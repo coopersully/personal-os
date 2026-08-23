@@ -1490,32 +1490,30 @@ function WorkspaceAppBarForRoute({
 }) {
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
-  const identity =
-    isSpatialCalendar ? (
-      <CalendarAppBarIdentity user={user} workspaceSwitcher={calendarWorkspaceSwitcher} />
-    ) : pathname === "/today" && todayBrief ? (
-      <TodayNavigationTitle generatedAt={todayBrief.generatedAt} timeZone={user.planningTimezone} />
-    ) : (
-      <span className="workspace-app-bar__title">
-        {/* Account routes always supply a page title, so the workspace registry
+  const identity = isSpatialCalendar ? (
+    <CalendarAppBarIdentity user={user} workspaceSwitcher={calendarWorkspaceSwitcher} />
+  ) : pathname === "/today" && todayBrief ? (
+    <TodayNavigationTitle generatedAt={todayBrief.generatedAt} timeZone={user.planningTimezone} />
+  ) : (
+    <span className="workspace-app-bar__title">
+      {/* Account routes always supply a page title, so the workspace registry
             covers the remaining identities. */}
-        {pageTitle ?? workspaceDefinitions.find((item) => item.id === workspace)?.label}
-      </span>
-    );
-  const context =
-    isSpatialCalendar ? (
-      <CalendarAppBarControls onToday={onCalendarToday} user={user} />
-    ) : workspace === "mail" ? (
-      <MailTopbarSearch />
-    ) : pathname === "/today" ? (
-      <TodayWeatherTopbar user={user} weather={weather} />
-    ) : pathname === "/activity" ? (
-      <ActivityTopbarControls />
-    ) : pathname === "/reminders" ? (
-      <RemindersTopbarControls />
-    ) : pathname === "/tasks" ? (
-      <TasksTopbarControls />
-    ) : null;
+      {pageTitle ?? workspaceDefinitions.find((item) => item.id === workspace)?.label}
+    </span>
+  );
+  const context = isSpatialCalendar ? (
+    <CalendarAppBarControls onToday={onCalendarToday} user={user} />
+  ) : workspace === "mail" ? (
+    <MailTopbarSearch />
+  ) : pathname === "/today" ? (
+    <TodayWeatherTopbar user={user} weather={weather} />
+  ) : pathname === "/activity" ? (
+    <ActivityTopbarControls />
+  ) : pathname === "/reminders" ? (
+    <RemindersTopbarControls />
+  ) : pathname === "/tasks" ? (
+    <TasksTopbarControls />
+  ) : null;
 
   return (
     <WorkspaceAppBar
@@ -3431,11 +3429,7 @@ function DayCalendarView({
         className="calendar-secondary-app-bar calendar-secondary-app-bar--day"
       >
         <WorkspaceSecondaryAppBarContent>
-          <AllDayEvents
-            calendarsById={calendarsById}
-            events={allDayEvents}
-            setEditor={setEditor}
-          />
+          <AllDayEvents calendarsById={calendarsById} events={allDayEvents} setEditor={setEditor} />
         </WorkspaceSecondaryAppBarContent>
       </WorkspaceSecondaryAppBar>
       <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
@@ -3847,10 +3841,12 @@ function calendarEventColorStyle(color: string | null | undefined): CSSPropertie
   return { "--calendar-color": color ?? "#777ce3" } as CSSProperties;
 }
 
-function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): string[] {
+type EventBlockColor = { color: string; id: string };
+
+function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): EventBlockColor[] {
   return event.blocks.flatMap((block) => {
     const color = calendarsById.get(block.calendarId)?.color;
-    return color ? [color] : [];
+    return color ? [{ color, id: block.eventId }] : [];
   });
 }
 
@@ -3865,7 +3861,7 @@ function TimelineEvent({
   isDragging = false,
   timeZone,
 }: {
-  blockColors: string[];
+  blockColors: EventBlockColor[];
   calendar: Calendar | undefined;
   compact?: boolean;
   layout: TimelineEventLayout;
@@ -3950,23 +3946,21 @@ function TimelineEvent({
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
         type="button"
       >
-        <>
-            {blockColors.length > 0 ? (
-              <span aria-hidden="true" className="calendar-timeline-event__block-rails">
-                {blockColors.map((color, index) => (
-                  <i key={`${color}-${index}`} style={{ background: color }} />
-                ))}
-              </span>
-            ) : null}
-            <strong>
-              {event.title}
-              {event.blocks.length > 0 ? (
-                <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
-              ) : null}
-            </strong>
-            <span>{formatTimelineTimeRange(event, timeZone)}</span>
-            {event.location ? <small>{event.location}</small> : null}
-        </>
+        {blockColors.length > 0 ? (
+          <span aria-hidden="true" className="calendar-timeline-event__block-rails">
+            {blockColors.map(({ color, id }) => (
+              <i key={id} style={{ background: color }} />
+            ))}
+          </span>
+        ) : null}
+        <strong>
+          {event.title}
+          {event.blocks.length > 0 ? (
+            <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
+          ) : null}
+        </strong>
+        <span>{formatTimelineTimeRange(event, timeZone)}</span>
+        {event.location ? <small>{event.location}</small> : null}
       </button>
     </CalendarEventContextMenu>
   );
@@ -4292,23 +4286,19 @@ function MonthCalendarView({
                       startCalendarDrag(dragEvent, event, setDraggedEventId)
                     }
                     onClick={() => setEditor({ event, kind: "event" })}
-                    style={calendarEventColorStyle(
-                      calendarsById.get(event.calendarId)?.color,
-                    )}
+                    style={calendarEventColorStyle(calendarsById.get(event.calendarId)?.color)}
                     type="button"
                   >
-                    <>
-                        <span className="month-event__time">
-                          {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
-                        </span>
-                        <span>{event.title}</span>
-                        {event.blocks.length > 0 ? (
-                          <LockIcon
-                            aria-label="Blocks another calendar"
-                            className="linked-block-icon"
-                          />
-                        ) : null}
-                    </>
+                    <span className="month-event__time">
+                      {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
+                    </span>
+                    <span>{event.title}</span>
+                    {event.blocks.length > 0 ? (
+                      <LockIcon
+                        aria-label="Blocks another calendar"
+                        className="linked-block-icon"
+                      />
+                    ) : null}
                   </button>
                 ))}
                 {dayEvents.length > 3 ? (
@@ -8042,15 +8032,9 @@ function startCalendarDrag(
 ) {
   const bounds = dragEvent.currentTarget.getBoundingClientRect();
   const clientY = Number.isFinite(dragEvent.clientY) ? dragEvent.clientY : bounds.top;
-  const grabOffsetY = Math.min(
-    Math.max(0, bounds.height),
-    Math.max(0, clientY - bounds.top),
-  );
+  const grabOffsetY = Math.min(Math.max(0, bounds.height), Math.max(0, clientY - bounds.top));
   const clientX = Number.isFinite(dragEvent.clientX) ? dragEvent.clientX : bounds.left;
-  const grabOffsetX = Math.min(
-    Math.max(0, bounds.width),
-    Math.max(0, clientX - bounds.left),
-  );
+  const grabOffsetX = Math.min(Math.max(0, bounds.width), Math.max(0, clientX - bounds.left));
   dragEvent.dataTransfer.effectAllowed = "move";
   dragEvent.dataTransfer.setData(calendarDragType, event.id);
   dragEvent.dataTransfer.setData(calendarDragOffsetType, String(grabOffsetY));
@@ -8065,9 +8049,7 @@ function startCalendarDrag(
   setDraggedEventId(event.id);
 }
 
-function setCalendarDragImage(
-  dragEvent: ReactDragEvent<HTMLButtonElement>,
-) {
+function setCalendarDragImage(dragEvent: ReactDragEvent<HTMLButtonElement>) {
   if (typeof dragEvent.dataTransfer.setDragImage !== "function") return;
   const image = document.createElement("div");
   image.setAttribute("aria-hidden", "true");
@@ -8108,10 +8090,7 @@ function timelineMinuteAtPointer(
   const bounds = timeline.getBoundingClientRect();
   const clientY = Number.isFinite(pointerEvent.clientY) ? pointerEvent.clientY : 0;
   const top = Number.isFinite(bounds.top) ? bounds.top : 0;
-  const relativeY = Math.min(
-    calendarTimelineHeight,
-    Math.max(0, clientY - top - grabOffsetY),
-  );
+  const relativeY = Math.min(calendarTimelineHeight, Math.max(0, clientY - top - grabOffsetY));
   const unsnappedMinute = (relativeY / calendarTimelineHeight) * calendarMinutesPerDay;
   return Math.min(23 * 60 + 45, Math.max(0, Math.round(unsnappedMinute / 15) * 15));
 }
@@ -8152,11 +8131,9 @@ function previewTimelineDrop(
       new Date(event.endsAt).getTime() > dayStart,
   );
   const movedEvent = { ...dragged, ...movedEventTimes(dragged, day, minute, timeZone) };
-  const movedLayout = positionTimelineEvents(
-    [...stationaryEvents, movedEvent],
-    day,
-    timeZone,
-  ).find((layout) => layout.event.id === dragged.id);
+  const movedLayout = positionTimelineEvents([...stationaryEvents, movedEvent], day, timeZone).find(
+    (layout) => layout.event.id === dragged.id,
+  );
   setPreview({
     color: metrics?.color ?? "#777ce3",
     column: movedLayout?.column ?? 0,
@@ -8165,12 +8142,8 @@ function previewTimelineDrop(
     grabOffsetX: metrics?.grabOffsetX ?? 0,
     grabOffsetY: metrics?.grabOffsetY ?? 0,
     minute,
-    pointerX: Number.isFinite(dragEvent.clientX)
-      ? dragEvent.clientX
-      : (metrics?.grabOffsetX ?? 0),
-    pointerY: Number.isFinite(dragEvent.clientY)
-      ? dragEvent.clientY
-      : (metrics?.grabOffsetY ?? 0),
+    pointerX: Number.isFinite(dragEvent.clientX) ? dragEvent.clientX : (metrics?.grabOffsetX ?? 0),
+    pointerY: Number.isFinite(dragEvent.clientY) ? dragEvent.clientY : (metrics?.grabOffsetY ?? 0),
     width: metrics?.width ?? 160,
   });
 }

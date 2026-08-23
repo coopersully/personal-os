@@ -431,10 +431,7 @@ describe.sequential("Calendar stewardship service", () => {
       .update(calendarAccounts)
       .set({ lastSyncedAt })
       .where(eq(calendarAccounts.id, accountId));
-    await database.db
-      .update(calendars)
-      .set({ lastSyncedAt })
-      .where(eq(calendars.id, calendarId));
+    await database.db.update(calendars).set({ lastSyncedAt }).where(eq(calendars.id, calendarId));
 
     const first = await service.createReview(userId, { scope: { type: "all_outstanding" } });
     expect(first.nextMaintenanceAt).toBe("2026-08-23T12:01:00.001Z");

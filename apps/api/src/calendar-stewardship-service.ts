@@ -457,8 +457,7 @@ function nextAssessmentTransition(
       continue;
     }
     const lastSyncedAt = new Date(source.lastSyncedAt).getTime();
-    const transition =
-      lastSyncedAt + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000 + 1;
+    const transition = lastSyncedAt + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000 + 1;
     if (Number.isFinite(transition) && transition > evidenceCutoff.getTime()) {
       transitions.push(transition);
     }
@@ -675,7 +674,8 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
             latestReview !== null &&
             latestReview.ledgerFingerprint !== calendarLedgerFingerprint(snapshot);
           const expired =
-            latestReview !== null && asOf.getTime() >= new Date(latestReview.nextMaintenanceAt).getTime();
+            latestReview !== null &&
+            asOf.getTime() >= new Date(latestReview.nextMaintenanceAt).getTime();
           const lifecycle: CalendarStatus["lifecycle"] =
             latestReview === null
               ? "never_maintained"

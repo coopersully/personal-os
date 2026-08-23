@@ -357,29 +357,31 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
     scope: snapshot.scope,
     sources: [...snapshot.sources]
       .sort(compareSources)
-      .map(({
-        accountId,
-        calendarId,
-        calendarRevision,
-        isWritable,
-        lastSyncedAt,
-        provider,
-        recurrencePresent,
-        syncGeneration,
-        syncRecovery,
-        syncStatus,
-      }) => ({
-        accountId,
-        calendarId,
-        calendarRevision,
-        isWritable,
-        lastSyncedAt,
-        provider,
-        recurrencePresent,
-        syncGeneration,
-        syncRecovery,
-        syncStatus,
-      })),
+      .map(
+        ({
+          accountId,
+          calendarId,
+          calendarRevision,
+          isWritable,
+          lastSyncedAt,
+          provider,
+          recurrencePresent,
+          syncGeneration,
+          syncRecovery,
+          syncStatus,
+        }) => ({
+          accountId,
+          calendarId,
+          calendarRevision,
+          isWritable,
+          lastSyncedAt,
+          provider,
+          recurrencePresent,
+          syncGeneration,
+          syncRecovery,
+          syncStatus,
+        }),
+      ),
   });
 }
 

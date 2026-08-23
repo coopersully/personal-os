@@ -196,6 +196,36 @@ describe("Calendar schedule health", () => {
     expect(await screen.findByText("Busy events overlap")).toBeInTheDocument();
     expect(screen.getByText(/Evidence through/)).toBeInTheDocument();
     expect(screen.getByText("Recommendations are advisory")).toBeInTheDocument();
+    expect(screen.getByText("Healthy")).toBeInTheDocument();
+  });
+
+  it("keeps operator-owned recovery as a service constraint", async () => {
+    mocks.getCalendarStatus.mockResolvedValue({
+      ...blockedStatus,
+      sources: [{ ...blockedStatus.sources[0]!, recovery: "operator" }],
+      validNextOperations: ["assess_calendar"],
+    });
+    renderPage();
+
+    expect(
+      await screen.findByText(
+        "Ilo will keep retrying while its service operator resolves this constraint.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Connections" })).not.toBeInTheDocument();
+  });
+
+  it("preserves immutable prior findings when the current count is unknown", async () => {
+    mocks.getCalendarStatus.mockResolvedValue({
+      ...staleStatus,
+      backlog: { ...staleStatus.backlog, actionable: null, openFindings: null },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Current finding count is unknown")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Prior review findings" })).toBeInTheDocument();
+    expect(screen.getByText("Busy events overlap")).toBeInTheDocument();
+    expect(screen.getByText(/does not establish the current finding count/)).toBeInTheDocument();
   });
 
   it("shows blocked evidence and the first-party recovery path without a false zero", async () => {

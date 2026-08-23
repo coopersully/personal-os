@@ -192,9 +192,7 @@ function SourceEvidencePanel({ status }: { status: CalendarStatus }) {
       !source.readable || source.state !== "current" || source.completeness !== "complete",
   );
   if (unsettled.length > 0 || status.setupBlockers.length > 0) {
-    const canOpenConnections = unsettled.some(
-      ({ recovery }) => recovery === "operator" || recovery === "reconnect",
-    );
+    const canOpenConnections = unsettled.some(({ recovery }) => recovery === "reconnect");
     return (
       <section aria-labelledby="source-evidence-attention">
         <Alert variant="warning">
@@ -347,11 +345,25 @@ function FindingPanel({
         </p>
       </div>
       {openFindingCount === null ? (
-        <Alert variant="info">
-          <CircleHelpIcon aria-hidden="true" />
-          <AlertTitle>Finding evidence is incomplete</AlertTitle>
-          <AlertDescription>Assess again after source evidence is current.</AlertDescription>
-        </Alert>
+        <>
+          <Alert variant="info">
+            <CircleHelpIcon aria-hidden="true" />
+            <AlertTitle>Current finding count is unknown</AlertTitle>
+            <AlertDescription>Assess again after source evidence is current.</AlertDescription>
+          </Alert>
+          {findings.length > 0 && review ? (
+            <div className="flex flex-col gap-3">
+              <div>
+                <h3 className="font-heading text-base font-medium">Prior review findings</h3>
+                <p className="text-sm text-muted-foreground">
+                  Immutable evidence from the review created {formatDateTime(review.createdAt)}. It
+                  does not establish the current finding count.
+                </p>
+              </div>
+              <FindingItems findings={findings} />
+            </div>
+          ) : null}
+        </>
       ) : openFindingCount === 0 ? (
         <Empty>
           <EmptyHeader>
@@ -363,24 +375,7 @@ function FindingPanel({
           </EmptyHeader>
         </Empty>
       ) : findings.length > 0 ? (
-        <ItemGroup>
-          {findings.map((finding) => (
-            <Item key={finding.id} variant="outline">
-              <ItemContent>
-                <ItemTitle>{finding.summary}</ItemTitle>
-                <ItemDescription>
-                  {findingKindLabel(finding.kind)} · Last observed{" "}
-                  {formatDateTime(finding.lastObservedAt)}
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Badge variant={finding.severity === "strained" ? "destructive" : "secondary"}>
-                  {titleCase(finding.severity)}
-                </Badge>
-              </ItemActions>
-            </Item>
-          ))}
-        </ItemGroup>
+        <FindingItems findings={findings} />
       ) : (
         <Alert variant="info">
           <CircleHelpIcon aria-hidden="true" />
@@ -425,8 +420,8 @@ function RecommendationPanel({ review }: { review: CalendarReview | null }) {
         </Empty>
       ) : (
         <ItemGroup>
-          {recommendations.map((recommendation) => (
-            <Item key={recommendation.key} variant="outline">
+          {recommendations.map((recommendation, index) => (
+            <Item key={recommendationIdentity(review, recommendation, index)} variant="outline">
               <ItemContent>
                 <ItemTitle>{recommendation.summary}</ItemTitle>
                 <ItemDescription>
@@ -445,6 +440,29 @@ function RecommendationPanel({ review }: { review: CalendarReview | null }) {
         </ItemGroup>
       )}
     </section>
+  );
+}
+
+function FindingItems({ findings }: { findings: CalendarReview["findings"] }) {
+  return (
+    <ItemGroup>
+      {findings.map((finding) => (
+        <Item key={finding.id} variant="outline">
+          <ItemContent>
+            <ItemTitle>{finding.summary}</ItemTitle>
+            <ItemDescription>
+              {findingKindLabel(finding.kind)} · Last observed{" "}
+              {formatDateTime(finding.lastObservedAt)}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Badge variant={finding.severity === "strained" ? "destructive" : "secondary"}>
+              {titleCase(finding.severity)}
+            </Badge>
+          </ItemActions>
+        </Item>
+      ))}
+    </ItemGroup>
   );
 }
 
@@ -532,7 +550,7 @@ function sourceRecoveryCopy(source: CalendarSourceFreshness) {
     case "automatic":
       return "Ilo will retry this source.";
     case "operator":
-      return "Review this connection in Settings.";
+      return "Ilo will keep retrying while its service operator resolves this constraint.";
     case "reconnect":
       return "Reconnect this calendar account.";
     default:
@@ -555,7 +573,7 @@ function healthDimensionLabel(dimension: CalendarHealthAssessment["dimension"]) 
 }
 
 function healthSignalLabel(signal: CalendarHealthAssessment["signal"]) {
-  return signal === "healthy" ? "Supported" : titleCase(signal);
+  return titleCase(signal);
 }
 
 function signalBadgeVariant(signal: CalendarHealthAssessment["signal"]) {
@@ -573,6 +591,22 @@ function findingKindLabel(kind: CalendarReview["findings"][number]["kind"]) {
     tentative_hold: "Tentative hold",
   };
   return labels[kind];
+}
+
+function recommendationIdentity(
+  review: CalendarReview,
+  recommendation: CalendarReview["recommendations"][number],
+  index: number,
+) {
+  const linkedFindings = [...recommendation.findingIds].sort().join(",") || "unlinked";
+  return [
+    review.id,
+    recommendation.key,
+    linkedFindings,
+    recommendation.horizon.start,
+    recommendation.horizon.end,
+    index,
+  ].join(":");
 }
 
 function formatDateTime(value: string) {

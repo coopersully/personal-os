@@ -77,7 +77,7 @@ For each eligible successful `main` commit, Actions builds API, MCP, and web ima
 - the exact set of predecessor bundle digests against which rollback compatibility was tested; and
 - an infrastructure-change class plus attested rehearsal approval when PostgreSQL or `cloudflared` changes.
 
-Actions generates artifact attestations for the bundle and application images. The privileged workflow uses only `contents: read`, `packages: write`, `attestations: write`, and `id-token: write`; pins third-party actions to reviewed commits; consumes no untrusted cache or artifact; and receives no production runtime secret.
+The protected-main `push` workflow binds CI and release to the same event SHA and workflow definition: the release job has `needs` on every required CI job and runs only for that successful `main` push. It does not use `workflow_run`, `repository_dispatch`, or a later default-branch checkout to release an older run. Therefore A's delayed success still executes and attests A's reviewed workflow at A even if newer B has landed and failed. Actions generates artifact attestations for the bundle and application images. Only the release job receives `contents: read`, `packages: write`, `attestations: write`, and `id-token: write`; it pins third-party actions to reviewed commits, rebuilds from the event SHA without consuming untrusted artifacts or caches, and receives no production runtime secret.
 
 The mutable `production-candidate` reference points only to the newest successful protected-`main` bundle and moves last. The controller's witnessed stable digest, not that mutable reference, is the active production identity. Publication is monotonic by commit ancestry and a signed release sequence; it never requires the successful commit to remain current `main` HEAD. Therefore, if commit A passes and newer commit B fails, A remains eligible rather than production waiting for another merge. A candidate that is not a descendant of the last published successful release is rejected unless an explicit reviewed recovery release authorizes it.
 
@@ -152,7 +152,7 @@ Release publication and production observation are separate statuses. The public
 
 On SIGTERM API and MCP stop accepting requests and scheduling work, await tracked in-flight requests/background jobs with bounded timeouts, then close dependencies. Compose provides matching `stop_grace_period` values. Candidate API/MCP processes start with schedulers, synchronization, callbacks, email, provider HTTP, and every background/side-effect worker disabled. Promotion enables those capabilities only after the coherent local candidate and public revision pass; failure before durable `stable` returns to writer-stopped reconciliation.
 
-MCP mutations generate or forward an `Idempotency-Key` to the public API. A database idempotency record is transactionally committed with the mutation and audit event under a unique `(principal, method, route, key)` scope. It stores a canonical request hash, completion state, and replayable result reference. The same key and payload returns the committed result; the same key with a different payload returns `409`; an uncommitted transaction leaves no success record and may be retried. Records outlive the maximum client/controller retry window and are pruned only under the global operation lock. This narrow database migration is explicitly in scope; an audit `request_id` alone is not an idempotency boundary.
+MCP mutations generate or forward an `Idempotency-Key` to the public API. Authentication resolves a stable idempotency subject: the human user ID for interactive sessions, or a persisted credential/token-family ID for agents. An OAuth refresh carries forward the same family across replacement access and refresh-token rows; the current access-token row ID is never the idempotency subject. A database idempotency record is transactionally committed with the mutation and audit event under a unique `(idempotency subject, method, route, key)` scope. It stores a canonical request hash, completion state, and replayable result reference. The same key and payload returns the committed result; the same key with a different payload returns `409`; an uncommitted transaction leaves no success record and may be retried. Records outlive the maximum client/controller retry window and are pruned only under the global operation lock. This narrow database migration is explicitly in scope; an audit `request_id` alone is not an idempotency boundary.
 
 Cutover verifies zero active application database connections, open transactions, queued jobs, and background writers before declaring a write freeze. Persisted human sessions remain intact during the final frozen migration; they are not counted as active connections and are not deleted.
 
@@ -166,7 +166,7 @@ Before deliberately disabling ingress, the controller creates a remotely visible
 
 ### Release and Compose
 
-`.github/workflows/deploy.yml` keeps its successful-CI-on-`main` trigger but replaces AWS publication with GHCR images, the bundle, attestations, monotonic successful-main publication, and a separate hold-aware production-observation status. `workflow_run` privileges are isolated from untrusted content.
+`.github/workflows/deploy.yml` becomes one protected-main `push` workflow whose least-privilege CI jobs gate a SHA-bound release job. That job replaces AWS publication with GHCR images, the bundle, attestations, and monotonic successful-main publication; a separate unprivileged job records hold-aware production observation. Pull-request workflows never receive release permissions, and no privileged follow-on event consumes artifacts from another run.
 
 `compose.production.yaml`, versioned in the bundle, defines pinned PostgreSQL, one-shot migration, API, MCP, web, and `cloudflared`; least-privilege database/service/per-origin networks; health/revision checks; Linux named storage; and delayed Tunnel startup until reconciliation. Before execution, the fixed verifier evaluates the fully resolved Compose model—including interpolation, extensions, profiles, includes, and providers—against a service-specific allowlist. It rejects `build`, mutable tags, `privileged`, added capabilities, host PID/IPC/network namespaces, devices, Docker socket/API access, unapproved bind mounts, published ports, external networks, arbitrary secret/config paths, and unknown keys. Services use non-root users, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, read-only filesystems, explicit writable tmpfs/volumes, and per-service secrets wherever compatible.
 
@@ -316,6 +316,7 @@ Any disaster recovery from a non-final-frozen backup restores authentication dat
 - The fully resolved Compose model passes the privilege, namespace, mount, socket, capability, secret-path, and service-specific allowlist.
 - Provenance verifies for repository, workflow, branch, commit, release sequence, bundle, and image digests.
 - Out-of-order workflows, failed newer HEAD, pointer races, forged tag/label, digest substitution, and failed candidates preserve the newest successful monotonic release.
+- A delayed A release after newer failing B is attested from A's own successful protected-main run and reviewed workflow definition; no default-branch follow-on can substitute B's provenance.
 - Direct and chained upgrades are accepted only when rollback evidence names the actual stable predecessor digest.
 - Live before/after schema fingerprints match the manifest; mismatch enters writer-stopped `recovery-required`.
 - PostgreSQL or `cloudflared` digest changes fail without an approved attested infrastructure rehearsal.
@@ -330,7 +331,7 @@ Any disaster recovery from a non-final-frozen backup restores authentication dat
 - Required named Compose flows work; containers cannot reach prohibited IPv4 or IPv6 LAN address classes.
 - `cloudflared` reaches only documented Tunnel endpoints on TCP/UDP 7844 and reconnects through tested QUIC/HTTP2 fallback.
 - API/MCP shutdown drains requests/jobs and a forced MCP retry cannot duplicate a mutation.
-- Idempotency replay, payload conflict, transaction rollback, concurrent duplicate, and retention tests pass at the API boundary.
+- Idempotency replay, payload conflict, transaction rollback, concurrent duplicate, OAuth refresh/token replacement, and retention tests pass at the API boundary.
 - Production-derived rehearsal is private, copied authentication records are purged, and provider HTTP/token refresh and all side effects are impossible.
 - Non-final disaster recovery invalidates restored bearer and one-time credentials before ingress; final frozen cutover preserves sessions.
 - Login, CRUD, MCP, credential decryption, callback, and email pass.

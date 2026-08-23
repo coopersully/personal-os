@@ -61,6 +61,45 @@ event without losing the shape of the day.
   a direct Connections link. Automatic retry and ilo-owned service repair remain non-destructive
   freshness state and do not interrupt the calendar with credential advice.
 
+## Schedule health review
+
+`/calendar/review` is the authenticated, Calendar-owned review surface for the first shipped
+stewardship slice. It asks the domain/API to assess a fixed window from 30 days before through 90
+days after the evidence cutoff. The server-owned playbook currently reports only these finding
+kinds:
+
+- stale or unavailable source evidence;
+- recurrence that this release cannot assess;
+- direct overlap between timed busy events;
+- transition-buffer shortfalls from the active Calendar profile; and
+- tentative holds that have not been updated recently.
+
+The page presents loading and retryable read-error states, assessment-in-progress and assessment-
+error feedback, and every lifecycle in the domain contract: never assessed, stale, queued, active,
+maintained, maintained with findings, blocked, and failed. It also distinguishes current, stale,
+unavailable, partial, and absent source evidence; unknown finding counts; a supported-checks empty
+result; prior immutable findings whose current count is unknown; and open findings whose detail is
+unavailable. Partial or stale evidence is blocked or shown as unknown, never converted to a healthy
+zero.
+
+Each durable review shows its evidence cutoff, next review time, playbook version, and rulebook
+version. Source rows show provider, freshness, completeness, evidence cutoff, and when the source is
+read-only; attention states explain evidence that cannot be relied on. Findings retain their
+evidence-bound kind, severity, and last-observed time; recommendations disclose confidence,
+assumptions, and tradeoffs without implying permission to act. Review responses exclude private
+event prose, attendees, locations, raw provider payloads, and credentials.
+
+This slice is read-scoped and advisory. The API may calculate findings and publish an owner-scoped,
+immutable review, but neither the page nor its typed API changes events, invitations, provider
+state, or user policy. Calendar judgment and versioned playbook policy remain in the domain/API.
+There is no MCP change and no external client automation; MCP remains a stateless intent surface.
+
+This is not the complete Calendar Ilo target. Durable maintenance runs and recovery,
+`maintain_calendar`, MCP wiring, bounded questions and one-off decisions, explicitly approved
+reusable rules, rule-authorized Calendar actions, collaboration stewardship, and travel routing
+remain deferred. Live travel feasibility stays unknown until a separately approved routing
+integration supplies current evidence.
+
 ## Agent-guided setup and proposals
 
 - Calendar setup runs through the shared agent handoff and Calendar-owned skill reference; the

@@ -2,6 +2,22 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-23 — Calendar stewardship foundations
+
+- Added a server-owned Calendar playbook release and research registry, with a fixed 30-day prior
+  and 90-day future assessment horizon and a 15-minute connected-source freshness boundary.
+- Added stable, evidence-bound findings for source readiness, unsupported recurrence, direct timed
+  busy-event overlap, active-profile buffer shortfall, and tentative holds. Private event prose,
+  attendees, locations, raw provider payloads, and credentials do not enter the review envelope.
+- Added owner-scoped durable findings, immutable Calendar reviews, input-fingerprint invalidation,
+  and multidimensional status that blocks or reports unknown instead of turning partial evidence
+  into a healthy zero.
+- Added an authenticated Calendar schedule-health page and read-scoped typed API. It can assess and
+  advise, but it cannot change events or provider state.
+- This is slice 1 of the approved Calendar Ilo target. Durable maintenance runs, `maintain_calendar`,
+  MCP wiring, questions, reusable rules, collaboration stewardship, and travel routing are not
+  claimed as shipped.
+
 ## 2026-08-06 — Recoverable connector authorization and durable initial sync
 
 - Replaced raw Google/X callback errors with no-store `303` redirects and owner-only, allowlisted

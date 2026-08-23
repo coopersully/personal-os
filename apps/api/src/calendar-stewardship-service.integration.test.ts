@@ -234,6 +234,21 @@ describe.sequential("Calendar stewardship service", () => {
     await expect(database.db.select().from(calendarReviews)).resolves.toHaveLength(2);
   });
 
+  it("falls back from a blank provider etag to the event update revision", async () => {
+    await database.db
+      .update(calendarEvents)
+      .set({ remoteEtag: "", updatedAt: new Date("2026-08-23T12:00:01.000Z") })
+      .where(eq(calendarEvents.id, firstEventId));
+
+    const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+
+    expect(
+      review.findings
+        .flatMap(({ sourceReferences }) => sourceReferences)
+        .find(({ remoteId }) => remoteId === "first-event")?.revision,
+    ).toBe("2026-08-23T12:00:01.000Z");
+  });
+
   it("publishes with a max-one pool and does not reserve a second connection for its snapshot", async () => {
     const singleConnectionDatabase = createDatabaseClient({
       connectionString: container.getConnectionUri(),
@@ -504,7 +519,7 @@ describe.sequential("Calendar stewardship service", () => {
         awaitingInput: null,
         blocked: 1,
         failed: null,
-        openFindings: null,
+        openFindings: review.findings.length,
       },
       lifecycle: "blocked",
       readiness: "degraded",
@@ -725,7 +740,7 @@ describe.sequential("Calendar stewardship service", () => {
       userId,
     });
 
-    await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
 
     const [preserved] = await database.db
       .select()
@@ -733,6 +748,11 @@ describe.sequential("Calendar stewardship service", () => {
       .where(eq(calendarFindings.id, futureFindingId));
     expect(preserved?.status).toBe("open");
     expect(preserved?.resolvedAt).toBeNull();
+    expect(review.state).toBe("blocked");
+    await expect(service.getStatus(userId)).resolves.toMatchObject({
+      backlog: { blocked: 1, openFindings: 2 },
+      lifecycle: "blocked",
+    });
   });
 
   it("reports exact authority groups, honest counts, and setup readiness", async () => {
@@ -781,13 +801,14 @@ describe.sequential("Calendar stewardship service", () => {
       scope: { type: "all_outstanding" },
     });
     expect(blockedReview.state).toBe("blocked");
+    expect(blockedReview.findings).toEqual(review.findings);
     const persistedFindings = await database.db
       .select()
       .from(calendarFindings)
       .where(eq(calendarFindings.userId, userId));
     expect(persistedFindings.some(({ status }) => status === "open")).toBe(true);
     await expect(service.getStatus(userId)).resolves.toMatchObject({
-      backlog: { actionable: null, openFindings: null },
+      backlog: { actionable: null, blocked: 2, openFindings: review.findings.length },
       health: expect.arrayContaining([
         expect.objectContaining({
           dimension: "source_trust",

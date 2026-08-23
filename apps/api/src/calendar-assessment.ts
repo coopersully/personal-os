@@ -36,6 +36,7 @@ type AssessmentSource = {
   lastSyncedAt: string | null;
   provider: "google" | "icloud" | "local";
   recurrencePresent: boolean;
+  remoteCalendarId: string | null;
   syncGeneration: number;
   syncRecovery: "automatic" | "operator" | "reconnect" | null;
   syncStatus: "idle" | "syncing" | "error";
@@ -51,7 +52,9 @@ export type CalendarAssessmentSnapshot = {
   evidenceCutoff: Date;
   evidenceLimits: { eventBudgetExceeded: boolean; openFindingBudgetExceeded: boolean };
   events: AssessmentEvent[];
-  existingOpenFindings: Array<{ fingerprint: string; id: string; kind: CalendarFindingKind }>;
+  existingOpenFindings: Array<{ fingerprint: string; id: string; kind: string }>;
+  existingOpenFindingSnapshots: CalendarFinding[];
+  openFindingLedger: { count: number; fingerprint: string; unsupportedCount: number };
   scope: CalendarMaintenanceScope;
   scopeEnd: Date;
   scopeStart: Date;
@@ -69,9 +72,11 @@ export type CalendarAssessmentDraft = {
   recommendations: Array<
     Omit<CalendarRecommendation, "findingIds"> & { findingFingerprints: string[] }
   >;
+  projectedOpenFindingCount: number | null;
   rulebookVersion: string;
   sourceFreshness: CalendarSourceFreshness[];
   state: CalendarReviewState;
+  unsupportedOpenFindingCount: number;
 };
 
 export const CALENDAR_ASSESSMENT_BUDGETS = Object.freeze({ events: 250, findings: 100 });
@@ -88,6 +93,7 @@ const RELEASE_UNKNOWN_DIMENSIONS = [
   "breaks_and_recovery",
   "schedule_volatility",
 ] as const;
+const SUPPORTED_FINDING_KINDS = new Set<string>(CALENDAR_PLAYBOOK.supportedFindingKinds);
 
 function compareById<T extends { id: string }>(left: T, right: T): number {
   return left.id.localeCompare(right.id);
@@ -120,6 +126,34 @@ function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
+function projectedOpenFindingIdentities(
+  snapshot: CalendarAssessmentSnapshot,
+  assessedFindings: ReadonlyArray<Pick<DraftFinding, "fingerprint" | "kind">>,
+): Array<{ fingerprint: string; id: string; kind: string }> {
+  const retainExistingSupported =
+    snapshot.sources.length === 0 ||
+    snapshot.activeProfile === null ||
+    snapshot.evidenceLimits.eventBudgetExceeded ||
+    snapshot.evidenceLimits.openFindingBudgetExceeded;
+  const projected = new Map<string, { fingerprint: string; id: string; kind: string }>();
+  for (const finding of snapshot.existingOpenFindings) {
+    if (retainExistingSupported || !SUPPORTED_FINDING_KINDS.has(finding.kind)) {
+      projected.set(finding.fingerprint, finding);
+    }
+  }
+  for (const finding of assessedFindings) {
+    projected.set(finding.fingerprint, {
+      fingerprint: finding.fingerprint,
+      id: "assessed",
+      kind: finding.kind,
+    });
+  }
+  return [...projected.values()].sort(
+    (left, right) =>
+      left.fingerprint.localeCompare(right.fingerprint) || left.id.localeCompare(right.id),
+  );
+}
+
 function rulebookVersion(activeProfile: CalendarAssessmentSnapshot["activeProfile"]): string {
   return activeProfile
     ? `calendar-profile/${activeProfile.id}/v${activeProfile.version}`
@@ -130,7 +164,7 @@ function sourceReference(source: AssessmentSource): MaterialSourceReference {
   return {
     accountId: source.accountId,
     provider: source.provider,
-    remoteId: source.calendarId,
+    remoteId: source.provider === "local" ? source.calendarId : source.remoteCalendarId,
     revision: source.calendarRevision,
     sourceType: "calendar_event",
   };
@@ -307,8 +341,12 @@ function recommendationFor(finding: DraftFinding, snapshot: CalendarAssessmentSn
  * source, event, profile, and policy inputs. It intentionally excludes the
  * wall-clock evidence cutoff and all private provider content.
  */
-export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot): string {
+export function calendarLedgerFingerprint(
+  snapshot: CalendarAssessmentSnapshot,
+  assessment = assessCalendar(snapshot),
+): string {
   const rulebook = rulebookVersion(snapshot.activeProfile);
+  const projectedOpenFindings = projectedOpenFindingIdentities(snapshot, assessment.findings);
   return sha256({
     activeProfile: snapshot.activeProfile
       ? {
@@ -352,6 +390,9 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
         }),
       ),
     evidenceLimits: snapshot.evidenceLimits,
+    openFindingLedger: snapshot.evidenceLimits.openFindingBudgetExceeded
+      ? snapshot.openFindingLedger
+      : projectedOpenFindings,
     playbookVersion: CALENDAR_PLAYBOOK.version,
     rulebookVersion: rulebook,
     scope: snapshot.scope,
@@ -366,6 +407,7 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
           lastSyncedAt,
           provider,
           recurrencePresent,
+          remoteCalendarId,
           syncGeneration,
           syncRecovery,
           syncStatus,
@@ -377,6 +419,7 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
           lastSyncedAt,
           provider,
           recurrencePresent,
+          remoteCalendarId,
           syncGeneration,
           syncRecovery,
           syncStatus,
@@ -553,8 +596,12 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       (source) => source.state === "current" && source.completeness === "complete",
     );
   const unavailable = sourceFreshness.some((source) => source.state === "unavailable");
+  const missingProfile = snapshot.activeProfile === null;
+  const unsupportedOpenFindings = snapshot.openFindingLedger.unsupportedCount > 0;
   const degraded =
     missingSource ||
+    missingProfile ||
+    unsupportedOpenFindings ||
     sourceFreshness.some(
       (source) => source.state !== "current" || source.completeness !== "complete",
     );
@@ -620,12 +667,17 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     evidenceCutoff: snapshot.evidenceCutoff.toISOString(),
   }));
   return {
-    evidenceLimited: inputEvidenceLimited || findingBudgetExceeded,
+    evidenceLimited:
+      inputEvidenceLimited || findingBudgetExceeded || missingSource || missingProfile,
     findings: findingsWithCutoff,
     health,
+    projectedOpenFindingCount: snapshot.evidenceLimits.openFindingBudgetExceeded
+      ? null
+      : projectedOpenFindingIdentities(snapshot, findings).length,
     recommendations: findings.map((finding) => recommendationFor(finding, snapshot)),
     rulebookVersion: rulebook,
     sourceFreshness,
     state: degraded ? "blocked" : findings.length > 0 ? "maintained_with_questions" : "maintained",
+    unsupportedOpenFindingCount: snapshot.openFindingLedger.unsupportedCount,
   };
 }

@@ -106,6 +106,7 @@ async function readAssessmentSnapshot(
       calendarUpdatedAt: calendars.updatedAt,
       isWritable: calendars.isWritable,
       provider: calendars.provider,
+      remoteCalendarId: calendars.remoteCalendarId,
       syncGeneration: calendarAccounts.syncGeneration,
       syncRecovery: calendarAccounts.syncRecovery,
       syncStatus: calendarAccounts.syncStatus,
@@ -171,11 +172,7 @@ async function readAssessmentSnapshot(
   const eventRows = queriedEventRows.slice(0, CALENDAR_ASSESSMENT_BUDGETS.events);
 
   const queriedOpenFindings = await executor
-    .select({
-      fingerprint: calendarFindings.fingerprint,
-      id: calendarFindings.id,
-      kind: calendarFindings.kind,
-    })
+    .select()
     .from(calendarFindings)
     .where(and(eq(calendarFindings.userId, userId), eq(calendarFindings.status, "open")))
     .orderBy(calendarFindings.fingerprint)
@@ -183,6 +180,16 @@ async function readAssessmentSnapshot(
   const openFindingBudgetExceeded =
     queriedOpenFindings.length > CALENDAR_ASSESSMENT_BUDGETS.findings;
   const existingOpenFindings = queriedOpenFindings.slice(0, CALENDAR_ASSESSMENT_BUDGETS.findings);
+  const [openFindingLedgerRow] = await executor
+    .select({
+      count: sql<number>`count(*)::integer`,
+      fingerprint: sql<string>`md5(coalesce(string_agg(${calendarFindings.fingerprint} || ':' || ${calendarFindings.kind} || ':' || ${calendarFindings.id}, '|' order by ${calendarFindings.fingerprint}, ${calendarFindings.id}), ''))`,
+      unsupportedCount: sql<number>`count(*) filter (where ${notInArray(calendarFindings.kind, [
+        ...CALENDAR_PLAYBOOK.supportedFindingKinds,
+      ])})::integer`,
+    })
+    .from(calendarFindings)
+    .where(and(eq(calendarFindings.userId, userId), eq(calendarFindings.status, "open")));
 
   const [profileRow] = await executor
     .select({
@@ -238,13 +245,28 @@ async function readAssessmentSnapshot(
       provider: event.provider,
       recurrence: event.recurrencePresent ? ["RECURRENCE_PRESENT"] : [],
       remoteEventId: event.remoteEventId,
-      revision: event.remoteEtag ?? event.updatedAt.toISOString(),
+      revision:
+        event.remoteEtag && event.remoteEtag.trim().length > 0
+          ? event.remoteEtag
+          : event.updatedAt.toISOString(),
       startsAt: event.startsAt.toISOString(),
       status: event.status,
       transparency: event.transparency,
       updatedAt: event.updatedAt.toISOString(),
     })),
-    existingOpenFindings,
+    existingOpenFindings: existingOpenFindings.map(({ fingerprint, id, kind }) => ({
+      fingerprint,
+      id,
+      kind,
+    })),
+    existingOpenFindingSnapshots: existingOpenFindings
+      .filter(({ kind }) => CALENDAR_PLAYBOOK.supportedFindingKinds.includes(kind))
+      .map(findingFromRow),
+    openFindingLedger: {
+      count: openFindingLedgerRow?.count ?? 0,
+      fingerprint: openFindingLedgerRow?.fingerprint ?? "",
+      unsupportedCount: openFindingLedgerRow?.unsupportedCount ?? 0,
+    },
     scope,
     scopeEnd,
     scopeStart,
@@ -262,6 +284,7 @@ async function readAssessmentSnapshot(
         (source.calendarLastSyncedAt ?? source.accountLastSyncedAt)?.toISOString() ?? null,
       provider: source.provider,
       recurrencePresent: recurrenceCalendarIds.has(source.calendarId),
+      remoteCalendarId: source.remoteCalendarId,
       syncGeneration: source.syncGeneration,
       syncRecovery: source.syncRecovery,
       syncStatus: source.syncStatus,
@@ -366,6 +389,19 @@ function bindRecommendationFindingIds(
       return id ? [id] : [];
     }),
   }));
+}
+
+function mergeBoundedFindings(
+  observed: CalendarFinding[],
+  preserved: CalendarFinding[],
+): CalendarFinding[] {
+  const merged = new Map<string, CalendarFinding>();
+  for (const finding of observed) merged.set(finding.fingerprint, finding);
+  for (const finding of preserved) {
+    if (merged.size >= CALENDAR_ASSESSMENT_BUDGETS.findings) break;
+    if (!merged.has(finding.fingerprint)) merged.set(finding.fingerprint, finding);
+  }
+  return [...merged.values()];
 }
 
 async function insertReview(
@@ -489,7 +525,12 @@ function buildStatus(input: {
   );
   const missingSource = input.snapshot.sources.length === 0;
   const missingProfile = input.snapshot.activeProfile === null;
-  const evidenceSettled = !missingSource && degradedSources.length === 0;
+  const evidenceSettled =
+    !missingSource &&
+    !missingProfile &&
+    !input.assessment.evidenceLimited &&
+    input.assessment.unsupportedOpenFindingCount === 0 &&
+    degradedSources.length === 0;
   const readiness =
     missingSource || missingProfile
       ? "setup_required"
@@ -508,7 +549,9 @@ function buildStatus(input: {
   if (input.snapshot.sources.some(({ syncRecovery }) => syncRecovery === "reconnect")) {
     validNextOperations.push("open_connections");
   }
-  if ((input.latestReview?.findings.length ?? 0) > 0) validNextOperations.push("review_findings");
+  if ((input.assessment.projectedOpenFindingCount ?? input.snapshot.openFindingLedger.count) > 0) {
+    validNextOperations.push("review_findings");
+  }
   const health = bindFindingIds(input.assessment.health, input.snapshot.existingOpenFindings).map(
     (assessment): CalendarHealthAssessment => {
       if (!missingSource) return assessment;
@@ -557,9 +600,13 @@ function buildStatus(input: {
       ambiguousEffects: null,
       awaitingApproval: null,
       awaitingInput: null,
-      blocked: degradedSources.length,
+      blocked:
+        degradedSources.length +
+        (missingSource ? 1 : 0) +
+        (missingProfile ? 1 : 0) +
+        input.assessment.unsupportedOpenFindingCount,
       failed: null,
-      openFindings: evidenceSettled ? input.assessment.findings.length : null,
+      openFindings: input.assessment.projectedOpenFindingCount,
     },
     health,
     latestReview: input.latestReview,
@@ -606,7 +653,7 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
               evidenceCutoff,
             );
             const draft = assessCalendar(snapshot);
-            const ledgerFingerprint = calendarLedgerFingerprint(snapshot);
+            const ledgerFingerprint = calendarLedgerFingerprint(snapshot, draft);
             const reusable = await readReusableReview(
               transaction,
               userId,
@@ -614,10 +661,13 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
               evidenceCutoff,
             );
             if (reusable) return reusable;
-            const findings =
+            const observedFindings =
               snapshot.sources.length === 0
                 ? []
                 : await reconcileFindings(transaction, userId, snapshot, draft);
+            const findings = draft.evidenceLimited
+              ? mergeBoundedFindings(observedFindings, snapshot.existingOpenFindingSnapshots)
+              : observedFindings;
             const health = bindFindingIds(draft.health, findings);
             const recommendations = bindRecommendationFindingIds(draft.recommendations, findings);
             return insertReview(transaction, {

@@ -14,6 +14,7 @@ const source = {
   lastSyncedAt: "2026-08-23T15:58:00.000Z",
   provider: "google" as const,
   recurrencePresent: false,
+  remoteCalendarId: "remote-calendar",
   syncGeneration: 4,
   syncRecovery: null,
   syncStatus: "idle" as const,
@@ -45,6 +46,8 @@ const snapshot = (events: ReturnType<typeof event>[]): CalendarAssessmentSnapsho
   evidenceLimits: { eventBudgetExceeded: false, openFindingBudgetExceeded: false },
   events,
   existingOpenFindings: [],
+  existingOpenFindingSnapshots: [],
+  openFindingLedger: { count: 0, fingerprint: "empty", unsupportedCount: 0 },
   scope: { type: "all_outstanding" },
   scopeEnd: new Date("2026-11-21T16:00:00.000Z"),
   scopeStart: new Date("2026-07-24T16:00:00.000Z"),
@@ -109,6 +112,9 @@ describe("Calendar assessment", () => {
     expect(result.health.find(({ dimension }) => dimension === "protected_time")?.signal).toBe(
       "unknown",
     );
+    expect(
+      result.findings.find(({ kind }) => kind === "source_stale")?.sourceReferences[0]?.remoteId,
+    ).toBe("remote-calendar");
   });
 
   it("treats operator recovery as unavailable and a local calendar as current without a sync timestamp", () => {
@@ -247,6 +253,75 @@ describe("Calendar assessment", () => {
         events: [{ ...firstEvent, blockSourceEventId: "copied-from-provider-event" }],
       }),
     ).not.toBe(calendarLedgerFingerprint(first));
+  });
+
+  it("includes the complete unresolved ledger in identity and blocks unsupported finding kinds", () => {
+    const baseline = snapshot([]);
+    const withFutureFinding = {
+      ...baseline,
+      existingOpenFindings: [
+        {
+          fingerprint: "f".repeat(64),
+          id: "77777777-7777-4777-8777-777777777777",
+          kind: "future_calendar_kind",
+        },
+      ],
+      openFindingLedger: {
+        count: 1,
+        fingerprint: "future-ledger",
+        unsupportedCount: 1,
+      },
+    } satisfies CalendarAssessmentSnapshot;
+
+    expect(calendarLedgerFingerprint(withFutureFinding)).not.toBe(
+      calendarLedgerFingerprint(baseline),
+    );
+    expect(assessCalendar(withFutureFinding).state).toBe("blocked");
+
+    const overflow = {
+      ...baseline,
+      evidenceLimits: { ...baseline.evidenceLimits, openFindingBudgetExceeded: true },
+      openFindingLedger: { count: 101, fingerprint: "ledger-a", unsupportedCount: 1 },
+    };
+    expect(
+      calendarLedgerFingerprint({
+        ...overflow,
+        openFindingLedger: { ...overflow.openFindingLedger, fingerprint: "ledger-b" },
+      }),
+    ).not.toBe(calendarLedgerFingerprint(overflow));
+  });
+
+  it("blocks settlement when the required active profile is missing", () => {
+    const missingProfile = snapshot([]);
+    missingProfile.activeProfile = null;
+
+    expect(assessCalendar(missingProfile)).toMatchObject({
+      evidenceLimited: true,
+      state: "blocked",
+    });
+  });
+
+  it("uses the local calendar id for local source material references", () => {
+    const local = snapshot([
+      event(
+        "44444444-4444-4444-8444-444444444444",
+        "2026-08-24T13:00:00.000Z",
+        "2026-08-24T14:00:00.000Z",
+        { provider: "local", recurrence: ["RRULE:FREQ=WEEKLY"] },
+      ),
+    ]);
+    local.sources[0] = {
+      ...source,
+      lastSyncedAt: null,
+      provider: "local",
+      recurrencePresent: true,
+      remoteCalendarId: null,
+    };
+
+    expect(
+      assessCalendar(local).findings.find(({ kind }) => kind === "recurrence_unassessed")
+        ?.sourceReferences[0]?.remoteId,
+    ).toBe(source.calendarId);
   });
 
   it("does not misrepresent a local UUID as the remote ID of a provider event", () => {

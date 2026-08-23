@@ -75,7 +75,7 @@ export function CalendarStewardshipPage() {
 
   const value = status.data;
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6">
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div className="flex min-w-0 flex-col items-start gap-2">
           <Button asChild size="sm" variant="ghost">
@@ -114,13 +114,13 @@ export function CalendarStewardshipPage() {
       <HealthDimensionsPanel health={value.health} />
       <FindingPanel review={value.latestReview} openFindingCount={value.backlog.openFindings} />
       <RecommendationPanel review={value.latestReview} />
-    </main>
+    </div>
   );
 }
 
 function CalendarStewardshipSkeleton() {
   return (
-    <main
+    <div
       aria-busy="true"
       aria-label="Loading schedule health"
       className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
@@ -132,13 +132,13 @@ function CalendarStewardshipSkeleton() {
       <Skeleton className="h-36 w-full" />
       <Skeleton className="h-48 w-full" />
       <Skeleton className="h-48 w-full" />
-    </main>
+    </div>
   );
 }
 
 function CalendarStewardshipError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
+    <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
       <Alert variant="destructive">
         <AlertTriangleIcon aria-hidden="true" />
         <AlertTitle>Schedule health is unavailable</AlertTitle>
@@ -149,7 +149,7 @@ function CalendarStewardshipError({ error, onRetry }: { error: unknown; onRetry:
           </Button>
         </AlertAction>
       </Alert>
-    </main>
+    </div>
   );
 }
 

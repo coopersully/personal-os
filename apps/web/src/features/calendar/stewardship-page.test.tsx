@@ -169,7 +169,9 @@ function renderPage() {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <CalendarStewardshipPage />
+        <main id="main-content">
+          <CalendarStewardshipPage />
+        </main>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -179,6 +181,22 @@ describe("Calendar schedule health", () => {
   beforeEach(() => {
     mocks.createCalendarReview.mockReset();
     mocks.getCalendarStatus.mockReset();
+  });
+
+  it("keeps the application shell as the sole main landmark", async () => {
+    mocks.getCalendarStatus.mockResolvedValue(maintainedStatus);
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("does not add a main landmark while schedule health is loading", () => {
+    mocks.getCalendarStatus.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+
+    expect(screen.getByLabelText("Loading schedule health")).toBeInTheDocument();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
   it("explains first assessment and refreshes to the durable review", async () => {
@@ -268,6 +286,7 @@ describe("Calendar schedule health", () => {
     renderPage();
 
     expect(await screen.findByText("Status unavailable")).toBeInTheDocument();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
     await browser.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("This review is stale")).toBeInTheDocument();
     expect(screen.getByText("Busy events overlap")).toBeInTheDocument();

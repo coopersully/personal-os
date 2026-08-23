@@ -39,6 +39,8 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0052_connector_notifications",
         "0053_oauth_states_expiry_index",
         "0054_agent_access_work_item_snapshots",
+        "0055_calendar_stewardship_foundations",
+        "0056_calendar_event_links",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);

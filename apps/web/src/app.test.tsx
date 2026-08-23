@@ -3567,6 +3567,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Calendar: Personal" }));
     await browser.click(screen.getByRole("button", { name: "Selected Google" }));
     await browser.click(screen.getByRole("button", { name: "Add conferencing" }));
+    await browser.click(screen.getByRole("button", { name: "Choose conferencing" }));
     await browser.click(screen.getByRole("menuitemradio", { name: "Paste meeting link" }));
     expect(screen.getByLabelText("Meeting link")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Meeting link" }));
@@ -3575,6 +3576,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("switch", { name: "All day" }));
     expect(screen.queryByLabelText("Starts time")).not.toBeInTheDocument();
     await browser.type(screen.getByLabelText("Title"), "Planning block");
+    await browser.click(screen.getByRole("button", { name: "Add location" }));
     const location = screen.getByRole("combobox", { name: "Location" });
     fireEvent.change(location, { target: { value: "New York" } });
     await waitFor(() => expect(mocks.searchWeatherLocations).toHaveBeenCalledWith("New York"));

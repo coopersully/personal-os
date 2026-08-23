@@ -7,7 +7,8 @@ import {
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarIcon, PlusIcon, SearchIcon, XIcon } from "@/components/icons";
+import { Link } from "react-router-dom";
+import { CalendarIcon, PlusIcon, SearchIcon, ShieldCheckIcon, XIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Calendar as DatePicker } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,6 +60,11 @@ export function CalendarFloatingNav({
             variant="ghost"
           >
             <SearchIcon aria-hidden="true" />
+          </Button>
+          <Button asChild size="icon" variant="ghost">
+            <Link aria-label="Schedule health" to="/calendar/review">
+              <ShieldCheckIcon aria-hidden="true" />
+            </Link>
           </Button>
           <Button
             aria-label="Create event"

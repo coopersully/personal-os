@@ -41,6 +41,7 @@ import {
   type FormEvent,
   lazy,
   type DragEvent as ReactDragEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type UIEvent as ReactUIEvent,
   Suspense,
@@ -375,6 +376,14 @@ type CalendarDropPreview = {
   width: number;
 };
 type EventDraft = { endsAt: string; startsAt: string };
+type CalendarRangeSelection = {
+  active: boolean;
+  anchorMinute: number;
+  currentMinute: number;
+  day: LocalDate;
+  originClientY: number;
+  pointerId: number;
+};
 type CalendarMap = Map<string, Calendar>;
 type ContextSidebarMode = "calendar" | "finances" | "mail" | "settings" | "tasks" | null;
 
@@ -2496,6 +2505,7 @@ function CalendarPage({
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<CalendarDropPreview | null>(null);
   const [inspectedEvent, setInspectedEvent] = useState<CalendarEvent | null>(null);
+  const [floatingDraft, setFloatingDraft] = useState<EventDraft | null>(null);
   const initializedFollow = useRef(false);
   const requestedView = searchParams.get("view");
   const defaultView: CalendarView =
@@ -2672,6 +2682,7 @@ function CalendarPage({
           dragPreview={dragPreview}
           draggedEventId={draggedEventId}
           moveEvent={dropEvent}
+          onCreateRange={setFloatingDraft}
           setEditor={setCalendarEditor}
           setDraggedEventId={setDraggedEventId}
           setDragPreview={setDragPreview}
@@ -2692,6 +2703,7 @@ function CalendarPage({
           dragPreview={dragPreview}
           draggedEventId={draggedEventId}
           moveEvent={dropEvent}
+          onCreateRange={setFloatingDraft}
           setEditor={setCalendarEditor}
           setDraggedEventId={setDraggedEventId}
           setDragPreview={setDragPreview}
@@ -2725,6 +2737,7 @@ function CalendarPage({
       <CalendarFloatingNav
         anchor={anchor}
         calendars={calendars.data ?? []}
+        {...(floatingDraft ? { draft: floatingDraft } : {})}
         eventDetails={
           inspectedEvent ? (
             <EventInspector
@@ -2742,6 +2755,7 @@ function CalendarPage({
           ) : undefined
         }
         onNavigate={jumpToDate}
+        onDraftDismiss={() => setFloatingDraft(null)}
         timeZone={user.planningTimezone}
         user={user}
       />
@@ -3411,6 +3425,7 @@ function DayCalendarView({
   events,
   followToday,
   moveEvent,
+  onCreateRange,
   onExitFollow,
   setEditor,
   setDraggedEventId,
@@ -3428,6 +3443,7 @@ function DayCalendarView({
   events: CalendarEvent[];
   followToday: boolean;
   moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
+  onCreateRange: (draft: EventDraft) => void;
   onExitFollow: () => void;
   setEditor: (editor: Editor) => void;
   setDraggedEventId: (id: string | null) => void;
@@ -3445,6 +3461,7 @@ function DayCalendarView({
   const scrollContainer = useRef<HTMLDivElement>(null);
   const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const [contextMinute, setContextMinute] = useState(0);
+  const rangeSelection = useCalendarRangeSelection(onCreateRange, timeZone);
   useEffect(() => {
     if (!isToday) scrollTimelineToMinute(scrollContainer.current, 8 * 60);
   }, [isToday]);
@@ -3505,8 +3522,15 @@ function DayCalendarView({
                 onDrop={(dragEvent) =>
                   dropTimelineEvent(dragEvent, day, events, moveEvent, setDraggedEventId)
                 }
+                onPointerCancel={rangeSelection.cancel}
+                onPointerDown={(event) => rangeSelection.start(event, day)}
+                onPointerMove={rangeSelection.move}
+                onPointerUp={rangeSelection.finish}
                 style={{ height: calendarTimelineHeight }}
               >
+                {rangeSelection.selection && sameLocalDate(rangeSelection.selection.day, day) ? (
+                  <CalendarCreateSelection selection={rangeSelection.selection} />
+                ) : null}
                 {dragPreview?.dayKey === localDateKey(day) ? (
                   <CalendarDropPreview preview={dragPreview} />
                 ) : null}
@@ -3549,6 +3573,7 @@ function WeekCalendarView({
   eventsByDay,
   followToday,
   moveEvent,
+  onCreateRange,
   onExitFollow,
   setEditor,
   setDraggedEventId,
@@ -3568,6 +3593,7 @@ function WeekCalendarView({
   eventsByDay: Map<string, CalendarEvent[]>;
   followToday: boolean;
   moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
+  onCreateRange: (draft: EventDraft) => void;
   onExitFollow: () => void;
   setEditor: (editor: Editor) => void;
   setDraggedEventId: (id: string | null) => void;
@@ -3595,6 +3621,7 @@ function WeekCalendarView({
   const scrollContainer = useRef<HTMLDivElement>(null);
   const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const includesToday = days.some((day) => sameLocalDate(day, today));
+  const rangeSelection = useCalendarRangeSelection(onCreateRange, timeZone);
   useEffect(() => {
     if (!includesToday) scrollTimelineToMinute(scrollContainer.current, 8 * 60);
   }, [includesToday]);
@@ -3727,8 +3754,15 @@ function WeekCalendarView({
                   setDraggedEventId,
                 )
               }
+              onPointerCancel={rangeSelection.cancel}
+              onPointerDown={(event) => rangeSelection.start(event, day)}
+              onPointerMove={rangeSelection.move}
+              onPointerUp={rangeSelection.finish}
               style={{ height: calendarTimelineHeight }}
             >
+              {rangeSelection.selection && sameLocalDate(rangeSelection.selection.day, day) ? (
+                <CalendarCreateSelection selection={rangeSelection.selection} />
+              ) : null}
               {dragPreview?.dayKey === localDateKey(day) ? (
                 <CalendarDropPreview preview={dragPreview} />
               ) : null}
@@ -3881,6 +3915,90 @@ function CalendarDropPreview({ preview }: { preview: CalendarDropPreview }) {
         : null}
     </>
   );
+}
+
+function calendarCreateRange(selection: CalendarRangeSelection) {
+  const startMinute = Math.min(selection.anchorMinute, selection.currentMinute);
+  const endMinute = Math.max(selection.anchorMinute, selection.currentMinute);
+  return {
+    endMinute:
+      endMinute === startMinute ? Math.min(calendarMinutesPerDay, startMinute + 15) : endMinute,
+    startMinute,
+  };
+}
+
+function CalendarCreateSelection({ selection }: { selection: CalendarRangeSelection }) {
+  const { endMinute, startMinute } = calendarCreateRange(selection);
+  return (
+    <div
+      aria-label={`New event from ${formatMinuteOfDay(startMinute)} to ${formatMinuteOfDay(endMinute)}`}
+      aria-live="polite"
+      className="calendar-create-selection"
+      role="status"
+      style={{
+        height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 12),
+        top: minuteToTimelinePixels(startMinute),
+      }}
+    >
+      <strong>{formatMinuteOfDay(startMinute)}</strong>
+      <span>– {formatMinuteOfDay(endMinute)}</span>
+    </div>
+  );
+}
+
+function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, timeZone: string) {
+  const [selection, setSelection] = useState<CalendarRangeSelection | null>(null);
+  const selectionRef = useRef<CalendarRangeSelection | null>(null);
+  const updateSelection = (next: CalendarRangeSelection | null) => {
+    selectionRef.current = next;
+    setSelection(next);
+  };
+  const start = (event: ReactPointerEvent<HTMLElement>, day: LocalDate) => {
+    if (event.button !== 0 || event.pointerType === "touch") return;
+    if ((event.target as Element).closest(".calendar-timeline-event")) return;
+    const minute = createRangeMinuteAtPointer(event, event.currentTarget);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    updateSelection({
+      active: false,
+      anchorMinute: minute,
+      currentMinute: minute,
+      day,
+      originClientY: event.clientY,
+      pointerId: event.pointerId,
+    });
+  };
+  const move = (event: ReactPointerEvent<HTMLElement>) => {
+    const current = selectionRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const active = current.active || Math.abs(event.clientY - current.originClientY) >= 4;
+    if (!active) return;
+    event.preventDefault();
+    updateSelection({
+      ...current,
+      active,
+      currentMinute: createRangeMinuteAtPointer(event, event.currentTarget),
+    });
+  };
+  const finish = (event: ReactPointerEvent<HTMLElement>) => {
+    const current = selectionRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (current.active) {
+      const { endMinute, startMinute } = calendarCreateRange(current);
+      onCreateRange({
+        endsAt: localDateTimeToUtc(current.day, endMinute, timeZone).toISOString(),
+        startsAt: localDateTimeToUtc(current.day, startMinute, timeZone).toISOString(),
+      });
+    }
+    updateSelection(null);
+  };
+  return {
+    cancel: () => updateSelection(null),
+    finish,
+    move,
+    selection: selection?.active ? selection : null,
+    start,
+  };
 }
 
 function calendarEventColorStyle(color: string | null | undefined): CSSProperties {
@@ -8303,6 +8421,16 @@ function timelineMinuteAtPointer(
   const relativeY = Math.min(calendarTimelineHeight, Math.max(0, clientY - top - grabOffsetY));
   const unsnappedMinute = (relativeY / calendarTimelineHeight) * calendarMinutesPerDay;
   return Math.min(23 * 60 + 45, Math.max(0, Math.round(unsnappedMinute / 15) * 15));
+}
+
+function createRangeMinuteAtPointer(pointerEvent: { clientY: number }, timeline: HTMLElement) {
+  const bounds = timeline.getBoundingClientRect();
+  const relativeY = Math.min(
+    calendarTimelineHeight,
+    Math.max(0, pointerEvent.clientY - bounds.top),
+  );
+  const minute = (relativeY / calendarTimelineHeight) * calendarMinutesPerDay;
+  return Math.min(calendarMinutesPerDay, Math.max(0, Math.round(minute / 15) * 15));
 }
 
 function previewTimelineDrop(

@@ -4348,6 +4348,50 @@ describe("ilo web app", () => {
 
     expect(stylesheet).toContain(".week-day-header > div:first-child > button,");
     expect(stylesheet).not.toContain(".week-day-header button,");
+    expect(stylesheet).toContain("background-position: 0 0, 0 24px, 0 12px;");
+    expect(stylesheet).toContain("background-size: 100% 48px, 5px 48px, 9px 24px;");
+  });
+
+  it("draws a snapped time range and opens the event composer with that schedule", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    Object.defineProperty(tuesday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+
+    const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
+    Object.defineProperties(pointerDown, {
+      button: { value: 0 },
+      clientY: { value: 480 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerDown);
+    const pointerMove = createEvent.pointerMove(tuesday);
+    Object.defineProperties(pointerMove, {
+      clientY: { value: 492 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerMove);
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 10 AM to 10:15 AM");
+    const pointerUp = createEvent.pointerUp(tuesday);
+    Object.defineProperties(pointerUp, {
+      clientY: { value: 492 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerUp);
+
+    await waitFor(() =>
+      expect(document.querySelector(".calendar-floating-nav__composer")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("textbox", { name: "Starts hour" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Starts minute" })).toHaveValue("00");
+    expect(screen.getByRole("textbox", { name: "Ends hour" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
   });
 
   it("describes all-day, multi-day, and overnight event ranges", async () => {

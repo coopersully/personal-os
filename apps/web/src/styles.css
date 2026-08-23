@@ -2802,9 +2802,26 @@ p {
     linear-gradient(to bottom, var(--calendar-hour-rule) 0 1px, transparent 1px),
     radial-gradient(circle at 1px 0, var(--calendar-half-hour-rule) 0 1px, transparent 1.25px),
     radial-gradient(circle at 1px 0, var(--calendar-quarter-hour-rule) 0 1px, transparent 1.25px);
-  background-size: 100% 48px, 5px 24px, 9px 12px;
+  background-position: 0 0, 0 24px, 0 12px;
+  background-size: 100% 48px, 5px 48px, 9px 24px;
   border-left: 1px solid var(--line);
   position: relative;
+}
+.calendar-create-selection {
+  background: color-mix(in srgb, var(--primary) 24%, var(--surface-raised));
+  border: 1px solid color-mix(in srgb, var(--primary) 70%, transparent);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--foreground);
+  inset-inline: 3px;
+  overflow: hidden;
+  padding: 5px 8px;
+  pointer-events: none;
+  position: absolute;
+  z-index: 7;
+}
+.calendar-create-selection span {
+  color: var(--muted);
+  margin-left: 3px;
 }
 .calendar-timeline.is-drag-target::after {
   content: none;
@@ -3106,9 +3123,6 @@ p {
   color: var(--acid-ink);
 }
 .week-day-timeline.is-today {
-  --calendar-hour-rule: color-mix(in srgb, var(--line) 82%, var(--foreground));
-  --calendar-half-hour-rule: color-mix(in srgb, var(--foreground) 34%, transparent);
-  --calendar-quarter-hour-rule: color-mix(in srgb, var(--foreground) 18%, transparent);
   background-color: var(--accent-soft);
 }
 .month-calendar {

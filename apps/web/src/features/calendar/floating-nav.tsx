@@ -77,7 +77,9 @@ type ConferenceChoice = "google_meet" | "link" | "none";
 type CalendarFloatingNavProps = {
   anchor: LocalDate;
   calendars: Calendar[];
+  draft?: { endsAt: string; startsAt: string };
   eventDetails?: ReactNode;
+  onDraftDismiss?: () => void;
   onNavigate: (date: LocalDate) => void;
   timeZone: string;
   user: User;
@@ -86,13 +88,21 @@ type CalendarFloatingNavProps = {
 export function CalendarFloatingNav({
   anchor,
   calendars,
+  draft,
   eventDetails,
+  onDraftDismiss,
   onNavigate,
   timeZone,
   user,
 }: CalendarFloatingNavProps) {
   const [mode, setMode] = useState<FloatingMode>("closed");
-  const close = () => setMode("closed");
+  const close = () => {
+    setMode("closed");
+    if (draft) onDraftDismiss?.();
+  };
+  useEffect(() => {
+    if (draft) setMode("create");
+  }, [draft]);
   const surfaceState: FloatingSurfaceState = eventDetails ? "details" : mode;
   const content = eventDetails ? (
     eventDetails
@@ -123,7 +133,14 @@ export function CalendarFloatingNav({
   ) : mode === "search" ? (
     <CalendarSearchCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
   ) : (
-    <InlineEventComposer calendars={calendars} close={close} timeZone={timeZone} user={user} />
+    <InlineEventComposer
+      calendars={calendars}
+      close={close}
+      {...(draft ? { draft } : {})}
+      key={draft ? `${draft.startsAt}-${draft.endsAt}` : "new-event"}
+      timeZone={timeZone}
+      user={user}
+    />
   );
 
   return (
@@ -724,10 +741,12 @@ function isValidTimePart(value: string, minimum: number, maximum: number) {
 function InlineEventComposer({
   calendars,
   close,
+  draft,
   timeZone,
 }: {
   calendars: Calendar[];
   close: () => void;
+  draft?: { endsAt: string; startsAt: string };
   timeZone: string;
   user: User;
 }) {
@@ -742,8 +761,10 @@ function InlineEventComposer({
         ),
     [calendars],
   );
-  const start = roundToQuarterHour(new Date(Date.now() + 30 * 60_000));
-  const end = new Date(start.getTime() + 60 * 60_000);
+  const start = draft
+    ? new Date(draft.startsAt)
+    : roundToQuarterHour(new Date(Date.now() + 30 * 60_000));
+  const end = draft ? new Date(draft.endsAt) : new Date(start.getTime() + 60 * 60_000);
   const initialStart = toDateTimeLocal(start, timeZone);
   const initialEnd = toDateTimeLocal(end, timeZone);
   const [allDay, setAllDay] = useState(false);
@@ -757,7 +778,7 @@ function InlineEventComposer({
   const [endDate, setEndDate] = useState(() => parseLocalDate(initialEnd.slice(0, 10)));
   const [startTime, setStartTime] = useState(initialStart.slice(11));
   const [endTime, setEndTime] = useState(initialEnd.slice(11));
-  const endWasEdited = useRef(false);
+  const endWasEdited = useRef(Boolean(draft));
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const selectedCalendar = writable.find((calendar) => calendar.id === calendarId) ?? writable[0];
   useEffect(() => {

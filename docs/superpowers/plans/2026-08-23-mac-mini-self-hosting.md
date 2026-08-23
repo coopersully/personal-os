@@ -59,6 +59,9 @@
 - Modify: `Dockerfile`
 - Modify: `infra/compute.tf`
 - Modify: `.github/workflows/{ci,deploy}.yml`
+- Create: `scripts/run-with-build-revision.mjs`
+- Create: `scripts/run-with-build-revision.test.mjs`
+- Modify: `package.json`
 
 - [ ] Write failing tests for three modes (`candidate`, `active`, `rehearsal`), full 40-character lowercase commit revisions, Mac production rejection when `DEPLOYMENT_MODE_FILE` is absent, and transition-AWS rejection when immutable `BUILD_REVISION` or explicit `DEPLOYMENT_MODE=active` is absent.
 
@@ -71,6 +74,7 @@ expect(() => loadConfig(awsTransitionEnv({ BUILD_REVISION: undefined }))).toThro
 - [ ] Run `pnpm vitest run packages/domain/src/deployment.test.ts apps/api/src/config.test.ts` and confirm the new assertions fail.
 - [ ] Implement exported schemas/types and add `buildRevision`, `deploymentMode`, `runtimeTopology`, and `deploymentModeFile` to `AppConfig`. Mac production requires the mode file. During the dual-deploy window only, ECS uses explicit `DEPLOYMENT_MODE=active` and `RUNTIME_TOPOLOGY=combined`; no implicit active default is allowed.
 - [ ] Thread the exact event SHA through API/MCP/web Docker build arguments, Vite, CI builds, `.github/workflows/deploy.yml`, and the ECS task definition in `infra/compute.tf` before enforcing the new requirements. Add contract tests proving the live AWS transition task and web artifact report that SHA.
+- [ ] Add the cross-platform `run-with-build-revision.mjs` wrapper used by `pnpm check`, `pnpm verify`, and documented local build commands. It supplies the exact `git rev-parse HEAD` SHA only for local verification, records whether the tree is dirty, refuses dirty production/release builds, and never overrides a CI-provided SHA. Test clean, dirty, detached, missing-Git, and caller-provided cases.
 - [ ] Re-run the focused tests and `pnpm --filter @personal-os/api typecheck`.
 - [ ] Commit: `feat: define production deployment runtime contracts`.
 
@@ -125,7 +129,7 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - [ ] Run the focused MCP/web tests and confirm failure.
 - [ ] Extract an MCP runtime with tracked requests and bounded SIGTERM drain. Return `{status, revision}` from `/health/live`; API ready, MCP live, and web revision must report the same full SHA.
 - [ ] Have the Vite build emit `dist/revision.json` from `BUILD_REVISION` without tracking a source-tree placeholder; configure nginx with `Cache-Control: no-store, max-age=0` for revision/health responses.
-- [ ] Re-run focused tests and build API, MCP, and web.
+- [ ] Re-run focused tests and build API, MCP, and web through `node scripts/run-with-build-revision.mjs pnpm build`; also prove a direct production/release build without a revision fails.
 - [ ] Commit: `feat: expose coherent release revision health`.
 
 ### Task 4: Add credential-family identity and idempotency persistence
@@ -197,12 +201,18 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `scripts/release/release-manifest.test.mjs`
 - Create: `scripts/release/test-predecessor-compatibility.mjs`
 - Create: `scripts/release/test-predecessor-compatibility.test.mjs`
+- Create: `scripts/release/create-infrastructure-approval.mjs`
+- Create: `scripts/release/verify-infrastructure-approval.mjs`
+- Create: `scripts/release/infrastructure-approval.test.mjs`
+- Create: `deploy/mac-mini/infrastructure-approval.pub`
 - Create: `scripts/release/fixtures/**`
 - Create: `deploy/mac-mini/runtime-compatibility.json`
 
 - [ ] Write failing fixture tests for checksum substitution, wrong repository/workflow/branch/SHA, non-monotonic sequence, invalid ancestry, unlisted stable predecessor, schema fingerprint mismatch, changed Postgres/cloudflared digest in an application release, incompatible state schema, and too-new bootstrap.
 - [ ] Implement canonical JSON manifest generation containing all fields required by Decision 3 of the spec, including exact platform digests, controller checksums, before/after migration fingerprints, compatible predecessor bundle digests, infrastructure class, and rehearsal approval digest. The generator accepts predecessor evidence only from the compatibility harness, never a caller-authored digest list.
 - [ ] In CI, restore the actual recorded stable predecessor schema/data fixture, apply the candidate migration, start the predecessor API/MCP images against the migrated schema, run their read/write smoke and rollback checks, then run the candidate. Emit signed evidence naming both exact bundle digests and schema fingerprints. For skipped releases, test every planned chain edge or the direct stable-to-candidate edge.
+- [ ] Define an attended infrastructure-approval statement binding candidate bundle digest, old/new PostgreSQL or cloudflared digests, restore/upgrade rehearsal evidence digests, approving Cooper identity, issue time, and expiry. Sign its canonical bytes with a dedicated offline Ed25519/minisign key whose public key is pinned in the fixed bootstrap; keep the private key outside the production Mac, GitHub, AWS, Cloudflare, and Backblaze.
+- [ ] Require manifest generation to reject infrastructure digest changes without the valid non-expired approval signature. Require the Mac controller to independently verify the same signature, pinned public-key fingerprint, candidate binding, evidence bindings, and expiry before any mutation. Test arbitrary digest, wrong signer, replayed candidate, changed evidence, expiry, and application-release misuse.
 - [ ] Implement offline structural/checksum verification separately from online GitHub attestation and ancestry verification. Make verification output machine-readable and fail closed.
 - [ ] Pin the tested host compatibility matrix in `runtime-compatibility.json` rather than using floating Homebrew latest versions.
 - [ ] Run the release test suite and commit: `feat: define verifiable production release bundles`.
@@ -311,6 +321,8 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `deploy/mac-mini/rehearsals/**`
 - Create: `deploy/witness/ilo-restore-witness.service`
 - Create: `deploy/witness/ilo-restore-witness.timer`
+- Create: `deploy/witness/ilo-checkpoint-witness.service`
+- Create: `deploy/witness/ilo-checkpoint-witness.timer`
 - Create: `deploy/witness/README.md`
 - Create: `infra/witness/{versions,variables,main,outputs}.tf`
 - Create: `infra/witness/terraform.tfvars.example`
@@ -321,6 +333,7 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - [ ] Make maintenance leases signed, bounded, and release-specific. They may suppress expected availability alerts but never heartbeat, backup, mismatch, or overrun alerts.
 - [ ] Provision the witness control plane explicitly: a minimal Debian Hetzner Cloud VPS outside AWS/GitHub/Cloudflare/Backblaze/Mac, no standing inbound access, encrypted disk where supported, provider firewall, a separately escrowed OpenTofu state snapshot, a B2 read-only recovery-set credential, a write-only non-overwriting witness-evidence prefix, and a Healthchecks.io dead-man alert owned outside the Mac uploader context. Use an exact-IP one-time bootstrap rule/key, then remove both and prove console/rescue recovery. Record the selected SKU, region, owner, alert destination, and quoted recurring cost; require Cooper's approval before apply.
 - [ ] Implement an independent witness that validates the full offsite database/manifest/OCI/attestation set and writes accepted-checkpoint evidence unavailable to the Mac uploader. Give the Mac only read access to witness evidence. Configure the weekly clean-room restore with the checked-in systemd timer and prove missed runs alert; do not schedule it through GitHub, AWS, Cloudflare, Backblaze jobs, or the production Mac.
+- [ ] Run checkpoint discovery/validation every 10 minutes with `ilo-checkpoint-witness.timer`, independently of the weekly full-restore timer. Alert when acceptance latency exceeds 30 minutes, a timer run is missed, or accepted-checkpoint age approaches one hour; make stale acceptance block deployments before the RPO is exceeded.
 - [ ] Add deterministic rehearsals for killed migration, killed controller at every state transition, corrupt state, stale pointer, pointer race, bad attestation, digest substitution, incompatible schema, broken candidate controller, Colima `Broken`, sleep/wake, reboot-after-login, Tunnel QUIC failure, and forced MCP retry.
 - [ ] Run the full rehearsal suite plus `pnpm verify`; retain sanitized evidence paths in the runbook.
 - [ ] Commit: `test: add mac deployment failure and recovery rehearsals`.

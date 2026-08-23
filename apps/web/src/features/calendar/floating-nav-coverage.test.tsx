@@ -20,7 +20,7 @@ vi.mock("../../api.js", () => ({
 
 const user = { id: "user-1" } as User;
 const localCalendar = {
-  accountId: null,
+  accountId: "account-local",
   color: "#777ce3",
   id: "calendar-local",
   isPrimary: true,

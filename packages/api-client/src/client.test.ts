@@ -145,6 +145,7 @@ const event: CalendarEvent = {
   notes: null,
   location: null,
   conferenceUrl: null,
+  url: null,
   startsAt: now,
   endsAt: "2026-07-13T13:00:00.000Z",
   timezone: "UTC",

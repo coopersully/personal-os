@@ -254,8 +254,7 @@ git commit -m "feat(finance): define canonical agent contracts"
 - Modify: packages/database/src/schema.ts
 - Create: packages/database/migrations/0037_finance_plan_versions.sql
 - Modify: packages/database/migrations/meta/_journal.json
-- Create: packages/database/migrations/meta/0037_snapshot.json
-- Modify: packages/database/src/client.test.ts
+- Create: packages/database/src/finance-schema.integration.test.ts
 
 **Interfaces:**
 - Produces Drizzle tables: financeAgentSettings, financeSetupSessions, financeProfileVersions, financeBudgetPlans, financeBudgetVersions, financeBudgetAllocations, financeGoals.
@@ -295,13 +294,13 @@ it("persists versioned Finance plans and bypass settings", async () => {
 
 - [ ] **Step 2: Run the database test and confirm missing tables fail**
 
-Run: pnpm vitest run packages/database/src/client.test.ts
+Run: pnpm vitest run packages/database/src/finance-schema.integration.test.ts
 
 Expected: FAIL because the new Drizzle exports do not exist.
 
 - [ ] **Step 3: Add schema tables and generate the named migration**
 
-Use UUID primary keys, user foreign keys with cascade deletion, timestamptz audit fields, integer versions, numeric(14,2) money columns, and jsonb assumptions/provenance where structure is already validated by the domain boundary.
+Use UUID primary keys, user foreign keys with cascade deletion, timestamptz audit fields, integer versions, integer-cent money columns consistent with the existing Finance schema, and jsonb assumptions/provenance where structure is already validated by the domain boundary. This repository stopped producing Drizzle snapshots after `0009`; follow the established manual SQL plus journal-entry convention rather than generating a misleading snapshot from stale metadata.
 
 Generate the migration:
 
@@ -324,14 +323,14 @@ Backfill existing finance_profiles into version 1 profile rows. Convert each use
 
 - [ ] **Step 4: Run migration, database tests, and schema type checking**
 
-Run: pnpm vitest run packages/database/src/client.test.ts && pnpm --filter @personal-os/database typecheck
+Run: pnpm vitest run packages/database/src/finance-schema.integration.test.ts && pnpm --filter @personal-os/database typecheck
 
 Expected: PASS against a database initialized exclusively from repository migrations.
 
 - [ ] **Step 5: Commit the planning persistence transition**
 
 ~~~bash
-git add packages/database/src/schema.ts packages/database/src/client.test.ts packages/database/migrations
+git add packages/database/src/schema.ts packages/database/src/finance-schema.integration.test.ts packages/database/migrations
 git commit -m "feat(finance): add versioned planning persistence"
 ~~~
 

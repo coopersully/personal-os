@@ -260,6 +260,13 @@
       "when": 1786888800000,
       "tag": "0036_home_location_and_planning_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787516106000,
+      "tag": "0037_finance_plan_versions",
+      "breakpoints": true
     }
   ]
 }

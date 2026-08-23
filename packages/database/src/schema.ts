@@ -956,6 +956,199 @@ export const financeBudgets = pgTable(
   ],
 );
 
+/** Per-user controls for agent-initiated Finance mutations. */
+export const financeAgentSettings = pgTable("finance_agent_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+  version: integer("version").notNull().default(1),
+  ...timestamps,
+});
+
+/** Immutable snapshots of the facts used to give financial guidance. */
+export const financeProfileVersions = pgTable(
+  "finance_profile_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    jurisdiction: text("jurisdiction"),
+    householdSize: integer("household_size"),
+    dependents: integer("dependents"),
+    expectedMonthlyTakeHome: integer("expected_monthly_take_home_cents"),
+    incomeStability: text("income_stability")
+      .$type<"seasonal" | "stable" | "unknown" | "variable">()
+      .notNull()
+      .default("unknown"),
+    liquidReserves: integer("liquid_reserves_cents"),
+    debts: jsonb("debts").$type<Record<string, unknown>[]>().notNull().default([]),
+    insurance: jsonb("insurance").$type<Record<string, unknown>[]>().notNull().default([]),
+    preferences: jsonb("preferences")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({ notes: [] }),
+    employment: jsonb("employment").$type<Record<string, unknown>>(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull().default({}),
+    sourceLegacyProfileId: uuid("source_legacy_profile_id").references(() => financeProfiles.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_profile_versions_user_version_idx").on(table.userId, table.version),
+    index("finance_profile_versions_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+/** Stable identity for a budget; revisions are stored in finance_budget_versions. */
+export const financeBudgetPlans = pgTable(
+  "finance_budget_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: text("status").$type<"active" | "archived">().notNull().default("active"),
+    ...timestamps,
+  },
+  (table) => [index("finance_budget_plans_user_status_idx").on(table.userId, table.status)],
+);
+
+export const financeGoals = pgTable(
+  "finance_goals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    targetAmount: integer("target_amount_cents").notNull(),
+    currentAmount: integer("current_amount_cents").notNull().default(0),
+    deadline: text("deadline"),
+    priority: text("priority").$type<"high" | "low" | "medium">().notNull().default("medium"),
+    status: text("status")
+      .$type<"active" | "completed" | "paused" | "removed">()
+      .notNull()
+      .default("active"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [index("finance_goals_user_status_idx").on(table.userId, table.status)],
+);
+
+export const financeBudgetVersions = pgTable(
+  "finance_budget_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => financeBudgetPlans.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    status: text("status")
+      .$type<"active" | "incomplete" | "proposed" | "retired">()
+      .notNull()
+      .default("incomplete"),
+    effectiveFrom: text("effective_from").notNull(),
+    expectedResources: integer("expected_resources_cents").notNull(),
+    allocatedTotal: integer("allocated_total_cents").notNull(),
+    balanceDelta: integer("balance_delta_cents").notNull(),
+    resources: jsonb("resources").$type<Record<string, unknown>[]>().notNull().default([]),
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull(),
+    createdByActorType: text("created_by_actor_type").$type<ActorType>(),
+    createdByActorId: text("created_by_actor_id"),
+    approvedByActorType: text("approved_by_actor_type").$type<ActorType>(),
+    approvedByActorId: text("approved_by_actor_id"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
+    index("finance_budget_versions_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.effectiveFrom,
+    ),
+    uniqueIndex("finance_budget_versions_user_active_month_idx")
+      .on(table.userId, table.effectiveFrom)
+      .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+export const financeBudgetAllocations = pgTable(
+  "finance_budget_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    budgetVersionId: uuid("budget_version_id")
+      .notNull()
+      .references(() => financeBudgetVersions.id, { onDelete: "cascade" }),
+    allocationKey: text("allocation_key").notNull(),
+    kind: text("kind").$type<"buffer" | "debt" | "goal" | "savings" | "spending">().notNull(),
+    amount: integer("amount_cents").notNull(),
+    description: text("description"),
+    categoryId: uuid("category_id").references(() => financeCategories.id, {
+      onDelete: "set null",
+    }),
+    accountId: uuid("account_id").references(() => financeAccounts.id, {
+      onDelete: "set null",
+    }),
+    goalId: uuid("goal_id").references(() => financeGoals.id, { onDelete: "set null" }),
+    legacyCategory: text("legacy_category"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_allocations_version_key_idx").on(
+      table.budgetVersionId,
+      table.allocationKey,
+    ),
+    index("finance_budget_allocations_user_idx").on(table.userId),
+  ],
+);
+
+/** Resumable chat setup state. It does not represent a scheduled or background job. */
+export const financeSetupSessions = pgTable(
+  "finance_setup_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<
+        | "budget_approval"
+        | "budget_proposal"
+        | "collecting_profile"
+        | "initial_maintenance"
+        | "settled"
+      >()
+      .notNull()
+      .default("collecting_profile"),
+    currentQuestionKey: text("current_question_key"),
+    budgetVersionId: uuid("budget_version_id").references(() => financeBudgetVersions.id, {
+      onDelete: "set null",
+    }),
+    maintenanceRunId: uuid("maintenance_run_id"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_setup_sessions_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_setup_sessions_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.status} <> 'settled'`),
+  ],
+);
+
 /** User-authored baseline for financial inference. Effective-dated rather than overwritten. */
 export const financeProfiles = pgTable(
   "finance_profiles",

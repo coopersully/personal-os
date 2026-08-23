@@ -4546,7 +4546,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "All day Quiet day" }));
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "Create event" }));
-    expect(screen.getByLabelText("Description")).toHaveFocus();
+    expect(screen.getByLabelText("Title")).toHaveFocus();
     await browser.click(screen.getByRole("button", { name: "Close" }));
     await browser.click(screen.getByRole("button", { name: /^1:00 PM Focus block/ }));
     fireEvent.keyDown(window, { key: "Escape" });

@@ -2,6 +2,8 @@ import type {
   Calendar,
   CalendarCommitmentProposal,
   CalendarEvent,
+  CalendarReview,
+  CalendarStatus,
   DailyBrief,
   FinanceAccount,
   FinanceBudget,
@@ -87,6 +89,55 @@ const calendar: Calendar = {
   isSelected: true,
   isWritable: true,
   lastSyncedAt: null,
+};
+const calendarReview: CalendarReview = {
+  createdAt: now,
+  evidenceCutoff: now,
+  findings: [],
+  health: [],
+  id,
+  ledgerFingerprint: "a".repeat(64),
+  nextMaintenanceAt: "2026-07-13T12:15:00.000Z",
+  playbookVersion: "1.0.0",
+  profileVersion: null,
+  recommendations: [],
+  rulebookVersion: "calendar-defaults-v1",
+  scope: { type: "all_outstanding" },
+  scopeEnd: "2026-11-10T12:00:00.000Z",
+  scopeStart: "2026-06-13T12:00:00.000Z",
+  sourceFreshness: [],
+  state: "maintained",
+};
+const calendarStatus: CalendarStatus = {
+  asOf: now,
+  authority: {
+    approvedRule: [],
+    automatic: ["inspect", "assess"],
+    individualApproval: ["create_event", "move_event", "resize_event", "trash_event"],
+    unavailable: [
+      "rsvp",
+      "invite",
+      "cancel_attended_event",
+      "book_travel",
+      "send_correspondence",
+    ],
+  },
+  backlog: {
+    actionable: 0,
+    ambiguousEffects: null,
+    awaitingApproval: null,
+    awaitingInput: 0,
+    blocked: 0,
+    failed: null,
+    openFindings: 0,
+  },
+  health: [],
+  latestReview: calendarReview,
+  lifecycle: "maintained",
+  readiness: "ready",
+  setupBlockers: [],
+  sources: [],
+  validNextOperations: ["assess_calendar"],
 };
 const event: CalendarEvent = {
   id,
@@ -1005,6 +1056,9 @@ function apiFetch() {
     if (url.pathname === "/v1/mailboxes") return json({ mailboxes: [mailbox] });
     if (url.pathname === "/v1/calendars" && method === "POST") return json({ calendar }, 201);
     if (url.pathname === "/v1/calendars") return json({ calendars: [calendar] });
+    if (url.pathname === "/v1/calendars/status") return json({ status: calendarStatus });
+    if (url.pathname === "/v1/calendars/reviews" && method === "POST")
+      return json({ review: calendarReview }, 201);
     if (url.pathname === "/v1/calendars/commitments/preview")
       return json({ proposal: commitmentProposal });
     if (url.pathname.includes("/calendars/")) return json({ calendar });
@@ -1076,6 +1130,15 @@ describe("ilo API client", () => {
     await expect(api.updateMotive(id, { isActive: false })).resolves.toEqual(motive);
     await api.deleteMotive(id);
     await expect(api.listCalendars()).resolves.toEqual([calendar]);
+    await expect(api.getCalendarStatus()).resolves.toEqual(calendarStatus);
+    await expect(api.createCalendarReview()).resolves.toEqual(calendarReview);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.example.com/v1/calendars/reviews",
+      expect.objectContaining({
+        body: JSON.stringify({ scope: { type: "all_outstanding" } }),
+        method: "POST",
+      }),
+    );
     await expect(
       api.createCalendar({ name: "Personal", color: null, timezone: "UTC" }),
     ).resolves.toEqual(calendar);

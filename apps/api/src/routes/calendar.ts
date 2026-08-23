@@ -1,4 +1,5 @@
 import {
+  createCalendarReviewInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
   createLocalCalendarInputSchema,
@@ -15,6 +16,7 @@ import {
 import type { Context, Hono } from "hono";
 import { type ZodType, z } from "zod";
 import type { createCalendarService } from "../calendar-service.js";
+import type { createCalendarStewardshipService } from "../calendar-stewardship-service.js";
 import { AppError } from "../errors.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
@@ -25,15 +27,25 @@ type CalendarRouteOptions = {
   app: Hono<AppEnv>;
   calendar: ReturnType<typeof createCalendarService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
+  stewardship: ReturnType<typeof createCalendarStewardshipService>;
 };
 
 /** Register the Calendar-owned HTTP surface without constructing shared services. */
-export function registerCalendarRoutes({ app, calendar, mutationContext }: CalendarRouteOptions) {
+export function registerCalendarRoutes({
+  app,
+  calendar,
+  mutationContext,
+  stewardship,
+}: CalendarRouteOptions) {
   const calendarFeatureAccess = requireFeatureAccess("calendar");
   const calendarReadAccess = requireScope("calendar:read");
+  const calendarReadOnlyPostPaths = new Set([
+    "/v1/calendars/commitments/preview",
+    "/v1/calendars/reviews",
+  ]);
   app.use("/v1/calendars", calendarFeatureAccess);
   app.use("/v1/calendars/*", (context, next) =>
-    context.req.method === "POST" && context.req.path === "/v1/calendars/commitments/preview"
+    context.req.method === "POST" && calendarReadOnlyPostPaths.has(context.req.path)
       ? calendarReadAccess(context, next)
       : calendarFeatureAccess(context, next),
   );
@@ -61,6 +73,20 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
         await parseBody(context, previewCalendarCommitmentInputSchema),
       ),
     }),
+  );
+  app.get("/v1/calendars/status", async (context) =>
+    context.json({ status: await stewardship.getStatus(context.get("principal").userId) }),
+  );
+  app.post("/v1/calendars/reviews", async (context) =>
+    context.json(
+      {
+        review: await stewardship.createReview(
+          context.get("principal").userId,
+          await parseOptionalBody(context, createCalendarReviewInputSchema),
+        ),
+      },
+      201,
+    ),
   );
   app.patch("/v1/calendars/:id", async (context) =>
     context.json({

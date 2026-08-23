@@ -149,6 +149,15 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           responses: { 200: { description: "Calendar commitment proposal preview" } },
         },
       },
+      "/v1/calendars/reviews": {
+        post: {
+          security,
+          responses: { 201: { description: "Immutable Calendar review created" } },
+        },
+      },
+      "/v1/calendars/status": {
+        get: { security, responses: { 200: { description: "Calendar stewardship status" } } },
+      },
       "/v1/calendars/{id}": {
         delete: { security, responses: { 204: { description: "Local calendar deleted" } } },
         patch: { security, responses: { 200: { description: "Local calendar updated" } } },

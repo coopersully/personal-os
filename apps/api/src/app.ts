@@ -36,6 +36,7 @@ import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
 import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
+import { createCalendarStewardshipService } from "./calendar-stewardship-service.js";
 import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
@@ -347,6 +348,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         status: entry.status,
       }),
   });
+  const calendarStewardship = createCalendarStewardshipService({ db: dependencies.db, now });
   const dailyBrief = createDailyBriefService({
     db: dependencies.db,
     listEvents: calendar.listEvents,
@@ -1079,7 +1081,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerTaskRoutes({ app, mutationContext, tasks });
 
-  registerCalendarRoutes({ app, calendar, mutationContext });
+  registerCalendarRoutes({
+    app,
+    calendar,
+    mutationContext,
+    stewardship: calendarStewardship,
+  });
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());

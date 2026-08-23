@@ -7,6 +7,7 @@ import {
   type Database,
   domainProfiles,
 } from "@personal-os/database";
+import * as databaseSchema from "@personal-os/database/schema";
 import {
   type CalendarFinding,
   calendarFindingSchema,
@@ -19,6 +20,8 @@ import {
   type CreateCalendarReviewInput,
 } from "@personal-os/domain";
 import { and, desc, eq, gt, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import type { Pool } from "pg";
 import {
   assessCalendar,
   type CalendarAssessmentDraft,
@@ -35,8 +38,10 @@ type FindingIdentity = Pick<CalendarFinding, "fingerprint" | "id">;
 
 const DAY_MS = 24 * 60 * 60_000;
 
-function isBufferMinutes(value: number | null): value is number {
-  return value !== null && Number.isInteger(value) && value >= 0 && value <= 1_440;
+function parseBufferMinutes(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 1_440 ? parsed : null;
 }
 
 function findingFromRow(row: typeof calendarFindings.$inferSelect): CalendarFinding {
@@ -134,7 +139,11 @@ async function readAssessmentSnapshot(
             endsAt: calendarEvents.endsAt,
             id: calendarEvents.id,
             provider: calendarEvents.provider,
-            recurrencePresent: sql<boolean>`jsonb_array_length(${calendarEvents.recurrence}) > 0`,
+            recurrencePresent: sql<boolean>`case
+              when jsonb_typeof(${calendarEvents.recurrence}) = 'array'
+              then jsonb_array_length(${calendarEvents.recurrence}) > 0
+              else true
+            end`,
             remoteEtag: calendarEvents.remoteEtag,
             startsAt: calendarEvents.startsAt,
             status: calendarEvents.status,
@@ -165,14 +174,14 @@ async function readAssessmentSnapshot(
 
   const [profileRow] = await executor
     .select({
-      afterBufferMinutes: sql<number | null>`case
+      afterBufferMinutes: sql<string | null>`case
         when jsonb_typeof(${domainProfiles.preferences} -> 'afterBufferMinutes') = 'number'
-        then (${domainProfiles.preferences} ->> 'afterBufferMinutes')::integer
+        then ${domainProfiles.preferences} ->> 'afterBufferMinutes'
         else null
       end`,
-      beforeBufferMinutes: sql<number | null>`case
+      beforeBufferMinutes: sql<string | null>`case
         when jsonb_typeof(${domainProfiles.preferences} -> 'beforeBufferMinutes') = 'number'
-        then (${domainProfiles.preferences} ->> 'beforeBufferMinutes')::integer
+        then ${domainProfiles.preferences} ->> 'beforeBufferMinutes'
         else null
       end`,
       id: domainProfiles.id,
@@ -190,13 +199,13 @@ async function readAssessmentSnapshot(
   const recurrenceCalendarIds = new Set(
     eventRows.filter(({ recurrencePresent }) => recurrencePresent).map(({ calendarId }) => calendarId),
   );
+  const afterBufferMinutes = parseBufferMinutes(profileRow?.afterBufferMinutes ?? null);
+  const beforeBufferMinutes = parseBufferMinutes(profileRow?.beforeBufferMinutes ?? null);
   const activeProfile =
-    profileRow &&
-    isBufferMinutes(profileRow.afterBufferMinutes) &&
-    isBufferMinutes(profileRow.beforeBufferMinutes)
+    profileRow && afterBufferMinutes !== null && beforeBufferMinutes !== null
       ? {
-          afterBufferMinutes: profileRow.afterBufferMinutes,
-          beforeBufferMinutes: profileRow.beforeBufferMinutes,
+          afterBufferMinutes,
+          beforeBufferMinutes,
           id: profileRow.id,
           version: profileRow.version,
         }
@@ -503,13 +512,19 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
           "This Calendar release supports all-outstanding reviews only.",
         );
       }
-      return db.transaction(async (lockTransaction) => {
-        await lockTransaction.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`calendar-stewardship:${userId}`}, 0))`,
+      const pool = (db as Database & { $client: Pool }).$client;
+      const client = await pool.connect();
+      let locked = false;
+      try {
+        await client.query(
+          "select pg_advisory_lock(hashtextextended('calendar:' || $1, 0))",
+          [userId],
         );
-        const evidenceCutoff = now();
-        return db.transaction(
+        locked = true;
+        const clientDatabase = drizzle(client, { schema: databaseSchema });
+        return await clientDatabase.transaction(
           async (transaction) => {
+            const evidenceCutoff = now();
             const snapshot = await readAssessmentSnapshot(
               transaction,
               userId,
@@ -536,7 +551,18 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
           },
           { isolationLevel: "repeatable read" },
         );
-      });
+      } finally {
+        try {
+          if (locked) {
+            await client.query(
+              "select pg_advisory_unlock(hashtextextended('calendar:' || $1, 0))",
+              [userId],
+            );
+          }
+        } finally {
+          client.release();
+        }
+      }
     },
 
     async getStatus(userId: string): Promise<CalendarStatus> {

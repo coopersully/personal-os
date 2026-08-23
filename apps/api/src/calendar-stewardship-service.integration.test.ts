@@ -227,6 +227,46 @@ describe.sequential("Calendar stewardship service", () => {
     await expect(database.db.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  it("publishes with a max-one pool and does not reserve a second connection for its snapshot", async () => {
+    const singleConnectionDatabase = createDatabaseClient({
+      connectionString: container.getConnectionUri(),
+      max: 1,
+    });
+    const singleConnectionService = createCalendarStewardshipService({
+      db: singleConnectionDatabase.db,
+      now: () => now,
+    });
+    try {
+      await expect(
+        singleConnectionService.createReview(userId, { scope: { type: "all_outstanding" } }),
+      ).resolves.toMatchObject({ state: "maintained_with_questions" });
+    } finally {
+      await singleConnectionDatabase.close();
+    }
+  });
+
+  it("publishes concurrent owners without exhausting a pool sized to those owners", async () => {
+    const boundedDatabase = createDatabaseClient({
+      connectionString: container.getConnectionUri(),
+      max: 2,
+    });
+    const boundedService = createCalendarStewardshipService({
+      db: boundedDatabase.db,
+      now: () => now,
+    });
+    try {
+      const reviews = await Promise.all([
+        boundedService.createReview(userId, { scope: { type: "all_outstanding" } }),
+        boundedService.createReview(otherUserId, { scope: { type: "all_outstanding" } }),
+      ]);
+      expect(reviews).toHaveLength(2);
+      expect(reviews[0]?.state).toBe("maintained_with_questions");
+      expect(reviews[1]?.state).toBe("maintained");
+    } finally {
+      await boundedDatabase.close();
+    }
+  });
+
   it("rejects unsupported scopes before writing derived state", async () => {
     const operation = service.createReview(userId, {
       scope: {
@@ -309,7 +349,7 @@ describe.sequential("Calendar stewardship service", () => {
     let pendingReview: ReturnType<typeof service.createReview> | undefined;
     await database.db.transaction(async (transaction) => {
       await transaction.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`calendar-stewardship:${userId}`}, 0))`,
+        sql`select pg_advisory_xact_lock(hashtextextended(${`calendar:${userId}`}, 0))`,
       );
       pendingReview = service.createReview(userId, { scope: { type: "all_outstanding" } });
       await waitForAdvisoryLockWaiter();
@@ -401,6 +441,41 @@ describe.sequential("Calendar stewardship service", () => {
       lifecycle: "blocked",
       readiness: "degraded",
       validNextOperations: expect.arrayContaining(["assess_calendar", "open_connections", "review_findings"]),
+    });
+  });
+
+  it("degrades malformed recurrence and profile JSON without throwing or carrying private values", async () => {
+    await database.db
+      .update(domainProfiles)
+      .set({
+        preferences: {
+          afterBufferMinutes: 15.5,
+          automaticEventCreation: false,
+          automaticEventEvidence: [],
+          beforeBufferMinutes: 15,
+          busyBlockPrivacy: "busy",
+          defaultCalendarId: calendarId,
+          defaultTimezone: "UTC",
+          privateProfileMaterial: "malformed-profile-secret",
+        },
+      })
+      .where(eq(domainProfiles.id, profileId));
+    await database.pool.query(
+      "update calendar_events set recurrence = $1::jsonb where id = $2",
+      [JSON.stringify({ privateRule: "malformed-recurrence-secret" }), firstEventId],
+    );
+
+    const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+
+    expect(review.state).toBe("blocked");
+    expect(review.profileVersion).toBeNull();
+    expect(review.findings.map(({ kind }) => kind)).toContain("recurrence_unassessed");
+    expect(JSON.stringify(review)).not.toMatch(
+      /malformed-profile-secret|malformed-recurrence-secret/,
+    );
+    await expect(service.getStatus(userId)).resolves.toMatchObject({
+      readiness: "setup_required",
+      setupBlockers: ["Activate a Calendar profile before relying on stewardship assessments."],
     });
   });
 

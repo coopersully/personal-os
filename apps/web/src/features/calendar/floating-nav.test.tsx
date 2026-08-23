@@ -2,9 +2,10 @@
 import "@testing-library/jest-dom/vitest";
 import type { User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { MotionProvider } from "@/components/motion-provider.js";
 import { CalendarFloatingNav } from "./floating-nav.js";
 
 const user = { id: "user-1" } as User;
@@ -24,30 +25,34 @@ const calendar = {
 function renderCalendar() {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter>
-        <CalendarFloatingNav
-          anchor={{ day: 23, month: 8, year: 2026 }}
-          calendars={[calendar]}
-          onNavigate={vi.fn()}
-          timeZone="UTC"
-          user={user}
-        />
-      </MemoryRouter>
+      <MotionProvider>
+        <MemoryRouter>
+          <CalendarFloatingNav
+            anchor={{ day: 23, month: 8, year: 2026 }}
+            calendars={[calendar]}
+            onNavigate={vi.fn()}
+            timeZone="UTC"
+            user={user}
+          />
+        </MemoryRouter>
+      </MotionProvider>
     </QueryClientProvider>,
   );
 }
 
 it("orders the three primary Calendar actions", () => {
   render(
-    <MemoryRouter>
-      <CalendarFloatingNav
-        anchor={{ day: 23, month: 8, year: 2026 }}
-        calendars={[]}
-        onNavigate={vi.fn()}
-        timeZone="UTC"
-        user={user}
-      />
-    </MemoryRouter>,
+    <MotionProvider>
+      <MemoryRouter>
+        <CalendarFloatingNav
+          anchor={{ day: 23, month: 8, year: 2026 }}
+          calendars={[]}
+          onNavigate={vi.fn()}
+          timeZone="UTC"
+          user={user}
+        />
+      </MemoryRouter>
+    </MotionProvider>,
   );
 
   const actions = screen.getByRole("navigation", { name: "Calendar actions" });
@@ -56,6 +61,27 @@ it("orders the three primary Calendar actions", () => {
     "Create event",
     "Search calendar",
   ]);
+});
+
+it("morphs one persistent surface through every pill action", async () => {
+  const browser = userEvent.setup();
+  const { container } = renderCalendar();
+  const surface = container.querySelector('[data-slot="calendar-floating-surface"]');
+
+  expect(surface).toHaveAttribute("data-state", "closed");
+  await browser.click(screen.getByRole("button", { name: "Choose date" }));
+  expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
+  expect(surface).toHaveAttribute("data-state", "date");
+  await browser.click(screen.getByRole("button", { name: "Close" }));
+  await browser.click(await screen.findByRole("button", { name: "Create event" }));
+  expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
+  expect(surface).toHaveAttribute("data-state", "create");
+  const composer = container.querySelector(".calendar-floating-nav__composer");
+  expect(composer).toBeInTheDocument();
+  await browser.click(within(composer as HTMLElement).getByRole("button", { name: "Close" }));
+  await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
+  expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
+  expect(surface).toHaveAttribute("data-state", "search");
 });
 
 it("lets the schedule controls size to content around a flexible duration line", () => {

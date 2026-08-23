@@ -23,6 +23,7 @@ import {
   ListTodoIcon,
   StarIcon,
 } from "./components/icons.js";
+import { MotionProvider } from "./components/motion-provider.js";
 import {
   getWorkspaceCalendarEntry,
   workspaceCalendarSummary,
@@ -433,12 +434,14 @@ function setup(path = "/today") {
   });
   const location = { value: path };
   const view = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <TestLocationObserver current={location} />
-        <App />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MotionProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <TestLocationObserver current={location} />
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MotionProvider>,
   );
   return { ...view, location, queryClient };
 }
@@ -4175,6 +4178,10 @@ describe("ilo web app", () => {
     await browser.click(eventCard);
 
     const details = await screen.findByRole("dialog", { name: "Focus block" });
+    expect(details.closest('[data-slot="calendar-floating-surface"]')).toHaveAttribute(
+      "data-state",
+      "details",
+    );
     expect(details).toHaveClass("calendar-floating-nav__composer");
     expect(details.closest(".calendar-floating-nav")).toBeInTheDocument();
     expect(view.container.querySelector(".event-sheet-backdrop")).not.toBeInTheDocument();
@@ -4301,7 +4308,7 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
 
     await browser.click(screen.getByRole("button", { name: "Add calendar to Details Included" }));
-    await browser.click(screen.getByRole("button", { name: "Selected Google", exact: true }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     await waitFor(() =>
       expect(mocks.updateEventBlock).toHaveBeenCalledWith(id, thirdId, { mode: "details" }),
     );
@@ -4312,11 +4319,11 @@ describe("ilo web app", () => {
 
     mocks.createEventBlock.mockRejectedValueOnce(new Error("Block failed"));
     await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
-    await browser.click(screen.getByRole("button", { name: "Selected Google", exact: true }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Block failed");
     mocks.createEventBlock.mockResolvedValue(linkedEvent);
     await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
-    await browser.click(screen.getByRole("button", { name: "Selected Google", exact: true }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     await waitFor(() =>
       expect(mocks.createEventBlock).toHaveBeenCalledWith(id, {
         calendarId: nullColorCalendar.id,

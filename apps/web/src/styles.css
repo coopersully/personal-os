@@ -2266,6 +2266,7 @@ p {
   transform: translateX(-50%);
   transition:
     bottom var(--motion-duration-spatial) var(--motion-ease-spatial),
+    transform var(--motion-duration-spatial) var(--motion-ease-spatial),
     width var(--motion-duration-spatial) var(--motion-ease-spatial);
   width: min(34rem, calc(100vw - 2rem));
   z-index: 16;
@@ -2283,6 +2284,34 @@ p {
 .calendar-floating-nav__search,
 .calendar-floating-nav__composer {
   pointer-events: auto;
+}
+.calendar-floating-nav__surface {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+  pointer-events: none;
+  transform-origin: center bottom;
+  width: fit-content;
+}
+.calendar-floating-nav__surface[data-state="date"] {
+  width: min(20rem, 100%);
+}
+.calendar-floating-nav__surface[data-state="search"],
+.calendar-floating-nav__surface[data-state="create"],
+.calendar-floating-nav__surface[data-state="details"] {
+  width: 100%;
+}
+.calendar-floating-nav__transition-content {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+  pointer-events: none;
+  transform-origin: center bottom;
+  width: 100%;
+}
+.calendar-floating-nav__surface[data-state="closed"]
+  .calendar-floating-nav__transition-content {
+  width: auto;
 }
 .calendar-floating-nav__pill {
   align-items: center;

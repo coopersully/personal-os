@@ -12,9 +12,12 @@ import {
   parseLocalDate,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, useIsPresent } from "motion/react";
+import * as m from "motion/react-m";
 import {
   type CSSProperties,
   type FormEvent,
+  forwardRef,
   type ReactNode,
   useCallback,
   useDeferredValue,
@@ -68,6 +71,7 @@ import { api, errorMessage } from "../../api.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 
 type FloatingMode = "closed" | "create" | "date" | "search";
+type FloatingSurfaceState = FloatingMode | "details";
 type ConferenceChoice = "google_meet" | "link" | "none";
 
 type CalendarFloatingNavProps = {
@@ -89,53 +93,77 @@ export function CalendarFloatingNav({
 }: CalendarFloatingNavProps) {
   const [mode, setMode] = useState<FloatingMode>("closed");
   const close = () => setMode("closed");
+  const surfaceState: FloatingSurfaceState = eventDetails ? "details" : mode;
+  const content = eventDetails ? (
+    eventDetails
+  ) : mode === "closed" ? (
+    <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
+      <Button aria-label="Choose date" onClick={() => setMode("date")} size="icon" variant="ghost">
+        <CalendarIcon aria-hidden="true" />
+      </Button>
+      <Button
+        aria-label="Create event"
+        onClick={() => setMode("create")}
+        size="icon"
+        variant="ghost"
+      >
+        <PlusIcon aria-hidden="true" />
+      </Button>
+      <Button
+        aria-label="Search calendar"
+        onClick={() => setMode("search")}
+        size="icon"
+        variant="ghost"
+      >
+        <SearchIcon aria-hidden="true" />
+      </Button>
+    </nav>
+  ) : mode === "date" ? (
+    <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
+  ) : mode === "search" ? (
+    <CalendarSearchCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
+  ) : (
+    <InlineEventComposer calendars={calendars} close={close} timeZone={timeZone} user={user} />
+  );
 
   return (
-    <div className="calendar-floating-nav" data-mode={eventDetails ? "details" : mode}>
-      {eventDetails ? (
-        eventDetails
-      ) : mode === "closed" ? (
-        <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
-          <Button
-            aria-label="Choose date"
-            onClick={() => setMode("date")}
-            size="icon"
-            variant="ghost"
-          >
-            <CalendarIcon aria-hidden="true" />
-          </Button>
-          <Button
-            aria-label="Create event"
-            onClick={() => setMode("create")}
-            size="icon"
-            variant="ghost"
-          >
-            <PlusIcon aria-hidden="true" />
-          </Button>
-          <Button
-            aria-label="Search calendar"
-            onClick={() => setMode("search")}
-            size="icon"
-            variant="ghost"
-          >
-            <SearchIcon aria-hidden="true" />
-          </Button>
-        </nav>
-      ) : mode === "date" ? (
-        <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
-      ) : mode === "search" ? (
-        <CalendarSearchCard
-          anchor={anchor}
-          close={close}
-          onNavigate={onNavigate}
-          timeZone={timeZone}
-        />
-      ) : (
-        <InlineEventComposer calendars={calendars} close={close} timeZone={timeZone} user={user} />
-      )}
+    <div className="calendar-floating-nav" data-mode={surfaceState}>
+      <m.div
+        className="calendar-floating-nav__surface"
+        data-slot="calendar-floating-surface"
+        data-state={surfaceState}
+        layout
+        layoutDependency={surfaceState}
+        transition={{ layout: { bounce: 0.16, duration: 0.42, type: "spring" } }}
+      >
+        <AnimatePresence initial={false} mode="popLayout">
+          <FloatingNavTransitionContent key={surfaceState}>{content}</FloatingNavTransitionContent>
+        </AnimatePresence>
+      </m.div>
     </div>
   );
 }
+
+const FloatingNavTransitionContent = forwardRef<HTMLDivElement, { children: ReactNode }>(
+  function FloatingNavTransitionContent({ children }, ref) {
+    const isPresent = useIsPresent();
+    return (
+      <m.div
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        aria-hidden={isPresent ? undefined : true}
+        className="calendar-floating-nav__transition-content"
+        exit={{ opacity: 0, scale: 0.985, y: -4 }}
+        initial={{ opacity: 0, scale: 0.975, y: 6 }}
+        inert={isPresent ? undefined : true}
+        layout="position"
+        ref={ref}
+        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+      >
+        {children}
+      </m.div>
+    );
+  },
+);
 
 function DateJumpCard({
   anchor,

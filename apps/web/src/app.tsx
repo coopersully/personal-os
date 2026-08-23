@@ -456,6 +456,10 @@ function workspaceForPath(pathname: string): WorkspaceDefinition | undefined {
   return workspaceForLocation(pathname);
 }
 
+function normalizeShellPathname(pathname: string): string {
+  return pathname.replace(/\/+$/, "") || "/";
+}
+
 /** Today's registry label is its page title; navigation names it plainly. */
 function workspaceLabelForPath(pathname: string): string {
   const workspace = workspaceForLocation(pathname);
@@ -941,10 +945,11 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
   const [workspacePreview, setWorkspacePreview] = useState<WorkspacePreview | null>(null);
   const location = useLocation();
+  const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
   const activeWorkspace = workspaceForPath(location.pathname);
   const isCalendarWorkspace = activeWorkspace?.id === "calendar";
-  const isSpatialCalendar = location.pathname === "/calendar";
+  const isSpatialCalendar = shellPathname === "/calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
   const workspacePath = activeWorkspace?.path ?? null;
   const [routeTransition, setRouteTransition] = useState<{
@@ -996,7 +1001,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         : navigationOwner.workspace;
   const workspaceSettingsActions = useWorkspaceSettingsActions(sidebarMode === "settings");
   const activeSettingsSection = settingsSectionFromSearch(location.search);
-  const pageTitle = workspaceTitleForLocation(location.pathname, location.search);
+  const pageTitle = workspaceTitleForLocation(shellPathname, location.search);
   const activeFinanceSection = financeSectionFromPath(location.pathname);
   const currentFinanceMonth = new Date().toISOString().slice(0, 7);
   const financeOverview = useQuery({
@@ -1147,7 +1152,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               workspaceSettingsActions,
             )}
             onLogout={mobileDockLogout}
-            pathname={location.pathname}
+            pathname={shellPathname}
             workspaceDefinitions={workspaceDefinitions}
           />
         ) : null}
@@ -1174,7 +1179,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             }
             onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
             pageTitle={pageTitle}
-            pathname={location.pathname}
+            pathname={shellPathname}
             pinned={pinned}
             setEditor={setEditor}
             todayBrief={todayBrief.data}

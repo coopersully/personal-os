@@ -3448,6 +3448,28 @@ describe("ilo web app", () => {
     schedule.unmount();
   });
 
+  it("keeps Calendar chrome stable across trailing-slash routes", async () => {
+    const review = setup("/calendar/review/");
+
+    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Calendar review", { selector: ".workspace-app-bar__title" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Calendar actions" })).not.toBeInTheDocument();
+    review.unmount();
+
+    const schedule = setup("/calendar/");
+    expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("heading", {
+        name: "July 12–18, 2026",
+      }),
+    ).toBeInTheDocument();
+    schedule.unmount();
+  });
+
   it("keeps the calendar stable if its current-day marker is temporarily absent", async () => {
     const browser = userEvent.setup();
     const view = setup("/calendar?view=week");

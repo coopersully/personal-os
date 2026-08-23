@@ -1,8 +1,8 @@
 # Mac Mini Self-Hosting and AWS Cutover Design
 
 **Status:** Hardened proposal for implementation; three adversarial review cycles incorporated
-**Date:** 2026-08-23  
-**Owner:** Cooper  
+**Date:** 2026-08-23
+**Owner:** Cooper
 **Repository:** `coopersully/personal-os`
 
 ## Summary
@@ -194,7 +194,7 @@ State, logs, secrets, controller versions, and metadata live outside the checkou
 
 Cloudflare hostname records, Tunnel and ingress configuration, exact edge certificates, HTTPS/HSTS settings, WAF, and rate-limit rules move into one authoritative reviewed Cloudflare IaC root before cutover. Remove existing record addresses from AWS state without deleting live records, import all pre-existing Cloudflare resources, and prove neither the old plan nor AWS destruction can modify production edge behavior. Its locked, versioned state backend and state-recovery credentials are independent of the AWS account being retired. All production edge changes use reviewed IaC; dashboard drift is alerted and corrected through the same root.
 
-`docs/deployment/mac-mini.md` documents bootstrap, escrow, state/quarantine, monitoring, restore, attended reboot, rollback, time-limited AWS return, post-retirement alternate-host recovery, SSM, Cloudflare, state ownership, and AWS removal. Commands are labeled development Mac, AWS, or Mac Mini.
+`docs/runbooks/mac-mini.md` indexes bootstrap, escrow, state/quarantine, monitoring, restore, attended reboot, rollback, time-limited AWS return, post-retirement alternate-host recovery, SSM, Cloudflare, state ownership, and AWS removal. Commands are labeled development Mac, AWS, or Mac Mini.
 
 ## Steady-state deployment flow
 

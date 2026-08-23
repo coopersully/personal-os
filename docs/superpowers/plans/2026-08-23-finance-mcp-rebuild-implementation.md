@@ -82,7 +82,7 @@ The implementation introduces focused modules while preserving existing public b
 - Create: packages/domain/src/finance.test.ts
 
 **Interfaces:**
-- Produces: FinanceToolResult<T>, FinanceMutationMeta, FinanceProfileVersion, FinanceBudgetVersion, FinanceReviewCase, FinanceSetupInput, FinanceMaintenanceInput, FinanceMaintenancePayload, financeCapabilityManifest.
+- Produces: FinanceToolResult<T>, FinanceMutationMeta, FinanceProfileVersion, FinanceBudgetVersion, FinanceInboxCase, FinanceSetupInput, FinanceMaintenanceInput, FinanceMaintenancePayload, financeCapabilityManifest. The existing legacy FinanceReviewCase export remains available until API callers migrate.
 - FinanceToolResult<T> always carries outcome, communication, changes, remainingWork, optional nextAction, optional diagnostics, and data.
 - financeCapabilityManifest maps every domain capability to exactly one API operation and one MCP tool.
 
@@ -93,7 +93,7 @@ import {
   financeBudgetVersionSchema,
   financeCapabilityManifest,
   financeMaintenanceInputSchema,
-  financeReviewCaseSchema,
+  financeInboxCaseSchema,
   financeToolResultSchema,
 } from "./finance.js";
 
@@ -123,7 +123,7 @@ it("defines balanced plan, review identity, protocol, and parity contracts", () 
     }),
   ).toThrow();
   expect(
-    financeReviewCaseSchema.parse({
+    financeInboxCaseSchema.parse({
       id: crypto.randomUUID(),
       economicEventId: crypto.randomUUID(),
       stableKey: "event:merchant_identity",

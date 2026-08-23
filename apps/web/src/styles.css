@@ -2355,14 +2355,18 @@ p {
 }
 .calendar-event-composer__time {
   align-items: center;
-  display: grid;
+  display: flex;
   gap: 0.75rem;
-  grid-template-columns: minmax(0, 1fr) 1rem minmax(0, 1fr);
+}
+.calendar-event-composer__time > [data-layout="schedule-control"] {
+  flex: 0 1 auto;
+  width: auto;
 }
 .calendar-event-composer__duration-line {
   background: color-mix(in srgb, var(--calendar-color) 58%, var(--border));
+  flex: 1 1 2rem;
   height: 1px;
-  width: 100%;
+  min-width: 1rem;
 }
 .calendar-event-composer__calendar-trigger i,
 .calendar-event-composer__calendar-option i {
@@ -2412,18 +2416,18 @@ p {
   min-width: 0;
 }
 .calendar-event-composer__date-trigger {
-  flex: 1;
+  flex: 0 1 auto;
   justify-content: flex-start;
   min-width: 0;
 }
 .calendar-event-composer__date-trigger strong {
-  margin-left: auto;
+  margin-left: 0.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .calendar-event-composer__time-trigger {
-  flex: 0 0 7.25rem;
-  justify-content: center;
+  flex: 0 0 auto;
+  justify-content: flex-start;
   min-width: 0;
 }
 .calendar-event-composer__time-popover {
@@ -4861,11 +4865,20 @@ p {
     width: 1.75rem;
   }
   .calendar-event-composer__time {
-    grid-template-columns: 1fr;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .calendar-event-composer__time > [data-layout="schedule-control"],
+  .calendar-event-composer__date-time-control {
+    width: 100%;
+  }
+  .calendar-event-composer__date-trigger {
+    flex: 1;
   }
   .calendar-event-composer__duration-line {
+    align-self: center;
+    flex: none;
     height: 0.75rem;
-    justify-self: center;
     width: 1px;
   }
   .calendar-floating-nav {

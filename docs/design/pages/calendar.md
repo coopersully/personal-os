@@ -40,6 +40,9 @@ event without losing the shape of the day.
   focuses immediately, searches a bounded event range plus dates, and supports
   direct relative-date phrases such as `last Christmas`. Creation exposes the
   standard event fields without launching a second surface.
+- In event creation, start and end controls size to their content and stay
+  start-aligned; the duration rule absorbs the remaining inline space. At
+  compact widths, the pair stacks without changing its time semantics.
 - Conferencing follows the selected calendar's real capabilities. Writable Google calendars can
   request a unique Google Meet conference from Google; every calendar can attach an existing Zoom,
   Teams, Webex, or other meeting URL. Provider-generated options are never shown as available when

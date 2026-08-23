@@ -72,3 +72,11 @@ it("opens the time picker centered on its selected time", async () => {
   expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
   vi.useRealTimers();
 });
+
+it("lets the schedule controls size to content around a flexible duration line", () => {
+  const { container } = renderCalendar();
+  fireEvent.click(screen.getByRole("button", { name: "Create event" }));
+
+  expect(container.querySelectorAll('[data-layout="schedule-control"]')).toHaveLength(2);
+  expect(container.querySelector('[data-layout="duration-fill"]')).toBeInTheDocument();
+});

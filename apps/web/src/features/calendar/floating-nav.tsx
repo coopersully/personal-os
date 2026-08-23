@@ -486,7 +486,7 @@ function EventDateTimeControl({
     year: date.year === referenceYear ? undefined : "numeric",
   }).format(selected);
   return (
-    <Field>
+    <Field data-layout="schedule-control">
       <FieldLabel className="sr-only">{label} date and time</FieldLabel>
       <div className="calendar-event-composer__date-time-control">
         <Popover open={open} onOpenChange={setOpen}>
@@ -771,7 +771,11 @@ function InlineEventComposer({
                   time={startTime}
                   timeZone={timeZone}
                 />
-                <span aria-hidden="true" className="calendar-event-composer__duration-line" />
+                <span
+                  aria-hidden="true"
+                  className="calendar-event-composer__duration-line"
+                  data-layout="duration-fill"
+                />
                 <EventDateTimeControl
                   allDay={allDay}
                   date={endDate}

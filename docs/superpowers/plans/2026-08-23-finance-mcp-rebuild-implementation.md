@@ -340,11 +340,10 @@ git commit -m "feat(finance): add versioned planning persistence"
 - Modify: packages/database/src/schema.ts
 - Create: packages/database/migrations/0038_finance_ledger_protocol.sql
 - Modify: packages/database/migrations/meta/_journal.json
-- Create: packages/database/migrations/meta/0038_snapshot.json
-- Modify: packages/database/src/client.test.ts
+- Modify: packages/database/src/finance-schema.integration.test.ts
 
 **Interfaces:**
-- Produces Drizzle tables: financeEconomicEvents, financeEventTransactions, financeTransactionRevisions, financeTransactionRelationships, financeMaintenanceRuns, financeMaintenanceJudgments, financeAuditFindings, financeMutationRecords.
+- Produces Drizzle tables: financeEconomicEvents, financeEventTransactions, financeTransactionRevisions, financeTransactionRelationships, financeMaintenanceRuns, financeMaintenanceJudgments, financeAuditFindings, financeMutationRecords, financeAccountConnections.
 - Extends financeReviewCases with stableKey, reasonCode, economicEventId, evidence, proposedResolution, impactAmount, firstSeenAt, lastSeenAt, reopenedFromId, resolution, and resolution provenance.
 - Exactly one active review exists per user and stable key.
 
@@ -384,7 +383,7 @@ it("deduplicates active reviews while retaining resolved lineage", async () => {
 
 - [ ] **Step 2: Run the database test and confirm missing storage fails**
 
-Run: pnpm vitest run packages/database/src/client.test.ts
+Run: pnpm vitest run packages/database/src/finance-schema.integration.test.ts
 
 Expected: FAIL because economic-event and protocol tables are absent.
 
@@ -408,14 +407,14 @@ Edit the branch-local generated SQL into an expand/backfill/constrain sequence: 
 
 - [ ] **Step 4: Run fresh migration tests and inspect SQL**
 
-Run: pnpm vitest run packages/database/src/client.test.ts && pnpm --filter @personal-os/database typecheck
+Run: pnpm vitest run packages/database/src/finance-schema.integration.test.ts && pnpm --filter @personal-os/database typecheck
 
 Expected: PASS. Confirm foreign keys are created after referenced tables and no unbounded UPDATE scans transaction history.
 
 - [ ] **Step 5: Commit the ledger protocol persistence**
 
 ~~~bash
-git add packages/database/src/schema.ts packages/database/src/client.test.ts packages/database/migrations
+git add packages/database/src/schema.ts packages/database/src/finance-schema.integration.test.ts packages/database/migrations
 git commit -m "feat(finance): persist ledger protocol and review lineage"
 ~~~
 

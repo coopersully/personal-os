@@ -4,13 +4,25 @@ import { eq } from "drizzle-orm";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeAccountConnections,
+  financeAccounts,
   financeAgentSettings,
+  financeAuditFindings,
   financeBudgetAllocations,
   financeBudgetPlans,
   financeBudgetVersions,
+  financeEconomicEvents,
+  financeEventTransactions,
   financeGoals,
+  financeMaintenanceJudgments,
+  financeMaintenanceRuns,
+  financeMutationRecords,
   financeProfileVersions,
+  financeReviewCases,
   financeSetupSessions,
+  financeTransactionRelationships,
+  financeTransactionRevisions,
+  financeTransactions,
   migrateDatabase,
   users,
 } from "./index.js";
@@ -175,5 +187,140 @@ describe.sequential("canonical finance persistence", () => {
         expect.objectContaining({ allocationKey: "reserve", amount: 150_000 }),
       ]),
     );
+  });
+
+  it("deduplicates active reviews while retaining ledger and resolved lineage", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ institution: "Fixture bank", name: "Checking", provider: "manual", userId })
+      .returning();
+    if (!account) throw new Error("Account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 42_00,
+        direction: "expense",
+        merchant: "Fixture merchant",
+        transactionDate: "2026-08-22",
+        userId,
+      })
+      .returning();
+    if (!transaction) throw new Error("Transaction was not created.");
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({ kind: "purchase", stableKey: "fixture:event-1", userId })
+      .returning();
+    if (!event) throw new Error("Economic event was not created.");
+
+    await database.db.insert(financeEventTransactions).values({
+      economicEventId: event.id,
+      transactionId: transaction.id,
+      userId,
+    });
+    await database.db.insert(financeTransactionRevisions).values({
+      changes: { category: { after: "Dining", before: null } },
+      provenance: { actorId: "agent-1", actorType: "agent", source: "agent_reasoning" },
+      transactionId: transaction.id,
+      userId,
+      version: 1,
+    });
+    await database.db.insert(financeTransactionRelationships).values({
+      economicEventId: event.id,
+      provenance: { actorId: "agent-1", actorType: "agent", source: "agent_reasoning" },
+      rationale: "Fixture relationship",
+      relationship: "reimbursement",
+      transactionIds: [transaction.id, transaction.id],
+      userId,
+    });
+
+    const [review] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        economicEventId: event.id,
+        evidence: { amountCents: transaction.amount },
+        reason: "possible_duplicate",
+        reasonCode: "possible_duplicate",
+        stableKey: "fixture:event-1:possible_duplicate",
+        transactionId: transaction.id,
+        userId,
+      })
+      .returning();
+    if (!review) throw new Error("Review was not created.");
+    await expect(
+      database.db.insert(financeReviewCases).values({
+        economicEventId: event.id,
+        reason: "possible_duplicate",
+        reasonCode: "possible_duplicate",
+        stableKey: "fixture:event-1:possible_duplicate",
+        transactionId: transaction.id,
+        userId,
+      }),
+    ).rejects.toThrow();
+    await database.db
+      .update(financeReviewCases)
+      .set({ resolution: { type: "dismiss" }, resolvedAt: new Date(), status: "resolved" })
+      .where(eq(financeReviewCases.id, review.id));
+    await expect(
+      database.db.insert(financeReviewCases).values({
+        economicEventId: event.id,
+        reason: "possible_duplicate",
+        reasonCode: "possible_duplicate",
+        reopenedFromId: review.id,
+        stableKey: "fixture:event-1:possible_duplicate",
+        transactionId: transaction.id,
+        userId,
+      }),
+    ).resolves.toBeDefined();
+
+    const [run] = await database.db
+      .insert(financeMaintenanceRuns)
+      .values({ scope: { type: "all_outstanding" }, stage: "agent_reasoning", userId })
+      .returning();
+    if (!run) throw new Error("Maintenance run was not created.");
+    await database.db.insert(financeMaintenanceJudgments).values({
+      judgmentKey: "classify:fixture",
+      payload: { transactionId: transaction.id, type: "classify_transaction" },
+      runId: run.id,
+      type: "classify_transaction",
+      userId,
+    });
+    await database.db.insert(financeAuditFindings).values({
+      economicEventId: event.id,
+      evidence: { amountCents: transaction.amount },
+      impactAmount: transaction.amount,
+      rationale: "Larger than usual.",
+      reasonCode: "unusual_amount",
+      runId: run.id,
+      stableKey: "fixture:event-1:unusual_amount",
+      userId,
+    });
+    await database.db.insert(financeAccountConnections).values({
+      accountIds: [account.id],
+      provider: "manual",
+      status: "connected",
+      userId,
+    });
+
+    await database.db.insert(financeMutationRecords).values({
+      actorId: "agent-1",
+      actorType: "agent",
+      idempotencyKey: "fixture-mutation",
+      operation: "classify_finance_transactions",
+      requestHash: "sha256:fixture",
+      response: { transactionId: transaction.id },
+      status: "completed",
+      userId,
+    });
+    await expect(
+      database.db.insert(financeMutationRecords).values({
+        actorType: "agent",
+        idempotencyKey: "fixture-mutation",
+        operation: "different_operation",
+        requestHash: "sha256:different",
+        status: "started",
+        userId,
+      }),
+    ).rejects.toThrow();
   });
 });

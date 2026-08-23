@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import {
   calendarAccounts,
+  calendarFindings,
+  calendarReviews,
   connectorSubscriptions,
   connectorSyncTriggers,
   domainProfileApprovals,
@@ -12,6 +14,40 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps Calendar findings stable and reviews immutable", async () => {
+    const findings = getTableConfig(calendarFindings);
+    const reviews = getTableConfig(calendarReviews);
+    expect(findings.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "calendar_findings_identity_idx",
+        "calendar_findings_user_status_idx",
+      ]),
+    );
+    expect(findings.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "calendar_findings_fingerprint_check",
+        "calendar_findings_status_check",
+        "calendar_findings_resolution_check",
+      ]),
+    );
+    expect(reviews.indexes.map((index) => index.config.name)).toContain(
+      "calendar_reviews_user_created_idx",
+    );
+    expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0055_calendar_stewardship_foundations.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "calendar_findings"');
+    expect(migrationSql).toContain('CREATE TABLE "calendar_reviews"');
+    expect(migrationSql).toContain("^[0-9a-f]{64}$");
+    expect(migrationSql).toContain('CREATE UNIQUE INDEX "calendar_findings_identity_idx"');
+    expect(migrationSql).not.toContain('ALTER TABLE "calendar_events"');
+  });
+
   it("keeps connector notification storage bounded and coalesced", async () => {
     const subscriptions = getTableConfig(connectorSubscriptions);
     const triggers = getTableConfig(connectorSyncTriggers);

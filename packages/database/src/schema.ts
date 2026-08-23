@@ -13,7 +13,17 @@ import type {
   AttentionItemImportance,
   AttentionItemKind,
   AttentionItemStatus,
+  CalendarFinding,
+  CalendarFindingEvidence,
+  CalendarFindingKind,
+  CalendarFindingSeverity,
+  CalendarFindingStatus,
+  CalendarHealthAssessment,
+  CalendarMaintenanceScope,
   CalendarProvider,
+  CalendarRecommendation,
+  CalendarReviewState,
+  CalendarSourceFreshness,
   ConnectorFailureCategory,
   ConnectorSubscriptionKind,
   ConnectorSubscriptionStatus,
@@ -1242,6 +1252,80 @@ export const calendarEvents = pgTable(
       .on(table.blockSourceEventId, table.calendarId)
       .where(sql`${table.deletedAt} is null`),
     uniqueIndex("calendar_events_remote_idx").on(table.calendarId, table.remoteEventId),
+  ],
+);
+
+export const calendarFindings = pgTable(
+  "calendar_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    kind: text("kind").$type<CalendarFindingKind>().notNull(),
+    severity: text("severity").$type<CalendarFindingSeverity>().notNull(),
+    status: text("status").$type<CalendarFindingStatus>().notNull().default("open"),
+    summary: text("summary").notNull(),
+    evidence: jsonb("evidence").$type<CalendarFindingEvidence>().notNull(),
+    sourceReferences: jsonb("source_references")
+      .$type<MaterialSourceReference[]>()
+      .notNull()
+      .default([]),
+    evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
+    playbookVersion: text("playbook_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("calendar_findings_identity_idx").on(table.userId, table.fingerprint),
+    index("calendar_findings_user_status_idx").on(table.userId, table.status, table.lastObservedAt),
+    check("calendar_findings_fingerprint_check", sql`${table.fingerprint} ~ '^[0-9a-f]{64}$'`),
+    check("calendar_findings_status_check", sql`${table.status} IN ('open', 'resolved')`),
+    check(
+      "calendar_findings_resolution_check",
+      sql`(${table.status} = 'resolved') = (${table.resolvedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const calendarReviews = pgTable(
+  "calendar_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: text("state").$type<CalendarReviewState>().notNull(),
+    scope: jsonb("scope").$type<CalendarMaintenanceScope>().notNull(),
+    scopeStart: timestamp("scope_start", { withTimezone: true }).notNull(),
+    scopeEnd: timestamp("scope_end", { withTimezone: true }).notNull(),
+    evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
+    nextMaintenanceAt: timestamp("next_maintenance_at", { withTimezone: true }).notNull(),
+    playbookVersion: text("playbook_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    profileVersion: integer("profile_version"),
+    ledgerFingerprint: text("ledger_fingerprint").notNull(),
+    sourceFreshness: jsonb("source_freshness").$type<CalendarSourceFreshness[]>().notNull(),
+    health: jsonb("health").$type<CalendarHealthAssessment[]>().notNull(),
+    findingSnapshots: jsonb("finding_snapshots").$type<CalendarFinding[]>().notNull(),
+    recommendations: jsonb("recommendations").$type<CalendarRecommendation[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("calendar_reviews_user_created_idx").on(table.userId, table.createdAt),
+    check("calendar_reviews_fingerprint_check", sql`${table.ledgerFingerprint} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "calendar_reviews_state_check",
+      sql`${table.state} IN ('maintained', 'maintained_with_questions', 'blocked')`,
+    ),
+    check(
+      "calendar_reviews_scope_check",
+      sql`${table.scopeStart} <= ${table.evidenceCutoff} AND ${table.evidenceCutoff} <= ${table.scopeEnd}`,
+    ),
   ],
 );
 

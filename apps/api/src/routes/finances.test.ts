@@ -325,6 +325,11 @@ describe("finance routes", () => {
       id,
       expect.objectContaining({ pending: false }),
     );
+    expect((await app.request("/v1/finances/transactions")).status).toBe(200);
+    expect(finances.listTransactions).toHaveBeenLastCalledWith(
+      id,
+      expect.objectContaining({ limit: 50 }),
+    );
     expect((await app.request("/v1/finances/categorizations/propose")).status).toBe(200);
     expect(finances.proposeCategorizations).toHaveBeenLastCalledWith(
       id,
@@ -451,5 +456,50 @@ describe("finance routes", () => {
         .status,
     ).toBe(400);
     expect(approve).not.toHaveBeenCalled();
+    const approved = await app.request(`/v1/finances/action-reviews/${id}/approve`, {
+      method: "POST",
+    });
+    expect(approved.status).toBe(200);
+    expect(approve).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ requestId: "question-list" }),
+    );
+  });
+
+  it("fails closed when a Finance mutation route has no action service", async () => {
+    const app = new Hono<AppEnv>();
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "missing-actions");
+      await next();
+    });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 500),
+    );
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request("/v1/finances/budgets", {
+      body: JSON.stringify({ category: "Housing", limit: 2_000, month: "2026-08" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("required"),
+    });
   });
 });

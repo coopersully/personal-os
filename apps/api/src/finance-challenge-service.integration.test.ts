@@ -358,4 +358,81 @@ describe.sequential("Finance ledger challenge", () => {
       ).resolves.toEqual([{ disposition: itemCase.disposition }]);
     }
   });
+
+  it("rejects findings outside the challenged packet and unsupported resolutions", async () => {
+    const cases = [
+      {
+        candidateItemId: crypto.randomUUID(),
+        evidence: "Foreign item.",
+        kind: "observation" as const,
+        rationale: "Foreign item.",
+        resolution: { type: "keep" as const },
+        severity: "info" as const,
+        sourceRefs: [],
+      },
+      {
+        candidateItemId: "OWNED_ITEM",
+        evidence: "Unsupported observation resolution.",
+        kind: "observation" as const,
+        rationale: "Unsupported resolution.",
+        resolution: {
+          choices: ["Yes"],
+          prompt: "Continue?",
+          type: "question" as const,
+          why: "Test.",
+        },
+        severity: "info" as const,
+        sourceRefs: [],
+      },
+    ];
+    for (const finding of cases) {
+      const setup = await fixture();
+      const prepared = await setup.challenge.prepare(setup.owner.id, setup.run.id, setup.ready.id);
+      await expect(
+        setup.challenge.submit(
+          {
+            candidateRevision: setup.ready.revision,
+            challengeId: prepared.id,
+            checked: [...financeLedgerChallengeChecks],
+            findings: [
+              {
+                ...finding,
+                candidateItemId:
+                  finding.candidateItemId === "OWNED_ITEM"
+                    ? setup.item.id
+                    : finding.candidateItemId,
+              },
+            ],
+            reviewedItemIds: [setup.item.id],
+            rubricVersion: "finance-ledger-challenge-v1",
+          },
+          setup.context,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    }
+
+    const staleRun = await fixture();
+    const prepared = await staleRun.challenge.prepare(
+      staleRun.owner.id,
+      staleRun.run.id,
+      staleRun.ready.id,
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ checkpoint: null })
+      .where(eq(workspaceMaintenanceRuns.id, staleRun.run.id));
+    await expect(
+      staleRun.challenge.submit(
+        {
+          candidateRevision: staleRun.ready.revision,
+          challengeId: prepared.id,
+          checked: [...financeLedgerChallengeChecks],
+          findings: [],
+          reviewedItemIds: [staleRun.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        staleRun.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
 });

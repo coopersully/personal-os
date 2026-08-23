@@ -135,6 +135,44 @@ it("makes empty and failed review work explicit", async () => {
   expect(await screen.findByText("Nothing needs review")).toBeInTheDocument();
 });
 
+it("uses plural evidence and singular non-maintenance review copy", async () => {
+  listFinanceQuestions.mockResolvedValue([
+    {
+      actionKind: "categorization",
+      choices: [{ label: "Dining", value: "dining" }],
+      expectedAnswer: [],
+      id,
+      prompt: "Choose a category",
+      sourceRefs: [
+        { id, type: "finance_transaction" },
+        { id: secondId, type: "finance_transaction" },
+      ],
+      why: "The merchant is ambiguous.",
+    },
+  ]);
+  listFinanceActionReviews.mockResolvedValue([
+    {
+      actionKind: "categorization",
+      assumptions: [],
+      changes: [{ entityId: id, entityType: "finance_transaction", summary: "Set Dining" }],
+      expectedRevision: null,
+      fingerprint: "sha256:single-review",
+      id: secondId,
+      rationale: "Confirmed by the user.",
+      requestedAt: now,
+      requestingAgentId: "connected-agent",
+      runId: null,
+      sourceRefs: [],
+      status: "pending",
+    },
+  ]);
+
+  renderWithQueryClient(<FinanceAgentReviewQueue />);
+  expect(await screen.findByText("Based on 2 ledger source records.")).toBeInTheDocument();
+  expect(screen.getByText("1 proposed change · prepared by connected-agent")).toBeInTheDocument();
+  expect(screen.getByText("Review Categorization")).toBeInTheDocument();
+});
+
 it("presents reimbursement states, amounts, and empty or failed results", async () => {
   listFinanceReimbursements.mockResolvedValue({
     reimbursements: [

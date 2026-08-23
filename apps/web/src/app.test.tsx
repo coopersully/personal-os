@@ -1422,6 +1422,50 @@ describe("ilo web app", () => {
     }
   });
 
+  it("chooses weather presentation for morning, daytime, and evening observations", async () => {
+    mocks.getMe.mockResolvedValue({
+      ...user,
+      homeLocation: {
+        coordinates: { latitude: 40.7, longitude: -74 },
+        label: "New York, New York, United States",
+        timezone: "America/New_York",
+      },
+    });
+    for (const observedAt of [
+      "2026-08-15T12:00:00.000Z",
+      "2026-08-15T16:00:00.000Z",
+      "2026-08-15T23:00:00.000Z",
+    ]) {
+      mocks.getWeather.mockResolvedValueOnce({
+        alerts: [],
+        condition: "Clear",
+        location: {
+          city: "New York",
+          coordinates: { latitude: 40.7, longitude: -74 },
+          country: "United States",
+          label: "New York, New York, United States",
+          mapUrl: "https://www.openstreetmap.org/",
+          region: "New York",
+          shortLabel: "NYC",
+          source: "home",
+        },
+        observedAt,
+        temperatureF: 68,
+        usAqi: null,
+      });
+      const view = setup("/today");
+      await screen.findByRole("button", { name: "Clear, 68°F" });
+      view.unmount();
+    }
+  });
+
+  it("keeps responsive workspaces usable without matchMedia", async () => {
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: undefined });
+    const view = setup("/calendar");
+    expect(await screen.findByRole("heading", { name: "Calendar" })).toBeInTheDocument();
+    view.unmount();
+  });
+
   it("states honestly why conditions are missing instead of inventing them", async () => {
     const getCurrentPosition = vi.fn((_success: PositionCallback, failure: PositionErrorCallback) =>
       failure({} as GeolocationPositionError),
@@ -2053,6 +2097,63 @@ describe("ilo web app", () => {
       password: "LocalTestOnly123!",
       token: "reset-token",
     });
+    passwordReset.unmount();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("keeps authentication validation and one-time-link failures recoverable", async () => {
+    const browser = userEvent.setup();
+
+    mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
+    mocks.validateInvitation.mockRejectedValueOnce(new Error("Invitation lookup failed"));
+    const registration = setup();
+    await browser.click(await screen.findByRole("button", { name: "I have an invite code" }));
+    const inviteCode = screen.getByLabelText("Invite code");
+    await browser.type(inviteCode, "SHORT");
+    fireEvent.blur(inviteCode);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter all eight characters");
+    await browser.clear(inviteCode);
+    await browser.type(inviteCode, "ABCD2345");
+    fireEvent.blur(inviteCode);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invitation lookup failed");
+    const registrationForm = inviteCode.closest("form");
+    if (!registrationForm) throw new Error("Registration form was not rendered.");
+    fireEvent.submit(registrationForm);
+    expect(mocks.register).not.toHaveBeenCalled();
+    registration.unmount();
+
+    window.history.replaceState({}, "", "/?verifyEmail=authenticated-token");
+    mocks.getMe.mockResolvedValueOnce(user);
+    let rejectVerification: ((error: Error) => void) | undefined;
+    mocks.confirmEmailVerification.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectVerification = reject;
+        }),
+    );
+    const verification = setup("/?verifyEmail=authenticated-token");
+    await browser.click(await screen.findByRole("button", { name: "Confirm email" }));
+    expect(screen.getByText("Confirming email")).toBeInTheDocument();
+    rejectVerification?.(new Error("Verification expired"));
+    expect(await screen.findByText("Verification expired")).toBeInTheDocument();
+    verification.unmount();
+
+    window.history.replaceState({}, "", "/?resetPassword=reset-token");
+    mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
+    let rejectReset: ((error: Error) => void) | undefined;
+    mocks.resetPassword.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectReset = reject;
+        }),
+    );
+    const passwordReset = setup();
+    await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "Reset password" }));
+    expect(screen.getByText("Resetting password")).toBeInTheDocument();
+    rejectReset?.(new Error("Reset expired"));
+    expect(await screen.findByText("Reset expired")).toBeInTheDocument();
     passwordReset.unmount();
     window.history.replaceState({}, "", "/");
   });
@@ -6009,6 +6110,45 @@ describe("ilo web app", () => {
     expect(writeText).toHaveBeenCalledWith("invite-code");
   });
 
+  it("keeps invitation and email-confirmation failures actionable", async () => {
+    const browser = userEvent.setup();
+    mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: true });
+    mocks.listInvitations.mockRejectedValueOnce(new Error("Invitations unavailable"));
+    const unavailable = setup("/settings?section=invitations");
+    expect(await screen.findByText("Invitations unavailable")).toBeInTheDocument();
+    unavailable.unmount();
+
+    mocks.listInvitations.mockResolvedValue([]);
+    let rejectCreate: ((error: Error) => void) | undefined;
+    mocks.createInvitation.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectCreate = reject;
+        }),
+    );
+    const createFailure = setup("/settings?section=invitations");
+    await browser.click(await screen.findByRole("button", { name: "Create invitation" }));
+    expect(screen.getByRole("button", { name: "Creating invitation…" })).toBeDisabled();
+    rejectCreate?.(new Error("Invitation creation failed"));
+    expect(await screen.findByText("Invitation creation failed")).toBeInTheDocument();
+    expect(mocks.createInvitation).toHaveBeenCalledWith({ expiresInDays: 14 });
+    createFailure.unmount();
+
+    mocks.getMe.mockResolvedValue({ ...user, emailVerified: false });
+    let rejectResend: ((error: Error) => void) | undefined;
+    mocks.resendEmailVerification.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectResend = reject;
+        }),
+    );
+    setup("/settings?section=profile");
+    await browser.click(await screen.findByRole("button", { name: "Resend confirmation" }));
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    rejectResend?.(new Error("Confirmation send failed"));
+    expect(await screen.findByText("Confirmation send failed")).toBeInTheDocument();
+  });
+
   it("connects and manages the selected X bookmark folder", async () => {
     mocks.isTauri.mockReturnValue(true);
     mocks.getXBookmarkAccount.mockResolvedValue({
@@ -6043,6 +6183,114 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.openUrl).toHaveBeenCalledWith("https://x.com/i/oauth2/authorize"),
     );
+  });
+
+  it("routes every settings section and enforces invitation visibility", async () => {
+    for (const section of [
+      "agents",
+      "automations",
+      "calendars",
+      "mail",
+      "tasks",
+      "workspace-access",
+    ]) {
+      const view = setup(`/settings?section=${section}`);
+      await screen.findByRole("complementary", { name: "Account utility navigation" });
+      view.unmount();
+    }
+
+    mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: false });
+    const invitations = setup("/settings?section=invitations");
+    await waitFor(() => expect(invitations.location.value).toBe("/settings?section=profile"));
+  });
+
+  it("keeps every X bookmark failure visible and recoverable", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    mocks.getXBookmarkAccount.mockResolvedValue({
+      displayName: null,
+      id,
+      lastSyncedAt: null,
+      selectedFolderId: "folder-1",
+      selectedFolderName: "Planning",
+      syncError: null,
+      syncStatus: "idle",
+      username: "cooper",
+    });
+    mocks.listXBookmarkFolders.mockResolvedValue([
+      { id, name: "Planning", remoteFolderId: "folder-1" },
+      { id: secondId, name: "Reading", remoteFolderId: "folder-2" },
+    ]);
+    mocks.selectXBookmarkFolder.mockRejectedValueOnce(new Error("Folder selection failed"));
+    mocks.syncXBookmarks.mockRejectedValueOnce(new Error("Bookmark sync failed"));
+    mocks.deleteXBookmarkAccount.mockRejectedValueOnce(new Error("Disconnect failed"));
+    const browser = userEvent.setup();
+    const connected = setup("/settings?section=connections");
+    await browser.selectOptions(await screen.findByLabelText("X bookmark folder"), "folder-2");
+    expect(await screen.findByText("Folder selection failed")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Sync X bookmarks for cooper" }));
+    expect(await screen.findByText("Bookmark sync failed")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Disconnect X bookmarks for cooper" }));
+    expect(await screen.findByText("Disconnect failed")).toBeInTheDocument();
+    connected.unmount();
+
+    mocks.getXBookmarkAccount.mockResolvedValue(null);
+    mocks.getXBookmarkAuthorizationUrl.mockRejectedValueOnce(new Error("X authorization failed"));
+    setup("/settings?section=connections");
+    await browser.click(await screen.findByRole("button", { name: "Connect" }));
+    await browser.click(screen.getByRole("menuitem", { name: "X bookmarks" }));
+    expect(await screen.findByText("X authorization failed")).toBeInTheDocument();
+  });
+
+  it("shows every X bookmark account health state", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    mocks.getXBookmarkAccount.mockResolvedValue({
+      displayName: "Cooper",
+      id,
+      lastSyncedAt: now,
+      selectedFolderId: null,
+      selectedFolderName: null,
+      syncError: "Access expired",
+      syncStatus: "error",
+      username: "cooper",
+    });
+    mocks.listXBookmarkFolders.mockResolvedValue([]);
+    const needsAttention = setup("/settings?section=connections");
+    expect(await screen.findByText("Cooper")).toBeInTheDocument();
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+    expect(screen.getByText(/X bookmarks need attention/)).toBeInTheDocument();
+    expect(screen.getByLabelText("X bookmark folder")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sync X bookmarks for cooper" })).toBeDisabled();
+    needsAttention.unmount();
+
+    mocks.getXBookmarkAccount.mockResolvedValue({
+      displayName: null,
+      id,
+      lastSyncedAt: now,
+      selectedFolderId: "folder-1",
+      selectedFolderName: "Planning",
+      syncError: null,
+      syncStatus: "syncing",
+      username: "cooper",
+    });
+    mocks.listXBookmarkFolders.mockResolvedValue([
+      { id, name: "Planning", remoteFolderId: "folder-1" },
+    ]);
+    let finishSync: (() => void) | undefined;
+    mocks.syncXBookmarks.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSync = resolve;
+        }),
+    );
+    const browser = userEvent.setup();
+    setup("/settings?section=connections");
+    expect(await screen.findByText("Syncing")).toBeInTheDocument();
+    expect(screen.getByText(/^Synced /)).toBeInTheDocument();
+    const syncButton = screen.getByRole("button", { name: "Sync X bookmarks for cooper" });
+    await browser.click(syncButton);
+    expect(syncButton).toBeDisabled();
+    expect(screen.getByLabelText("X bookmark folder")).toBeDisabled();
+    finishSync?.();
   });
 
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
@@ -6085,6 +6333,135 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Refresh now" })).toBeDisabled();
     finishSave?.();
     pendingSave.unmount();
+  });
+
+  it("keeps Pinterest settings, updates, and wallpaper application failures explicit", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    const settings = {
+      backgroundColor: "#ffffff",
+      backgroundMode: "white" as const,
+      boardUrl: "https://www.pinterest.com/example/board/",
+      cornerRadius: 0,
+      enabled: false,
+      frameSpacing: 16,
+      lastAppliedAt: null,
+      layout: "grid" as const,
+      mosaicFit: "preserve" as const,
+      paddingBottom: 16,
+      paddingEnd: 16,
+      paddingLinked: true,
+      paddingStart: 16,
+      paddingTop: 16,
+      rotationDegrees: 0,
+      tileSize: 64,
+    };
+    const browser = userEvent.setup();
+
+    mocks.getPinterestWallpaperSettings.mockRejectedValueOnce(new Error("Settings unavailable"));
+    const failedSettings = setup("/settings?section=wallpaper");
+    expect(await screen.findByText("Settings unavailable")).toBeInTheDocument();
+    failedSettings.unmount();
+
+    mocks.getPinterestWallpaperSettings.mockResolvedValue(settings);
+    mocks.updatePinterestWallpaperSettings.mockRejectedValueOnce(
+      new Error("Wallpaper save failed"),
+    );
+    const failedUpdate = setup("/settings?section=wallpaper");
+    const boardUrl = await screen.findByLabelText("Public board URL");
+    fireEvent.change(boardUrl, { target: { value: "   " } });
+    fireEvent.blur(boardUrl);
+    expect(await screen.findByText("Wallpaper save failed")).toBeInTheDocument();
+    failedUpdate.unmount();
+
+    let finishPins:
+      | ((pins: Array<{ id: string; imageUrl: string; title: null }>) => void)
+      | undefined;
+    mocks.listPinterestPins.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPins = resolve;
+        }),
+    );
+    const tooFewPins = setup("/settings?section=wallpaper");
+    await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
+    expect(screen.getByRole("button", { name: "Refreshing" })).toBeDisabled();
+    finishPins?.([
+      { id: "pin-1", imageUrl: "https://example.com/1.jpg", title: null },
+      { id: "pin-2", imageUrl: "https://example.com/2.jpg", title: null },
+      { id: "pin-3", imageUrl: "https://example.com/3.jpg", title: null },
+    ]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh now" })).toBeEnabled());
+    tooFewPins.unmount();
+
+    mocks.getPinterestWallpaperSettings.mockResolvedValue({
+      ...settings,
+      boardUrl: "https://www.pinterest.com/",
+    });
+    mocks.listPinterestPins.mockResolvedValue(
+      Array.from({ length: 4 }, (_, index) => ({
+        id: `pin-${index}`,
+        imageUrl: `https://example.com/${index}.jpg`,
+        title: null,
+      })),
+    );
+    mocks.invoke.mockImplementation((command: string) =>
+      command === "apply_pinterest_wallpaper"
+        ? Promise.reject("Desktop wallpaper failed")
+        : {
+            hasNotch: false,
+            platform: "macos",
+            safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
+            screen: { height: 900, width: 1440 },
+          },
+    );
+    const stringFailure = setup("/settings?section=wallpaper");
+    await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalled());
+    stringFailure.unmount();
+
+    mocks.invoke.mockImplementation((command: string) =>
+      command === "apply_pinterest_wallpaper"
+        ? Promise.reject(new Error("Desktop wallpaper failed"))
+        : {
+            hasNotch: false,
+            platform: "macos",
+            safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
+            screen: { height: 900, width: 1440 },
+          },
+    );
+    setup("/settings?section=wallpaper");
+    await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
+    expect(await screen.findByText("Could not apply the Pinterest wallpaper.")).toBeInTheDocument();
+  });
+
+  it("does not reapply today's scheduled Pinterest wallpaper", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    mocks.getPinterestWallpaperSettings.mockResolvedValue({
+      backgroundColor: "#ffffff",
+      backgroundMode: "white",
+      boardUrl: "https://www.pinterest.com/example/board/",
+      cornerRadius: 0,
+      enabled: true,
+      frameSpacing: 16,
+      lastAppliedAt: new Date().toISOString(),
+      layout: "grid",
+      mosaicFit: "preserve",
+      paddingBottom: 16,
+      paddingEnd: 16,
+      paddingLinked: true,
+      paddingStart: 16,
+      paddingTop: 16,
+      rotationDegrees: 0,
+      tileSize: 64,
+    });
+    setup("/settings?section=wallpaper");
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Public board URL")).toHaveValue(
+        "https://www.pinterest.com/example/board/",
+      ),
+    );
+    expect(mocks.invoke).not.toHaveBeenCalledWith("apply_pinterest_wallpaper", expect.anything());
   });
 
   it("previews, tunes, and applies a Pinterest desktop wallpaper", async () => {

@@ -242,4 +242,35 @@ describe("Finance scenarios", () => {
       }).assumptions,
     ).toHaveLength(25);
   });
+
+  it("surfaces shrinking cash, lower reserves, and debt without a payment plan", () => {
+    const baseline = {
+      assumptions: [],
+      budgetAllocations: [],
+      debtBalance: 1_000,
+      label: "Baseline",
+      monthlyDebtPayment: 0,
+      monthlyHousingCost: 1_500,
+      monthlyIncome: 1_000,
+      monthlyReserveContribution: 200,
+      startingCash: 2_000,
+    };
+    const result = compareFinanceScenarios({
+      alternatives: [{ ...baseline, label: "Lower reserve", monthlyReserveContribution: 50 }],
+      asOf: "2026-08-15",
+      baseline,
+      horizonMonths: 3,
+    });
+
+    expect(result.baseline.projectedLowestBalance).toBe(-100);
+    expect(result.missingInputs).toContain(
+      "Monthly debt payment is needed to estimate payoff timing.",
+    );
+    expect(result.alternatives[0]?.goalDateEffects).toContain(
+      "Reserve contribution is 150/month lower than Baseline.",
+    );
+    expect(result.sensitivityWarnings).toContain(
+      "A negative monthly cash flow reduces the projected balance every month.",
+    );
+  });
 });

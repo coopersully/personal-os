@@ -1225,9 +1225,12 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ status: "pending" }]);
 
     await database.db
-      .update(financeAutomationSettings)
-      .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
     await expect(service.performDirect("profile", input, context)).resolves.toMatchObject({
       result: { id: "profile-1" },
       status: "applied",
@@ -5055,6 +5058,268 @@ describe.sequential("finance action service", () => {
         .from(financeReimbursements)
         .where(eq(financeReimbursements.allocationId, activeReimbursableAllocation.id)),
     ).resolves.toHaveLength(1);
+  });
+
+  it("keeps stale and contradictory maintenance reimbursement evidence recoverable", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Reimbursement recovery bank",
+        name: "Reimbursement recovery checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: `Recovery dining ${crypto.randomUUID()}`,
+        slug: `recovery-dining-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Reimbursement recovery fixture failed.");
+    const makeExpense = async (amount: number, allocations: number[]) => {
+      const [transaction] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId: account.id,
+          amount,
+          category: category.name,
+          categoryId: category.id,
+          direction: "expense",
+          merchant: "Recovery dinner",
+          transactionDate: "2026-08-17",
+          userId,
+        })
+        .returning();
+      if (!transaction) throw new Error("Recovery expense was not created.");
+      const rows = await database.db
+        .insert(financeTransactionAllocations)
+        .values(
+          allocations.map((allocationAmount, allocationOrder) => ({
+            allocationOrder,
+            amount: allocationAmount,
+            categoryId: category.id,
+            transactionId: transaction.id,
+            treatment: "personal" as const,
+            userId,
+          })),
+        )
+        .returning();
+      return { allocations: rows, transaction };
+    };
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const answer = (questionId: string, value: Record<string, unknown>, requestId: string) =>
+      service.answerQuestion(questionId, JSON.stringify(value), {
+        principal: agent(userId, "maintenance-answerer"),
+        requestId,
+      });
+    const single = await makeExpense(10_000, [10_000]);
+    const [singleAllocation] = single.allocations;
+    if (!singleAllocation) throw new Error("Single-allocation expense fixture failed.");
+    const store = (candidate: Record<string, unknown>, source?: MaterialSourceReference) =>
+      storeReimbursementQuestion(database, {
+        accountId: account.id,
+        candidate,
+        ...(source ? { source } : {}),
+        transaction: single.transaction,
+        userId,
+      });
+
+    const incomplete = await store({ transactionId: single.transaction.id });
+    await expect(answer(incomplete.id, {}, "reimbursement-incomplete")).resolves.toMatchObject({
+      status: "needs_input",
+    });
+    const invalidTransaction = await store({});
+    await expect(
+      answer(invalidTransaction.id, { answer: { kind: "not_sure" } }, "reimbursement-no-id"),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const missingCase = await store({
+      reimbursementIds: [crypto.randomUUID()],
+      transactionId: single.transaction.id,
+    });
+    await expect(
+      answer(missingCase.id, { answer: { kind: "not_sure" } }, "reimbursement-missing-case"),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const missingTransaction = await store({ transactionId: crypto.randomUUID() });
+    await expect(
+      answer(
+        missingTransaction.id,
+        { answer: { kind: "not_sure" } },
+        "reimbursement-missing-transaction",
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const staleSource = await store(
+      { allocationIds: [singleAllocation.id], transactionId: single.transaction.id },
+      {
+        accountId: account.id,
+        provider: "local",
+        remoteId: single.transaction.id,
+        revision: "stale-revision",
+        sourceType: "finance_transaction",
+      },
+    );
+    await expect(
+      answer(staleSource.id, { answer: { kind: "not_sure" } }, "reimbursement-stale-source"),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const wrongExpenseAnswer = await store({
+      allocationIds: [singleAllocation.id],
+      transactionId: single.transaction.id,
+    });
+    await expect(
+      answer(
+        wrongExpenseAnswer.id,
+        { answer: { kind: "not_reimbursement", rationale: "This is income." } },
+        "reimbursement-wrong-expense-answer",
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const changedAllocation = await store({
+      allocationIds: [crypto.randomUUID()],
+      transactionId: single.transaction.id,
+    });
+    await expect(
+      answer(
+        changedAllocation.id,
+        { answer: { kind: "entirely_personal", rationale: "Personal." } },
+        "reimbursement-changed-allocation",
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+
+    const split = await makeExpense(10_000, [4_000, 6_000]);
+    const splitQuestion = await storeReimbursementQuestion(database, {
+      accountId: account.id,
+      candidate: {
+        allocationIds: split.allocations.map((item) => item.id),
+        transactionId: split.transaction.id,
+      },
+      transaction: split.transaction,
+      userId,
+    });
+    await expect(
+      answer(
+        splitQuestion.id,
+        { answer: { kind: "entirely_personal", rationale: "Personal." } },
+        "reimbursement-split-allocation",
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const excessive = await store({
+      allocationIds: [singleAllocation.id],
+      transactionId: single.transaction.id,
+    });
+    await expect(
+      answer(
+        excessive.id,
+        {
+          answer: {
+            amount: 101,
+            dueDate: null,
+            kind: "reimbursable",
+            payer: "Alex",
+            rationale: "Too much.",
+          },
+        },
+        "reimbursement-excessive",
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const unsupported = await store({ transactionId: single.transaction.id });
+    await expect(
+      answer(unsupported.id, { answer: { kind: "not_sure" } }, "reimbursement-unsupported"),
+    ).resolves.toMatchObject({ status: "needs_input" });
+
+    await database.db
+      .update(financeTransactionAllocations)
+      .set({ treatment: "reimbursable" })
+      .where(eq(financeTransactionAllocations.id, singleAllocation.id));
+    const [reimbursement] = await database.db
+      .insert(financeReimbursements)
+      .values({
+        allocationId: singleAllocation.id,
+        evidence: { sourceRefs: [], summary: "Dinner receipt" },
+        expectedAmount: 10_000,
+        payer: "Alex",
+        rationale: "Alex owes dinner money.",
+        userId,
+      })
+      .returning();
+    const [credit] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 10_000,
+        direction: "income",
+        merchant: "Alex repayment",
+        transactionDate: "2026-08-18",
+        userId,
+      })
+      .returning();
+    if (!reimbursement || !credit) throw new Error("Direct reconciliation fixture failed.");
+    const directEvidence = {
+      sourceRefs: [
+        {
+          accountId: account.id,
+          provider: "local" as const,
+          remoteId: credit.id,
+          revision: credit.updatedAt.toISOString(),
+          sourceType: "finance_transaction" as const,
+        },
+      ],
+      summary: "Posted repayment credit.",
+    };
+    const matched = await service.performDirect(
+      "reimbursement",
+      {
+        amount: 50,
+        creditTransactionId: credit.id,
+        evidence: directEvidence,
+        expectedRevision: reimbursement.revision,
+        operation: "match_credit",
+        rationale: "Match half of the repayment.",
+        reimbursementId: reimbursement.id,
+      },
+      { principal: agent(userId), requestId: "direct-reimbursement-match" },
+    );
+    expect(matched).toMatchObject({ status: "applied" });
+    if (matched.status !== "applied" || typeof matched.result !== "object" || !matched.result)
+      throw new Error("Expected a direct reimbursement match.");
+    const revision = (matched.result as { revision: number }).revision;
+    await expect(
+      service.performDirect(
+        "reimbursement",
+        {
+          evidence: {
+            sourceRefs: [
+              {
+                accountId: account.id,
+                provider: "local",
+                remoteId: single.transaction.id,
+                revision: single.transaction.updatedAt.toISOString(),
+                sourceType: "finance_transaction",
+              },
+            ],
+            summary: "Cancel remaining balance.",
+          },
+          expectedRevision: revision,
+          operation: "cancel",
+          rationale: "The remaining balance was forgiven.",
+          reimbursementId: reimbursement.id,
+        },
+        { principal: agent(userId), requestId: "direct-reimbursement-cancel" },
+      ),
+    ).resolves.toMatchObject({ result: { status: "cancelled" }, status: "applied" });
   });
 
   it("keeps uncertain answers recoverable, records personal evidence, and queues bypass-off answers", async () => {

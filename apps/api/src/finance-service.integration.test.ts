@@ -9339,4 +9339,174 @@ describe.sequential("finance service", () => {
     expect(outcomes).toHaveLength(failures.length);
     expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(true);
   });
+
+  it("summarizes every account kind and preserves explicit no-op cashflow decisions", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance summary branches",
+        email: `finance-summary-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Finance summary owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "finance-summary" };
+    const accounts = await Promise.all([
+      service.createAccount(
+        { balance: 1000, institution: "Bank", kind: "cash", name: "Cash", provider: "manual" },
+        context,
+      ),
+      service.createAccount(
+        { balance: -250, institution: "Bank", kind: "debt", name: "Card", provider: "manual" },
+        context,
+      ),
+      service.createAccount(
+        {
+          balance: 500,
+          institution: "Broker",
+          kind: "investment",
+          name: "Fund",
+          provider: "manual",
+        },
+        context,
+      ),
+      service.createAccount(
+        { balance: 75, institution: "Home", kind: "other", name: "Asset", provider: "manual" },
+        context,
+      ),
+      service.createAccount(
+        { balance: null, institution: "Wallet", kind: "cash", name: "Unknown", provider: "manual" },
+        context,
+      ),
+    ]);
+    const [cashAccount] = accounts;
+    if (!cashAccount) throw new Error("Cash account fixture was not created.");
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      cash: 1000,
+      debt: 250,
+      incomeBasis: "none",
+      investments: 500,
+      netWorth: 1325,
+      otherAssets: 75,
+    });
+    await expect(service.listMerchants(owner.id, 1)).resolves.toEqual([]);
+    await service.createTransaction(
+      {
+        accountId: cashAccount.id,
+        amount: 1000,
+        category: "INCOME",
+        categoryConfidence: 1,
+        date: "2026-07-18",
+        direction: "income",
+        merchant: "One-time income",
+        notes: null,
+      },
+      context,
+    );
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      incomeBasis: "observed",
+      observedAnnualIncome: 1000,
+    });
+    await service.updateProfile(
+      {
+        effectiveDate: "2026-07-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: 120000,
+        monthlyHousingCost: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      },
+      context,
+    );
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      annualIncome: 120000,
+      incomeBasis: "stated",
+      statedAnnualIncome: 120000,
+    });
+
+    const [stream] = await database.db
+      .insert(financeIncomeStreams)
+      .values({
+        amountTolerance: 0,
+        cadence: "monthly",
+        confidence: 9000,
+        displayName: "Summary income",
+        expectedAmount: 100_000,
+        payer: "Employer",
+        source: "inferred",
+        status: "active",
+        userId: owner.id,
+      })
+      .returning();
+    if (!stream) throw new Error("Summary income fixture failed.");
+    const [obligation] = await database.db
+      .insert(financeRecurringObligations)
+      .values({
+        amountTolerance: 0,
+        cadence: "monthly",
+        confidence: 9000,
+        displayName: "Summary bill",
+        expectedAmount: 10_000,
+        kind: "bill",
+        merchant: "Utility",
+        source: "inferred",
+        status: "active",
+        userId: owner.id,
+      })
+      .returning();
+    if (!obligation) throw new Error("Summary obligation fixture failed.");
+    const [alert] = await database.db
+      .insert(financeAlerts)
+      .values({
+        body: "Review this summary alert.",
+        evidence: {},
+        severity: "info",
+        title: "Summary alert",
+        incomeStreamId: stream.id,
+        type: "income_changed",
+        userId: owner.id,
+      })
+      .returning();
+    if (!alert) throw new Error("Summary alert fixture failed.");
+    await expect(
+      service.updateIncomeStream(stream.id, { status: "active" }, context),
+    ).resolves.toMatchObject({ status: "active" });
+    await expect(
+      service.updateRecurringObligation(obligation.id, { status: "active" }, context),
+    ).resolves.toMatchObject({ status: "active" });
+    await expect(
+      service.resolveAlert(alert.id, { action: "dismiss", rationale: null }, context),
+    ).resolves.toMatchObject({ status: "dismissed" });
+    const category = (await service.listCategories(owner.id))[0];
+    if (!category) throw new Error("Seeded Finance category was not found.");
+    await expect(
+      service.listTransactions(owner.id, { categoryId: category.id, limit: 25, review: "all" }),
+    ).resolves.toMatchObject({ items: expect.any(Array) });
+    await expect(service.listMerchants(owner.id, 1)).resolves.toHaveLength(1);
+    await expect(service.getForecast(owner.id)).resolves.toMatchObject({
+      projectedBalanceAtNextPayday: null,
+      safeToSpend: expect.any(Number),
+    });
+    await expect(
+      service.listOverview(owner.id, "2026-07", [cashAccount.id]),
+    ).resolves.toMatchObject({
+      accounts: expect.any(Array),
+      spendingThisMonth: expect.any(Number),
+    });
+    await expect(
+      service.updateAutomationSettings({ reviewBypassEnabled: false }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: false });
+    await expect(
+      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
+    await expect(
+      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
+  });
 });

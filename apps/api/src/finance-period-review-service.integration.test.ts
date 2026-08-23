@@ -320,5 +320,55 @@ describe.sequential("Finance period review service", () => {
     await expect(staleService.createForRun(owner.id, run.id)).rejects.toMatchObject({
       code: "conflict",
     });
+
+    const wrongRulebookService = createFinancePeriodReviewService({
+      db: database.db,
+      now: () => now,
+      status: {
+        getFinanceStatus: async () => ({
+          ...observed,
+          details: { ...observed.details, rulebookVersion: `sha256:${"f".repeat(64)}` },
+        }),
+      },
+    });
+    await expect(wrongRulebookService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    const [challenge] = await database.db
+      .insert(financeLedgerChallenges)
+      .values({
+        candidateId: candidate.id,
+        candidateRevision: `sha256:${"0".repeat(64)}`,
+        coverage: {},
+        cutoff: now,
+        rubricVersion: "finance-ledger-challenge-v1",
+        runId: run.id,
+        state: "resolved",
+        submittedAt: now,
+        submittingAgentId: "connected-agent",
+        userId: owner.id,
+      })
+      .returning();
+    if (!challenge) throw new Error("Incomplete period challenge was not created.");
+    const currentService = createFinancePeriodReviewService({
+      db: database.db,
+      now: () => now,
+      status: { getFinanceStatus: async () => observed },
+    });
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(financeLedgerChallenges)
+      .set({ candidateRevision: candidate.revision })
+      .where(eq(financeLedgerChallenges.id, challenge.id));
+    const completedWithQuestions = await currentService.createForRun(owner.id, run.id);
+    expect(completedWithQuestions).toMatchObject({
+      challenge: { checked: [], findings: 0, observations: 0 },
+      period: { end: "2026-08-31", start: "2026-08-01" },
+      position: { closing: null, opening: null },
+      spending: { savings: null },
+      status: "completed",
+    });
   });
 });

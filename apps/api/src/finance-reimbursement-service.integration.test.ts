@@ -387,6 +387,167 @@ describe.sequential("reimbursement lifecycle", () => {
     expect(listed.unmatchedCredits.length).toBeLessThanOrEqual(500);
   });
 
+  it("rejects conflicting reimbursement revisions, evidence, amounts, and credit kinds", async () => {
+    const emptyUser = crypto.randomUUID();
+    await database.db.insert(users).values({
+      displayName: "Empty reimbursement owner",
+      email: `empty-reimbursement-${emptyUser}@example.com`,
+      id: emptyUser,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceReimbursementService({ db: database.db, now: () => now });
+    await expect(service.list(emptyUser)).resolves.toEqual({
+      reimbursements: [],
+      unmatchedCredits: [],
+    });
+
+    const { allocation, credit, expense, principal } = await fixture();
+    const context = { principal, requestId: crypto.randomUUID() };
+    const created = await service.reconcile(
+      {
+        allocationId: allocation.id,
+        dueDate: null,
+        evidence: evidence(),
+        expectedAmount: 100,
+        operation: "create",
+        payer: "Casey",
+        rationale: "Casey owes part of dinner",
+      },
+      context,
+    );
+    await expect(
+      service.reconcile(
+        {
+          allocationId: allocation.id,
+          dueDate: null,
+          evidence: evidence("Other evidence"),
+          expectedAmount: 130,
+          operation: "create",
+          payer: "Blair",
+          rationale: "Too much combined",
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.reconcile(
+        {
+          expectedRevision: created.revision + 1,
+          evidence: evidence(),
+          operation: "cancel",
+          rationale: "Stale cancellation",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.reconcile(
+        {
+          amount: 101,
+          creditTransactionId: credit.id,
+          evidence: evidence(),
+          expectedRevision: created.revision,
+          operation: "match_credit",
+          rationale: "Exceeds remaining",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.reconcile(
+        {
+          amount: 50,
+          creditTransactionId: expense.id,
+          evidence: evidence(),
+          expectedRevision: created.revision,
+          operation: "match_credit",
+          rationale: "Expense is not a credit",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const matched = await service.reconcile(
+      {
+        amount: 50,
+        creditTransactionId: credit.id,
+        evidence: evidence(),
+        expectedRevision: created.revision,
+        operation: "match_credit",
+        rationale: "Partial repayment",
+        reimbursementId: created.id,
+      },
+      { ...context, requestId: crypto.randomUUID() },
+    );
+    await expect(
+      service.reconcile(
+        {
+          amount: 50,
+          creditTransactionId: credit.id,
+          evidence: evidence("Changed evidence"),
+          expectedRevision: created.revision,
+          operation: "match_credit",
+          rationale: "Partial repayment",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.reconcile(
+        {
+          amount: 40,
+          creditTransactionId: credit.id,
+          evidence: evidence(),
+          expectedRevision: matched.revision,
+          operation: "match_credit",
+          rationale: "Different amount",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const cancelled = await service.reconcile(
+      {
+        expectedRevision: matched.revision,
+        evidence: evidence("Cancel evidence"),
+        operation: "cancel",
+        rationale: "No more repayment",
+        reimbursementId: created.id,
+      },
+      { ...context, requestId: crypto.randomUUID() },
+    );
+    await expect(
+      service.reconcile(
+        {
+          expectedRevision: matched.revision,
+          evidence: evidence("Different cancellation"),
+          operation: "cancel",
+          rationale: "Different cancellation",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.reconcile(
+        {
+          amount: 1,
+          creditTransactionId: crypto.randomUUID(),
+          evidence: evidence(),
+          expectedRevision: cancelled.revision,
+          operation: "match_credit",
+          rationale: "Cancelled case",
+          reimbursementId: created.id,
+        },
+        { ...context, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("marks overdue expected money without treating it as received", () => {
     expect(
       deriveReimbursementStatus({

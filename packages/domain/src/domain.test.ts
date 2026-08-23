@@ -1721,6 +1721,24 @@ describe("finance agent contracts", () => {
     expect(toCents(0.29)).toBe(29);
     expect(() => toCents(0.291)).toThrow("exact cents");
     expect(() => toCents(Number.MAX_SAFE_INTEGER)).toThrow("safe Finance range");
+    expect(
+      setFinanceTransactionBreakdownInputSchema.safeParse({
+        ...input,
+        allocations: [
+          { amount: 10, categoryId: id, rationale: "First" },
+          { amount: 10, categoryId: id, rationale: "Duplicate" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      setFinanceTransactionBreakdownInputSchema.safeParse({
+        ...input,
+        futureRule: {
+          categoryId: "44444444-4444-4444-8444-444444444444",
+          rationale: "Unsupported future rule",
+        },
+      }).success,
+    ).toBe(false);
   });
   it("keeps public Finance question answer descriptors bounded and private-payload free", () => {
     const question = {
@@ -1891,6 +1909,22 @@ describe("finance agent contracts", () => {
         })),
         asOf: "2026-08-01",
         baseline: { label: "Baseline", monthlyIncome: 6_000, startingCash: 1_000 },
+        horizonMonths: 12,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioInputSchema.safeParse({
+        alternatives: [],
+        asOf: "2026-08-01",
+        baseline: {
+          budgetAllocations: [
+            { categoryId: id, limit: 100 },
+            { categoryId: id, limit: 200 },
+          ],
+          label: "Duplicate category",
+          monthlyIncome: 6_000,
+          startingCash: 1_000,
+        },
         horizonMonths: 12,
       }).success,
     ).toBe(false);

@@ -11,7 +11,6 @@ import {
   type CalendarFinding,
   calendarFindingSchema,
   type CalendarHealthAssessment,
-  calendarProfilePreferencesSchema,
   type CalendarRecommendation,
   type CalendarReview,
   calendarReviewSchema,
@@ -19,7 +18,7 @@ import {
   calendarStatusSchema,
   type CreateCalendarReviewInput,
 } from "@personal-os/domain";
-import { and, desc, eq, gt, inArray, isNull, lt, notInArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
 import {
   assessCalendar,
   type CalendarAssessmentDraft,
@@ -35,6 +34,10 @@ type DatabaseExecutor = Pick<Database, "select">;
 type FindingIdentity = Pick<CalendarFinding, "fingerprint" | "id">;
 
 const DAY_MS = 24 * 60 * 60_000;
+
+function isBufferMinutes(value: number | null): value is number {
+  return value !== null && Number.isInteger(value) && value >= 0 && value <= 1_440;
+}
 
 function findingFromRow(row: typeof calendarFindings.$inferSelect): CalendarFinding {
   return calendarFindingSchema.parse({
@@ -131,7 +134,7 @@ async function readAssessmentSnapshot(
             endsAt: calendarEvents.endsAt,
             id: calendarEvents.id,
             provider: calendarEvents.provider,
-            recurrence: calendarEvents.recurrence,
+            recurrencePresent: sql<boolean>`jsonb_array_length(${calendarEvents.recurrence}) > 0`,
             remoteEtag: calendarEvents.remoteEtag,
             startsAt: calendarEvents.startsAt,
             status: calendarEvents.status,
@@ -162,8 +165,17 @@ async function readAssessmentSnapshot(
 
   const [profileRow] = await executor
     .select({
+      afterBufferMinutes: sql<number | null>`case
+        when jsonb_typeof(${domainProfiles.preferences} -> 'afterBufferMinutes') = 'number'
+        then (${domainProfiles.preferences} ->> 'afterBufferMinutes')::integer
+        else null
+      end`,
+      beforeBufferMinutes: sql<number | null>`case
+        when jsonb_typeof(${domainProfiles.preferences} -> 'beforeBufferMinutes') = 'number'
+        then (${domainProfiles.preferences} ->> 'beforeBufferMinutes')::integer
+        else null
+      end`,
       id: domainProfiles.id,
-      preferences: domainProfiles.preferences,
       version: domainProfiles.version,
     })
     .from(domainProfiles)
@@ -175,23 +187,23 @@ async function readAssessmentSnapshot(
       ),
     )
     .limit(1);
-  const parsedPreferences = profileRow
-    ? calendarProfilePreferencesSchema.safeParse(profileRow.preferences)
-    : null;
   const recurrenceCalendarIds = new Set(
-    eventRows.filter(({ recurrence }) => recurrence.length > 0).map(({ calendarId }) => calendarId),
+    eventRows.filter(({ recurrencePresent }) => recurrencePresent).map(({ calendarId }) => calendarId),
   );
+  const activeProfile =
+    profileRow &&
+    isBufferMinutes(profileRow.afterBufferMinutes) &&
+    isBufferMinutes(profileRow.beforeBufferMinutes)
+      ? {
+          afterBufferMinutes: profileRow.afterBufferMinutes,
+          beforeBufferMinutes: profileRow.beforeBufferMinutes,
+          id: profileRow.id,
+          version: profileRow.version,
+        }
+      : null;
 
   return {
-    activeProfile:
-      profileRow && parsedPreferences?.success
-        ? {
-            afterBufferMinutes: parsedPreferences.data.afterBufferMinutes,
-            beforeBufferMinutes: parsedPreferences.data.beforeBufferMinutes,
-            id: profileRow.id,
-            version: profileRow.version,
-          }
-        : null,
+    activeProfile,
     evidenceCutoff,
     events: eventRows.map((event) => ({
       allDay: event.allDay,
@@ -200,7 +212,7 @@ async function readAssessmentSnapshot(
       endsAt: event.endsAt.toISOString(),
       id: event.id,
       provider: event.provider,
-      recurrence: event.recurrence,
+      recurrence: event.recurrencePresent ? ["RECURRENCE_PRESENT"] : [],
       revision: event.remoteEtag ?? event.updatedAt.toISOString(),
       startsAt: event.startsAt.toISOString(),
       status: event.status,
@@ -393,7 +405,7 @@ function buildStatus(input: {
   );
   const missingSource = input.snapshot.sources.length === 0;
   const missingProfile = input.snapshot.activeProfile === null;
-  const evidenceSettled = degradedSources.length === 0;
+  const evidenceSettled = !missingSource && degradedSources.length === 0;
   const readiness =
     missingSource || missingProfile
       ? "setup_required"
@@ -417,6 +429,28 @@ function buildStatus(input: {
     validNextOperations.push("open_connections");
   }
   if ((input.latestReview?.findings.length ?? 0) > 0) validNextOperations.push("review_findings");
+  const health = bindFindingIds(input.assessment.health, input.snapshot.existingOpenFindings).map(
+    (assessment): CalendarHealthAssessment => {
+      if (!missingSource) return assessment;
+      if (assessment.dimension === "source_trust") {
+        return {
+          ...assessment,
+          evidenceFindingIds: [],
+          signal: "unknown",
+          summary: "No selected Calendar source is available to assess.",
+        };
+      }
+      if (assessment.dimension === "hard_conflicts") {
+        return {
+          ...assessment,
+          evidenceFindingIds: [],
+          signal: "unknown",
+          summary: "Conflict coverage is unavailable because no Calendar source is selected.",
+        };
+      }
+      return assessment;
+    },
+  );
 
   return {
     asOf: input.asOf.toISOString(),
@@ -447,7 +481,7 @@ function buildStatus(input: {
       failed: null,
       openFindings: evidenceSettled ? input.snapshot.existingOpenFindings.length : null,
     },
-    health: bindFindingIds(input.assessment.health, input.snapshot.existingOpenFindings),
+    health,
     latestReview: input.latestReview,
     lifecycle: input.lifecycle,
     readiness,
@@ -469,35 +503,40 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
           "This Calendar release supports all-outstanding reviews only.",
         );
       }
-      const evidenceCutoff = now();
-      return db.transaction(
-        async (transaction) => {
-          const snapshot = await readAssessmentSnapshot(
-            transaction,
-            userId,
-            input.scope,
-            evidenceCutoff,
-          );
-          const draft = assessCalendar(snapshot);
-          const findings = await reconcileFindings(transaction, userId, snapshot, draft);
-          const health = bindFindingIds(draft.health, findings);
-          const recommendations = bindRecommendationFindingIds(draft.recommendations, findings);
-          return insertReview(transaction, {
-            draft,
-            findings,
-            health,
-            ledgerFingerprint: calendarLedgerFingerprint(snapshot),
-            nextMaintenanceAt: new Date(
-              evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000,
-            ),
-            profileVersion: snapshot.activeProfile?.version ?? null,
-            recommendations,
-            snapshot,
-            userId,
-          });
-        },
-        { isolationLevel: "repeatable read" },
-      );
+      return db.transaction(async (lockTransaction) => {
+        await lockTransaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`calendar-stewardship:${userId}`}, 0))`,
+        );
+        const evidenceCutoff = now();
+        return db.transaction(
+          async (transaction) => {
+            const snapshot = await readAssessmentSnapshot(
+              transaction,
+              userId,
+              input.scope,
+              evidenceCutoff,
+            );
+            const draft = assessCalendar(snapshot);
+            const findings = await reconcileFindings(transaction, userId, snapshot, draft);
+            const health = bindFindingIds(draft.health, findings);
+            const recommendations = bindRecommendationFindingIds(draft.recommendations, findings);
+            return insertReview(transaction, {
+              draft,
+              findings,
+              health,
+              ledgerFingerprint: calendarLedgerFingerprint(snapshot),
+              nextMaintenanceAt: new Date(
+                evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000,
+              ),
+              profileVersion: snapshot.activeProfile?.version ?? null,
+              recommendations,
+              snapshot,
+              userId,
+            });
+          },
+          { isolationLevel: "repeatable read" },
+        );
+      });
     },
 
     async getStatus(userId: string): Promise<CalendarStatus> {

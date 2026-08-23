@@ -13,7 +13,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createCalendarStewardshipService } from "./calendar-stewardship-service.js";
 
 const initialNow = new Date("2026-08-23T12:00:00.000Z");
@@ -117,6 +117,7 @@ describe.sequential("Calendar stewardship service", () => {
           busyBlockPrivacy: "busy",
           defaultCalendarId: calendarId,
           defaultTimezone: "UTC",
+          privateProfileMaterial: "profile-buffer-secret",
         },
         sourceContexts: [],
         status: "active",
@@ -172,6 +173,17 @@ describe.sequential("Calendar stewardship service", () => {
     service = createCalendarStewardshipService({ db: database.db, now: () => now });
   });
 
+  async function waitForAdvisoryLockWaiter(): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await database.pool.query<{ waiting: boolean }>(
+        "select exists (select 1 from pg_locks where locktype = 'advisory' and not granted) as waiting",
+      );
+      if (result.rows[0]?.waiting) return;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+    throw new Error("The concurrent review did not wait for the owner publication lock.");
+  }
+
   it("publishes owner-scoped findings and an immutable redacted review without audit mutation", async () => {
     const [otherAccount] = await database.db
       .insert(calendarAccounts)
@@ -210,7 +222,7 @@ describe.sequential("Calendar stewardship service", () => {
     expect(rows[0]?.userId).toBe(userId);
     expect(rows[0]?.findingSnapshots).toEqual(review.findings);
     expect(JSON.stringify(rows[0])).not.toMatch(
-      /Planning meeting|Second private meeting|private note|attendee@example.com|Private profile/,
+      /Planning meeting|Second private meeting|private note|attendee@example.com|Private profile|profile-buffer-secret/,
     );
     await expect(database.db.select().from(auditEvents)).resolves.toHaveLength(0);
   });
@@ -272,6 +284,56 @@ describe.sequential("Calendar stewardship service", () => {
     });
   });
 
+  it("serializes owner publication so an older request cannot reopen a finding after later evidence settles", async () => {
+    const first = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    const overlap = first.findings.find(({ kind }) => kind === "event_overlap");
+    if (!overlap) throw new Error("Overlap finding was not created.");
+    await database.db
+      .update(calendarEvents)
+      .set({
+        endsAt: new Date("2026-08-24T17:00:00.000Z"),
+        startsAt: new Date("2026-08-24T16:00:00.000Z"),
+        updatedAt: now,
+      })
+      .where(eq(calendarEvents.id, secondEventId));
+    await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    await database.db
+      .update(calendarEvents)
+      .set({
+        endsAt: new Date("2026-08-24T15:30:00.000Z"),
+        startsAt: new Date("2026-08-24T14:30:00.000Z"),
+        updatedAt: now,
+      })
+      .where(eq(calendarEvents.id, secondEventId));
+
+    let pendingReview: ReturnType<typeof service.createReview> | undefined;
+    await database.db.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`calendar-stewardship:${userId}`}, 0))`,
+      );
+      pendingReview = service.createReview(userId, { scope: { type: "all_outstanding" } });
+      await waitForAdvisoryLockWaiter();
+      await transaction
+        .update(calendarEvents)
+        .set({
+          endsAt: new Date("2026-08-24T17:00:00.000Z"),
+          startsAt: new Date("2026-08-24T16:00:00.000Z"),
+          updatedAt: new Date(now.getTime() + 1_000),
+        })
+        .where(eq(calendarEvents.id, secondEventId));
+    });
+    if (!pendingReview) throw new Error("The concurrent review was not started.");
+
+    await expect(pendingReview).resolves.not.toEqual(
+      expect.objectContaining({ findings: expect.arrayContaining([expect.objectContaining({ id: overlap.id })]) }),
+    );
+    const [preserved] = await database.db
+      .select()
+      .from(calendarFindings)
+      .where(eq(calendarFindings.id, overlap.id));
+    expect(preserved?.status).toBe("resolved");
+  });
+
   it("invalidates live status for event, source, profile, and freshness changes", async () => {
     await service.createReview(userId, { scope: { type: "all_outstanding" } });
     await expect(service.getStatus(userId)).resolves.toMatchObject({
@@ -317,7 +379,7 @@ describe.sequential("Calendar stewardship service", () => {
       .where(eq(calendarAccounts.id, accountId));
     await database.db
       .update(calendarEvents)
-      .set({ recurrence: ["RRULE:FREQ=WEEKLY"] })
+      .set({ recurrence: ["RRULE:FREQ=WEEKLY;PRIVATE=provider-recurrence-secret"] })
       .where(eq(calendarEvents.id, firstEventId));
 
     const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
@@ -325,6 +387,7 @@ describe.sequential("Calendar stewardship service", () => {
     expect(review.findings.map(({ kind }) => kind)).toEqual(
       expect.arrayContaining(["source_unavailable", "recurrence_unassessed"]),
     );
+    expect(JSON.stringify(review)).not.toContain("provider-recurrence-secret");
     await expect(service.getStatus(userId)).resolves.toMatchObject({
       backlog: {
         actionable: null,
@@ -341,7 +404,7 @@ describe.sequential("Calendar stewardship service", () => {
     });
   });
 
-  it("assesses only selected enabled nondeleted sources and events in the fixed horizon", async () => {
+  it("excludes unselected, disabled, and soft-deleted sources plus events outside the fixed horizon", async () => {
     const [excludedCalendar] = await database.db
       .insert(calendars)
       .values({
@@ -355,6 +418,45 @@ describe.sequential("Calendar stewardship service", () => {
       })
       .returning();
     if (!excludedCalendar) throw new Error("Excluded calendar fixture was not created.");
+    const [disabledAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        label: "Disabled account",
+        lastSyncedAt: now,
+        provider: "google",
+        providerAccountId: "disabled-calendar-stewardship",
+        userId,
+      })
+      .returning();
+    if (!disabledAccount) throw new Error("Disabled account fixture was not created.");
+    const [disabledCalendar, deletedCalendar] = await database.db
+      .insert(calendars)
+      .values([
+        {
+          accountId: disabledAccount.id,
+          lastSyncedAt: now,
+          name: "Disabled source",
+          provider: "google",
+          remoteCalendarId: "disabled-calendar",
+          timezone: "UTC",
+          userId,
+        },
+        {
+          accountId,
+          deletedAt: now,
+          lastSyncedAt: now,
+          name: "Deleted source",
+          provider: "google",
+          remoteCalendarId: "deleted-calendar",
+          timezone: "UTC",
+          userId,
+        },
+      ])
+      .returning();
+    if (!disabledCalendar || !deletedCalendar) {
+      throw new Error("Disabled and deleted Calendar fixtures were not created.");
+    }
     await database.db.insert(calendarEvents).values([
       {
         calendarId,
@@ -376,6 +478,26 @@ describe.sequential("Calendar stewardship service", () => {
         title: "Excluded recurrence",
         userId,
       },
+      {
+        calendarId: disabledCalendar.id,
+        endsAt: new Date("2026-08-24T18:00:00.000Z"),
+        provider: "google",
+        recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;PRIVATE=provider-payload"],
+        startsAt: new Date("2026-08-24T17:00:00.000Z"),
+        timezone: "UTC",
+        title: "Disabled recurrence",
+        userId,
+      },
+      {
+        calendarId: deletedCalendar.id,
+        endsAt: new Date("2026-08-24T19:00:00.000Z"),
+        provider: "google",
+        recurrence: ["RRULE:FREQ=DAILY;PRIVATE=provider-payload"],
+        startsAt: new Date("2026-08-24T18:00:00.000Z"),
+        timezone: "UTC",
+        title: "Deleted recurrence",
+        userId,
+      },
     ]);
 
     const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
@@ -383,6 +505,35 @@ describe.sequential("Calendar stewardship service", () => {
     expect(review.sourceFreshness).toHaveLength(1);
     expect(review.sourceFreshness[0]?.calendarId).toBe(calendarId);
     expect(review.findings.map(({ kind }) => kind)).not.toContain("recurrence_unassessed");
+  });
+
+  it("preserves open findings from unsupported future playbook kinds", async () => {
+    const futureFindingId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    await database.db.insert(calendarFindings).values({
+      evidence: { accountId, calendarId, type: "source" },
+      evidenceCutoff: now,
+      fingerprint: "b".repeat(64),
+      firstObservedAt: now,
+      id: futureFindingId,
+      kind: "future_calendar_kind" as (typeof calendarFindings.$inferInsert)["kind"],
+      lastObservedAt: now,
+      playbookVersion: "2.0.0",
+      rulebookVersion: "calendar-profile/future",
+      severity: "attention",
+      sourceReferences: [],
+      status: "open",
+      summary: "Future safe summary.",
+      userId,
+    });
+
+    await service.createReview(userId, { scope: { type: "all_outstanding" } });
+
+    const [preserved] = await database.db
+      .select()
+      .from(calendarFindings)
+      .where(eq(calendarFindings.id, futureFindingId));
+    expect(preserved?.status).toBe("open");
+    expect(preserved?.resolvedAt).toBeNull();
   });
 
   it("reports exact authority groups, honest counts, and setup readiness", async () => {
@@ -411,9 +562,29 @@ describe.sequential("Calendar stewardship service", () => {
       .update(domainProfiles)
       .set({ status: "draft", updatedAt: now, version: 2 })
       .where(and(eq(domainProfiles.id, profileId), eq(domainProfiles.userId, userId)));
+    await database.db
+      .update(calendars)
+      .set({ isSelected: false, updatedAt: now })
+      .where(and(eq(calendars.id, calendarId), eq(calendars.userId, userId)));
     await expect(service.getStatus(userId)).resolves.toMatchObject({
+      backlog: { actionable: null, openFindings: null },
+      health: expect.arrayContaining([
+        expect.objectContaining({
+          dimension: "source_trust",
+          signal: "unknown",
+          summary: "No selected Calendar source is available to assess.",
+        }),
+        expect.objectContaining({
+          dimension: "hard_conflicts",
+          signal: "unknown",
+          summary: "Conflict coverage is unavailable because no Calendar source is selected.",
+        }),
+      ]),
       readiness: "setup_required",
-      setupBlockers: ["Activate a Calendar profile before relying on stewardship assessments."],
+      setupBlockers: [
+        "Select at least one enabled Calendar source before relying on stewardship assessments.",
+        "Activate a Calendar profile before relying on stewardship assessments.",
+      ],
     });
   });
 });

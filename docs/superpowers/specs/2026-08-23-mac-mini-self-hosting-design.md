@@ -1,394 +1,314 @@
 # Mac Mini Self-Hosting and AWS Cutover Design
 
-**Status:** Proposed for implementation  
+**Status:** Hardened proposal for implementation
 **Date:** 2026-08-23  
 **Owner:** Cooper  
 **Repository:** `coopersully/personal-os`
 
 ## Summary
 
-Move ilo production from AWS ECS, RDS, ALB, WAF, S3, and CloudFront to the
-always-on Mac Mini. Preserve the existing public hostnames and automatic
-deployment after CI succeeds on `main`. Optimize for a single-user service,
-fast cutover, simple recovery, and low recurring cost rather than high
-availability or zero-downtime deployment.
+Move ilo production from AWS ECS, RDS, ALB, WAF, S3, and CloudFront to the always-on Mac Mini while preserving the existing hostnames and automatic deployment after successful CI on `main`. Optimize for one user, fast cutover, deterministic recovery, and low cost rather than high availability or zero downtime.
 
-The Mac Mini will run the existing Linux containers in a Docker-compatible
-Linux VM. Cloudflare Tunnel will provide public ingress without exposing the
-home network. GitHub-hosted Actions will publish immutable multi-architecture
-images to GHCR. A fixed pull-based watcher on the Mac will notice a new
-production image and run a local deployment script. PostgreSQL will run beside
-the application and will be protected by local and encrypted offsite backups.
+The Mac will run the Linux containers in a dedicated Colima profile. Cloudflare Tunnel will provide ingress without inbound router ports. GitHub-hosted Actions will publish an attested release bundle containing exact multi-architecture image digests. A fixed Mac bootstrap will verify and install the bundle's matching deployment controller. That controller will reconcile deployments through a durable state machine, create an immutable offsite backup, replace services, and prove the expected revision is public before recording success.
 
-AWS will remain stopped but recoverable for 72 hours after cutover. It will be
-decommissioned only after the local deployment, reboot recovery, backup, and
-restore paths have all passed.
+PostgreSQL will run locally with hourly encrypted backups and independently escrowed recovery keys. AWS will remain stopped but recoverable for 72 hours. New local releases will be held during that window so frozen RDS and the AWS images remain a coherent fallback. AWS retirement occurs only after deployment, attended reboot recovery, clean-room restore, and return-to-AWS procedures pass.
 
 ## Goals
 
-- Serve `app.ilo.coopersully.me`, `api.ilo.coopersully.me`, and
-  `mcp.ilo.coopersully.me` from the Mac Mini.
-- Deploy every successful `main` commit without interactive access to the Mac.
-- Add no inbound router port forwarding and require no static residential IP.
-- Preserve production data, sessions, connected-account credentials, OAuth
-  callbacks, and public URLs.
-- Provide deterministic health checks, image rollback, database backup, and a
-  documented return-to-AWS procedure.
-- Make the complete setup executable by Codex on the Mac Mini from repository
-  documentation and checked-in scripts.
-- Remove the steady-state AWS application cost after the recovery window.
+- Serve `app.ilo.coopersully.me`, `api.ilo.coopersully.me`, and `mcp.ilo.coopersully.me` from the Mac.
+- Deploy every eligible successful `main` commit without interactive Mac access after the 72-hour recovery window.
+- Begin an eligible deployment within 30 seconds of release publication.
+- Require no inbound router forwarding or static residential IP.
+- Preserve data, sessions, connected-account credentials, OAuth callbacks, and URLs.
+- Provide deterministic provenance, crash recovery, rollback, backup, and AWS return.
+- Make setup executable by Codex on the Mac from checked-in documentation and scripts.
+- Remove steady-state AWS application cost after the recovery window.
 
 ## Non-goals
 
 - Zero downtime, blue/green deployment, clustering, or automatic failover.
-- More than one API replica or one MCP replica.
-- Kubernetes or a self-hosted platform control plane.
+- Multiple API or MCP replicas.
+- Kubernetes, Watchtower, or a self-hosted platform control plane.
 - Running pull-request jobs on the production Mac.
-- Removing every AWS resource during initial cutover.
-- Changing application behavior, public APIs, domain packages, or database
-  schema as part of the hosting migration.
+- Removing every AWS resource during cutover.
+- Changing public product APIs, domain packages, or schema solely for hosting. Narrow changes for revision reporting, client identity, scheduler control, and graceful shutdown are in scope.
+- Unattended recovery from a full power cycle. FileVault unlock and login remain attended.
 
-## Constraints and assumptions
+## Constraints and service levels
 
 - Cooper is the only production user and accepts a maintenance window.
-- The Mac Mini normally remains powered on and has adequate memory and storage.
-- The repository remains public.
-- The Mac has outbound HTTPS access to GitHub, GHCR, Cloudflare, provider APIs,
-  Resend, and the selected offsite backup store.
-- The existing production hostnames remain unchanged, so registered OAuth
-  callback URLs and desktop builds do not need to change.
-- Production migrations continue to follow the append-only,
-  expand-migrate-contract policy in `docs/engineering/database-migrations.md`.
+- FileVault remains enabled, automatic login disabled, and production runs under a dedicated non-admin macOS account.
+- The public repository and application packages remain public. No write-capable GitHub credential is stored on the Mac.
+- The Mac has outbound HTTPS access to required providers, monitoring, and backup storage.
+- Existing hostnames remain unchanged.
+- Migrations follow `docs/engineering/database-migrations.md`.
+- Recovery-point objective is one hour; target recovery time is four hours.
+- The Mac, disk, home power, connection, and tunnel form one availability zone.
 
 ## Decisions
 
-### 1. Use the existing containers through a Docker-compatible Linux VM
+### 1. Dedicated and explicitly sized Colima production runtime
 
-The production deployment will continue using the root `Dockerfile`. On Apple
-Silicon, the release workflow will publish `linux/arm64` images; it will also
-publish `linux/amd64` images so the deployment remains portable and works on an
-Intel Mac Mini.
+Release images include `linux/arm64` and `linux/amd64`. Production uses a dedicated Colima profile and socket selected through explicit `DOCKER_HOST`, never the global Docker context. Its Compose project is `ilo-production`; volumes, networks, and runtime directories cannot overlap development Compose or `.codex` lifecycle actions.
 
-The bootstrap process may reuse an existing healthy Docker-compatible runtime.
-If none exists, it will install Colima with Docker and Docker Compose. The
-chosen runtime is acceptable only after an unattended reboot test proves that
-the VM and all ilo services recover without manual shell commands. This keeps
-the repository independent of a specific macOS container UI while selecting
-Colima as the default implementation.
+The checked-in profile sets CPU, memory, data-disk, root-disk, architecture, and runtime. Bootstrap verifies the effective allocation inside the VM and leaves at least 25% host memory and 20% host disk free.
 
-### 2. Keep GitHub execution off the production Mac
+Colima starts at user login through Homebrew services. Restart policies and reconciliation recover process, container, and VM service failures. A power cycle requires FileVault unlock and login; after that step, no shell command is allowed. A controlled reboot rehearsal, including Colima `Broken` recovery, is a cutover gate. If unreliable, use a small Linux VM or VPS rather than weakening disk or login security.
 
-The public repository will not register the Mac Mini as a GitHub Actions
-self-hosted runner. GitHub-hosted Actions will run CI and build images. The Mac
-will run only fixed, locally installed deployment code and the released
-containers selected by the production tag.
+### 2. Keep GitHub execution off production
 
-This preserves immediate deployment without allowing forked pull-request jobs
-to execute on a production machine containing application secrets and data.
+The Mac is not a self-hosted Actions runner. GitHub-hosted Actions run CI, builds, and attestations. The Mac runs only a fixed bootstrap plus controller code from a verified bundle. Forked code therefore cannot execute on the host containing production data and secrets.
 
-### 3. Publish immutable images and use one image tag as the release pointer
+### 3. Attested release manifest with exact digests
 
-GitHub Actions will publish these packages to GHCR for each successful `main`
-commit:
+For each eligible successful `main` commit, Actions builds API, MCP, and web images. Tags are locators, not security or immutability boundaries. The workflow records the platform manifest digest for each image and publishes a versioned OCI release bundle containing:
 
-- `ghcr.io/coopersully/personal-os-api:sha-<commit>`
-- `ghcr.io/coopersully/personal-os-mcp:sha-<commit>`
-- `ghcr.io/coopersully/personal-os-web:sha-<commit>`
+- schema version and full commit SHA;
+- exact API, MCP, web, PostgreSQL, and `cloudflared` manifest digests;
+- `compose.production.yaml` and matching deployment-controller files;
+- checksums for every bundle file;
+- minimum fixed-bootstrap version;
+- schema before and after migration; and
+- machine-readable rollback compatibility with the prior production release, derived from CI compatibility tests.
 
-Each image will include the OCI revision label containing the full commit SHA.
-After all three immutable images are available, the workflow will move the API
-image's `production` tag last. That tag is the atomic release pointer. The Mac
-watcher pulls it, reads the revision label, confirms that all three matching
-immutable images exist, and deploys only that complete set.
+Actions generates artifact attestations for the bundle and application images. The privileged workflow uses only `contents: read`, `packages: write`, `attestations: write`, and `id-token: write`; pins third-party actions to reviewed commits; consumes no untrusted cache or artifact; and receives no production runtime secret.
 
-The packages should be public because the source repository is public. If they
-remain private, the Mac will use a read-only package credential stored locally;
-no write-capable GitHub credential will be placed on the server.
-
-### 4. Use Cloudflare Tunnel as the only public ingress
+The mutable `production` reference points only to the bundle and moves last. Immediately before moving it, the workflow verifies the candidate is still protected `main` HEAD, preventing a slow older workflow from moving production backward. A newer untested `main` commit may intentionally cause an older successful release to be skipped.
 
-A remotely managed Cloudflare Tunnel will route the existing three hostnames to
-the internal web, API, and MCP container ports. `cloudflared` will run as part
-of the production Compose project and share only its internal network.
+The Mac verifies attestations against the exact repository, branch, workflow, and commit; verifies checksums; and deploys `image@sha256:...`. Labels and SHA-shaped tags never prove authenticity. State records digests, not only SHAs.
 
-No PostgreSQL, API, MCP, web, Docker, SSH, or deployment port will be published
-to the router or public internet. Production Compose will not expose PostgreSQL
-to the LAN. Administrative access to the Mac remains outside this design.
+Before AWS publishing changes, a transition release both deploys AWS and publishes the exact live AWS SHA as a complete attested GHCR bundle. Cutover requires identical content to be proven live on AWS and available for the Mac architecture.
 
-Cloudflare will terminate TLS and provide edge filtering and rate limiting.
-`TRUST_PROXY` and `MCP_TRUST_PROXY` will be enabled only because Cloudflare
-Tunnel is the declared trusted edge. The application-level authentication and
-MCP rate limits remain enabled.
-
-### 5. Run PostgreSQL locally and make offsite restoration a release gate
+### 4. Transactional deployment state machine
 
-PostgreSQL 17 will run in the Compose project with a dedicated persistent
-volume and a generated production password. The database will not be reachable
-outside the internal container network.
+Only the bootstrap, watcher launcher, and attestation verifier are fixed locally. Each release carries compatible Compose and controller files. Bootstrap atomically installs the verified controller, retains its predecessor, and rejects a bundle requiring a newer bootstrap.
 
-Before each deployment, the deployment script will create a compressed logical
-backup with `pg_dump`. A separate scheduled job will create at least one daily
-backup. Backups will be encrypted and copied to an S3-compatible offsite store.
-The first cutover cannot proceed until a backup created on the Mac has been
-restored successfully into a disposable database and verified.
-
-Retention defaults:
-
-- seven successful pre-deploy or daily backups on the Mac;
-- thirty daily backups in the offsite store; and
-- the final RDS snapshot retained through AWS decommissioning.
-
-Backup failure blocks application deployment. A failed upload may be retried,
-but the deploy cannot continue merely because a local dump exists.
-
-### 6. Store secrets only on the Mac
-
-Production secrets will live in a root- or service-user-owned environment file
-outside the repository. The file will be readable only by the account that
-runs the deployment. GitHub Actions will receive build-time public values only,
-such as `VITE_API_BASE_URL`; it will not receive database, OAuth, encryption,
-email, or MCP shared secrets.
-
-The existing production `APP_ENCRYPTION_KEY` must be copied unchanged so ilo
-can continue decrypting stored connected-account credentials. OAuth client
-secrets and the email credential will also be preserved initially. The local
-database password and Cloudflare Tunnel token will be new. The
-`MCP_INTERNAL_SECRET` may be rotated during cutover as long as API and MCP
-receive the same value.
-
-## Components and repository changes
-
-Implementation is expected to add or change the following boundaries. Exact
-task ordering and tests will be defined in the implementation plan.
-
-### Release workflow
-
-`.github/workflows/deploy.yml` will retain its current `workflow_run` trigger
-after successful CI on `main`, immutable commit selection, concurrency guard,
-and public health verification. AWS OIDC, ECR, ECS, S3, and CloudFront steps
-will be replaced by multi-architecture GHCR build and publish steps.
-
-Before enabling unattended production deployments, `main` will receive a
-GitHub ruleset that requires the existing CI checks and prevents force pushes.
-This is an external repository setting and must be recorded in the runbook.
-
-### Production Compose definition
-
-`compose.production.yaml` will define:
-
-- PostgreSQL with a health check and persistent volume;
-- API with readiness checks and production-only configuration;
-- MCP, starting only after the API is ready;
-- the immutable web image; and
-- `cloudflared`, with access only to the internal application network.
-
-It will reference image names and one `RELEASE_SHA` supplied by the deploy
-script. It will not contain `build:` entries, development passwords, published
-database ports, or secret values.
-
-### Mac deployment scripts
-
-Files under `deploy/mac-mini/` will have narrow responsibilities:
-
-- `bootstrap.sh`: validate architecture, container runtime, disk capacity,
-  required commands, runtime directories, and auto-start support;
-- `watch.sh`: serialize checks for a changed production image and invoke the
-  deployer;
-- `deploy.sh`: validate the release set, back up the database, update Compose,
-  sequence services, run health checks, record success, and roll back images on
-  failure;
-- `backup.sh`: create, verify, encrypt, upload, and expire database backups;
-- `restore.sh`: restore an explicitly named backup into an empty target and
-  refuse accidental overwrite;
-- `verify.sh`: test local and public web, API, MCP, database, and tunnel health;
-  and
-- launchd definitions: start the container runtime, stack, watcher, and daily
-  backup after reboot.
-
-State will live outside the checkout in a dedicated deployment directory and
-will include the current SHA, previous successful SHA, Compose environment,
-deployment logs, and backup metadata. Scripts will use an exclusive lock so a
-scheduled check cannot overlap an active deployment.
-
-### Operations runbook
-
-`docs/deployment/mac-mini.md` will document bootstrap, secrets, deployment,
-logs, health checks, backup/restore, reboot recovery, manual rollback, AWS
-return, Cloudflare routing, and eventual AWS removal.
-
-The runbook will explicitly state which steps run on the development Mac, which
-run through AWS, and which run on the Mac Mini so Codex does not operate on the
-wrong host.
-
-## Deployment flow
-
-1. A commit lands on `main`.
-2. The existing CI workflow completes successfully.
-3. The release workflow builds all three architectures/images from the exact
-   successful SHA and pushes immutable tags.
-4. The workflow moves the API `production` tag only after all images exist.
-5. The Mac watcher notices the new production image within 30 seconds.
-6. The deployer obtains a lock, validates the image revision, pulls the full
-   release, and confirms adequate free disk space.
-7. The deployer completes and uploads a PostgreSQL backup.
-8. Compose replaces the API first. API startup applies pending migrations and
-   readiness proves database connectivity.
-9. Compose replaces MCP and web, then checks local health.
-10. The deployer checks all three existing public hostnames through Cloudflare.
-11. On success it records the new current and previous SHAs and prunes only
-    unreferenced images older than the rollback window.
-
-The target is for local deployment to begin within 30 seconds of image
-publication. Completion time depends on image pulls, backup upload, and
-migrations. Total merge-to-production time remains bounded primarily by CI and
-image builds, not by the Mac watcher.
-
-## Deployment failure handling
-
-- A build or publish failure leaves the `production` tag unchanged.
-- A missing image, revision mismatch, backup failure, low disk condition, or
-  active deployment lock prevents any service replacement.
-- If API readiness fails, the deployer restores the previous API image and
-  leaves MCP and web unchanged.
-- If MCP, web, or public verification fails after API succeeds, all application
-  images revert to the previous SHA.
-- Database contents are not automatically restored during image rollback.
-  Automatic application rollback is allowed only under the repository's
-  backward-compatible migration policy.
-- Every failure exits nonzero, writes a durable local log, and leaves the prior
-  successful SHA recorded. Initial implementation may use GitHub deployment
-  status or email for notification; lack of notification does not change
-  rollback behavior.
-
-## Cutover approach
-
-Downtime is acceptable, so cutover will favor an explicit write freeze over
-dual-write, replication, or blue/green database infrastructure.
-
-### Phase 1: Prepare and prove the Mac
-
-1. Bootstrap the container runtime and production deployment directory.
-2. Install production secrets, preserving `APP_ENCRYPTION_KEY`.
-3. Create the Cloudflare Tunnel and temporary validation hostnames.
-4. Deploy the currently running production SHA to the Mac with an empty or
-   disposable database.
-5. Verify local and tunneled web/API/MCP health, outbound provider access,
-   restart behavior, log rotation, and disk monitoring.
-6. Produce an encrypted offsite backup and restore it successfully into a
-   disposable database.
-7. Reboot the Mac and prove that the runtime, database, application, tunnel,
-   watcher, and scheduled backup recover without an interactive command.
-
-### Phase 2: Prove production data migration
-
-1. Create an RDS snapshot.
-2. Copy a non-final production dump to the Mac without stopping AWS.
-3. Restore it into the local PostgreSQL volume.
-4. Start the currently deployed application SHA and verify owner login, core
-   record counts, encrypted connected-account data, connector reads, and MCP
-   authorization.
-5. Delete the rehearsal database and document measured dump/restore duration.
-
-RDS is private. For the fastest controlled transfer, temporarily make the RDS
-instance publicly reachable only from the Mac Mini's current public `/32`
-address, require TLS, take the dump, and immediately return RDS to private
-access. The security-group and RDS changes must be recorded and reversed in the
-same procedure. If that constrained route cannot be established safely, use a
-temporary SSM-managed EC2 transfer host; do not broadly expose PostgreSQL.
-
-### Phase 3: Final write freeze and DNS cutover
-
-1. Record AWS, GitHub, Cloudflare, and Mac health before making changes.
-2. Create a final manual RDS snapshot.
-3. Scale AWS MCP to zero, then AWS API to zero, establishing the write freeze.
-4. Create and verify the final compressed PostgreSQL dump.
-5. Restore the final dump into an empty local production database.
-6. Start the exact SHA that was running on AWS; do not combine infrastructure
-   cutover with a new application release.
-7. Verify database counts, owner login, API readiness, MCP authorization,
-   application assets, and connector credential decryption locally.
-8. Replace the three Cloudflare DNS routes with Tunnel routes while preserving
-   the existing hostnames.
-9. Verify all public surfaces, sign-in, one representative mutation, MCP read,
-   transactional email, and provider callback reachability.
-10. Create and upload the first post-cutover local backup.
-11. Mark the local deploy watcher active and keep AWS writers at zero.
-
-### Phase 4: Recovery window and AWS retirement
-
-For 72 hours:
-
-- keep ECS services at zero;
-- retain RDS, its final snapshot, ECR images, and Terraform state;
-- monitor public uptime, tunnel health, disk use, logs, backup uploads, and one
-  daily restore check; and
-- avoid destructive AWS or Terraform changes.
-
-After 72 healthy hours:
-
-1. Reconcile the known difference between checked-in Terraform and live ECS
-   networking before applying or destroying anything.
-2. Preserve the final RDS snapshot and one independently downloaded logical
-   backup.
-3. Remove application traffic resources in dependency order through reviewed
-   Terraform changes.
-4. Remove obsolete GitHub AWS deployment variables and disable the AWS OIDC
-   deployment role.
-5. Remove or deactivate any root AWS access keys and make a named least-
-   privilege identity the only routine local profile.
-6. Retain only intentionally selected backup/storage resources, or close AWS
-   entirely after verifying the offsite provider.
-
-## Cutover rollback
-
-### Before the first local write
-
-Route the three hostnames back to the existing AWS targets and scale API and MCP
-back to one. No database synchronization is required because RDS remains the
-source of truth.
-
-### After local writes begin
-
-1. Stop the local MCP and API to freeze writes.
-2. Back up the local PostgreSQL database.
-3. Restore that backup to RDS through the same tightly restricted transfer
-   route, verifying schema compatibility first.
-4. Start AWS API, then MCP, and verify health.
-5. Route Cloudflare DNS back to CloudFront and the ALB.
-
-Because Cooper is the only user, rollback may instead discard explicitly
-identified test-only local writes and return to the frozen RDS state. The
-operator must choose and record whether local writes are preserved before
-changing DNS back.
+Durable states are:
+
+- `stable`: current and previous digests are verified;
+- `deploying`: candidate, prior release, backup, schema, controller version, and completed step are recorded before mutation;
+- `failed`: attempted digest, failure class, retries, and rollback outcome are recorded; and
+- `recovery-required`: rollback is unsafe or incomplete and public ingress remains disabled.
+
+State writes are atomic and fsynced. The controller locks, writes `deploying` before service replacement, and records each completed step. On startup it reconciles non-stable state before `cloudflared` starts: resume an idempotent step, roll the whole application back when safe, or enter `recovery-required`. It never serves a mixed release after restart.
+
+Transient failures get at most three bounded retries. A terminally failed or rolled-back digest is quarantined until the pointer changes or Cooper explicitly retries it. An unchanged failed pointer cannot repeatedly create backups or outages.
+
+### 5. Cloudflare Tunnel as the only ingress
+
+A remotely managed Tunnel routes the three existing hostnames to pinned internal containers. No database, API, MCP, web, Docker, SSH, or deployment port is published to the router or LAN.
+
+Cloudflare enforces Always Use HTTPS, HSTS at least matching the current two-year policy, the available managed WAF ruleset, and a coarse rate-limit rule covering authentication and MCP abuse. Actual plan capabilities are recorded. Application authentication and per-token controls remain authoritative.
+
+The current first-value `X-Forwarded-For` behavior is not trusted. Declared Cloudflare mode uses `CF-Connecting-IP` only for requests arriving through the private tunnel network and ignores caller forwarding headers. Tests prove forged `X-Forwarded-For` cannot affect API authentication or MCP rate-limit identity.
+
+The production VM or host firewall denies container access to RFC1918, link-local, multicast, router, NAS, and host-gateway addresses except the internal application-to-PostgreSQL path. Required DNS and outbound HTTPS remain available. An isolated VLAN or verified host/VM egress rules is acceptable; container probes proving denial are mandatory.
+
+### 6. Pin PostgreSQL and migrate through SSM only
+
+Local PostgreSQL uses the same major and an equal or newer tested minor than RDS, pinned by digest. PostgreSQL and `cloudflared` upgrades require backup and clean restore rehearsal.
+
+RDS is never made public. A temporary EC2 transfer host in an existing public application subnet uses an SSM role and current agent, accepts no inbound traffic, has minimal outbound access, and uses a dedicated security group allowed into RDS. The Mac reaches RDS only with Session Manager remote-host port forwarding.
+
+Connections validate the RDS CA and hostname. Dump tools are the same or newer PostgreSQL major. Create local application/migration roles first, restore with `--no-owner --no-acl` into an empty database owned by the intended role, apply explicit grants, and run `ANALYZE`. Rehearsal verifies extensions, sequences, grants, counts, and encrypted data. Remove the host and temporary rules after the final dump.
+
+### 7. Independent immutable recovery
+
+PostgreSQL is internal-only. Its volume and local backup staging live outside the disposable Colima VM disk, or are bind-mounted to protected host storage, so VM loss cannot remove both data and backups.
+
+Create compressed logical dumps hourly, before each eligible deployment, and after cutover or infrastructure upgrades. Verify each dump, encrypt before upload, and use a unique immutable key. The Mac credential may create objects and complete its uploads but cannot delete, overwrite, shorten retention, change policy, or disable Object Lock/bucket lock.
+
+Retention is 24 hourly and seven pre-deploy backups locally, 48 hourly and 30 daily offsite, plus the final RDS snapshot through retirement.
+
+Escrow `APP_ENCRYPTION_KEY`, the backup key, and the recovery-secret inventory independently. The clean-room restore gate uses another machine, the offsite object, and escrow; it cannot read from the production Mac. Backup or upload failure blocks deployment and is remotely reported.
+
+Runtime secrets live outside the repository in a file readable only by the dedicated production account. GitHub receives build-time public values only. Preserve `APP_ENCRYPTION_KEY` unchanged; preserve OAuth and email credentials initially; generate a new local database password and Tunnel token; and rotate `MCP_INTERNAL_SECRET` only when API and MCP change together. File permissions, absence from Compose output, and absence from process arguments are verification gates.
+
+### 8. Revision health, graceful shutdown, rehearsal safety, and monitoring
+
+API and MCP health expose a non-secret build revision, and the web image exposes the same revision through a static version endpoint or response header. Verification must observe the expected candidate, not any healthy response. GitHub waits with a bounded timeout for the expected public revision after moving the pointer.
+
+On SIGTERM the API stops accepting requests and scheduling jobs, awaits in-flight HTTP and tracked background work with a bounded timeout, then closes PostgreSQL. Compose provides a matching `stop_grace_period`. Cutover verifies zero sessions before declaring a write freeze.
+
+Rehearsal mode disables scheduled jobs and blocks provider mutations, email, and external side effects. Individual connector reads may be deliberately enabled for recorded tests. A restored rehearsal database cannot run Plaid synchronization, automations, finance backfills, callbacks, or email.
+
+A mandatory remote sink receives deployment, backup, tunnel, disk, and watcher-heartbeat status. It alerts on explicit failure and missing heartbeat.
+
+## Repository boundaries
+
+### Release and Compose
+
+`.github/workflows/deploy.yml` keeps its successful-CI-on-`main` trigger but replaces AWS publication with GHCR images, the bundle, attestations, the current-head guard, and expected-revision verification. `workflow_run` privileges are isolated from untrusted content.
+
+`compose.production.yaml`, versioned in the bundle, defines pinned PostgreSQL, API, MCP, web, and `cloudflared`; internal database/application/tunnel networks; health/revision checks; host-protected storage; and delayed Tunnel startup until reconciliation. It contains no `build:`, development password, published database port, mutable tag, or secret.
+
+### Narrow application hardening
+
+Only composition and transport edges change: health revision, trusted-edge client identity, scheduler and external-side-effect switches, and graceful draining. Business rules remain in existing packages; MCP stays a stateless API adapter; hosting concerns do not enter domain or schema packages.
+
+### Mac deployment files
+
+Files under `deploy/mac-mini/` have one responsibility:
+
+- `bootstrap.sh`: verify account, FileVault, architecture, profile/resources, disk, commands, directories, isolation, and startup;
+- `watch.sh`: serialize checks and enforce holds and quarantine;
+- `verify-release.sh`: verify provenance, checksums, branch, commit, bootstrap compatibility, and digests;
+- `deploy.sh`: execute the state machine;
+- `reconcile.sh`: recover interrupted state before ingress;
+- `backup.sh`: create, verify, encrypt, upload, and report backups;
+- `restore.sh`: restore a named backup only into a verified empty target;
+- `verify.sh`: test exact revisions, database, Tunnel, HTTPS/HSTS, isolation, and monitoring; and
+- launchd definitions: recover Colima after login, reconcile, start the stable stack/Tunnel, watch, and schedule hourly backup.
+
+State, logs, secrets, controller versions, and metadata live outside the checkout in permission-restricted directories.
+
+### DNS ownership and runbook
+
+Cloudflare hostname records move out of AWS Terraform state into a separate authoritative Cloudflare DNS state before cutover. Remove existing record addresses from old state without deleting live records, import them into new state, and prove neither the old plan nor AWS destruction can modify Tunnel routes. All production DNS changes use reviewed Terraform.
+
+`docs/deployment/mac-mini.md` documents bootstrap, escrow, state/quarantine, monitoring, restore, attended reboot, rollback, AWS return, SSM, Cloudflare, DNS ownership, and AWS removal. Commands are labeled development Mac, AWS, or Mac Mini.
+
+## Steady-state deployment flow
+
+1. A commit lands on protected `main`; CI succeeds.
+2. Release builds exact images without untrusted artifacts.
+3. It resolves digests, creates the bundle, tests migration rollback compatibility, and attests artifacts.
+4. It rechecks current `main`, then moves the bundle pointer last.
+5. Within 30 seconds the watcher sees a new digest; hold/quarantine causes an auditable skip.
+6. The Mac verifies provenance/digests and atomically installs the compatible controller.
+7. Controller locks, records `deploying`, checks capacity, and uploads an immutable backup.
+8. It pulls digests and gracefully replaces API; migrations run and readiness reports the candidate.
+9. It replaces MCP/web and proves all local revisions.
+10. It starts or retains Tunnel ingress and proves HTTPS, HSTS, authentication, representative behavior, and public revisions.
+11. It records `stable`, current/previous digests, schema, and backup; reports remotely; and prunes only unreferenced images outside recovery.
+12. GitHub observes the expected revision and marks release success.
+
+## Failure and migration policy
+
+- Build, attestation, publication, or current-head failure leaves the pointer unchanged.
+- Provenance, digest, stale-release, bootstrap, backup, isolation, disk, or lock failure prevents replacement.
+- Pre-migration failure leaves stable production serving.
+- Post-replacement failure rolls all services back only when attested compatibility proves the previous release supports the resulting schema.
+- If rollback is unsafe, disable ingress, record `recovery-required`, and require a forward fix or explicit database restore.
+- Never restore database contents silently or automatically.
+- Quarantine terminal failures; retry classified transient failures at most three times.
+- Report all outcomes remotely; a missing heartbeat is an alert.
+
+## Cutover
+
+### Phase 0: Release and DNS ownership
+
+1. Add hardened publication while retaining AWS deployment.
+2. Publish and attest the exact AWS SHA/content for both architectures.
+3. Require protected `main`, CI, privileged-workflow review, and no force pushes.
+4. Create separate Cloudflare DNS state; non-destructively transfer/import records and prove ownership plans.
+5. Create Tunnel and temporary validation hostnames without changing production.
+
+### Phase 1: Prove the Mac
+
+1. Verify FileVault/no auto-login and create the non-admin account.
+2. Bootstrap the dedicated profile, resources, socket, storage, isolation, monitoring, and launchd jobs.
+3. Install secrets, preserve `APP_ENCRYPTION_KEY`, and complete independent escrow.
+4. Deploy the AWS release with disposable data and rehearsal mode.
+5. Verify local/tunneled revisions, forged-header rejection, isolation, logs, disk, HTTPS/HSTS, and deliberate read-only provider access.
+6. Back up and restore on another machine using only offsite storage and escrow.
+7. Rehearse release failure, controller interruption at every boundary, and quarantine.
+8. Reboot, unlock/login once, and prove full automatic post-login recovery without a shell.
+
+### Phase 2: Rehearse RDS migration
+
+1. Create the no-inbound SSM transfer instance and least-privilege groups.
+2. Snapshot RDS; use SSM forwarding for a CA/hostname-verified non-final dump.
+3. Create roles/empty database, restore ownership/grants, and run `ANALYZE`.
+4. Start the exact AWS SHA with schedulers and side effects disabled.
+5. Verify extensions, sequences, grants, login, counts, encrypted data, deliberate reads, and MCP.
+6. Delete rehearsal data and record dump/restore/verification duration against the four-hour RTO.
+
+### Phase 3: Freeze and cut over
+
+1. Record AWS, GitHub, Cloudflare, SSM, monitoring, and Mac health; put watcher in `hold`.
+2. Disable AWS jobs, scale MCP then API to zero, and wait for ECS running and pending counts to reach zero.
+3. Verify zero application sessions, active transactions, and writers. Only then declare the freeze.
+4. Take final RDS snapshot and verified SSM logical dump from that frozen state.
+5. Restore into an empty local database with roles, grants, sequences, extensions, and `ANALYZE`.
+6. Start the exact AWS release; do not combine cutover with a new application release.
+7. Verify counts, credentials, login, revisions, assets, callbacks, email, and a local mutation.
+8. Apply reviewed Cloudflare DNS state from AWS targets to Tunnel targets.
+9. Verify HTTPS/HSTS, WAF/rate limits, sign-in, public revisions, mutation, MCP, email, and callbacks.
+10. Upload the first post-cutover immutable backup and confirm heartbeat.
+
+### Phase 4: Frozen 72-hour window
+
+Keep ECS at zero; retain RDS, snapshot, exact images, transfer procedure, and state; keep the watcher in `hold`; monitor everything; run an offsite restore; and make no destructive AWS/DNS/escrow change. Bundles may publish but cannot deploy.
+
+An urgent release requires an explicit choice to end simple AWS rollback after proving the post-write return path, or a schema-neutral forward fix. It is never unattended. After 72 healthy hours, remove the hold and deploy only the newest eligible current-`main` bundle.
+
+### Phase 5: Retire AWS
+
+1. Reconcile live/Terraform drift and prove AWS state owns no production DNS.
+2. Preserve final snapshot and one downloaded logical backup through agreed retention.
+3. Remove traffic resources through reviewed Terraform.
+4. Remove GitHub AWS variables and disable OIDC deployment.
+5. Remove root keys; retain only intentional least-privilege recovery access.
+6. Remove SSM transfer resources.
+7. Close AWS only after offsite/escrow recovery succeeds independently.
+
+## Rollback
+
+### Before a local write
+
+Stop local writers, apply Cloudflare DNS state back to AWS, scale API then MCP to one, and verify the frozen AWS revision. RDS remains authoritative.
+
+### After local writes
+
+1. Gracefully stop local writers, disable ingress, and prove the database frozen.
+2. Upload a verified immutable backup.
+3. Restore the retained snapshot to a **new** RDS instance, or provision a new empty compatible target. Never import over populated frozen RDS.
+4. Through SSM, restore local data into that empty target, apply roles/grants, run `ANALYZE`, and validate.
+5. Point AWS secrets to the new endpoint; start compatible API then MCP; verify revisions.
+6. Apply Cloudflare DNS state back to AWS.
+7. Preserve original and returned RDS targets until resolution.
+
+Alternatively, Cooper may explicitly discard identified local writes and return to frozen RDS. Record that decision and discarded interval before DNS changes.
 
 ## Verification gates
 
-Implementation and cutover are incomplete until all of these pass:
+- `pnpm verify` passes.
+- Compose has no secrets, builds, published DB ports, mutable tags, or shared development resources.
+- Provenance verifies for repository, workflow, branch, commit, bundle, and image digests.
+- Stale workflow, forged tag/label, digest substitution, and failed candidate are rejected.
+- Interruption at every transition recovers one coherent release before ingress.
+- Native images and explicit Colima resources pass.
+- Local/public health reports expected revisions.
+- Forged forwarding headers cannot alter identity or limits.
+- Containers cannot reach prohibited LAN addresses.
+- Shutdown drains requests/jobs; rehearsal creates no external side effect.
+- Login, CRUD, MCP, credential decryption, callback, and email pass.
+- HTTPS redirect, HSTS, WAF, and edge rate limiting pass.
+- Hourly immutable backup and missing-heartbeat alerts pass.
+- Another machine restores using only offsite backup and escrow.
+- Rollback passes for safe and unsafe migrations.
+- Attended reboot needs no post-login shell.
+- Final snapshot/dump follow verified freeze.
+- Post-write AWS return uses a new empty target.
+- Old AWS Terraform cannot revert or delete Tunnel DNS.
 
-- repository lint, type checking, tests, builds, and E2E through `pnpm verify`;
-- production Compose configuration validation with no secret values committed;
-- native image execution on the Mac Mini architecture;
-- local API readiness, MCP liveness, and web health;
-- public health through all three Cloudflare hostnames;
-- owner sign-in and one representative create/read/update flow;
-- MCP OAuth/token use and one representative tool call;
-- production credential decryption for an existing connected account;
-- transactional email delivery;
-- successful offsite backup and clean-room restore;
-- failed-release image rollback rehearsal;
-- full Mac reboot recovery without manual commands; and
-- documented AWS return procedure tested before AWS destruction.
+## Rejected alternatives
 
-## Risks accepted for the single-user phase
+- **Self-hosted Actions runner:** unnecessary execution and secret exposure.
+- **Watchtower:** cannot safely gate backup, migration, verification, and rollback.
+- **Tailscale Funnel:** does not preserve the current custom hostnames.
+- **Kubernetes/Coolify/Dokploy:** control-plane cost without recovery benefit for one host.
+- **Public RDS:** current subnets have no public route; SSM is safer and simpler.
+- **Cheap Linux VPS:** selected fallback if Colima reboot reliability fails, but not the preferred local-control/cost outcome.
 
-- The Mac, local disk, home power, and internet connection form one availability
-  zone.
-- In-place API replacement can cause a short outage.
-- Database restoration is manual and slower than RDS point-in-time recovery.
-- Cloudflare is both DNS and production ingress.
-- A malicious commit merged to `main` can still publish a malicious production
-  container. Required CI and branch protection reduce accidental deployment but
-  do not replace review of privileged workflow changes.
+## Accepted single-user risks
 
-These risks are proportionate for one owner and can be revisited if ilo gains
-additional users or availability requirements.
+- FileVault makes cold boot attended.
+- The Mac and home connection are one availability zone.
+- In-place replacement can briefly interrupt service.
+- Recovery is more manual than RDS PITR, bounded by the one-hour RPO and four-hour target RTO.
+- Cloudflare is both DNS and ingress.
+- A malicious reviewed commit on protected `main` can publish malicious production code. Provenance prevents registry forgery, not malicious source.
+
+Revisit this architecture before adding users, requiring unattended cold boot, or tightening RPO/RTO.

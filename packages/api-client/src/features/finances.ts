@@ -337,6 +337,91 @@ export function createFinanceApi(request: FinanceRequest) {
       }
       return request(`/v1/finances/transactions${search.size ? `?${search}` : ""}`);
     },
+    async getFinanceAccountConnection(id: string): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/account-connections/${id}`);
+    },
+    async startFinanceAccountConnection(
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/account-connections", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async updateFinanceAccount(
+      id: string,
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/accounts/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+    },
+    async disconnectFinanceAccount(
+      id: string,
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/accounts/${id}/disconnect`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async getFinanceTransaction(id: string): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/transactions/${id}`);
+    },
+    async removeFinanceTransaction(
+      id: string,
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/transactions/${id}/remove`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async splitFinanceTransaction(
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/transactions/split", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async classifyFinanceTransactions(
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/transactions/classify", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async linkFinanceTransactions(
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/transactions/link", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async listFinanceRules(): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/rules");
+    },
+    async manageFinanceRule(input: Record<string, unknown>): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/rules", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async listFinanceRecurringItems(): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/recurring-items");
+    },
+    async manageFinanceRecurringItem(
+      input: Record<string, unknown>,
+    ): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/recurring-items", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
     async listFinanceMerchants(limit = 50): Promise<FinanceMerchant[]> {
       const response = await request<{ merchants: FinanceMerchant[] }>(
         `/v1/finances/merchants?limit=${limit}`,
@@ -352,6 +437,14 @@ export function createFinanceApi(request: FinanceRequest) {
         },
       );
       return response.merchant;
+    },
+    async mergeFinanceMerchantsCanonical(
+      input: MergeFinanceMerchantsInput & { idempotencyKey: string },
+    ): Promise<FinanceToolResult<unknown>> {
+      return request("/v1/finances/merchants/merge", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
     },
     async proposeFinanceCategorizations(query: Partial<FinanceTransactionQuery> = {}) {
       const search = new URLSearchParams();
@@ -390,6 +483,14 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return response.result;
     },
+    async importFinanceTransactions(
+      input: FinanceCsvImportInput & { idempotencyKey: string },
+    ): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/accounts/${input.accountId}/import`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
     async syncFinanceAccount(id: string): Promise<number> {
       const response = await request<{ result: { changed: number } }>(
         `/v1/finances/accounts/${id}/sync`,
@@ -418,6 +519,15 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return response.transaction;
     },
+    async updateFinanceTransactionCanonical(
+      id: string,
+      input: UpdateFinanceTransactionInput & { idempotencyKey: string },
+    ): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/transactions/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+    },
     async updateFinanceMerchant(
       id: string,
       input: UpdateFinanceMerchantInput,
@@ -430,6 +540,15 @@ export function createFinanceApi(request: FinanceRequest) {
         },
       );
       return response.merchant;
+    },
+    async updateFinanceMerchantCanonical(
+      id: string,
+      input: UpdateFinanceMerchantInput & { idempotencyKey: string },
+    ): Promise<FinanceToolResult<unknown>> {
+      return request(`/v1/finances/merchants/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
     },
   };
 }

@@ -29,22 +29,37 @@ describe("canonical Finance contracts", () => {
   });
 
   it("requires a complete budget version to balance to the cent", () => {
+    const base = {
+      allocations: [],
+      allocatedTotal: 4_900,
+      approvedAt: null,
+      assumptions: [],
+      balanceDelta: 100,
+      createdAt: now,
+      effectiveFrom: "2026-08",
+      expectedResources: 5_000,
+      id,
+      planId: relatedId,
+      rationale: "Initial plan",
+      resources: [{ amount: 5_000, key: "income", kind: "income" }],
+      status: "proposed",
+      version: 1,
+    };
+    expect(() => financeBudgetVersionSchema.parse(base)).toThrow(
+      "Budget resources and allocations must balance",
+    );
     expect(() =>
       financeBudgetVersionSchema.parse({
-        allocations: [],
-        allocatedTotal: 4_900,
-        approvedAt: null,
-        assumptions: [],
-        balanceDelta: 100,
-        createdAt: now,
-        effectiveFrom: "2026-08",
-        expectedResources: 5_000,
-        id,
-        planId: relatedId,
-        rationale: "Initial plan",
-        resources: [{ amount: 5_000, key: "income", kind: "income" }],
-        status: "proposed",
-        version: 1,
+        ...base,
+        allocatedTotal: 0,
+        balanceDelta: 5000,
+      }),
+    ).toThrow("Budget resources and allocations must balance");
+    expect(() =>
+      financeBudgetVersionSchema.parse({
+        ...base,
+        allocatedTotal: 0,
+        balanceDelta: 0,
       }),
     ).toThrow("Budget resources and allocations must balance");
   });

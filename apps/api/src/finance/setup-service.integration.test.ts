@@ -56,6 +56,27 @@ describe.sequential("guided Finance setup", () => {
     });
     let response = await service.setupFinances({ operation: "start" }, context);
     expect(response.communication.nextQuestion?.id).toBe("profile:location");
+    await expect(
+      service.setupFinances(
+        {
+          answer: "Wrong question",
+          idempotencyKey: "setup-wrong-question",
+          operation: "answer",
+          questionId: "profile:household_size",
+          sessionId: response.data.sessionId,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.setupFinances(
+        {
+          operation: "resume",
+          sessionId: "00000000-0000-4000-8000-000000000000",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
 
     const answers: Record<string, string> = {
       "profile:location": "Brooklyn, New York",
@@ -79,6 +100,24 @@ describe.sequential("guided Finance setup", () => {
       data: { budgetVersionId: expect.any(String), stage: "budget_approval" },
     });
     expect(response.communication.nextQuestion?.id).toBe("budget:approval");
+    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
+      data: { stage: "budget_approval" },
+    });
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
+    ).resolves.toMatchObject({ data: { stage: "budget_approval" } });
+    await expect(
+      service.setupFinances(
+        {
+          approvalSource: "agent_self_approval",
+          budgetVersionId: "00000000-0000-4000-8000-000000000000",
+          idempotencyKey: "setup-wrong-budget",
+          operation: "approve_budget",
+          sessionId: response.data.sessionId,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
     const profile = await planning.getFinancialProfile(userId);
     expect(profile.data).toMatchObject({ expectedMonthlyTakeHome: 8000, jurisdiction: "US-NY" });
 
@@ -96,5 +135,12 @@ describe.sequential("guided Finance setup", () => {
       data: { stage: "initial_maintenance" },
       nextAction: { tool: "maintain_finances" },
     });
+    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
+      data: { stage: "initial_maintenance" },
+      nextAction: { tool: "maintain_finances" },
+    });
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
+    ).resolves.toMatchObject({ data: { stage: "initial_maintenance" } });
   });
 });

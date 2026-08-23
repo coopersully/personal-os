@@ -390,6 +390,28 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(200);
+    const canonicalTransactionUpdate = {
+      body: { category: "Groceries", idempotencyKey: "route-transaction-update" },
+      method: "PATCH" as const,
+    };
+    const firstCanonicalTransactionUpdate = await payload(
+      await request(
+        `/v1/finances/transactions/${financeTransaction.id}`,
+        canonicalTransactionUpdate,
+      ),
+    );
+    expect(firstCanonicalTransactionUpdate).toMatchObject({
+      data: { category: "Groceries" },
+      outcome: "completed",
+    });
+    await expect(
+      payload(
+        await request(
+          `/v1/finances/transactions/${financeTransaction.id}`,
+          canonicalTransactionUpdate,
+        ),
+      ),
+    ).resolves.toEqual(firstCanonicalTransactionUpdate);
     const categories = (await payload(await request("/v1/finances/categories"))).categories;
     const shopping = categories.find((item: { slug: string }) => item.slug === "shopping");
     if (!shopping) throw new Error("Shopping category was not seeded.");
@@ -403,6 +425,17 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(200);
+    expect(
+      await payload(
+        await request(`/v1/finances/merchants/${merchant.id}`, {
+          body: {
+            displayName: "Trader Joe's Market",
+            idempotencyKey: "route-merchant-update",
+          },
+          method: "PATCH",
+        }),
+      ),
+    ).toMatchObject({ data: { isUserConfirmed: true }, outcome: "completed" });
     expect((await payload(await request("/v1/finances/merchants"))).merchants).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ displayName: "Trader Joe's Market", isUserConfirmed: true }),
@@ -581,6 +614,206 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(201);
+    const canonicalImport = await payload(
+      await request(`/v1/finances/accounts/${paypalAccount.id}/import`, {
+        body: {
+          accountId: paypalAccount.id,
+          csv: "Date,Name,Amount,Transaction ID\n2026-07-14,Corner store,8.5,paypal-import-2",
+          idempotencyKey: "route-import",
+          provider: "paypal",
+        },
+      }),
+    );
+    expect(canonicalImport).toMatchObject({
+      data: { imported: 1, skipped: 0 },
+      outcome: "completed",
+    });
+    expect((await request(`/v1/finances/transactions/${financeTransaction.id}`)).status).toBe(200);
+    expect(
+      (
+        await request(`/v1/finances/accounts/${financeAccount.id}`, {
+          body: { idempotencyKey: "route-account-update", name: "Primary wallet" },
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(200);
+    expect((await request(`/v1/finances/account-connections/${unknownFinanceId}`)).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await request("/v1/finances/account-connections", {
+          body: { idempotencyKey: "route-connect", provider: "plaid" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request("/v1/finances/transactions/classify", {
+          body: {
+            classifications: [
+              {
+                categoryId: shopping.id,
+                confidence: 0.99,
+                meaning: "Grocery purchase",
+                rationale: "Known grocery merchant.",
+                transactionId: financeTransaction.id,
+              },
+            ],
+            idempotencyKey: "route-classify",
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const createLedgerTransaction = async (merchantName: string, amount: number) =>
+      (
+        await payload(
+          await request("/v1/finances/transactions", {
+            body: {
+              accountId: financeAccount.id,
+              amount,
+              category: null,
+              categoryConfidence: null,
+              date: "2026-07-13",
+              direction: "expense",
+              merchant: merchantName,
+              notes: null,
+            },
+          }),
+        )
+      ).transaction;
+    const transferOne = await createLedgerTransaction("Transfer one", 20);
+    const transferTwo = await createLedgerTransaction("Transfer two", 20);
+    expect(
+      (
+        await request("/v1/finances/transactions/link", {
+          body: {
+            idempotencyKey: "route-link",
+            rationale: "One movement between owned accounts.",
+            relationship: "transfer",
+            transactionIds: [transferOne.id, transferTwo.id],
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const mixedTransaction = await createLedgerTransaction("Mixed purchase", 30);
+    expect(
+      (
+        await request("/v1/finances/transactions/split", {
+          body: {
+            expectedVersion: 1,
+            idempotencyKey: "route-split",
+            parts: [
+              { amount: 10, categoryId: shopping.id, meaning: "Household", notes: null },
+              { amount: 20, categoryId: shopping.id, meaning: "Clothing", notes: null },
+            ],
+            transactionId: mixedTransaction.id,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const mistakenTransaction = await createLedgerTransaction("Mistake", 1);
+    expect(
+      (
+        await request(`/v1/finances/transactions/${mistakenTransaction.id}/remove`, {
+          body: { idempotencyKey: "route-remove" },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await request("/v1/finances/rules")).status).toBe(200);
+    expect(
+      (
+        await request("/v1/finances/rules", {
+          body: { idempotencyKey: "route-rule-invalid", operation: "create" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request("/v1/finances/rules", {
+          body: { idempotencyKey: "route-rule-missing-id", operation: "update" },
+        })
+      ).status,
+    ).toBe(400);
+    const rule = await payload(
+      await request("/v1/finances/rules", {
+        body: {
+          category: "Groceries",
+          idempotencyKey: "route-rule-create",
+          merchant: "Corner market",
+          operation: "create",
+        },
+      }),
+    );
+    expect(rule.data.id).toEqual(expect.any(String));
+    expect(
+      await payload(
+        await request("/v1/finances/rules", {
+          body: {
+            category: "Groceries",
+            idempotencyKey: "route-rule-create",
+            merchant: "Corner market",
+            operation: "create",
+          },
+        }),
+      ),
+    ).toEqual(rule);
+    expect(
+      (
+        await request("/v1/finances/rules", {
+          body: {
+            category: "Shopping",
+            idempotencyKey: "route-rule-update",
+            merchant: "Corner market updated",
+            operation: "update",
+            ruleId: rule.data.id,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request("/v1/finances/rules", {
+          body: {
+            category: "Groceries",
+            idempotencyKey: "route-rule-update-category",
+            operation: "update",
+            ruleId: rule.data.id,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request("/v1/finances/rules", {
+          body: {
+            idempotencyKey: "route-rule-remove",
+            operation: "remove",
+            ruleId: rule.data.id,
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await request("/v1/finances/recurring-items")).status).toBe(200);
+    expect(
+      (
+        await request("/v1/finances/recurring-items", {
+          body: {
+            idempotencyKey: "route-recurring",
+            itemId: unknownFinanceId,
+            itemType: "obligation",
+            operation: "pause",
+          },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(`/v1/finances/accounts/${paypalAccount.id}/disconnect`, {
+          body: { idempotencyKey: "route-disconnect" },
+        })
+      ).status,
+    ).toBe(200);
     expect(
       (await request(`/v1/finances/accounts/${financeAccount.id}`, { method: "DELETE" })).status,
     ).toBe(204);

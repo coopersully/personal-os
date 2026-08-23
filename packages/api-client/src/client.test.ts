@@ -630,6 +630,28 @@ function apiFetch() {
       });
     if (url.pathname === "/v1/finances/plaid/link-token") return json({ linkToken: "link-token" });
     if (url.pathname === "/v1/finances/plaid/exchange") return json({ accounts: [financeAccount] });
+    if (url.pathname === "/v1/finances/account-connections")
+      return json(financeEnvelope({ connectionId: id, status: "pending" }));
+    if (url.pathname === `/v1/finances/account-connections/${id}`)
+      return json(financeEnvelope({ id, status: "connected" }));
+    if (url.pathname === `/v1/finances/accounts/${id}` && method === "PATCH")
+      return json(financeEnvelope(financeAccount));
+    if (url.pathname === `/v1/finances/accounts/${id}/disconnect`)
+      return json(financeEnvelope(financeAccount));
+    if (url.pathname === `/v1/finances/transactions/${id}` && method === "GET")
+      return json(financeEnvelope(financeTransaction));
+    if (url.pathname === `/v1/finances/transactions/${id}/remove`)
+      return json(financeEnvelope({ id, removed: true }));
+    if (url.pathname === "/v1/finances/transactions/split")
+      return json(financeEnvelope([financeTransaction]));
+    if (url.pathname === "/v1/finances/transactions/classify")
+      return json(financeEnvelope([financeTransaction]));
+    if (url.pathname === "/v1/finances/transactions/link")
+      return json(financeEnvelope({ relationship: "transfer" }));
+    if (url.pathname === "/v1/finances/rules")
+      return json(financeEnvelope(method === "GET" ? [] : { id }));
+    if (url.pathname === "/v1/finances/recurring-items")
+      return json(financeEnvelope(method === "GET" ? { income: [], obligations: [] } : { id }));
     if (url.pathname === "/v1/finances/categories")
       return json({
         categories: [
@@ -669,9 +691,17 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/merchants" && method === "GET")
       return json({ merchants: [financeMerchant] });
     if (url.pathname === "/v1/finances/merchants/merge" && method === "POST")
-      return json({ merchant: financeMerchant });
+      return json(
+        String(init?.body).includes("idempotencyKey")
+          ? financeEnvelope(financeMerchant)
+          : { merchant: financeMerchant },
+      );
     if (url.pathname === `/v1/finances/merchants/${id}` && method === "PATCH")
-      return json({ merchant: { ...financeMerchant, isUserConfirmed: true } });
+      return json(
+        String(init?.body).includes("idempotencyKey")
+          ? financeEnvelope({ ...financeMerchant, isUserConfirmed: true })
+          : { merchant: { ...financeMerchant, isUserConfirmed: true } },
+      );
     if (url.pathname === "/v1/finances/review") return json({ reviews: [] });
     if (url.pathname === "/v1/finances/inbox") return json(financeEnvelope([]));
     if (url.pathname === `/v1/finances/inbox/${id}/answer`) return json(financeEnvelope([]));
@@ -691,13 +721,22 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/transactions" && method === "POST")
       return json({ transaction: financeTransaction }, 201);
     if (url.pathname === `/v1/finances/transactions/${accountId}` && method === "PATCH")
-      return json({
-        transaction: { ...financeTransaction, category: "Dining", needsReview: false },
-      });
+      return json(
+        String(init?.body).includes("idempotencyKey")
+          ? financeEnvelope({ ...financeTransaction, category: "Dining", needsReview: false })
+          : {
+              transaction: { ...financeTransaction, category: "Dining", needsReview: false },
+            },
+      );
     if (url.pathname === `/v1/finances/accounts/${id}/sync`)
       return json({ result: { changed: 2 } });
     if (url.pathname === `/v1/finances/accounts/${id}/import`)
-      return json({ result: { imported: 2, skipped: 1 } }, 201);
+      return json(
+        String(init?.body).includes("idempotencyKey")
+          ? financeEnvelope({ imported: 2, skipped: 1 })
+          : { result: { imported: 2, skipped: 1 } },
+        201,
+      );
     if (url.pathname === "/v1/finances")
       return json({
         overview: {
@@ -1004,8 +1043,21 @@ describe("ilo API client", () => {
       api.updateFinanceMerchant(id, { displayName: "Corner Store" }),
     ).resolves.toMatchObject({ isUserConfirmed: true });
     await expect(
+      api.updateFinanceMerchantCanonical(id, {
+        displayName: "Corner Store",
+        idempotencyKey: "merchant-update-1",
+      }),
+    ).resolves.toMatchObject({ data: { isUserConfirmed: true } });
+    await expect(
       api.mergeFinanceMerchants({ sourceMerchantId: accountId, targetMerchantId: id }),
     ).resolves.toEqual(financeMerchant);
+    await expect(
+      api.mergeFinanceMerchantsCanonical({
+        idempotencyKey: "merchant-merge-1",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      }),
+    ).resolves.toMatchObject({ data: financeMerchant });
     await expect(api.getFinanceReviewQueue()).resolves.toEqual([]);
     await expect(api.getFinanceInbox()).resolves.toMatchObject({ data: [] });
     await expect(
@@ -1042,6 +1094,18 @@ describe("ilo API client", () => {
     await expect(api.getPlaidStatus()).resolves.toEqual({ available: true });
     await expect(api.getPlaidLinkToken()).resolves.toBe("link-token");
     await expect(
+      api.startFinanceAccountConnection({ idempotencyKey: "connect-1", provider: "plaid" }),
+    ).resolves.toMatchObject({ data: { connectionId: id } });
+    await expect(api.getFinanceAccountConnection(id)).resolves.toMatchObject({
+      data: { status: "connected" },
+    });
+    await expect(
+      api.updateFinanceAccount(id, { idempotencyKey: "account-1", name: "Primary" }),
+    ).resolves.toMatchObject({ data: financeAccount });
+    await expect(
+      api.disconnectFinanceAccount(id, { idempotencyKey: "disconnect-1" }),
+    ).resolves.toMatchObject({ data: financeAccount });
+    await expect(
       api.exchangePlaidToken({ institution: "Test bank", publicToken: "public-token" }),
     ).resolves.toEqual([financeAccount]);
     await expect(
@@ -1050,6 +1114,37 @@ describe("ilo API client", () => {
       category: "Dining",
       needsReview: false,
     });
+    await expect(
+      api.updateFinanceTransactionCanonical(accountId, {
+        category: "Dining",
+        idempotencyKey: "transaction-update-1",
+      }),
+    ).resolves.toMatchObject({ data: { category: "Dining" } });
+    await expect(api.getFinanceTransaction(id)).resolves.toMatchObject({
+      data: financeTransaction,
+    });
+    await expect(
+      api.removeFinanceTransaction(id, { idempotencyKey: "remove-1" }),
+    ).resolves.toMatchObject({ data: { removed: true } });
+    await expect(api.splitFinanceTransaction({ idempotencyKey: "split-1" })).resolves.toMatchObject(
+      { data: [financeTransaction] },
+    );
+    await expect(
+      api.classifyFinanceTransactions({ idempotencyKey: "classify-1" }),
+    ).resolves.toMatchObject({ data: [financeTransaction] });
+    await expect(api.linkFinanceTransactions({ idempotencyKey: "link-1" })).resolves.toMatchObject({
+      data: { relationship: "transfer" },
+    });
+    await expect(api.listFinanceRules()).resolves.toMatchObject({ data: [] });
+    await expect(
+      api.manageFinanceRule({ idempotencyKey: "rule-1", operation: "create" }),
+    ).resolves.toMatchObject({ data: { id } });
+    await expect(api.listFinanceRecurringItems()).resolves.toMatchObject({
+      data: { income: [], obligations: [] },
+    });
+    await expect(
+      api.manageFinanceRecurringItem({ idempotencyKey: "recurring-1", operation: "pause" }),
+    ).resolves.toMatchObject({ data: { id } });
     await expect(api.syncFinanceAccount(id)).resolves.toBe(2);
     await expect(
       api.importFinanceCsv({
@@ -1058,6 +1153,14 @@ describe("ilo API client", () => {
         provider: "paypal",
       }),
     ).resolves.toEqual({ imported: 2, skipped: 1 });
+    await expect(
+      api.importFinanceTransactions({
+        accountId: id,
+        csv: "Date,Amount\n2026-07-13,10",
+        idempotencyKey: "import-1",
+        provider: "paypal",
+      }),
+    ).resolves.toMatchObject({ data: { imported: 2, skipped: 1 } });
     await api.deleteFinanceAccount(id);
     await expect(api.listAutomations()).resolves.toEqual([automation]);
     await expect(

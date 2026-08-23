@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { financeCapabilityManifest } from "@personal-os/domain";
 import { registerFinanceTools } from "./finances.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -50,6 +51,22 @@ describe("Finance MCP workflows", () => {
     expect(maintenance?.description).toContain("never queues an automation");
     expect(tools.tools.map((tool) => tool.name)).not.toContain("get_finance_review_queue");
     expect(tools.tools.map((tool) => tool.name)).not.toContain("apply_finance_categorizations");
+    expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual(
+      financeCapabilityManifest.map((capability) => capability.mcpTool).toSorted(),
+    );
+    for (const toolName of [
+      "update_finance_transaction",
+      "import_finance_transactions",
+      "update_finance_merchant",
+      "merge_finance_merchants",
+      "manage_finance_rule",
+      "manage_finance_recurring_item",
+    ]) {
+      const tool = tools.tools.find((candidate) => candidate.name === toolName);
+      expect(tool?.inputSchema).toMatchObject({
+        required: expect.arrayContaining(["idempotencyKey"]),
+      });
+    }
 
     const called = await client.callTool({
       name: "setup_finances",

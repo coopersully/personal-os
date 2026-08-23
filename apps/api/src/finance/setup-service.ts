@@ -87,7 +87,7 @@ export function setupProfileChange(
   return { liquidReserves: parseSetupMoney(answer) };
 }
 
-function setupResult(input: {
+export function setupResult(input: {
   budgetVersionId: string | null;
   disclosures?: Array<{ importance: "critical" | "important"; message: string }>;
   headline: string;

@@ -3,6 +3,7 @@ import {
   answerFinanceReviewInputSchema,
   applyFinanceCategorizationsInputSchema,
   approveFinanceBudgetInputSchema,
+  classifyFinanceTransactionsInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceBudgetVersionInputSchema,
@@ -17,10 +18,12 @@ import {
   financeReviewDecisionInputSchema,
   financeSetupInputSchema,
   financeTransactionQuerySchema,
+  linkFinanceTransactionsInputSchema,
   manageFinanceGoalInputSchema,
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
   reviseFinanceBudgetInputSchema,
+  splitFinanceTransactionInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -29,6 +32,7 @@ import {
   updateFinancialProfileInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import { z } from "zod";
 import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { AppEnv, Principal } from "../types.js";
@@ -181,28 +185,144 @@ export function registerFinanceRoutes({ app, db, finances, mutationContext }: Fi
       ),
     }),
   );
-  app.patch("/v1/finances/merchants/:id", async (context) =>
-    context.json({
+  app.get("/v1/finances/rules", async (context) =>
+    context.json(await finances.listFinanceRules(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/rules", async (context) =>
+    context.json(
+      await finances.manageFinanceRule(
+        await parseBody(
+          context,
+          z.object({
+            category: z.string().trim().min(1).max(80).optional(),
+            idempotencyKey: z.string().trim().min(1).max(200),
+            merchant: z.string().trim().min(1).max(240).optional(),
+            operation: z.enum(["create", "update", "remove"]),
+            ruleId: z.string().uuid().optional(),
+          }),
+        ),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.get("/v1/finances/recurring-items", async (context) =>
+    context.json(await finances.listFinanceRecurringItems(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/recurring-items", async (context) =>
+    context.json(
+      await finances.manageFinanceRecurringItem(
+        await parseBody(
+          context,
+          z.object({
+            idempotencyKey: z.string().trim().min(1).max(200),
+            itemId: z.string().uuid(),
+            itemType: z.enum(["income", "obligation"]),
+            operation: z.enum(["pause", "resume", "cancel"]),
+          }),
+        ),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.patch("/v1/finances/merchants/:id", async (context) => {
+    const input = await parseBody(
+      context,
+      updateFinanceMerchantInputSchema.extend({
+        idempotencyKey: z.string().trim().min(1).max(200).optional(),
+      }),
+    );
+    if (input.idempotencyKey) {
+      return context.json(
+        await finances.updateFinanceMerchant(
+          context.req.param("id"),
+          { displayName: input.displayName, idempotencyKey: input.idempotencyKey },
+          await financeContext(context),
+        ),
+      );
+    }
+    return context.json({
       merchant: await finances.updateMerchant(
         context.req.param("id"),
-        await parseBody(context, updateFinanceMerchantInputSchema),
+        { displayName: input.displayName },
         mutationContext(context),
       ),
-    }),
-  );
-  app.post("/v1/finances/merchants/merge", async (context) =>
-    context.json({
-      merchant: await finances.mergeMerchants(
-        await parseBody(context, mergeFinanceMerchantsInputSchema),
-        mutationContext(context),
+    });
+  });
+  app.post("/v1/finances/merchants/merge", async (context) => {
+    const input = await parseBody(
+      context,
+      mergeFinanceMerchantsInputSchema.and(
+        z.object({ idempotencyKey: z.string().trim().min(1).max(200).optional() }),
       ),
-    }),
-  );
+    );
+    if (input.idempotencyKey) {
+      return context.json(
+        await finances.mergeFinanceMerchantRecords(
+          {
+            idempotencyKey: input.idempotencyKey,
+            sourceMerchantId: input.sourceMerchantId,
+            targetMerchantId: input.targetMerchantId,
+          },
+          await financeContext(context),
+        ),
+      );
+    }
+    return context.json({
+      merchant: await finances.mergeMerchants(input, mutationContext(context)),
+    });
+  });
   app.get("/v1/finances/transactions", async (context) =>
     context.json(
       await finances.listTransactions(
         context.get("principal").userId,
         financeTransactionQuerySchema.parse(context.req.query()),
+      ),
+    ),
+  );
+  app.get("/v1/finances/transactions/:id", async (context) =>
+    context.json(
+      await finances.getFinanceTransaction(
+        context.get("principal").userId,
+        context.req.param("id"),
+      ),
+    ),
+  );
+  app.post("/v1/finances/transactions/:id/remove", async (context) => {
+    const input = await parseBody(
+      context,
+      z.object({ idempotencyKey: z.string().trim().min(1).max(200) }),
+    );
+    return context.json(
+      await finances.removeFinanceTransaction(
+        context.req.param("id"),
+        input.idempotencyKey,
+        await financeContext(context),
+      ),
+    );
+  });
+  app.post("/v1/finances/transactions/split", async (context) =>
+    context.json(
+      await finances.splitFinanceTransaction(
+        await parseBody(context, splitFinanceTransactionInputSchema),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.post("/v1/finances/transactions/classify", async (context) => {
+    const input = await parseBody(context, classifyFinanceTransactionsInputSchema);
+    return context.json(
+      await finances.classifyFinanceTransactions(
+        input.classifications,
+        input.idempotencyKey,
+        await financeContext(context),
+      ),
+    );
+  });
+  app.post("/v1/finances/transactions/link", async (context) =>
+    context.json(
+      await finances.linkFinanceTransactions(
+        await parseBody(context, linkFinanceTransactionsInputSchema),
+        await financeContext(context),
       ),
     ),
   );
@@ -301,15 +421,30 @@ export function registerFinanceRoutes({ app, db, finances, mutationContext }: Fi
       201,
     ),
   );
-  app.patch("/v1/finances/transactions/:id", async (context) =>
-    context.json({
+  app.patch("/v1/finances/transactions/:id", async (context) => {
+    const input = await parseBody(
+      context,
+      updateFinanceTransactionInputSchema.and(
+        z.object({ idempotencyKey: z.string().trim().min(1).max(200).optional() }),
+      ),
+    );
+    if (input.idempotencyKey) {
+      return context.json(
+        await finances.updateFinanceTransaction(
+          context.req.param("id"),
+          { ...input, idempotencyKey: input.idempotencyKey },
+          await financeContext(context),
+        ),
+      );
+    }
+    return context.json({
       transaction: await finances.updateTransaction(
         context.req.param("id"),
-        await parseBody(context, updateFinanceTransactionInputSchema),
+        input,
         mutationContext(context),
       ),
-    }),
-  );
+    });
+  });
   app.post("/v1/finances/budgets", async (context) =>
     context.json(
       {
@@ -425,18 +560,87 @@ export function registerFinanceRoutes({ app, db, finances, mutationContext }: Fi
       result: await finances.syncPlaidAccount(context.req.param("id"), mutationContext(context)),
     }),
   );
-  app.post("/v1/finances/accounts/:id/import", async (context) =>
+  app.get("/v1/finances/account-connections/:id", async (context) =>
     context.json(
+      await finances.getFinanceAccountConnection(
+        context.get("principal").userId,
+        context.req.param("id"),
+      ),
+    ),
+  );
+  app.post("/v1/finances/account-connections", async (context) =>
+    context.json(
+      await finances.startFinanceAccountConnection(
+        await parseBody(
+          context,
+          z.object({
+            idempotencyKey: z.string().trim().min(1).max(200),
+            provider: z.literal("plaid"),
+          }),
+        ),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.patch("/v1/finances/accounts/:id", async (context) =>
+    context.json(
+      await finances.updateFinanceAccount(
+        context.req.param("id"),
+        await parseBody(
+          context,
+          z.object({
+            balance: z.number().finite().nullable().optional(),
+            idempotencyKey: z.string().trim().min(1).max(200),
+            institution: z.string().trim().min(1).max(160).optional(),
+            kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
+            name: z.string().trim().min(1).max(160).optional(),
+          }),
+        ),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.post("/v1/finances/accounts/:id/disconnect", async (context) => {
+    const input = await parseBody(
+      context,
+      z.object({ idempotencyKey: z.string().trim().min(1).max(200) }),
+    );
+    return context.json(
+      await finances.disconnectFinanceAccount(
+        context.req.param("id"),
+        input.idempotencyKey,
+        await financeContext(context),
+      ),
+    );
+  });
+  app.post("/v1/finances/accounts/:id/import", async (context) => {
+    const input = await parseBody(
+      context,
+      financeCsvImportInputSchema.extend({
+        idempotencyKey: z.string().trim().min(1).max(200).optional(),
+      }),
+    );
+    if (input.idempotencyKey) {
+      return context.json(
+        await finances.importFinanceTransactions(
+          {
+            ...input,
+            accountId: context.req.param("id"),
+            idempotencyKey: input.idempotencyKey,
+          },
+          await financeContext(context),
+        ),
+        201,
+      );
+    }
+    return context.json(
       {
         result: await finances.importCsv(
-          {
-            ...(await parseBody(context, financeCsvImportInputSchema)),
-            accountId: context.req.param("id"),
-          },
+          { ...input, accountId: context.req.param("id") },
           mutationContext(context),
         ),
       },
       201,
-    ),
-  );
+    );
+  });
 }

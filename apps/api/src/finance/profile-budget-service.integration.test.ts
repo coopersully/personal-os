@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeAccounts,
   financeAgentSettings,
   financeCategories,
   migrateDatabase,
@@ -186,6 +187,33 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(service.getFinanceBudgetStatus(userId)).resolves.toMatchObject({
       data: { status: "active", version: 2 },
     });
+    await expect(
+      service.approveFinanceBudget(
+        {
+          approvalSource: "user_instruction",
+          budgetVersionId: revised.data.id,
+          expectedVersion: revised.data.version,
+          idempotencyKey: "approve-active",
+        },
+        noBypass,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.reviseFinanceBudget(
+        {
+          allocations: [{ amount: 8000, key: "buffer", kind: "buffer" }],
+          assumptions: [],
+          effectiveFrom: "2026-09",
+          expectedVersion: 1,
+          idempotencyKey: "budget-stale-revision",
+          name: "Monthly plan",
+          planId: active.data.planId,
+          rationale: "Stale fixture.",
+          resources: [{ amount: 8000, key: "take-home", kind: "income" }],
+        },
+        noBypass,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.listFinanceGoals(userId)).resolves.toMatchObject({
       data: [expect.objectContaining({ id: goal.id })],
     });
@@ -228,6 +256,17 @@ describe.sequential("Finance profile and budget lifecycle", () => {
         noBypass,
       ),
     ).resolves.toMatchObject({ data: { status: "completed" } });
+    await expect(
+      service.manageFinanceGoal(
+        {
+          expectedVersion: 1,
+          goalId: "00000000-0000-4000-8000-000000000000",
+          idempotencyKey: "goal-missing",
+          operation: "pause",
+        },
+        noBypass,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("rejects an unbalanced budget proposal", async () => {
@@ -241,6 +280,20 @@ describe.sequential("Finance profile and budget lifecycle", () => {
         userId,
       },
       requestId: "unbalanced",
+    });
+    const [emptyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Empty planning",
+        email: "empty-planning@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!emptyUser) throw new Error("Empty planning user missing.");
+    await expect(service.getFinancialProfile(emptyUser.id)).resolves.toMatchObject({ data: null });
+    await expect(service.getFinanceBudget(emptyUser.id)).resolves.toMatchObject({ data: null });
+    await expect(service.getFinanceBudgetStatus(emptyUser.id)).resolves.toMatchObject({
+      data: null,
     });
     await expect(
       service.createFinanceBudget(
@@ -256,5 +309,172 @@ describe.sequential("Finance profile and budget lifecycle", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.updateFinancialProfile(
+        {
+          changes: { dependents: 1 },
+          expectedVersion: 0,
+          idempotencyKey: "stale-profile",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.createFinanceBudget(
+        {
+          allocations: [{ amount: 1000, key: "missing-category", kind: "spending" }],
+          assumptions: [],
+          effectiveFrom: "2026-10",
+          idempotencyKey: "missing-category-budget",
+          name: "Missing category",
+          rationale: "Fixture",
+          resources: [{ amount: 1000, key: "income", kind: "income" }],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.reviseFinanceBudget(
+        {
+          allocations: [{ amount: 1000, key: "buffer", kind: "buffer" }],
+          assumptions: [],
+          effectiveFrom: "2026-10",
+          expectedVersion: 1,
+          idempotencyKey: "missing-plan-budget",
+          name: "Missing",
+          planId: "00000000-0000-4000-8000-000000000000",
+          rationale: "Fixture",
+          resources: [{ amount: 1000, key: "income", kind: "income" }],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.getFinanceBudget(userId, "00000000-0000-4000-8000-000000000000"),
+    ).resolves.toMatchObject({ data: null });
+    await expect(
+      service.approveFinanceBudget(
+        {
+          approvalSource: "user_instruction",
+          budgetVersionId: "00000000-0000-4000-8000-000000000000",
+          expectedVersion: 1,
+          idempotencyKey: "missing-budget-approval",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    for (const [key, allocation] of [
+      [
+        "foreign-category",
+        {
+          amount: 100,
+          categoryId: "00000000-0000-4000-8000-000000000000",
+          key: "spending",
+          kind: "spending" as const,
+        },
+      ],
+      [
+        "foreign-account",
+        {
+          accountId: "00000000-0000-4000-8000-000000000000",
+          amount: 100,
+          key: "debt",
+          kind: "debt" as const,
+        },
+      ],
+      [
+        "foreign-goal",
+        {
+          amount: 100,
+          goalId: "00000000-0000-4000-8000-000000000000",
+          key: "goal",
+          kind: "goal" as const,
+        },
+      ],
+    ] as const) {
+      await expect(
+        service.createFinanceBudget(
+          {
+            allocations: [allocation],
+            assumptions: [],
+            effectiveFrom: "2026-10",
+            idempotencyKey: `${key}-budget`,
+            name: key,
+            rationale: "Invalid ownership fixture.",
+            resources: [{ amount: 100, key: "income", kind: "income" }],
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    }
+
+    const [debtAccount] = await database.db
+      .insert(financeAccounts)
+      .values({ institution: "Lender", kind: "debt", name: "Loan", provider: "manual", userId })
+      .returning();
+    const goal = (await service.listFinanceGoals(userId)).data[0];
+    if (!debtAccount || !goal) throw new Error("Allocation fixtures missing.");
+    await expect(
+      service.createFinanceBudget(
+        {
+          allocations: [
+            {
+              accountId: debtAccount.id,
+              amount: 100,
+              description: "Extra principal",
+              key: "debt",
+              kind: "debt",
+            },
+            { amount: 100, goalId: goal.id, key: "savings", kind: "savings" },
+            { amount: 100, key: "buffer", kind: "buffer" },
+          ],
+          assumptions: [],
+          effectiveFrom: "2026-10",
+          idempotencyKey: "allocation-kinds-budget",
+          name: "Allocation kinds",
+          rationale: "Exercise all allocation destinations.",
+          resources: [{ amount: 300, key: "income", kind: "income" }],
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ data: { balanceDelta: 0 } });
+    const allFields = await service.manageFinanceGoal(
+      {
+        changes: {
+          deadline: null,
+          name: "Updated reserve",
+          priority: "medium",
+          targetAmount: 16000,
+        },
+        expectedVersion: goal.version,
+        goalId: goal.id,
+        idempotencyKey: "goal-all-fields",
+        operation: "update",
+      },
+      context,
+    );
+    expect(allFields).toMatchObject({ data: { priority: "medium" } });
+    await expect(
+      service.manageFinanceGoal(
+        {
+          expectedVersion: goal.version,
+          goalId: goal.id,
+          idempotencyKey: "goal-stale",
+          operation: "remove",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.manageFinanceGoal(
+        {
+          expectedVersion: allFields.data.version,
+          goalId: goal.id,
+          idempotencyKey: "goal-remove",
+          operation: "remove",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ data: { status: "removed" } });
   });
 });

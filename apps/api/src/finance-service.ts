@@ -3,6 +3,7 @@ import {
   auditEvents,
   type Database,
   type EncryptedCredentials,
+  financeAccountConnections,
   financeAccounts,
   financeAlerts,
   financeBudgets,
@@ -40,6 +41,7 @@ import type {
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceToolResult,
   FinanceTransaction,
   FinanceTransactionQuery,
   FinanceWealthSummary,
@@ -55,7 +57,10 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizz
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { createFinanceAccountService } from "./finance/account-service.js";
+import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
+import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { createMaintenanceService } from "./finance/maintenance-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { createSetupService } from "./finance/setup-service.js";
@@ -307,6 +312,16 @@ export function financeCsvImportErrorMessage(error: unknown) {
 function currency(cents: number | null) {
   return cents === null ? null : cents / 100;
 }
+function canonicalResult<T>(data: T, headline: string): FinanceToolResult<T> {
+  return {
+    changes: [],
+    communication: { headline, optionalDetails: [], requiredDisclosures: [] },
+    data,
+    outcome: "completed",
+    remainingWork: { categories: [], count: 0 },
+    schemaVersion: 1,
+  };
+}
 function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
   return {
     balance: currency(row.balance),
@@ -378,10 +393,23 @@ function merchant(
 }
 
 export function createFinanceService({ db, now, plaid }: Options) {
+  const canonicalAccounts = createFinanceAccountService({ db, now });
   const inbox = createInboxService({ db, now });
+  const canonicalLedger = createFinanceLedgerService({ db, now });
   const maintenance = createMaintenanceService({ db, inbox, now });
   const planning = createProfileBudgetService({ db, now });
   const setup = createSetupService({ db, now, planning });
+  function legacyMutationContext(context: FinanceMutationContext): MutationContext {
+    return {
+      principal: {
+        actorId: context.actorId,
+        actorType: context.actorType,
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: context.userId,
+      },
+      requestId: context.requestId,
+    };
+  }
   async function ensureCategories(userId: string) {
     await db
       .insert(financeCategories)
@@ -1245,6 +1273,14 @@ export function createFinanceService({ db, now, plaid }: Options) {
     }
   }
   return {
+    getFinanceAccountConnection: canonicalAccounts.getConnection,
+    updateFinanceAccount: canonicalAccounts.update,
+    disconnectFinanceAccount: canonicalAccounts.disconnect,
+    getFinanceTransaction: canonicalLedger.getTransaction,
+    removeFinanceTransaction: canonicalLedger.removeTransaction,
+    splitFinanceTransaction: canonicalLedger.splitTransaction,
+    classifyFinanceTransactions: canonicalLedger.classifyTransactions,
+    linkFinanceTransactions: canonicalLedger.linkTransactions,
     ...inbox,
     ...maintenance,
     ...planning,
@@ -1524,6 +1560,41 @@ export function createFinanceService({ db, now, plaid }: Options) {
       });
       return response.link_token;
     },
+    async startFinanceAccountConnection(
+      input: { idempotencyKey: string; provider: "plaid" },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.account_connection.start",
+          payload: input,
+        },
+        async () => {
+          const linkToken = await this.createPlaidLinkToken(context.userId);
+          const [connection] = await db
+            .insert(financeAccountConnections)
+            .values({ provider: input.provider, status: "pending", userId: context.userId })
+            .returning();
+          if (!connection)
+            throw new AppError("internal_error", "The account connection was not started.");
+          return {
+            ...canonicalResult(
+              {
+                connectionId: connection.id,
+                externalHandoff: { linkToken, provider: input.provider },
+                status: connection.status,
+              },
+              "The secure bank authorization handoff is ready.",
+            ),
+            outcome: "external_action_required" as const,
+            remainingWork: { categories: ["provider_authorization"], count: 1 },
+          };
+        },
+      );
+    },
     async exchangePlaidToken(
       input: ExchangePlaidTokenInput,
       context: MutationContext,
@@ -1598,6 +1669,28 @@ export function createFinanceService({ db, now, plaid }: Options) {
               ...context,
             }),
           );
+        }
+        const [pendingConnection] = await tx
+          .select({ id: financeAccountConnections.id })
+          .from(financeAccountConnections)
+          .where(
+            and(
+              eq(financeAccountConnections.userId, context.principal.userId),
+              eq(financeAccountConnections.provider, "plaid"),
+              eq(financeAccountConnections.status, "pending"),
+            ),
+          )
+          .orderBy(desc(financeAccountConnections.createdAt))
+          .limit(1);
+        if (pendingConnection) {
+          await tx
+            .update(financeAccountConnections)
+            .set({
+              accountIds: created.map((item) => item.id),
+              status: "connected",
+              updatedAt: now(),
+            })
+            .where(eq(financeAccountConnections.id, pendingConnection.id));
         }
         return created;
       });
@@ -1854,6 +1947,205 @@ export function createFinanceService({ db, now, plaid }: Options) {
     },
     async listCategories(userId: string) {
       return (await ensureCategories(userId)).map(categoryValue);
+    },
+    async listFinanceRules(userId: string) {
+      const rules = await db
+        .select()
+        .from(financeCategoryRules)
+        .where(eq(financeCategoryRules.userId, userId))
+        .orderBy(financeCategoryRules.merchantNormalized);
+      return canonicalResult(
+        rules.map((rule) => ({
+          category: rule.category,
+          createdAt: rule.createdAt.toISOString(),
+          id: rule.id,
+          merchant: rule.merchantNormalized,
+          updatedAt: rule.updatedAt.toISOString(),
+        })),
+        `Found ${rules.length} deterministic categorization rules.`,
+      );
+    },
+    async manageFinanceRule(
+      input: {
+        category?: string | undefined;
+        idempotencyKey: string;
+        merchant?: string | undefined;
+        operation: "create" | "update" | "remove";
+        ruleId?: string | undefined;
+      },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.rule.manage",
+          payload: input,
+        },
+        async () => {
+          const auditContext = legacyMutationContext(context);
+          if (input.operation === "create") {
+            if (!input.category || !input.merchant)
+              throw new AppError("invalid_request", "A merchant and category are required.");
+            const normalized = normalizedMerchant(input.merchant);
+            const [saved] = await db
+              .insert(financeCategoryRules)
+              .values({
+                category: input.category,
+                merchantNormalized: normalized,
+                userId: context.userId,
+              })
+              .onConflictDoUpdate({
+                set: { category: input.category, updatedAt: now() },
+                target: [financeCategoryRules.userId, financeCategoryRules.merchantNormalized],
+              })
+              .returning();
+            if (!saved)
+              throw new AppError("internal_error", "The Finance rule could not be saved.");
+            await db.insert(auditEvents).values(
+              auditValues({
+                action: "finance.rule_saved",
+                after: saved,
+                before: null,
+                entityId: saved.id,
+                entityType: "finance_category_rule",
+                ...auditContext,
+              }),
+            );
+            return canonicalResult(saved, "Categorization rule saved.");
+          }
+          if (!input.ruleId)
+            throw new AppError("invalid_request", "A ruleId is required for this operation.");
+          const [before] = await db
+            .select()
+            .from(financeCategoryRules)
+            .where(
+              and(
+                eq(financeCategoryRules.id, input.ruleId),
+                eq(financeCategoryRules.userId, context.userId),
+              ),
+            )
+            .limit(1);
+          if (!before) throw new AppError("not_found", "The Finance rule was not found.");
+          if (input.operation === "remove") {
+            await db.delete(financeCategoryRules).where(eq(financeCategoryRules.id, before.id));
+            await db.insert(auditEvents).values(
+              auditValues({
+                action: "finance.rule_removed",
+                after: null,
+                before,
+                entityId: before.id,
+                entityType: "finance_category_rule",
+                ...auditContext,
+              }),
+            );
+            return canonicalResult(
+              { id: before.id, removed: true },
+              "Categorization rule removed.",
+            );
+          }
+          const [saved] = await db
+            .update(financeCategoryRules)
+            .set({
+              category: input.category,
+              merchantNormalized: input.merchant
+                ? normalizedMerchant(input.merchant)
+                : before.merchantNormalized,
+              updatedAt: now(),
+            })
+            .where(eq(financeCategoryRules.id, before.id))
+            .returning();
+          if (!saved)
+            throw new AppError("internal_error", "The Finance rule could not be updated.");
+          await db.insert(auditEvents).values(
+            auditValues({
+              action: "finance.rule_updated",
+              after: saved,
+              before,
+              entityId: saved.id,
+              entityType: "finance_category_rule",
+              ...auditContext,
+            }),
+          );
+          return canonicalResult(saved, "Categorization rule updated.");
+        },
+      );
+    },
+    async listFinanceRecurringItems(userId: string) {
+      const [income, obligations] = await Promise.all([
+        db
+          .select()
+          .from(financeIncomeStreams)
+          .where(eq(financeIncomeStreams.userId, userId))
+          .orderBy(desc(financeIncomeStreams.confidence), financeIncomeStreams.displayName),
+        db
+          .select()
+          .from(financeRecurringObligations)
+          .where(eq(financeRecurringObligations.userId, userId))
+          .orderBy(
+            desc(financeRecurringObligations.confidence),
+            financeRecurringObligations.displayName,
+          ),
+      ]);
+      return canonicalResult(
+        {
+          income: income.map(incomeStreamValue),
+          obligations: obligations.map(recurringValue),
+        },
+        `Found ${income.length + obligations.length} recurring Finance items.`,
+      );
+    },
+    async manageFinanceRecurringItem(
+      input: {
+        idempotencyKey: string;
+        itemId: string;
+        itemType: "income" | "obligation";
+        operation: "pause" | "resume" | "cancel";
+      },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.recurring.manage",
+          payload: input,
+        },
+        async () => {
+          const auditContext = legacyMutationContext(context);
+          if (input.itemType === "income") {
+            if (input.operation === "cancel")
+              throw new AppError(
+                "invalid_request",
+                "Income can be paused, but only obligations can be cancelled.",
+              );
+            const item = await this.updateIncomeStream(
+              input.itemId,
+              { status: input.operation === "pause" ? "paused" : "active" },
+              auditContext,
+            );
+            return canonicalResult(
+              item,
+              `Recurring income ${input.operation === "pause" ? "paused" : "resumed"}.`,
+            );
+          }
+          const item = await this.updateRecurringObligation(
+            input.itemId,
+            {
+              status:
+                input.operation === "cancel"
+                  ? "cancelled"
+                  : input.operation === "pause"
+                    ? "paused"
+                    : "active",
+            },
+            auditContext,
+          );
+          return canonicalResult(item, `Recurring obligation ${input.operation}d.`);
+        },
+      );
     },
     async listMerchants(userId: string, limit = 50) {
       const merchants = await db
@@ -2669,6 +2961,88 @@ export function createFinanceService({ db, now, plaid }: Options) {
         recurringObligations,
         transactions: await Promise.all(transactions.map(enrichTransaction)),
       };
+    },
+    async importFinanceTransactions(
+      input: FinanceCsvImportInput & { idempotencyKey: string },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.transactions.import",
+          payload: input,
+        },
+        async () => {
+          const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
+          const data = await this.importCsv(legacyInput, legacyMutationContext(context));
+          return canonicalResult(data, `${data.imported} transactions imported.`);
+        },
+      );
+    },
+    async updateFinanceTransaction(
+      id: string,
+      input: UpdateFinanceTransactionInput & { idempotencyKey: string },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.transaction.update",
+          payload: { id, ...input },
+        },
+        async () => {
+          const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
+          const data = await this.updateTransaction(
+            id,
+            legacyInput,
+            legacyMutationContext(context),
+          );
+          return canonicalResult(data, "Transaction updated.");
+        },
+      );
+    },
+    async updateFinanceMerchant(
+      id: string,
+      input: UpdateFinanceMerchantInput & { idempotencyKey: string },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.merchant.update",
+          payload: { id, ...input },
+        },
+        async () => {
+          const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
+          const data = await this.updateMerchant(id, legacyInput, legacyMutationContext(context));
+          return canonicalResult(data, "Merchant updated.");
+        },
+      );
+    },
+    async mergeFinanceMerchantRecords(
+      input: MergeFinanceMerchantsInput & { idempotencyKey: string },
+      context: FinanceMutationContext,
+    ) {
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          idempotencyKey: input.idempotencyKey,
+          operation: "finance.merchant.merge",
+          payload: input,
+        },
+        async () => {
+          const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
+          const data = await this.mergeMerchants(legacyInput, legacyMutationContext(context));
+          return canonicalResult(data, "Merchants merged.");
+        },
+      );
     },
     async updateTransaction(
       id: string,

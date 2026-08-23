@@ -3,7 +3,10 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeBudgetPlans,
+  financeBudgetVersions,
   financeCategories,
+  financeCategoryRules,
   financeEconomicEvents,
   financeEventTransactions,
   financeTransactions,
@@ -11,6 +14,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createInboxService } from "./inbox-service.js";
@@ -86,6 +90,40 @@ describe.sequential("caller-driven Finance maintenance", () => {
     expect(started.data.stage).toBe("agent_reasoning");
     expect(started.data.reasoningBatch).toHaveLength(1);
     expect(started.nextAction?.tool).toBe("maintain_finances");
+    await expect(
+      service.maintainFinances({ operation: "start", scope: { type: "all_outstanding" } }, context),
+    ).resolves.toMatchObject({ data: { runId: started.data.runId } });
+    await expect(
+      service.maintainFinances(
+        {
+          expectedVersion: started.data.version,
+          findings: [],
+          idempotencyKey: "audit-too-early",
+          operation: "submit_audit",
+          runId: started.data.runId,
+        },
+        context,
+      ),
+    ).rejects.toThrow("not awaiting audit");
+    await expect(
+      service.maintainFinances(
+        {
+          expectedVersion: started.data.version + 1,
+          idempotencyKey: "judgments-stale",
+          judgments: [
+            {
+              confidence: 0.5,
+              questionReason: "Fixture",
+              transactionId: started.data.reasoningBatch[0]?.transactionId as string,
+              type: "needs_user_review",
+            },
+          ],
+          operation: "submit_judgments",
+          runId: started.data.runId,
+        },
+        context,
+      ),
+    ).rejects.toThrow("version");
 
     const item = started.data.reasoningBatch[0];
     if (!item) throw new Error("Reasoning item missing.");
@@ -109,6 +147,25 @@ describe.sequential("caller-driven Finance maintenance", () => {
       context,
     );
     expect(reasoned.data.stage).toBe("agent_audit");
+    await expect(
+      service.maintainFinances(
+        {
+          expectedVersion: reasoned.data.version,
+          idempotencyKey: "judgments-too-late",
+          judgments: [
+            {
+              confidence: 0.5,
+              questionReason: "Fixture",
+              transactionId: item.transactionId,
+              type: "needs_user_review",
+            },
+          ],
+          operation: "submit_judgments",
+          runId: reasoned.data.runId,
+        },
+        context,
+      ),
+    ).rejects.toThrow("not awaiting judgments");
 
     const settled = await service.maintainFinances(
       {
@@ -121,6 +178,9 @@ describe.sequential("caller-driven Finance maintenance", () => {
       context,
     );
     expect(settled).toMatchObject({ data: { stage: "settled" }, outcome: "completed" });
+    await expect(
+      service.getFinanceMaintenanceRun(userId, "00000000-0000-4000-8000-000000000000"),
+    ).rejects.toThrow("not found");
   });
 
   it("resumes an audit-only run, persists findings, and exposes history", async () => {
@@ -183,5 +243,228 @@ describe.sequential("caller-driven Finance maintenance", () => {
       context,
     );
     expect(settled).toMatchObject({ data: { stage: "settled" }, remainingWork: { count: 1 } });
+  });
+
+  it("runs deterministic rules, creates review work, and links related transactions", async () => {
+    const now = () => new Date("2026-08-25T20:00:00Z");
+    const inbox = createInboxService({ db: database.db, now });
+    const service = createMaintenanceService({ db: database.db, inbox, now });
+    const [account] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.userId, userId))
+      .limit(1);
+    const [category] = await database.db
+      .select()
+      .from(financeCategories)
+      .where(eq(financeCategories.userId, userId))
+      .limit(1);
+    if (!account || !category) throw new Error("Maintenance fixtures missing.");
+    await database.db.insert(financeCategoryRules).values({
+      category: category.name,
+      merchantNormalized: "known market",
+      userId,
+    });
+    const [plan] = await database.db
+      .insert(financeBudgetPlans)
+      .values({ name: "Maintenance plan", userId })
+      .returning();
+    if (!plan) throw new Error("Maintenance plan missing.");
+    await database.db.insert(financeBudgetVersions).values({
+      allocatedTotal: 100000,
+      assumptions: [],
+      balanceDelta: 0,
+      effectiveFrom: "2026-08",
+      expectedResources: 100000,
+      planId: plan.id,
+      rationale: "Maintenance fixture.",
+      resources: [{ amount: 100000, key: "income", kind: "income" }],
+      status: "active",
+      userId,
+      version: 1,
+    });
+    const [deterministic, uncertain, transferOne, transferTwo] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 1000,
+          direction: "expense",
+          merchant: "Known Market",
+          transactionDate: "2026-08-25",
+          userId,
+        },
+        {
+          accountId: account.id,
+          amount: 1100,
+          direction: "expense",
+          merchant: "Unclear",
+          transactionDate: "2026-08-25",
+          userId,
+        },
+        {
+          accountId: account.id,
+          amount: 2000,
+          direction: "expense",
+          merchant: "Move out",
+          transactionDate: "2026-08-25",
+          userId,
+        },
+        {
+          accountId: account.id,
+          amount: 2000,
+          direction: "income",
+          merchant: "Move in",
+          transactionDate: "2026-08-25",
+          userId,
+        },
+      ])
+      .returning();
+    if (!deterministic || !uncertain || !transferOne || !transferTwo)
+      throw new Error("Maintenance transactions missing.");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: "agent",
+        actorType: "agent",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "mixed-maintenance",
+    });
+    const started = await service.maintainFinances(
+      { operation: "start", scope: { accountIds: [account.id], type: "accounts" } },
+      context,
+    );
+    expect(started.data.reasoningBatch.map((item) => item.transactionId)).not.toContain(
+      deterministic.id,
+    );
+    const reasoned = await service.maintainFinances(
+      {
+        expectedVersion: started.data.version,
+        idempotencyKey: "mixed-judgments",
+        judgments: [
+          {
+            confidence: 0.4,
+            questionReason: "The merchant is ambiguous.",
+            transactionId: uncertain.id,
+            type: "needs_user_review",
+          },
+          {
+            confidence: 0.99,
+            rationale: "Equal opposite movements on the same date.",
+            relationship: "transfer",
+            transactionIds: [transferOne.id, transferTwo.id],
+            type: "link_transactions",
+          },
+        ],
+        operation: "submit_judgments",
+        runId: started.data.runId,
+      },
+      context,
+    );
+    expect(reasoned).toMatchObject({ data: { stage: "agent_audit" } });
+    expect(reasoned.remainingWork.count).toBeGreaterThanOrEqual(1);
+    await service.maintainFinances(
+      {
+        expectedVersion: reasoned.data.version,
+        findings: [],
+        idempotencyKey: "mixed-audit",
+        operation: "submit_audit",
+        runId: reasoned.data.runId,
+      },
+      context,
+    );
+    const [directionAccount] = await database.db
+      .insert(financeAccounts)
+      .values({ institution: "Directions", name: "Directions", provider: "manual", userId })
+      .returning();
+    if (!directionAccount) throw new Error("Direction account missing.");
+    const [income, transfer] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: directionAccount.id,
+          amount: 3000,
+          direction: "income",
+          merchant: "Unknown income",
+          transactionDate: "2026-08-25",
+          userId,
+        },
+        {
+          accountId: directionAccount.id,
+          amount: 3000,
+          direction: "transfer",
+          merchant: "Unknown transfer",
+          transactionDate: "2026-08-25",
+          userId,
+        },
+      ])
+      .returning();
+    if (!income || !transfer) throw new Error("Direction transactions missing.");
+    const directions = await service.maintainFinances(
+      {
+        operation: "start",
+        scope: { accountIds: [directionAccount.id], type: "accounts" },
+      },
+      context,
+    );
+    const directionsReasoned = await service.maintainFinances(
+      {
+        expectedVersion: directions.data.version,
+        idempotencyKey: "direction-judgments",
+        judgments: [
+          {
+            confidence: 0.2,
+            questionReason: "Unknown income source.",
+            transactionId: income.id,
+            type: "needs_user_review",
+          },
+          {
+            confidence: 0.2,
+            questionReason: "Unknown transfer destination.",
+            transactionId: transfer.id,
+            type: "needs_user_review",
+          },
+        ],
+        operation: "submit_judgments",
+        runId: directions.data.runId,
+      },
+      context,
+    );
+    await service.maintainFinances(
+      {
+        expectedVersion: directionsReasoned.data.version,
+        findings: [],
+        idempotencyKey: "direction-audit",
+        operation: "submit_audit",
+        runId: directionsReasoned.data.runId,
+      },
+      context,
+    );
+    const since = await service.maintainFinances(
+      { operation: "start", scope: { from: "2026-08-25", type: "since" } },
+      context,
+    );
+    expect(since).toMatchObject({ data: { runId: expect.any(String) } });
+    await expect(
+      service.maintainFinances(
+        {
+          expectedVersion: since.data.version,
+          idempotencyKey: "existing-event-judgment",
+          judgments: [
+            {
+              confidence: 0.2,
+              questionReason: "Still needs confirmation.",
+              transactionId: income.id,
+              type: "needs_user_review",
+            },
+          ],
+          operation: "submit_judgments",
+          runId: since.data.runId,
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ data: { stage: "agent_audit" } });
   });
 });

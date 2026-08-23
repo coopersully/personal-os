@@ -1,4 +1,9 @@
-import { parseSetupJurisdiction, parseSetupMoney, setupProfileChange } from "./setup-service.js";
+import {
+  parseSetupJurisdiction,
+  parseSetupMoney,
+  setupProfileChange,
+  setupResult,
+} from "./setup-service.js";
 
 describe("Finance setup answer parsing", () => {
   it.each([
@@ -32,5 +37,42 @@ describe("Finance setup answer parsing", () => {
     expect(() => setupProfileChange("profile:household_size", "0")).toThrow("positive");
     expect(() => setupProfileChange("profile:household_size", "1.5")).toThrow("whole");
     expect(() => setupProfileChange("profile:household_size", "101")).toThrow("positive");
+  });
+
+  it("reports completed, question, and caller-driven next-action states", () => {
+    const base = {
+      budgetVersionId: null,
+      headline: "Setup state",
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      stage: "collecting_profile" as const,
+      version: 1,
+    };
+    expect(setupResult(base)).toMatchObject({
+      outcome: "completed",
+      remainingWork: { categories: [], count: 0 },
+    });
+    expect(
+      setupResult({
+        ...base,
+        nextAction: {
+          arguments: { operation: "start" },
+          reason: "Maintain the ledger.",
+          tool: "maintain_finances",
+        },
+        stage: "initial_maintenance",
+      }),
+    ).toMatchObject({
+      outcome: "work_remaining",
+      remainingWork: { categories: ["maintenance"], count: 1 },
+    });
+    expect(
+      setupResult({
+        ...base,
+        question: { answerType: "text", id: "profile:test", prompt: "One question?" },
+      }),
+    ).toMatchObject({
+      outcome: "user_input_required",
+      remainingWork: { categories: ["collecting_profile"], count: 1 },
+    });
   });
 });

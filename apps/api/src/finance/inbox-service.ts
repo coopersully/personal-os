@@ -3,17 +3,19 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeEventTransactions,
+  financeProfileVersions,
   financeReviewCases,
   financeTransactionRelationships,
   financeTransactionRevisions,
   financeTransactions,
 } from "@personal-os/database";
-import type {
-  AnswerFinanceReviewInput,
-  FinanceChange,
-  FinanceInboxCase,
-  FinanceReviewReason,
-  FinanceToolResult,
+import {
+  type AnswerFinanceReviewInput,
+  type FinanceChange,
+  type FinanceInboxCase,
+  type FinanceReviewReason,
+  type FinanceToolResult,
+  financialProfileChangesSchema,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
@@ -318,10 +320,64 @@ export function createInboxService({ db, now }: Options) {
                 })
                 .onConflictDoNothing();
             } else if (input.resolution.type === "update_profile") {
-              throw new AppError(
-                "invalid_request",
-                "Use update_financial_profile for profile corrections.",
-              );
+              const changes = financialProfileChangesSchema.parse(input.resolution.changes);
+              const before = await tx.query.financeProfileVersions.findFirst({
+                orderBy: [desc(financeProfileVersions.version)],
+                where: eq(financeProfileVersions.userId, context.userId),
+              });
+              const observedAt = now();
+              const prior = {
+                debts: before?.debts ?? [],
+                dependents: before?.dependents ?? null,
+                expectedMonthlyTakeHome:
+                  before?.expectedMonthlyTakeHome === null ||
+                  before?.expectedMonthlyTakeHome === undefined
+                    ? null
+                    : fromCents(before.expectedMonthlyTakeHome),
+                householdSize: before?.householdSize ?? null,
+                incomeStability: before?.incomeStability ?? ("unknown" as const),
+                insurance: before?.insurance ?? [],
+                jurisdiction: before?.jurisdiction ?? null,
+                liquidReserves:
+                  before?.liquidReserves === null || before?.liquidReserves === undefined
+                    ? null
+                    : fromCents(before.liquidReserves),
+                preferences: before?.preferences ?? { notes: [] },
+                provenance: before?.provenance ?? {},
+              };
+              const next = { ...prior, ...changes };
+              const nextProvenance = { ...prior.provenance };
+              for (const field of Object.keys(changes)) {
+                nextProvenance[field] = {
+                  actorId: context.actorId,
+                  actorType: context.actorType,
+                  evidence: { answer: input.answer, reviewId: review.id },
+                  observedAt: observedAt.toISOString(),
+                  requestId: context.requestId,
+                };
+              }
+              const [profile] = await tx
+                .insert(financeProfileVersions)
+                .values({
+                  debts: next.debts,
+                  dependents: next.dependents,
+                  expectedMonthlyTakeHome:
+                    next.expectedMonthlyTakeHome == null
+                      ? null
+                      : toCents(next.expectedMonthlyTakeHome),
+                  householdSize: next.householdSize,
+                  incomeStability: next.incomeStability,
+                  insurance: next.insurance,
+                  jurisdiction: next.jurisdiction,
+                  liquidReserves: next.liquidReserves == null ? null : toCents(next.liquidReserves),
+                  preferences: next.preferences,
+                  provenance: nextProvenance,
+                  userId: context.userId,
+                  version: (before?.version ?? 0) + 1,
+                })
+                .returning();
+              if (!profile)
+                throw new AppError("internal_error", "The financial profile was not updated.");
             }
             await tx
               .update(financeReviewCases)

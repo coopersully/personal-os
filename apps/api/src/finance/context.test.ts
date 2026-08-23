@@ -8,7 +8,11 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Principal } from "../types.js";
-import { executeFinanceIdempotently, loadFinanceAuthorization } from "./context.js";
+import {
+  executeFinanceIdempotently,
+  loadFinanceAuthorization,
+  requireFinanceMutation,
+} from "./context.js";
 
 describe.sequential("trusted Finance mutation context", () => {
   let container: StartedPostgreSqlContainer;
@@ -96,5 +100,75 @@ describe.sequential("trusted Finance mutation context", () => {
         mutate,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("rejects missing scope and distinguishes in-progress from failed retries", async () => {
+    const readOnly = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: "read-only-agent",
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId,
+      },
+      requestId: "read-only",
+    });
+    expect(() => requireFinanceMutation(readOnly)).toThrow("finances:write");
+    const userContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "user-context",
+    });
+    expect(userContext).toMatchObject({ canMutate: true, canSelfApprove: false });
+    expect(() =>
+      requireFinanceMutation(userContext, { approvalSource: "agent_self_approval" }),
+    ).toThrow("self-approval");
+
+    const failed = {
+      idempotencyKey: "failed-operation",
+      operation: "finance.failure",
+      payload: { test: true },
+    };
+    await expect(
+      executeFinanceIdempotently(database.db, userContext, failed, async () => {
+        throw "non-error failure";
+      }),
+    ).rejects.toBe("non-error failure");
+    await expect(
+      executeFinanceIdempotently(database.db, userContext, failed, async () => ({ ok: true })),
+    ).rejects.toThrow("previously failed");
+
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runningOperation = {
+      idempotencyKey: "running-operation",
+      operation: "finance.running",
+      payload: { test: true },
+    };
+    const running = executeFinanceIdempotently(
+      database.db,
+      userContext,
+      runningOperation,
+      async () => {
+        await gate;
+        return { ok: true };
+      },
+    );
+    await vi.waitFor(async () => {
+      await expect(
+        executeFinanceIdempotently(database.db, userContext, runningOperation, async () => ({
+          ok: false,
+        })),
+      ).rejects.toThrow("already in progress");
+    });
+    release?.();
+    await expect(running).resolves.toEqual({ ok: true });
   });
 });

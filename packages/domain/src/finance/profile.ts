@@ -49,21 +49,23 @@ export const financeProfileVersionSchema = z.object({
 });
 export type FinanceProfileVersion = z.infer<typeof financeProfileVersionSchema>;
 
+export const financialProfileChangesSchema = z
+  .object({
+    debts: z.array(financeDebtProfileSchema).max(100).optional(),
+    dependents: z.number().int().nonnegative().max(100).nullable().optional(),
+    expectedMonthlyTakeHome: financePositiveMoneySchema.nullable().optional(),
+    householdSize: z.number().int().positive().max(100).nullable().optional(),
+    incomeStability: financeIncomeStabilitySchema.optional(),
+    insurance: z.array(financeInsuranceProfileSchema).max(100).optional(),
+    jurisdiction: z.string().trim().min(1).max(120).nullable().optional(),
+    liquidReserves: financePositiveMoneySchema.nullable().optional(),
+    preferences: financePlanningPreferencesSchema.optional(),
+  })
+  .refine((changes) => Object.keys(changes).length > 0, "Provide at least one profile change.");
+
 export const updateFinancialProfileInputSchema = z
   .object({
-    changes: z
-      .object({
-        debts: z.array(financeDebtProfileSchema).max(100).optional(),
-        dependents: z.number().int().nonnegative().max(100).nullable().optional(),
-        expectedMonthlyTakeHome: financePositiveMoneySchema.nullable().optional(),
-        householdSize: z.number().int().positive().max(100).nullable().optional(),
-        incomeStability: financeIncomeStabilitySchema.optional(),
-        insurance: z.array(financeInsuranceProfileSchema).max(100).optional(),
-        jurisdiction: z.string().trim().min(1).max(120).nullable().optional(),
-        liquidReserves: financePositiveMoneySchema.nullable().optional(),
-        preferences: financePlanningPreferencesSchema.optional(),
-      })
-      .refine((changes) => Object.keys(changes).length > 0, "Provide at least one profile change."),
+    changes: financialProfileChangesSchema,
   })
   .and(financeMutationMetaSchema.required({ expectedVersion: true }));
 export type UpdateFinancialProfileInput = z.infer<typeof updateFinancialProfileInputSchema>;

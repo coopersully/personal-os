@@ -398,20 +398,10 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { openWorldHint: true },
       description:
         "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the ilo web application. The external provider may still require the user to authenticate and consent.",
-      inputSchema: { provider: z.literal("plaid").default("plaid") },
+      inputSchema: { idempotencyKey, provider: z.literal("plaid").default("plaid") },
       title: "Start Finance account connection",
     },
-    async ({ provider }) => {
-      const linkToken = await api.getPlaidLinkToken();
-      return financeResult({
-        ...envelope(
-          { externalHandoff: { linkToken, provider }, status: "pending" },
-          "The secure bank authorization handoff is ready.",
-        ),
-        outcome: "external_action_required",
-        remainingWork: { categories: ["provider_authorization"], count: 1 },
-      });
-    },
+    async (input) => financeResult(await api.startFinanceAccountConnection(input)),
   );
 
   server.registerTool(
@@ -451,6 +441,52 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         ...(issues.length ? { diagnostics: { issues } } : {}),
       });
     },
+  );
+
+  server.registerTool(
+    "get_finance_account_connection",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Inspect one bank-connection attempt or connection state when setup, synchronization, or reauthorization needs diagnosis.",
+      inputSchema: { connectionId: id },
+      title: "Get Finance account connection",
+    },
+    async ({ connectionId }) => financeResult(await api.getFinanceAccountConnection(connectionId)),
+  );
+
+  server.registerTool(
+    "update_finance_account",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Correct an account's user-owned name, kind, institution, or manual balance. This never changes provider credentials or ledger history.",
+      inputSchema: {
+        accountId: id,
+        balance: z.number().finite().nullable().optional(),
+        expectedVersion: z.number().int().nonnegative().optional(),
+        idempotencyKey,
+        institution: z.string().min(1).max(160).optional(),
+        kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
+        name: z.string().min(1).max(160).optional(),
+      },
+      title: "Update Finance account",
+    },
+    async ({ accountId, ...input }) =>
+      financeResult(await api.updateFinanceAccount(accountId, input)),
+  );
+
+  server.registerTool(
+    "disconnect_finance_account",
+    {
+      annotations: { idempotentHint: true, openWorldHint: true },
+      description:
+        "Disconnect a provider account and remove its stored provider credentials while preserving the account and every historical ledger transaction. Use only when the user asks to disconnect or provider access must be revoked.",
+      inputSchema: { accountId: id, idempotencyKey },
+      title: "Disconnect Finance account",
+    },
+    async ({ accountId, ...input }) =>
+      financeResult(await api.disconnectFinanceAccount(accountId, input)),
   );
 
   server.registerTool(
@@ -505,6 +541,137 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "get_finance_transaction",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read one ledger transaction with its classification and reconciliation evidence before changing or explaining it.",
+      inputSchema: { transactionId: id },
+      title: "Get Finance transaction",
+    },
+    async ({ transactionId }) => financeResult(await api.getFinanceTransaction(transactionId)),
+  );
+
+  server.registerTool(
+    "update_finance_transaction",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Correct a transaction category or note with provenance. Use classify_finance_transactions for reasoned batch categorization.",
+      inputSchema: {
+        category: z.string().min(1).max(80).nullable().optional(),
+        idempotencyKey,
+        learnMerchant: z.boolean().optional(),
+        notes: z.string().max(4000).nullable().optional(),
+        transactionId: id,
+      },
+      title: "Update Finance transaction",
+    },
+    async ({ transactionId, ...input }) =>
+      financeResult(await api.updateFinanceTransactionCanonical(transactionId, input)),
+  );
+
+  server.registerTool(
+    "remove_finance_transaction",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Remove an erroneous manual ledger transaction with an audit record. Provider evidence should normally be linked as a duplicate or reversal instead of removed.",
+      inputSchema: { idempotencyKey, transactionId: id },
+      title: "Remove Finance transaction",
+    },
+    async ({ transactionId, ...input }) =>
+      financeResult(await api.removeFinanceTransaction(transactionId, input)),
+  );
+
+  server.registerTool(
+    "split_finance_transaction",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Split one posted transaction across multiple budget categories while preserving the original economic-event lineage. Part amounts must exactly equal the original amount.",
+      inputSchema: {
+        expectedVersion: z.number().int().positive(),
+        idempotencyKey,
+        parts: z
+          .array(
+            z.object({
+              amount: z.number().positive(),
+              categoryId: id,
+              meaning: z.string().min(1).max(500),
+              notes: z.string().max(4000).nullable(),
+            }),
+          )
+          .min(2)
+          .max(100),
+        transactionId: id,
+      },
+      title: "Split Finance transaction",
+    },
+    async (input) => financeResult(await api.splitFinanceTransaction(input)),
+  );
+
+  server.registerTool(
+    "classify_finance_transactions",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Apply reasoned categories to one or more transactions with confidence, meaning, rationale, and agent provenance. Low-confidence uncertainty belongs in the Inbox.",
+      inputSchema: {
+        classifications: z
+          .array(
+            z.object({
+              categoryId: id,
+              confidence: z.number().min(0).max(1),
+              meaning: z.string().min(1).max(500),
+              rationale: z.string().min(1).max(1000),
+              transactionId: id,
+            }),
+          )
+          .min(1)
+          .max(100),
+        idempotencyKey,
+      },
+      title: "Classify Finance transactions",
+    },
+    async (input) => financeResult(await api.classifyFinanceTransactions(input)),
+  );
+
+  server.registerTool(
+    "link_finance_transactions",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Link transactions that represent one transfer, refund, reimbursement, reversal, or duplicate economic event so totals are not double counted.",
+      inputSchema: {
+        idempotencyKey,
+        rationale: z.string().min(1).max(1000),
+        relationship: z.enum(["transfer", "reimbursement", "refund", "reversal", "duplicate"]),
+        transactionIds: z.array(id).min(2).max(100),
+      },
+      title: "Link Finance transactions",
+    },
+    async (input) => financeResult(await api.linkFinanceTransactions(input)),
+  );
+
+  server.registerTool(
+    "import_finance_transactions",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Import a PayPal, Venmo, or Zelle CSV into its matching account. Stable source identifiers deduplicate retries and preserve imported evidence.",
+      inputSchema: {
+        accountId: id,
+        csv: z.string().min(1).max(1_000_000),
+        idempotencyKey,
+        provider: z.enum(["paypal", "venmo", "zelle"]),
+      },
+      title: "Import Finance transactions",
+    },
+    async (input) => financeResult(await api.importFinanceTransactions(input)),
+  );
+
+  server.registerTool(
     "list_finance_merchants",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
@@ -520,13 +687,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description: "Set a clear merchant display name without altering historical amounts.",
-      inputSchema: { displayName: z.string().min(1).max(240), merchantId: id },
+      inputSchema: { displayName: z.string().min(1).max(240), idempotencyKey, merchantId: id },
       title: "Update Finance merchant",
     },
-    async ({ merchantId, displayName }) =>
-      financeResult(
-        envelope(await api.updateFinanceMerchant(merchantId, { displayName }), "Merchant updated."),
-      ),
+    async ({ merchantId, ...input }) =>
+      financeResult(await api.updateFinanceMerchantCanonical(merchantId, input)),
   );
   server.registerTool(
     "merge_finance_merchants",
@@ -534,10 +699,65 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Merge duplicate merchant identities after evidence shows they are the same real merchant.",
-      inputSchema: { sourceMerchantId: id, targetMerchantId: id },
+      inputSchema: { idempotencyKey, sourceMerchantId: id, targetMerchantId: id },
       title: "Merge Finance merchants",
     },
-    async (input) =>
-      financeResult(envelope(await api.mergeFinanceMerchants(input), "Merchants merged.")),
+    async (input) => financeResult(await api.mergeFinanceMerchantsCanonical(input)),
+  );
+
+  server.registerTool(
+    "list_finance_rules",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "List deterministic merchant categorization rules. Maintenance always applies these before agent reasoning.",
+      inputSchema: {},
+      title: "List Finance rules",
+    },
+    async () => financeResult(await api.listFinanceRules()),
+  );
+  server.registerTool(
+    "manage_finance_rule",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Create, update, or remove an exact merchant categorization rule when repeated evidence supports deterministic handling.",
+      inputSchema: {
+        category: z.string().min(1).max(80).optional(),
+        idempotencyKey,
+        merchant: z.string().min(1).max(240).optional(),
+        operation: z.enum(["create", "update", "remove"]),
+        ruleId: id.optional(),
+      },
+      title: "Manage Finance rule",
+    },
+    async (input) => financeResult(await api.manageFinanceRule(input)),
+  );
+  server.registerTool(
+    "list_finance_recurring_items",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "List detected income and recurring obligations used for cash-flow planning and anomaly detection.",
+      inputSchema: {},
+      title: "List Finance recurring items",
+    },
+    async () => financeResult(await api.listFinanceRecurringItems()),
+  );
+  server.registerTool(
+    "manage_finance_recurring_item",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Pause, resume, cancel, or correct a detected recurring income or obligation used by forecasts.",
+      inputSchema: {
+        idempotencyKey,
+        itemId: id,
+        itemType: z.enum(["income", "obligation"]),
+        operation: z.enum(["pause", "resume", "cancel"]),
+      },
+      title: "Manage Finance recurring item",
+    },
+    async (input) => financeResult(await api.manageFinanceRecurringItem(input)),
   );
 }

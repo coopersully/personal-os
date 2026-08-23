@@ -1,0 +1,531 @@
+import {
+  calendarAccounts,
+  calendarEvents,
+  calendarFindings,
+  calendarReviews,
+  calendars,
+  type Database,
+  domainProfiles,
+} from "@personal-os/database";
+import {
+  type CalendarFinding,
+  calendarFindingSchema,
+  type CalendarHealthAssessment,
+  calendarProfilePreferencesSchema,
+  type CalendarRecommendation,
+  type CalendarReview,
+  calendarReviewSchema,
+  type CalendarStatus,
+  calendarStatusSchema,
+  type CreateCalendarReviewInput,
+} from "@personal-os/domain";
+import { and, desc, eq, gt, inArray, isNull, lt, notInArray } from "drizzle-orm";
+import {
+  assessCalendar,
+  type CalendarAssessmentDraft,
+  type CalendarAssessmentSnapshot,
+  calendarLedgerFingerprint,
+} from "./calendar-assessment.js";
+import { CALENDAR_PLAYBOOK } from "./calendar-playbook.js";
+import { AppError } from "./errors.js";
+
+type CalendarStewardshipServiceOptions = { db: Database; now: () => Date };
+type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type DatabaseExecutor = Pick<Database, "select">;
+type FindingIdentity = Pick<CalendarFinding, "fingerprint" | "id">;
+
+const DAY_MS = 24 * 60 * 60_000;
+
+function findingFromRow(row: typeof calendarFindings.$inferSelect): CalendarFinding {
+  return calendarFindingSchema.parse({
+    evidence: row.evidence,
+    evidenceCutoff: row.evidenceCutoff.toISOString(),
+    fingerprint: row.fingerprint,
+    firstObservedAt: row.firstObservedAt.toISOString(),
+    id: row.id,
+    kind: row.kind,
+    lastObservedAt: row.lastObservedAt.toISOString(),
+    playbookVersion: row.playbookVersion,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    rulebookVersion: row.rulebookVersion,
+    severity: row.severity,
+    sourceReferences: row.sourceReferences,
+    status: row.status,
+    summary: row.summary,
+  });
+}
+
+function reviewFromRow(row: typeof calendarReviews.$inferSelect): CalendarReview {
+  return calendarReviewSchema.parse({
+    createdAt: row.createdAt.toISOString(),
+    evidenceCutoff: row.evidenceCutoff.toISOString(),
+    findings: row.findingSnapshots,
+    health: row.health,
+    id: row.id,
+    ledgerFingerprint: row.ledgerFingerprint,
+    nextMaintenanceAt: row.nextMaintenanceAt.toISOString(),
+    playbookVersion: row.playbookVersion,
+    profileVersion: row.profileVersion,
+    recommendations: row.recommendations,
+    rulebookVersion: row.rulebookVersion,
+    scope: row.scope,
+    scopeEnd: row.scopeEnd.toISOString(),
+    scopeStart: row.scopeStart.toISOString(),
+    sourceFreshness: row.sourceFreshness,
+    state: row.state,
+  });
+}
+
+async function readAssessmentSnapshot(
+  executor: DatabaseExecutor,
+  userId: string,
+  scope: CreateCalendarReviewInput["scope"],
+  evidenceCutoff: Date,
+): Promise<CalendarAssessmentSnapshot> {
+  const scopeStart = new Date(
+    evidenceCutoff.getTime() - CALENDAR_PLAYBOOK.allOutstanding.pastDays * DAY_MS,
+  );
+  const scopeEnd = new Date(
+    evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.allOutstanding.futureDays * DAY_MS,
+  );
+  const sourceRows = await executor
+    .select({
+      accountId: calendarAccounts.id,
+      accountLastSyncedAt: calendarAccounts.lastSyncedAt,
+      calendarId: calendars.id,
+      calendarLastSyncedAt: calendars.lastSyncedAt,
+      calendarUpdatedAt: calendars.updatedAt,
+      isWritable: calendars.isWritable,
+      provider: calendars.provider,
+      syncGeneration: calendarAccounts.syncGeneration,
+      syncRecovery: calendarAccounts.syncRecovery,
+      syncStatus: calendarAccounts.syncStatus,
+    })
+    .from(calendars)
+    .innerJoin(
+      calendarAccounts,
+      and(
+        eq(calendarAccounts.id, calendars.accountId),
+        eq(calendarAccounts.userId, userId),
+        eq(calendarAccounts.calendarEnabled, true),
+      ),
+    )
+    .where(
+      and(
+        eq(calendars.userId, userId),
+        eq(calendars.isSelected, true),
+        isNull(calendars.deletedAt),
+      ),
+    )
+    .orderBy(calendars.id);
+
+  const calendarIds = sourceRows.map(({ calendarId }) => calendarId);
+  const eventRows =
+    calendarIds.length === 0
+      ? []
+      : await executor
+          .select({
+            allDay: calendarEvents.allDay,
+            blockSourceEventId: calendarEvents.blockSourceEventId,
+            calendarId: calendarEvents.calendarId,
+            endsAt: calendarEvents.endsAt,
+            id: calendarEvents.id,
+            provider: calendarEvents.provider,
+            recurrence: calendarEvents.recurrence,
+            remoteEtag: calendarEvents.remoteEtag,
+            startsAt: calendarEvents.startsAt,
+            status: calendarEvents.status,
+            transparency: calendarEvents.transparency,
+            updatedAt: calendarEvents.updatedAt,
+          })
+          .from(calendarEvents)
+          .where(
+            and(
+              eq(calendarEvents.userId, userId),
+              inArray(calendarEvents.calendarId, calendarIds),
+              isNull(calendarEvents.deletedAt),
+              lt(calendarEvents.startsAt, scopeEnd),
+              gt(calendarEvents.endsAt, scopeStart),
+            ),
+          )
+          .orderBy(calendarEvents.id);
+
+  const existingOpenFindings = await executor
+    .select({
+      fingerprint: calendarFindings.fingerprint,
+      id: calendarFindings.id,
+      kind: calendarFindings.kind,
+    })
+    .from(calendarFindings)
+    .where(and(eq(calendarFindings.userId, userId), eq(calendarFindings.status, "open")))
+    .orderBy(calendarFindings.fingerprint);
+
+  const [profileRow] = await executor
+    .select({
+      id: domainProfiles.id,
+      preferences: domainProfiles.preferences,
+      version: domainProfiles.version,
+    })
+    .from(domainProfiles)
+    .where(
+      and(
+        eq(domainProfiles.userId, userId),
+        eq(domainProfiles.domain, "calendar"),
+        eq(domainProfiles.status, "active"),
+      ),
+    )
+    .limit(1);
+  const parsedPreferences = profileRow
+    ? calendarProfilePreferencesSchema.safeParse(profileRow.preferences)
+    : null;
+  const recurrenceCalendarIds = new Set(
+    eventRows.filter(({ recurrence }) => recurrence.length > 0).map(({ calendarId }) => calendarId),
+  );
+
+  return {
+    activeProfile:
+      profileRow && parsedPreferences?.success
+        ? {
+            afterBufferMinutes: parsedPreferences.data.afterBufferMinutes,
+            beforeBufferMinutes: parsedPreferences.data.beforeBufferMinutes,
+            id: profileRow.id,
+            version: profileRow.version,
+          }
+        : null,
+    evidenceCutoff,
+    events: eventRows.map((event) => ({
+      allDay: event.allDay,
+      blockSourceEventId: event.blockSourceEventId,
+      calendarId: event.calendarId,
+      endsAt: event.endsAt.toISOString(),
+      id: event.id,
+      provider: event.provider,
+      recurrence: event.recurrence,
+      revision: event.remoteEtag ?? event.updatedAt.toISOString(),
+      startsAt: event.startsAt.toISOString(),
+      status: event.status,
+      transparency: event.transparency,
+      updatedAt: event.updatedAt.toISOString(),
+    })),
+    existingOpenFindings,
+    scope,
+    scopeEnd,
+    scopeStart,
+    sources: sourceRows.map((source) => ({
+      accountId: source.accountId,
+      calendarId: source.calendarId,
+      calendarRevision: [
+        source.calendarUpdatedAt.toISOString(),
+        `generation=${source.syncGeneration}`,
+        `status=${source.syncStatus}`,
+        `recovery=${source.syncRecovery ?? "none"}`,
+      ].join(";"),
+      isWritable: source.isWritable,
+      lastSyncedAt: (
+        source.calendarLastSyncedAt ?? source.accountLastSyncedAt
+      )?.toISOString() ?? null,
+      provider: source.provider,
+      recurrencePresent: recurrenceCalendarIds.has(source.calendarId),
+      syncGeneration: source.syncGeneration,
+      syncRecovery: source.syncRecovery,
+      syncStatus: source.syncStatus,
+    })),
+  };
+}
+
+async function reconcileFindings(
+  transaction: DatabaseTransaction,
+  userId: string,
+  snapshot: CalendarAssessmentSnapshot,
+  draft: CalendarAssessmentDraft,
+): Promise<CalendarFinding[]> {
+  const observedAt = snapshot.evidenceCutoff;
+  const findings: CalendarFinding[] = [];
+  for (const finding of draft.findings) {
+    const [row] = await transaction
+      .insert(calendarFindings)
+      .values({
+        evidence: finding.evidence,
+        evidenceCutoff: new Date(finding.evidenceCutoff),
+        fingerprint: finding.fingerprint,
+        firstObservedAt: observedAt,
+        kind: finding.kind,
+        lastObservedAt: observedAt,
+        playbookVersion: finding.playbookVersion,
+        resolvedAt: null,
+        rulebookVersion: finding.rulebookVersion,
+        severity: finding.severity,
+        sourceReferences: finding.sourceReferences,
+        status: "open",
+        summary: finding.summary,
+        updatedAt: observedAt,
+        userId,
+      })
+      .onConflictDoUpdate({
+        target: [calendarFindings.userId, calendarFindings.fingerprint],
+        set: {
+          evidence: finding.evidence,
+          evidenceCutoff: new Date(finding.evidenceCutoff),
+          kind: finding.kind,
+          lastObservedAt: observedAt,
+          playbookVersion: finding.playbookVersion,
+          resolvedAt: null,
+          rulebookVersion: finding.rulebookVersion,
+          severity: finding.severity,
+          sourceReferences: finding.sourceReferences,
+          status: "open",
+          summary: finding.summary,
+          updatedAt: observedAt,
+        },
+      })
+      .returning();
+    if (!row) {
+      throw new AppError("internal_error", "The Calendar finding could not be published.");
+    }
+    findings.push(findingFromRow(row));
+  }
+
+  const currentFingerprints = draft.findings.map(({ fingerprint }) => fingerprint);
+  await transaction
+    .update(calendarFindings)
+    .set({ resolvedAt: observedAt, status: "resolved", updatedAt: observedAt })
+    .where(
+      and(
+        eq(calendarFindings.userId, userId),
+        eq(calendarFindings.status, "open"),
+        inArray(calendarFindings.kind, [...CALENDAR_PLAYBOOK.supportedFindingKinds]),
+        ...(currentFingerprints.length > 0
+          ? [notInArray(calendarFindings.fingerprint, currentFingerprints)]
+          : []),
+      ),
+    );
+  return findings;
+}
+
+function bindFindingIds(
+  health: CalendarAssessmentDraft["health"],
+  findings: ReadonlyArray<FindingIdentity>,
+): CalendarHealthAssessment[] {
+  const ids = new Map(findings.map(({ fingerprint, id }) => [fingerprint, id]));
+  return health.map(({ evidenceFindingFingerprints, ...assessment }) => ({
+    ...assessment,
+    evidenceFindingIds: evidenceFindingFingerprints.flatMap((fingerprint) => {
+      const id = ids.get(fingerprint);
+      return id ? [id] : [];
+    }),
+  }));
+}
+
+function bindRecommendationFindingIds(
+  recommendations: CalendarAssessmentDraft["recommendations"],
+  findings: ReadonlyArray<FindingIdentity>,
+): CalendarRecommendation[] {
+  const ids = new Map(findings.map(({ fingerprint, id }) => [fingerprint, id]));
+  return recommendations.map(({ findingFingerprints, ...recommendation }) => ({
+    ...recommendation,
+    findingIds: findingFingerprints.flatMap((fingerprint) => {
+      const id = ids.get(fingerprint);
+      return id ? [id] : [];
+    }),
+  }));
+}
+
+async function insertReview(
+  transaction: DatabaseTransaction,
+  input: {
+    draft: CalendarAssessmentDraft;
+    findings: CalendarFinding[];
+    health: CalendarHealthAssessment[];
+    ledgerFingerprint: string;
+    nextMaintenanceAt: Date;
+    profileVersion: number | null;
+    recommendations: CalendarRecommendation[];
+    snapshot: CalendarAssessmentSnapshot;
+    userId: string;
+  },
+): Promise<CalendarReview> {
+  const [row] = await transaction
+    .insert(calendarReviews)
+    .values({
+      evidenceCutoff: input.snapshot.evidenceCutoff,
+      findingSnapshots: input.findings,
+      health: input.health,
+      ledgerFingerprint: input.ledgerFingerprint,
+      nextMaintenanceAt: input.nextMaintenanceAt,
+      playbookVersion: CALENDAR_PLAYBOOK.version,
+      profileVersion: input.profileVersion,
+      recommendations: input.recommendations,
+      rulebookVersion: input.draft.rulebookVersion,
+      scope: input.snapshot.scope,
+      scopeEnd: input.snapshot.scopeEnd,
+      scopeStart: input.snapshot.scopeStart,
+      sourceFreshness: input.draft.sourceFreshness,
+      state: input.draft.state,
+      userId: input.userId,
+    })
+    .returning();
+  if (!row) throw new AppError("internal_error", "The Calendar review could not be published.");
+  return reviewFromRow(row);
+}
+
+async function readLatestReview(
+  executor: DatabaseExecutor,
+  userId: string,
+): Promise<CalendarReview | null> {
+  const [row] = await executor
+    .select()
+    .from(calendarReviews)
+    .where(eq(calendarReviews.userId, userId))
+    .orderBy(desc(calendarReviews.createdAt), desc(calendarReviews.id))
+    .limit(1);
+  return row ? reviewFromRow(row) : null;
+}
+
+function buildStatus(input: {
+  asOf: Date;
+  assessment: CalendarAssessmentDraft;
+  latestReview: CalendarReview | null;
+  lifecycle: CalendarStatus["lifecycle"];
+  snapshot: CalendarAssessmentSnapshot;
+}): CalendarStatus {
+  const degradedSources = input.assessment.sourceFreshness.filter(
+    ({ completeness, state }) => state !== "current" || completeness !== "complete",
+  );
+  const missingSource = input.snapshot.sources.length === 0;
+  const missingProfile = input.snapshot.activeProfile === null;
+  const evidenceSettled = degradedSources.length === 0;
+  const readiness =
+    missingSource || missingProfile
+      ? "setup_required"
+      : degradedSources.length > 0
+        ? "degraded"
+        : "ready";
+  const setupBlockers = [
+    ...(missingSource
+      ? ["Select at least one enabled Calendar source before relying on stewardship assessments."]
+      : []),
+    ...(missingProfile
+      ? ["Activate a Calendar profile before relying on stewardship assessments."]
+      : []),
+  ];
+  const validNextOperations: CalendarStatus["validNextOperations"] = ["assess_calendar"];
+  if (
+    input.snapshot.sources.some(
+      ({ syncRecovery }) => syncRecovery === "operator" || syncRecovery === "reconnect",
+    )
+  ) {
+    validNextOperations.push("open_connections");
+  }
+  if ((input.latestReview?.findings.length ?? 0) > 0) validNextOperations.push("review_findings");
+
+  return {
+    asOf: input.asOf.toISOString(),
+    authority: {
+      approvedRule: [],
+      automatic: ["inspect", "assess"],
+      individualApproval: [
+        "create_event",
+        "move_event",
+        "resize_event",
+        "trash_event",
+        "restore_event",
+      ],
+      unavailable: [
+        "rsvp",
+        "invite",
+        "cancel_attended_event",
+        "book_travel",
+        "send_correspondence",
+      ],
+    },
+    backlog: {
+      actionable: evidenceSettled ? input.snapshot.existingOpenFindings.length : null,
+      ambiguousEffects: null,
+      awaitingApproval: null,
+      awaitingInput: null,
+      blocked: degradedSources.length,
+      failed: null,
+      openFindings: evidenceSettled ? input.snapshot.existingOpenFindings.length : null,
+    },
+    health: bindFindingIds(input.assessment.health, input.snapshot.existingOpenFindings),
+    latestReview: input.latestReview,
+    lifecycle: input.lifecycle,
+    readiness,
+    setupBlockers,
+    sources: input.assessment.sourceFreshness,
+    validNextOperations,
+  };
+}
+
+export function createCalendarStewardshipService({ db, now }: CalendarStewardshipServiceOptions) {
+  return {
+    async createReview(
+      userId: string,
+      input: CreateCalendarReviewInput,
+    ): Promise<CalendarReview> {
+      if (input.scope.type !== "all_outstanding") {
+        throw new AppError(
+          "invalid_request",
+          "This Calendar release supports all-outstanding reviews only.",
+        );
+      }
+      const evidenceCutoff = now();
+      return db.transaction(
+        async (transaction) => {
+          const snapshot = await readAssessmentSnapshot(
+            transaction,
+            userId,
+            input.scope,
+            evidenceCutoff,
+          );
+          const draft = assessCalendar(snapshot);
+          const findings = await reconcileFindings(transaction, userId, snapshot, draft);
+          const health = bindFindingIds(draft.health, findings);
+          const recommendations = bindRecommendationFindingIds(draft.recommendations, findings);
+          return insertReview(transaction, {
+            draft,
+            findings,
+            health,
+            ledgerFingerprint: calendarLedgerFingerprint(snapshot),
+            nextMaintenanceAt: new Date(
+              evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000,
+            ),
+            profileVersion: snapshot.activeProfile?.version ?? null,
+            recommendations,
+            snapshot,
+            userId,
+          });
+        },
+        { isolationLevel: "repeatable read" },
+      );
+    },
+
+    async getStatus(userId: string): Promise<CalendarStatus> {
+      const asOf = now();
+      return db.transaction(
+        async (transaction) => {
+          const latestReview = await readLatestReview(transaction, userId);
+          const scope = latestReview?.scope ?? ({ type: "all_outstanding" } as const);
+          const cutoff = latestReview ? new Date(latestReview.evidenceCutoff) : asOf;
+          const snapshot = await readAssessmentSnapshot(transaction, userId, scope, cutoff);
+          const assessment = assessCalendar({ ...snapshot, evidenceCutoff: asOf });
+          const fingerprintChanged =
+            latestReview !== null &&
+            latestReview.ledgerFingerprint !== calendarLedgerFingerprint(snapshot);
+          const expired =
+            latestReview !== null && asOf > new Date(latestReview.nextMaintenanceAt);
+          const lifecycle: CalendarStatus["lifecycle"] =
+            latestReview === null
+              ? "never_maintained"
+              : fingerprintChanged || expired
+                ? "stale"
+                : latestReview.state;
+          return calendarStatusSchema.parse(
+            buildStatus({ asOf, assessment, latestReview, lifecycle, snapshot }),
+          );
+        },
+        { isolationLevel: "repeatable read", readOnly: true },
+      );
+    },
+  };
+}

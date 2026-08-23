@@ -22,6 +22,9 @@ import type {
   FinanceInboxCase,
   FinanceIncomeStream,
   FinanceLedgerHealth,
+  FinanceMaintenanceHistoryQuery,
+  FinanceMaintenanceInput,
+  FinanceMaintenancePayload,
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
@@ -292,6 +295,29 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify(input),
         method: "POST",
       });
+    },
+    async maintainFinances(
+      input: FinanceMaintenanceInput,
+    ): Promise<FinanceToolResult<FinanceMaintenancePayload>> {
+      return request("/v1/finances/maintenance", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async getFinanceMaintenanceHistory(
+      query: Partial<FinanceMaintenanceHistoryQuery> = {},
+    ): Promise<{
+      items: FinanceMaintenancePayload[];
+      nextCursor: string | null;
+    }> {
+      const search = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) search.set(key, String(value));
+      }
+      return request(`/v1/finances/maintenance${search.size ? `?${search}` : ""}`);
+    },
+    async getFinanceMaintenanceRun(id: string): Promise<FinanceMaintenancePayload> {
+      return request(`/v1/finances/maintenance/${id}`);
     },
     async listFinanceTransactions(query: Partial<FinanceTransactionQuery> = {}): Promise<{
       items: FinanceTransaction[];

@@ -11,6 +11,8 @@ import {
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
+  financeMaintenanceHistoryQuerySchema,
+  financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
@@ -205,6 +207,30 @@ export function registerFinanceRoutes({ app, db, finances, mutationContext }: Fi
   );
   app.get("/v1/finances/inbox", async (context) =>
     context.json(await finances.getFinanceInbox(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/maintenance", async (context) =>
+    context.json(
+      await finances.maintainFinances(
+        await parseBody(context, financeMaintenanceInputSchema),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.get("/v1/finances/maintenance", async (context) =>
+    context.json(
+      await finances.getFinanceMaintenanceHistory(
+        context.get("principal").userId,
+        financeMaintenanceHistoryQuerySchema.parse(context.req.query()),
+      ),
+    ),
+  );
+  app.get("/v1/finances/maintenance/:id", async (context) =>
+    context.json(
+      await finances.getFinanceMaintenanceRun(
+        context.get("principal").userId,
+        context.req.param("id"),
+      ),
+    ),
   );
   app.post("/v1/finances/inbox/:id/answer", async (context) =>
     context.json(

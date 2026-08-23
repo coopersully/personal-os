@@ -56,6 +56,7 @@ import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { createInboxService } from "./finance/inbox-service.js";
+import { createMaintenanceService } from "./finance/maintenance-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import {
   cadenceFromDates,
@@ -377,6 +378,7 @@ function merchant(
 
 export function createFinanceService({ db, now, plaid }: Options) {
   const inbox = createInboxService({ db, now });
+  const maintenance = createMaintenanceService({ db, inbox, now });
   const planning = createProfileBudgetService({ db, now });
   async function ensureCategories(userId: string) {
     await db
@@ -1242,6 +1244,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
   }
   return {
     ...inbox,
+    ...maintenance,
     ...planning,
     plaidAvailable() {
       return Boolean(plaid?.clientId && plaid.secret);

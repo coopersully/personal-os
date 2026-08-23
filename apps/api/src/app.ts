@@ -42,7 +42,10 @@ import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createFinanceActionService } from "./finance-action-service.js";
+import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
+import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -405,6 +408,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
+  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
@@ -483,10 +487,24 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financeChallenges = createFinanceChallengeService({
+    actions: financeActions,
+    db: dependencies.db,
+    finances,
+    now,
+  });
+  const financePeriodReviews = createFinancePeriodReviewService({
+    db: dependencies.db,
+    now,
+    status: financeStatus,
+  });
   const financeMaintenance = createFinanceMaintenanceService({
+    actions: financeActions,
+    challenge: financeChallenges,
     finances,
     maintenance,
     now,
+    periodReviews: financePeriodReviews,
     status: financeStatus,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
@@ -1120,7 +1138,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
-  registerFinanceRoutes({ app, financeMaintenance, financeStatus, finances, mutationContext });
+  registerFinanceRoutes({
+    actions: financeActions,
+    app,
+    financeChallenges,
+    financeMaintenance,
+    financePeriodReviews,
+    financeStatus,
+    finances,
+    mutationContext,
+  });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 
@@ -1316,7 +1343,7 @@ const oauthScopeLabels: Record<string, string> = {
   "calendar:read": "Read calendars and events",
   "calendar:write": "Create and manage events",
   "finances:read": "Read sensitive financial accounts, balances, and activity",
-  "finances:write": "Save Finance setup guidance drafts",
+  "finances:write": "Update Finance ledger records, financial profile, and monthly budget plans",
   "finances:maintain":
     "Maintain Finances: create a durable Finance maintenance run that can use provider synchronization and rule-approved categorization and reconciliation; questions and approvals stay pending rather than guessed.",
   "goals:read": "Read goals and motives",

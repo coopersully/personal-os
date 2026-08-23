@@ -1749,7 +1749,7 @@ describe.sequential("ilo API", () => {
           method: "PATCH",
         })
       ).status,
-    ).toBe(403);
+    ).toBe(200);
     const agentNoteResponse = await request(
       `/v1/finances/transactions/${agentBypassCandidate.id}`,
       {
@@ -1758,7 +1758,7 @@ describe.sequential("ilo API", () => {
         method: "PATCH",
       },
     );
-    expect(agentNoteResponse.status).toBe(403);
+    expect(agentNoteResponse.status).toBe(202);
     const userNoteResponse = await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
       body: { notes: "Keep the receipt for review." },
       method: "PATCH",
@@ -1784,7 +1784,7 @@ describe.sequential("ilo API", () => {
         method: "PATCH",
       },
     );
-    expect(writeOnlyNoteResponse.status).toBe(403);
+    expect(writeOnlyNoteResponse.status).toBe(202);
     const noteUpdateAudits = await database.db
       .select({
         action: auditEvents.action,
@@ -1840,7 +1840,7 @@ describe.sequential("ilo API", () => {
           method: "POST",
         })
       ).status,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await request("/v1/me", {

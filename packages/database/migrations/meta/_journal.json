@@ -414,6 +414,55 @@
       "when": 1786968000000,
       "tag": "0058_finance_provider_items",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786971600000,
+      "tag": "0059_finance_automation_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786975200000,
+      "tag": "0060_finance_agent_action_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1786978800000,
+      "tag": "0061_finance_transaction_allocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1786982400000,
+      "tag": "0062_finance_reimbursements",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1786986000000,
+      "tag": "0063_finance_maintenance_candidates",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1786990000000,
+      "tag": "0064_finance_ledger_challenges",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1786993600000,
+      "tag": "0065_finance_period_reviews",
+      "breakpoints": true
     }
   ]
 }

@@ -407,4 +407,61 @@ describe("Plaid connector", () => {
       ]);
     }
   });
+
+  it("fails closed for malformed invalid-cursor evidence", async () => {
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () =>
+        new Response("{", {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        }),
+      secret: "secret",
+    });
+    await expect(
+      plaid.syncTransactions({ accessToken: "access-token", cursor: "cursor" }),
+    ).rejects.toMatchObject({ code: "plaid_request_rejected" });
+  });
+
+  it("normalizes sparse Plaid category detail", async () => {
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () =>
+        Response.json({
+          added: [
+            {
+              account_id: "account-1",
+              amount: 10,
+              date: "2026-08-15",
+              merchant_name: "Store",
+              name: "STORE",
+              pending: false,
+              personal_finance_category: { primary: "GENERAL_MERCHANDISE" },
+              transaction_id: "transaction-1",
+            },
+          ],
+          has_more: false,
+          modified: [],
+          next_cursor: "cursor",
+          removed: [],
+        }),
+      secret: "secret",
+    });
+
+    await expect(
+      plaid.syncTransactions({ accessToken: "access-token", cursor: null }),
+    ).resolves.toMatchObject({
+      added: [
+        expect.objectContaining({
+          personalFinanceCategory: {
+            confidenceLevel: null,
+            detailed: null,
+            primary: "GENERAL_MERCHANDISE",
+          },
+        }),
+      ],
+    });
+  });
 });

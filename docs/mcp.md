@@ -110,6 +110,22 @@ annotations are compatible-host UX hints only. Authorization, policy, source evi
 capability, structured errors, conflict handling, audit history, recoverable deletion, and
 partial-effect reporting remain deterministic API behavior.
 
+Finance includes read tools for ledger context and the current automation setting, plus
+`finances:write` tools that mutate the accounting ledger, profile and income data, and budget
+plans. Budgets are not human-only. Only a signed-in user can enable the single Finance review
+bypass; MCP cannot change that setting, connect institutions, import transactions, administer
+accounts, approve or dismiss action reviews, or execute external financial activity. Each
+supported semantic mutation, including insight refresh, returns `applied`, `pending_review`, or
+`needs_input`. The API derives that disposition from evidence, confidence and ambiguity checks,
+ownership, revisions, policy, and the persisted app-only bypass setting. Bypass chooses only
+whether a fully prepared action queues or applies; it never overrides confidence, ambiguity, or
+evidence requirements. The signed-in app's **Finances → Review** routes are the only
+approval/dismissal path. Its human-only question list returns bounded public descriptors; an
+answer may supply only the requested bounded fields, is scoped to the originating agent when an
+agent answers, merges into the stored action, and prepares it again. It therefore cannot approve
+a queued action or change bypass. The deprecated `resolve_finance_review` alias safely translates
+legacy categorization answers only.
+
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
 - `get_ilo_setup` is the authoritative setup entrypoint. Call it immediately after connection and
@@ -203,6 +219,13 @@ maintenance durably starts, resumes, or verifies one Ilo-owned turn for all outs
 bounded window, or an exact target. No-argument maintenance means all outstanding work. MCP does
 not poll, schedule, or sequence this work: the API owns its durable lifecycle, questions,
 approvals, recovery, and terminal result.
+When status reports `awaiting_agent_challenge`, the agent calls
+`get_finance_ledger_challenge` until its opaque cursor is exhausted, checks all
+twelve versioned rubric areas, and calls `submit_finance_ledger_challenge` with
+complete item coverage and structured findings. The API resumes that same run;
+the agent does not call individual mutation tools to reproduce the candidate.
+After verification, `latestReview` links to the immutable artifact readable with
+`get_finance_period_review`.
 `get_finance_status` requires `finances:read`; `maintain_finances` requires the separately
 consented `finances:maintain` scope. Existing `finances:write` grants remain limited to Finance
 guidance drafts and do not gain maintenance authority. Grant `finances:maintain` through an
@@ -223,23 +246,44 @@ derived transaction source reference from a consistent snapshot. Provider-backed
 retain PayPal, Venmo, or Zelle attribution rather than being mislabeled as local.
 Generic attention cannot claim Finance transaction provenance.
 
+Mixed purchases use `set_finance_transaction_breakdown`; allocations must equal
+the transaction's exact cents and explicitly distinguish personal and
+reimbursable treatment. Reimbursement tools track expected money and posted
+credits inside the ledger. They do not request, send, or move money.
+
 Categorization is intentionally proposal-first:
 `propose_finance_categorizations` uses the Finance read scope on both `GET` and
 the compatibility `POST` and does not mutate anything. Proposal pages return
 an opaque `nextCursor`, and hosts can continue without making read calls mutate
-the ledger. Direct transaction categorization is not an agent tool or
-agent-permitted raw API shortcut. Applying a proposal, resolving any review or
-alert, changing recurring state, adding a transaction, and renaming or merging
-merchants require a signed-in Ilo session. Provider administration,
-account/import/financial-profile/budget changes, permanent merchant rules, and
-ambiguous transfer confirmation are also human-only.
+the ledger. `finances:write` tools may submit the ledger, profile, and budget
+mutations described above and receive `applied`, `pending_review`, or
+`needs_input`. The API derives the disposition from the signed-in user's
+persisted app-only review bypass and current evidence; this includes the Finance
+insight refresh mutation. Agents cannot toggle bypass or approve/dismiss action
+reviews. They may apply a permanent merchant-learning rule only as part of an
+explicitly prepared categorization action, and it remains subject to the same
+confidence, ambiguity, evidence, ownership, and revision checks; bypass never
+waives those checks. A scoped same-user agent may list pending Finance questions
+through their public descriptors only. `answer_finance_question` accepts only
+the requested bounded fields as person-provided evidence and prepares the
+stored action again; Task 3's server-owned disposition still decides whether it
+is applied or queued for individual review. An authorized same-user
+`finances:write` agent may answer a maintenance-generated question, while an
+ordinary agent answer remains limited to its originating agent. Reimbursement
+questions use a typed answer and may conditionally classify allocations or
+create/match an internal reimbursement case; they never initiate a payment or
+any other external financial activity. The deprecated `resolve_finance_review`
+compatibility alias only translates legacy categorization answers. Provider
+administration, account connection and import, ambiguous transfer confirmation,
+and action-review approval/dismissal remain human-only and unavailable to MCP.
 
-The signed-in categorization batch API predates this guided-setup work and
+The categorization batch API predates this guided-setup work and
 commits each decision independently. Its bounded workers and per-item results
 do not provide a durable batch or resume record if the process ends between
 decisions. A follow-up must add an idempotency key, persisted per-item state,
-query or resume support, and abort-aware scheduling. MCP does not expose this
-human-only apply endpoint.
+query or resume support, and abort-aware scheduling. MCP exposes it as
+`apply_finance_categorizations` with the same evidence and review boundary as
+other Finance actions.
 
 The shared `save_domain_profile` tool may save a Finance guidance draft with
 `finances:write`. It cannot activate that draft: activation is a signed-in

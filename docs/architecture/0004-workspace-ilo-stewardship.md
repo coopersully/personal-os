@@ -74,6 +74,13 @@ Retain granular tools for surgical inspection, previews, and exact authorized ac
 the high-level operation a synchronous loop of client-authored calls. Consequential authority stays
 at each underlying operation, and a maintenance request cannot widen the caller's scopes or policy.
 
+Finance adds a deliberate agent-challenge boundary between preparation and
+settlement. `maintain_finances` owns the durable run and prepares the candidate;
+`get_finance_ledger_challenge` pages its complete public evidence;
+`submit_finance_ledger_challenge` records versioned rubric coverage and
+structured findings. The API—not the MCP host—then applies the app-only review
+setting, verifies the committed result, and publishes the period review.
+
 ## Reliability and observation
 
 A maintenance run records its requested scope, evidence cutoff, playbook/rulebook versions, steps,

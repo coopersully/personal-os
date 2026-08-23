@@ -20,6 +20,17 @@ describe("Finance maintenance MCP catalog", () => {
       requiredScopes: ["finances:maintain"],
       stage: "commit",
     });
+    expect(iloToolCatalog.answer_finance_question).toMatchObject({
+      destructive: true,
+      policy: "approve_each",
+      readOnly: false,
+      requiredScopes: ["finances:write"],
+      stage: "commit",
+    });
+    expect(iloToolCatalog.resolve_finance_review).toMatchObject({
+      destructive: true,
+      policy: "approve_each",
+    });
   });
 
   it("advertises Finance intents only to authorized writable connections", () => {

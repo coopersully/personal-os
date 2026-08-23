@@ -242,7 +242,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await database.db
       .update(financeAccounts)
       .set({
-        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimExpiresAt: new Date("2099-08-17T12:00:00.000Z"),
         syncClaimId: legacyClaimId,
       })
       .where(eq(financeAccounts.id, target.id));

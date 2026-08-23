@@ -1,6 +1,25 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
-import { maintenanceScopeSchema, upsertFinanceAttentionItemInputSchema } from "@personal-os/domain";
+import {
+  applyFinanceCategorizationsInputSchema,
+  createFinanceBudgetInputSchema,
+  createFinanceTransactionInputSchema,
+  financeReimbursementQuestionAnswerSchema,
+  financeScenarioInputSchema,
+  maintenanceScopeSchema,
+  mergeFinanceMerchantsInputSchema,
+  reconcileFinanceReimbursementInputSchema,
+  resolveFinanceAlertInputSchema,
+  setFinanceBudgetPlanInputSchema,
+  setFinanceTransactionBreakdownInputSchema,
+  submitFinanceLedgerChallengeInputSchema,
+  updateFinanceIncomeStreamInputSchema,
+  updateFinanceMerchantInputSchema,
+  updateFinanceProfileInputSchema,
+  updateFinanceRecurringObligationInputSchema,
+  updateFinanceTransactionInputSchema,
+  upsertFinanceAttentionItemInputSchema,
+} from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
@@ -11,9 +30,27 @@ const readAnnotations = {
   openWorldHint: false,
   readOnlyHint: true,
 } as const;
+const writeAnnotations = {
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+  readOnlyHint: false,
+} as const;
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
+  server.registerTool(
+    "get_finance_automation_settings",
+    {
+      annotations: readAnnotations,
+      description:
+        "Read whether the signed-in person has enabled Finance review bypass. The setting is informational only: Ilo decides whether justified Finance work applies, queues for review, or needs more input.",
+      inputSchema: z.object({}),
+      title: "Get Finance automation settings",
+    },
+    async () => apiResult(() => api.getFinanceAutomationSettings()),
+  );
+
   server.registerTool(
     "get_finance_status",
     {
@@ -26,6 +63,30 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Get Finance status",
     },
     async (input) => apiResult(() => api.getFinanceStatus(input.scope)),
+  );
+
+  server.registerTool(
+    "compare_finance_scenarios",
+    {
+      annotations: readAnnotations,
+      description:
+        "Preview deterministic cash-flow tradeoffs for a baseline and up to five alternatives.",
+      inputSchema: financeScenarioInputSchema,
+      title: "Compare Finance scenarios",
+    },
+    async (input) => apiResult(() => api.compareFinanceScenarios(input)),
+  );
+
+  server.registerTool(
+    "set_finance_budget_plan",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Set one complete monthly budget plan with its assumptions and rationale. Ilo returns applied, pending_review, or needs_input.",
+      inputSchema: setFinanceBudgetPlanInputSchema,
+      title: "Set Finance budget plan",
+    },
+    async (input) => apiResult(() => api.setFinanceBudgetPlan(input)),
   );
 
   server.registerTool(
@@ -45,6 +106,45 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Maintain Finances",
     },
     async (input) => apiResult(() => api.maintainFinances(input.scope)),
+  );
+
+  server.registerTool(
+    "get_finance_ledger_challenge",
+    {
+      annotations: readAnnotations,
+      description:
+        "Read the next page of a prepared Finance maintenance candidate. Review every item and every rubric check before submitting; look for mixed merchants, weak rules, unusual amounts, reimbursements, transfers, duplicates, vague categories, stale facts, and misleading totals.",
+      inputSchema: z
+        .object({ challengeId: id, cursor: z.string().trim().min(1).optional() })
+        .strict(),
+      title: "Get Finance ledger challenge",
+    },
+    async (input) =>
+      apiResult(() => api.getFinanceLedgerChallenge(input.challengeId, input.cursor)),
+  );
+
+  server.registerTool(
+    "submit_finance_ledger_challenge",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Submit complete structured coverage of a Finance maintenance candidate. Keep supported items, remove or replace corrections, and surface genuine questions or blockers. Ilo then resumes the same durable maintenance run and applies or queues the batch according to the app review setting.",
+      inputSchema: submitFinanceLedgerChallengeInputSchema,
+      title: "Submit Finance ledger challenge",
+    },
+    async (input) => apiResult(() => api.submitFinanceLedgerChallenge(input)),
+  );
+
+  server.registerTool(
+    "get_finance_period_review",
+    {
+      annotations: readAnnotations,
+      description:
+        "Read one immutable Finance period review, including positions, income, gross and personal spending, reimbursements, budget variance, challenge coverage, exceptions, recommendations, and ongoing monitoring responsibility.",
+      inputSchema: z.object({ reviewId: id }).strict(),
+      title: "Get Finance period review",
+    },
+    async (input) => apiResult(() => api.getFinancePeriodReview(input.reviewId)),
   );
 
   server.registerTool(
@@ -217,6 +317,247 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async (input) =>
       apiResult(() => api.proposeFinanceCategorizations({ ...input, review: "needs_review" })),
+  );
+
+  server.registerTool(
+    "apply_finance_categorizations",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Apply revision-guarded categorization decisions. Ilo requires evidence first, then either applies, queues one review, or asks a bounded question.",
+      inputSchema: applyFinanceCategorizationsInputSchema,
+      title: "Apply finance categorizations",
+    },
+    async (input) => apiResult(() => api.applyFinanceCategorizations(input)),
+  );
+
+  const answerFinanceQuestionInput = z
+    .object({
+      answer: z.union([
+        z.string().trim().min(1).max(4_000),
+        financeReimbursementQuestionAnswerSchema,
+      ]),
+      id,
+    })
+    .strict();
+  const answerFinanceQuestion = async ({
+    id: questionId,
+    answer,
+  }: z.infer<typeof answerFinanceQuestionInput>) =>
+    apiResult(() => api.answerFinanceQuestion(questionId, answer));
+  const legacyFinanceReviewInput = z.union([
+    answerFinanceQuestionInput,
+    z
+      .object({
+        categoryId: id,
+        confidence: z.number().min(0).max(1).default(1),
+        expectedTransactionUpdatedAt: z.iso.datetime(),
+        id,
+        learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
+        rationale: z.string().trim().min(1).max(1_000),
+        transactionId: id,
+      })
+      .strict(),
+  ]);
+  server.registerTool(
+    "answer_finance_question",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Answer a bounded Finance question with evidence from the person. This never changes Finance review bypass and never approves or dismisses a queued action.",
+      inputSchema: answerFinanceQuestionInput,
+      title: "Answer Finance question",
+    },
+    answerFinanceQuestion,
+  );
+  server.registerTool(
+    "resolve_finance_review",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Deprecated compatibility alias for answer_finance_question. It translates legacy transaction categorization answers only; it cannot approve an action review or change review bypass.",
+      inputSchema: legacyFinanceReviewInput,
+      title: "Answer Finance question (compatibility)",
+    },
+    async (input) =>
+      "answer" in input
+        ? answerFinanceQuestion(input)
+        : apiResult(() =>
+            api.answerFinanceQuestion(
+              input.id,
+              JSON.stringify({
+                decisions: [
+                  {
+                    categoryId: input.categoryId,
+                    confidence: input.confidence,
+                    expectedTransactionUpdatedAt: input.expectedTransactionUpdatedAt,
+                    learnMerchant: input.learnMerchant,
+                    rationale: input.rationale,
+                    transactionId: input.transactionId,
+                  },
+                ],
+              }),
+            ),
+          ),
+  );
+
+  server.registerTool(
+    "update_finance_recurring_obligation",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Accept, pause, or cancel a recurring ledger obligation; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...updateFinanceRecurringObligationInputSchema.shape }),
+      title: "Update finance recurring obligation",
+    },
+    async ({ id: obligationId, ...input }) =>
+      apiResult(() => api.updateFinanceRecurringObligation(obligationId, input)),
+  );
+
+  server.registerTool(
+    "resolve_finance_alert",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Resolve or dismiss a Finance ledger alert; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...resolveFinanceAlertInputSchema.shape }),
+      title: "Resolve finance alert",
+    },
+    async ({ id: alertId, ...input }) => apiResult(() => api.resolveFinanceAlert(alertId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_merchant",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Confirm a canonical merchant display name; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...updateFinanceMerchantInputSchema.shape }),
+      title: "Update finance merchant",
+    },
+    async ({ id: merchantId, ...input }) =>
+      apiResult(() => api.updateFinanceMerchant(merchantId, input)),
+  );
+
+  server.registerTool(
+    "merge_finance_merchants",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Merge duplicate canonical merchants with an explicit rationale; Ilo returns its apply-or-review disposition.",
+      inputSchema: mergeFinanceMerchantsInputSchema,
+      title: "Merge finance merchants",
+    },
+    async (input) => apiResult(() => api.mergeFinanceMerchants(input)),
+  );
+
+  server.registerTool(
+    "create_finance_budget",
+    {
+      annotations: writeAnnotations,
+      description: "Create a monthly category budget; Ilo returns its apply-or-review disposition.",
+      inputSchema: createFinanceBudgetInputSchema,
+      title: "Create finance budget",
+    },
+    async (input) => apiResult(() => api.createFinanceBudget(input)),
+  );
+
+  server.registerTool(
+    "create_finance_transaction",
+    {
+      annotations: writeAnnotations,
+      description: "Add a manual ledger transaction; Ilo returns its apply-or-review disposition.",
+      inputSchema: createFinanceTransactionInputSchema,
+      title: "Create finance transaction",
+    },
+    async (input) => apiResult(() => api.createFinanceTransaction(input)),
+  );
+
+  server.registerTool(
+    "update_finance_transaction",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Update a transaction category or note; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...updateFinanceTransactionInputSchema.shape }),
+      title: "Update finance transaction",
+    },
+    async ({ id: transactionId, ...input }) =>
+      apiResult(() => api.updateFinanceTransaction(transactionId, input)),
+  );
+
+  server.registerTool(
+    "list_finance_reimbursements",
+    {
+      annotations: readAnnotations,
+      description:
+        "List expected, received, overdue, cancelled, and unmatched reimbursement credits.",
+      inputSchema: z.object({}),
+      title: "List finance reimbursements",
+    },
+    async () => apiResult(() => api.listFinanceReimbursements()),
+  );
+
+  server.registerTool(
+    "reconcile_finance_reimbursement",
+    {
+      annotations: { ...writeAnnotations, destructiveHint: true },
+      description:
+        "Create, evidence-match a ledger credit to, or cancel a reimbursement. This can change Finance projections and may require review; Ilo never executes an external payment.",
+      inputSchema: reconcileFinanceReimbursementInputSchema,
+      title: "Reconcile finance reimbursement",
+    },
+    async (input) => apiResult(() => api.reconcileFinanceReimbursement(input)),
+  );
+
+  server.registerTool(
+    "set_finance_transaction_breakdown",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Set exact category allocations for one posted transaction. Allocations are one-off unless the optional futureRule explicitly requests an evidence-backed, consequential reusable merchant rule; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...setFinanceTransactionBreakdownInputSchema.shape }),
+      title: "Set finance transaction breakdown",
+    },
+    async ({ id: transactionId, ...input }) =>
+      apiResult(() => api.setFinanceTransactionBreakdown(transactionId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_income_stream",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Accept or pause an inferred income stream; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...updateFinanceIncomeStreamInputSchema.shape }),
+      title: "Update finance income stream",
+    },
+    async ({ id: incomeStreamId, ...input }) =>
+      apiResult(() => api.updateFinanceIncomeStream(incomeStreamId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_profile",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Update the financial planning baseline; Ilo returns its apply-or-review disposition.",
+      inputSchema: updateFinanceProfileInputSchema,
+      title: "Update finance profile",
+    },
+    async (input) => apiResult(() => api.updateFinanceProfile(input)),
+  );
+
+  server.registerTool(
+    "refresh_finance_insights",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Refresh recurring, income, and alert ledger insights through Ilo's apply-or-review flow.",
+      inputSchema: z.object({}),
+      title: "Refresh finance insights",
+    },
+    async () => apiResult(() => api.refreshFinanceInsights()),
   );
 
   server.registerTool(

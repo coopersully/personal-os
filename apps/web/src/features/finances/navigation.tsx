@@ -2,7 +2,9 @@ import { Link } from "react-router-dom";
 import {
   BankIcon,
   DollarIcon,
+  GridIcon,
   type Icon,
+  ListChecksIcon,
   ReceiptIcon,
   ShieldCheckIcon,
   WalletIcon,
@@ -25,11 +27,13 @@ const navigation: Array<{
 }> = [
   {
     items: [
-      { icon: BankIcon, id: "overview", label: "Overview" },
-      { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
+      { icon: GridIcon, id: "overview", label: "Overview" },
+      { icon: ListChecksIcon, id: "review", label: "Review" },
       { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
+      { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
       { icon: WalletIcon, id: "budgets", label: "Budgets" },
       { icon: ReceiptIcon, id: "subscriptions", label: "Subscriptions" },
+      { icon: BankIcon, id: "accounts", label: "Accounts" },
       { icon: ShieldCheckIcon, id: "health", label: "Ledger health" },
     ],
     label: "Finances",

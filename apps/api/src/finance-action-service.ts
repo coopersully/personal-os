@@ -129,7 +129,7 @@ function localSource(id: string, revision: string | null): MaterialSourceReferen
   return { accountId: null, provider: "local", remoteId: id, revision, sourceType: "local" };
 }
 
-function normalizedMerchantRuleKey(merchant: string) {
+export function normalizedMerchantRuleKey(merchant: string) {
   return merchant
     .toLowerCase()
     .replace(/[*#]\d+\b/g, " ")
@@ -152,7 +152,7 @@ function transactionSource(
   };
 }
 
-function profileProjection(
+export function profileProjection(
   existing: typeof financeProfiles.$inferSelect | undefined,
   input: Record<string, unknown>,
 ): string {
@@ -206,7 +206,7 @@ function assertNever(value: never): never {
   throw new AppError("invalid_request", `Unsupported Finance action kind: ${String(value)}.`);
 }
 
-function supportedActionKind(value: unknown): SupportedActionKind {
+export function supportedActionKind(value: unknown): SupportedActionKind {
   const actionKind = financeActionKindSchema.parse(value);
   if (
     ![
@@ -226,7 +226,10 @@ function supportedActionKind(value: unknown): SupportedActionKind {
   }
   return actionKind as SupportedActionKind;
 }
-function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<string, unknown>) {
+export function semanticTargetKeys(
+  actionKind: SupportedActionKind,
+  input: Record<string, unknown>,
+) {
   const ids = (value: unknown) => (Array.isArray(value) ? value.map(String).sort() : []);
   switch (actionKind) {
     case "profile":
@@ -342,7 +345,7 @@ function profileValidationAnswer(input: Record<string, unknown>): ExpectedAnswer
   return (typeof field === "string" ? profileValidationAnswers[field] : undefined) ?? fallback;
 }
 
-function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
+export function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
   if (value === null) return field.nullable;
   const valid = (() => {
     switch (field.type) {

@@ -73,11 +73,11 @@ const financeTargetTypes = [
 ] as const;
 type FinanceTargetType = (typeof financeTargetTypes)[number];
 
-function isFinanceTargetType(value: string): value is FinanceTargetType {
+export function isFinanceTargetType(value: string): value is FinanceTargetType {
   return financeTargetTypes.includes(value as FinanceTargetType);
 }
 
-function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, nested: unknown) => {
     if (nested !== null && typeof nested === "object" && !Array.isArray(nested)) {
       const record = nested as Record<string, unknown>;
@@ -118,7 +118,7 @@ const migrationBlockedSynchronization = {
   state: "blocked" as const,
 };
 
-function synchronization(source: SynchronizationSource) {
+export function synchronization(source: SynchronizationSource) {
   return {
     failureCode: source.syncErrorCode,
     failureCount: source.syncFailureCount,
@@ -131,7 +131,11 @@ function synchronization(source: SynchronizationSource) {
   };
 }
 
-function effectiveSynchronization(source: SynchronizationSource, asOf: Date, manual = false) {
+export function effectiveSynchronization(
+  source: SynchronizationSource,
+  asOf: Date,
+  manual = false,
+) {
   const value = synchronization(source);
   if (
     !manual &&
@@ -169,12 +173,12 @@ function serializeAccount(
   };
 }
 
-function nextMonth(month: string): string {
+export function nextMonth(month: string): string {
   const [year = 0, monthNumber = 0] = month.split("-").map(Number);
   return new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 7);
 }
 
-function transactionIsInScope(
+export function transactionIsInScope(
   row: typeof financeTransactions.$inferSelect,
   scope: MaintenanceScope,
   defaultMonth: string,
@@ -195,7 +199,7 @@ function transactionIsInScope(
   );
 }
 
-function latestProfile(rows: Array<typeof financeProfiles.$inferSelect>, date: string) {
+export function latestProfile(rows: Array<typeof financeProfiles.$inferSelect>, date: string) {
   return rows
     .filter((row) => row.effectiveDate <= date)
     .toSorted((left, right) => right.effectiveDate.localeCompare(left.effectiveDate))[0];

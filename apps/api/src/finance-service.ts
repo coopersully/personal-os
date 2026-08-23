@@ -225,13 +225,13 @@ type TransactionCursor = {
 type TransactionListQuery = Omit<FinanceTransactionQuery, "sortBy" | "sortDirection"> &
   Partial<Pick<FinanceTransactionQuery, "sortBy" | "sortDirection">>;
 
-function categoryGroup(name: string) {
+export function categoryGroup(name: string) {
   if (["Income", "Transfers", "Investments"].includes(name)) return "Financial";
   if (["Housing", "Bills & Utilities", "Insurance", "Taxes"].includes(name)) return "Essential";
   return "Spending";
 }
 
-function categorySlug(name: string) {
+export function categorySlug(name: string) {
   return name
     .toLowerCase()
     .replace(/&/g, "and")
@@ -239,7 +239,7 @@ function categorySlug(name: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-function legacyCategorySlug(userId: string, name: string, retry = 0) {
+export function legacyCategorySlug(userId: string, name: string, retry = 0) {
   const normalized = categorySlug(name) || "legacy-category";
   const retrySuffix = retry === 0 ? "" : `:${retry}`;
   const digest = createHash("sha256")
@@ -271,14 +271,14 @@ function approvedProfileFrom(
     : null;
 }
 
-function titleCaseMerchant(value: string) {
+export function titleCaseMerchant(value: string) {
   return value
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .replace(/\b(Usa|Llc|Inc|Ny|Ca)\b/g, (word) => word.toUpperCase());
 }
 
-function normalizedMerchant(merchant: string) {
+export function normalizedMerchant(merchant: string) {
   return merchant
     .toLowerCase()
     .replace(/[*#]\d+\b/g, " ")
@@ -286,26 +286,26 @@ function normalizedMerchant(merchant: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
-function formatCurrency(cents: number) {
+export function formatCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", { currency: "USD", style: "currency" }).format(cents / 100);
 }
-function nextMonth(month: string) {
+export function nextMonth(month: string) {
   const [year, monthNumber] = month.split("-").map(Number);
   return new Date(Date.UTC(year ?? 0, monthNumber ?? 0, 1)).toISOString().slice(0, 7);
 }
 
-function dateAfter(date: string, days: number) {
+export function dateAfter(date: string, days: number) {
   const value = new Date(`${date}T12:00:00Z`);
   value.setUTCDate(value.getUTCDate() + Math.round(days));
   return value.toISOString().slice(0, 10);
 }
 
-function daysInCalendarMonth(month: string) {
+export function daysInCalendarMonth(month: string) {
   const [year, monthNumber] = month.split("-").map(Number);
   return new Date(Date.UTC(year ?? 0, monthNumber ?? 0, 0)).getUTCDate();
 }
 
-function budgetPaceDates(period: FinanceBudgetPacePeriod, today: string) {
+export function budgetPaceDates(period: FinanceBudgetPacePeriod, today: string) {
   const month = today.slice(0, 7);
   const start =
     period === "week"
@@ -324,7 +324,7 @@ function budgetPaceDates(period: FinanceBudgetPacePeriod, today: string) {
   return dates;
 }
 
-function decodeTransactionCursor(cursor: string): TransactionCursor {
+export function decodeTransactionCursor(cursor: string): TransactionCursor {
   try {
     const value = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
@@ -344,7 +344,7 @@ function decodeTransactionCursor(cursor: string): TransactionCursor {
   }
 }
 
-function encodeTransactionCursor(
+export function encodeTransactionCursor(
   row: typeof financeTransactions.$inferSelect,
   sortBy: FinanceTransactionQuery["sortBy"],
   direction: FinanceTransactionQuery["sortDirection"],
@@ -356,7 +356,7 @@ function encodeTransactionCursor(
   ).toString("base64url");
 }
 
-function decodeCandidateItemCursor(cursor: string): number {
+export function decodeCandidateItemCursor(cursor: string): number {
   try {
     const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
       ordinal?: unknown;
@@ -369,11 +369,11 @@ function decodeCandidateItemCursor(cursor: string): number {
   }
 }
 
-function encodeCandidateItemCursor(ordinal: number) {
+export function encodeCandidateItemCursor(ordinal: number) {
   return Buffer.from(JSON.stringify({ ordinal })).toString("base64url");
 }
 
-function financeCandidateRevision(
+export function financeCandidateRevision(
   items: Array<{
     actionKind: string;
     disposition: string;
@@ -395,7 +395,7 @@ function financeCandidateRevision(
     .digest("hex")}`;
 }
 
-function normalizeCandidateDraft(item: FinanceMaintenanceCandidateItemDraft) {
+export function normalizeCandidateDraft(item: FinanceMaintenanceCandidateItemDraft) {
   const parsed = financeMaintenanceCandidateItemDraftSchema.parse(item);
   if (parsed.disposition !== "prepared") return parsed;
   return {
@@ -406,7 +406,7 @@ function normalizeCandidateDraft(item: FinanceMaintenanceCandidateItemDraft) {
     ),
   };
 }
-function categorization(merchant: string, learnedCategory?: string) {
+export function categorization(merchant: string, learnedCategory?: string) {
   if (isRentMerchant(merchant)) {
     return { category: rentCategory, confidence: 10_000, needsReview: false };
   }
@@ -417,24 +417,24 @@ function categorization(merchant: string, learnedCategory?: string) {
     : { category: null, confidence: null, needsReview: true };
 }
 
-function isRentMerchant(merchant: string) {
+export function isRentMerchant(merchant: string) {
   return /\blee\s+t(?:a|e)(?:ch|ck)man\b/i.test(merchant);
 }
 
-function isSoFiVaultTransfer(merchant: string) {
+export function isSoFiVaultTransfer(merchant: string) {
   return /\b(?:to|from|2x)\b.*\bvault\b/i.test(merchant);
 }
 
-function isProviderTransfer(category: string | null) {
+export function isProviderTransfer(category: string | null) {
   return category === "TRANSFER_IN" || category === "TRANSFER_OUT";
 }
 
-function isCardPayment(merchant: string) {
+export function isCardPayment(merchant: string) {
   return /(?:\be-?payment\b|\bautopay\b|\bmobile payment\b|\bthank you\b|\bcard payment\b)/i.test(
     merchant,
   );
 }
-function providerConfidence(value: PlaidCategoryConfidence) {
+export function providerConfidence(value: PlaidCategoryConfidence) {
   return {
     HIGH: 0.9,
     LOW: 0.5,
@@ -443,10 +443,10 @@ function providerConfidence(value: PlaidCategoryConfidence) {
     VERY_HIGH: 0.985,
   }[value ?? "UNKNOWN"];
 }
-function providerNeedsReview(value: PlaidCategoryConfidence) {
+export function providerNeedsReview(value: PlaidCategoryConfidence) {
   return value === "LOW" || value === "MEDIUM" || value === "UNKNOWN" || value === undefined;
 }
-function isRefundOrReversal(row: typeof financeTransactions.$inferSelect) {
+export function isRefundOrReversal(row: typeof financeTransactions.$inferSelect) {
   return (
     row.direction === "income" &&
     row.category !== "INCOME" &&
@@ -454,7 +454,7 @@ function isRefundOrReversal(row: typeof financeTransactions.$inferSelect) {
     row.category !== transferCategory
   );
 }
-function budgetImpact(row: typeof financeTransactions.$inferSelect, includePending = false) {
+export function budgetImpact(row: typeof financeTransactions.$inferSelect, includePending = false) {
   if (row.pending && !includePending) return 0;
   if (row.direction === "expense") return row.amount;
   return isRefundOrReversal(row) ? -row.amount : 0;

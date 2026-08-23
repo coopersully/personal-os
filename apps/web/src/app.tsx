@@ -53,6 +53,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Link,
   Navigate,
@@ -96,6 +97,8 @@ import {
   CheckIcon,
   CheckSquareIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CircleCheckIcon,
   ClockIcon,
   CloudIcon,
@@ -106,8 +109,6 @@ import {
   CopyPlusIcon,
   EditIcon,
   ExternalLinkIcon,
-  EyeIcon,
-  EyeOffIcon,
   FileTextIcon,
   GridIcon,
   HouseIcon,
@@ -154,6 +155,7 @@ import {
   Avatar as ShadcnAvatar,
   AvatarBadge as ShadcnAvatarBadge,
   AvatarFallback as ShadcnAvatarFallback,
+  AvatarGroup as ShadcnAvatarGroup,
   AvatarImage as ShadcnAvatarImage,
 } from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
@@ -258,6 +260,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Slider as ShadcnSlider } from "@/components/ui/slider";
 import { Toaster } from "@/components/ui/sonner";
+import { Switch as ShadcnSwitch } from "@/components/ui/switch";
 import { Textarea as ShadcnTextarea } from "@/components/ui/textarea";
 import {
   ToggleGroup as ShadcnToggleGroup,
@@ -285,6 +288,7 @@ import {
   workspaceTodaySummary,
 } from "./components/workspace-switching.js";
 import { ActivityPage, ActivityTopbarControls } from "./features/activity/page.js";
+import { CalendarFloatingNav } from "./features/calendar/floating-nav.js";
 import { calendarNavigationItem } from "./features/calendar/manifest.js";
 import {
   type CalendarView,
@@ -355,7 +359,18 @@ type Editor =
   | null;
 
 type CalendarEventMove = { day: LocalDate; event: CalendarEvent; minute: number };
-type CalendarDropPreview = { dayKey: string; duration: number; minute: number };
+type CalendarDropPreview = {
+  dayKey: string;
+  duration: number;
+  grabOffsetX: number;
+  grabOffsetY: number;
+  minute: number;
+  pointerX: number;
+  pointerY: number;
+  color: string;
+  column: number;
+  width: number;
+};
 type EventDraft = { endsAt: string; startsAt: string };
 type CalendarMap = Map<string, Calendar>;
 type ContextSidebarMode = "calendar" | "finances" | "mail" | "settings" | "tasks" | null;
@@ -368,11 +383,17 @@ const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> =
 
 const RichEventNotes = lazy(() => import("./rich-event-notes.js"));
 
-const calendarHourHeight = 64;
+const calendarHourHeight = 48;
 const calendarMinutesPerDay = 24 * 60;
 const calendarTimelineHeight = 24 * calendarHourHeight;
-const calendarHours = Array.from({ length: 24 }, (_, hour) => hour);
+const calendarTimeMarks = Array.from({ length: 48 }, (_, index) => index * 30);
 const calendarDragType = "application/x-personal-os-calendar-event";
+const calendarDragOffsetType = "application/x-personal-os-calendar-grab-offset-y";
+const calendarDragOffsets = new Map<string, number>();
+const calendarDragMetrics = new Map<
+  string,
+  { color: string; grabOffsetX: number; grabOffsetY: number; width: number }
+>();
 
 type NavigationItemDefinition = {
   badge?: number | string;
@@ -921,6 +942,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const location = useLocation();
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
   const activeWorkspace = workspaceForPath(location.pathname);
+  const isCalendarWorkspace = activeWorkspace?.id === "calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
   const workspacePath = activeWorkspace?.path ?? null;
   const [routeTransition, setRouteTransition] = useState<{
@@ -1022,12 +1044,12 @@ function AuthenticatedApp({ user }: { user: User }) {
 
   return (
     <>
-      <div className="app-shell">
+      <div className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : ""}`}>
         <PinterestWallpaperScheduler />
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
-        {!isMobileWorkspaceDock ? (
+        {!isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <aside
             aria-label={
               navigationOwner.kind !== "workspace"
@@ -1053,6 +1075,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                 </Link>
               ) : (
                 <WorkspaceSwitcher
+                  compact
                   onNavigate={closeMobileMenu}
                   onOpenChange={setWorkspaceSwitcherOpen}
                   onPreviewChange={setWorkspacePreview}
@@ -1114,7 +1137,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             </ShadcnSidebarFooter>
           </aside>
         ) : null}
-        {isMobileWorkspaceDock ? (
+        {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
             accountName={workspaceOwnerName(user)}
             accountSections={settingsSectionPages(
@@ -1134,6 +1157,19 @@ function AuthenticatedApp({ user }: { user: User }) {
             </div>
           )}
           <WorkspaceAppBarForRoute
+            calendarWorkspaceSwitcher={
+              isCalendarWorkspace ? (
+                <WorkspaceSwitcher
+                  onNavigate={closeMobileMenu}
+                  onOpenChange={setWorkspaceSwitcherOpen}
+                  onPreviewChange={setWorkspacePreview}
+                  pathname={location.pathname}
+                  search={location.search}
+                  user={user}
+                  weather={weather.data}
+                />
+              ) : null
+            }
             onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
             pageTitle={pageTitle}
             pathname={location.pathname}
@@ -1146,7 +1182,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           />
 
           <main
-            className={`content${sidebarMode === "calendar" || sidebarMode === "mail" ? ` content--${sidebarMode}` : ""}`}
+            className={`content${isCalendarWorkspace ? " content--calendar" : sidebarMode === "mail" ? " content--mail" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1422,6 +1458,7 @@ function NavigationIcon({
 }
 
 function WorkspaceAppBarForRoute({
+  calendarWorkspaceSwitcher,
   onCalendarToday,
   pageTitle,
   pathname,
@@ -1432,6 +1469,7 @@ function WorkspaceAppBarForRoute({
   user,
   weather,
 }: {
+  calendarWorkspaceSwitcher: ReactNode;
   onCalendarToday: () => void;
   pageTitle: string | null;
   pathname: string;
@@ -1445,7 +1483,7 @@ function WorkspaceAppBarForRoute({
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const identity =
     workspace === "calendar" ? (
-      <CalendarAppBarIdentity user={user} />
+      <CalendarAppBarIdentity user={user} workspaceSwitcher={calendarWorkspaceSwitcher} />
     ) : pathname === "/today" && todayBrief ? (
       <TodayNavigationTitle generatedAt={todayBrief.generatedAt} timeZone={user.planningTimezone} />
     ) : (
@@ -1494,9 +1532,7 @@ function WorkspaceAppBarForRoute({
             <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
           ) : workspace === "tasks" ? (
             <TasksCreateButton onCreate={() => setEditor({ kind: "task" })} />
-          ) : workspace === "calendar" ? (
-            <CalendarCreateButton setEditor={setEditor} />
-          ) : workspace === "mail" ? (
+          ) : workspace === "calendar" ? null : workspace === "mail" ? (
             <>
               <MailSyncButton />
               <MailComposeButton />
@@ -1582,6 +1618,7 @@ function warmWorkspacePreview(queryClient: QueryClient, path: WorkspaceDefinitio
 }
 
 function WorkspaceSwitcher({
+  compact = false,
   onNavigate,
   onOpenChange,
   onPreviewChange,
@@ -1590,6 +1627,7 @@ function WorkspaceSwitcher({
   user,
   weather: currentWeather,
 }: {
+  compact?: boolean;
   onNavigate: () => void;
   onOpenChange: (open: boolean) => void;
   onPreviewChange: (preview: WorkspacePreview | null) => void;
@@ -1713,7 +1751,7 @@ function WorkspaceSwitcher({
           <DropdownMenuContent
             align="start"
             aria-label="Switch workspace"
-            className="workspace-switcher__menu w-[--radix-popper-anchor-width]"
+            className={`workspace-switcher__menu w-[--radix-popper-anchor-width]${compact ? " workspace-switcher__menu--calendar" : ""}`}
             style={
               {
                 "--workspace-indicator-y": `${indicatorOffset}px`,
@@ -1887,15 +1925,6 @@ function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function CalendarCreateButton({ setEditor }: { setEditor: (editor: Editor) => void }) {
-  return (
-    <ShadcnButton aria-label="New event" onClick={() => setEditor({ kind: "event" })} size="sm">
-      <CalendarPlusIcon aria-hidden="true" data-icon="inline-start" />
-      <span>New event</span>
-    </ShadcnButton>
   );
 }
 
@@ -2455,6 +2484,7 @@ function CalendarPage({
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<CalendarDropPreview | null>(null);
+  const initializedFollow = useRef(false);
   const requestedView = searchParams.get("view");
   const defaultView: CalendarView =
     typeof window.matchMedia === "function" && window.matchMedia("(max-width: 560px)").matches
@@ -2550,8 +2580,22 @@ function CalendarPage({
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (initializedFollow.current) return;
+    initializedFollow.current = true;
+    if (!sameLocalDate(anchor, today)) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("follow", "1");
+      return next;
+    });
+  }, [anchor, setSearchParams, today]);
+
   const showDay = (day: LocalDate) => {
     updateCalendarState({ date: localDateToIso(day), view: "day" });
+  };
+  const jumpToDate = (day: LocalDate) => {
+    updateCalendarState({ date: localDateToIso(day), follow: "0" });
   };
   const dropEvent = (event: CalendarEvent, day: LocalDate, minute: number) => {
     if (calendarsById.get(event.calendarId)?.isWritable) {
@@ -2559,8 +2603,13 @@ function CalendarPage({
     }
     setDraggedEventId(null);
     setDragPreview(null);
+    calendarDragOffsets.delete(event.id);
   };
   const clearDrag = () => {
+    if (draggedEventId) {
+      calendarDragOffsets.delete(draggedEventId);
+      calendarDragMetrics.delete(draggedEventId);
+    }
     setDraggedEventId(null);
     setDragPreview(null);
   };
@@ -2608,6 +2657,7 @@ function CalendarPage({
           setEditor={setEditor}
           setDraggedEventId={setDraggedEventId}
           setDragPreview={setDragPreview}
+          selectedDate={anchor}
           showDay={showDay}
           followToday={followToday}
           key={localDateKey(days[0] as LocalDate)}
@@ -2634,11 +2684,24 @@ function CalendarPage({
           todaySnap={todaySnap}
         />
       )}
+      <CalendarFloatingNav
+        anchor={anchor}
+        calendars={calendars.data ?? []}
+        onNavigate={jumpToDate}
+        timeZone={user.planningTimezone}
+        user={user}
+      />
     </div>
   );
 }
 
-function CalendarAppBarIdentity({ user }: { user: User }) {
+function CalendarAppBarIdentity({
+  user,
+  workspaceSwitcher,
+}: {
+  user: User;
+  workspaceSwitcher: ReactNode;
+}) {
   const [searchParams] = useSearchParams();
   const compactMedia =
     typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 560px)") : undefined;
@@ -2655,19 +2718,29 @@ function CalendarAppBarIdentity({ user }: { user: User }) {
   );
   const start = days[0] as LocalDate;
   const end = days[days.length - 1] as LocalDate;
-  const viewLabel = calendarViews.find((option) => option.value === view)?.label ?? view;
   const title =
     view === "day"
       ? formatLocalDate(start, { day: "numeric", month: "long", weekday: "long", year: "numeric" })
       : view === "week"
         ? calendarOrientationWeekTitle(start, end)
         : formatLocalDate(anchor, { month: "long", year: "numeric" });
+  const compactTitle =
+    view === "day"
+      ? formatLocalDate(start, { day: "numeric", month: "short" })
+      : view === "week"
+        ? `${formatLocalDate(start, { month: "short" })} ${start.day}–${end.day}`
+        : formatLocalDate(anchor, { month: "short", year: "numeric" });
 
   return (
-    <div className="calendar-app-bar__orientation">
-      <div>
-        <span>{viewLabel}</span>
-        <h2>{title}</h2>
+    <div className="calendar-app-bar__identity-cluster">
+      <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      <div className="calendar-app-bar__orientation">
+        <h2>
+          <span className="calendar-app-bar__title-full">{title}</span>
+          <span aria-hidden="true" className="calendar-app-bar__title-compact">
+            {compactTitle}
+          </span>
+        </h2>
       </div>
     </div>
   );
@@ -2690,7 +2763,10 @@ function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: 
   const defaultView: CalendarView = compactMedia?.matches ? "day" : "week";
   const requestedView = searchParams.get("view");
   const view = calendarViewFromSearch(requestedView, defaultView);
-  const includeWeekends = searchParams.get("weekends") !== "0";
+  const requestedAnchor = searchParams.get("date");
+  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
+    ? parseLocalDate(requestedAnchor as string)
+    : localDateAt(new Date(), user.planningTimezone);
   const updateCalendarState = (updates: Record<string, null | string>) =>
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -2700,31 +2776,19 @@ function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: 
       }
       return next;
     });
+  const movePeriod = (direction: -1 | 1) => {
+    const date =
+      view === "day"
+        ? addLocalDays(anchor, direction)
+        : view === "week"
+          ? addLocalDays(anchor, direction * 7)
+          : addCalendarMonths(anchor, direction);
+    updateCalendarState({ date: localDateToIso(date), follow: "0" });
+  };
   return (
     <fieldset className="calendar-app-bar__controls">
       <legend className="sr-only">Calendar controls</legend>
       <div className="calendar-app-bar__control-set">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ShadcnButton
-              aria-label="Today"
-              className="calendar-app-bar__today"
-              onClick={() => {
-                updateCalendarState({
-                  date: localDateToIso(localDateAt(new Date(), user.planningTimezone)),
-                  follow: "1",
-                });
-                onToday();
-              }}
-              size="sm"
-              variant="outline"
-            >
-              <LocationFixedIcon aria-hidden="true" data-icon="inline-start" />
-              <span>Today</span>
-            </ShadcnButton>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Return to today</TooltipContent>
-        </Tooltip>
         <ShadcnToggleGroup
           aria-label="Calendar view: choose day, week, or month"
           className="calendar-app-bar__view-switch"
@@ -2761,31 +2825,146 @@ function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: 
             );
           })}
         </ShadcnToggleGroup>
-        {view === "week" ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <ShadcnButton
-                aria-label="Weekends"
-                aria-pressed={includeWeekends}
-                className="calendar-app-bar__weekends"
-                onClick={() => updateCalendarState({ weekends: includeWeekends ? "0" : null })}
-                size="icon"
-                variant={includeWeekends ? "secondary" : "ghost"}
-              >
-                {includeWeekends ? (
-                  <EyeIcon aria-hidden="true" />
-                ) : (
-                  <EyeOffIcon aria-hidden="true" />
-                )}
-              </ShadcnButton>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {includeWeekends ? "Hide weekends" : "Show weekends"}
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
+        <ShadcnButton
+          aria-label="Today"
+          className="calendar-app-bar__today"
+          onClick={() => {
+            updateCalendarState({
+              date: localDateToIso(localDateAt(new Date(), user.planningTimezone)),
+              follow: "1",
+            });
+            onToday();
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <LocationFixedIcon aria-hidden="true" data-icon="inline-start" />
+          <span>Today</span>
+        </ShadcnButton>
+        <div className="calendar-app-bar__period-navigation">
+          <ShadcnButton
+            aria-label={`Previous ${view}`}
+            onClick={() => movePeriod(-1)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <ChevronLeftIcon aria-hidden="true" />
+          </ShadcnButton>
+          <ShadcnButton
+            aria-label={`Next ${view}`}
+            onClick={() => movePeriod(1)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <ChevronRightIcon aria-hidden="true" />
+          </ShadcnButton>
+        </div>
+        <CalendarAccountsControl />
       </div>
     </fieldset>
+  );
+}
+
+function addCalendarMonths(date: LocalDate, amount: number): LocalDate {
+  const monthIndex = date.month - 1 + amount;
+  const year = date.year + Math.floor(monthIndex / 12);
+  const month = (((monthIndex % 12) + 12) % 12) + 1;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return { day: Math.min(date.day, daysInMonth), month, year };
+}
+
+function CalendarAccountsControl() {
+  const calendars = useQuery({ queryFn: api.listCalendars, queryKey: calendarQueryKeys.calendars });
+  const accounts = useQuery({
+    queryFn: api.listConnectors,
+    queryKey: ["connectors"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
+  const enabledAccounts = (accounts.data ?? []).filter((account) => account.calendarEnabled);
+  const records = calendars.data ?? [];
+  const selectedCount = records.filter((calendar) => calendar.isSelected).length;
+  const label = `${selectedCount} of ${records.length} calendars`;
+  return (
+    <ShadcnPopover>
+      <ShadcnPopoverTrigger asChild>
+        <ShadcnButton
+          aria-label={label}
+          className="calendar-accounts-trigger"
+          size="sm"
+          variant="ghost"
+        >
+          <ShadcnAvatarGroup className="calendar-accounts-trigger__avatars">
+            {enabledAccounts.map((account) => (
+              <ShadcnAvatar key={account.id} size="sm">
+                {account.avatarUrl ? <ShadcnAvatarImage alt="" src={account.avatarUrl} /> : null}
+                <ShadcnAvatarFallback>
+                  {initials(account.label ?? account.email ?? account.provider)}
+                </ShadcnAvatarFallback>
+              </ShadcnAvatar>
+            ))}
+          </ShadcnAvatarGroup>
+          <span>{label}</span>
+        </ShadcnButton>
+      </ShadcnPopoverTrigger>
+      <ShadcnPopoverContent align="end" className="calendar-accounts-popover">
+        <ShadcnPopoverHeader>
+          <ShadcnPopoverTitle>Calendars</ShadcnPopoverTitle>
+          <ShadcnPopoverDescription>{label}</ShadcnPopoverDescription>
+        </ShadcnPopoverHeader>
+        {records.length === 0 ? (
+          <p className="calendar-accounts-popover__empty">No calendars are available.</p>
+        ) : (
+          <ShadcnFieldGroup className="calendar-accounts-popover__list">
+            {groupCalendarsByAccount(enabledAccounts, records).flatMap((group) =>
+              group.calendars.map((calendar) => (
+                <CalendarVisibilitySwitch calendar={calendar} key={calendar.id} />
+              )),
+            )}
+          </ShadcnFieldGroup>
+        )}
+      </ShadcnPopoverContent>
+    </ShadcnPopover>
+  );
+}
+
+function CalendarVisibilitySwitch({ calendar }: { calendar: Calendar }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation<Calendar, Error, boolean, { previous: Calendar[] }>({
+    mutationFn: (selected) => api.setCalendarSelected(calendar.id, selected),
+    onError: (error, _selected, context) => {
+      if (context) queryClient.setQueryData(calendarQueryKeys.calendars, context.previous);
+      toast.error(errorMessage(error));
+    },
+    onMutate: async (selected) => {
+      await queryClient.cancelQueries({ queryKey: calendarQueryKeys.calendars });
+      const previous = queryClient.getQueryData<Calendar[]>(calendarQueryKeys.calendars) ?? [];
+      queryClient.setQueryData<Calendar[]>(calendarQueryKeys.calendars, (records) =>
+        records?.map((record) =>
+          record.id === calendar.id ? { ...record, isSelected: selected } : record,
+        ),
+      );
+      return { previous };
+    },
+    onSettled: () => invalidateMaterial(queryClient),
+  });
+  return (
+    <ShadcnField orientation="horizontal">
+      <ShadcnFieldLabel htmlFor={`calendar-popover-${calendar.id}`}>
+        <i
+          aria-hidden="true"
+          className="calendar-accounts-popover__color"
+          style={{ background: calendar.color ?? "var(--muted)" }}
+        />
+        <span className="truncate">{calendar.name}</span>
+      </ShadcnFieldLabel>
+      <ShadcnSwitch
+        checked={calendar.isSelected}
+        disabled={mutation.isPending}
+        id={`calendar-popover-${calendar.id}`}
+        onCheckedChange={(selected) => mutation.mutate(selected)}
+        size="sm"
+      />
+    </ShadcnField>
   );
 }
 
@@ -3210,6 +3389,7 @@ function DayCalendarView({
     [day, events, timeZone],
   );
   const scrollContainer = useRef<HTMLDivElement>(null);
+  const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const [contextMinute, setContextMinute] = useState(0);
   useEffect(() => {
     if (!isToday) scrollTimelineToMinute(scrollContainer.current, 8 * 60);
@@ -3217,13 +3397,16 @@ function DayCalendarView({
   useEffect(() => {
     if (!isToday || !followToday) return;
     scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
+    rememberProgrammaticCalendarScroll(programmaticScrollPosition, scrollContainer.current);
   }, [currentTime, followToday, isToday, timeZone]);
   useEffect(() => {
     if (!isToday || !followToday || todaySnap === 0) return;
     scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
+    rememberProgrammaticCalendarScroll(programmaticScrollPosition, scrollContainer.current);
   }, [currentTime, followToday, isToday, timeZone, todaySnap]);
   const handleScroll = (event: ReactUIEvent<HTMLDivElement>) => {
     if (!followToday) return;
+    if (consumeProgrammaticCalendarScroll(programmaticScrollPosition, event.currentTarget)) return;
     const target = Math.max(
       0,
       minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
@@ -3238,7 +3421,11 @@ function DayCalendarView({
         className="calendar-secondary-app-bar calendar-secondary-app-bar--day"
       >
         <WorkspaceSecondaryAppBarContent>
-          <AllDayEvents events={allDayEvents} setEditor={setEditor} />
+          <AllDayEvents
+            calendarsById={calendarsById}
+            events={allDayEvents}
+            setEditor={setEditor}
+          />
         </WorkspaceSecondaryAppBarContent>
       </WorkspaceSecondaryAppBar>
       <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
@@ -3256,7 +3443,14 @@ function DayCalendarView({
                 }
                 onDragLeave={(dragEvent) => clearTimelineDropPreview(dragEvent, setDragPreview)}
                 onDragOver={(dragEvent) =>
-                  previewTimelineDrop(dragEvent, day, events, draggedEventId, setDragPreview)
+                  previewTimelineDrop(
+                    dragEvent,
+                    day,
+                    events,
+                    draggedEventId,
+                    setDragPreview,
+                    timeZone,
+                  )
                 }
                 onDrop={(dragEvent) =>
                   dropTimelineEvent(dragEvent, day, events, moveEvent, setDraggedEventId)
@@ -3267,12 +3461,11 @@ function DayCalendarView({
                   <CalendarDropPreview preview={dragPreview} />
                 ) : null}
                 {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
-                {timelineEvents.length === 0 ? (
-                  <span className="calendar-timeline-empty">This day is open</span>
-                ) : null}
                 {timelineEvents.map((layout) => (
                   <TimelineEvent
+                    blockColors={eventBlockColors(layout.event, calendarsById)}
                     calendar={calendarsById.get(layout.event.calendarId)}
+                    isDragging={draggedEventId === layout.event.id}
                     key={layout.event.id}
                     layout={layout}
                     onEdit={() => setEditor({ event: layout.event, kind: "event" })}
@@ -3310,6 +3503,7 @@ function WeekCalendarView({
   setEditor,
   setDraggedEventId,
   setDragPreview,
+  selectedDate,
   showDay,
   timeZone,
   today,
@@ -3328,6 +3522,7 @@ function WeekCalendarView({
   setEditor: (editor: Editor) => void;
   setDraggedEventId: (id: string | null) => void;
   setDragPreview: (preview: CalendarDropPreview | null) => void;
+  selectedDate: LocalDate;
   showDay: (day: LocalDate) => void;
   timeZone: string;
   today: LocalDate;
@@ -3348,6 +3543,7 @@ function WeekCalendarView({
     [days, eventsByDay, timeZone],
   );
   const scrollContainer = useRef<HTMLDivElement>(null);
+  const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const includesToday = days.some((day) => sameLocalDate(day, today));
   useEffect(() => {
     if (!includesToday) scrollTimelineToMinute(scrollContainer.current, 8 * 60);
@@ -3355,6 +3551,7 @@ function WeekCalendarView({
   useEffect(() => {
     if (!includesToday || !followToday) return;
     scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
+    rememberProgrammaticCalendarScroll(programmaticScrollPosition, scrollContainer.current);
   }, [currentTime, followToday, includesToday, timeZone]);
   useEffect(() => {
     if (!includesToday || !followToday || todaySnap === 0) return;
@@ -3371,10 +3568,12 @@ function WeekCalendarView({
         containerBounds.left -
         (container.clientWidth - todayBounds.width) / 2,
     );
+    rememberProgrammaticCalendarScroll(programmaticScrollPosition, container);
   }, [followToday, includesToday, timeZone, todaySnap]);
   const handleScroll = (event: ReactUIEvent<HTMLDivElement>) => {
     if (!followToday) return;
     const container = event.currentTarget;
+    if (consumeProgrammaticCalendarScroll(programmaticScrollPosition, container)) return;
     const verticalTarget = Math.max(
       0,
       minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
@@ -3425,6 +3624,7 @@ function WeekCalendarView({
                     <span>{formatLocalWeekday(day)}</span>
                     <button
                       aria-current={isToday ? "date" : undefined}
+                      data-selected={sameLocalDate(day, selectedDate)}
                       aria-label={`View ${formatLocalDate(day, {
                         day: "numeric",
                         month: "long",
@@ -3437,14 +3637,19 @@ function WeekCalendarView({
                       {day.day}
                     </button>
                   </div>
-                  <AllDayEvents compact events={allDayEvents} setEditor={setEditor} />
+                  <AllDayEvents
+                    calendarsById={calendarsById}
+                    compact
+                    events={allDayEvents}
+                    setEditor={setEditor}
+                  />
                 </header>
               );
             })}
           </WorkspaceSecondaryAppBarContent>
         </WorkspaceSecondaryAppBar>
         <TimeAxis />
-        {days.map((day) => {
+        {days.map((day, dayIndex) => {
           const layouts = layoutsByDay.get(localDateKey(day)) as TimelineEventLayout[];
           const isToday = sameLocalDate(day, today);
           return (
@@ -3460,6 +3665,7 @@ function WeekCalendarView({
                   Array.from(eventsByDay.values()).flat(),
                   draggedEventId,
                   setDragPreview,
+                  timeZone,
                 )
               }
               onDrop={(dragEvent) =>
@@ -3476,12 +3682,19 @@ function WeekCalendarView({
               {dragPreview?.dayKey === localDateKey(day) ? (
                 <CalendarDropPreview preview={dragPreview} />
               ) : null}
-              {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
-              {layouts.length === 0 ? <span className="calendar-timeline-empty">Open</span> : null}
+              {dayIndex === 0 && includesToday ? (
+                <TimelineNow
+                  currentTime={currentTime}
+                  spanColumns={days.length}
+                  timeZone={timeZone}
+                />
+              ) : null}
               {layouts.map((layout) => (
                 <TimelineEvent
+                  blockColors={eventBlockColors(layout.event, calendarsById)}
                   calendar={calendarsById.get(layout.event.calendarId)}
                   compact
+                  isDragging={draggedEventId === layout.event.id}
                   key={layout.event.id}
                   layout={layout}
                   onEdit={() => setEditor({ event: layout.event, kind: "event" })}
@@ -3513,94 +3726,237 @@ function TimeAxis() {
       className="calendar-time-axis"
       style={{ height: calendarTimelineHeight }}
     >
-      {calendarHours.map((hour) => (
-        <li key={hour} style={{ top: minuteToTimelinePixels(hour * 60) }}>
-          {formatHour(hour)}
+      {calendarTimeMarks.map((minute) => (
+        <li
+          data-major={minute % 60 === 0}
+          key={minute}
+          style={{ top: minuteToTimelinePixels(minute) }}
+        >
+          {formatMinuteOfDay(minute)}
         </li>
       ))}
     </ol>
   );
 }
 
-function TimelineNow({ currentTime, timeZone }: { currentTime: Date; timeZone: string }) {
+function rememberProgrammaticCalendarScroll(
+  position: { current: { left: number; top: number } | null },
+  container: HTMLElement | null,
+) {
+  if (!container) return;
+  position.current = { left: container.scrollLeft, top: container.scrollTop };
+}
+
+function consumeProgrammaticCalendarScroll(
+  position: { current: { left: number; top: number } | null },
+  container: HTMLElement,
+) {
+  const expected = position.current;
+  if (!expected) return false;
+  const matches =
+    Math.abs(container.scrollLeft - expected.left) <= 1 &&
+    Math.abs(container.scrollTop - expected.top) <= 1;
+  if (matches) position.current = null;
+  return matches;
+}
+
+function TimelineNow({
+  currentTime,
+  spanColumns,
+  timeZone,
+}: {
+  currentTime: Date;
+  spanColumns?: number;
+  timeZone: string;
+}) {
   return (
     <div
       aria-label={`Current time ${formatTime(currentTime.toISOString(), timeZone)}`}
       className="calendar-now-line"
       role="timer"
-      style={{ top: minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) }}
+      style={{
+        right: spanColumns ? "auto" : undefined,
+        top: minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute),
+        width: spanColumns
+          ? `calc(56px + ${spanColumns * 100}% + ${Math.max(0, spanColumns - 1)}px)`
+          : undefined,
+      }}
     >
-      <span>
-        <strong>Now</strong>
-        {formatTime(currentTime.toISOString(), timeZone)}
-      </span>
+      <span>{formatTime(currentTime.toISOString(), timeZone)}</span>
       <i />
     </div>
   );
 }
 
 function CalendarDropPreview({ preview }: { preview: CalendarDropPreview }) {
+  const dateLabel = formatLocalDate(parseLocalDate(preview.dayKey), {
+    day: "numeric",
+    month: "short",
+    weekday: "short",
+  });
+  const timeLabel = formatMinuteOfDay(preview.minute);
   return (
-    <div
-      aria-live="polite"
-      className="calendar-drop-preview"
-      role="status"
-      style={{
-        height: Math.max(minuteToTimelinePixels(preview.duration), 18),
-        top: minuteToTimelinePixels(preview.minute),
-      }}
-    >
-      Drop at {formatHour(Math.floor(preview.minute / 60))}
-    </div>
+    <>
+      <div
+        aria-label={`Move to ${dateLabel} at ${timeLabel}`}
+        aria-live="polite"
+        className="calendar-drop-preview"
+        role="status"
+        style={{
+          ...calendarEventColorStyle(preview.color),
+          height: Math.max(minuteToTimelinePixels(preview.duration), 18),
+          left: 3 + preview.column * 12,
+          top: minuteToTimelinePixels(preview.minute),
+          width: `calc(100% - ${6 + preview.column * 12}px)`,
+        }}
+      />
+      {typeof document !== "undefined"
+        ? createPortal(
+            <div
+              aria-hidden="true"
+              className="calendar-drag-overlay"
+              style={{
+                ...calendarEventColorStyle(preview.color),
+                height: Math.max(minuteToTimelinePixels(preview.duration), 36),
+                left: preview.pointerX - preview.grabOffsetX,
+                top: preview.pointerY - preview.grabOffsetY,
+                width: preview.width,
+              }}
+            >
+              <span>{dateLabel}</span>
+              <strong>{timeLabel}</strong>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
+function calendarEventColorStyle(color: string | null | undefined): CSSProperties {
+  return { "--calendar-color": color ?? "#777ce3" } as CSSProperties;
+}
+
+function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): string[] {
+  return event.blocks.flatMap((block) => {
+    const color = calendarsById.get(block.calendarId)?.color;
+    return color ? [color] : [];
+  });
+}
+
 function TimelineEvent({
+  blockColors,
   calendar,
   compact = false,
   layout,
   onEdit,
   onDragEnd,
   setDraggedEventId,
+  isDragging = false,
   timeZone,
 }: {
+  blockColors: string[];
   calendar: Calendar | undefined;
   compact?: boolean;
   layout: TimelineEventLayout;
   onEdit: () => void;
   onDragEnd: () => void;
   setDraggedEventId: (id: string | null) => void;
+  isDragging?: boolean;
   timeZone: string;
 }) {
-  const { column, columns, endMinute, event, startMinute } = layout;
+  const { column, endMinute, event, startMinute } = layout;
   const writable = calendar?.isWritable ?? false;
+  const [moveBlocked, setMoveBlocked] = useState(false);
+  const blockedHoldTriggered = useRef(false);
+  const blockedHoldTimer = useRef<number | null>(null);
+  const blockedFeedbackTimer = useRef<number | null>(null);
+  const blockedMessage = calendar
+    ? `${calendar.name} is read-only, so this event can’t be moved.`
+    : "This event is read-only and can’t be moved.";
+  const clearBlockedHoldTimer = () => {
+    if (blockedHoldTimer.current === null) return;
+    window.clearTimeout(blockedHoldTimer.current);
+    blockedHoldTimer.current = null;
+  };
+  useEffect(
+    () => () => {
+      if (blockedHoldTimer.current !== null) window.clearTimeout(blockedHoldTimer.current);
+      if (blockedFeedbackTimer.current !== null) window.clearTimeout(blockedFeedbackTimer.current);
+    },
+    [],
+  );
+  const startBlockedHold = () => {
+    if (writable) return;
+    clearBlockedHoldTimer();
+    blockedHoldTimer.current = window.setTimeout(() => {
+      blockedHoldTriggered.current = true;
+      setMoveBlocked(true);
+      blockedHoldTimer.current = null;
+      if (blockedFeedbackTimer.current !== null) {
+        window.clearTimeout(blockedFeedbackTimer.current);
+      }
+      blockedFeedbackTimer.current = window.setTimeout(() => {
+        setMoveBlocked(false);
+        blockedFeedbackTimer.current = null;
+      }, 2_400);
+    }, 350);
+  };
   return (
-    <CalendarEventContextMenu calendar={calendar} event={event} timeZone={timeZone}>
+    <CalendarEventContextMenu
+      blockedMessage={blockedMessage}
+      blockedOpen={moveBlocked}
+      calendar={calendar}
+      event={event}
+      timeZone={timeZone}
+    >
       <button
         aria-label={`${formatTime(event.startsAt, timeZone)} ${event.title}`}
-        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${writable ? " is-draggable" : ""}`}
+        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
         draggable={writable}
         onDragEnd={onDragEnd}
         onDragStart={(dragEvent) => startCalendarDrag(dragEvent, event, setDraggedEventId)}
-        onClick={onEdit}
+        onClick={(clickEvent) => {
+          if (blockedHoldTriggered.current) {
+            blockedHoldTriggered.current = false;
+            clickEvent.preventDefault();
+            clickEvent.stopPropagation();
+            return;
+          }
+          onEdit();
+        }}
+        onPointerCancel={clearBlockedHoldTimer}
+        onPointerDown={startBlockedHold}
+        onPointerLeave={clearBlockedHoldTimer}
+        onPointerUp={clearBlockedHoldTimer}
         style={{
-          borderLeftColor: calendar?.color ?? "#777ce3",
+          ...calendarEventColorStyle(calendar?.color),
           height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 18),
-          left: `calc(${(column / columns) * 100}% + 3px)`,
+          left: 3 + column * 12,
           top: minuteToTimelinePixels(startMinute),
-          width: `calc(${100 / columns}% - 6px)`,
+          width: `calc(100% - ${6 + column * 12}px)`,
+          zIndex: 2 + column,
         }}
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
         type="button"
       >
-        <strong>
-          {event.title}
-          {event.blocks.length > 0 ? (
-            <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
-          ) : null}
-        </strong>
-        <span>{formatTimelineTimeRange(event, timeZone)}</span>
-        {event.location ? <small>{event.location}</small> : null}
+        <>
+            {blockColors.length > 0 ? (
+              <span aria-hidden="true" className="calendar-timeline-event__block-rails">
+                {blockColors.map((color, index) => (
+                  <i key={`${color}-${index}`} style={{ background: color }} />
+                ))}
+              </span>
+            ) : null}
+            <strong>
+              {event.title}
+              {event.blocks.length > 0 ? (
+                <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
+              ) : null}
+            </strong>
+            <span>{formatTimelineTimeRange(event, timeZone)}</span>
+            {event.location ? <small>{event.location}</small> : null}
+        </>
       </button>
     </CalendarEventContextMenu>
   );
@@ -3673,11 +4029,15 @@ function parseClipboardCalendarEvent(value: string): CalendarEvent | undefined {
 }
 
 function CalendarEventContextMenu({
+  blockedMessage,
+  blockedOpen = false,
   calendar,
   children,
   event,
   timeZone,
 }: {
+  blockedMessage?: string;
+  blockedOpen?: boolean;
   calendar: Calendar | undefined;
   children: ReactNode;
   event: CalendarEvent;
@@ -3718,9 +4078,19 @@ function CalendarEventContextMenu({
     await copy();
     remove.mutate();
   };
+  const trigger = <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>;
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      {blockedMessage ? (
+        <Tooltip open={blockedOpen}>
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent className="calendar-move-blocked-tooltip" side="top">
+            {blockedMessage}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        trigger
+      )}
       <ContextMenuContent>
         <ContextMenuLabel>{event.title}</ContextMenuLabel>
         <ContextMenuSeparator />
@@ -3762,10 +4132,12 @@ function CalendarEventContextMenu({
 }
 
 function AllDayEvents({
+  calendarsById,
   compact = false,
   events,
   setEditor,
 }: {
+  calendarsById: CalendarMap;
   compact?: boolean;
   events: CalendarEvent[];
   setEditor: (editor: Editor) => void;
@@ -3780,6 +4152,7 @@ function AllDayEvents({
             aria-label={`All day ${event.title}`}
             key={event.id}
             onClick={() => setEditor({ event, kind: "event" })}
+            style={calendarEventColorStyle(calendarsById.get(event.calendarId)?.color)}
             type="button"
           >
             {event.title}
@@ -3884,6 +4257,7 @@ function MonthCalendarView({
               <header>
                 <button
                   aria-current={isToday ? "date" : undefined}
+                  data-selected={sameLocalDate(day, anchor)}
                   aria-label={`View ${formatLocalDate(day, {
                     day: "numeric",
                     month: "long",
@@ -3900,7 +4274,7 @@ function MonthCalendarView({
                 {dayEvents.slice(0, 3).map((event) => (
                   <button
                     aria-label={`${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`}
-                    className={`month-event${calendarsById.get(event.calendarId)?.isWritable ? " is-draggable" : ""}`}
+                    className={`month-event${calendarsById.get(event.calendarId)?.isWritable ? " is-draggable" : ""}${draggedEventId === event.id ? " is-dragging" : ""}`}
                     draggable={calendarsById.get(event.calendarId)?.isWritable ?? false}
                     key={event.id}
                     onDragEnd={clearDrag}
@@ -3908,23 +4282,23 @@ function MonthCalendarView({
                       startCalendarDrag(dragEvent, event, setDraggedEventId)
                     }
                     onClick={() => setEditor({ event, kind: "event" })}
+                    style={calendarEventColorStyle(
+                      calendarsById.get(event.calendarId)?.color,
+                    )}
                     type="button"
                   >
-                    <i
-                      style={{
-                        background: calendarsById.get(event.calendarId)?.color ?? "#777ce3",
-                      }}
-                    />
-                    <span className="month-event__time">
-                      {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
-                    </span>
-                    <span>{event.title}</span>
-                    {event.blocks.length > 0 ? (
-                      <LockIcon
-                        aria-label="Blocks another calendar"
-                        className="linked-block-icon"
-                      />
-                    ) : null}
+                    <>
+                        <span className="month-event__time">
+                          {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
+                        </span>
+                        <span>{event.title}</span>
+                        {event.blocks.length > 0 ? (
+                          <LockIcon
+                            aria-label="Blocks another calendar"
+                            className="linked-block-icon"
+                          />
+                        ) : null}
+                    </>
                   </button>
                 ))}
                 {dayEvents.length > 3 ? (
@@ -7656,9 +8030,51 @@ function startCalendarDrag(
   event: CalendarEvent,
   setDraggedEventId: (id: string | null) => void,
 ) {
+  const bounds = dragEvent.currentTarget.getBoundingClientRect();
+  const clientY = Number.isFinite(dragEvent.clientY) ? dragEvent.clientY : bounds.top;
+  const grabOffsetY = Math.min(
+    Math.max(0, bounds.height),
+    Math.max(0, clientY - bounds.top),
+  );
+  const clientX = Number.isFinite(dragEvent.clientX) ? dragEvent.clientX : bounds.left;
+  const grabOffsetX = Math.min(
+    Math.max(0, bounds.width),
+    Math.max(0, clientX - bounds.left),
+  );
   dragEvent.dataTransfer.effectAllowed = "move";
   dragEvent.dataTransfer.setData(calendarDragType, event.id);
+  dragEvent.dataTransfer.setData(calendarDragOffsetType, String(grabOffsetY));
+  calendarDragOffsets.set(event.id, grabOffsetY);
+  calendarDragMetrics.set(event.id, {
+    color: dragEvent.currentTarget.style.getPropertyValue("--calendar-color") || "#777ce3",
+    grabOffsetX,
+    grabOffsetY,
+    width: bounds.width,
+  });
+  setCalendarDragImage(dragEvent);
   setDraggedEventId(event.id);
+}
+
+function setCalendarDragImage(
+  dragEvent: ReactDragEvent<HTMLButtonElement>,
+) {
+  if (typeof dragEvent.dataTransfer.setDragImage !== "function") return;
+  const image = document.createElement("div");
+  image.setAttribute("aria-hidden", "true");
+  Object.assign(image.style, {
+    background: "transparent",
+    border: "0",
+    height: "1px",
+    left: "-10000px",
+    opacity: "0",
+    pointerEvents: "none",
+    position: "fixed",
+    top: "-10000px",
+    width: "1px",
+  });
+  document.body.append(image);
+  dragEvent.dataTransfer.setDragImage(image, 0, 0);
+  window.requestAnimationFrame(() => image.remove());
 }
 
 function allowCalendarDrop(dragEvent: ReactDragEvent<HTMLElement>, draggedEventId: string | null) {
@@ -7667,11 +8083,25 @@ function allowCalendarDrop(dragEvent: ReactDragEvent<HTMLElement>, draggedEventI
   dragEvent.dataTransfer.dropEffect = "move";
 }
 
-function timelineMinuteAtPointer(pointerEvent: { clientY: number }, timeline: HTMLElement) {
+function calendarDragGrabOffset(dataTransfer: DataTransfer, eventId: string) {
+  const storedOffset = calendarDragOffsets.get(eventId);
+  if (storedOffset !== undefined) return storedOffset;
+  const offset = Number(dataTransfer.getData(calendarDragOffsetType));
+  return Number.isFinite(offset) ? Math.max(0, offset) : 0;
+}
+
+function timelineMinuteAtPointer(
+  pointerEvent: { clientY: number },
+  timeline: HTMLElement,
+  grabOffsetY = 0,
+) {
   const bounds = timeline.getBoundingClientRect();
   const clientY = Number.isFinite(pointerEvent.clientY) ? pointerEvent.clientY : 0;
   const top = Number.isFinite(bounds.top) ? bounds.top : 0;
-  const relativeY = Math.min(calendarTimelineHeight, Math.max(0, clientY - top));
+  const relativeY = Math.min(
+    calendarTimelineHeight,
+    Math.max(0, clientY - top - grabOffsetY),
+  );
   const unsnappedMinute = (relativeY / calendarTimelineHeight) * calendarMinutesPerDay;
   return Math.min(23 * 60 + 45, Math.max(0, Math.round(unsnappedMinute / 15) * 15));
 }
@@ -7682,6 +8112,7 @@ function previewTimelineDrop(
   events: CalendarEvent[],
   draggedEventId: string | null,
   setPreview: (preview: CalendarDropPreview | null) => void,
+  timeZone: string,
 ) {
   if (!draggedEventId) return;
   allowCalendarDrop(dragEvent, draggedEventId);
@@ -7689,15 +8120,48 @@ function previewTimelineDrop(
     (event) => event.id === (dragEvent.dataTransfer.getData(calendarDragType) || draggedEventId),
   );
   if (!dragged || dragged.allDay) return;
-  setPreview({
-    dayKey: localDateKey(day),
-    duration: Math.max(
-      15,
-      Math.round(
-        (new Date(dragged.endsAt).getTime() - new Date(dragged.startsAt).getTime()) / 60_000,
-      ),
+  const metrics = calendarDragMetrics.get(dragged.id);
+  const minute = timelineMinuteAtPointer(
+    dragEvent,
+    dragEvent.currentTarget,
+    calendarDragGrabOffset(dragEvent.dataTransfer, dragged.id),
+  );
+  const duration = Math.max(
+    15,
+    Math.round(
+      (new Date(dragged.endsAt).getTime() - new Date(dragged.startsAt).getTime()) / 60_000,
     ),
-    minute: timelineMinuteAtPointer(dragEvent, dragEvent.currentTarget),
+  );
+  const dayRange = localDateRange(day, addLocalDays(day, 1), timeZone);
+  const dayStart = new Date(dayRange.from).getTime();
+  const dayEnd = new Date(dayRange.to).getTime();
+  const stationaryEvents = events.filter(
+    (event) =>
+      event.id !== dragged.id &&
+      new Date(event.startsAt).getTime() < dayEnd &&
+      new Date(event.endsAt).getTime() > dayStart,
+  );
+  const movedEvent = { ...dragged, ...movedEventTimes(dragged, day, minute, timeZone) };
+  const movedLayout = positionTimelineEvents(
+    [...stationaryEvents, movedEvent],
+    day,
+    timeZone,
+  ).find((layout) => layout.event.id === dragged.id);
+  setPreview({
+    color: metrics?.color ?? "#777ce3",
+    column: movedLayout?.column ?? 0,
+    dayKey: localDateKey(day),
+    duration,
+    grabOffsetX: metrics?.grabOffsetX ?? 0,
+    grabOffsetY: metrics?.grabOffsetY ?? 0,
+    minute,
+    pointerX: Number.isFinite(dragEvent.clientX)
+      ? dragEvent.clientX
+      : (metrics?.grabOffsetX ?? 0),
+    pointerY: Number.isFinite(dragEvent.clientY)
+      ? dragEvent.clientY
+      : (metrics?.grabOffsetY ?? 0),
+    width: metrics?.width ?? 160,
   });
 }
 
@@ -7720,9 +8184,15 @@ function dropTimelineEvent(
   const id = dragEvent.dataTransfer.getData(calendarDragType);
   const event = events.find((record) => record.id === id);
   if (event) {
-    const minute = timelineMinuteAtPointer(dragEvent, dragEvent.currentTarget);
+    const minute = timelineMinuteAtPointer(
+      dragEvent,
+      dragEvent.currentTarget,
+      calendarDragGrabOffset(dragEvent.dataTransfer, id),
+    );
     moveEvent(event, day, minute);
   }
+  calendarDragOffsets.delete(id);
+  calendarDragMetrics.delete(id);
   setDraggedEventId(null);
 }
 
@@ -7859,6 +8329,14 @@ function formatHour(hour: number): string {
   if (hour === 0) return "12 AM";
   if (hour === 12) return "12 PM";
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
+}
+
+function formatMinuteOfDay(minute: number): string {
+  const hour = Math.floor(minute / 60);
+  const suffix = minute % 60 === 0 ? "" : `:${String(minute % 60).padStart(2, "0")}`;
+  if (hour === 0) return `12${suffix} AM`;
+  if (hour === 12) return `12${suffix} PM`;
+  return hour < 12 ? `${hour}${suffix} AM` : `${hour - 12}${suffix} PM`;
 }
 
 function formatTimeZoneName(date: Date, timeZone: string): string {

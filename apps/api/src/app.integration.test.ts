@@ -802,7 +802,7 @@ describe.sequential("ilo API", () => {
           .from(calendarAccounts)
           .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
       ]);
-    expect(events).toHaveLength(7);
+    expect(events).toHaveLength(9);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
     expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));

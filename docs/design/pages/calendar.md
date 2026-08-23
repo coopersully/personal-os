@@ -7,30 +7,39 @@ event without losing the shape of the day.
 
 ## Composition
 
-- The contextual sidebar places `My calendars` before connected-provider
-  account groups because local calendars are a separate first-party source.
+- Calendar is the one full-screen workspace and does not render the contextual
+  or mobile workspace sidebar. Date jumping and calendar visibility stay
+  available in Calendar-owned controls instead of consuming grid width.
 - Calendar composes the shared secondary app bar in every view. The day bar
   owns all-day material, the week bar owns weekday/date controls and all-day
   material, and the month bar owns weekday wayfinding.
 - The week secondary bar expands only for real all-day material and meets the
   timeline without a decorative divider.
 - The persistent Calendar orientation occupies the shared workspace app bar's
-  `identity` slot, with Today and the view selector in `context`. It names the
-  selected day, week, or month; the calendar body begins directly with its
-  spatial material and only that body scrolls.
+  `identity` slot beside the workspace switcher, with Today and the view
+  selector in `context`. The primary bar remains one vertically centred 52 px
+  row: its controls share one optical height, never wrap, and shed secondary
+  labels before truncating the selected date. It names the selected day, week,
+  or month; the calendar body begins directly with its spatial material and
+  only that body scrolls.
 - Week views keep their shared secondary bar vertically pinned and their time
   axis horizontally pinned. Month views keep the shared weekday bar pinned
   while the date grid scrolls. These are wayfinding anchors, not optional
   decoration.
-- The app-frame controls are two understandable groups: a Today action and a
-  connected Day/Week/Month segmented control. They remain available on mobile;
-  mobile reduces the creation action to its labelled icon so it cannot overlap
-  navigation.
-- Timeline columns carry a subtle horizontal rule at every hour. The rule
-  continues through today highlighting and remains behind events, drag
-  previews, and the current-time marker.
+- The app-frame controls keep Day/Week/Month, Today, period back/forward, and
+  the synced-calendar disclosure in that order. The disclosure shows account
+  avatars with an `X of X calendars` label and uses switches for visibility.
+- Timeline columns carry 15-minute rules with an hour/half-hour/quarter-hour
+  weight hierarchy. Half-hour labels in the gutter make the hierarchy readable
+  without counting subdivisions. Rules remain behind events, drag previews,
+  and the current-time marker.
 - Vertical day separation remains visible. Horizontal rules communicate time,
   not card boundaries.
+- A bottom-centred floating pill owns date jump, search, and event creation.
+  Each action transforms the pill in place. Search moves to screen centre,
+  focuses immediately, searches a bounded event range plus dates, and supports
+  direct relative-date phrases such as `last Christmas`. Creation exposes the
+  standard event fields without launching a second surface.
 
 ## Acceptance
 
@@ -39,12 +48,15 @@ event without losing the shape of the day.
   less vertical space when no all-day events exist.
 - Hour rules align with the time axis in day and week views.
 - Current-time, selection, event, and drag states remain visually dominant over
-  the hour grid.
+  the quarter-hour grid. Dragging a writable event visibly lifts it and the
+  drop preview advances only in 15-minute increments.
 - Day, week, and month views retain an explicit app-frame date-range heading
   at every scroll position. The Today control remains a standard action, not a
   selected state. Their grid wayfinding uses the shared secondary app bar, not
   Calendar-only chrome. On narrow screens, Calendar compacts primary-bar labels
   while the secondary spatial bar remains horizontally aligned with its grid.
+  At compact widths the workspace identity becomes icon-only and the range
+  uses a shorter equivalent label; neither becomes a second app-bar row.
 - A Calendar-enabled account that requires renewed authorization produces one warning callout with
   a direct Connections link. Automatic retry and ilo-owned service repair remain non-destructive
   freshness state and do not interrupt the calendar with credential advice.

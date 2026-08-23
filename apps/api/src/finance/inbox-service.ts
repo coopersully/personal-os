@@ -58,8 +58,11 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
   };
 }
 
-function prompt(row: typeof financeReviewCases.$inferSelect): string {
-  const merchant = typeof row.evidence.merchant === "string" ? ` at ${row.evidence.merchant}` : "";
+export function financeReviewPrompt(
+  reason: FinanceReviewReason,
+  evidence: Record<string, unknown>,
+): string {
+  const merchant = typeof evidence.merchant === "string" ? ` at ${evidence.merchant}` : "";
   const prompts: Record<FinanceReviewReason, string> = {
     budget_variance: "Was this budget variance expected, and should the budget change?",
     category_ambiguity: `What did this transaction${merchant} represent?`,
@@ -74,7 +77,11 @@ function prompt(row: typeof financeReviewCases.$inferSelect): string {
     source_freshness: "Does this account need to be reconnected or updated manually?",
     unusual_amount: `Was this unusually large transaction${merchant} expected and legitimate?`,
   };
-  return prompts[row.reasonCode];
+  return prompts[reason];
+}
+
+function prompt(row: typeof financeReviewCases.$inferSelect): string {
+  return financeReviewPrompt(row.reasonCode, row.evidence);
 }
 
 function inboxResult(

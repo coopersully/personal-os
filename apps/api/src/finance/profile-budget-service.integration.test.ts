@@ -176,6 +176,58 @@ describe.sequential("Finance profile and budget lifecycle", () => {
         noBypass,
       ),
     ).resolves.toMatchObject({ data: { status: "active", version: 2 } });
+
+    await expect(service.getFinancialProfile(userId)).resolves.toMatchObject({
+      data: { version: 1 },
+    });
+    await expect(service.getFinanceBudget(userId, active.data.planId)).resolves.toMatchObject({
+      data: { version: 2 },
+    });
+    await expect(service.getFinanceBudgetStatus(userId)).resolves.toMatchObject({
+      data: { status: "active", version: 2 },
+    });
+    await expect(service.listFinanceGoals(userId)).resolves.toMatchObject({
+      data: [expect.objectContaining({ id: goal.id })],
+    });
+    const updatedGoal = await service.manageFinanceGoal(
+      {
+        changes: { name: "Six-month reserve", targetAmount: 15_000 },
+        expectedVersion: 1,
+        goalId: goal.id,
+        idempotencyKey: "goal-update",
+        operation: "update",
+      },
+      noBypass,
+    );
+    const pausedGoal = await service.manageFinanceGoal(
+      {
+        expectedVersion: updatedGoal.data.version,
+        goalId: goal.id,
+        idempotencyKey: "goal-pause",
+        operation: "pause",
+      },
+      noBypass,
+    );
+    const resumedGoal = await service.manageFinanceGoal(
+      {
+        expectedVersion: pausedGoal.data.version,
+        goalId: goal.id,
+        idempotencyKey: "goal-resume",
+        operation: "resume",
+      },
+      noBypass,
+    );
+    await expect(
+      service.manageFinanceGoal(
+        {
+          expectedVersion: resumedGoal.data.version,
+          goalId: goal.id,
+          idempotencyKey: "goal-complete",
+          operation: "complete",
+        },
+        noBypass,
+      ),
+    ).resolves.toMatchObject({ data: { status: "completed" } });
   });
 
   it("rejects an unbalanced budget proposal", async () => {

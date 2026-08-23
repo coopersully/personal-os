@@ -55,14 +55,14 @@ function nextQuestion(profile: FinanceProfileVersion | null): FinanceQuestion | 
   return null;
 }
 
-function parseMoney(answer: string): number {
+export function parseSetupMoney(answer: string): number {
   const value = Number(answer.replace(/[$,\s]/g, ""));
   if (!Number.isFinite(value) || value < 0)
     throw new AppError("invalid_request", "Enter a non-negative amount.");
   return Math.round(value * 100) / 100;
 }
 
-function jurisdiction(answer: string): string {
+export function parseSetupJurisdiction(answer: string): string {
   const normalized = answer.toLowerCase();
   if (normalized.includes("new york") || normalized.includes("brooklyn")) return "US-NY";
   if (normalized.includes("california")) return "US-CA";
@@ -71,11 +71,11 @@ function jurisdiction(answer: string): string {
   return answer.trim().slice(0, 120);
 }
 
-function profileChange(
+export function setupProfileChange(
   questionId: QuestionId,
   answer: string,
 ): UpdateFinancialProfileInput["changes"] {
-  if (questionId === "profile:location") return { jurisdiction: jurisdiction(answer) };
+  if (questionId === "profile:location") return { jurisdiction: parseSetupJurisdiction(answer) };
   if (questionId === "profile:household_size") {
     const value = Number(answer);
     if (!Number.isInteger(value) || value < 1 || value > 100)
@@ -83,8 +83,8 @@ function profileChange(
     return { householdSize: value };
   }
   if (questionId === "profile:monthly_take_home")
-    return { expectedMonthlyTakeHome: parseMoney(answer) };
-  return { liquidReserves: parseMoney(answer) };
+    return { expectedMonthlyTakeHome: parseSetupMoney(answer) };
+  return { liquidReserves: parseSetupMoney(answer) };
 }
 
 function setupResult(input: {
@@ -332,7 +332,7 @@ export function createSetupService({ db, now, planning }: Options) {
             const current = await profile(context.userId);
             const saved = await planning.updateFinancialProfile(
               {
-                changes: profileChange(input.questionId as QuestionId, input.answer),
+                changes: setupProfileChange(input.questionId as QuestionId, input.answer),
                 expectedVersion: current?.version ?? 0,
                 idempotencyKey: `${input.idempotencyKey}:profile`,
               },

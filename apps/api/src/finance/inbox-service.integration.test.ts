@@ -3,6 +3,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeCategories,
   financeEconomicEvents,
   financeTransactions,
   migrateDatabase,
@@ -132,5 +133,60 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     expect(answered.communication.nextQuestion?.id).not.toBe(first.id);
     expect(answered.remainingWork.count).toBe(1);
     expect(answered.changes).toHaveLength(1);
+  });
+
+  it("keeps clarification open, then classifies with trusted agent provenance", async () => {
+    const now = () => new Date("2026-08-24T20:00:00Z");
+    const service = createInboxService({ db: database.db, now });
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({ group: "Food", name: "Dining", slug: "dining", userId })
+      .returning();
+    if (!category) throw new Error("Category fixture missing.");
+    const current = await service.getFinanceInbox(userId);
+    const reviewId = current.communication.nextQuestion?.id;
+    if (!reviewId) throw new Error("Review fixture missing.");
+    const principal: Principal = {
+      actorId: "agent",
+      actorType: "agent",
+      scopes: new Set(["finances:write"]),
+      userId,
+    };
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal,
+      requestId: "classify-answer",
+    });
+    await expect(
+      service.answerFinanceReview(
+        reviewId,
+        {
+          answer: "I need the merchant name.",
+          idempotencyKey: "clarify-1",
+          resolution: { clarification: "Which location was this?", type: "clarify" },
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      changes: [],
+      communication: { nextQuestion: { id: reviewId } },
+    });
+    await expect(
+      service.answerFinanceReview(
+        reviewId,
+        {
+          answer: "It was lunch.",
+          idempotencyKey: "classify-1",
+          resolution: {
+            categoryId: category.id,
+            meaning: "Lunch",
+            type: "classify_transaction",
+          },
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      changes: [expect.objectContaining({ type: "finance_review_resolved" })],
+    });
   });
 });

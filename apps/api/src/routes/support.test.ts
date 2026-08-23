@@ -43,6 +43,18 @@ describe("agent mutation policy", () => {
     expect(next).toHaveBeenCalledTimes(2);
   });
 
+  it("lets a Finance agent choose the operation while enforcing the Finance write scope", async () => {
+    const next = vi.fn();
+    await requireFeatureAccess("finances")(
+      {
+        get: () => principal(new Set(["finances:write"])),
+        req: { method: "POST" },
+      } as never,
+      next,
+    );
+    expect(next).toHaveBeenCalledOnce();
+  });
+
   it("rejects a request that lacks the feature's selected scope", async () => {
     await expect(
       requireFeatureAccess("reminders")(

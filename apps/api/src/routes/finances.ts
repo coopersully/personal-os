@@ -21,7 +21,7 @@ import {
 import type { Context, Hono } from "hono";
 import type { createFinanceService } from "../finance-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman } from "./support.js";
+import { parseBody, requireFeatureAccess } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -53,7 +53,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   app.get("/v1/finances/profile", async (context) =>
     context.json({ profile: await finances.getProfile(context.get("principal").userId) }),
   );
-  app.put("/v1/finances/profile", requireHuman, async (context) =>
+  app.put("/v1/finances/profile", async (context) =>
     context.json({
       profile: await finances.updateProfile(
         await parseBody(context, updateFinanceProfileInputSchema),
@@ -66,7 +66,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       incomeStreams: await finances.listIncomeStreams(context.get("principal").userId),
     }),
   );
-  app.patch("/v1/finances/income-streams/:id", requireHuman, async (context) =>
+  app.patch("/v1/finances/income-streams/:id", async (context) =>
     context.json({
       incomeStream: await finances.updateIncomeStream(
         context.req.param("id"),
@@ -106,7 +106,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.post("/v1/finances/insights/refresh", requireHuman, async (context) =>
+  app.post("/v1/finances/insights/refresh", async (context) =>
     context.json({
       result: await finances.refreshCashflowInsights(context.get("principal").userId),
     }),
@@ -251,12 +251,12 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   app.get("/v1/finances/plaid/status", async (context) =>
     context.json({ available: finances.plaidAvailable() }),
   );
-  app.post("/v1/finances/plaid/link-token", requireHuman, async (context) =>
+  app.post("/v1/finances/plaid/link-token", async (context) =>
     context.json({
       linkToken: await finances.createPlaidLinkToken(context.get("principal").userId),
     }),
   );
-  app.post("/v1/finances/plaid/exchange", requireHuman, async (context) =>
+  app.post("/v1/finances/plaid/exchange", async (context) =>
     context.json(
       {
         accounts: await finances.exchangePlaidToken(
@@ -272,7 +272,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       result: await finances.syncPlaidAccount(context.req.param("id"), mutationContext(context)),
     }),
   );
-  app.post("/v1/finances/accounts/:id/import", requireHuman, async (context) =>
+  app.post("/v1/finances/accounts/:id/import", async (context) =>
     context.json(
       {
         result: await finances.importCsv(

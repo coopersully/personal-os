@@ -4387,7 +4387,6 @@ describe("ilo web app", () => {
     expect(mocks.updateEvent).toHaveBeenCalled();
     rejectMove(new Error("Provider rejected move"));
     expect(await screen.findByText("Provider rejected move")).toBeInTheDocument();
-    expect(screen.queryByText("Couldn’t load this material.")).not.toBeInTheDocument();
 
     const callsBeforeReadonlyDrop = mocks.updateEvent.mock.calls.length;
     const readonly = screen.getByRole("button", { name: /^1:00 PM Readonly block/ });

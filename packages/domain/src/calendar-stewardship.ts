@@ -209,7 +209,10 @@ export const calendarStatusSchema = z
   })
   .superRefine((status, context) => {
     const sourceTrust = status.health.find(({ dimension }) => dimension === "source_trust");
-    if (status.sources.some(({ state }) => state !== "current") && sourceTrust?.signal === "healthy") {
+    if (
+      status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete") &&
+      sourceTrust?.signal === "healthy"
+    ) {
       context.addIssue({
         code: "custom",
         message: "Unavailable or stale sources cannot be healthy.",
@@ -217,7 +220,7 @@ export const calendarStatusSchema = z
       });
     }
     if (
-      status.lifecycle === "maintained" &&
+      ["maintained", "maintained_with_questions"].includes(status.lifecycle) &&
       status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete")
     ) {
       context.addIssue({

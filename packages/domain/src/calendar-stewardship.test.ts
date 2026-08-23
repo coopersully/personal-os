@@ -77,6 +77,102 @@ describe("Calendar stewardship contracts", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it.each(["partial", "unknown"] as const)(
+    "rejects a healthy source-trust status with %s source completeness",
+    (completeness) => {
+      const parsed = calendarStatusSchema.safeParse({
+        asOf: now,
+        readiness: "degraded",
+        setupBlockers: [],
+        lifecycle: "stale",
+        sources: [
+          {
+            accountId: id,
+            calendarId: id,
+            completeness,
+            evidenceCutoff: now,
+            lastSyncedAt: now,
+            provider: "google",
+            readable: true,
+            reason: null,
+            recovery: null,
+            state: "current",
+            writable: true,
+          },
+        ],
+        authority: {
+          approvedRule: [],
+          automatic: ["inspect", "assess"],
+          individualApproval: [],
+          unavailable: [],
+        },
+        backlog: {
+          actionable: null,
+          ambiguousEffects: null,
+          awaitingApproval: null,
+          awaitingInput: null,
+          blocked: 0,
+          failed: null,
+          openFindings: null,
+        },
+        health: [
+          {
+            dimension: "source_trust",
+            evidenceFindingIds: [],
+            signal: "healthy",
+            summary: "Sources are current.",
+          },
+        ],
+        latestReview: null,
+        validNextOperations: ["assess_calendar"],
+      });
+      expect(parsed.success).toBe(false);
+    },
+  );
+
+  it("rejects maintained-with-questions status with stale or incomplete source evidence", () => {
+    const parsed = calendarStatusSchema.safeParse({
+      asOf: now,
+      readiness: "degraded",
+      setupBlockers: [],
+      lifecycle: "maintained_with_questions",
+      sources: [
+        {
+          accountId: id,
+          calendarId: id,
+          completeness: "partial",
+          evidenceCutoff: now,
+          lastSyncedAt: now,
+          provider: "google",
+          readable: true,
+          reason: null,
+          recovery: null,
+          state: "stale",
+          writable: true,
+        },
+      ],
+      authority: {
+        approvedRule: [],
+        automatic: ["inspect", "assess"],
+        individualApproval: [],
+        unavailable: [],
+      },
+      backlog: {
+        actionable: null,
+        ambiguousEffects: null,
+        awaitingApproval: null,
+        awaitingInput: null,
+        blocked: 0,
+        failed: null,
+        openFindings: null,
+      },
+      health: [],
+      latestReview: null,
+      validNextOperations: ["assess_calendar"],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it("keeps review evidence redacted and revision-bound", () => {
     const review = calendarReviewSchema.parse({
       createdAt: now,

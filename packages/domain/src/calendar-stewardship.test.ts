@@ -166,7 +166,14 @@ describe("Calendar stewardship contracts", () => {
         failed: null,
         openFindings: null,
       },
-      health: [],
+      health: [
+        {
+          dimension: "source_trust",
+          evidenceFindingIds: [],
+          signal: "unknown",
+          summary: "No selected Calendar source is available to assess.",
+        },
+      ],
       latestReview: null,
       validNextOperations: ["assess_calendar"],
     });
@@ -178,7 +185,14 @@ describe("Calendar stewardship contracts", () => {
       createdAt: now,
       evidenceCutoff: now,
       findings: [],
-      health: [],
+      health: [
+        {
+          dimension: "source_trust",
+          evidenceFindingIds: [],
+          signal: "unknown",
+          summary: "No selected Calendar source is available to assess.",
+        },
+      ],
       id,
       ledgerFingerprint: "a".repeat(64),
       nextMaintenanceAt: "2026-08-23T16:15:00.000Z",
@@ -190,8 +204,44 @@ describe("Calendar stewardship contracts", () => {
       scopeEnd: "2026-11-21T16:00:00.000Z",
       scopeStart: "2026-07-24T16:00:00.000Z",
       sourceFreshness: [],
-      state: "maintained",
+      state: "blocked",
     });
     expect(JSON.stringify(review)).not.toMatch(/credentials|raw|attendee|notes|location|title/i);
+  });
+
+  it("rejects maintained reviews and statuses without selected source evidence", () => {
+    const maintainedReview = {
+      createdAt: now,
+      evidenceCutoff: now,
+      findings: [],
+      health: [],
+      id,
+      ledgerFingerprint: "a".repeat(64),
+      nextMaintenanceAt: "2026-08-23T16:15:00.000Z",
+      playbookVersion: "1.0.0",
+      profileVersion: null,
+      recommendations: [],
+      rulebookVersion: "calendar-profile/none",
+      scope: { type: "all_outstanding" as const },
+      scopeEnd: "2026-11-21T16:00:00.000Z",
+      scopeStart: "2026-07-24T16:00:00.000Z",
+      sourceFreshness: [],
+      state: "maintained" as const,
+    };
+    expect(calendarReviewSchema.safeParse(maintainedReview).success).toBe(false);
+    expect(
+      calendarStatusSchema.safeParse({
+        asOf: now,
+        authority: { approvedRule: [], automatic: ["inspect", "assess"], individualApproval: [], unavailable: [] },
+        backlog: { actionable: null, ambiguousEffects: null, awaitingApproval: null, awaitingInput: null, blocked: 0, failed: null, openFindings: null },
+        health: [],
+        latestReview: null,
+        lifecycle: "maintained",
+        readiness: "setup_required",
+        setupBlockers: ["Select a source."],
+        sources: [],
+        validNextOperations: ["assess_calendar"],
+      }).success,
+    ).toBe(false);
   });
 });

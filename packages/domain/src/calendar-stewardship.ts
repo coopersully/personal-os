@@ -163,6 +163,24 @@ export const calendarReviewSchema = z.object({
   scopeStart: isoDateTimeSchema,
   sourceFreshness: z.array(calendarSourceFreshnessSchema),
   state: calendarReviewStateSchema,
+}).superRefine((review, context) => {
+  if (review.sourceFreshness.length === 0 && review.state !== "blocked") {
+    context.addIssue({
+      code: "custom",
+      message: "A review without selected Calendar sources must remain blocked.",
+      path: ["state"],
+    });
+  }
+  if (
+    review.sourceFreshness.length === 0 &&
+    review.health.find(({ dimension }) => dimension === "source_trust")?.signal !== "unknown"
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "A review without selected Calendar sources must report unknown source trust.",
+      path: ["health"],
+    });
+  }
 });
 export type CalendarReview = z.infer<typeof calendarReviewSchema>;
 
@@ -210,6 +228,16 @@ export const calendarStatusSchema = z
   .superRefine((status, context) => {
     const sourceTrust = status.health.find(({ dimension }) => dimension === "source_trust");
     if (
+      status.sources.length === 0 &&
+      (status.readiness !== "setup_required" || sourceTrust?.signal !== "unknown")
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Missing Calendar sources require setup and unknown source trust.",
+        path: ["sources"],
+      });
+    }
+    if (
       status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete") &&
       sourceTrust?.signal === "healthy"
     ) {
@@ -221,7 +249,8 @@ export const calendarStatusSchema = z
     }
     if (
       ["maintained", "maintained_with_questions"].includes(status.lifecycle) &&
-      status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete")
+      (status.sources.length === 0 ||
+        status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete"))
     ) {
       context.addIssue({
         code: "custom",

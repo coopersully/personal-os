@@ -2,7 +2,7 @@ import type { AccessScope, CalendarReview, CalendarStatus } from "@personal-os/d
 import { Hono } from "hono";
 import type { createCalendarService } from "../calendar-service.js";
 import type { createCalendarStewardshipService } from "../calendar-stewardship-service.js";
-import { errorResponse } from "../errors.js";
+import { AppError, errorResponse } from "../errors.js";
 import type { AppEnv } from "../types.js";
 import { registerCalendarRoutes } from "./calendar.js";
 
@@ -158,6 +158,49 @@ describe("Calendar routes", () => {
     expect(stewardship.getStatus).toHaveBeenCalledWith(id);
     expect(stewardship.createReview).toHaveBeenCalledWith(id, {
       scope: { type: "all_outstanding" },
+    });
+  });
+
+  it("maps a busy stewardship publication to an honest conflict response", async () => {
+    const app = new Hono<AppEnv>();
+    const stewardship = {
+      createReview: vi.fn(async () => {
+        throw new AppError(
+          "conflict",
+          "A Calendar review is already being published. Try again shortly.",
+        );
+      }),
+      getStatus: vi.fn(async () => status),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set<AccessScope>(["calendar:read"]),
+        userId: id,
+      });
+      context.set("requestId", "calendar-busy-route-test");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerCalendarRoutes({
+      app,
+      calendar: {} as ReturnType<typeof createCalendarService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+      stewardship: stewardship as unknown as ReturnType<typeof createCalendarStewardshipService>,
+    });
+
+    const response = await app.request("/v1/calendars/reviews", {
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      body: "{}",
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "conflict", message: "A Calendar review is already being published. Try again shortly." },
     });
   });
 

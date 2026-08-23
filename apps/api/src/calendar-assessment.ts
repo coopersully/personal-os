@@ -20,6 +20,7 @@ type AssessmentEvent = {
   id: string;
   provider: "google" | "icloud" | "local";
   recurrence: string[];
+  remoteEventId: string | null;
   revision: string;
   startsAt: string;
   status: "confirmed" | "tentative" | "cancelled";
@@ -48,6 +49,7 @@ export type CalendarAssessmentSnapshot = {
     version: number;
   } | null;
   evidenceCutoff: Date;
+  evidenceLimits: { eventBudgetExceeded: boolean; openFindingBudgetExceeded: boolean };
   events: AssessmentEvent[];
   existingOpenFindings: Array<{ fingerprint: string; id: string; kind: CalendarFindingKind }>;
   scope: CalendarMaintenanceScope;
@@ -57,6 +59,7 @@ export type CalendarAssessmentSnapshot = {
 };
 
 export type CalendarAssessmentDraft = {
+  evidenceLimited: boolean;
   findings: Array<
     Omit<CalendarFinding, "firstObservedAt" | "id" | "lastObservedAt" | "resolvedAt" | "status">
   >;
@@ -70,6 +73,8 @@ export type CalendarAssessmentDraft = {
   sourceFreshness: CalendarSourceFreshness[];
   state: CalendarReviewState;
 };
+
+export const CALENDAR_ASSESSMENT_BUDGETS = Object.freeze({ events: 250, findings: 100 });
 
 type DraftFinding = CalendarAssessmentDraft["findings"][number];
 type EventPair = readonly [AssessmentEvent, AssessmentEvent];
@@ -138,13 +143,14 @@ function eventReference(
   return {
     accountId: source?.accountId ?? null,
     provider: event.provider,
-    remoteId: event.id,
+    remoteId: event.provider === "local" ? event.id : (event.remoteEventId ?? event.id),
     revision: event.revision,
     sourceType: "calendar_event",
   };
 }
 
 function eventIsInScope(event: AssessmentEvent, snapshot: CalendarAssessmentSnapshot): boolean {
+  if (event.recurrence.length > 0) return true;
   const startsAt = new Date(event.startsAt).getTime();
   const endsAt = new Date(event.endsAt).getTime();
   return startsAt < snapshot.scopeEnd.getTime() && endsAt > snapshot.scopeStart.getTime();
@@ -303,12 +309,37 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
       : null,
     events: [...snapshot.events]
       .sort(compareById)
-      .map(({ calendarId, id, provider, revision }) => ({ calendarId, id, provider, revision })),
+      .map(({
+        availability,
+        calendarId,
+        endsAt,
+        id,
+        isAllDay,
+        provider,
+        recurrence,
+        remoteEventId,
+        revision,
+        startsAt,
+        status,
+        transparency,
+      }) => ({
+        availability,
+        calendarId,
+        endsAt,
+        id,
+        isAllDay,
+        provider,
+        recurrence,
+        remoteEventId,
+        revision,
+        startsAt,
+        status,
+        transparency,
+      })),
+    evidenceLimits: snapshot.evidenceLimits,
     playbookVersion: CALENDAR_PLAYBOOK.version,
     rulebookVersion: rulebook,
     scope: snapshot.scope,
-    scopeEnd: snapshot.scopeEnd.toISOString(),
-    scopeStart: snapshot.scopeStart.toISOString(),
     sources: [...snapshot.sources]
       .sort(compareSources)
       .map(({ accountId, calendarId, calendarRevision, provider, syncGeneration }) => ({
@@ -333,25 +364,34 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     events.filter((event) => event.recurrence.length > 0).map((event) => event.calendarId),
   );
   const findings: DraftFinding[] = [];
-  const sourceFreshness = sources.map((source) => {
+  let findingBudgetExceeded = false;
+  const pushFinding = (finding: DraftFinding): void => {
+    if (findings.length < CALENDAR_ASSESSMENT_BUDGETS.findings) findings.push(finding);
+    else findingBudgetExceeded = true;
+  };
+  const inputEvidenceLimited =
+    snapshot.evidenceLimits.eventBudgetExceeded ||
+    snapshot.evidenceLimits.openFindingBudgetExceeded;
+  let sourceFreshness = sources.map((source) => {
     const state = sourceState(source, snapshot.evidenceCutoff);
     const completeness = recurrenceByCalendarId.has(source.calendarId) ? "partial" : "complete";
     if (state !== "current") {
-      findings.push(sourceFinding(state === "unavailable" ? "source_unavailable" : "source_stale", source, rulebook));
+      pushFinding(sourceFinding(state === "unavailable" ? "source_unavailable" : "source_stale", source, rulebook));
     }
     if (completeness === "partial") {
-      findings.push(sourceFinding("recurrence_unassessed", source, rulebook));
+      pushFinding(sourceFinding("recurrence_unassessed", source, rulebook));
     }
     return {
       accountId: source.accountId,
       calendarId: source.calendarId,
-      completeness,
+      completeness: inputEvidenceLimited ? "partial" : completeness,
       evidenceCutoff: snapshot.evidenceCutoff.toISOString(),
       lastSyncedAt: source.lastSyncedAt,
       provider: source.provider,
       readable: state !== "unavailable",
-      reason:
-        completeness === "partial" && state === "current"
+      reason: inputEvidenceLimited
+        ? "Calendar evidence exceeded the bounded assessment budget."
+        : completeness === "partial" && state === "current"
           ? "Recurring events are not expanded in this release."
           : sourceReason(state),
       recovery: source.syncRecovery,
@@ -381,7 +421,7 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       const overlapStart = Math.max(new Date(first.startsAt).getTime(), new Date(second.startsAt).getTime());
       const overlapEnd = Math.min(new Date(first.endsAt).getTime(), new Date(second.endsAt).getTime());
       if (overlapEnd <= overlapStart) continue;
-      findings.push(
+      pushFinding(
         makeFinding({
           evidence: pairEvidence(
             first,
@@ -407,7 +447,7 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       snapshot.evidenceCutoff.getTime() - new Date(event.updatedAt).getTime() >=
         CALENDAR_PLAYBOOK.tentativeHoldAgeDays * DAY_MS
     ) {
-      findings.push(
+      pushFinding(
         makeFinding({
           evidence: {
             endsAt: event.endsAt,
@@ -437,7 +477,7 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       const gapStart = new Date(first.endsAt).getTime();
       const gapEnd = new Date(second.startsAt).getTime();
       if (gapEnd <= gapStart || gapEnd - gapStart >= requiredBufferMinutes * MINUTE_MS) continue;
-      findings.push(
+      pushFinding(
         makeFinding({
           evidence: pairEvidence(first, second, first.endsAt, second.startsAt),
           kind: "buffer_shortfall",
@@ -450,11 +490,19 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     }
   }
 
-  const completeEvidence = sourceFreshness.every(
+  if (findingBudgetExceeded) {
+    sourceFreshness = sourceFreshness.map((source) => ({
+      ...source,
+      completeness: "partial" as const,
+      reason: "Calendar findings exceeded the bounded assessment budget.",
+    }));
+  }
+  const missingSource = sourceFreshness.length === 0;
+  const completeEvidence = !missingSource && sourceFreshness.every(
     (source) => source.state === "current" && source.completeness === "complete",
   );
   const unavailable = sourceFreshness.some((source) => source.state === "unavailable");
-  const degraded = sourceFreshness.some(
+  const degraded = missingSource || sourceFreshness.some(
     (source) => source.state !== "current" || source.completeness !== "complete",
   );
   const sourceEvidenceFingerprints = findings
@@ -471,8 +519,10 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     {
       dimension: "source_trust",
       evidenceFindingFingerprints: sourceEvidenceFingerprints,
-      signal: unavailable ? "strained" : degraded ? "attention" : "healthy",
-      summary: unavailable
+      signal: missingSource ? "unknown" : unavailable ? "strained" : degraded ? "attention" : "healthy",
+      summary: missingSource
+        ? "No selected Calendar source is available to assess."
+        : unavailable
         ? "Required calendar evidence is unavailable."
         : degraded
           ? "Required calendar evidence is not fully current and complete."
@@ -511,6 +561,7 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     evidenceCutoff: snapshot.evidenceCutoff.toISOString(),
   }));
   return {
+    evidenceLimited: inputEvidenceLimited || findingBudgetExceeded,
     findings: findingsWithCutoff,
     health,
     recommendations: findings.map((finding) => recommendationFor(finding, snapshot)),

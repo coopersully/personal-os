@@ -15,6 +15,7 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, sql } from "drizzle-orm";
 import type { Pool, PoolClient } from "pg";
+import { CALENDAR_ASSESSMENT_BUDGETS } from "./calendar-assessment.js";
 import { createCalendarStewardshipService } from "./calendar-stewardship-service.js";
 
 const initialNow = new Date("2026-08-23T12:00:00.000Z");
@@ -174,17 +175,6 @@ describe.sequential("Calendar stewardship service", () => {
     service = createCalendarStewardshipService({ db: database.db, now: () => now });
   });
 
-  async function waitForAdvisoryLockWaiter(): Promise<void> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const result = await database.pool.query<{ waiting: boolean }>(
-        "select exists (select 1 from pg_locks where locktype = 'advisory' and not granted) as waiting",
-      );
-      if (result.rows[0]?.waiting) return;
-      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
-    }
-    throw new Error("The concurrent review did not wait for the owner publication lock.");
-  }
-
   it("publishes owner-scoped findings and an immutable redacted review without audit mutation", async () => {
     const [otherAccount] = await database.db
       .insert(calendarAccounts)
@@ -228,6 +218,22 @@ describe.sequential("Calendar stewardship service", () => {
     await expect(database.db.select().from(auditEvents)).resolves.toHaveLength(0);
   });
 
+  it("coalesces an unchanged current review but publishes changed ledger inputs", async () => {
+    const first = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    now = new Date(initialNow.getTime() + 60_000);
+    const unchanged = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect(unchanged.id).toBe(first.id);
+    await expect(database.db.select().from(calendarReviews)).resolves.toHaveLength(1);
+
+    await database.db
+      .update(calendarEvents)
+      .set({ remoteEtag: "coalescing-change-v3", updatedAt: new Date(now.getTime() + 1_000) })
+      .where(eq(calendarEvents.id, firstEventId));
+    const changed = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect(changed.id).not.toBe(first.id);
+    await expect(database.db.select().from(calendarReviews)).resolves.toHaveLength(2);
+  });
+
   it("publishes with a max-one pool and does not reserve a second connection for its snapshot", async () => {
     const singleConnectionDatabase = createDatabaseClient({
       connectionString: container.getConnectionUri(),
@@ -262,17 +268,18 @@ describe.sequential("Calendar stewardship service", () => {
       ]);
       expect(reviews).toHaveLength(2);
       expect(reviews[0]?.state).toBe("maintained_with_questions");
-      expect(reviews[1]?.state).toBe("maintained");
+      expect(reviews[1]?.state).toBe("blocked");
     } finally {
       await boundedDatabase.close();
     }
   });
 
-  it("evicts the physical connection and preserves the failure when session unlock fails", async () => {
+  it("evicts the physical connection without failing a committed review when session unlock fails", async () => {
     const pool = (database.db as typeof database.db & { $client: Pool }).$client;
     const originalPoolConnect = pool.connect;
     const connect = originalPoolConnect.bind(pool) as () => Promise<PoolClient>;
     const unlockFailure = new Error("forced advisory unlock failure");
+    let cleanupClient: (() => Promise<void>) | undefined;
     let releasedWith: Error | boolean | undefined;
     pool.connect = (async () => {
       const client = await connect();
@@ -287,19 +294,27 @@ describe.sequential("Calendar stewardship service", () => {
       }) as typeof client.query;
       client.release = ((error?: Error | boolean) => {
         releasedWith = error;
-        return originalRelease(error);
       }) as typeof client.release;
+      cleanupClient = async () => {
+        await originalQuery(
+          "select pg_advisory_unlock(hashtextextended('calendar:' || $1, 0))",
+          [userId],
+        );
+        originalRelease();
+      };
       return client;
     }) as typeof pool.connect;
 
+    let review: Awaited<ReturnType<typeof service.createReview>> | undefined;
     try {
-      await expect(
-        service.createReview(userId, { scope: { type: "all_outstanding" } }),
-      ).rejects.toBe(unlockFailure);
-      expect(releasedWith).toBe(unlockFailure);
+      review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
     } finally {
       pool.connect = originalPoolConnect;
+      await cleanupClient?.();
     }
+    expect(review).toMatchObject({ state: "maintained_with_questions" });
+    expect(releasedWith).toBe(unlockFailure);
+    await expect(database.db.select().from(calendarReviews)).resolves.toHaveLength(1);
   });
 
   it("rejects unsupported scopes before writing derived state", async () => {
@@ -359,54 +374,21 @@ describe.sequential("Calendar stewardship service", () => {
     });
   });
 
-  it("serializes owner publication so an older request cannot reopen a finding after later evidence settles", async () => {
-    const first = await service.createReview(userId, { scope: { type: "all_outstanding" } });
-    const overlap = first.findings.find(({ kind }) => kind === "event_overlap");
-    if (!overlap) throw new Error("Overlap finding was not created.");
-    await database.db
-      .update(calendarEvents)
-      .set({
-        endsAt: new Date("2026-08-24T17:00:00.000Z"),
-        startsAt: new Date("2026-08-24T16:00:00.000Z"),
-        updatedAt: now,
-      })
-      .where(eq(calendarEvents.id, secondEventId));
-    await service.createReview(userId, { scope: { type: "all_outstanding" } });
-    await database.db
-      .update(calendarEvents)
-      .set({
-        endsAt: new Date("2026-08-24T15:30:00.000Z"),
-        startsAt: new Date("2026-08-24T14:30:00.000Z"),
-        updatedAt: now,
-      })
-      .where(eq(calendarEvents.id, secondEventId));
-
-    let pendingReview: ReturnType<typeof service.createReview> | undefined;
+  it("returns a bounded conflict immediately when the owner review lock is busy", async () => {
     await database.db.transaction(async (transaction) => {
       await transaction.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`calendar:${userId}`}, 0))`,
       );
-      pendingReview = service.createReview(userId, { scope: { type: "all_outstanding" } });
-      await waitForAdvisoryLockWaiter();
-      await transaction
-        .update(calendarEvents)
-        .set({
-          endsAt: new Date("2026-08-24T17:00:00.000Z"),
-          startsAt: new Date("2026-08-24T16:00:00.000Z"),
-          updatedAt: new Date(now.getTime() + 1_000),
-        })
-        .where(eq(calendarEvents.id, secondEventId));
+      await expect(
+        service.createReview(userId, { scope: { type: "all_outstanding" } }),
+      ).rejects.toMatchObject({
+        code: "conflict",
+        message: "A Calendar review is already being published. Try again shortly.",
+      });
     });
-    if (!pendingReview) throw new Error("The concurrent review was not started.");
-
-    await expect(pendingReview).resolves.not.toEqual(
-      expect.objectContaining({ findings: expect.arrayContaining([expect.objectContaining({ id: overlap.id })]) }),
-    );
-    const [preserved] = await database.db
-      .select()
-      .from(calendarFindings)
-      .where(eq(calendarFindings.id, overlap.id));
-    expect(preserved?.status).toBe("resolved");
+    await expect(
+      service.createReview(userId, { scope: { type: "all_outstanding" } }),
+    ).resolves.toMatchObject({ state: "maintained_with_questions" });
   });
 
   it("invalidates live status for event, source, profile, and freshness changes", async () => {
@@ -438,6 +420,31 @@ describe.sequential("Calendar stewardship service", () => {
     await service.createReview(userId, { scope: { type: "all_outstanding" } });
     now = new Date(initialNow.getTime() + 15 * 60_000 + 1);
     await expect(service.getStatus(userId)).resolves.toMatchObject({ lifecycle: "stale" });
+  });
+
+  it("counts newly assessed findings in settled live status before they are persisted", async () => {
+    await database.db
+      .update(calendarEvents)
+      .set({
+        endsAt: new Date("2026-08-24T17:00:00.000Z"),
+        startsAt: new Date("2026-08-24T16:00:00.000Z"),
+      })
+      .where(eq(calendarEvents.id, secondEventId));
+    const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect(review.findings).toHaveLength(0);
+    await database.db
+      .update(calendarEvents)
+      .set({
+        endsAt: new Date("2026-08-24T15:30:00.000Z"),
+        remoteEtag: "new-overlap-v3",
+        startsAt: new Date("2026-08-24T14:30:00.000Z"),
+      })
+      .where(eq(calendarEvents.id, secondEventId));
+
+    await expect(service.getStatus(userId)).resolves.toMatchObject({
+      backlog: { actionable: 1, openFindings: 1 },
+      lifecycle: "stale",
+    });
   });
 
   it("blocks unavailable and recurrence-incomplete evidence without claiming zero backlog", async () => {
@@ -545,6 +552,29 @@ describe.sequential("Calendar stewardship service", () => {
     });
   });
 
+  it("marks an over-budget event projection partial and bounds published findings", async () => {
+    const startsAt = new Date("2026-09-01T00:00:00.000Z");
+    await database.db.insert(calendarEvents).values(
+      Array.from({ length: CALENDAR_ASSESSMENT_BUDGETS.events }, (_, index) => ({
+        calendarId,
+        endsAt: new Date(startsAt.getTime() + index * 5 * 60_000 + 60_000),
+        provider: "google" as const,
+        remoteEtag: `budget-${index}`,
+        remoteEventId: `budget-${index}`,
+        startsAt: new Date(startsAt.getTime() + index * 5 * 60_000),
+        timezone: "UTC",
+        title: `Private budget event ${index}`,
+        userId,
+      })),
+    );
+
+    const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+
+    expect(review.state).toBe("blocked");
+    expect(review.sourceFreshness[0]?.completeness).toBe("partial");
+    expect(review.findings.length).toBeLessThanOrEqual(CALENDAR_ASSESSMENT_BUDGETS.findings);
+  });
+
   it("excludes unselected, disabled, and soft-deleted sources plus events outside the fixed horizon", async () => {
     const [excludedCalendar] = await database.db
       .insert(calendars)
@@ -601,12 +631,12 @@ describe.sequential("Calendar stewardship service", () => {
     await database.db.insert(calendarEvents).values([
       {
         calendarId,
-        endsAt: new Date("2026-11-21T13:00:00.000Z"),
+        endsAt: new Date("2025-01-01T13:00:00.000Z"),
         provider: "google",
         recurrence: ["RRULE:FREQ=WEEKLY"],
-        startsAt: new Date("2026-11-21T12:00:00.000Z"),
+        startsAt: new Date("2025-01-01T12:00:00.000Z"),
         timezone: "UTC",
-        title: "Outside future horizon",
+        title: "Recurring master predating horizon",
         userId,
       },
       {
@@ -645,7 +675,7 @@ describe.sequential("Calendar stewardship service", () => {
 
     expect(review.sourceFreshness).toHaveLength(1);
     expect(review.sourceFreshness[0]?.calendarId).toBe(calendarId);
-    expect(review.findings.map(({ kind }) => kind)).not.toContain("recurrence_unassessed");
+    expect(review.findings.map(({ kind }) => kind)).toContain("recurrence_unassessed");
   });
 
   it("preserves open findings from unsupported future playbook kinds", async () => {
@@ -707,6 +737,15 @@ describe.sequential("Calendar stewardship service", () => {
       .update(calendars)
       .set({ isSelected: false, updatedAt: now })
       .where(and(eq(calendars.id, calendarId), eq(calendars.userId, userId)));
+    const blockedReview = await service.createReview(userId, {
+      scope: { type: "all_outstanding" },
+    });
+    expect(blockedReview.state).toBe("blocked");
+    const persistedFindings = await database.db
+      .select()
+      .from(calendarFindings)
+      .where(eq(calendarFindings.userId, userId));
+    expect(persistedFindings.some(({ status }) => status === "open")).toBe(true);
     await expect(service.getStatus(userId)).resolves.toMatchObject({
       backlog: { actionable: null, openFindings: null },
       health: expect.arrayContaining([

@@ -1,4 +1,9 @@
-import { assessCalendar, calendarLedgerFingerprint, type CalendarAssessmentSnapshot } from "./calendar-assessment.js";
+import {
+  assessCalendar,
+  CALENDAR_ASSESSMENT_BUDGETS,
+  calendarLedgerFingerprint,
+  type CalendarAssessmentSnapshot,
+} from "./calendar-assessment.js";
 
 const cutoff = new Date("2026-08-23T16:00:00.000Z");
 const source = {
@@ -21,6 +26,7 @@ const event = (id: string, startsAt: string, endsAt: string, overrides = {}) => 
   id,
   provider: "google" as const,
   recurrence: [],
+  remoteEventId: `${id}-remote`,
   revision: `${id}-v1`,
   startsAt,
   status: "confirmed" as const,
@@ -36,6 +42,7 @@ const snapshot = (events: ReturnType<typeof event>[]): CalendarAssessmentSnapsho
     version: 2,
   },
   evidenceCutoff: cutoff,
+  evidenceLimits: { eventBudgetExceeded: false, openFindingBudgetExceeded: false },
   events,
   existingOpenFindings: [],
   scope: { type: "all_outstanding" },
@@ -171,7 +178,12 @@ describe("Calendar assessment", () => {
     const first = snapshot([
       event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z"),
     ]);
-    const sameInputsAtAnotherCutoff = { ...first, evidenceCutoff: new Date("2026-08-23T16:05:00.000Z") };
+    const sameInputsAtAnotherCutoff = {
+      ...first,
+      evidenceCutoff: new Date("2026-08-23T16:05:00.000Z"),
+      scopeEnd: new Date("2026-11-21T16:05:00.000Z"),
+      scopeStart: new Date("2026-07-24T16:05:00.000Z"),
+    };
     const privateFieldsAtAnotherCutoff = {
       ...sameInputsAtAnotherCutoff,
       events: [{ ...first.events[0]!, title: "Private planning meeting" }],
@@ -182,5 +194,54 @@ describe("Calendar assessment", () => {
     expect(
       calendarLedgerFingerprint({ ...first, events: [{ ...first.events[0]!, revision: "changed" }] }),
     ).not.toBe(calendarLedgerFingerprint(first));
+  });
+
+  it("blocks empty source evidence instead of producing a maintained assessment", () => {
+    const missing = snapshot([]);
+    missing.sources = [];
+
+    const result = assessCalendar(missing);
+
+    expect(result.state).toBe("blocked");
+    expect(result.health.find(({ dimension }) => dimension === "source_trust")).toMatchObject({
+      signal: "unknown",
+      summary: "No selected Calendar source is available to assess.",
+    });
+  });
+
+  it("bounds event and finding work and marks truncated evidence partial", () => {
+    const events = Array.from({ length: 16 }, (_, index) =>
+      event(
+        `44444444-4444-4444-8444-${String(index).padStart(12, "0")}`,
+        "2026-08-24T13:00:00.000Z",
+        "2026-08-24T14:00:00.000Z",
+      ),
+    );
+    const limited = snapshot(events);
+    limited.evidenceLimits.eventBudgetExceeded = true;
+
+    const result = assessCalendar(limited);
+
+    expect(result.findings).toHaveLength(CALENDAR_ASSESSMENT_BUDGETS.findings);
+    expect(result.evidenceLimited).toBe(true);
+    expect(result.state).toBe("blocked");
+    expect(result.sourceFreshness[0]).toMatchObject({ completeness: "partial" });
+  });
+
+  it("uses provider remote event identity in material references", () => {
+    const result = assessCalendar(
+      snapshot([
+        event(
+          "44444444-4444-4444-8444-444444444444",
+          "2026-08-24T13:00:00.000Z",
+          "2026-08-24T14:00:00.000Z",
+          { status: "tentative" },
+        ),
+      ]),
+    );
+
+    expect(result.findings[0]?.sourceReferences[0]?.remoteId).toBe(
+      "44444444-4444-4444-8444-444444444444-remote",
+    );
   });
 });

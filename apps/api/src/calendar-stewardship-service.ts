@@ -19,11 +19,12 @@ import {
   calendarStatusSchema,
   type CreateCalendarReviewInput,
 } from "@personal-os/domain";
-import { and, desc, eq, gt, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import {
   assessCalendar,
+  CALENDAR_ASSESSMENT_BUDGETS,
   type CalendarAssessmentDraft,
   type CalendarAssessmentSnapshot,
   calendarLedgerFingerprint,
@@ -128,7 +129,12 @@ async function readAssessmentSnapshot(
     .orderBy(calendars.id);
 
   const calendarIds = sourceRows.map(({ calendarId }) => calendarId);
-  const eventRows =
+  const recurrencePresent = sql<boolean>`case
+    when jsonb_typeof(${calendarEvents.recurrence}) = 'array'
+    then jsonb_array_length(${calendarEvents.recurrence}) > 0
+    else true
+  end`;
+  const queriedEventRows =
     calendarIds.length === 0
       ? []
       : await executor
@@ -139,12 +145,9 @@ async function readAssessmentSnapshot(
             endsAt: calendarEvents.endsAt,
             id: calendarEvents.id,
             provider: calendarEvents.provider,
-            recurrencePresent: sql<boolean>`case
-              when jsonb_typeof(${calendarEvents.recurrence}) = 'array'
-              then jsonb_array_length(${calendarEvents.recurrence}) > 0
-              else true
-            end`,
+            recurrencePresent,
             remoteEtag: calendarEvents.remoteEtag,
+            remoteEventId: calendarEvents.remoteEventId,
             startsAt: calendarEvents.startsAt,
             status: calendarEvents.status,
             transparency: calendarEvents.transparency,
@@ -156,13 +159,21 @@ async function readAssessmentSnapshot(
               eq(calendarEvents.userId, userId),
               inArray(calendarEvents.calendarId, calendarIds),
               isNull(calendarEvents.deletedAt),
-              lt(calendarEvents.startsAt, scopeEnd),
-              gt(calendarEvents.endsAt, scopeStart),
+              or(
+                and(
+                  lt(calendarEvents.startsAt, scopeEnd),
+                  gt(calendarEvents.endsAt, scopeStart),
+                ),
+                recurrencePresent,
+              ),
             ),
           )
-          .orderBy(calendarEvents.id);
+          .orderBy(calendarEvents.id)
+          .limit(CALENDAR_ASSESSMENT_BUDGETS.events + 1);
+  const eventBudgetExceeded = queriedEventRows.length > CALENDAR_ASSESSMENT_BUDGETS.events;
+  const eventRows = queriedEventRows.slice(0, CALENDAR_ASSESSMENT_BUDGETS.events);
 
-  const existingOpenFindings = await executor
+  const queriedOpenFindings = await executor
     .select({
       fingerprint: calendarFindings.fingerprint,
       id: calendarFindings.id,
@@ -170,7 +181,14 @@ async function readAssessmentSnapshot(
     })
     .from(calendarFindings)
     .where(and(eq(calendarFindings.userId, userId), eq(calendarFindings.status, "open")))
-    .orderBy(calendarFindings.fingerprint);
+    .orderBy(calendarFindings.fingerprint)
+    .limit(CALENDAR_ASSESSMENT_BUDGETS.findings + 1);
+  const openFindingBudgetExceeded =
+    queriedOpenFindings.length > CALENDAR_ASSESSMENT_BUDGETS.findings;
+  const existingOpenFindings = queriedOpenFindings.slice(
+    0,
+    CALENDAR_ASSESSMENT_BUDGETS.findings,
+  );
 
   const [profileRow] = await executor
     .select({
@@ -214,6 +232,7 @@ async function readAssessmentSnapshot(
   return {
     activeProfile,
     evidenceCutoff,
+    evidenceLimits: { eventBudgetExceeded, openFindingBudgetExceeded },
     events: eventRows.map((event) => ({
       allDay: event.allDay,
       blockSourceEventId: event.blockSourceEventId,
@@ -222,6 +241,7 @@ async function readAssessmentSnapshot(
       id: event.id,
       provider: event.provider,
       recurrence: event.recurrencePresent ? ["RECURRENCE_PRESENT"] : [],
+      remoteEventId: event.remoteEventId,
       revision: event.remoteEtag ?? event.updatedAt.toISOString(),
       startsAt: event.startsAt.toISOString(),
       status: event.status,
@@ -307,19 +327,21 @@ async function reconcileFindings(
   }
 
   const currentFingerprints = draft.findings.map(({ fingerprint }) => fingerprint);
-  await transaction
-    .update(calendarFindings)
-    .set({ resolvedAt: observedAt, status: "resolved", updatedAt: observedAt })
-    .where(
-      and(
-        eq(calendarFindings.userId, userId),
-        eq(calendarFindings.status, "open"),
-        inArray(calendarFindings.kind, [...CALENDAR_PLAYBOOK.supportedFindingKinds]),
-        ...(currentFingerprints.length > 0
-          ? [notInArray(calendarFindings.fingerprint, currentFingerprints)]
-          : []),
-      ),
-    );
+  if (!draft.evidenceLimited) {
+    await transaction
+      .update(calendarFindings)
+      .set({ resolvedAt: observedAt, status: "resolved", updatedAt: observedAt })
+      .where(
+        and(
+          eq(calendarFindings.userId, userId),
+          eq(calendarFindings.status, "open"),
+          inArray(calendarFindings.kind, [...CALENDAR_PLAYBOOK.supportedFindingKinds]),
+          ...(currentFingerprints.length > 0
+            ? [notInArray(calendarFindings.fingerprint, currentFingerprints)]
+            : []),
+        ),
+      );
+  }
   return findings;
 }
 
@@ -402,6 +424,27 @@ async function readLatestReview(
   return row ? reviewFromRow(row) : null;
 }
 
+async function readReusableReview(
+  executor: DatabaseExecutor,
+  userId: string,
+  ledgerFingerprint: string,
+  evidenceCutoff: Date,
+): Promise<CalendarReview | null> {
+  const [row] = await executor
+    .select()
+    .from(calendarReviews)
+    .where(
+      and(
+        eq(calendarReviews.userId, userId),
+        eq(calendarReviews.ledgerFingerprint, ledgerFingerprint),
+        gte(calendarReviews.nextMaintenanceAt, evidenceCutoff),
+      ),
+    )
+    .orderBy(desc(calendarReviews.createdAt), desc(calendarReviews.id))
+    .limit(1);
+  return row ? reviewFromRow(row) : null;
+}
+
 function buildStatus(input: {
   asOf: Date;
   assessment: CalendarAssessmentDraft;
@@ -478,13 +521,13 @@ function buildStatus(input: {
       ],
     },
     backlog: {
-      actionable: evidenceSettled ? input.snapshot.existingOpenFindings.length : null,
+      actionable: evidenceSettled ? input.assessment.findings.length : null,
       ambiguousEffects: null,
       awaitingApproval: null,
       awaitingInput: null,
       blocked: degradedSources.length,
       failed: null,
-      openFindings: evidenceSettled ? input.snapshot.existingOpenFindings.length : null,
+      openFindings: evidenceSettled ? input.assessment.findings.length : null,
     },
     health,
     latestReview: input.latestReview,
@@ -512,10 +555,16 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
       const client = await pool.connect();
       let locked = false;
       try {
-        await client.query(
-          "select pg_advisory_lock(hashtextextended('calendar:' || $1, 0))",
+        const lockResult = await client.query<{ locked: boolean }>(
+          "select pg_try_advisory_lock(hashtextextended('calendar:' || $1, 0)) as locked",
           [userId],
         );
+        if (!lockResult.rows[0]?.locked) {
+          throw new AppError(
+            "conflict",
+            "A Calendar review is already being published. Try again shortly.",
+          );
+        }
         locked = true;
         const clientDatabase = drizzle(client, { schema: databaseSchema });
         return await clientDatabase.transaction(
@@ -528,14 +577,25 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
               evidenceCutoff,
             );
             const draft = assessCalendar(snapshot);
-            const findings = await reconcileFindings(transaction, userId, snapshot, draft);
+            const ledgerFingerprint = calendarLedgerFingerprint(snapshot);
+            const reusable = await readReusableReview(
+              transaction,
+              userId,
+              ledgerFingerprint,
+              evidenceCutoff,
+            );
+            if (reusable) return reusable;
+            const findings =
+              snapshot.sources.length === 0
+                ? []
+                : await reconcileFindings(transaction, userId, snapshot, draft);
             const health = bindFindingIds(draft.health, findings);
             const recommendations = bindRecommendationFindingIds(draft.recommendations, findings);
             return insertReview(transaction, {
               draft,
               findings,
               health,
-              ledgerFingerprint: calendarLedgerFingerprint(snapshot),
+              ledgerFingerprint,
               nextMaintenanceAt: new Date(
                 evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000,
               ),
@@ -569,7 +629,6 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
             } catch {
               // Preserve the unlock failure after requesting connection eviction.
             }
-            throw error;
           }
         }
       }

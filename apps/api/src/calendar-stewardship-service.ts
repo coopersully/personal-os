@@ -430,11 +430,7 @@ function buildStatus(input: {
       : []),
   ];
   const validNextOperations: CalendarStatus["validNextOperations"] = ["assess_calendar"];
-  if (
-    input.snapshot.sources.some(
-      ({ syncRecovery }) => syncRecovery === "operator" || syncRecovery === "reconnect",
-    )
-  ) {
+  if (input.snapshot.sources.some(({ syncRecovery }) => syncRecovery === "reconnect")) {
     validNextOperations.push("open_connections");
   }
   if ((input.latestReview?.findings.length ?? 0) > 0) validNextOperations.push("review_findings");

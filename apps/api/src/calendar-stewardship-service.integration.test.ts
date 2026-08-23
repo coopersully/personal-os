@@ -479,6 +479,37 @@ describe.sequential("Calendar stewardship service", () => {
     });
   });
 
+  it("offers connection repair only for reconnect recovery, not scheduled operator retry", async () => {
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: "Operator retry is scheduled",
+        syncErrorCategory: "configuration",
+        syncErrorCode: "operator_retry_scheduled",
+        syncFailureCount: 1,
+        syncRecovery: "operator",
+        syncStatus: "error",
+      })
+      .where(eq(calendarAccounts.id, accountId));
+    await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect((await service.getStatus(userId)).validNextOperations).not.toContain(
+      "open_connections",
+    );
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: "Reconnect authorization required",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "authorization_required",
+        syncRecovery: "reconnect",
+        updatedAt: new Date(now.getTime() + 1_000),
+      })
+      .where(eq(calendarAccounts.id, accountId));
+    await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect((await service.getStatus(userId)).validNextOperations).toContain("open_connections");
+  });
+
   it("degrades malformed recurrence and profile JSON without throwing or carrying private values", async () => {
     await database.db
       .update(domainProfiles)

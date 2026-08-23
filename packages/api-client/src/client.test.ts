@@ -114,13 +114,7 @@ const calendarStatus: CalendarStatus = {
     approvedRule: [],
     automatic: ["inspect", "assess"],
     individualApproval: ["create_event", "move_event", "resize_event", "trash_event"],
-    unavailable: [
-      "rsvp",
-      "invite",
-      "cancel_attended_event",
-      "book_travel",
-      "send_correspondence",
-    ],
+    unavailable: ["rsvp", "invite", "cancel_attended_event", "book_travel", "send_correspondence"],
   },
   backlog: {
     actionable: 0,

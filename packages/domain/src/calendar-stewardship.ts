@@ -146,42 +146,44 @@ export const calendarRecommendationSchema = z.object({
 });
 export type CalendarRecommendation = z.infer<typeof calendarRecommendationSchema>;
 
-export const calendarReviewSchema = z.object({
-  createdAt: isoDateTimeSchema,
-  evidenceCutoff: isoDateTimeSchema,
-  findings: z.array(calendarFindingSchema),
-  health: z.array(calendarHealthAssessmentSchema),
-  id: idSchema,
-  ledgerFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
-  nextMaintenanceAt: isoDateTimeSchema,
-  playbookVersion: semanticVersionSchema,
-  profileVersion: z.number().int().positive().nullable(),
-  recommendations: z.array(calendarRecommendationSchema),
-  rulebookVersion: z.string().min(1).max(160),
-  scope: calendarMaintenanceScopeSchema,
-  scopeEnd: isoDateTimeSchema,
-  scopeStart: isoDateTimeSchema,
-  sourceFreshness: z.array(calendarSourceFreshnessSchema),
-  state: calendarReviewStateSchema,
-}).superRefine((review, context) => {
-  if (review.sourceFreshness.length === 0 && review.state !== "blocked") {
-    context.addIssue({
-      code: "custom",
-      message: "A review without selected Calendar sources must remain blocked.",
-      path: ["state"],
-    });
-  }
-  if (
-    review.sourceFreshness.length === 0 &&
-    review.health.find(({ dimension }) => dimension === "source_trust")?.signal !== "unknown"
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "A review without selected Calendar sources must report unknown source trust.",
-      path: ["health"],
-    });
-  }
-});
+export const calendarReviewSchema = z
+  .object({
+    createdAt: isoDateTimeSchema,
+    evidenceCutoff: isoDateTimeSchema,
+    findings: z.array(calendarFindingSchema),
+    health: z.array(calendarHealthAssessmentSchema),
+    id: idSchema,
+    ledgerFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+    nextMaintenanceAt: isoDateTimeSchema,
+    playbookVersion: semanticVersionSchema,
+    profileVersion: z.number().int().positive().nullable(),
+    recommendations: z.array(calendarRecommendationSchema),
+    rulebookVersion: z.string().min(1).max(160),
+    scope: calendarMaintenanceScopeSchema,
+    scopeEnd: isoDateTimeSchema,
+    scopeStart: isoDateTimeSchema,
+    sourceFreshness: z.array(calendarSourceFreshnessSchema),
+    state: calendarReviewStateSchema,
+  })
+  .superRefine((review, context) => {
+    if (review.sourceFreshness.length === 0 && review.state !== "blocked") {
+      context.addIssue({
+        code: "custom",
+        message: "A review without selected Calendar sources must remain blocked.",
+        path: ["state"],
+      });
+    }
+    if (
+      review.sourceFreshness.length === 0 &&
+      review.health.find(({ dimension }) => dimension === "source_trust")?.signal !== "unknown"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "A review without selected Calendar sources must report unknown source trust.",
+        path: ["health"],
+      });
+    }
+  });
 export type CalendarReview = z.infer<typeof calendarReviewSchema>;
 
 export const calendarStewardshipOperationSchema = z.enum([
@@ -223,7 +225,9 @@ export const calendarStatusSchema = z
     readiness: z.enum(["setup_required", "ready", "degraded"]),
     setupBlockers: z.array(z.string().max(240)),
     sources: z.array(calendarSourceFreshnessSchema),
-    validNextOperations: z.array(z.enum(["assess_calendar", "open_connections", "review_findings"])),
+    validNextOperations: z.array(
+      z.enum(["assess_calendar", "open_connections", "review_findings"]),
+    ),
   })
   .superRefine((status, context) => {
     const sourceTrust = status.health.find(({ dimension }) => dimension === "source_trust");
@@ -238,7 +242,9 @@ export const calendarStatusSchema = z
       });
     }
     if (
-      status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete") &&
+      status.sources.some(
+        ({ completeness, state }) => state !== "current" || completeness !== "complete",
+      ) &&
       sourceTrust?.signal === "healthy"
     ) {
       context.addIssue({
@@ -250,7 +256,9 @@ export const calendarStatusSchema = z
     if (
       ["maintained", "maintained_with_questions"].includes(status.lifecycle) &&
       (status.sources.length === 0 ||
-        status.sources.some(({ completeness, state }) => state !== "current" || completeness !== "complete"))
+        status.sources.some(
+          ({ completeness, state }) => state !== "current" || completeness !== "complete",
+        ))
     ) {
       context.addIssue({
         code: "custom",

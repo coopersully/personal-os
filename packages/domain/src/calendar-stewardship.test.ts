@@ -11,7 +11,9 @@ const id = "11111111-1111-4111-8111-111111111111";
 
 describe("Calendar stewardship contracts", () => {
   it("defaults review creation to the server-owned all-outstanding scope", () => {
-    expect(createCalendarReviewInputSchema.parse({})).toEqual({ scope: { type: "all_outstanding" } });
+    expect(createCalendarReviewInputSchema.parse({})).toEqual({
+      scope: { type: "all_outstanding" },
+    });
   });
 
   it("retains the complete target lifecycle even when this slice reaches only settled review states", () => {
@@ -51,8 +53,20 @@ describe("Calendar stewardship contracts", () => {
       authority: {
         approvedRule: [],
         automatic: ["inspect", "assess"],
-        individualApproval: ["create_event", "move_event", "resize_event", "trash_event", "restore_event"],
-        unavailable: ["rsvp", "invite", "cancel_attended_event", "book_travel", "send_correspondence"],
+        individualApproval: [
+          "create_event",
+          "move_event",
+          "resize_event",
+          "trash_event",
+          "restore_event",
+        ],
+        unavailable: [
+          "rsvp",
+          "invite",
+          "cancel_attended_event",
+          "book_travel",
+          "send_correspondence",
+        ],
       },
       backlog: {
         actionable: null,
@@ -77,58 +91,58 @@ describe("Calendar stewardship contracts", () => {
     expect(parsed.success).toBe(false);
   });
 
-  it.each(["partial", "unknown"] as const)(
-    "rejects a healthy source-trust status with %s source completeness",
-    (completeness) => {
-      const parsed = calendarStatusSchema.safeParse({
-        asOf: now,
-        readiness: "degraded",
-        setupBlockers: [],
-        lifecycle: "stale",
-        sources: [
-          {
-            accountId: id,
-            calendarId: id,
-            completeness,
-            evidenceCutoff: now,
-            lastSyncedAt: now,
-            provider: "google",
-            readable: true,
-            reason: null,
-            recovery: null,
-            state: "current",
-            writable: true,
-          },
-        ],
-        authority: {
-          approvedRule: [],
-          automatic: ["inspect", "assess"],
-          individualApproval: [],
-          unavailable: [],
+  it.each([
+    "partial",
+    "unknown",
+  ] as const)("rejects a healthy source-trust status with %s source completeness", (completeness) => {
+    const parsed = calendarStatusSchema.safeParse({
+      asOf: now,
+      readiness: "degraded",
+      setupBlockers: [],
+      lifecycle: "stale",
+      sources: [
+        {
+          accountId: id,
+          calendarId: id,
+          completeness,
+          evidenceCutoff: now,
+          lastSyncedAt: now,
+          provider: "google",
+          readable: true,
+          reason: null,
+          recovery: null,
+          state: "current",
+          writable: true,
         },
-        backlog: {
-          actionable: null,
-          ambiguousEffects: null,
-          awaitingApproval: null,
-          awaitingInput: null,
-          blocked: 0,
-          failed: null,
-          openFindings: null,
+      ],
+      authority: {
+        approvedRule: [],
+        automatic: ["inspect", "assess"],
+        individualApproval: [],
+        unavailable: [],
+      },
+      backlog: {
+        actionable: null,
+        ambiguousEffects: null,
+        awaitingApproval: null,
+        awaitingInput: null,
+        blocked: 0,
+        failed: null,
+        openFindings: null,
+      },
+      health: [
+        {
+          dimension: "source_trust",
+          evidenceFindingIds: [],
+          signal: "healthy",
+          summary: "Sources are current.",
         },
-        health: [
-          {
-            dimension: "source_trust",
-            evidenceFindingIds: [],
-            signal: "healthy",
-            summary: "Sources are current.",
-          },
-        ],
-        latestReview: null,
-        validNextOperations: ["assess_calendar"],
-      });
-      expect(parsed.success).toBe(false);
-    },
-  );
+      ],
+      latestReview: null,
+      validNextOperations: ["assess_calendar"],
+    });
+    expect(parsed.success).toBe(false);
+  });
 
   it("rejects maintained-with-questions status with stale or incomplete source evidence", () => {
     const parsed = calendarStatusSchema.safeParse({
@@ -232,8 +246,21 @@ describe("Calendar stewardship contracts", () => {
     expect(
       calendarStatusSchema.safeParse({
         asOf: now,
-        authority: { approvedRule: [], automatic: ["inspect", "assess"], individualApproval: [], unavailable: [] },
-        backlog: { actionable: null, ambiguousEffects: null, awaitingApproval: null, awaitingInput: null, blocked: 0, failed: null, openFindings: null },
+        authority: {
+          approvedRule: [],
+          automatic: ["inspect", "assess"],
+          individualApproval: [],
+          unavailable: [],
+        },
+        backlog: {
+          actionable: null,
+          ambiguousEffects: null,
+          awaitingApproval: null,
+          awaitingInput: null,
+          blocked: 0,
+          failed: null,
+          openFindings: null,
+        },
         health: [],
         latestReview: null,
         lifecycle: "maintained",

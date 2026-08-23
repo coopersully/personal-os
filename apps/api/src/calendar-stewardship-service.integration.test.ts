@@ -296,10 +296,9 @@ describe.sequential("Calendar stewardship service", () => {
         releasedWith = error;
       }) as typeof client.release;
       cleanupClient = async () => {
-        await originalQuery(
-          "select pg_advisory_unlock(hashtextextended('calendar:' || $1, 0))",
-          [userId],
-        );
+        await originalQuery("select pg_advisory_unlock(hashtextextended('calendar:' || $1, 0))", [
+          userId,
+        ]);
         originalRelease();
       };
       return client;
@@ -366,7 +365,11 @@ describe.sequential("Calendar stewardship service", () => {
       .where(eq(calendarEvents.id, secondEventId));
     const third = await service.createReview(userId, { scope: { type: "all_outstanding" } });
     expect(third.findings).toContainEqual(
-      expect.objectContaining({ id: overlap.id, firstObservedAt: overlap.firstObservedAt, status: "open" }),
+      expect.objectContaining({
+        id: overlap.id,
+        firstObservedAt: overlap.firstObservedAt,
+        status: "open",
+      }),
     );
     await expect(service.getStatus(otherUserId)).resolves.toMatchObject({
       latestReview: null,
@@ -482,7 +485,11 @@ describe.sequential("Calendar stewardship service", () => {
       },
       lifecycle: "blocked",
       readiness: "degraded",
-      validNextOperations: expect.arrayContaining(["assess_calendar", "open_connections", "review_findings"]),
+      validNextOperations: expect.arrayContaining([
+        "assess_calendar",
+        "open_connections",
+        "review_findings",
+      ]),
     });
   });
 
@@ -499,9 +506,7 @@ describe.sequential("Calendar stewardship service", () => {
       })
       .where(eq(calendarAccounts.id, accountId));
     await service.createReview(userId, { scope: { type: "all_outstanding" } });
-    expect((await service.getStatus(userId)).validNextOperations).not.toContain(
-      "open_connections",
-    );
+    expect((await service.getStatus(userId)).validNextOperations).not.toContain("open_connections");
 
     await database.db
       .update(calendarAccounts)
@@ -533,10 +538,10 @@ describe.sequential("Calendar stewardship service", () => {
         },
       })
       .where(eq(domainProfiles.id, profileId));
-    await database.pool.query(
-      "update calendar_events set recurrence = $1::jsonb where id = $2",
-      [JSON.stringify({ privateRule: "malformed-recurrence-secret" }), firstEventId],
-    );
+    await database.pool.query("update calendar_events set recurrence = $1::jsonb where id = $2", [
+      JSON.stringify({ privateRule: "malformed-recurrence-secret" }),
+      firstEventId,
+    ]);
 
     const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
 
@@ -714,8 +719,20 @@ describe.sequential("Calendar stewardship service", () => {
     expect(status.authority).toEqual({
       approvedRule: [],
       automatic: ["inspect", "assess"],
-      individualApproval: ["create_event", "move_event", "resize_event", "trash_event", "restore_event"],
-      unavailable: ["rsvp", "invite", "cancel_attended_event", "book_travel", "send_correspondence"],
+      individualApproval: [
+        "create_event",
+        "move_event",
+        "resize_event",
+        "trash_event",
+        "restore_event",
+      ],
+      unavailable: [
+        "rsvp",
+        "invite",
+        "cancel_attended_event",
+        "book_travel",
+        "send_correspondence",
+      ],
     });
     expect(status.backlog).toEqual({
       actionable: review.findings.length,

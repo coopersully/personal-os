@@ -1,8 +1,8 @@
 import {
   assessCalendar,
   CALENDAR_ASSESSMENT_BUDGETS,
-  calendarLedgerFingerprint,
   type CalendarAssessmentSnapshot,
+  calendarLedgerFingerprint,
 } from "./calendar-assessment.js";
 
 const cutoff = new Date("2026-08-23T16:00:00.000Z");
@@ -55,9 +55,22 @@ describe("Calendar assessment", () => {
   it("reports overlapping, tentative, and too-close events without retaining event prose", () => {
     const result = assessCalendar(
       snapshot([
-        event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z"),
-        event("55555555-5555-4555-8555-555555555555", "2026-08-24T13:45:00.000Z", "2026-08-24T14:30:00.000Z", { status: "tentative" }),
-        event("66666666-6666-4666-8666-666666666666", "2026-08-24T14:35:00.000Z", "2026-08-24T15:00:00.000Z"),
+        event(
+          "44444444-4444-4444-8444-444444444444",
+          "2026-08-24T13:00:00.000Z",
+          "2026-08-24T14:00:00.000Z",
+        ),
+        event(
+          "55555555-5555-4555-8555-555555555555",
+          "2026-08-24T13:45:00.000Z",
+          "2026-08-24T14:30:00.000Z",
+          { status: "tentative" },
+        ),
+        event(
+          "66666666-6666-4666-8666-666666666666",
+          "2026-08-24T14:35:00.000Z",
+          "2026-08-24T15:00:00.000Z",
+        ),
       ]),
     );
 
@@ -72,9 +85,14 @@ describe("Calendar assessment", () => {
 
   it("blocks stale source evidence and unexpanded recurrence instead of claiming protected time", () => {
     const stale = snapshot([
-      event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z", {
-        recurrence: ["RRULE:FREQ=WEEKLY"],
-      }),
+      event(
+        "44444444-4444-4444-8444-444444444444",
+        "2026-08-24T13:00:00.000Z",
+        "2026-08-24T14:00:00.000Z",
+        {
+          recurrence: ["RRULE:FREQ=WEEKLY"],
+        },
+      ),
     ]);
     stale.sources[0] = {
       ...source,
@@ -88,7 +106,9 @@ describe("Calendar assessment", () => {
     expect(result.findings.map(({ kind }) => kind)).toEqual(
       expect.arrayContaining(["source_stale", "recurrence_unassessed"]),
     );
-    expect(result.health.find(({ dimension }) => dimension === "protected_time")?.signal).toBe("unknown");
+    expect(result.health.find(({ dimension }) => dimension === "protected_time")?.signal).toBe(
+      "unknown",
+    );
   });
 
   it("treats operator recovery as unavailable and a local calendar as current without a sync timestamp", () => {
@@ -110,8 +130,16 @@ describe("Calendar assessment", () => {
   it("does not emit a redundant buffer finding for an overlapping pair", () => {
     const result = assessCalendar(
       snapshot([
-        event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z"),
-        event("55555555-5555-4555-8555-555555555555", "2026-08-24T13:45:00.000Z", "2026-08-24T14:30:00.000Z"),
+        event(
+          "44444444-4444-4444-8444-444444444444",
+          "2026-08-24T13:00:00.000Z",
+          "2026-08-24T14:00:00.000Z",
+        ),
+        event(
+          "55555555-5555-4555-8555-555555555555",
+          "2026-08-24T13:45:00.000Z",
+          "2026-08-24T14:30:00.000Z",
+        ),
       ]),
     );
 
@@ -176,7 +204,11 @@ describe("Calendar assessment", () => {
 
   it("fingerprints revisions and policy but not cutoff time or private event fields", () => {
     const first = snapshot([
-      event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z"),
+      event(
+        "44444444-4444-4444-8444-444444444444",
+        "2026-08-24T13:00:00.000Z",
+        "2026-08-24T14:00:00.000Z",
+      ),
     ]);
     const sameInputsAtAnotherCutoff = {
       ...first,
@@ -184,15 +216,24 @@ describe("Calendar assessment", () => {
       scopeEnd: new Date("2026-11-21T16:05:00.000Z"),
       scopeStart: new Date("2026-07-24T16:05:00.000Z"),
     };
+    const [firstEvent] = first.events;
+    if (!firstEvent) throw new Error("Expected the fingerprint fixture to include an event.");
     const privateFieldsAtAnotherCutoff = {
       ...sameInputsAtAnotherCutoff,
-      events: [{ ...first.events[0]!, title: "Private planning meeting" }],
+      events: [{ ...firstEvent, title: "Private planning meeting" }],
     };
 
-    expect(calendarLedgerFingerprint(first)).toBe(calendarLedgerFingerprint(sameInputsAtAnotherCutoff));
-    expect(calendarLedgerFingerprint(first)).toBe(calendarLedgerFingerprint(privateFieldsAtAnotherCutoff));
+    expect(calendarLedgerFingerprint(first)).toBe(
+      calendarLedgerFingerprint(sameInputsAtAnotherCutoff),
+    );
+    expect(calendarLedgerFingerprint(first)).toBe(
+      calendarLedgerFingerprint(privateFieldsAtAnotherCutoff),
+    );
     expect(
-      calendarLedgerFingerprint({ ...first, events: [{ ...first.events[0]!, revision: "changed" }] }),
+      calendarLedgerFingerprint({
+        ...first,
+        events: [{ ...firstEvent, revision: "changed" }],
+      }),
     ).not.toBe(calendarLedgerFingerprint(first));
   });
 

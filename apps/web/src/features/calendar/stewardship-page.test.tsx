@@ -135,6 +135,9 @@ const neverMaintainedStatus: CalendarStatus = {
   lifecycle: "never_maintained",
 };
 
+const [reviewSource] = review.sourceFreshness;
+if (!reviewSource) throw new Error("Expected the review fixture to include a source.");
+
 const blockedStatus: CalendarStatus = {
   ...neverMaintainedStatus,
   backlog: { ...neverMaintainedStatus.backlog, blocked: 1 },
@@ -150,7 +153,7 @@ const blockedStatus: CalendarStatus = {
   readiness: "degraded",
   sources: [
     {
-      ...review.sourceFreshness[0]!,
+      ...reviewSource,
       completeness: "unknown",
       reason: "Google access needs to be renewed.",
       recovery: "reconnect",
@@ -159,6 +162,9 @@ const blockedStatus: CalendarStatus = {
   ],
   validNextOperations: ["assess_calendar", "open_connections"],
 };
+
+const [blockedSource] = blockedStatus.sources;
+if (!blockedSource) throw new Error("Expected the blocked status fixture to include a source.");
 
 const staleStatus: CalendarStatus = { ...maintainedStatus, lifecycle: "stale" };
 
@@ -220,7 +226,7 @@ describe("Calendar schedule health", () => {
   it("keeps operator-owned recovery as a service constraint", async () => {
     mocks.getCalendarStatus.mockResolvedValue({
       ...blockedStatus,
-      sources: [{ ...blockedStatus.sources[0]!, recovery: "operator" }],
+      sources: [{ ...blockedSource, recovery: "operator" }],
       validNextOperations: ["assess_calendar"],
     });
     renderPage();

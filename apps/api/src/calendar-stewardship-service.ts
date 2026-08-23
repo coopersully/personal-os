@@ -10,14 +10,14 @@ import {
 import * as databaseSchema from "@personal-os/database/schema";
 import {
   type CalendarFinding,
-  calendarFindingSchema,
   type CalendarHealthAssessment,
   type CalendarRecommendation,
   type CalendarReview,
-  calendarReviewSchema,
   type CalendarStatus,
-  calendarStatusSchema,
   type CreateCalendarReviewInput,
+  calendarFindingSchema,
+  calendarReviewSchema,
+  calendarStatusSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, gt, gte, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -160,10 +160,7 @@ async function readAssessmentSnapshot(
               inArray(calendarEvents.calendarId, calendarIds),
               isNull(calendarEvents.deletedAt),
               or(
-                and(
-                  lt(calendarEvents.startsAt, scopeEnd),
-                  gt(calendarEvents.endsAt, scopeStart),
-                ),
+                and(lt(calendarEvents.startsAt, scopeEnd), gt(calendarEvents.endsAt, scopeStart)),
                 recurrencePresent,
               ),
             ),
@@ -185,10 +182,7 @@ async function readAssessmentSnapshot(
     .limit(CALENDAR_ASSESSMENT_BUDGETS.findings + 1);
   const openFindingBudgetExceeded =
     queriedOpenFindings.length > CALENDAR_ASSESSMENT_BUDGETS.findings;
-  const existingOpenFindings = queriedOpenFindings.slice(
-    0,
-    CALENDAR_ASSESSMENT_BUDGETS.findings,
-  );
+  const existingOpenFindings = queriedOpenFindings.slice(0, CALENDAR_ASSESSMENT_BUDGETS.findings);
 
   const [profileRow] = await executor
     .select({
@@ -215,7 +209,9 @@ async function readAssessmentSnapshot(
     )
     .limit(1);
   const recurrenceCalendarIds = new Set(
-    eventRows.filter(({ recurrencePresent }) => recurrencePresent).map(({ calendarId }) => calendarId),
+    eventRows
+      .filter(({ recurrencePresent }) => recurrencePresent)
+      .map(({ calendarId }) => calendarId),
   );
   const afterBufferMinutes = parseBufferMinutes(profileRow?.afterBufferMinutes ?? null);
   const beforeBufferMinutes = parseBufferMinutes(profileRow?.beforeBufferMinutes ?? null);
@@ -262,9 +258,8 @@ async function readAssessmentSnapshot(
         `recovery=${source.syncRecovery ?? "none"}`,
       ].join(";"),
       isWritable: source.isWritable,
-      lastSyncedAt: (
-        source.calendarLastSyncedAt ?? source.accountLastSyncedAt
-      )?.toISOString() ?? null,
+      lastSyncedAt:
+        (source.calendarLastSyncedAt ?? source.accountLastSyncedAt)?.toISOString() ?? null,
       provider: source.provider,
       recurrencePresent: recurrenceCalendarIds.has(source.calendarId),
       syncGeneration: source.syncGeneration,
@@ -541,10 +536,7 @@ function buildStatus(input: {
 
 export function createCalendarStewardshipService({ db, now }: CalendarStewardshipServiceOptions) {
   return {
-    async createReview(
-      userId: string,
-      input: CreateCalendarReviewInput,
-    ): Promise<CalendarReview> {
+    async createReview(userId: string, input: CreateCalendarReviewInput): Promise<CalendarReview> {
       if (input.scope.type !== "all_outstanding") {
         throw new AppError(
           "invalid_request",
@@ -646,8 +638,7 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
           const fingerprintChanged =
             latestReview !== null &&
             latestReview.ledgerFingerprint !== calendarLedgerFingerprint(snapshot);
-          const expired =
-            latestReview !== null && asOf > new Date(latestReview.nextMaintenanceAt);
+          const expired = latestReview !== null && asOf > new Date(latestReview.nextMaintenanceAt);
           const lifecycle: CalendarStatus["lifecycle"] =
             latestReview === null
               ? "never_maintained"

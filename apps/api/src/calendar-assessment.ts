@@ -226,7 +226,10 @@ function pairEvidence(
   return {
     endsAt,
     eventIds: [left.id, right.id],
-    minutes: Math.max(0, Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / MINUTE_MS)),
+    minutes: Math.max(
+      0,
+      Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / MINUTE_MS),
+    ),
     revisions: [left.revision, right.revision],
     startsAt,
     type: "event_pair",
@@ -238,7 +241,9 @@ function pairSourceReferences(
   second: AssessmentEvent,
   sourcesByCalendarId: Map<string, AssessmentSource>,
 ): MaterialSourceReference[] {
-  return sortedPair(first, second).map((event) => eventReference(event, sourcesByCalendarId.get(event.calendarId)));
+  return sortedPair(first, second).map((event) =>
+    eventReference(event, sourcesByCalendarId.get(event.calendarId)),
+  );
 }
 
 function makeFinding(input: {
@@ -272,7 +277,8 @@ function recommendationFor(finding: DraftFinding, snapshot: CalendarAssessmentSn
   const copy: Record<CalendarFindingKind, string> = {
     buffer_shortfall: "Review the transition buffer around the affected schedule window.",
     event_overlap: "Review the conflicting schedule window before relying on it.",
-    recurrence_unassessed: "Expand or otherwise assess the recurring schedule before relying on this review.",
+    recurrence_unassessed:
+      "Expand or otherwise assess the recurring schedule before relying on this review.",
     source_stale: "Refresh the calendar source before relying on this review.",
     source_unavailable: "Restore access to the calendar source before relying on this review.",
     tentative_hold: "Review whether the tentative schedule hold is still needed.",
@@ -309,33 +315,35 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
       : null,
     events: [...snapshot.events]
       .sort(compareById)
-      .map(({
-        availability,
-        calendarId,
-        endsAt,
-        id,
-        isAllDay,
-        provider,
-        recurrence,
-        remoteEventId,
-        revision,
-        startsAt,
-        status,
-        transparency,
-      }) => ({
-        availability,
-        calendarId,
-        endsAt,
-        id,
-        isAllDay,
-        provider,
-        recurrence,
-        remoteEventId,
-        revision,
-        startsAt,
-        status,
-        transparency,
-      })),
+      .map(
+        ({
+          availability,
+          calendarId,
+          endsAt,
+          id,
+          isAllDay,
+          provider,
+          recurrence,
+          remoteEventId,
+          revision,
+          startsAt,
+          status,
+          transparency,
+        }) => ({
+          availability,
+          calendarId,
+          endsAt,
+          id,
+          isAllDay,
+          provider,
+          recurrence,
+          remoteEventId,
+          revision,
+          startsAt,
+          status,
+          transparency,
+        }),
+      ),
     evidenceLimits: snapshot.evidenceLimits,
     playbookVersion: CALENDAR_PLAYBOOK.version,
     rulebookVersion: rulebook,
@@ -376,7 +384,13 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     const state = sourceState(source, snapshot.evidenceCutoff);
     const completeness = recurrenceByCalendarId.has(source.calendarId) ? "partial" : "complete";
     if (state !== "current") {
-      pushFinding(sourceFinding(state === "unavailable" ? "source_unavailable" : "source_stale", source, rulebook));
+      pushFinding(
+        sourceFinding(
+          state === "unavailable" ? "source_unavailable" : "source_stale",
+          source,
+          rulebook,
+        ),
+      );
     }
     if (completeness === "partial") {
       pushFinding(sourceFinding("recurrence_unassessed", source, rulebook));
@@ -411,15 +425,24 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     )
     .sort(
       (left, right) =>
-        new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime() || compareById(left, right),
+        new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime() ||
+        compareById(left, right),
     );
 
   for (let firstIndex = 0; firstIndex < candidates.length; firstIndex += 1) {
-    const first = candidates[firstIndex]!;
+    const first = candidates[firstIndex];
+    if (!first) continue;
     for (let secondIndex = firstIndex + 1; secondIndex < candidates.length; secondIndex += 1) {
-      const second = candidates[secondIndex]!;
-      const overlapStart = Math.max(new Date(first.startsAt).getTime(), new Date(second.startsAt).getTime());
-      const overlapEnd = Math.min(new Date(first.endsAt).getTime(), new Date(second.endsAt).getTime());
+      const second = candidates[secondIndex];
+      if (!second) continue;
+      const overlapStart = Math.max(
+        new Date(first.startsAt).getTime(),
+        new Date(second.startsAt).getTime(),
+      );
+      const overlapEnd = Math.min(
+        new Date(first.endsAt).getTime(),
+        new Date(second.endsAt).getTime(),
+      );
       if (overlapEnd <= overlapStart) continue;
       pushFinding(
         makeFinding({
@@ -472,8 +495,9 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       snapshot.activeProfile.beforeBufferMinutes,
     );
     for (let index = 1; index < candidates.length; index += 1) {
-      const first = candidates[index - 1]!;
-      const second = candidates[index]!;
+      const first = candidates[index - 1];
+      const second = candidates[index];
+      if (!first || !second) continue;
       const gapStart = new Date(first.endsAt).getTime();
       const gapEnd = new Date(second.startsAt).getTime();
       if (gapEnd <= gapStart || gapEnd - gapStart >= requiredBufferMinutes * MINUTE_MS) continue;
@@ -498,13 +522,17 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     }));
   }
   const missingSource = sourceFreshness.length === 0;
-  const completeEvidence = !missingSource && sourceFreshness.every(
-    (source) => source.state === "current" && source.completeness === "complete",
-  );
+  const completeEvidence =
+    !missingSource &&
+    sourceFreshness.every(
+      (source) => source.state === "current" && source.completeness === "complete",
+    );
   const unavailable = sourceFreshness.some((source) => source.state === "unavailable");
-  const degraded = missingSource || sourceFreshness.some(
-    (source) => source.state !== "current" || source.completeness !== "complete",
-  );
+  const degraded =
+    missingSource ||
+    sourceFreshness.some(
+      (source) => source.state !== "current" || source.completeness !== "complete",
+    );
   const sourceEvidenceFingerprints = findings
     .filter(
       (finding) =>
@@ -519,14 +547,20 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     {
       dimension: "source_trust",
       evidenceFindingFingerprints: sourceEvidenceFingerprints,
-      signal: missingSource ? "unknown" : unavailable ? "strained" : degraded ? "attention" : "healthy",
+      signal: missingSource
+        ? "unknown"
+        : unavailable
+          ? "strained"
+          : degraded
+            ? "attention"
+            : "healthy",
       summary: missingSource
         ? "No selected Calendar source is available to assess."
         : unavailable
-        ? "Required calendar evidence is unavailable."
-        : degraded
-          ? "Required calendar evidence is not fully current and complete."
-          : "All selected calendar sources are current and complete.",
+          ? "Required calendar evidence is unavailable."
+          : degraded
+            ? "Required calendar evidence is not fully current and complete."
+            : "All selected calendar sources are current and complete.",
     },
     {
       dimension: "hard_conflicts",

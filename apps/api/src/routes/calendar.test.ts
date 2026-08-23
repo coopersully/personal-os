@@ -85,13 +85,7 @@ const status: CalendarStatus = {
     approvedRule: [],
     automatic: ["inspect", "assess"],
     individualApproval: ["create_event", "move_event", "resize_event", "trash_event"],
-    unavailable: [
-      "rsvp",
-      "invite",
-      "cancel_attended_event",
-      "book_travel",
-      "send_correspondence",
-    ],
+    unavailable: ["rsvp", "invite", "cancel_attended_event", "book_travel", "send_correspondence"],
   },
   backlog: {
     actionable: 0,
@@ -139,9 +133,9 @@ describe("Calendar routes", () => {
       app.request(path, { headers: { "content-type": "application/json" }, ...init });
 
     expect((await request("/v1/calendars/status")).status).toBe(403);
-    expect(
-      (await request("/v1/calendars/reviews", { body: "{}", method: "POST" })).status,
-    ).toBe(403);
+    expect((await request("/v1/calendars/reviews", { body: "{}", method: "POST" })).status).toBe(
+      403,
+    );
     expect(stewardship.getStatus).not.toHaveBeenCalled();
     expect(stewardship.createReview).not.toHaveBeenCalled();
 
@@ -200,7 +194,10 @@ describe("Calendar routes", () => {
     });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({
-      error: { code: "conflict", message: "A Calendar review is already being published. Try again shortly." },
+      error: {
+        code: "conflict",
+        message: "A Calendar review is already being published. Try again shortly.",
+      },
     });
   });
 

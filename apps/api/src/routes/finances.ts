@@ -1,5 +1,6 @@
 import type { Database } from "@personal-os/database";
 import {
+  answerFinanceReviewInputSchema,
   applyFinanceCategorizationsInputSchema,
   approveFinanceBudgetInputSchema,
   createFinanceAccountInputSchema,
@@ -201,6 +202,18 @@ export function registerFinanceRoutes({ app, db, finances, mutationContext }: Fi
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
       ),
     }),
+  );
+  app.get("/v1/finances/inbox", async (context) =>
+    context.json(await finances.getFinanceInbox(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/inbox/:id/answer", async (context) =>
+    context.json(
+      await finances.answerFinanceReview(
+        context.req.param("id"),
+        await parseBody(context, answerFinanceReviewInputSchema),
+        await financeContext(context),
+      ),
+    ),
   );
   app.post("/v1/finances/categorizations/propose", async (context) =>
     context.json({

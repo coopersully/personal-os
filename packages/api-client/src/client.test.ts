@@ -662,6 +662,8 @@ function apiFetch() {
     if (url.pathname === `/v1/finances/merchants/${id}` && method === "PATCH")
       return json({ merchant: { ...financeMerchant, isUserConfirmed: true } });
     if (url.pathname === "/v1/finances/review") return json({ reviews: [] });
+    if (url.pathname === "/v1/finances/inbox") return json(financeEnvelope([]));
+    if (url.pathname === `/v1/finances/inbox/${id}/answer`) return json(financeEnvelope([]));
     if (url.pathname === "/v1/finances/categorizations/propose") return json({ proposals: [] });
     if (url.pathname === "/v1/finances/categorizations/apply")
       return json({
@@ -991,6 +993,14 @@ describe("ilo API client", () => {
       api.mergeFinanceMerchants({ sourceMerchantId: accountId, targetMerchantId: id }),
     ).resolves.toEqual(financeMerchant);
     await expect(api.getFinanceReviewQueue()).resolves.toEqual([]);
+    await expect(api.getFinanceInbox()).resolves.toMatchObject({ data: [] });
+    await expect(
+      api.answerFinanceReview(id, {
+        answer: "Legitimate",
+        idempotencyKey: "review-1",
+        resolution: { rationale: "Confirmed", type: "dismiss" },
+      }),
+    ).resolves.toMatchObject({ data: [] });
     await expect(api.listFinanceTransactions({ review: "needs_review" })).resolves.toMatchObject({
       nextCursor: null,
     });

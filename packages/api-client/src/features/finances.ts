@@ -1,4 +1,5 @@
 import type {
+  AnswerFinanceReviewInput,
   ApplyFinanceCategorizationsInput,
   ApproveFinanceBudgetInput,
   CreateFinanceAccountInput,
@@ -18,6 +19,7 @@ import type {
   FinanceExport,
   FinanceForecast,
   FinanceGoal,
+  FinanceInboxCase,
   FinanceIncomeStream,
   FinanceLedgerHealth,
   FinanceMerchant,
@@ -278,6 +280,18 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/review?limit=${limit}`,
       );
       return response.reviews;
+    },
+    async getFinanceInbox(): Promise<FinanceToolResult<FinanceInboxCase[]>> {
+      return request("/v1/finances/inbox");
+    },
+    async answerFinanceReview(
+      id: string,
+      input: AnswerFinanceReviewInput,
+    ): Promise<FinanceToolResult<FinanceInboxCase[]>> {
+      return request(`/v1/finances/inbox/${id}/answer`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
     },
     async listFinanceTransactions(query: Partial<FinanceTransactionQuery> = {}): Promise<{
       items: FinanceTransaction[];

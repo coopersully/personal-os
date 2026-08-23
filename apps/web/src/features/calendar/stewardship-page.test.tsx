@@ -137,6 +137,10 @@ const neverMaintainedStatus: CalendarStatus = {
 
 const [reviewSource] = review.sourceFreshness;
 if (!reviewSource) throw new Error("Expected the review fixture to include a source.");
+const [reviewFinding] = review.findings;
+if (!reviewFinding) throw new Error("Expected the review fixture to include a finding.");
+const [reviewRecommendation] = review.recommendations;
+if (!reviewRecommendation) throw new Error("Expected the review fixture to include advice.");
 
 const blockedStatus: CalendarStatus = {
   ...neverMaintainedStatus,
@@ -302,5 +306,101 @@ describe("Calendar schedule health", () => {
         selector: '[data-slot="alert-title"]',
       }),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["queued", "Assessment queued"],
+    ["active", "Assessment in progress"],
+    ["failed", "Assessment failed"],
+  ] as const)("renders the %s lifecycle honestly", async (lifecycle, heading) => {
+    mocks.getCalendarStatus.mockResolvedValue({ ...maintainedStatus, lifecycle });
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+  });
+
+  it("renders automatic and unavailable recovery without inventing an action", async () => {
+    mocks.getCalendarStatus.mockResolvedValue({
+      ...blockedStatus,
+      sources: [
+        {
+          ...blockedSource,
+          reason: null,
+          recovery: "automatic",
+          state: "stale",
+        },
+        {
+          ...blockedSource,
+          accountId: "account-2",
+          calendarId: "calendar-2",
+          reason: null,
+          recovery: null,
+        },
+      ],
+      validNextOperations: ["assess_calendar"],
+    });
+    renderPage();
+
+    expect(await screen.findByText("Ilo will retry this source.")).toBeInTheDocument();
+    expect(screen.getByText("Evidence is unavailable and unknown.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Connections" })).not.toBeInTheDocument();
+  });
+
+  it("renders read-only evidence, strained findings, and unlinked advice", async () => {
+    const strainedFinding = { ...reviewFinding, severity: "strained" as const };
+    const sparseRecommendation = {
+      ...reviewRecommendation,
+      assumptions: [],
+      findingIds: [],
+      tradeoffs: [],
+    };
+    mocks.getCalendarStatus.mockResolvedValue({
+      ...maintainedStatus,
+      health: [
+        {
+          dimension: "meeting_load",
+          evidenceFindingIds: [strainedFinding.id],
+          signal: "strained",
+          summary: "Meeting load is strained.",
+        },
+      ],
+      latestReview: {
+        ...review,
+        findings: [strainedFinding],
+        health: [],
+        recommendations: [sparseRecommendation],
+      },
+      sources: [{ ...reviewSource, writable: false }],
+    });
+    renderPage();
+
+    expect(await screen.findByText("Read only")).toBeInTheDocument();
+    expect(screen.getAllByText("Strained")).toHaveLength(2);
+    expect(screen.getByText(/Assumptions: None recorded/)).toHaveTextContent(
+      "Tradeoffs: None recorded.",
+    );
+  });
+
+  it("keeps absent evidence and missing finding details explicit", async () => {
+    mocks.getCalendarStatus.mockResolvedValue({
+      ...maintainedStatus,
+      latestReview: null,
+      sources: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("No source evidence is available")).toBeInTheDocument();
+    expect(screen.getByText("Finding details are unavailable")).toBeInTheDocument();
+    expect(screen.getByText("No review artifact yet")).toBeInTheDocument();
+  });
+
+  it("disables assessment while a maintenance turn is pending", async () => {
+    const browser = userEvent.setup();
+    mocks.getCalendarStatus.mockResolvedValue(maintainedStatus);
+    mocks.createCalendarReview.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+
+    await browser.click(await screen.findByRole("button", { name: "Assess calendar" }));
+    expect(screen.getByRole("button", { name: "Assessing…" })).toBeDisabled();
   });
 });

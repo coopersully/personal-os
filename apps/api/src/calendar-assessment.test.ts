@@ -142,6 +142,31 @@ describe("Calendar assessment", () => {
     ]);
   });
 
+  it("keeps tentative finding and recommendation order stable when caller event order changes", () => {
+    const first = event(
+      "44444444-4444-4444-8444-444444444444",
+      "2026-08-24T13:00:00.000Z",
+      "2026-08-24T14:00:00.000Z",
+      { status: "tentative", transparency: "free" },
+    );
+    const second = event(
+      "55555555-5555-4555-8555-555555555555",
+      "2026-08-24T14:00:00.000Z",
+      "2026-08-24T15:00:00.000Z",
+      { status: "tentative", transparency: "free" },
+    );
+
+    const forward = assessCalendar(snapshot([first, second]));
+    const reversed = assessCalendar(snapshot([second, first]));
+
+    expect(reversed.findings.map(({ fingerprint }) => fingerprint)).toEqual(
+      forward.findings.map(({ fingerprint }) => fingerprint),
+    );
+    expect(reversed.recommendations.map(({ findingFingerprints }) => findingFingerprints)).toEqual(
+      forward.recommendations.map(({ findingFingerprints }) => findingFingerprints),
+    );
+  });
+
   it("fingerprints revisions and policy but not cutoff time or private event fields", () => {
     const first = snapshot([
       event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z"),

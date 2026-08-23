@@ -325,7 +325,9 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
 export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAssessmentDraft {
   const rulebook = rulebookVersion(snapshot.activeProfile);
   const sources = [...snapshot.sources].sort(compareSources);
-  const events = snapshot.events.filter((event) => eventIsInScope(event, snapshot));
+  const events = snapshot.events
+    .filter((event) => eventIsInScope(event, snapshot))
+    .sort(compareById);
   const sourcesByCalendarId = new Map(sources.map((source) => [source.calendarId, source]));
   const recurrenceByCalendarId = new Set(
     events.filter((event) => event.recurrence.length > 0).map((event) => event.calendarId),

@@ -71,6 +71,10 @@ describe("Finance action deterministic helpers", () => {
         reimbursementId: "reimbursement",
       }),
     ).toEqual(["reimbursement:reimbursement"]);
+    expect(semanticTargetKeys("categorization", {})).toEqual([]);
+    expect(semanticTargetKeys("merchant", { id: "merchant", targetMerchantId: "ignored" })).toEqual(
+      ["merchant:merchant"],
+    );
   });
 
   it("reports only material profile changes without exposing private values", () => {
@@ -101,6 +105,13 @@ describe("Finance action deterministic helpers", () => {
     expect(summary).toContain("role updated");
     expect(summary).not.toContain("New employer");
     expect(summary).toContain("net pay $100.00 → $200.00");
+    expect(
+      profileProjection({ payAccountId: "account", reserveTargetMonths: 3 } as never, {
+        effectiveDate: "2026-08-01",
+        payAccountId: null,
+        reserveTargetMonths: null,
+      }),
+    ).toContain("pay account selected account → unset");
   });
 
   it("validates scalar and structured question answer values", () => {
@@ -119,5 +130,10 @@ describe("Finance action deterministic helpers", () => {
     expect(isExpectedAnswerValue(field("string_array", false, ["one"]), ["two"])).toBe(false);
     expect(isExpectedAnswerValue(field("string", true), null)).toBe(true);
     expect(isExpectedAnswerValue(field("string"), null)).toBe(false);
+    expect(isExpectedAnswerValue(field("boolean"), "true")).toBe(false);
+    expect(isExpectedAnswerValue(field("string"), "   ")).toBe(false);
+    expect(isExpectedAnswerValue(field("string_array"), [])).toBe(true);
+    expect(isExpectedAnswerValue(field("string_array"), ["  "])).toBe(false);
+    expect(isExpectedAnswerValue(field("string", false, ["one"]), "two")).toBe(false);
   });
 });

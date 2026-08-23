@@ -41,6 +41,8 @@ describe("Finance service deterministic helpers", () => {
     expect(titleCaseMerchant("ACME LLC USA")).toBe("Acme LLC USA");
     expect(normalizedMerchant("ACME*1234 #10")).toBe("acme");
     expect(formatCurrency(12345)).toBe("$123.45");
+    expect(categorySlug("  Already---clean  ")).toBe("already-clean");
+    expect(categoryGroup("Entertainment")).toBe("Spending");
   });
 
   it("round-trips candidate cursors and rejects malformed positions", () => {
@@ -90,13 +92,20 @@ describe("Finance service deterministic helpers", () => {
 
   it("handles paced calendar ranges and provider categorization signals", () => {
     expect(nextMonth("2026-12")).toBe("2027-01");
+    expect(nextMonth("2026-01")).toBe("2026-02");
     expect(daysInCalendarMonth("2028-02")).toBe(29);
+    expect(daysInCalendarMonth("2026-02")).toBe(28);
     expect(budgetPaceDates("week", "2026-08-19")).toHaveLength(7);
     expect(budgetPaceDates("month", "2026-02-11")).toHaveLength(28);
     expect(budgetPaceDates("year", "2026-08-19")).toHaveLength(365);
     expect(categorization("Trader Joe's")).toEqual({
       category: "Groceries",
       confidence: 9_000,
+      needsReview: false,
+    });
+    expect(categorization("LEE TACHMAN RENT")).toEqual({
+      category: "RENT_AND_UTILITIES",
+      confidence: 10_000,
       needsReview: false,
     });
     expect(categorization("Unknown", "Custom")).toEqual({
@@ -113,6 +122,7 @@ describe("Finance service deterministic helpers", () => {
     expect(isRentMerchant("Coffee")).toBe(false);
     expect(isSoFiVaultTransfer("SOFI transfer to vault")).toBe(true);
     expect(isSoFiVaultTransfer("SOFI purchase")).toBe(false);
+    expect(isSoFiVaultTransfer("FROM VAULT")).toBe(true);
     expect(isProviderTransfer("TRANSFER_IN")).toBe(true);
     expect(isProviderTransfer("TRANSFER_OUT")).toBe(true);
     expect(isProviderTransfer(null)).toBe(false);
@@ -127,6 +137,8 @@ describe("Finance service deterministic helpers", () => {
     expect(providerNeedsReview("HIGH")).toBe(false);
     expect(providerNeedsReview("MEDIUM")).toBe(true);
     expect(providerNeedsReview("LOW")).toBe(true);
+    expect(providerNeedsReview("UNKNOWN")).toBe(true);
+    expect(providerNeedsReview(undefined as never)).toBe(true);
   });
 
   it("round-trips and rejects transaction cursors", () => {
@@ -168,5 +180,7 @@ describe("Finance service deterministic helpers", () => {
     expect(budgetImpact(row("expense", "Dining", true), true)).toBe(2500);
     expect(budgetImpact(row("income", "Dining"))).toBe(-2500);
     expect(budgetImpact(row("income", "INCOME"))).toBe(0);
+    expect(budgetImpact(row("income", "Transfers"))).toBe(0);
+    expect(budgetImpact(row("expense", "Dining"))).toBe(2500);
   });
 });

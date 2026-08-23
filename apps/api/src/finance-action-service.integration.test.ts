@@ -779,6 +779,98 @@ describe.sequential("finance action service", () => {
         reimbursementDraft.privatePayload.input,
       ),
     );
+
+    // Exercise the evidence alternatives agents routinely encounter: a
+    // previously displayed transaction that has changed, an unavailable
+    // category, and an incomplete direct category edit. Each must stop at a
+    // question rather than quietly applying a guess.
+    const categorizationCase = cases.find((item) => item.actionKind === "categorization");
+    const preparedDecision = (
+      categorizationCase?.input as { decisions?: Array<Record<string, unknown>> } | undefined
+    )?.decisions?.[0] as {
+      categoryId: string;
+      expectedTransactionUpdatedAt: string;
+      transactionId: string;
+    };
+    if (!preparedDecision) throw new Error("Candidate categorization fixture was not created.");
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "categorization",
+        {
+          decisions: [
+            {
+              ...preparedDecision,
+              confidence: 1,
+              expectedTransactionUpdatedAt: "2020-01-01T00:00:00.000Z",
+              learnMerchant: "suggest",
+              rationale: "The displayed evidence is stale.",
+            },
+          ],
+        },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "question", disposition: "question" });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "categorization",
+        {
+          decisions: [
+            {
+              ...preparedDecision,
+              categoryId: crypto.randomUUID(),
+              confidence: 1,
+              learnMerchant: "suggest",
+              rationale: "The category was removed.",
+            },
+          ],
+        },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "question", disposition: "question" });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "transaction",
+        { category: "Candidate category", id: transaction.id },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "question", disposition: "question" });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "transaction",
+        {
+          category: "Removed category",
+          confidence: 1,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          id: transaction.id,
+          rationale: "Use the shown transaction evidence.",
+        },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "question", disposition: "question" });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "alert",
+        {
+          action: "dismiss",
+          id: String(cases.find((item) => item.actionKind === "alert")?.input.id),
+        },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "alert", disposition: "prepared" });
+
+    await database.db.insert(financeBudgets).values({
+      category: "Candidate simple",
+      limit: 1_200,
+      month: "2026-08",
+      userId: ownerId,
+    });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "budget_plan",
+        { category: "Candidate simple", limit: 12, month: "2026-08" },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "budget_plan", disposition: "prepared" });
   });
 
   it("queues one bounded maintenance review without semantic writes and retains all private fingerprints", async () => {

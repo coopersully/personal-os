@@ -534,7 +534,7 @@ function buildStatus(input: {
   const readiness =
     missingSource || missingProfile
       ? "setup_required"
-      : degradedSources.length > 0
+      : degradedSources.length > 0 || input.assessment.unsupportedOpenFindingCount > 0
         ? "degraded"
         : "ready";
   const setupBlockers = [

@@ -106,6 +106,7 @@ describe("Calendar assessment", () => {
     const result = assessCalendar(stale);
 
     expect(result.state).toBe("blocked");
+    expect(result.evidenceLimited).toBe(true);
     expect(result.findings.map(({ kind }) => kind)).toEqual(
       expect.arrayContaining(["source_stale", "recurrence_unassessed"]),
     );
@@ -129,7 +130,10 @@ describe("Calendar assessment", () => {
       syncStatus: "idle",
     };
 
-    expect(assessCalendar(unavailable).sourceFreshness[0]).toMatchObject({ state: "unavailable" });
+    expect(assessCalendar(unavailable)).toMatchObject({
+      evidenceLimited: true,
+      sourceFreshness: [expect.objectContaining({ state: "unavailable" })],
+    });
     expect(assessCalendar(local).sourceFreshness[0]).toMatchObject({ state: "current" });
   });
 
@@ -297,8 +301,12 @@ describe("Calendar assessment", () => {
 
     expect(assessCalendar(missingProfile)).toMatchObject({
       evidenceLimited: true,
+      projectedOpenFindingCount: null,
       state: "blocked",
     });
+    expect(
+      assessCalendar(missingProfile).health.find(({ dimension }) => dimension === "source_trust"),
+    ).toMatchObject({ signal: "healthy" });
   });
 
   it("uses the local calendar id for local source material references", () => {

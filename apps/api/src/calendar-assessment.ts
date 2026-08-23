@@ -129,12 +129,8 @@ function sha256(value: unknown): string {
 function projectedOpenFindingIdentities(
   snapshot: CalendarAssessmentSnapshot,
   assessedFindings: ReadonlyArray<Pick<DraftFinding, "fingerprint" | "kind">>,
+  retainExistingSupported: boolean,
 ): Array<{ fingerprint: string; id: string; kind: string }> {
-  const retainExistingSupported =
-    snapshot.sources.length === 0 ||
-    snapshot.activeProfile === null ||
-    snapshot.evidenceLimits.eventBudgetExceeded ||
-    snapshot.evidenceLimits.openFindingBudgetExceeded;
   const projected = new Map<string, { fingerprint: string; id: string; kind: string }>();
   for (const finding of snapshot.existingOpenFindings) {
     if (retainExistingSupported || !SUPPORTED_FINDING_KINDS.has(finding.kind)) {
@@ -346,7 +342,11 @@ export function calendarLedgerFingerprint(
   assessment = assessCalendar(snapshot),
 ): string {
   const rulebook = rulebookVersion(snapshot.activeProfile);
-  const projectedOpenFindings = projectedOpenFindingIdentities(snapshot, assessment.findings);
+  const projectedOpenFindings = projectedOpenFindingIdentities(
+    snapshot,
+    assessment.findings,
+    assessment.evidenceLimited,
+  );
   return sha256({
     activeProfile: snapshot.activeProfile
       ? {
@@ -598,13 +598,11 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
   const unavailable = sourceFreshness.some((source) => source.state === "unavailable");
   const missingProfile = snapshot.activeProfile === null;
   const unsupportedOpenFindings = snapshot.openFindingLedger.unsupportedCount > 0;
-  const degraded =
-    missingSource ||
-    missingProfile ||
-    unsupportedOpenFindings ||
-    sourceFreshness.some(
-      (source) => source.state !== "current" || source.completeness !== "complete",
-    );
+  const unsettledSourceEvidence = sourceFreshness.some(
+    (source) => source.state !== "current" || source.completeness !== "complete",
+  );
+  const sourceDegraded = missingSource || unsettledSourceEvidence;
+  const settlementBlocked = sourceDegraded || missingProfile || unsupportedOpenFindings;
   const sourceEvidenceFingerprints = findings
     .filter(
       (finding) =>
@@ -623,14 +621,14 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
         ? "unknown"
         : unavailable
           ? "strained"
-          : degraded
+          : sourceDegraded
             ? "attention"
             : "healthy",
       summary: missingSource
         ? "No selected Calendar source is available to assess."
         : unavailable
           ? "Required calendar evidence is unavailable."
-          : degraded
+          : sourceDegraded
             ? "Required calendar evidence is not fully current and complete."
             : "All selected calendar sources are current and complete.",
     },
@@ -666,18 +664,28 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     ...finding,
     evidenceCutoff: snapshot.evidenceCutoff.toISOString(),
   }));
+  const evidenceLimited =
+    inputEvidenceLimited ||
+    findingBudgetExceeded ||
+    missingSource ||
+    missingProfile ||
+    unsettledSourceEvidence;
   return {
-    evidenceLimited:
-      inputEvidenceLimited || findingBudgetExceeded || missingSource || missingProfile,
+    evidenceLimited,
     findings: findingsWithCutoff,
     health,
-    projectedOpenFindingCount: snapshot.evidenceLimits.openFindingBudgetExceeded
-      ? null
-      : projectedOpenFindingIdentities(snapshot, findings).length,
+    projectedOpenFindingCount:
+      evidenceLimited || unsupportedOpenFindings
+        ? null
+        : projectedOpenFindingIdentities(snapshot, findings, evidenceLimited).length,
     recommendations: findings.map((finding) => recommendationFor(finding, snapshot)),
     rulebookVersion: rulebook,
     sourceFreshness,
-    state: degraded ? "blocked" : findings.length > 0 ? "maintained_with_questions" : "maintained",
+    state: settlementBlocked
+      ? "blocked"
+      : findings.length > 0
+        ? "maintained_with_questions"
+        : "maintained",
     unsupportedOpenFindingCount: snapshot.openFindingLedger.unsupportedCount,
   };
 }

@@ -392,6 +392,44 @@ describe.sequential("Calendar stewardship service", () => {
     });
   });
 
+  it("preserves prior findings while required source evidence is unsettled", async () => {
+    const first = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    const overlap = first.findings.find(({ kind }) => kind === "event_overlap");
+    if (!overlap) throw new Error("Overlap finding was not created.");
+
+    await database.db
+      .update(calendarEvents)
+      .set({
+        endsAt: new Date("2026-08-24T17:00:00.000Z"),
+        startsAt: new Date("2026-08-24T16:00:00.000Z"),
+        updatedAt: now,
+      })
+      .where(eq(calendarEvents.id, secondEventId));
+    const staleAt = new Date("2026-08-23T11:00:00.000Z");
+    await database.db
+      .update(calendarAccounts)
+      .set({ lastSyncedAt: staleAt })
+      .where(eq(calendarAccounts.id, accountId));
+    await database.db
+      .update(calendars)
+      .set({ lastSyncedAt: staleAt })
+      .where(eq(calendars.id, calendarId));
+
+    const blocked = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+
+    expect(blocked.state).toBe("blocked");
+    expect(blocked.findings).toContainEqual(expect.objectContaining({ id: overlap.id }));
+    await expect(service.getStatus(userId)).resolves.toMatchObject({
+      backlog: { actionable: null, openFindings: null },
+    });
+    const [preserved] = await database.db
+      .select()
+      .from(calendarFindings)
+      .where(eq(calendarFindings.id, overlap.id));
+    expect(preserved?.status).toBe("open");
+    expect(preserved?.resolvedAt).toBeNull();
+  });
+
   it("returns a bounded conflict immediately when the owner review lock is busy", async () => {
     await database.db.transaction(async (transaction) => {
       await transaction.execute(
@@ -519,7 +557,7 @@ describe.sequential("Calendar stewardship service", () => {
         awaitingInput: null,
         blocked: 1,
         failed: null,
-        openFindings: review.findings.length,
+        openFindings: null,
       },
       lifecycle: "blocked",
       readiness: "degraded",
@@ -750,8 +788,12 @@ describe.sequential("Calendar stewardship service", () => {
     expect(preserved?.resolvedAt).toBeNull();
     expect(review.state).toBe("blocked");
     await expect(service.getStatus(userId)).resolves.toMatchObject({
-      backlog: { blocked: 1, openFindings: 2 },
+      backlog: { blocked: 1, openFindings: null },
       lifecycle: "blocked",
+      readiness: "degraded",
+      health: expect.arrayContaining([
+        expect.objectContaining({ dimension: "source_trust", signal: "healthy" }),
+      ]),
     });
   });
 
@@ -808,7 +850,7 @@ describe.sequential("Calendar stewardship service", () => {
       .where(eq(calendarFindings.userId, userId));
     expect(persistedFindings.some(({ status }) => status === "open")).toBe(true);
     await expect(service.getStatus(userId)).resolves.toMatchObject({
-      backlog: { actionable: null, blocked: 2, openFindings: review.findings.length },
+      backlog: { actionable: null, blocked: 2, openFindings: null },
       health: expect.arrayContaining([
         expect.objectContaining({
           dimension: "source_trust",

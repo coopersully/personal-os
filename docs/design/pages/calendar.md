@@ -42,8 +42,11 @@ event without losing the shape of the day.
   standard event fields without launching a second surface.
 - The pill and its date, search, create, and event-detail states share one
   persistent Motion layout surface. Bounds morph with a restrained spring while
-  outgoing and incoming content crossfade with a short lift. Exiting controls
-  become inert, and the global reduced-motion preference remains authoritative.
+  outgoing and incoming content only crossfade; they never run a competing
+  positional transform. Exiting controls become inert, and the global
+  reduced-motion preference remains authoritative. On collapse, expanded
+  content fades deliberately while the pill waits until the surface is near its
+  resting size, preventing a full-width pill-navigation flash.
 - Selecting a spatial Calendar event replaces that pill with an event-details
   card in the same floating host used by creation. The card retains the full
   event inspector—including write capability, linked busy blocks, provider

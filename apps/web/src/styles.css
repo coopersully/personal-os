@@ -2266,18 +2266,13 @@ p {
   transform: translateX(-50%);
   transition:
     bottom var(--motion-duration-spatial) var(--motion-ease-spatial),
-    transform var(--motion-duration-spatial) var(--motion-ease-spatial),
-    width var(--motion-duration-spatial) var(--motion-ease-spatial);
-  width: min(34rem, calc(100vw - 2rem));
+    transform var(--motion-duration-spatial) var(--motion-ease-spatial);
+  width: min(38rem, calc(100vw - 2rem));
   z-index: 16;
 }
 .calendar-floating-nav[data-mode="search"] {
   bottom: 50%;
   transform: translate(-50%, 50%);
-}
-.calendar-floating-nav[data-mode="create"],
-.calendar-floating-nav[data-mode="details"] {
-  width: min(38rem, calc(100vw - 2rem));
 }
 .calendar-floating-nav__pill,
 .calendar-floating-nav__card,

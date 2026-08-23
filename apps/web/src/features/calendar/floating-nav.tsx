@@ -12,7 +12,7 @@ import {
   parseLocalDate,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AnimatePresence, useIsPresent } from "motion/react";
+import { AnimatePresence, useIsPresent, usePresenceData } from "motion/react";
 import * as m from "motion/react-m";
 import {
   type CSSProperties,
@@ -129,14 +129,20 @@ export function CalendarFloatingNav({
   return (
     <div className="calendar-floating-nav" data-mode={surfaceState}>
       <m.div
+        animate={{ borderRadius: surfaceState === "closed" ? 999 : 12 }}
         className="calendar-floating-nav__surface"
         data-slot="calendar-floating-surface"
         data-state={surfaceState}
+        initial={false}
         layout
         layoutDependency={surfaceState}
-        transition={{ layout: { bounce: 0.16, duration: 0.42, type: "spring" } }}
+        style={{ overflow: "hidden", position: "relative" }}
+        transition={{
+          borderRadius: { duration: 0.18, ease: [0.22, 1, 0.36, 1] },
+          layout: { bounce: 0.12, duration: 0.38, type: "spring" },
+        }}
       >
-        <AnimatePresence initial={false} mode="popLayout">
+        <AnimatePresence custom={surfaceState} initial={false} mode="popLayout">
           <FloatingNavTransitionContent key={surfaceState}>{content}</FloatingNavTransitionContent>
         </AnimatePresence>
       </m.div>
@@ -147,17 +153,30 @@ export function CalendarFloatingNav({
 const FloatingNavTransitionContent = forwardRef<HTMLDivElement, { children: ReactNode }>(
   function FloatingNavTransitionContent({ children }, ref) {
     const isPresent = useIsPresent();
+    const nextState = usePresenceData() as FloatingSurfaceState | undefined;
+    const isCollapsing = nextState === "closed";
     return (
       <m.div
-        animate={{ opacity: 1, scale: 1, y: 0 }}
+        animate={{
+          opacity: 1,
+          transition: {
+            delay: isCollapsing && isPresent ? 0.16 : 0,
+            duration: 0.14,
+            ease: [0.22, 1, 0.36, 1],
+          },
+        }}
         aria-hidden={isPresent ? undefined : true}
         className="calendar-floating-nav__transition-content"
-        exit={{ opacity: 0, scale: 0.985, y: -4 }}
-        initial={{ opacity: 0, scale: 0.975, y: 6 }}
+        exit={{
+          opacity: 0,
+          transition: {
+            duration: isCollapsing ? 0.24 : 0.12,
+            ease: [0.4, 0, 1, 1],
+          },
+        }}
+        initial={{ opacity: 0 }}
         inert={isPresent ? undefined : true}
-        layout="position"
         ref={ref}
-        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
       >
         {children}
       </m.div>

@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { MotionProvider } from "@/components/motion-provider.js";
@@ -69,9 +69,14 @@ it("morphs one persistent surface through every pill action", async () => {
   const surface = container.querySelector('[data-slot="calendar-floating-surface"]');
 
   expect(surface).toHaveAttribute("data-state", "closed");
+  expect(surface).toHaveStyle({ position: "relative" });
   await browser.click(screen.getByRole("button", { name: "Choose date" }));
   expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
   expect(surface).toHaveAttribute("data-state", "date");
+  const activeContent = surface?.querySelector(
+    '.calendar-floating-nav__transition-content:not([aria-hidden="true"])',
+  );
+  expect((activeContent as HTMLElement).style.transform).toBe("");
   await browser.click(screen.getByRole("button", { name: "Close" }));
   await browser.click(await screen.findByRole("button", { name: "Create event" }));
   expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
@@ -82,6 +87,21 @@ it("morphs one persistent surface through every pill action", async () => {
   await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
   expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
   expect(surface).toHaveAttribute("data-state", "search");
+});
+
+it("holds the pill content back while an expanded surface collapses", async () => {
+  const { container } = renderCalendar();
+  fireEvent.click(screen.getByRole("button", { name: "Create event" }));
+  await screen.findByLabelText("Create event");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+
+  const composer = container.querySelector(".calendar-floating-nav__composer");
+  fireEvent.click(within(composer as HTMLElement).getByRole("button", { name: "Close" }));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+
+  const pill = screen.getByRole("navigation", { name: "Calendar actions" });
+  const incoming = pill.closest(".calendar-floating-nav__transition-content") as HTMLElement;
+  expect(Number(incoming.style.opacity)).toBeLessThan(0.2);
 });
 
 it("lets the schedule controls size to content around a flexible duration line", () => {

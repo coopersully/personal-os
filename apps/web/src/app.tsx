@@ -63,6 +63,7 @@ import {
   Routes,
   UNSAFE_NavigationContext,
   useLocation,
+  useNavigate,
   useSearchParams,
 } from "react-router-dom";
 import { toast } from "sonner";
@@ -109,6 +110,8 @@ import {
   CopyPlusIcon,
   EditIcon,
   ExternalLinkIcon,
+  EyeIcon,
+  EyeOffIcon,
   FileTextIcon,
   GridIcon,
   HouseIcon,
@@ -300,7 +303,6 @@ import { CalendarStewardshipPage } from "./features/calendar/stewardship-page.js
 import {
   ConnectionHealthBadge,
   ConnectionHealthDescription,
-  ConnectionRecoveryAlert,
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./features/connections/health.js";
@@ -2488,10 +2490,12 @@ function CalendarPage({
   user: User;
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<CalendarDropPreview | null>(null);
+  const [inspectedEvent, setInspectedEvent] = useState<CalendarEvent | null>(null);
   const initializedFollow = useRef(false);
   const requestedView = searchParams.get("view");
   const defaultView: CalendarView =
@@ -2535,6 +2539,11 @@ function CalendarPage({
     queryKey: ["connectors"],
     refetchInterval: visibleConnectorRefreshInterval,
   });
+  const reconnectingAccounts = (connectorAccounts.data ?? []).filter(
+    (account) => account.calendarEnabled && connectionHealth(account).state === "reconnect",
+  );
+  const reconnectingAccountKey = reconnectingAccounts.map((account) => account.id).join("|");
+  const reconnectingAccountLabels = reconnectingAccounts.map((account) => account.label).join(", ");
   const calendarsById = useMemo(
     () => new Map((calendars.data ?? []).map((calendar) => [calendar.id, calendar])),
     [calendars.data],
@@ -2544,11 +2553,13 @@ function CalendarPage({
       const times = movedEventTimes(input.event, input.day, input.minute, user.planningTimezone);
       return api.updateEvent(input.event.id, times);
     },
-    onError: (_error, _input, context) => {
-      if (!context) return;
-      for (const [key, data] of context.snapshots) {
-        queryClient.setQueryData(key, data);
+    onError: (error, _input, context) => {
+      if (context) {
+        for (const [key, data] of context.snapshots) {
+          queryClient.setQueryData(key, data);
+        }
       }
+      toast.error("Event couldn’t be moved", { description: errorMessage(error) });
     },
     onMutate: async (input: CalendarEventMove) => {
       await queryClient.cancelQueries({ queryKey: ["events"] });
@@ -2589,6 +2600,22 @@ function CalendarPage({
   }, []);
 
   useEffect(() => {
+    const toastId = "calendar-connection-recovery";
+    if (!reconnectingAccountKey) {
+      toast.dismiss(toastId);
+      return;
+    }
+    toast.warning(`Reconnect ${reconnectingAccounts.length === 1 ? "an account" : "accounts"}`, {
+      action: {
+        label: "Review connections",
+        onClick: () => navigate("/settings?section=connections"),
+      },
+      description: `${reconnectingAccountLabels} needs authorization before new information can sync.`,
+      id: toastId,
+    });
+  }, [navigate, reconnectingAccountKey, reconnectingAccountLabels, reconnectingAccounts.length]);
+
+  useEffect(() => {
     if (initializedFollow.current) return;
     initializedFollow.current = true;
     if (!sameLocalDate(anchor, today)) return;
@@ -2604,6 +2631,13 @@ function CalendarPage({
   };
   const jumpToDate = (day: LocalDate) => {
     updateCalendarState({ date: localDateToIso(day), follow: "0" });
+  };
+  const setCalendarEditor = (nextEditor: Editor) => {
+    if (nextEditor?.kind === "event" && nextEditor.event && nextEditor.mode !== "edit") {
+      setInspectedEvent(nextEditor.event);
+      return;
+    }
+    setEditor(nextEditor);
   };
   const dropEvent = (event: CalendarEvent, day: LocalDate, minute: number) => {
     if (calendarsById.get(event.calendarId)?.isWritable) {
@@ -2624,10 +2658,6 @@ function CalendarPage({
 
   return (
     <div className="calendar-page">
-      {moveEvent.isError ? <InlineError error={moveEvent.error} /> : null}
-      <ConnectionRecoveryAlert
-        accounts={(connectorAccounts.data ?? []).filter((account) => account.calendarEnabled)}
-      />
       {events.isPending ? (
         <PageLoading workspace="calendar" />
       ) : events.isError ? (
@@ -2642,7 +2672,7 @@ function CalendarPage({
           dragPreview={dragPreview}
           draggedEventId={draggedEventId}
           moveEvent={dropEvent}
-          setEditor={setEditor}
+          setEditor={setCalendarEditor}
           setDraggedEventId={setDraggedEventId}
           setDragPreview={setDragPreview}
           followToday={followToday}
@@ -2662,7 +2692,7 @@ function CalendarPage({
           dragPreview={dragPreview}
           draggedEventId={draggedEventId}
           moveEvent={dropEvent}
-          setEditor={setEditor}
+          setEditor={setCalendarEditor}
           setDraggedEventId={setDraggedEventId}
           setDragPreview={setDragPreview}
           selectedDate={anchor}
@@ -2683,7 +2713,7 @@ function CalendarPage({
           clearDrag={clearDrag}
           draggedEventId={draggedEventId}
           moveEvent={dropEvent}
-          setEditor={setEditor}
+          setEditor={setCalendarEditor}
           setDraggedEventId={setDraggedEventId}
           showDay={showDay}
           key={localDateKey(anchor)}
@@ -2695,6 +2725,22 @@ function CalendarPage({
       <CalendarFloatingNav
         anchor={anchor}
         calendars={calendars.data ?? []}
+        eventDetails={
+          inspectedEvent ? (
+            <EventInspector
+              calendars={calendars.data ?? []}
+              close={() => setInspectedEvent(null)}
+              edit={() => {
+                setInspectedEvent(null);
+                setEditor({ event: inspectedEvent, kind: "event", mode: "edit" });
+              }}
+              event={inspectedEvent}
+              key={inspectedEvent.id}
+              presentation="floating"
+              user={user}
+            />
+          ) : undefined
+        }
         onNavigate={jumpToDate}
         timeZone={user.planningTimezone}
         user={user}
@@ -3841,12 +3887,14 @@ function calendarEventColorStyle(color: string | null | undefined): CSSPropertie
   return { "--calendar-color": color ?? "#777ce3" } as CSSProperties;
 }
 
-type EventBlockColor = { color: string; id: string };
+type EventBlockColor = { color: string; id: string; mode: "busy" | "details" };
 
 function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): EventBlockColor[] {
   return event.blocks.flatMap((block) => {
-    const color = calendarsById.get(block.calendarId)?.color;
-    return color ? [{ color, id: block.eventId }] : [];
+    const calendar = calendarsById.get(block.calendarId);
+    return calendar
+      ? [{ color: calendar.color ?? "#777ce3", id: block.eventId, mode: block.mode }]
+      : [];
   });
 }
 
@@ -3948,8 +3996,12 @@ function TimelineEvent({
       >
         {blockColors.length > 0 ? (
           <span aria-hidden="true" className="calendar-timeline-event__block-rails">
-            {blockColors.map(({ color, id }) => (
-              <i key={id} style={{ background: color }} />
+            {blockColors.map(({ color, id, mode }) => (
+              <i
+                className={mode === "details" ? "is-details-included" : "is-shown-as-busy"}
+                key={id}
+                style={{ "--block-color": color } as CSSProperties}
+              />
             ))}
           </span>
         ) : null}
@@ -7328,19 +7380,37 @@ function EventInspector({
   close,
   edit,
   event,
+  presentation = "sheet",
   user,
 }: {
   calendars: Calendar[];
   close: () => void;
   edit: () => void;
   event: CalendarEvent;
+  presentation?: "floating" | "sheet";
   user: User;
 }) {
   const queryClient = useQueryClient();
-  const sheetRef = useRef<HTMLElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blocks, setBlocks] = useState(event.blocks);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
   const calendar = calendars.find((record) => record.id === event.calendarId);
+  const blockedCalendars = blocks.flatMap((block) => {
+    const blockedCalendar = calendars.find((record) => record.id === block.calendarId);
+    return blockedCalendar ? [{ block, calendar: blockedCalendar }] : [];
+  });
+  const calendarsWithDetails = blockedCalendars
+    .filter(({ block }) => block.mode === "details")
+    .map(({ calendar: blockedCalendar }) => blockedCalendar);
+  const calendarsWithBusyOnly = blockedCalendars
+    .filter(({ block }) => block.mode === "busy")
+    .map(({ calendar: blockedCalendar }) => blockedCalendar);
+  const eventStartsAt = new Date(event.startsAt).getTime();
+  const eventEndsAt = new Date(event.endsAt).getTime();
+  const eventIsInProgress =
+    currentTime.getTime() >= eventStartsAt && currentTime.getTime() < eventEndsAt;
+  const remainingMinutes = Math.max(1, Math.ceil((eventEndsAt - currentTime.getTime()) / 60_000));
   const blockDestinations = calendars.filter(
     (record) => record.id !== event.calendarId && record.isWritable,
   );
@@ -7388,7 +7458,223 @@ function EventInspector({
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [close]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useDialogFocus(sheetRef);
+  const content = (
+    <>
+      <header className="event-sheet__header">
+        <div className="event-sheet__calendar">
+          <i aria-hidden="true" style={{ background: calendar?.color ?? "#777ce3" }} />
+          <span>{calendar?.name ?? "Calendar"}</span>
+          <Badge>{event.provider}</Badge>
+        </div>
+        <Button aria-label="Close event details" onClick={close} tone="ghost">
+          <XIcon aria-hidden="true" className="size-[19px]" />
+        </Button>
+      </header>
+      <div className="event-sheet__body">
+        <div className="event-sheet__title">
+          <h2 id="event-sheet-title">{event.title}</h2>
+          {presentation === "floating" ? (
+            <div className="event-details-card__schedule">
+              <span>
+                {event.allDay
+                  ? formatEventRange(event, user.planningTimezone)
+                  : formatTimelineTimeRange(event, user.planningTimezone)}
+              </span>
+              {eventIsInProgress ? (
+                <ShadcnBadge aria-live="polite" role="status" variant="secondary">
+                  <PulseIcon aria-hidden="true" data-icon="inline-start" />
+                  In progress · {formatMinutes(remainingMinutes)} left
+                </ShadcnBadge>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <section className="event-details-card__sharing" aria-labelledby="event-sharing-title">
+          <h3 id="event-sharing-title">Shared With</h3>
+          <dl>
+            <div>
+              <dt>
+                <EyeIcon aria-hidden="true" className="size-[15px]" /> Details Included
+              </dt>
+              <dd>
+                <EventVisibilityList
+                  blocks={blocks}
+                  calendars={calendarsWithDetails}
+                  destinations={blockDestinations}
+                  disabled={changeBlock.isPending}
+                  label="Calendars with details included"
+                  mode="details"
+                  onAdd={(calendarId, block) =>
+                    changeBlock.mutate(
+                      block
+                        ? {
+                            blockId: block.eventId,
+                            calendarId,
+                            mode: "details",
+                            operation: "update",
+                          }
+                        : { calendarId, mode: "details", operation: "create" },
+                    )
+                  }
+                  onRemove={(block) =>
+                    changeBlock.mutate({
+                      blockId: block.eventId,
+                      calendarId: block.calendarId,
+                      mode: block.mode,
+                      operation: "delete",
+                    })
+                  }
+                />
+              </dd>
+            </div>
+            <div>
+              <dt>
+                <EyeOffIcon aria-hidden="true" className="size-[15px]" /> Shown as Busy
+              </dt>
+              <dd>
+                <EventVisibilityList
+                  blocks={blocks}
+                  calendars={calendarsWithBusyOnly}
+                  destinations={blockDestinations}
+                  disabled={changeBlock.isPending}
+                  label="Calendars shown as busy"
+                  mode="busy"
+                  onAdd={(calendarId, block) =>
+                    changeBlock.mutate(
+                      block
+                        ? {
+                            blockId: block.eventId,
+                            calendarId,
+                            mode: "busy",
+                            operation: "update",
+                          }
+                        : { calendarId, mode: "busy", operation: "create" },
+                    )
+                  }
+                  onRemove={(block) =>
+                    changeBlock.mutate({
+                      blockId: block.eventId,
+                      calendarId: block.calendarId,
+                      mode: block.mode,
+                      operation: "delete",
+                    })
+                  }
+                />
+              </dd>
+            </div>
+          </dl>
+        </section>
+        <dl className="event-sheet__facts">
+          {presentation === "sheet" ? (
+            <div>
+              <dt>
+                <ClockIcon aria-hidden="true" className="size-[17px]" /> Time
+              </dt>
+              <dd>{formatEventRange(event, user.planningTimezone)}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>
+              <CalendarIcon aria-hidden="true" className="size-[17px]" /> Time Zone
+            </dt>
+            <dd>
+              {user.planningTimezone} ·{" "}
+              {formatTimeZoneName(new Date(event.startsAt), user.planningTimezone)}
+            </dd>
+          </div>
+          {event.location ? (
+            <div>
+              <dt>
+                <MapPinIcon aria-hidden="true" className="size-[17px]" /> Location
+              </dt>
+              <dd>
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {event.location} <ExternalLinkIcon aria-hidden="true" className="size-3" />
+                </a>
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+        {changeBlock.isError ? (
+          <p className="form-error" role="alert">
+            {errorMessage(changeBlock.error)}
+          </p>
+        ) : null}
+        <section className="event-sheet__notes" aria-labelledby="event-notes-title">
+          <h3 id="event-notes-title">
+            <FileTextIcon aria-hidden="true" className="size-4" /> Notes
+          </h3>
+          {event.notes ? (
+            <Suspense fallback={<p className="event-sheet__empty">Formatting notes…</p>}>
+              <RichEventNotes source={event.notes} />
+            </Suspense>
+          ) : (
+            <p className="event-sheet__empty">No notes attached to this event.</p>
+          )}
+        </section>
+        <div className="event-sheet__sync-note">
+          <CloudIcon aria-hidden="true" className="size-4" />
+          <span>
+            {event.provider === "google"
+              ? "Edits write through to Google Calendar before they appear here."
+              : "This event is stored in ilo and available to authorized agents."}
+          </span>
+        </div>
+        {remove.isError ? (
+          <p className="form-error" role="alert">
+            {errorMessage(remove.error)}
+          </p>
+        ) : null}
+      </div>
+      <footer className="event-sheet__actions">
+        {confirmDelete ? (
+          <div className="event-sheet__confirm">
+            <span>Delete this event everywhere?</span>
+            <Button onClick={() => setConfirmDelete(false)}>Keep Event</Button>
+            <Button disabled={remove.isPending} onClick={() => remove.mutate()} tone="danger">
+              {remove.isPending ? <Spinner label="Deleting" /> : "Delete Event"}
+            </Button>
+          </div>
+        ) : (
+          <>
+            <Button
+              disabled={!calendar?.isWritable}
+              onClick={() => setConfirmDelete(true)}
+              tone="danger"
+            >
+              <TrashIcon aria-hidden="true" className="size-[15px]" /> Delete
+            </Button>
+            <Button disabled={!calendar?.isWritable} onClick={edit} tone="accent">
+              <EditIcon aria-hidden="true" className="size-[15px]" /> Edit Event
+            </Button>
+          </>
+        )}
+      </footer>
+    </>
+  );
+  if (presentation === "floating") {
+    return (
+      <ShadcnCard
+        aria-labelledby="event-sheet-title"
+        className="calendar-floating-nav__composer is-calendar-colored event-details-card"
+        ref={sheetRef}
+        role="dialog"
+        style={{ "--calendar-color": calendar?.color ?? "#777ce3" } as CSSProperties}
+        tabIndex={-1}
+      >
+        {content}
+      </ShadcnCard>
+    );
+  }
   return (
     <div className="event-sheet-backdrop">
       <button
@@ -7397,7 +7683,7 @@ function EventInspector({
         onClick={close}
         type="button"
       />
-      <aside
+      <div
         aria-labelledby="event-sheet-title"
         aria-modal="true"
         className="event-sheet"
@@ -7405,182 +7691,106 @@ function EventInspector({
         role="dialog"
         tabIndex={-1}
       >
-        <header className="event-sheet__header">
-          <div className="event-sheet__calendar">
-            <i aria-hidden="true" style={{ background: calendar?.color ?? "#777ce3" }} />
-            <span>{calendar?.name ?? "Calendar"}</span>
-            <Badge>{event.provider}</Badge>
-          </div>
-          <Button aria-label="Close event details" onClick={close} tone="ghost">
-            <XIcon aria-hidden="true" className="size-[19px]" />
-          </Button>
-        </header>
-        <div className="event-sheet__body">
-          <div className="event-sheet__title">
-            <p className="eyebrow">{event.allDay ? "All-day event" : "Scheduled event"}</p>
-            <h2 id="event-sheet-title">{event.title}</h2>
-          </div>
-          <dl className="event-sheet__facts">
-            <div>
-              <dt>
-                <ClockIcon aria-hidden="true" className="size-[17px]" /> Time
-              </dt>
-              <dd>{formatEventRange(event, user.planningTimezone)}</dd>
-            </div>
-            <div>
-              <dt>
-                <CalendarIcon aria-hidden="true" className="size-[17px]" /> Time Zone
-              </dt>
-              <dd>
-                {user.planningTimezone} ·{" "}
-                {formatTimeZoneName(new Date(event.startsAt), user.planningTimezone)}
-              </dd>
-            </div>
-            {event.location ? (
-              <div>
-                <dt>
-                  <MapPinIcon aria-hidden="true" className="size-[17px]" /> Location
-                </dt>
-                <dd>
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {event.location} <ExternalLinkIcon aria-hidden="true" className="size-3" />
-                  </a>
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-          {blockDestinations.length > 0 ? (
-            <section className="event-sheet__blocking" aria-labelledby="event-blocking-title">
-              <header>
-                <div>
-                  <h3 id="event-blocking-title">
-                    <LockIcon aria-hidden="true" className="size-4" /> Blocked time
-                  </h3>
-                  <p>Keep one event here while reserving the same time elsewhere.</p>
-                </div>
-                {blocks.length > 0 ? <Badge>{blocks.length} linked</Badge> : null}
-              </header>
-              <div className="event-block-list">
-                {blockDestinations.map((destination) => {
-                  const block = blocks.find((record) => record.calendarId === destination.id);
-                  return (
-                    <div className="event-block-row" key={destination.id}>
-                      <label>
-                        <input
-                          checked={Boolean(block)}
-                          disabled={changeBlock.isPending}
-                          onChange={(changeEvent) => {
-                            if (changeEvent.currentTarget.checked) {
-                              changeBlock.mutate({
-                                calendarId: destination.id,
-                                mode: "busy",
-                                operation: "create",
-                              });
-                            } else {
-                              const linkedBlock = block as NonNullable<typeof block>;
-                              changeBlock.mutate({
-                                blockId: linkedBlock.eventId,
-                                calendarId: destination.id,
-                                mode: linkedBlock.mode,
-                                operation: "delete",
-                              });
-                            }
-                          }}
-                          type="checkbox"
-                        />
-                        <i
-                          aria-hidden="true"
-                          style={{ background: destination.color ?? "#777ce3" }}
-                        />
-                        <span>
-                          <strong>{destination.name}</strong>
-                          <small>{destination.provider}</small>
-                        </span>
-                      </label>
-                      <select
-                        aria-label={`Privacy on ${destination.name}`}
-                        disabled={!block || changeBlock.isPending}
-                        onChange={(changeEvent) =>
-                          block &&
-                          changeBlock.mutate({
-                            blockId: block.eventId,
-                            calendarId: destination.id,
-                            mode: changeEvent.currentTarget.value as "busy" | "details",
-                            operation: "update",
-                          })
-                        }
-                        value={block?.mode ?? "busy"}
-                      >
-                        <option value="busy">Busy only</option>
-                        <option value="details">Include details</option>
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
-              {changeBlock.isError ? (
-                <p className="form-error" role="alert">
-                  {errorMessage(changeBlock.error)}
-                </p>
-              ) : null}
-            </section>
-          ) : null}
-          <section className="event-sheet__notes" aria-labelledby="event-notes-title">
-            <h3 id="event-notes-title">
-              <FileTextIcon aria-hidden="true" className="size-4" /> Notes
-            </h3>
-            {event.notes ? (
-              <Suspense fallback={<p className="event-sheet__empty">Formatting notes…</p>}>
-                <RichEventNotes source={event.notes} />
-              </Suspense>
-            ) : (
-              <p className="event-sheet__empty">No notes attached to this event.</p>
-            )}
-          </section>
-          <div className="event-sheet__sync-note">
-            <CloudIcon aria-hidden="true" className="size-4" />
-            <span>
-              {event.provider === "google"
-                ? "Edits write through to Google Calendar before they appear here."
-                : "This event is stored in ilo and available to authorized agents."}
-            </span>
-          </div>
-          {remove.isError ? (
-            <p className="form-error" role="alert">
-              {errorMessage(remove.error)}
-            </p>
-          ) : null}
-        </div>
-        <footer className="event-sheet__actions">
-          {confirmDelete ? (
-            <div className="event-sheet__confirm">
-              <span>Delete this event everywhere?</span>
-              <Button onClick={() => setConfirmDelete(false)}>Keep Event</Button>
-              <Button disabled={remove.isPending} onClick={() => remove.mutate()} tone="danger">
-                {remove.isPending ? <Spinner label="Deleting" /> : "Delete Event"}
-              </Button>
-            </div>
-          ) : (
-            <>
-              <Button
-                disabled={!calendar?.isWritable}
-                onClick={() => setConfirmDelete(true)}
-                tone="danger"
-              >
-                <TrashIcon aria-hidden="true" className="size-[15px]" /> Delete
-              </Button>
-              <Button disabled={!calendar?.isWritable} onClick={edit} tone="accent">
-                <EditIcon aria-hidden="true" className="size-[15px]" /> Edit Event
-              </Button>
-            </>
-          )}
-        </footer>
-      </aside>
+        {content}
+      </div>
     </div>
+  );
+}
+
+function EventVisibilityList({
+  blocks,
+  calendars,
+  destinations,
+  disabled,
+  label,
+  mode,
+  onAdd,
+  onRemove,
+}: {
+  blocks: CalendarEvent["blocks"];
+  calendars: Calendar[];
+  destinations: Calendar[];
+  disabled: boolean;
+  label: string;
+  mode: "busy" | "details";
+  onAdd: (calendarId: string, block: CalendarEvent["blocks"][number] | undefined) => void;
+  onRemove: (block: CalendarEvent["blocks"][number]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const availableCalendars = destinations.filter(
+    (calendar) => blocks.find((block) => block.calendarId === calendar.id)?.mode !== mode,
+  );
+  const status = mode === "details" ? "Details Included" : "Shown as Busy";
+  return (
+    <ul aria-label={label} className="event-details-card__calendar-list">
+      {calendars.map((calendar) => {
+        const block = blocks.find((record) => record.calendarId === calendar.id);
+        return (
+          <ShadcnBadge asChild key={calendar.id} variant="secondary">
+            <li
+              className={mode === "details" ? "is-details-included" : "is-shown-as-busy"}
+              style={{ "--badge-color": calendar.color ?? "var(--muted)" } as CSSProperties}
+            >
+              <i aria-hidden="true" style={{ background: calendar.color ?? "var(--muted)" }} />
+              <span>{calendar.name}</span>
+              {block ? (
+                <button
+                  aria-label={`Remove ${calendar.name} from ${status}`}
+                  className="event-details-card__calendar-remove"
+                  disabled={disabled}
+                  onClick={() => onRemove(block)}
+                  type="button"
+                >
+                  <XIcon aria-hidden="true" />
+                </button>
+              ) : null}
+            </li>
+          </ShadcnBadge>
+        );
+      })}
+      <li>
+        <ShadcnPopover onOpenChange={setOpen} open={open}>
+          <ShadcnPopoverTrigger asChild>
+            <ShadcnButton
+              aria-label={`Add calendar to ${status}`}
+              disabled={disabled || availableCalendars.length === 0}
+              size="icon-xs"
+              variant="outline"
+            >
+              <PlusIcon aria-hidden="true" />
+            </ShadcnButton>
+          </ShadcnPopoverTrigger>
+          <ShadcnPopoverContent align="start" className="event-visibility-popover">
+            <ShadcnPopoverHeader>
+              <ShadcnPopoverTitle>Add to {status}</ShadcnPopoverTitle>
+              <ShadcnPopoverDescription>
+                {mode === "details"
+                  ? "Share the event and its details on another calendar."
+                  : "Show the occupied time without sharing event details."}
+              </ShadcnPopoverDescription>
+            </ShadcnPopoverHeader>
+            <div className="event-visibility-popover__options">
+              {availableCalendars.map((calendar) => (
+                <ShadcnButton
+                  key={calendar.id}
+                  onClick={() => {
+                    onAdd(
+                      calendar.id,
+                      blocks.find((block) => block.calendarId === calendar.id),
+                    );
+                    setOpen(false);
+                  }}
+                  variant="ghost"
+                >
+                  <i aria-hidden="true" style={{ background: calendar.color ?? "var(--muted)" }} />
+                  <span>{calendar.name}</span>
+                </ShadcnButton>
+              ))}
+            </div>
+          </ShadcnPopoverContent>
+        </ShadcnPopover>
+      </li>
+    </ul>
   );
 }
 

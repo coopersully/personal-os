@@ -4145,6 +4145,59 @@ describe("ilo web app", () => {
     emptyView.unmount();
   }, 15_000);
 
+  it("opens Calendar event details in the shared floating-card host", async () => {
+    const activeEvent = {
+      ...event,
+      blocks: [
+        {
+          calendarId: googleCalendar.id,
+          eventId: secondId,
+          mode: "busy" as const,
+          provider: "google" as const,
+        },
+        {
+          calendarId: nullColorCalendar.id,
+          eventId: thirdId,
+          mode: "details" as const,
+          provider: "google" as const,
+        },
+      ],
+      endsAt: "2026-07-13T12:30:00.000Z",
+      startsAt: "2026-07-13T11:30:00.000Z",
+    };
+    mocks.listEvents.mockResolvedValue([activeEvent]);
+    const view = setup("/calendar");
+    const browser = userEvent.setup();
+
+    const eventCard = await screen.findByRole("button", { name: /^11:30 AM Focus block/ });
+    expect(eventCard.querySelector(".is-details-included")).toBeInTheDocument();
+    expect(eventCard.querySelector(".is-shown-as-busy")).toBeInTheDocument();
+    await browser.click(eventCard);
+
+    const details = await screen.findByRole("dialog", { name: "Focus block" });
+    expect(details).toHaveClass("calendar-floating-nav__composer");
+    expect(details.closest(".calendar-floating-nav")).toBeInTheDocument();
+    expect(view.container.querySelector(".event-sheet-backdrop")).not.toBeInTheDocument();
+    expect(screen.queryByText("Scheduled event")).not.toBeInTheDocument();
+    expect(within(details).getByText("11:30 AM–12:30 PM")).toBeInTheDocument();
+    expect(within(details).getByText("In progress · 30 min left")).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(within(details).getByRole("heading", { name: "Shared With" })).toBeInTheDocument();
+    expect(within(details).getByText("Details Included")).toBeInTheDocument();
+    const fullyVisible = within(details).getByRole("list", {
+      name: "Calendars with details included",
+    });
+    expect(within(fullyVisible).getByText("Selected Google")).toBeInTheDocument();
+    expect(within(details).getByText("Shown as Busy")).toBeInTheDocument();
+    const busyOnly = within(details).getByRole("list", { name: "Calendars shown as busy" });
+    expect(within(busyOnly).getByText("Readonly Google")).toBeInTheDocument();
+    expect(within(details).queryByText("Blocked on")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Event" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
   it("renders rich event notes safely and confirms write-through deletion", async () => {
     const richEvent = {
       ...event,
@@ -4200,7 +4253,7 @@ describe("ilo web app", () => {
     expect(mocks.deleteEvent).toHaveBeenCalledWith(id);
   });
 
-  it("links one visible event to private or detailed destination blocks", async () => {
+  it("syncs calendars through details-included and shown-as-busy badges", async () => {
     const block = {
       calendarId: nullColorCalendar.id,
       eventId: thirdId,
@@ -4233,22 +4286,37 @@ describe("ilo web app", () => {
     const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /^1:00 PM Focus block/ }));
-    expect(screen.getByRole("heading", { name: "Blocked time" })).toBeInTheDocument();
-    expect(screen.getByText("1 linked")).toBeInTheDocument();
-    const destination = screen.getByRole("checkbox", { name: /Selected Google/ });
-    expect(destination).toBeChecked();
-    await browser.selectOptions(screen.getByLabelText("Privacy on Selected Google"), "details");
+    expect(
+      within(screen.getByRole("list", { name: "Calendars with details included" })).getByRole(
+        "button",
+        {
+          name: "Add calendar to Details Included",
+        },
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("list", { name: "Calendars shown as busy" })).getByText(
+        "Selected Google",
+      ),
+    ).toBeInTheDocument();
+
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Details Included" }));
+    await browser.click(screen.getByRole("button", { name: "Selected Google", exact: true }));
     await waitFor(() =>
       expect(mocks.updateEventBlock).toHaveBeenCalledWith(id, thirdId, { mode: "details" }),
     );
-    await browser.click(destination);
+    await browser.click(
+      screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
+    );
     await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledWith(id, thirdId));
 
     mocks.createEventBlock.mockRejectedValueOnce(new Error("Block failed"));
-    await browser.click(destination);
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
+    await browser.click(screen.getByRole("button", { name: "Selected Google", exact: true }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Block failed");
     mocks.createEventBlock.mockResolvedValue(linkedEvent);
-    await browser.click(destination);
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
+    await browser.click(screen.getByRole("button", { name: "Selected Google", exact: true }));
     await waitFor(() =>
       expect(mocks.createEventBlock).toHaveBeenCalledWith(id, {
         calendarId: nullColorCalendar.id,

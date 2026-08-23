@@ -40,9 +40,32 @@ event without losing the shape of the day.
   focuses immediately, searches a bounded event range plus dates, and supports
   direct relative-date phrases such as `last Christmas`. Creation exposes the
   standard event fields without launching a second surface.
+- Selecting a spatial Calendar event replaces that pill with an event-details
+  card in the same floating host used by creation. The card retains the full
+  event inspector—including write capability, linked busy blocks, provider
+  context, notes, edit, and deletion—without opening the legacy side sheet.
+  Event inspection initiated outside Calendar keeps its existing surface.
+  Its title is followed immediately by the same compact time range used on the
+  spatial event card. Active events expose a live time-remaining status, and
+  linked calendars live in an outlined `Shared With` section. `Details Included`
+  calendars receive the full event; `Shown as Busy` calendars receive only the
+  occupied time. Both rows remain visible, and their calendar-colored badges can
+  be removed or added with inline controls that write through to synchronization.
+  Event cards repeat this distinction in their calendar-color rails: solid for
+  details included and dotted when shown as busy.
+- Transient Calendar action and connection-recovery failures use the app-level
+  Sonner toaster. They never insert material between the shared app bar and the
+  spatial calendar or shift the grid after it has rendered. A failure that
+  prevents the calendar itself from loading still replaces the unavailable
+  grid with an in-context error state.
 - In event creation, start and end controls size to their content and stay
   start-aligned; the duration rule absorbs the remaining inline space. At
   compact widths, the pair stacks without changing its time semantics.
+- Optional location, conferencing, and related-link fields expand in place and
+  dismiss back to their compact add actions. Time inputs expose editable hour
+  and minute segments with an explicit meridiem. An untouched end follows start
+  changes at a one-hour duration; a manually chosen valid end is preserved, and
+  any end invalidated by a later start is repaired to one hour after that start.
 - Conferencing follows the selected calendar's real capabilities. Writable Google calendars can
   request a unique Google Meet conference from Google; every calendar can attach an existing Zoom,
   Teams, Webex, or other meeting URL. Provider-generated options are never shown as available when

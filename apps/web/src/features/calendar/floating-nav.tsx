@@ -15,13 +15,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type CSSProperties,
   type FormEvent,
+  type ReactNode,
+  useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import {
   CalendarIcon,
   CheckIcon,
@@ -30,7 +32,6 @@ import {
   MapPinIcon,
   PlusIcon,
   SearchIcon,
-  ShieldCheckIcon,
   VideoAddIcon,
   XIcon,
 } from "@/components/icons";
@@ -61,7 +62,6 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
@@ -73,6 +73,7 @@ type ConferenceChoice = "google_meet" | "link" | "none";
 type CalendarFloatingNavProps = {
   anchor: LocalDate;
   calendars: Calendar[];
+  eventDetails?: ReactNode;
   onNavigate: (date: LocalDate) => void;
   timeZone: string;
   user: User;
@@ -81,6 +82,7 @@ type CalendarFloatingNavProps = {
 export function CalendarFloatingNav({
   anchor,
   calendars,
+  eventDetails,
   onNavigate,
   timeZone,
   user,
@@ -89,8 +91,10 @@ export function CalendarFloatingNav({
   const close = () => setMode("closed");
 
   return (
-    <div className="calendar-floating-nav" data-mode={mode}>
-      {mode === "closed" ? (
+    <div className="calendar-floating-nav" data-mode={eventDetails ? "details" : mode}>
+      {eventDetails ? (
+        eventDetails
+      ) : mode === "closed" ? (
         <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
           <Button
             aria-label="Choose date"
@@ -101,25 +105,20 @@ export function CalendarFloatingNav({
             <CalendarIcon aria-hidden="true" />
           </Button>
           <Button
-            aria-label="Search calendar"
-            onClick={() => setMode("search")}
-            size="icon"
-            variant="ghost"
-          >
-            <SearchIcon aria-hidden="true" />
-          </Button>
-          <Button asChild size="icon" variant="ghost">
-            <Link aria-label="Schedule health" to="/calendar/review">
-              <ShieldCheckIcon aria-hidden="true" />
-            </Link>
-          </Button>
-          <Button
             aria-label="Create event"
             onClick={() => setMode("create")}
             size="icon"
             variant="ghost"
           >
             <PlusIcon aria-hidden="true" />
+          </Button>
+          <Button
+            aria-label="Search calendar"
+            onClick={() => setMode("search")}
+            size="icon"
+            variant="ghost"
+          >
+            <SearchIcon aria-hidden="true" />
           </Button>
         </nav>
       ) : mode === "date" ? (
@@ -369,7 +368,7 @@ function daysInCalendarMonth(month: number, year: number) {
   return new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
 }
 
-function EventLocationPicker() {
+function EventLocationPicker({ onDismiss }: { onDismiss: () => void }) {
   const [inputValue, setInputValue] = useState("");
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<WeatherLocationOption | null>(null);
@@ -420,10 +419,19 @@ function EventLocationPicker() {
           name="location"
           onFocus={() => setOpen(true)}
           placeholder="Search or add a location"
-          showClear
         >
           <InputGroupAddon>
             <MapPinIcon aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              aria-label="Remove location"
+              onClick={onDismiss}
+              size="icon-xs"
+              type="button"
+            >
+              <XIcon aria-hidden="true" />
+            </InputGroupButton>
           </InputGroupAddon>
         </ComboboxInput>
         <ComboboxContent aria-busy={locations.isFetching || undefined}>
@@ -518,18 +526,15 @@ function EventDateTimeControl({
             />
           </PopoverContent>
         </Popover>
-        {!allDay ? <EventTimePicker label={label} onChange={onTimeChange} value={time} /> : null}
+        {!allDay ? <EventTimeInput label={label} onChange={onTimeChange} value={time} /> : null}
       </div>
     </Field>
   );
 }
 
-const quarterHourTimes = Array.from({ length: 96 }, (_, index) => {
-  const minutes = index * 15;
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-});
+type Meridiem = "AM" | "PM";
 
-function EventTimePicker({
+function EventTimeInput({
   label,
   onChange,
   value,
@@ -538,63 +543,135 @@ function EventTimePicker({
   onChange: (value: string) => void;
   value: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const selectedOption = useRef<HTMLButtonElement>(null);
-  const displayValue = formatTime(value);
+  const hourInput = useRef<HTMLInputElement>(null);
+  const minuteInput = useRef<HTMLInputElement>(null);
+  const parts = timeInputParts(value);
+  const [hour, setHour] = useState(parts.hour);
+  const [minute, setMinute] = useState(parts.minute);
+  const [meridiem, setMeridiem] = useState<Meridiem>(parts.meridiem);
+  useEffect(() => {
+    const next = timeInputParts(value);
+    setHour(next.hour);
+    setMinute(next.minute);
+    setMeridiem(next.meridiem);
+  }, [value]);
+
+  const commit = (nextHour: string, nextMinute: string, nextMeridiem: Meridiem) => {
+    const parsedHour = Number(nextHour);
+    const parsedMinute = Number(nextMinute);
+    if (parsedHour < 1 || parsedHour > 12 || parsedMinute < 0 || parsedMinute > 59) return;
+    const hour24 = (parsedHour % 12) + (nextMeridiem === "PM" ? 12 : 0);
+    onChange(`${String(hour24).padStart(2, "0")}:${String(parsedMinute).padStart(2, "0")}`);
+  };
+
+  const valid = isValidTimePart(hour, 1, 12) && isValidTimePart(minute, 0, 59);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label={`${label} time, ${displayValue}`}
-          className="calendar-event-composer__time-trigger"
-          type="button"
-          variant="outline"
-        >
-          {displayValue}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="calendar-event-composer__time-popover"
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          selectedOption.current?.focus({ preventScroll: true });
-          selectedOption.current?.scrollIntoView({ behavior: "auto", block: "center" });
+    <InputGroup className="calendar-event-composer__time-input">
+      <InputGroupInput
+        aria-invalid={!valid}
+        aria-label={`${label} hour`}
+        autoComplete="off"
+        className="calendar-event-composer__time-segment is-hour"
+        inputMode="numeric"
+        onBlur={() => {
+          if (!isValidTimePart(hour, 1, 12)) setHour(parts.hour);
+          else setHour(String(Number(hour)));
         }}
-      >
-        <ScrollArea className="calendar-event-composer__time-options">
-          <div aria-label={`${label} time`} role="listbox">
-            {quarterHourTimes.map((option) => (
-              <Button
-                aria-selected={option === value}
-                key={option}
-                onClick={() => {
-                  onChange(option);
-                  setOpen(false);
+        onChange={(event) => {
+          const digits = event.target.value.replace(/\D/g, "").slice(0, 4);
+          if (digits.length >= 3) {
+            const nextHour = String(Number(digits.slice(0, -2)));
+            const nextMinute = digits.slice(-2);
+            if (isValidTimePart(nextHour, 1, 12) && isValidTimePart(nextMinute, 0, 59)) {
+              setHour(nextHour);
+              setMinute(nextMinute);
+              commit(nextHour, nextMinute, meridiem);
+              minuteInput.current?.focus();
+              minuteInput.current?.select();
+              return;
+            }
+          }
+          setHour(digits);
+          commit(digits, minute, meridiem);
+          if (digits !== "1" && isValidTimePart(digits, 1, 12)) {
+            minuteInput.current?.focus();
+            minuteInput.current?.select();
+          }
+        }}
+        onClick={(event) => event.currentTarget.select()}
+        onFocus={(event) => event.currentTarget.select()}
+        ref={hourInput}
+        value={hour}
+      />
+      <InputGroupInput
+        aria-invalid={!valid}
+        aria-label={`${label} minute`}
+        autoComplete="off"
+        className="calendar-event-composer__time-segment is-minute"
+        inputMode="numeric"
+        onBlur={() => {
+          if (!isValidTimePart(minute, 0, 59)) setMinute(parts.minute);
+          else {
+            const normalizedMinute = String(Number(minute)).padStart(2, "0");
+            setMinute(normalizedMinute);
+            commit(hour, normalizedMinute, meridiem);
+          }
+        }}
+        onChange={(event) => {
+          const digits = event.target.value.replace(/\D/g, "").slice(0, 2);
+          setMinute(digits);
+          if (digits.length === 2) commit(hour, digits, meridiem);
+        }}
+        onClick={(event) => event.currentTarget.select()}
+        onFocus={(event) => event.currentTarget.select()}
+        ref={minuteInput}
+        value={minute}
+      />
+      <InputGroupAddon className="calendar-event-composer__time-colon" align="inline-end">
+        <span aria-hidden="true">:</span>
+      </InputGroupAddon>
+      <InputGroupAddon className="calendar-event-composer__time-meridiem" align="inline-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <InputGroupButton aria-label={`${label} AM or PM, ${meridiem}`} type="button">
+              {meridiem}
+              <ChevronDownIcon data-icon="inline-end" />
+            </InputGroupButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuRadioGroup
+                onValueChange={(nextValue) => {
+                  const nextMeridiem = nextValue as Meridiem;
+                  setMeridiem(nextMeridiem);
+                  commit(hour, minute, nextMeridiem);
                 }}
-                role="option"
-                ref={option === value ? selectedOption : undefined}
-                size="sm"
-                type="button"
-                variant={option === value ? "secondary" : "ghost"}
+                value={meridiem}
               >
-                {formatTime(option)}
-              </Button>
-            ))}
-          </div>
-        </ScrollArea>
-      </PopoverContent>
-    </Popover>
+                <DropdownMenuRadioItem value="AM">AM</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="PM">PM</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </InputGroupAddon>
+    </InputGroup>
   );
 }
 
-function formatTime(value: string) {
+function timeInputParts(value: string) {
   const [hour, minute] = value.split(":").map(Number);
-  return new Intl.DateTimeFormat("en", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(2000, 0, 1, hour, minute)));
+  return {
+    hour: String((hour as number) % 12 || 12),
+    meridiem: (hour as number) >= 12 ? ("PM" as const) : ("AM" as const),
+    minute: String(minute).padStart(2, "0"),
+  };
+}
+
+function isValidTimePart(value: string, minimum: number, maximum: number) {
+  if (!/^\d{1,2}$/.test(value)) return false;
+  const number = Number(value);
+  return number >= minimum && number <= maximum;
 }
 
 function InlineEventComposer({
@@ -633,6 +710,8 @@ function InlineEventComposer({
   const [endDate, setEndDate] = useState(() => parseLocalDate(initialEnd.slice(0, 10)));
   const [startTime, setStartTime] = useState(initialStart.slice(11));
   const [endTime, setEndTime] = useState(initialEnd.slice(11));
+  const endWasEdited = useRef(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const selectedCalendar = writable.find((calendar) => calendar.id === calendarId) ?? writable[0];
   useEffect(() => {
     if (!calendarId && writable[0]) setCalendarId(writable[0].id);
@@ -642,8 +721,49 @@ function InlineEventComposer({
       setConferenceChoice("none");
     }
   }, [conferenceChoice, selectedCalendar?.provider]);
+  const repairEndAfterStart = useCallback(
+    (nextStartDate: LocalDate, nextStartTime: string) => {
+      if (allDay) {
+        if (!endWasEdited.current || compareLocalDates(endDate, nextStartDate) < 0) {
+          if (compareLocalDates(endDate, nextStartDate) !== 0) setEndDate(nextStartDate);
+        }
+        return;
+      }
+      const nextStart = localDateTimeToUtc(nextStartDate, timeToMinute(nextStartTime), timeZone);
+      const currentEnd = localDateTimeToUtc(endDate, timeToMinute(endTime), timeZone);
+      if (endWasEdited.current && currentEnd > nextStart) return;
+      const nextEnd = toDateTimeLocal(new Date(nextStart.getTime() + 60 * 60_000), timeZone);
+      const nextEndDate = parseLocalDate(nextEnd.slice(0, 10));
+      const nextEndTime = nextEnd.slice(11);
+      if (compareLocalDates(endDate, nextEndDate) !== 0) setEndDate(nextEndDate);
+      if (endTime !== nextEndTime) setEndTime(nextEndTime);
+    },
+    [allDay, endDate, endTime, timeZone],
+  );
+  const setValidatedEnd = (nextEndDate: LocalDate, nextEndTime: string) => {
+    endWasEdited.current = true;
+    if (allDay) {
+      setEndDate(compareLocalDates(nextEndDate, startDate) < 0 ? startDate : nextEndDate);
+      return;
+    }
+    const startsAt = localDateTimeToUtc(startDate, timeToMinute(startTime), timeZone);
+    const endsAt = localDateTimeToUtc(nextEndDate, timeToMinute(nextEndTime), timeZone);
+    if (endsAt <= startsAt) {
+      const defaultEnd = toDateTimeLocal(new Date(startsAt.getTime() + 60 * 60_000), timeZone);
+      setEndDate(parseLocalDate(defaultEnd.slice(0, 10)));
+      setEndTime(defaultEnd.slice(11));
+      return;
+    }
+    setEndDate(nextEndDate);
+    setEndTime(nextEndTime);
+  };
+  useEffect(() => {
+    repairEndAfterStart(startDate, startTime);
+  }, [repairEndAfterStart, startDate, startTime]);
   const mutation = useMutation({
     mutationFn: (input: Parameters<typeof api.createEvent>[0]) => api.createEvent(input),
+    onError: (error) =>
+      toast.error("Event couldn’t be created", { description: errorMessage(error) }),
     onSuccess: async () => {
       await invalidateMaterial(queryClient);
       close();
@@ -658,6 +778,11 @@ function InlineEventComposer({
     const endsAt = allDay
       ? localDateTimeToUtc(addDays(endDate, 1), 0, timeZone).toISOString()
       : localDateTimeToUtc(endDate, timeToMinute(endTime), timeZone).toISOString();
+    if (new Date(endsAt) <= new Date(startsAt)) {
+      setScheduleError("Event must end after it starts.");
+      return;
+    }
+    setScheduleError(null);
     mutation.mutate({
       allDay,
       calendarId,
@@ -704,6 +829,7 @@ function InlineEventComposer({
                       <InputGroupButton
                         aria-label={`Calendar: ${selectedCalendar?.name ?? "Choose calendar"}`}
                         className="calendar-event-composer__calendar-trigger"
+                        type="button"
                       >
                         <i
                           aria-hidden="true"
@@ -765,8 +891,14 @@ function InlineEventComposer({
                   allDay={allDay}
                   date={startDate}
                   label="Starts"
-                  onDateChange={setStartDate}
-                  onTimeChange={setStartTime}
+                  onDateChange={(nextDate) => {
+                    setStartDate(nextDate);
+                    setScheduleError(null);
+                  }}
+                  onTimeChange={(nextTime) => {
+                    setStartTime(nextTime);
+                    setScheduleError(null);
+                  }}
                   referenceYear={localDateAt(new Date(), timeZone).year}
                   time={startTime}
                   timeZone={timeZone}
@@ -780,49 +912,72 @@ function InlineEventComposer({
                   allDay={allDay}
                   date={endDate}
                   label="Ends"
-                  onDateChange={setEndDate}
-                  onTimeChange={setEndTime}
+                  onDateChange={(nextDate) => {
+                    setValidatedEnd(nextDate, endTime);
+                    setScheduleError(null);
+                  }}
+                  onTimeChange={(nextTime) => {
+                    setValidatedEnd(endDate, nextTime);
+                    setScheduleError(null);
+                  }}
                   referenceYear={localDateAt(new Date(), timeZone).year}
                   time={endTime}
                   timeZone={timeZone}
                 />
               </div>
             </div>
-            {showLocation ? <EventLocationPicker /> : null}
+            {showLocation ? <EventLocationPicker onDismiss={() => setShowLocation(false)} /> : null}
             {showConferencing ? (
               <Field>
                 <FieldLabel className="sr-only">Conferencing</FieldLabel>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button className="w-full justify-start" type="button" variant="outline">
-                      <VideoAddIcon data-icon="inline-start" />
-                      {conferenceChoice === "google_meet"
-                        ? "Google Meet will be created"
-                        : conferenceChoice === "link"
-                          ? "Meeting link"
-                          : "Add conferencing"}
-                      <ChevronDownIcon className="ml-auto" data-icon="inline-end" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuGroup>
-                      <DropdownMenuRadioGroup
-                        onValueChange={(value) => setConferenceChoice(value as ConferenceChoice)}
-                        value={conferenceChoice}
-                      >
-                        <DropdownMenuRadioItem value="none">No conferencing</DropdownMenuRadioItem>
-                        {selectedCalendar?.provider === "google" ? (
-                          <DropdownMenuRadioItem value="google_meet">
-                            Generate Google Meet
+                <InputGroup>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <InputGroupButton className="flex-1 justify-start" type="button">
+                        <VideoAddIcon data-icon="inline-start" />
+                        {conferenceChoice === "google_meet"
+                          ? "Google Meet will be created"
+                          : conferenceChoice === "link"
+                            ? "Meeting link"
+                            : "Choose conferencing"}
+                        <ChevronDownIcon className="ml-auto" data-icon="inline-end" />
+                      </InputGroupButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuGroup>
+                        <DropdownMenuRadioGroup
+                          onValueChange={(value) => setConferenceChoice(value as ConferenceChoice)}
+                          value={conferenceChoice}
+                        >
+                          <DropdownMenuRadioItem value="none">
+                            No conferencing
                           </DropdownMenuRadioItem>
-                        ) : null}
-                        <DropdownMenuRadioItem value="link">
-                          Paste meeting link
-                        </DropdownMenuRadioItem>
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                          {selectedCalendar?.provider === "google" ? (
+                            <DropdownMenuRadioItem value="google_meet">
+                              Generate Google Meet
+                            </DropdownMenuRadioItem>
+                          ) : null}
+                          <DropdownMenuRadioItem value="link">
+                            Paste meeting link
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      aria-label="Remove conferencing"
+                      onClick={() => {
+                        setConferenceChoice("none");
+                        setShowConferencing(false);
+                      }}
+                      size="icon-xs"
+                      type="button"
+                    >
+                      <XIcon aria-hidden="true" />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
                 {conferenceChoice === "link" ? (
                   <InputGroup>
                     <InputGroupInput
@@ -853,11 +1008,24 @@ function InlineEventComposer({
                     placeholder="Add a related URL"
                     type="url"
                   />
-                  <InputGroupAddon>
+                  <InputGroupAddon align="inline-end">
                     <ExternalLinkIcon aria-hidden="true" />
+                    <InputGroupButton
+                      aria-label="Remove related link"
+                      onClick={() => setShowLink(false)}
+                      size="icon-xs"
+                      type="button"
+                    >
+                      <XIcon aria-hidden="true" />
+                    </InputGroupButton>
                   </InputGroupAddon>
                 </InputGroup>
               </Field>
+            ) : null}
+            {scheduleError ? (
+              <p className="calendar-floating-nav__error" role="alert">
+                {scheduleError}
+              </p>
             ) : null}
             {!showLocation || !showConferencing || !showLink ? (
               <div className="calendar-event-composer__optional-actions">
@@ -889,11 +1057,6 @@ function InlineEventComposer({
                 rows={2}
               />
             </Field>
-            {mutation.isError ? (
-              <p className="calendar-floating-nav__error" role="alert">
-                {errorMessage(mutation.error)}
-              </p>
-            ) : null}
             <Button disabled={mutation.isPending || writable.length === 0} type="submit">
               <PlusIcon data-icon="inline-start" />
               {mutation.isPending ? "Creating…" : "Create event"}

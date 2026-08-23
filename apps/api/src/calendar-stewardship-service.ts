@@ -19,7 +19,7 @@ import {
   calendarReviewSchema,
   calendarStatusSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, gt, gte, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import {
@@ -432,12 +432,50 @@ async function readReusableReview(
       and(
         eq(calendarReviews.userId, userId),
         eq(calendarReviews.ledgerFingerprint, ledgerFingerprint),
-        gte(calendarReviews.nextMaintenanceAt, evidenceCutoff),
+        gt(calendarReviews.nextMaintenanceAt, evidenceCutoff),
       ),
     )
     .orderBy(desc(calendarReviews.createdAt), desc(calendarReviews.id))
     .limit(1);
   return row ? reviewFromRow(row) : null;
+}
+
+function nextAssessmentTransition(
+  snapshot: CalendarAssessmentSnapshot,
+  evidenceCutoff: Date,
+): Date {
+  const transitions = [
+    evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000,
+  ];
+  for (const source of snapshot.sources) {
+    if (
+      source.provider === "local" ||
+      source.syncStatus !== "idle" ||
+      source.syncRecovery !== null ||
+      source.lastSyncedAt === null
+    ) {
+      continue;
+    }
+    const lastSyncedAt = new Date(source.lastSyncedAt).getTime();
+    const transition =
+      lastSyncedAt + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000 + 1;
+    if (Number.isFinite(transition) && transition > evidenceCutoff.getTime()) {
+      transitions.push(transition);
+    }
+  }
+  for (const event of snapshot.events) {
+    if (event.status !== "tentative") continue;
+    const startsAt = new Date(event.startsAt).getTime();
+    if (!Number.isFinite(startsAt) || startsAt <= evidenceCutoff.getTime()) continue;
+    const holdAgeTransition =
+      new Date(event.updatedAt).getTime() + CALENDAR_PLAYBOOK.tentativeHoldAgeDays * DAY_MS;
+    transitions.push(
+      Number.isFinite(holdAgeTransition) && holdAgeTransition > evidenceCutoff.getTime()
+        ? Math.min(holdAgeTransition, startsAt)
+        : startsAt,
+    );
+  }
+  return new Date(Math.min(...transitions));
 }
 
 function buildStatus(input: {
@@ -588,9 +626,7 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
               findings,
               health,
               ledgerFingerprint,
-              nextMaintenanceAt: new Date(
-                evidenceCutoff.getTime() + CALENDAR_PLAYBOOK.sourceFreshnessMinutes * 60_000,
-              ),
+              nextMaintenanceAt: nextAssessmentTransition(snapshot, evidenceCutoff),
               profileVersion: snapshot.activeProfile?.version ?? null,
               recommendations,
               snapshot,
@@ -638,7 +674,8 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
           const fingerprintChanged =
             latestReview !== null &&
             latestReview.ledgerFingerprint !== calendarLedgerFingerprint(snapshot);
-          const expired = latestReview !== null && asOf > new Date(latestReview.nextMaintenanceAt);
+          const expired =
+            latestReview !== null && asOf.getTime() >= new Date(latestReview.nextMaintenanceAt).getTime();
           const lifecycle: CalendarStatus["lifecycle"] =
             latestReview === null
               ? "never_maintained"
@@ -649,7 +686,7 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
             buildStatus({ asOf, assessment, latestReview, lifecycle, snapshot }),
           );
         },
-        { isolationLevel: "repeatable read", readOnly: true },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
       );
     },
   };

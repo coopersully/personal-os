@@ -143,7 +143,7 @@ function eventReference(
   return {
     accountId: source?.accountId ?? null,
     provider: event.provider,
-    remoteId: event.provider === "local" ? event.id : (event.remoteEventId ?? event.id),
+    remoteId: event.provider === "local" ? event.id : event.remoteEventId,
     revision: event.revision,
     sourceType: "calendar_event",
   };
@@ -311,17 +311,22 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
   const rulebook = rulebookVersion(snapshot.activeProfile);
   return sha256({
     activeProfile: snapshot.activeProfile
-      ? { id: snapshot.activeProfile.id, version: snapshot.activeProfile.version }
+      ? {
+          afterBufferMinutes: snapshot.activeProfile.afterBufferMinutes,
+          beforeBufferMinutes: snapshot.activeProfile.beforeBufferMinutes,
+          id: snapshot.activeProfile.id,
+          version: snapshot.activeProfile.version,
+        }
       : null,
     events: [...snapshot.events]
       .sort(compareById)
       .map(
         ({
-          availability,
+          allDay,
+          blockSourceEventId,
           calendarId,
           endsAt,
           id,
-          isAllDay,
           provider,
           recurrence,
           remoteEventId,
@@ -329,12 +334,13 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
           startsAt,
           status,
           transparency,
+          updatedAt,
         }) => ({
-          availability,
+          allDay,
+          blockSourceEventId,
           calendarId,
           endsAt,
           id,
-          isAllDay,
           provider,
           recurrence,
           remoteEventId,
@@ -342,6 +348,7 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
           startsAt,
           status,
           transparency,
+          updatedAt,
         }),
       ),
     evidenceLimits: snapshot.evidenceLimits,
@@ -350,12 +357,28 @@ export function calendarLedgerFingerprint(snapshot: CalendarAssessmentSnapshot):
     scope: snapshot.scope,
     sources: [...snapshot.sources]
       .sort(compareSources)
-      .map(({ accountId, calendarId, calendarRevision, provider, syncGeneration }) => ({
+      .map(({
         accountId,
         calendarId,
         calendarRevision,
+        isWritable,
+        lastSyncedAt,
         provider,
+        recurrencePresent,
         syncGeneration,
+        syncRecovery,
+        syncStatus,
+      }) => ({
+        accountId,
+        calendarId,
+        calendarRevision,
+        isWritable,
+        lastSyncedAt,
+        provider,
+        recurrencePresent,
+        syncGeneration,
+        syncRecovery,
+        syncStatus,
       })),
   });
 }

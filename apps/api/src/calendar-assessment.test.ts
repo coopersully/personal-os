@@ -235,6 +235,36 @@ describe("Calendar assessment", () => {
         events: [{ ...firstEvent, revision: "changed" }],
       }),
     ).not.toBe(calendarLedgerFingerprint(first));
+    expect(
+      calendarLedgerFingerprint({
+        ...first,
+        events: [{ ...firstEvent, allDay: true }],
+      }),
+    ).not.toBe(calendarLedgerFingerprint(first));
+    expect(
+      calendarLedgerFingerprint({
+        ...first,
+        events: [{ ...firstEvent, blockSourceEventId: "copied-from-provider-event" }],
+      }),
+    ).not.toBe(calendarLedgerFingerprint(first));
+  });
+
+  it("does not misrepresent a local UUID as the remote ID of a provider event", () => {
+    const result = assessCalendar(
+      snapshot([
+        event(
+          "44444444-4444-4444-8444-444444444444",
+          "2026-08-24T13:00:00.000Z",
+          "2026-08-24T14:00:00.000Z",
+          { remoteEventId: null, status: "tentative" },
+        ),
+      ]),
+    );
+
+    expect(result.findings[0]?.sourceReferences[0]).toMatchObject({
+      provider: "google",
+      remoteId: null,
+    });
   });
 
   it("blocks empty source evidence instead of producing a maintained assessment", () => {

@@ -425,6 +425,32 @@ describe.sequential("Calendar stewardship service", () => {
     await expect(service.getStatus(userId)).resolves.toMatchObject({ lifecycle: "stale" });
   });
 
+  it("expires review reuse at the selected source freshness transition", async () => {
+    const lastSyncedAt = new Date(initialNow.getTime() - 14 * 60_000);
+    await database.db
+      .update(calendarAccounts)
+      .set({ lastSyncedAt })
+      .where(eq(calendarAccounts.id, accountId));
+    await database.db
+      .update(calendars)
+      .set({ lastSyncedAt })
+      .where(eq(calendars.id, calendarId));
+
+    const first = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect(first.nextMaintenanceAt).toBe("2026-08-23T12:01:00.001Z");
+
+    now = new Date("2026-08-23T12:01:00.001Z");
+    await expect(service.getStatus(userId)).resolves.toMatchObject({
+      lifecycle: "stale",
+      readiness: "degraded",
+      sources: [expect.objectContaining({ state: "stale" })],
+    });
+    const second = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    expect(second.id).not.toBe(first.id);
+    expect(second.state).toBe("blocked");
+    await expect(database.db.select().from(calendarReviews)).resolves.toHaveLength(2);
+  });
+
   it("counts newly assessed findings in settled live status before they are persisted", async () => {
     await database.db
       .update(calendarEvents)

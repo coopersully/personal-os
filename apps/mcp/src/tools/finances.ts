@@ -1,119 +1,239 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
+import {
+  type FinanceToolResult,
+  financeMaintenanceInputSchema,
+  financeSetupInputSchema,
+  manageFinanceGoalInputSchema,
+} from "@personal-os/domain";
 import { z } from "zod";
-import { result } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
+const idempotencyKey = z
+  .string()
+  .min(1)
+  .max(200)
+  .describe("Reuse only to retry the exact same mutation.");
 
-/** Finance-owned MCP surface. Domain policy remains enforced by the API. */
+function envelope<T>(data: T, headline: string): FinanceToolResult<T> {
+  return {
+    changes: [],
+    communication: { headline, optionalDetails: [], requiredDisclosures: [] },
+    data,
+    outcome: "completed",
+    remainingWork: { categories: [], count: 0 },
+    schemaVersion: 1,
+  };
+}
+
+function financeResult<T>(value: FinanceToolResult<T>) {
+  const question = value.communication.nextQuestion?.prompt;
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: question
+          ? `${value.communication.headline}\n\n${question}`
+          : value.communication.headline,
+      },
+    ],
+    structuredContent: value,
+  };
+}
+
+const allocation = z.discriminatedUnion("kind", [
+  z.object({
+    amount: z.number().nonnegative(),
+    categoryId: id,
+    key: z.string().min(1),
+    kind: z.literal("spending"),
+  }),
+  z.object({
+    accountId: id,
+    amount: z.number().nonnegative(),
+    key: z.string().min(1),
+    kind: z.literal("debt"),
+  }),
+  z.object({
+    amount: z.number().nonnegative(),
+    goalId: id,
+    key: z.string().min(1),
+    kind: z.literal("goal"),
+  }),
+  z.object({
+    amount: z.number().nonnegative(),
+    goalId: id.optional(),
+    key: z.string().min(1),
+    kind: z.literal("savings"),
+  }),
+  z.object({ amount: z.number().nonnegative(), key: z.string().min(1), kind: z.literal("buffer") }),
+]);
+const resource = z.object({
+  amount: z.number().nonnegative(),
+  key: z.string().min(1),
+  kind: z.enum(["income", "reserve_draw", "borrowing", "other"]),
+  sourceId: id.optional(),
+});
+const budget = {
+  allocations: z.array(allocation).min(1).max(500),
+  assumptions: z.array(z.string().min(1).max(1000)).max(100),
+  effectiveFrom: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  idempotencyKey,
+  name: z.string().min(1).max(160).default("Monthly plan"),
+  rationale: z.string().min(1).max(4000),
+  resources: z.array(resource).min(1).max(100),
+};
+
+/** Intent-first Finance MCP surface. Domain policy and accounting stay in the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
   server.registerTool(
-    "get_finance_wealth_summary",
-    {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description:
-        "Read net worth split into cash, investments, debt, and other assets plus annualized income and current monthly budget capacity.",
-      inputSchema: {},
-      title: "Get finance wealth summary",
-    },
-    async () => result(await api.getFinanceWealthSummary()),
-  );
-
-  server.registerTool(
-    "get_finance_cashflow",
-    {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description:
-        "Read the user's financial profile, expected income streams, recurring obligations, and conservative cash-flow forecast before giving financial-planning guidance.",
-      inputSchema: {},
-      title: "Get finance cash flow",
-    },
-    async () =>
-      result({
-        alerts: await api.listFinanceAlerts(),
-        forecast: await api.getFinanceForecast(),
-        incomeStreams: await api.listFinanceIncomeStreams(),
-        profile: await api.getFinanceProfile(),
-        recurringObligations: await api.listFinanceRecurringObligations(),
-      }),
-  );
-
-  server.registerTool(
-    "review_finance_recurring_payment",
+    "setup_finances",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Confirm, pause, or cancel a detected recurring bill or subscription after inspecting its evidence. Confirmation makes the inferred pattern user-owned.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. It inspects existing state, returns one question at a time, persists each answer, shows the proposed budget, accepts a plain approval or authorized bypass self-approval, then continues into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
       inputSchema: {
-        id,
-        status: z.enum(["active", "cancelled", "paused"]),
+        answer: z.string().max(10000).optional(),
+        approvalSource: z.enum(["user_instruction", "agent_self_approval"]).optional(),
+        budgetVersionId: id.optional(),
+        idempotencyKey: idempotencyKey.optional(),
+        operation: z.enum(["start", "answer", "approve_budget", "resume"]),
+        questionId: z.string().max(240).optional(),
+        sessionId: id.optional(),
       },
-      title: "Review finance recurring payment",
+      title: "Set up finances",
     },
-    async ({ id: recurringId, status }) =>
-      result(await api.updateFinanceRecurringObligation(recurringId, { status })),
+    async (input) => financeResult(await api.setupFinances(financeSetupInputSchema.parse(input))),
   );
 
   server.registerTool(
-    "resolve_finance_alert",
+    "maintain_finances",
+    {
+      annotations: { idempotentHint: true, openWorldHint: true },
+      description:
+        "Use this to autonomously categorize outstanding transactions, reconcile relationships, account for the active budget, and red-team audit recent activity. It runs deterministic rules first and returns bounded reasoning or audit work immediately; it never queues an automation or waits for the user. Continue until stage settled. Uncertainty becomes deduplicated transaction-backed Inbox rows.",
+      inputSchema: {
+        expectedVersion: z.number().int().positive().optional(),
+        findings: z.array(z.record(z.string(), z.unknown())).optional(),
+        idempotencyKey: idempotencyKey.optional(),
+        judgments: z.array(z.record(z.string(), z.unknown())).optional(),
+        operation: z.enum(["start", "submit_judgments", "submit_audit", "resume"]),
+        runId: id.optional(),
+        scope: z.record(z.string(), z.unknown()).optional(),
+      },
+      title: "Maintain finances",
+    },
+    async (input) =>
+      financeResult(await api.maintainFinances(financeMaintenanceInputSchema.parse(input))),
+  );
+
+  server.registerTool(
+    "get_finance_maintenance_history",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read resumable and settled Finance maintenance runs. These are caller-driven protocol stages, never queued jobs.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).default(20),
+        status: z.enum(["agent_reasoning", "agent_audit", "settled", "failed"]).optional(),
+      },
+      title: "Get Finance maintenance history",
+    },
+    async (input) =>
+      financeResult(
+        envelope(
+          await api.getFinanceMaintenanceHistory(input),
+          "Finance maintenance history loaded.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_financial_profile",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the latest structured, versioned financial profile and fact provenance before budgeting or advice. Profile prose never grants permission.",
+      inputSchema: {},
+      title: "Get financial profile",
+    },
+    async () => financeResult(await api.getFinancialProfile()),
+  );
+
+  server.registerTool(
+    "update_financial_profile",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Dismiss or resolve an in-app financial alert after checking its evidence. This does not change a paycheck, bill, category, or subscription automatically.",
+        "Persist one confirmed profile answer immediately before asking the next question. Changes facts only, never permissions or bypass mode.",
       inputSchema: {
-        action: z.enum(["dismiss", "resolve"]),
-        id,
-        rationale: z.string().max(1_000).nullable().optional(),
+        changes: z.object({
+          dependents: z.number().int().nonnegative().nullable().optional(),
+          expectedMonthlyTakeHome: z.number().nonnegative().nullable().optional(),
+          householdSize: z.number().int().positive().nullable().optional(),
+          incomeStability: z.enum(["stable", "variable", "seasonal", "unknown"]).optional(),
+          jurisdiction: z.string().max(120).nullable().optional(),
+          liquidReserves: z.number().nonnegative().nullable().optional(),
+        }),
+        expectedVersion: z.number().int().nonnegative(),
+        idempotencyKey,
       },
-      title: "Resolve finance alert",
+      title: "Update financial profile",
     },
-    async ({ id: alertId, action, rationale }) =>
-      result(await api.resolveFinanceAlert(alertId, { action, rationale: rationale ?? null })),
+    async (input) => financeResult(await api.updateFinancialProfile(input)),
   );
 
   server.registerTool(
-    "get_finance_ledger_health",
+    "get_finance_budget",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read the integrity health of the finance ledger: pending activity, unmatched transfer candidates, possible duplicates, stale accounts, missing provenance, and open review work. Use this before trusting a budget or cash-flow total.",
-      inputSchema: {},
-      title: "Get finance ledger health",
+        "Read the latest complete budget version, all resources and allocations, its balance proof, assumptions, and approval state.",
+      inputSchema: { planId: id.optional() },
+      title: "Get Finance budget",
     },
-    async () => result(await api.getFinanceLedgerHealth()),
+    async ({ planId }) => financeResult(await api.getFinanceBudget(planId)),
   );
 
   server.registerTool(
-    "list_finance_transactions",
+    "create_finance_budget",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "List transactions with explicit date, account, category, pending, and review filters. Use this instead of the overview for investigation or monthly analysis.",
+        "Create and show a complete balanced proposal. Use explicit income, reserve draw, or borrowing; never hide a deficit or leave resources unassigned. This does not activate it.",
+      inputSchema: budget,
+      title: "Create Finance budget",
+    },
+    async (input) => financeResult(await api.createFinanceBudget(input)),
+  );
+
+  server.registerTool(
+    "revise_finance_budget",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Create a balanced successor budget version after priorities or evidence change. Never overwrite the prior version.",
+      inputSchema: { ...budget, expectedVersion: z.number().int().positive(), planId: id },
+      title: "Revise Finance budget",
+    },
+    async (input) => financeResult(await api.reviseFinanceBudget(input)),
+  );
+
+  server.registerTool(
+    "approve_finance_budget",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Activate a shown balanced proposal. When the user says approve, call with user_instruction. A fully scoped bypass agent may use agent_self_approval autonomously.",
       inputSchema: {
-        accountId: id.optional(),
-        categoryId: id.optional(),
-        cursor: z.string().datetime().optional(),
-        from: z.iso.date().optional(),
-        limit: z.number().int().min(1).max(200).default(50),
-        pending: z.boolean().optional(),
-        review: z.enum(["all", "needs_review", "resolved"]).default("all"),
-        to: z.iso.date().optional(),
+        approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+        budgetVersionId: id,
+        expectedVersion: z.number().int().positive(),
+        idempotencyKey,
       },
-      title: "List finance transactions",
+      title: "Approve Finance budget",
     },
-    async (input) => result(await api.listFinanceTransactions(input)),
-  );
-
-  server.registerTool(
-    "get_finance_categories",
-    {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description:
-        "List the user's stable finance categories before proposing or applying a category.",
-      inputSchema: {},
-      title: "Get finance categories",
-    },
-    async () => result(await api.getFinanceCategories()),
+    async (input) => financeResult(await api.approveFinanceBudget(input)),
   );
 
   server.registerTool(
@@ -121,138 +241,238 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read budget limits, month-to-date spending, and remaining funds. Use this before suggesting a spending change or flagging an over-budget category.",
-      inputSchema: {
-        month: z
-          .string()
-          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
-          .optional(),
-      },
-      title: "Get finance budget status",
+        "Read the active budget and disclose resources, allocations, buffer or deficit, and material assumptions before spending advice.",
+      inputSchema: {},
+      title: "Get Finance budget status",
     },
-    async ({ month }) => result(await api.getFinanceBudgetStatus(month)),
+    async () => financeResult(await api.getCanonicalFinanceBudgetStatus()),
   );
 
   server.registerTool(
-    "list_finance_merchants",
+    "list_finance_goals",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
-      description:
-        "List canonical merchant display names and their raw provider aliases. Inspect this before renaming or merging merchant records.",
-      inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
-      title: "List finance merchants",
+      description: "List versioned financial goals used by budget allocations and advice.",
+      inputSchema: {},
+      title: "List Finance goals",
     },
-    async ({ limit }) => result(await api.listFinanceMerchants(limit)),
+    async () => financeResult(await api.listFinanceGoals()),
   );
 
   server.registerTool(
-    "rename_finance_merchant",
+    "manage_finance_goal",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Set a clear, user-facing display name for one canonical merchant. This never changes historical amounts or categories.",
-      inputSchema: { displayName: z.string().min(1).max(240), id },
-      title: "Rename finance merchant",
-    },
-    async ({ id: merchantId, displayName }) =>
-      result(await api.updateFinanceMerchant(merchantId, { displayName })),
-  );
-
-  server.registerTool(
-    "merge_finance_merchants",
-    {
-      annotations: { idempotentHint: true, openWorldHint: false },
-      description:
-        "Merge duplicate merchant records only after confirming their aliases represent the same real place. Moves aliases and transactions to the target merchant while preserving the target display name.",
-      inputSchema: { sourceMerchantId: id, targetMerchantId: id },
-      title: "Merge finance merchants",
-    },
-    async (input) => result(await api.mergeFinanceMerchants(input)),
-  );
-
-  server.registerTool(
-    "get_finance_review_queue",
-    {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description:
-        "Read transactions deliberately held for review, including the reason, candidate category, merchant evidence, and current status.",
-      inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
-      title: "Get finance review queue",
-    },
-    async ({ limit }) => result(await api.getFinanceReviewQueue(limit)),
-  );
-
-  server.registerTool(
-    "propose_finance_categorizations",
-    {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description:
-        "Prepare conservative category proposals for transactions needing review. This does not change any transaction or create a reusable merchant rule.",
+        "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general ilo goals.",
       inputSchema: {
-        accountId: id.optional(),
-        from: z.iso.date().optional(),
-        limit: z.number().int().min(1).max(100).default(50),
-        to: z.iso.date().optional(),
+        changes: z.record(z.string(), z.unknown()).optional(),
+        deadline: z.iso.date().nullable().optional(),
+        expectedVersion: z.number().int().positive().optional(),
+        goalId: id.optional(),
+        idempotencyKey,
+        name: z.string().max(240).optional(),
+        operation: z.enum(["create", "update", "complete", "pause", "resume", "remove"]),
+        priority: z.enum(["low", "medium", "high"]).optional(),
+        targetAmount: z.number().nonnegative().optional(),
       },
-      title: "Propose finance categorizations",
+      title: "Manage Finance goal",
     },
     async (input) =>
-      result(await api.proposeFinanceCategorizations({ ...input, review: "needs_review" })),
+      financeResult(await api.manageFinanceGoal(manageFinanceGoalInputSchema.parse(input))),
   );
 
   server.registerTool(
-    "apply_finance_categorizations",
-    {
-      annotations: { idempotentHint: true, openWorldHint: false },
-      description:
-        "Apply proposed agent categorizations. The service enforces an adaptive high-confidence threshold; below it, the transaction stays in review. Set learnMerchant to always only when a durable rule is explicitly intended.",
-      inputSchema: {
-        decisions: z
-          .array(
-            z.object({
-              categoryId: id,
-              confidence: z.number().min(0).max(1),
-              learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
-              rationale: z.string().min(1).max(1_000),
-              transactionId: id,
-            }),
-          )
-          .min(1)
-          .max(100),
-      },
-      title: "Apply finance categorizations",
-    },
-    async (input) => result(await api.applyFinanceCategorizations(input)),
-  );
-
-  server.registerTool(
-    "resolve_finance_review",
-    {
-      annotations: { idempotentHint: true, openWorldHint: false },
-      description:
-        "Record a user's review decision: approve, recategorize, defer, or mark a transfer. User confirmations build confidence gradually; no permanent rule is created unless requested.",
-      inputSchema: {
-        action: z.enum(["approve", "defer", "not_purchase", "recategorize"]),
-        categoryId: id.optional(),
-        id,
-        learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
-        rationale: z.string().max(1_000).nullable().default(null),
-      },
-      title: "Resolve finance review",
-    },
-    async ({ id: reviewId, ...input }) => result(await api.resolveFinanceReview(reviewId, input)),
-  );
-
-  server.registerTool(
-    "get_finance_overview",
+    "get_finance_inbox",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read finance accounts, budgets, recent transactions, spending, and the uncategorized review queue.",
+        "Read highlighted transaction-backed review rows. Ask only communication.nextQuestion.prompt, one question at a time. Do not recite every case or invent a text question list.",
       inputSchema: {},
-      title: "Get finance overview",
+      title: "Get Finance Inbox",
     },
-    async () => result(await api.getFinanceOverview()),
+    async () => financeResult(await api.getFinanceInbox()),
+  );
+
+  server.registerTool(
+    "answer_finance_review",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Call immediately after the user's answer. It applies the change and resolves the row atomically. Briefly acknowledge changes, then ask only the returned next question.",
+      inputSchema: {
+        answer: z.string().min(1).max(10000),
+        idempotencyKey,
+        resolution: z.record(z.string(), z.unknown()),
+        reviewId: id,
+      },
+      title: "Answer Finance review",
+    },
+    async ({ reviewId, ...input }) =>
+      financeResult(await api.answerFinanceReview(reviewId, input as never)),
+  );
+
+  const reads: Array<[string, string, () => Promise<unknown>]> = [
+    [
+      "get_finance_snapshot",
+      "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
+      () => api.getFinanceOverview(),
+    ],
+    [
+      "get_finance_wealth_summary",
+      "Read net worth, cash, investments, debt, income basis, and plan capacity.",
+      () => api.getFinanceWealthSummary(),
+    ],
+    [
+      "get_finance_ledger_health",
+      "Read whether ledger totals are trustworthy, including stale sources, duplicates, transfers, and missing provenance.",
+      () => api.getFinanceLedgerHealth(),
+    ],
+    [
+      "get_finance_categories",
+      "List stable Finance categories before classifying or budgeting.",
+      () => api.getFinanceCategories(),
+    ],
+    [
+      "export_finance_data",
+      "Export the user's ilo-owned Finance ledger, accounts, categories, and projections.",
+      () => api.exportFinanceData(),
+    ],
+  ];
+  for (const [name, description, read] of reads) {
+    server.registerTool(
+      name,
+      {
+        annotations: { openWorldHint: false, readOnlyHint: true },
+        description,
+        inputSchema: {},
+        title: name.replaceAll("_", " "),
+      },
+      async () => financeResult(envelope(await read(), `${name.replaceAll("_", " ")} loaded.`)),
+    );
+  }
+
+  server.registerTool(
+    "get_finance_cashflow",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read forecast income, obligations, alerts, and safe-to-spend evidence before near-term advice.",
+      inputSchema: {},
+      title: "Get Finance cash flow",
+    },
+    async () =>
+      financeResult(
+        envelope(
+          {
+            alerts: await api.listFinanceAlerts(),
+            forecast: await api.getFinanceForecast(),
+            incomeStreams: await api.listFinanceIncomeStreams(),
+            recurringItems: await api.listFinanceRecurringObligations(),
+          },
+          "Cash-flow evidence loaded.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "list_finance_accounts",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "List every connected or manual Finance account, current balance, source status, and last sync. Use before sync, connection, or account-specific investigation.",
+      inputSchema: {},
+      title: "List Finance accounts",
+    },
+    async () => {
+      const overview = await api.getFinanceOverview();
+      return financeResult(
+        envelope(overview.accounts, `Found ${overview.accounts.length} Finance accounts.`),
+      );
+    },
+  );
+
+  server.registerTool(
+    "start_finance_account_connection",
+    {
+      annotations: { openWorldHint: true },
+      description:
+        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the ilo web application. The external provider may still require the user to authenticate and consent.",
+      inputSchema: { provider: z.literal("plaid").default("plaid") },
+      title: "Start Finance account connection",
+    },
+    async ({ provider }) => {
+      const linkToken = await api.getPlaidLinkToken();
+      return financeResult({
+        ...envelope(
+          { externalHandoff: { linkToken, provider }, status: "pending" },
+          "The secure bank authorization handoff is ready.",
+        ),
+        outcome: "external_action_required",
+        remainingWork: { categories: ["provider_authorization"], count: 1 },
+      });
+    },
+  );
+
+  server.registerTool(
+    "sync_finance_accounts",
+    {
+      annotations: { idempotentHint: true, openWorldHint: true },
+      description:
+        "Synchronize the requested accounts now. Continue healthy accounts when one source fails and return each failure as an account-scoped diagnostic with the precise remedy.",
+      inputSchema: { accountIds: z.array(id).min(1).max(100), idempotencyKey },
+      title: "Sync Finance accounts",
+    },
+    async ({ accountIds }) => {
+      const syncedAccountIds: string[] = [];
+      const issues: NonNullable<FinanceToolResult<unknown>["diagnostics"]>["issues"] = [];
+      for (const accountId of accountIds) {
+        try {
+          await api.syncFinanceAccount(accountId);
+          syncedAccountIds.push(accountId);
+        } catch (error) {
+          issues.push({
+            affectedWork: [accountId],
+            code: "account_sync_failed",
+            plainLanguage: error instanceof Error ? error.message : "This account did not sync.",
+            remedy:
+              "Reconnect this account if its provider authorization expired, then retry only this account.",
+            retryable: true,
+            scope: "account",
+            unaffectedWork: accountIds.filter((id) => id !== accountId),
+          });
+        }
+      }
+      return financeResult({
+        ...envelope(
+          { syncedAccountIds },
+          `Synchronized ${syncedAccountIds.length} of ${accountIds.length} accounts.`,
+        ),
+        ...(issues.length ? { diagnostics: { issues } } : {}),
+      });
+    },
+  );
+
+  server.registerTool(
+    "list_finance_transactions",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "List ledger transactions for investigation, accounting, or audit. Treat cursor as opaque and pass it back unchanged.",
+      inputSchema: {
+        accountId: id.optional(),
+        categoryId: id.optional(),
+        cursor: z.string().max(600).optional(),
+        from: z.iso.date().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        pending: z.boolean().optional(),
+        review: z.enum(["all", "needs_review", "resolved"]).default("all"),
+        to: z.iso.date().optional(),
+      },
+      title: "List Finance transactions",
+    },
+    async (input) =>
+      financeResult(envelope(await api.listFinanceTransactions(input), "Transactions loaded.")),
   );
 
   server.registerTool(
@@ -260,41 +480,64 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false },
       description:
-        "Add a finance transaction. Omit category only when the agent is genuinely uncertain; it will enter the user's review queue.",
+        "Add a manual ledger transaction. Leave category null only when genuinely uncertain so maintenance can reason about it.",
       inputSchema: {
         accountId: id,
         amount: z.number().positive(),
-        category: z.string().min(1).max(80).nullable().default(null),
+        category: z.string().max(80).nullable().default(null),
         date: z.iso.date(),
         direction: z.enum(["income", "expense", "transfer"]),
         merchant: z.string().min(1).max(240),
-        notes: z.string().max(4_000).nullable().default(null),
+        notes: z.string().max(4000).nullable().default(null),
       },
-      title: "Add finance transaction",
+      title: "Add Finance transaction",
     },
     async (input) =>
-      result(
-        await api.createFinanceTransaction({
-          ...input,
-          categoryConfidence: input.category === null ? null : 1,
-        }),
+      financeResult(
+        envelope(
+          await api.createFinanceTransaction({
+            ...input,
+            categoryConfidence: input.category ? 1 : null,
+          }),
+          "Transaction added.",
+        ),
       ),
   );
 
   server.registerTool(
-    "categorize_finance_transaction",
+    "list_finance_merchants",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description: "List canonical merchants and provider aliases before renaming or merging.",
+      inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
+      title: "List Finance merchants",
+    },
+    async ({ limit }) =>
+      financeResult(envelope(await api.listFinanceMerchants(limit), "Merchants loaded.")),
+  );
+  server.registerTool(
+    "update_finance_merchant",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description: "Set a clear merchant display name without altering historical amounts.",
+      inputSchema: { displayName: z.string().min(1).max(240), merchantId: id },
+      title: "Update Finance merchant",
+    },
+    async ({ merchantId, displayName }) =>
+      financeResult(
+        envelope(await api.updateFinanceMerchant(merchantId, { displayName }), "Merchant updated."),
+      ),
+  );
+  server.registerTool(
+    "merge_finance_merchants",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Legacy direct categorization. Prefer propose_finance_categorizations and apply_finance_categorizations so confidence, review, and learning intent are recorded.",
-      inputSchema: {
-        category: z.string().min(1).max(80),
-        id,
-        learnMerchant: z.boolean().default(false),
-      },
-      title: "Categorize finance transaction",
+        "Merge duplicate merchant identities after evidence shows they are the same real merchant.",
+      inputSchema: { sourceMerchantId: id, targetMerchantId: id },
+      title: "Merge Finance merchants",
     },
-    async ({ id: transactionId, category, learnMerchant }) =>
-      result(await api.updateFinanceTransaction(transactionId, { category, learnMerchant })),
+    async (input) =>
+      financeResult(envelope(await api.mergeFinanceMerchants(input), "Merchants merged.")),
   );
 }

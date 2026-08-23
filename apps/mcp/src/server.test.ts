@@ -252,6 +252,17 @@ function mockApi() {
       type: "income_missing",
     })),
     getFinanceCategories: vi.fn(async () => []),
+    exportFinanceData: vi.fn(async () => ({
+      accounts: [],
+      alerts: [],
+      asOf: now,
+      budgets: [],
+      categories: [],
+      incomeStreams: [],
+      profile: null,
+      recurringObligations: [],
+      transactions: [],
+    })),
     getFinanceBudgetStatus: vi.fn(async () => []),
     listFinanceMerchants: vi.fn(async () => []),
     mergeFinanceMerchants: vi.fn(async () => ({
@@ -358,24 +369,34 @@ describe("ilo MCP server", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual([
-      "get_finance_wealth_summary",
-      "get_finance_cashflow",
-      "review_finance_recurring_payment",
-      "resolve_finance_alert",
-      "get_finance_ledger_health",
-      "list_finance_transactions",
-      "get_finance_categories",
+      "setup_finances",
+      "maintain_finances",
+      "get_finance_maintenance_history",
+      "get_financial_profile",
+      "update_financial_profile",
+      "get_finance_budget",
+      "create_finance_budget",
+      "revise_finance_budget",
+      "approve_finance_budget",
       "get_finance_budget_status",
-      "list_finance_merchants",
-      "rename_finance_merchant",
-      "merge_finance_merchants",
-      "get_finance_review_queue",
-      "propose_finance_categorizations",
-      "apply_finance_categorizations",
-      "resolve_finance_review",
-      "get_finance_overview",
+      "list_finance_goals",
+      "manage_finance_goal",
+      "get_finance_inbox",
+      "answer_finance_review",
+      "get_finance_snapshot",
+      "get_finance_wealth_summary",
+      "get_finance_ledger_health",
+      "get_finance_categories",
+      "export_finance_data",
+      "get_finance_cashflow",
+      "list_finance_accounts",
+      "start_finance_account_connection",
+      "sync_finance_accounts",
+      "list_finance_transactions",
       "add_finance_transaction",
-      "categorize_finance_transaction",
+      "list_finance_merchants",
+      "update_finance_merchant",
+      "merge_finance_merchants",
       "list_x_bookmarks",
       "sync_x_bookmarks",
       "list_reminders",
@@ -429,48 +450,21 @@ describe("ilo MCP server", () => {
       arguments: { detail: null, title: "Act with care" },
     });
 
-    await client.callTool({ name: "get_finance_overview", arguments: {} });
+    await client.callTool({ name: "get_finance_snapshot", arguments: {} });
     await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
     await client.callTool({ name: "get_finance_cashflow", arguments: {} });
-    await client.callTool({
-      name: "review_finance_recurring_payment",
-      arguments: { id, status: "active" },
-    });
-    await client.callTool({
-      name: "resolve_finance_alert",
-      arguments: { action: "resolve", id, rationale: "Reviewed in the dashboard." },
-    });
     await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
     await client.callTool({ name: "list_finance_transactions", arguments: { limit: 10 } });
     await client.callTool({ name: "get_finance_categories", arguments: {} });
-    await client.callTool({ name: "get_finance_budget_status", arguments: { month: "2026-07" } });
+    await client.callTool({ name: "export_finance_data", arguments: {} });
     await client.callTool({ name: "list_finance_merchants", arguments: {} });
     await client.callTool({
-      name: "rename_finance_merchant",
-      arguments: { displayName: "Test", id },
+      name: "update_finance_merchant",
+      arguments: { displayName: "Test", merchantId: id },
     });
     await client.callTool({
       name: "merge_finance_merchants",
       arguments: { sourceMerchantId: accountId, targetMerchantId: id },
-    });
-    await client.callTool({ name: "get_finance_review_queue", arguments: {} });
-    await client.callTool({ name: "propose_finance_categorizations", arguments: {} });
-    await client.callTool({
-      name: "apply_finance_categorizations",
-      arguments: {
-        decisions: [
-          {
-            categoryId: id,
-            confidence: 0.99,
-            rationale: "Known merchant history.",
-            transactionId: accountId,
-          },
-        ],
-      },
-    });
-    await client.callTool({
-      name: "resolve_finance_review",
-      arguments: { action: "defer", id },
     });
     await client.callTool({ name: "list_x_bookmarks", arguments: {} });
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
@@ -505,10 +499,6 @@ describe("ilo MCP server", () => {
         direction: "expense",
         merchant: "Categorized",
       },
-    });
-    await client.callTool({
-      name: "categorize_finance_transaction",
-      arguments: { id, category: "Dining" },
     });
 
     await client.callTool({

@@ -212,8 +212,8 @@ describe("Calendar schedule health", () => {
     await browser.click(screen.getByRole("button", { name: "Assess calendar" }));
     await waitFor(() => expect(mocks.createCalendarReview).toHaveBeenCalledWith());
     expect(await screen.findByText("Busy events overlap")).toBeInTheDocument();
-    expect(screen.getByText(/Evidence through/)).toBeInTheDocument();
-    expect(screen.getByText("Recommendations are advisory")).toBeInTheDocument();
+    expect(screen.getByText("Evidence through", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText("Recommendations are advisory.")).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
   });
 
@@ -291,6 +291,10 @@ describe("Calendar schedule health", () => {
     expect(await screen.findByText("This review is stale")).toBeInTheDocument();
     expect(screen.getByText("Busy events overlap")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Assess calendar" }));
-    expect(await screen.findByText("Assessment unavailable")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Assessment unavailable", {
+        selector: '[data-slot="alert-title"]',
+      }),
+    ).toBeInTheDocument();
   });
 });

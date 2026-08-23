@@ -197,6 +197,30 @@ const financeBudget: FinanceBudget = {
   month: "2026-07",
   updatedAt: now,
 };
+const canonicalFinanceBudget = {
+  allocatedTotal: 8000,
+  allocations: [{ amount: 8000, key: "buffer", kind: "buffer" as const }],
+  approvedAt: null,
+  assumptions: [],
+  balanceDelta: 0,
+  createdAt: now,
+  effectiveFrom: "2026-09",
+  expectedResources: 8000,
+  id: accountId,
+  planId: id,
+  rationale: "Balanced fixture",
+  resources: [{ amount: 8000, key: "income", kind: "income" as const }],
+  status: "proposed" as const,
+  version: 1,
+};
+const financeEnvelope = (data: unknown) => ({
+  changes: [],
+  communication: { headline: "Done", optionalDetails: [], requiredDisclosures: [] },
+  data,
+  outcome: "completed",
+  remainingWork: { categories: [], count: 0 },
+  schemaVersion: 1,
+});
 const financeMerchant: FinanceMerchant = {
   aliases: ["CORNER STORE #102"],
   displayName: "Corner Store",
@@ -494,6 +518,31 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/profile/current") return json(financeEnvelope(null));
+    if (url.pathname === "/v1/finances/profile" && method === "PATCH")
+      return json(
+        financeEnvelope({
+          createdAt: now,
+          debts: [],
+          dependents: 0,
+          expectedMonthlyTakeHome: 8000,
+          householdSize: 1,
+          id,
+          incomeStability: "stable",
+          insurance: [],
+          jurisdiction: null,
+          liquidReserves: null,
+          preferences: {
+            bufferTarget: null,
+            debtPriority: null,
+            emergencyReserveMonths: null,
+            notes: [],
+          },
+          provenance: {},
+          userId: id,
+          version: 1,
+        }),
+      );
     if (url.pathname === "/v1/finances/profile")
       return json({
         profile: {
@@ -578,6 +627,34 @@ function apiFetch() {
       });
     if (url.pathname === "/v1/finances/budgets/status")
       return json({ budgets: [{ budget: financeBudget, remaining: 231.5, spent: 18.5 }] });
+    if (url.pathname === "/v1/finances/budget-plans")
+      return json(financeEnvelope(canonicalFinanceBudget), method === "POST" ? 201 : 200);
+    if (url.pathname === `/v1/finances/budget-plans/${id}/revisions`)
+      return json(financeEnvelope({ ...canonicalFinanceBudget, version: 2 }), 201);
+    if (url.pathname === `/v1/finances/budget-versions/${accountId}/approve`)
+      return json(financeEnvelope({ ...canonicalFinanceBudget, status: "active" }));
+    if (url.pathname === "/v1/finances/budget-status")
+      return json(financeEnvelope({ ...canonicalFinanceBudget, status: "active" }));
+    if (url.pathname === "/v1/finances/goals")
+      return json(
+        financeEnvelope(
+          method === "GET"
+            ? []
+            : {
+                createdAt: now,
+                currentAmount: 0,
+                deadline: null,
+                id,
+                name: "Reserve",
+                priority: "high",
+                status: "active",
+                targetAmount: 12000,
+                updatedAt: now,
+                version: 1,
+              },
+        ),
+        method === "POST" ? 201 : 200,
+      );
     if (url.pathname === "/v1/finances/merchants" && method === "GET")
       return json({ merchants: [financeMerchant] });
     if (url.pathname === "/v1/finances/merchants/merge" && method === "POST")
@@ -799,6 +876,42 @@ describe("ilo API client", () => {
     await expect(
       api.createFinanceBudget({ category: "Dining", limit: 250, month: "2026-07" }),
     ).resolves.toEqual(financeBudget);
+    await expect(
+      api.createFinanceBudget({
+        allocations: [{ amount: 8000, key: "buffer", kind: "buffer" }],
+        assumptions: [],
+        effectiveFrom: "2026-09",
+        idempotencyKey: "budget-1",
+        name: "Monthly plan",
+        rationale: "Balanced fixture",
+        resources: [{ amount: 8000, key: "income", kind: "income" }],
+      }),
+    ).resolves.toMatchObject({ data: { balanceDelta: 0, planId: id } });
+    await expect(api.getFinanceBudget()).resolves.toMatchObject({ data: { planId: id } });
+    await expect(
+      api.reviseFinanceBudget({
+        allocations: [{ amount: 8000, key: "buffer", kind: "buffer" }],
+        assumptions: [],
+        effectiveFrom: "2026-09",
+        expectedVersion: 1,
+        idempotencyKey: "budget-2",
+        name: "Monthly plan",
+        planId: id,
+        rationale: "Balanced fixture",
+        resources: [{ amount: 8000, key: "income", kind: "income" }],
+      }),
+    ).resolves.toMatchObject({ data: { version: 2 } });
+    await expect(
+      api.approveFinanceBudget({
+        approvalSource: "user_instruction",
+        budgetVersionId: accountId,
+        expectedVersion: 1,
+        idempotencyKey: "approve-1",
+      }),
+    ).resolves.toMatchObject({ data: { status: "active" } });
+    await expect(api.getCanonicalFinanceBudgetStatus()).resolves.toMatchObject({
+      data: { status: "active" },
+    });
     await expect(api.getFinanceOverview()).resolves.toMatchObject({ reviewCount: 1 });
     await expect(api.getFinanceOverviewForMonth("2026-07")).resolves.toMatchObject({
       reviewCount: 1,
@@ -811,6 +924,25 @@ describe("ilo API client", () => {
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
     await expect(api.getFinanceProfile()).resolves.toMatchObject({ employer: "Acme" });
+    await expect(api.getFinancialProfile()).resolves.toMatchObject({ data: null });
+    await expect(
+      api.updateFinancialProfile({
+        changes: { expectedMonthlyTakeHome: 8000 },
+        expectedVersion: 0,
+        idempotencyKey: "profile-1",
+      }),
+    ).resolves.toMatchObject({ data: { version: 1 } });
+    await expect(api.listFinanceGoals()).resolves.toMatchObject({ data: [] });
+    await expect(
+      api.manageFinanceGoal({
+        deadline: null,
+        idempotencyKey: "goal-1",
+        name: "Reserve",
+        operation: "create",
+        priority: "high",
+        targetAmount: 12000,
+      }),
+    ).resolves.toMatchObject({ data: { name: "Reserve" } });
     await expect(
       api.updateFinanceProfile({
         effectiveDate: "2026-07-01",

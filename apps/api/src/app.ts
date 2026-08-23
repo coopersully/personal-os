@@ -722,7 +722,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
-  registerFinanceRoutes({ app, finances, mutationContext });
+  registerFinanceRoutes({ app, db: dependencies.db, finances, mutationContext });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

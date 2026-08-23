@@ -20,7 +20,11 @@ const allocationBase = z.object({
 });
 
 export const financeBudgetAllocationSchema = z.discriminatedUnion("kind", [
-  allocationBase.extend({ categoryId: idSchema, kind: z.literal("spending") }),
+  allocationBase.extend({
+    categoryId: idSchema.optional(),
+    kind: z.literal("spending"),
+    legacyCategory: z.string().trim().min(1).max(240).optional(),
+  }),
   allocationBase.extend({ goalId: idSchema.optional(), kind: z.literal("savings") }),
   allocationBase.extend({ accountId: idSchema, kind: z.literal("debt") }),
   allocationBase.extend({ goalId: idSchema, kind: z.literal("goal") }),

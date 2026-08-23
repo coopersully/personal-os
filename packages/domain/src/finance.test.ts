@@ -1,4 +1,5 @@
 import {
+  financeBudgetAllocationSchema,
   financeBudgetVersionSchema,
   financeCapabilityManifest,
   financeInboxCaseSchema,
@@ -46,6 +47,17 @@ describe("canonical Finance contracts", () => {
         version: 1,
       }),
     ).toThrow("Budget resources and allocations must balance");
+  });
+
+  it("can expose an incomplete migrated allocation without inventing a category id", () => {
+    expect(
+      financeBudgetAllocationSchema.parse({
+        amount: 100,
+        key: "legacy-rent",
+        kind: "spending",
+        legacyCategory: "Rent",
+      }),
+    ).toMatchObject({ legacyCategory: "Rent" });
   });
 
   it("uses stable economic-event and reason identity for Inbox cases", () => {

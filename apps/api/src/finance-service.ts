@@ -55,6 +55,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizz
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import {
   cadenceFromDates,
   forecastCashflow,
@@ -374,6 +375,7 @@ function merchant(
 }
 
 export function createFinanceService({ db, now, plaid }: Options) {
+  const planning = createProfileBudgetService({ db, now });
   async function ensureCategories(userId: string) {
     await db
       .insert(financeCategories)
@@ -1237,6 +1239,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
     }
   }
   return {
+    ...planning,
     plaidAvailable() {
       return Boolean(plaid?.clientId && plaid.secret);
     },

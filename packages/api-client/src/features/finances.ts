@@ -1,7 +1,9 @@
 import type {
   ApplyFinanceCategorizationsInput,
+  ApproveFinanceBudgetInput,
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
+  CreateFinanceBudgetVersionInput,
   CreateFinanceTransactionInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
@@ -10,35 +12,63 @@ import type {
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
+  FinanceBudgetVersion,
   FinanceCategory,
   FinanceCsvImportInput,
   FinanceExport,
   FinanceForecast,
+  FinanceGoal,
   FinanceIncomeStream,
   FinanceLedgerHealth,
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
+  FinanceProfileVersion,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceToolResult,
   FinanceTransaction,
   FinanceTransactionQuery,
   FinanceWealthSummary,
+  ManageFinanceGoalInput,
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
+  ReviseFinanceBudgetInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
+  UpdateFinancialProfileInput,
 } from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 /** Typed Finance operations sharing the authenticated client transport. */
 export function createFinanceApi(request: FinanceRequest) {
+  function createFinanceBudget(input: CreateFinanceBudgetInput): Promise<FinanceBudget>;
+  function createFinanceBudget(
+    input: CreateFinanceBudgetVersionInput,
+  ): Promise<FinanceToolResult<FinanceBudgetVersion>>;
+  async function createFinanceBudget(
+    input: CreateFinanceBudgetInput | CreateFinanceBudgetVersionInput,
+  ): Promise<FinanceBudget | FinanceToolResult<FinanceBudgetVersion>> {
+    if ("resources" in input) {
+      return request<FinanceToolResult<FinanceBudgetVersion>>("/v1/finances/budget-plans", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    }
+    const response = await request<{ budget: FinanceBudget }>("/v1/finances/budgets", {
+      body: JSON.stringify(input),
+      method: "POST",
+    });
+    return response.budget;
+  }
+
   return {
+    createFinanceBudget,
     async applyFinanceCategorizations(
       input: ApplyFinanceCategorizationsInput,
     ): Promise<Array<{ applied: boolean; threshold: number; transaction: FinanceTransaction }>> {
@@ -57,12 +87,13 @@ export function createFinanceApi(request: FinanceRequest) {
       });
       return response.account;
     },
-    async createFinanceBudget(input: CreateFinanceBudgetInput): Promise<FinanceBudget> {
-      const response = await request<{ budget: FinanceBudget }>("/v1/finances/budgets", {
+    async approveFinanceBudget(
+      input: ApproveFinanceBudgetInput,
+    ): Promise<FinanceToolResult<FinanceBudgetVersion>> {
+      return request(`/v1/finances/budget-versions/${input.budgetVersionId}/approve`, {
         body: JSON.stringify(input),
         method: "POST",
       });
-      return response.budget;
     },
     async createFinanceTransaction(
       input: CreateFinanceTransactionInput,
@@ -120,6 +151,48 @@ export function createFinanceApi(request: FinanceRequest) {
     async getFinanceProfile(): Promise<FinanceProfile | null> {
       const response = await request<{ profile: FinanceProfile | null }>("/v1/finances/profile");
       return response.profile;
+    },
+    async getFinancialProfile(): Promise<FinanceToolResult<FinanceProfileVersion | null>> {
+      return request("/v1/finances/profile/current");
+    },
+    async updateFinancialProfile(
+      input: UpdateFinancialProfileInput,
+    ): Promise<FinanceToolResult<FinanceProfileVersion>> {
+      return request("/v1/finances/profile", {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+    },
+    async getFinanceBudget(
+      planId?: string,
+    ): Promise<FinanceToolResult<FinanceBudgetVersion | null>> {
+      return request(
+        `/v1/finances/budget-plans${planId ? `?planId=${encodeURIComponent(planId)}` : ""}`,
+      );
+    },
+    async reviseFinanceBudget(
+      input: ReviseFinanceBudgetInput,
+    ): Promise<FinanceToolResult<FinanceBudgetVersion>> {
+      return request(`/v1/finances/budget-plans/${input.planId}/revisions`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async getCanonicalFinanceBudgetStatus(): Promise<
+      FinanceToolResult<FinanceBudgetVersion | null>
+    > {
+      return request("/v1/finances/budget-status");
+    },
+    async listFinanceGoals(): Promise<FinanceToolResult<FinanceGoal[]>> {
+      return request("/v1/finances/goals");
+    },
+    async manageFinanceGoal(
+      input: ManageFinanceGoalInput,
+    ): Promise<FinanceToolResult<FinanceGoal>> {
+      return request("/v1/finances/goals", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
     },
     async updateFinanceProfile(input: UpdateFinanceProfileInput): Promise<FinanceProfile> {
       const response = await request<{ profile: FinanceProfile }>("/v1/finances/profile", {

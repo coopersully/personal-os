@@ -1,7 +1,10 @@
+import type { Database } from "@personal-os/database";
 import {
   applyFinanceCategorizationsInputSchema,
+  approveFinanceBudgetInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetInputSchema,
+  createFinanceBudgetVersionInputSchema,
   createFinanceTransactionInputSchema,
   exchangePlaidTokenInputSchema,
   financeBudgetPaceQuerySchema,
@@ -10,15 +13,19 @@ import {
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
+  manageFinanceGoalInputSchema,
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
+  reviseFinanceBudgetInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
   updateFinanceRecurringObligationInputSchema,
   updateFinanceTransactionInputSchema,
+  updateFinancialProfileInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess } from "./support.js";
@@ -27,13 +34,20 @@ type MutationContext = { principal: Principal; requestId: string };
 
 type FinanceRouteOptions = {
   app: Hono<AppEnv>;
+  db: Database;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
 /** Register the Finance-owned HTTP surface without constructing shared services. */
-export function registerFinanceRoutes({ app, finances, mutationContext }: FinanceRouteOptions) {
+export function registerFinanceRoutes({ app, db, finances, mutationContext }: FinanceRouteOptions) {
   const requireFinanceScope = requireFeatureAccess("finances");
+  const financeContext = (context: Context<AppEnv>) =>
+    loadFinanceAuthorization({
+      db,
+      principal: context.get("principal"),
+      requestId: context.get("requestId"),
+    });
   app.use("/v1/finances", requireFinanceScope);
   app.use("/v1/finances/*", requireFinanceScope);
   app.get("/v1/finances", async (context) => {
@@ -52,6 +66,17 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   );
   app.get("/v1/finances/profile", async (context) =>
     context.json({ profile: await finances.getProfile(context.get("principal").userId) }),
+  );
+  app.get("/v1/finances/profile/current", async (context) =>
+    context.json(await finances.getFinancialProfile(context.get("principal").userId)),
+  );
+  app.patch("/v1/finances/profile", async (context) =>
+    context.json(
+      await finances.updateFinancialProfile(
+        await parseBody(context, updateFinancialProfileInputSchema),
+        await financeContext(context),
+      ),
+    ),
   );
   app.put("/v1/finances/profile", async (context) =>
     context.json({
@@ -248,6 +273,86 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       201,
     ),
   );
+  app.get("/v1/finances/budget-plans", async (context) =>
+    context.json(
+      await finances.getFinanceBudget(context.get("principal").userId, context.req.query("planId")),
+    ),
+  );
+  app.post("/v1/finances/budget-plans", async (context) =>
+    context.json(
+      await finances.createFinanceBudget(
+        await parseBody(context, createFinanceBudgetVersionInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
+  app.post("/v1/finances/budget-plans/:id/revisions", async (context) => {
+    const body = await context.req.json();
+    return context.json(
+      await finances.reviseFinanceBudget(
+        reviseFinanceBudgetInputSchema.parse({
+          ...(body as Record<string, unknown>),
+          planId: context.req.param("id"),
+        }),
+        await financeContext(context),
+      ),
+      201,
+    );
+  });
+  app.post("/v1/finances/budget-versions/:id/approve", async (context) => {
+    const body = await context.req.json();
+    return context.json(
+      await finances.approveFinanceBudget(
+        approveFinanceBudgetInputSchema.parse({
+          ...(body as Record<string, unknown>),
+          budgetVersionId: context.req.param("id"),
+        }),
+        await financeContext(context),
+      ),
+    );
+  });
+  app.get("/v1/finances/budget-status", async (context) =>
+    context.json(await finances.getFinanceBudgetStatus(context.get("principal").userId)),
+  );
+  app.get("/v1/finances/goals", async (context) =>
+    context.json(await finances.listFinanceGoals(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/goals", async (context) =>
+    context.json(
+      await finances.manageFinanceGoal(
+        await parseBody(context, manageFinanceGoalInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
+  app.patch("/v1/finances/goals/:id", async (context) => {
+    const body = await context.req.json();
+    return context.json(
+      await finances.manageFinanceGoal(
+        manageFinanceGoalInputSchema.parse({
+          ...(body as Record<string, unknown>),
+          goalId: context.req.param("id"),
+          operation: "update",
+        }),
+        await financeContext(context),
+      ),
+    );
+  });
+  app.delete("/v1/finances/goals/:id", async (context) => {
+    const body = await context.req.json();
+    return context.json(
+      await finances.manageFinanceGoal(
+        manageFinanceGoalInputSchema.parse({
+          ...(body as Record<string, unknown>),
+          goalId: context.req.param("id"),
+          operation: "remove",
+        }),
+        await financeContext(context),
+      ),
+    );
+  });
   app.get("/v1/finances/plaid/status", async (context) =>
     context.json({ available: finances.plaidAvailable() }),
   );

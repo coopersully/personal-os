@@ -296,6 +296,7 @@ import {
   calendarQueryKeys,
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
+import { CalendarStewardshipPage } from "./features/calendar/stewardship-page.js";
 import {
   ConnectionHealthBadge,
   ConnectionHealthDescription,
@@ -943,6 +944,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
   const activeWorkspace = workspaceForPath(location.pathname);
   const isCalendarWorkspace = activeWorkspace?.id === "calendar";
+  const isSpatialCalendar = location.pathname === "/calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
   const workspacePath = activeWorkspace?.path ?? null;
   const [routeTransition, setRouteTransition] = useState<{
@@ -1182,7 +1184,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           />
 
           <main
-            className={`content${isCalendarWorkspace ? " content--calendar" : sidebarMode === "mail" ? " content--mail" : ""}`}
+            className={`content${isSpatialCalendar ? " content--calendar" : sidebarMode === "mail" ? " content--mail" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1339,6 +1341,7 @@ function WorkspaceRoutes({
         path="/calendar"
         element={<CalendarPage setEditor={setEditor} todaySnap={calendarTodaySnap} user={user} />}
       />
+      <Route path="/calendar/review" element={<CalendarStewardshipPage />} />
       <Route
         path="/reminders"
         element={
@@ -1481,8 +1484,9 @@ function WorkspaceAppBarForRoute({
   weather: WeatherSnapshot | undefined;
 }) {
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
+  const isSpatialCalendar = pathname === "/calendar";
   const identity =
-    workspace === "calendar" ? (
+    isSpatialCalendar ? (
       <CalendarAppBarIdentity user={user} workspaceSwitcher={calendarWorkspaceSwitcher} />
     ) : pathname === "/today" && todayBrief ? (
       <TodayNavigationTitle generatedAt={todayBrief.generatedAt} timeZone={user.planningTimezone} />
@@ -1494,7 +1498,7 @@ function WorkspaceAppBarForRoute({
       </span>
     );
   const context =
-    workspace === "calendar" ? (
+    isSpatialCalendar ? (
       <CalendarAppBarControls onToday={onCalendarToday} user={user} />
     ) : workspace === "mail" ? (
       <MailTopbarSearch />
@@ -2409,6 +2413,7 @@ function TodayNavigationTitle({
 
 function workspaceTitleForLocation(pathname: string, search: string): string | null {
   const searchParams = new URLSearchParams(search);
+  if (pathname === "/calendar/review") return "Calendar review";
   if (pathname === "/calendar") return "Calendar";
   if (pathname === "/reminders") {
     return searchParams.get("view") === "completed" ? "Completed reminders" : "Reminders";

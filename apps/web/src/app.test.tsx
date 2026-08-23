@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { readFileSync } from "node:fs";
-import type { UpdateAccountSetupInput, User } from "@personal-os/domain";
+import type { CalendarStatus, UpdateAccountSetupInput, User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -72,6 +72,31 @@ const user: User = {
   workdayEndMinute: 17 * 60,
   createdAt: now,
   updatedAt: now,
+};
+const calendarStatus: CalendarStatus = {
+  asOf: now,
+  authority: {
+    approvedRule: [],
+    automatic: ["inspect", "assess"],
+    individualApproval: ["create_event", "move_event"],
+    unavailable: ["book_travel", "send_correspondence"],
+  },
+  backlog: {
+    actionable: null,
+    ambiguousEffects: 0,
+    awaitingApproval: 0,
+    awaitingInput: 0,
+    blocked: 0,
+    failed: 0,
+    openFindings: null,
+  },
+  health: [],
+  latestReview: null,
+  lifecycle: "never_maintained",
+  readiness: "ready",
+  setupBlockers: [],
+  sources: [],
+  validNextOperations: ["assess_calendar"],
 };
 const calendar = {
   id,
@@ -253,6 +278,7 @@ const mocks = vi.hoisted(() => ({
   createAccessToken: vi.fn(),
   createInvitation: vi.fn(),
   createCalendar: vi.fn(),
+  createCalendarReview: vi.fn(),
   createMailDraft: vi.fn(),
   createEvent: vi.fn(),
   createEventBlock: vi.fn(),
@@ -275,6 +301,7 @@ const mocks = vi.hoisted(() => ({
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
   getDailyBrief: vi.fn(),
+  getCalendarStatus: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
   getIloSetup: vi.fn(),
@@ -430,6 +457,7 @@ function defaults() {
   mocks.plaidLink.onSuccess = null;
   mocks.plaidLink.ready = false;
   mocks.getMe.mockResolvedValue(user);
+  mocks.getCalendarStatus.mockResolvedValue(calendarStatus);
   mocks.listCalendars.mockResolvedValue([calendar, googleCalendar, nullColorCalendar]);
   mocks.listEvents.mockResolvedValue([event, allDayEvent]);
   mocks.listReminders.mockResolvedValue({
@@ -3391,6 +3419,33 @@ describe("ilo web app", () => {
     expect(screen.queryByRole("region", { name: "Calendar date picker" })).not.toBeInTheDocument();
     expect(await screen.findByText("Focus block")).toBeInTheDocument();
     calendar.unmount();
+  });
+
+  it("routes Calendar stewardship without replacing the spatial schedule", async () => {
+    const review = setup("/calendar/review");
+
+    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to schedule" })).toHaveAttribute(
+      "href",
+      "/calendar",
+    );
+    expect(
+      screen.getByText("Calendar review", { selector: ".workspace-app-bar__title" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Calendar date picker")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Calendar actions" })).not.toBeInTheDocument();
+    review.unmount();
+
+    const schedule = setup("/calendar");
+    expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Schedule health" })).toHaveAttribute(
+      "href",
+      "/calendar/review",
+    );
+    expect(screen.queryByLabelText("Calendar date picker")).not.toBeInTheDocument();
+    schedule.unmount();
   });
 
   it("keeps the calendar stable if its current-day marker is temporarily absent", async () => {

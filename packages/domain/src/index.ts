@@ -2,6 +2,7 @@ export * from "./assistant.js";
 export * from "./auth.js";
 export * from "./automation.js";
 export * from "./calendar.js";
+export * from "./calendar-stewardship.js";
 export * from "./common.js";
 export * from "./connection.js";
 export * from "./feature-contracts.js";

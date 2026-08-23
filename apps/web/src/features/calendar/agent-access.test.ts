@@ -16,5 +16,12 @@ describe("Calendar agent access readiness", () => {
         profile: { data: undefined, state: "ready" },
       })[0]?.description,
     ).toContain("1 needs reconnect");
+    expect(
+      calendarAgentAccessReadiness({
+        calendars: { data: [calendar, calendar], state: "ready" },
+        hosts: { data: [], state: "ready" },
+        profile: { data: undefined, state: "ready" },
+      })[0]?.description,
+    ).toContain("2 need reconnect");
   });
 });

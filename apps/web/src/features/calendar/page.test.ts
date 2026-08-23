@@ -11,5 +11,12 @@ describe("Calendar periods", () => {
       { day: 28, month: 8, year: 2026 },
       { day: 29, month: 8, year: 2026 },
     ]);
+    expect(calendarPeriodDays("week", { day: 23, month: 8, year: 2026 }, false)).toEqual([
+      { day: 24, month: 8, year: 2026 },
+      { day: 25, month: 8, year: 2026 },
+      { day: 26, month: 8, year: 2026 },
+      { day: 27, month: 8, year: 2026 },
+      { day: 28, month: 8, year: 2026 },
+    ]);
   });
 });

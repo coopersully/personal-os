@@ -3567,8 +3567,10 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Calendar: Personal" }));
     await browser.click(screen.getByRole("button", { name: "Selected Google" }));
     await browser.click(screen.getByRole("button", { name: "Add conferencing" }));
-    const conferencingMenu = screen.queryByRole("button", { name: "Choose conferencing" });
-    if (conferencingMenu) await browser.click(conferencingMenu);
+    const conferencingMenu =
+      screen.queryByRole("button", { name: "Choose conferencing" }) ??
+      screen.getByRole("button", { name: "Add conferencing" });
+    await browser.click(conferencingMenu);
     await browser.click(screen.getByRole("menuitemradio", { name: "Paste meeting link" }));
     expect(screen.getByLabelText("Meeting link")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Meeting link" }));

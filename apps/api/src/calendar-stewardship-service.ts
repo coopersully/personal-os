@@ -552,15 +552,29 @@ export function createCalendarStewardshipService({ db, now }: CalendarStewardshi
           { isolationLevel: "repeatable read" },
         );
       } finally {
-        try {
-          if (locked) {
+        if (!locked) {
+          client.release();
+        } else {
+          try {
             await client.query(
               "select pg_advisory_unlock(hashtextextended('calendar:' || $1, 0))",
               [userId],
             );
+            client.release();
+          } catch (error) {
+            const releaseError =
+              error instanceof Error
+                ? error
+                : new Error("The Calendar publication lock could not be released.", {
+                    cause: error,
+                  });
+            try {
+              client.release(releaseError);
+            } catch {
+              // Preserve the unlock failure after requesting connection eviction.
+            }
+            throw error;
           }
-        } finally {
-          client.release();
         }
       }
     },

@@ -14,6 +14,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, sql } from "drizzle-orm";
+import type { Pool, PoolClient } from "pg";
 import { createCalendarStewardshipService } from "./calendar-stewardship-service.js";
 
 const initialNow = new Date("2026-08-23T12:00:00.000Z");
@@ -264,6 +265,40 @@ describe.sequential("Calendar stewardship service", () => {
       expect(reviews[1]?.state).toBe("maintained");
     } finally {
       await boundedDatabase.close();
+    }
+  });
+
+  it("evicts the physical connection and preserves the failure when session unlock fails", async () => {
+    const pool = (database.db as typeof database.db & { $client: Pool }).$client;
+    const originalPoolConnect = pool.connect;
+    const connect = originalPoolConnect.bind(pool) as () => Promise<PoolClient>;
+    const unlockFailure = new Error("forced advisory unlock failure");
+    let releasedWith: Error | boolean | undefined;
+    pool.connect = (async () => {
+      const client = await connect();
+      const originalQuery = client.query.bind(client) as (...arguments_: unknown[]) => unknown;
+      const originalRelease = client.release.bind(client);
+      client.query = ((...arguments_: unknown[]) => {
+        const query = arguments_[0];
+        if (typeof query === "string" && query.includes("pg_advisory_unlock")) {
+          return Promise.reject(unlockFailure);
+        }
+        return originalQuery(...arguments_);
+      }) as typeof client.query;
+      client.release = ((error?: Error | boolean) => {
+        releasedWith = error;
+        return originalRelease(error);
+      }) as typeof client.release;
+      return client;
+    }) as typeof pool.connect;
+
+    try {
+      await expect(
+        service.createReview(userId, { scope: { type: "all_outstanding" } }),
+      ).rejects.toBe(unlockFailure);
+      expect(releasedWith).toBe(unlockFailure);
+    } finally {
+      pool.connect = originalPoolConnect;
     }
   });
 

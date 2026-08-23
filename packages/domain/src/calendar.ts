@@ -66,12 +66,20 @@ export const updateLocalCalendarInputSchema = z
   .refine((value) => Object.keys(value).length > 0, "At least one calendar field is required");
 export type UpdateLocalCalendarInput = z.infer<typeof updateLocalCalendarInputSchema>;
 
+const calendarEventHttpUrlSchema = z.url().refine(
+  (value) => {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  },
+  { message: "Calendar event URLs must use HTTP or HTTPS" },
+);
+
 const eventFieldsSchema = z.object({
   title: z.string().trim().min(1).max(500),
   notes: z.string().trim().max(50_000).nullable().default(null),
   location: z.string().trim().max(1_000).nullable().default(null),
-  conferenceUrl: z.url().nullable().default(null),
-  url: z.url().nullable().default(null),
+  conferenceUrl: calendarEventHttpUrlSchema.nullable().default(null),
+  url: calendarEventHttpUrlSchema.nullable().default(null),
   startsAt: isoDateTimeSchema,
   endsAt: isoDateTimeSchema,
   timezone: calendarTimeZoneSchema,
@@ -119,7 +127,7 @@ const updateEventFieldsSchema = z.object({
   title: z.string().trim().min(1).max(500).optional(),
   notes: z.string().trim().max(50_000).nullable().optional(),
   location: z.string().trim().max(1_000).nullable().optional(),
-  url: z.url().nullable().optional(),
+  url: calendarEventHttpUrlSchema.nullable().optional(),
   startsAt: isoDateTimeSchema.optional(),
   endsAt: isoDateTimeSchema.optional(),
   timezone: calendarTimeZoneSchema.optional(),

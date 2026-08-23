@@ -111,6 +111,37 @@ describe("Calendar assessment", () => {
     expect(result.findings.map(({ kind }) => kind)).toEqual(["event_overlap"]);
   });
 
+  it("finds old future tentative holds outside timed-busy analysis but ignores fresh ones", () => {
+    const result = assessCalendar(
+      snapshot([
+        event(
+          "44444444-4444-4444-8444-444444444444",
+          "2026-08-24T00:00:00.000Z",
+          "2026-08-25T00:00:00.000Z",
+          { allDay: true, status: "tentative" },
+        ),
+        event(
+          "55555555-5555-4555-8555-555555555555",
+          "2026-08-24T13:00:00.000Z",
+          "2026-08-24T14:00:00.000Z",
+          { status: "tentative", transparency: "free" },
+        ),
+        event(
+          "66666666-6666-4666-8666-666666666666",
+          "2026-08-24T14:00:00.000Z",
+          "2026-08-24T15:00:00.000Z",
+          { status: "tentative", updatedAt: "2026-08-23T15:59:00.000Z" },
+        ),
+      ]),
+    );
+
+    const holds = result.findings.filter(({ kind }) => kind === "tentative_hold");
+    expect(holds.map(({ evidence }) => evidence.type === "event" && evidence.eventId)).toEqual([
+      "44444444-4444-4444-8444-444444444444",
+      "55555555-5555-4555-8555-555555555555",
+    ]);
+  });
+
   it("fingerprints revisions and policy but not cutoff time or private event fields", () => {
     const first = snapshot([
       event("44444444-4444-4444-8444-444444444444", "2026-08-24T13:00:00.000Z", "2026-08-24T14:00:00.000Z"),

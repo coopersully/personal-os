@@ -397,8 +397,9 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     }
   }
 
-  for (const event of candidates) {
+  for (const event of events) {
     if (
+      event.status !== "cancelled" &&
       event.status === "tentative" &&
       new Date(event.startsAt).getTime() > snapshot.evidenceCutoff.getTime() &&
       snapshot.evidenceCutoff.getTime() - new Date(event.updatedAt).getTime() >=

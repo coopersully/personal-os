@@ -595,13 +595,13 @@ function findingKindLabel(kind: CalendarReview["findings"][number]["kind"]) {
 }
 
 function recommendationIdentity(
-  review: CalendarReview,
+  review: CalendarReview | null,
   recommendation: CalendarReview["recommendations"][number],
   index: number,
 ) {
   const linkedFindings = [...recommendation.findingIds].sort().join(",") || "unlinked";
   return [
-    review.id,
+    review?.id ?? "unpublished",
     recommendation.key,
     linkedFindings,
     recommendation.horizon.start,

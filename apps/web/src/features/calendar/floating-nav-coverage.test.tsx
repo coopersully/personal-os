@@ -186,4 +186,23 @@ describe("Calendar floating navigation edge states", () => {
       vi.useRealTimers();
     }
   });
+
+  it("submits a timed event with hidden optional fields", async () => {
+    const browser = userEvent.setup();
+    mocks.createEvent.mockReturnValue(new Promise(() => undefined));
+    renderCalendar();
+
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await browser.type(screen.getByRole("textbox", { name: "Title" }), "Timed planning");
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+
+    await waitFor(() =>
+      expect(mocks.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allDay: false,
+          location: null,
+        }),
+      ),
+    );
+  });
 });

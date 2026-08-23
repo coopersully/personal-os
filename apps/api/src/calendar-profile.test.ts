@@ -62,4 +62,30 @@ describe("Calendar profile source invalidation", () => {
       }),
     ).rejects.toMatchObject({ code: "conflict" });
   });
+
+  it("drops an invalid legacy default while removing an unavailable source", async () => {
+    const profile = {
+      categories: [],
+      domain: "calendar",
+      id: "profile-1",
+      instructions: [],
+      objective: "",
+      preferences: { defaultCalendarId: 42 },
+      sourceContexts: [{ sourceId: "calendar-1" }],
+      status: "active",
+      summary: "",
+      userId: "user-1",
+      version: 2,
+    };
+    const { transaction } = transactionFor(profile, { ...profile, version: 3 });
+
+    await expect(
+      invalidateCalendarProfileSources(transaction, {
+        context,
+        now: new Date("2026-08-23T12:00:00.000Z"),
+        unavailableCalendarIds: ["calendar-1"],
+        userId: "user-1",
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

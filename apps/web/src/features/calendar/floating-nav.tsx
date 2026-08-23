@@ -1,4 +1,10 @@
-import type { Calendar, CalendarEvent, LocalDate, User } from "@personal-os/domain";
+import type {
+  Calendar,
+  CalendarEvent,
+  LocalDate,
+  User,
+  WeatherLocationOption,
+} from "@personal-os/domain";
 import {
   localDateAt,
   localDateRange,
@@ -6,22 +12,63 @@ import {
   parseLocalDate,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type FormEvent,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
-import { CalendarIcon, PlusIcon, SearchIcon, ShieldCheckIcon, XIcon } from "@/components/icons";
+import {
+  CalendarIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
+  MapPinIcon,
+  PlusIcon,
+  SearchIcon,
+  ShieldCheckIcon,
+  VideoAddIcon,
+  XIcon,
+} from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Calendar as DatePicker } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 
 type FloatingMode = "closed" | "create" | "date" | "search";
+type ConferenceChoice = "google_meet" | "link" | "none";
 
 type CalendarFloatingNavProps = {
   anchor: LocalDate;
@@ -322,6 +369,234 @@ function daysInCalendarMonth(month: number, year: number) {
   return new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
 }
 
+function EventLocationPicker() {
+  const [inputValue, setInputValue] = useState("");
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<WeatherLocationOption | null>(null);
+  const deferredQuery = useDeferredValue(inputValue.trim());
+  const locations = useQuery({
+    enabled: deferredQuery.length >= 2,
+    queryFn: () => api.searchWeatherLocations(deferredQuery),
+    queryKey: ["event-location-search", deferredQuery],
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  return (
+    <Field>
+      <FieldLabel className="sr-only" htmlFor="floating-event-location">
+        Location
+      </FieldLabel>
+      <Combobox
+        autoHighlight
+        filter={null}
+        inputValue={inputValue}
+        itemToStringLabel={(location: WeatherLocationOption) => location.label}
+        items={locations.data ?? []}
+        onInputValueChange={(nextValue, { reason }) => {
+          if (reason === "item-press") return;
+          setInputValue(nextValue);
+          setSelected(null);
+          setOpen(nextValue.trim().length >= 2);
+        }}
+        onOpenChange={setOpen}
+        onValueChange={(nextValue, { reason }) => {
+          setSelected(nextValue);
+          if (reason === "item-press") {
+            setInputValue(nextValue?.label ?? "");
+            setOpen(false);
+          }
+          if (nextValue === null && (reason === "clear-press" || reason === "input-clear")) {
+            setInputValue("");
+            setOpen(false);
+          }
+        }}
+        open={open}
+        value={selected}
+      >
+        <ComboboxInput
+          aria-label="Location"
+          autoComplete="off"
+          id="floating-event-location"
+          name="location"
+          onFocus={() => setOpen(true)}
+          placeholder="Search or add a location"
+          showClear
+        >
+          <InputGroupAddon>
+            <MapPinIcon aria-hidden="true" />
+          </InputGroupAddon>
+        </ComboboxInput>
+        <ComboboxContent aria-busy={locations.isFetching || undefined}>
+          {deferredQuery.length < 2 ? (
+            <p className="px-2 py-2 text-sm text-muted-foreground">
+              Type at least two characters for suggestions.
+            </p>
+          ) : null}
+          {locations.isFetching ? (
+            <p className="px-2 py-2 text-sm text-muted-foreground">Searching locations…</p>
+          ) : null}
+          {locations.isError ? (
+            <p className="px-2 py-2 text-sm text-destructive" role="alert">
+              Location suggestions are unavailable. You can still enter a location.
+            </p>
+          ) : null}
+          <ComboboxEmpty>
+            {deferredQuery.length >= 2 && !locations.isFetching && !locations.isError
+              ? "No matching locations. Your entry will still be saved."
+              : null}
+          </ComboboxEmpty>
+          <ComboboxList>
+            {(location: WeatherLocationOption) => (
+              <ComboboxItem key={location.label} value={location}>
+                {location.label}
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
+    </Field>
+  );
+}
+
+function EventDateTimeControl({
+  allDay,
+  date,
+  label,
+  onDateChange,
+  onTimeChange,
+  referenceYear,
+  time,
+  timeZone,
+}: {
+  allDay: boolean;
+  date: LocalDate;
+  label: "Ends" | "Starts";
+  onDateChange: (date: LocalDate) => void;
+  onTimeChange: (time: string) => void;
+  referenceYear: number;
+  time: string;
+  timeZone: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = calendarDate(date);
+  const dateLabel = new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+    year: date.year === referenceYear ? undefined : "numeric",
+  }).format(selected);
+  return (
+    <Field>
+      <FieldLabel className="sr-only">{label} date and time</FieldLabel>
+      <div className="calendar-event-composer__date-time-control">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              aria-label={`${label} date, ${dateLabel}`}
+              className="calendar-event-composer__date-trigger"
+              type="button"
+              variant="outline"
+            >
+              <span>{label}</span>
+              <strong>{dateLabel}</strong>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-auto">
+            <DatePicker
+              captionLayout="dropdown"
+              defaultMonth={selected}
+              endMonth={new Date(Date.UTC(referenceYear + 25, 11, 1, 12))}
+              mode="single"
+              onSelect={(nextDate) => {
+                if (!nextDate) return;
+                onDateChange(localDateAt(nextDate, timeZone));
+                setOpen(false);
+              }}
+              selected={selected}
+              startMonth={new Date(Date.UTC(referenceYear - 25, 0, 1, 12))}
+              timeZone={timeZone}
+            />
+          </PopoverContent>
+        </Popover>
+        {!allDay ? <EventTimePicker label={label} onChange={onTimeChange} value={time} /> : null}
+      </div>
+    </Field>
+  );
+}
+
+const quarterHourTimes = Array.from({ length: 96 }, (_, index) => {
+  const minutes = index * 15;
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+});
+
+function EventTimePicker({
+  label,
+  onChange,
+  value,
+}: {
+  label: "Ends" | "Starts";
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedOption = useRef<HTMLButtonElement>(null);
+  const displayValue = formatTime(value);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          aria-label={`${label} time, ${displayValue}`}
+          className="calendar-event-composer__time-trigger"
+          type="button"
+          variant="outline"
+        >
+          {displayValue}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="calendar-event-composer__time-popover"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          selectedOption.current?.focus({ preventScroll: true });
+          selectedOption.current?.scrollIntoView({ behavior: "auto", block: "center" });
+        }}
+      >
+        <ScrollArea className="calendar-event-composer__time-options">
+          <div aria-label={`${label} time`} role="listbox">
+            {quarterHourTimes.map((option) => (
+              <Button
+                aria-selected={option === value}
+                key={option}
+                onClick={() => {
+                  onChange(option);
+                  setOpen(false);
+                }}
+                role="option"
+                ref={option === value ? selectedOption : undefined}
+                size="sm"
+                type="button"
+                variant={option === value ? "secondary" : "ghost"}
+              >
+                {formatTime(option)}
+              </Button>
+            ))}
+          </div>
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function formatTime(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  return new Intl.DateTimeFormat("en", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(2000, 0, 1, hour, minute)));
+}
+
 function InlineEventComposer({
   calendars,
   close,
@@ -333,8 +608,40 @@ function InlineEventComposer({
   user: User;
 }) {
   const queryClient = useQueryClient();
-  const writable = calendars.filter((calendar) => calendar.isWritable);
+  const writable = useMemo(
+    () =>
+      calendars
+        .filter((calendar) => calendar.isWritable)
+        .toSorted(
+          (left, right) =>
+            Number(right.isPrimary) - Number(left.isPrimary) || left.name.localeCompare(right.name),
+        ),
+    [calendars],
+  );
   const start = roundToQuarterHour(new Date(Date.now() + 30 * 60_000));
+  const end = new Date(start.getTime() + 60 * 60_000);
+  const initialStart = toDateTimeLocal(start, timeZone);
+  const initialEnd = toDateTimeLocal(end, timeZone);
+  const [allDay, setAllDay] = useState(false);
+  const [calendarId, setCalendarId] = useState(writable[0]?.id ?? "");
+  const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
+  const [conferenceChoice, setConferenceChoice] = useState<ConferenceChoice>("none");
+  const [showConferencing, setShowConferencing] = useState(false);
+  const [showLink, setShowLink] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
+  const [startDate, setStartDate] = useState(() => parseLocalDate(initialStart.slice(0, 10)));
+  const [endDate, setEndDate] = useState(() => parseLocalDate(initialEnd.slice(0, 10)));
+  const [startTime, setStartTime] = useState(initialStart.slice(11));
+  const [endTime, setEndTime] = useState(initialEnd.slice(11));
+  const selectedCalendar = writable.find((calendar) => calendar.id === calendarId) ?? writable[0];
+  useEffect(() => {
+    if (!calendarId && writable[0]) setCalendarId(writable[0].id);
+  }, [calendarId, writable]);
+  useEffect(() => {
+    if (conferenceChoice === "google_meet" && selectedCalendar?.provider !== "google") {
+      setConferenceChoice("none");
+    }
+  }, [conferenceChoice, selectedCalendar?.provider]);
   const mutation = useMutation({
     mutationFn: (input: Parameters<typeof api.createEvent>[0]) => api.createEvent(input),
     onSuccess: async () => {
@@ -345,80 +652,238 @@ function InlineEventComposer({
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const startsAt = allDay
+      ? localDateTimeToUtc(startDate, 0, timeZone).toISOString()
+      : localDateTimeToUtc(startDate, timeToMinute(startTime), timeZone).toISOString();
+    const endsAt = allDay
+      ? localDateTimeToUtc(addDays(endDate, 1), 0, timeZone).toISOString()
+      : localDateTimeToUtc(endDate, timeToMinute(endTime), timeZone).toISOString();
     mutation.mutate({
-      allDay: form.get("allDay") === "on",
-      calendarId: String(form.get("calendarId")),
-      endsAt: dateTimeLocalToIso(String(form.get("endsAt")), timeZone),
+      allDay,
+      calendarId,
+      conferenceProvider: conferenceChoice === "google_meet" ? "google_meet" : null,
+      conferenceUrl: conferenceChoice === "link" ? nullable(form.get("conferenceUrl")) : null,
+      endsAt,
       location: nullable(form.get("location")),
       notes: nullable(form.get("notes")),
-      startsAt: dateTimeLocalToIso(String(form.get("startsAt")), timeZone),
+      url: showLink ? nullable(form.get("url")) : null,
+      startsAt,
       timezone: timeZone,
       title: String(form.get("title")).trim(),
     });
   };
 
   return (
-    <Card aria-label="Create event" className="calendar-floating-nav__composer">
+    <Card
+      aria-label="Create event"
+      className="calendar-floating-nav__composer is-calendar-colored"
+      style={{ "--calendar-color": selectedCalendar?.color ?? "#777ce3" } as CSSProperties}
+    >
       <CardHeader>
         <CardTitle>Create event</CardTitle>
         <CloseButton close={close} />
       </CardHeader>
       <CardContent>
         <form onSubmit={submit}>
-          <FieldGroup>
+          <FieldGroup className="gap-3">
             <Field>
-              <FieldLabel htmlFor="floating-event-title">Description</FieldLabel>
-              <Input autoFocus id="floating-event-title" name="title" required />
+              <FieldLabel className="sr-only" htmlFor="floating-event-title">
+                Title
+              </FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  autoFocus
+                  id="floating-event-title"
+                  name="title"
+                  placeholder="Event title"
+                  required
+                />
+                <InputGroupAddon align="inline-end">
+                  <Popover open={calendarPickerOpen} onOpenChange={setCalendarPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <InputGroupButton
+                        aria-label={`Calendar: ${selectedCalendar?.name ?? "Choose calendar"}`}
+                        className="calendar-event-composer__calendar-trigger"
+                      >
+                        <i
+                          aria-hidden="true"
+                          style={{ background: selectedCalendar?.color ?? "#777ce3" }}
+                        />
+                        <span>{selectedCalendar?.name ?? "Calendar"}</span>
+                      </InputGroupButton>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="end"
+                      className="calendar-event-composer__calendar-picker"
+                    >
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Create on calendar
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        {writable.map((calendar) => (
+                          <Button
+                            aria-pressed={calendar.id === selectedCalendar?.id}
+                            className="calendar-event-composer__calendar-option"
+                            key={calendar.id}
+                            onClick={() => {
+                              setCalendarId(calendar.id);
+                              setCalendarPickerOpen(false);
+                            }}
+                            type="button"
+                            variant="ghost"
+                          >
+                            <i
+                              aria-hidden="true"
+                              style={{ background: calendar.color ?? "#777ce3" }}
+                            />
+                            <span>{calendar.name}</span>
+                            {calendar.id === selectedCalendar?.id ? (
+                              <CheckIcon aria-hidden="true" data-icon="inline-end" />
+                            ) : null}
+                          </Button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </InputGroupAddon>
+              </InputGroup>
             </Field>
-            <div className="calendar-event-composer__time">
-              <Field>
-                <FieldLabel htmlFor="floating-event-start">Starts</FieldLabel>
-                <Input
-                  defaultValue={toDateTimeLocal(start, timeZone)}
-                  id="floating-event-start"
-                  name="startsAt"
-                  required
-                  type="datetime-local"
+            <div className="calendar-event-composer__schedule">
+              <div className="calendar-event-composer__schedule-heading">
+                <span className="text-sm font-medium">When</span>
+                <label htmlFor="floating-event-all-day">
+                  <span>All day</span>
+                  <Switch
+                    checked={allDay}
+                    id="floating-event-all-day"
+                    onCheckedChange={setAllDay}
+                  />
+                </label>
+              </div>
+              <div className="calendar-event-composer__time">
+                <EventDateTimeControl
+                  allDay={allDay}
+                  date={startDate}
+                  label="Starts"
+                  onDateChange={setStartDate}
+                  onTimeChange={setStartTime}
+                  referenceYear={localDateAt(new Date(), timeZone).year}
+                  time={startTime}
+                  timeZone={timeZone}
                 />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="floating-event-end">Ends</FieldLabel>
-                <Input
-                  defaultValue={toDateTimeLocal(new Date(start.getTime() + 60 * 60_000), timeZone)}
-                  id="floating-event-end"
-                  name="endsAt"
-                  required
-                  type="datetime-local"
+                <span aria-hidden="true" className="calendar-event-composer__duration-line" />
+                <EventDateTimeControl
+                  allDay={allDay}
+                  date={endDate}
+                  label="Ends"
+                  onDateChange={setEndDate}
+                  onTimeChange={setEndTime}
+                  referenceYear={localDateAt(new Date(), timeZone).year}
+                  time={endTime}
+                  timeZone={timeZone}
                 />
-              </Field>
+              </div>
             </div>
+            {showLocation ? <EventLocationPicker /> : null}
+            {showConferencing ? (
+              <Field>
+                <FieldLabel className="sr-only">Conferencing</FieldLabel>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button className="w-full justify-start" type="button" variant="outline">
+                      <VideoAddIcon data-icon="inline-start" />
+                      {conferenceChoice === "google_meet"
+                        ? "Google Meet will be created"
+                        : conferenceChoice === "link"
+                          ? "Meeting link"
+                          : "Add conferencing"}
+                      <ChevronDownIcon className="ml-auto" data-icon="inline-end" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuGroup>
+                      <DropdownMenuRadioGroup
+                        onValueChange={(value) => setConferenceChoice(value as ConferenceChoice)}
+                        value={conferenceChoice}
+                      >
+                        <DropdownMenuRadioItem value="none">No conferencing</DropdownMenuRadioItem>
+                        {selectedCalendar?.provider === "google" ? (
+                          <DropdownMenuRadioItem value="google_meet">
+                            Generate Google Meet
+                          </DropdownMenuRadioItem>
+                        ) : null}
+                        <DropdownMenuRadioItem value="link">
+                          Paste meeting link
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {conferenceChoice === "link" ? (
+                  <InputGroup>
+                    <InputGroupInput
+                      aria-label="Meeting link"
+                      id="floating-event-conference-url"
+                      name="conferenceUrl"
+                      placeholder="Zoom, Teams, Webex, or another meeting URL"
+                      required
+                      type="url"
+                    />
+                    <InputGroupAddon>
+                      <ExternalLinkIcon aria-hidden="true" />
+                    </InputGroupAddon>
+                  </InputGroup>
+                ) : null}
+              </Field>
+            ) : null}
+            {showLink ? (
+              <Field>
+                <FieldLabel className="sr-only" htmlFor="floating-event-url">
+                  Link
+                </FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    aria-label="Link"
+                    id="floating-event-url"
+                    name="url"
+                    placeholder="Add a related URL"
+                    type="url"
+                  />
+                  <InputGroupAddon>
+                    <ExternalLinkIcon aria-hidden="true" />
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+            ) : null}
+            {!showLocation || !showConferencing || !showLink ? (
+              <div className="calendar-event-composer__optional-actions">
+                {!showLocation ? (
+                  <AddOptionalFieldButton onClick={() => setShowLocation(true)}>
+                    Add location
+                  </AddOptionalFieldButton>
+                ) : null}
+                {!showConferencing ? (
+                  <AddOptionalFieldButton onClick={() => setShowConferencing(true)}>
+                    Add conferencing
+                  </AddOptionalFieldButton>
+                ) : null}
+                {!showLink ? (
+                  <AddOptionalFieldButton onClick={() => setShowLink(true)}>
+                    Add link
+                  </AddOptionalFieldButton>
+                ) : null}
+              </div>
+            ) : null}
             <Field>
-              <FieldLabel htmlFor="floating-event-calendar">Calendar</FieldLabel>
-              <NativeSelect
-                className="w-full"
-                defaultValue={writable[0]?.id}
-                id="floating-event-calendar"
-                name="calendarId"
-                required
-              >
-                {writable.map((calendar) => (
-                  <NativeSelectOption key={calendar.id} value={calendar.id}>
-                    {calendar.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Field orientation="horizontal">
-              <FieldLabel htmlFor="floating-event-all-day">All day</FieldLabel>
-              <Switch id="floating-event-all-day" name="allDay" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="floating-event-location">Location</FieldLabel>
-              <Input id="floating-event-location" name="location" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="floating-event-notes">Notes</FieldLabel>
-              <Textarea id="floating-event-notes" name="notes" rows={3} />
+              <FieldLabel className="sr-only" htmlFor="floating-event-notes">
+                Description
+              </FieldLabel>
+              <Textarea
+                id="floating-event-notes"
+                name="notes"
+                placeholder="Description, notes, or related links (optional)"
+                rows={2}
+              />
             </Field>
             {mutation.isError ? (
               <p className="calendar-floating-nav__error" role="alert">
@@ -433,6 +898,21 @@ function InlineEventComposer({
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function AddOptionalFieldButton({ children, onClick }: { children: string; onClick: () => void }) {
+  return (
+    <Button
+      className="calendar-event-composer__add-field"
+      onClick={onClick}
+      size="sm"
+      type="button"
+      variant="ghost"
+    >
+      <PlusIcon data-icon="inline-start" />
+      {children}
+    </Button>
   );
 }
 
@@ -498,15 +978,9 @@ function toDateTimeLocal(date: Date, timeZone: string) {
   return `${parts.year}-${parts.month}-${parts.day}T${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}`;
 }
 
-function dateTimeLocalToIso(value: string, timeZone: string) {
-  const [dateValue, timeValue] = value.split("T");
-  const date = parseLocalDate(dateValue as string);
-  const [hour, minute] = (timeValue as string).split(":").map(Number);
-  return localDateTimeToUtc(
-    date,
-    (hour as number) * 60 + (minute as number),
-    timeZone,
-  ).toISOString();
+function timeToMinute(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  return (hour as number) * 60 + (minute as number);
 }
 
 function nullable(value: FormDataEntryValue | null) {

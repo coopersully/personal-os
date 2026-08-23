@@ -8,9 +8,16 @@ import type {
 
 const conferenceHosts = [
   "meet.google.com",
+  "around.co",
+  "gotomeet.me",
+  "jitsi.net",
+  "meet.jit.si",
+  "meet.goto.com",
+  "riverside.fm",
   "teams.live.com",
   "teams.microsoft.com",
   "webex.com",
+  "whereby.com",
   "zoom.us",
 ];
 

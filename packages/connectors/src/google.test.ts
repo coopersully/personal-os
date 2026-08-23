@@ -376,6 +376,7 @@ describe("Google Calendar connector", () => {
       endsAt: "2026-07-13T14:00:00.000Z",
       timezone: "America/New_York",
       allDay: false,
+      conferenceProvider: "google_meet",
     });
     expect(created.value).toMatchObject({
       title: "Focus",
@@ -388,9 +389,18 @@ describe("Google Calendar connector", () => {
       recurrence: ["RRULE:FREQ=DAILY"],
     });
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toMatchObject({
+      conferenceData: {
+        createRequest: {
+          conferenceSolutionKey: { type: "hangoutsMeet" },
+          requestId: expect.any(String),
+        },
+      },
       summary: "Focus",
       start: { dateTime: "2026-07-13T13:00:00.000Z", timeZone: "America/New_York" },
     });
+    expect(
+      new URL(String(fetch.mock.calls[0]?.[0])).searchParams.get("conferenceDataVersion"),
+    ).toBe("1");
 
     const allDay = await google.createEvent(fresh, "primary", {
       calendarId: "11111111-1111-4111-8111-111111111111",

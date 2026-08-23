@@ -2,6 +2,14 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-23 — Provider-aware event conferencing
+
+- Added unique Google Meet generation for events created on writable Google calendars using the
+  provider's conference-data contract, while preserving pasted meeting links for local, iCloud,
+  Zoom, Teams, Webex, Jitsi, Whereby, GoTo Meeting, Around, and Riverside workflows.
+- Kept generation capability honest: Zoom and Teams generation require future dedicated provider
+  connections and are not presented as connected merely because a URL can be attached.
+
 ## 2026-08-23 — Calendar stewardship foundations
 
 - Added a server-owned Calendar playbook release and research registry, with a fixed 30-day prior

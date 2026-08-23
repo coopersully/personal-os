@@ -1209,6 +1209,7 @@ export const calendarEvents = pgTable(
     notes: text("notes"),
     location: text("location"),
     conferenceUrl: text("conference_url"),
+    url: text("url"),
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
     endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
     timezone: text("timezone").notNull(),

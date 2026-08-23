@@ -130,9 +130,11 @@ const event = {
   blockSourceEventId: null,
   blockMode: null,
   blocks: [],
+  conferenceUrl: null,
   title: "Focus block",
   notes: null,
   location: "Studio",
+  url: null,
   startsAt: "2026-07-13T13:00:00.000Z",
   endsAt: "2026-07-13T14:00:00.000Z",
   timezone: "UTC",
@@ -3560,11 +3562,38 @@ describe("ilo web app", () => {
     expect(view.location.value).toContain("date=2026-07-13");
 
     await browser.click(screen.getByRole("button", { name: "Create event" }));
-    await browser.type(screen.getByLabelText("Description"), "Planning block");
+    expect(screen.getByRole("button", { name: /^Starts date,/ })).not.toHaveTextContent("2026");
+    expect(screen.getByRole("button", { name: "Calendar: Personal" })).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Calendar: Personal" }));
+    await browser.click(screen.getByRole("button", { name: "Selected Google" }));
+    await browser.click(screen.getByRole("button", { name: "Add conferencing" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Paste meeting link" }));
+    expect(screen.getByLabelText("Meeting link")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Meeting link" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Generate Google Meet" }));
+    expect(screen.queryByLabelText("Meeting link")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("switch", { name: "All day" }));
+    expect(screen.queryByLabelText("Starts time")).not.toBeInTheDocument();
+    await browser.type(screen.getByLabelText("Title"), "Planning block");
+    const location = screen.getByRole("combobox", { name: "Location" });
+    fireEvent.change(location, { target: { value: "New York" } });
+    await waitFor(() => expect(mocks.searchWeatherLocations).toHaveBeenCalledWith("New York"));
+    await browser.click(
+      await screen.findByRole("option", { name: "New York, New York, United States" }),
+    );
     await browser.click(screen.getByRole("button", { name: "Create event" }));
     await waitFor(() =>
       expect(mocks.createEvent).toHaveBeenCalledWith(
-        expect.objectContaining({ calendarId: id, title: "Planning block" }),
+        expect.objectContaining({
+          allDay: true,
+          calendarId: nullColorCalendar.id,
+          conferenceProvider: "google_meet",
+          conferenceUrl: null,
+          endsAt: "2026-07-14T00:00:00.000Z",
+          location: "New York, New York, United States",
+          startsAt: "2026-07-13T00:00:00.000Z",
+          title: "Planning block",
+        }),
       ),
     );
     expect(await screen.findByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
@@ -4478,9 +4507,7 @@ describe("ilo web app", () => {
 
     dragOverCalendarEvent(monday, transfer, 648);
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
-    expect(document.querySelector(".calendar-drag-overlay")).toHaveTextContent(
-      "Mon, Jul 131 PM",
-    );
+    expect(document.querySelector(".calendar-drag-overlay")).toHaveTextContent("Mon, Jul 131 PM");
   });
 
   it("restores follow mode whenever Calendar first loads on today", async () => {

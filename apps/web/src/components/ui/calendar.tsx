@@ -61,11 +61,15 @@ function Calendar({
           defaultClassNames.dropdowns,
         ),
         dropdown_root: cn(
-          "relative rounded-(--cell-radius)",
+          buttonVariants({ size: "sm", variant: "outline" }),
+          "relative cursor-pointer gap-1 px-2.5 font-medium [&>svg]:text-muted-foreground",
           defaultClassNames.dropdown_root,
         ),
-        dropdown: cn("absolute inset-0 bg-popover opacity-0", defaultClassNames.dropdown),
-        caption_label: cn("font-medium select-none", defaultClassNames.caption_label),
+        dropdown: cn(
+          "absolute inset-0 cursor-pointer bg-popover opacity-0",
+          defaultClassNames.dropdown,
+        ),
+        caption_label: cn("font-medium leading-none select-none", defaultClassNames.caption_label),
         month_grid: cn("w-full border-collapse", defaultClassNames.month_grid),
         weekdays: cn("flex", defaultClassNames.weekdays),
         weekday: cn(
@@ -98,6 +102,7 @@ function Calendar({
           />
         ),
         Chevron: ({ className: chevronClassName, orientation, ...chevronProps }) => {
+          if (orientation === "down") return <span aria-hidden="true" className="hidden" />;
           const Icon =
             orientation === "left"
               ? ChevronLeftIcon
@@ -119,7 +124,7 @@ function Calendar({
         ...components,
       }}
       formatters={{
-        formatMonthDropdown: (date) => date.toLocaleString(locale?.code, { month: "short" }),
+        formatMonthDropdown: (date) => date.toLocaleString(locale?.code, { month: "long" }),
         ...formatters,
       }}
       locale={locale}

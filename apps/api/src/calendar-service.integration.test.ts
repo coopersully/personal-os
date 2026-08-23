@@ -387,6 +387,18 @@ describe.sequential("Calendar commitment proposals", () => {
   });
 
   it("reports profile drift, weak/flexible evidence, and exact projection duplicates", async () => {
+    await expect(
+      service.createEvent(
+        {
+          ...candidate(),
+          conferenceProvider: "google_meet",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "Google Meet can only be generated on a writable Google calendar.",
+    });
     const created = await service.createEvent(
       {
         ...candidate(),

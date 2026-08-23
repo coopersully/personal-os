@@ -146,6 +146,7 @@ function blockInput(
     endsAt: source.endsAt.toISOString(),
     location: mode === "details" ? source.location : null,
     notes: mode === "details" ? source.notes : null,
+    url: mode === "details" ? source.url : null,
     startsAt: source.startsAt.toISOString(),
     timezone: source.timezone,
     title: mode === "details" ? source.title : "Busy",
@@ -618,6 +619,12 @@ export function createCalendarService({
     async createEvent(input: CreateEventInput, context: MutationContext): Promise<CalendarEvent> {
       const calendar = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(calendar);
+      if (input.conferenceProvider === "google_meet" && calendar.provider !== "google") {
+        throw new AppError(
+          "invalid_request",
+          "Google Meet can only be generated on a writable Google calendar.",
+        );
+      }
       const effect =
         calendar.provider === "local" ? null : providerEffect("create", calendar, null, "source");
       const ledger = providerLedger("create_event", effect ? [effect] : [], context);
@@ -635,11 +642,12 @@ export function createCalendarService({
                   allDay: remote?.allDay ?? input.allDay,
                   attendees: normalizeAttendees(input.attendees),
                   calendarId: calendar.id,
-                  conferenceUrl: remote?.conferenceUrl ?? null,
+                  conferenceUrl: remote?.conferenceUrl ?? input.conferenceUrl ?? null,
                   endsAt: remote?.endsAt ?? new Date(input.endsAt),
                   eventType: input.eventType ?? "default",
                   location: remote?.location ?? input.location,
                   notes: remote?.notes ?? input.notes,
+                  url: input.url,
                   provider: calendar.provider,
                   raw: remote?.raw,
                   recurrence: remote?.recurrence ?? [],
@@ -1640,6 +1648,7 @@ export function createCalendarService({
         ...(changes.eventType === undefined ? {} : { eventType: changes.eventType }),
         ...(changes.location === undefined ? {} : { location: changes.location }),
         ...(changes.notes === undefined ? {} : { notes: changes.notes }),
+        ...(changes.url === undefined ? {} : { url: changes.url }),
         ...(changes.recurrence === undefined ? {} : { recurrence: changes.recurrence }),
         ...(changes.reminders === undefined ? {} : { reminders: changes.reminders }),
         ...(changes.startsAt === undefined ? {} : { startsAt }),

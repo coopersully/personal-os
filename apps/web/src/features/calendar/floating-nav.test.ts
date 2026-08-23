@@ -22,6 +22,7 @@ const event = {
   timezone: "UTC",
   title: "Design review",
   updatedAt: "2026-08-23T12:00:00.000Z",
+  url: null,
 } satisfies CalendarEvent;
 
 describe("calendar floating navigation search", () => {

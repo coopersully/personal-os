@@ -58,6 +58,7 @@ import { AppError } from "./errors.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createMaintenanceService } from "./finance/maintenance-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
+import { createSetupService } from "./finance/setup-service.js";
 import {
   cadenceFromDates,
   forecastCashflow,
@@ -380,6 +381,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
   const inbox = createInboxService({ db, now });
   const maintenance = createMaintenanceService({ db, inbox, now });
   const planning = createProfileBudgetService({ db, now });
+  const setup = createSetupService({ db, now, planning });
   async function ensureCategories(userId: string) {
     await db
       .insert(financeCategories)
@@ -1246,6 +1248,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
     ...inbox,
     ...maintenance,
     ...planning,
+    ...setup,
     plaidAvailable() {
       return Boolean(plaid?.clientId && plaid.secret);
     },

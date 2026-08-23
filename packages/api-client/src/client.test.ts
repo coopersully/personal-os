@@ -518,6 +518,17 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/setup")
+      return json(
+        financeEnvelope({
+          budgetVersionId: null,
+          maintenanceRunId: null,
+          question: null,
+          sessionId: id,
+          stage: "collecting_profile",
+          version: 1,
+        }),
+      );
     if (url.pathname === "/v1/finances/profile/current") return json(financeEnvelope(null));
     if (url.pathname === "/v1/finances/profile" && method === "PATCH")
       return json(
@@ -863,6 +874,9 @@ describe("ilo API client", () => {
         provider: "manual",
       }),
     ).resolves.toEqual(financeAccount);
+    await expect(api.setupFinances({ operation: "start" })).resolves.toMatchObject({
+      data: { sessionId: id },
+    });
     await expect(
       api.createFinanceTransaction({
         accountId: id,

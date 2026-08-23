@@ -15,6 +15,7 @@ import {
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
+  financeSetupInputSchema,
   financeTransactionQuerySchema,
   manageFinanceGoalInputSchema,
   mergeFinanceMerchantsInputSchema,
@@ -64,6 +65,14 @@ export function registerFinanceRoutes({ app, db, finances, mutationContext }: Fi
       ),
     });
   });
+  app.post("/v1/finances/setup", async (context) =>
+    context.json(
+      await finances.setupFinances(
+        await parseBody(context, financeSetupInputSchema),
+        await financeContext(context),
+      ),
+    ),
+  );
   app.get("/v1/finances/wealth", async (context) =>
     context.json({ wealth: await finances.getWealthSummary(context.get("principal").userId) }),
   );

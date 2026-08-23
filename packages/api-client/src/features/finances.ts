@@ -32,6 +32,8 @@ import type {
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceSetupInput,
+  FinanceSetupPayload,
   FinanceToolResult,
   FinanceTransaction,
   FinanceTransactionQuery,
@@ -74,6 +76,12 @@ export function createFinanceApi(request: FinanceRequest) {
 
   return {
     createFinanceBudget,
+    async setupFinances(input: FinanceSetupInput): Promise<FinanceToolResult<FinanceSetupPayload>> {
+      return request("/v1/finances/setup", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
     async applyFinanceCategorizations(
       input: ApplyFinanceCategorizationsInput,
     ): Promise<Array<{ applied: boolean; threshold: number; transaction: FinanceTransaction }>> {

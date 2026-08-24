@@ -116,6 +116,7 @@ export const maintenanceRunStatusSchema = z.enum([
   "running",
   "completed",
   "completed_with_questions",
+  "awaiting_agent_challenge",
   "awaiting_approval",
   "blocked",
   "failed_recoverable",
@@ -126,6 +127,7 @@ export type MaintenanceRunStatus = z.infer<typeof maintenanceRunStatusSchema>;
 export const maintenanceSettlementStatusSchema = z.enum([
   "completed",
   "completed_with_questions",
+  "awaiting_agent_challenge",
   "awaiting_approval",
   "blocked",
   "failed_recoverable",
@@ -170,6 +172,11 @@ export const maintenanceRunSchema = z.discriminatedUnion("status", [
   }),
   maintenanceRunBaseSchema.extend({
     status: z.literal("completed_with_questions"),
+    leaseExpiresAt: z.null(),
+    retryAt: z.null(),
+  }),
+  maintenanceRunBaseSchema.extend({
+    status: z.literal("awaiting_agent_challenge"),
     leaseExpiresAt: z.null(),
     retryAt: z.null(),
   }),

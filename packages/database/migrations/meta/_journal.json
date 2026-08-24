@@ -428,6 +428,97 @@
       "when": 1786971600000,
       "tag": "0059_task_organization_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786971600000,
+      "tag": "0059_finance_automation_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786975200000,
+      "tag": "0060_finance_agent_action_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1786978800000,
+      "tag": "0061_finance_transaction_allocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1786982400000,
+      "tag": "0062_finance_reimbursements",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1786986000000,
+      "tag": "0063_finance_maintenance_candidates",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1786990000000,
+      "tag": "0064_finance_ledger_challenges",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1786993600000,
+      "tag": "0065_finance_period_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787516106000,
+      "tag": "0066_finance_plan_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787517000000,
+      "tag": "0067_finance_ledger_protocol",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787562000000,
+      "tag": "0068_finance_mutation_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787562600000,
+      "tag": "0069_finance_legacy_budget_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1787566200000,
+      "tag": "0070_finance_parallel_migration_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787569800000,
+      "tag": "0071_task_organization_reconciliation",
+      "breakpoints": true
     }
   ]
 }

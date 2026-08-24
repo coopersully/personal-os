@@ -23,6 +23,7 @@ apps/desktop/src-tauri/gen/
 apps/web/dev-dist/
 apps/web/public/sw.js
 apps/web/public/workbox-*.js
+.worktrees/
 
 # Third-party agent skills without redistribution terms stay local-only.
 .agents/skills/hono/

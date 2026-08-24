@@ -13,6 +13,72 @@ import {
 } from "./serialization.js";
 
 describe("auditSnapshot", () => {
+  it("serializes absent and present setup and calendar source revisions explicitly", () => {
+    const date = new Date("2026-08-20T12:00:00.000Z");
+    const user = {
+      accentColor: null,
+      createdAt: date,
+      displayName: "Cooper",
+      email: "cooper@example.com",
+      emailVerifiedAt: date,
+      id: "user",
+      setupCompletedAt: date,
+      setupCurrentStep: "complete",
+      setupDismissedAt: null,
+      setupSelectedWorkspaces: [],
+      setupStartedAt: date,
+      setupStatus: "completed",
+      updatedAt: date,
+    } as never;
+    expect(serializeUser(user).setup).toMatchObject({
+      completedAt: date.toISOString(),
+      dismissedAt: null,
+      startedAt: date.toISOString(),
+    });
+
+    const event = {
+      allDay: false,
+      attendees: [],
+      blockMode: null,
+      blockSourceEventId: null,
+      calendarId: "calendar",
+      conferenceUrl: null,
+      createdAt: date,
+      endsAt: date,
+      eventType: "default",
+      id: "event",
+      location: null,
+      notes: null,
+      provider: "local",
+      recurrence: [],
+      reminders: [],
+      remoteEtag: null,
+      remoteEventId: null,
+      startsAt: date,
+      status: "confirmed",
+      timezone: "UTC",
+      title: "Event",
+      transparency: "opaque",
+      updatedAt: date,
+      visibility: "private",
+    };
+    expect(serializeEvent(event as never).source).toEqual({
+      accountId: null,
+      provider: "local",
+      remoteId: "event",
+      revision: date.toISOString(),
+      sourceType: "calendar_event",
+    });
+    expect(
+      serializeEvent({ ...event, provider: "google", remoteEventId: "remote" } as never).source
+        ?.remoteId,
+    ).toBe("remote");
+    expect(
+      serializeEvent({ ...event, provider: "google", remoteEventId: null } as never).source
+        ?.remoteId,
+    ).toBeNull();
+  });
+
   it("keeps operational identifiers while removing private content and credentials", () => {
     expect(
       auditSnapshot({

@@ -10,6 +10,7 @@ overrides:
   "ajv@8.20.0>fast-uri": "3.1.4"
   "brace-expansion@5.0.7": "5.0.8"
   "hono@4.12.32": "4.12.34"
+  "html-to-text@10.0.0>deepmerge-ts": "8.0.1"
   "ip-address@10.2.0": "10.3.1"
   "postcss@8.5.17": "8.5.23"
 

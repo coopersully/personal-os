@@ -2,6 +2,34 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-21 — Finance agent ledger stewardship
+
+- Added one default-off, signed-in-user-controlled Finance setting that lets a
+  scoped agent apply confident ledger changes without individual review. The
+  same calls otherwise produce review; missing evidence always produces a
+  bounded question.
+- Added exact apply-or-review operations for profile, income, budgets,
+  transactions, categorization, merchant learning, alerts, mixed purchase
+  allocations, and internal reimbursement tracking.
+- Added durable maintenance candidates, resumable paged preparation, the
+  twelve-check ledger challenge, one-turn settlement, same-run verification,
+  and immutable period reviews. Migrations `0060`–`0065` hold action reviews,
+  allocations/reimbursements, candidates, challenges, and reviews.
+- Added `get_finance_status`, `maintain_finances`,
+  `get_finance_ledger_challenge`, `submit_finance_ledger_challenge`, and
+  `get_finance_period_review` as the complete-workspace MCP flow while retaining
+  granular surgical tools.
+- Simplified the web workspace around Overview, Review, Transactions, Cash
+  flow, Budgets, Subscriptions, Accounts, and Ledger health. Review shows
+  questions first and one maintenance approval; cash flow exposes reimbursement
+  progress; transactions support exact-cent mixed breakdowns.
+- Kept provider connection/import, account administration, ambiguous transfer
+  confirmation, review approval/dismissal, and the bypass setting outside MCP
+  authority. MCP cannot move money, trade, pay bills, or file taxes.
+- Remaining production evidence: final deployment and provider behavior still
+  require production-equivalent observation; green local fixtures do not prove
+  external provider availability.
+
 ## 2026-08-06 — Recoverable connector authorization and durable initial sync
 
 - Replaced raw Google/X callback errors with no-store `303` redirects and owner-only, allowlisted

@@ -19,24 +19,26 @@ const errorSchema = z.object({
   status: z.number().optional(),
 });
 
-export const iloToolOutputSchema = z.object({
-  _ilo: z.object({
-    domain: z.string(),
-    links: z.object({
-      activity: z.url(),
-      agentAccess: z.url(),
-      approvals: z.url(),
-      recovery: z.url(),
-      today: z.url(),
+export const iloToolOutputSchema = z
+  .object({
+    _ilo: z.object({
+      domain: z.string(),
+      links: z.object({
+        activity: z.url(),
+        agentAccess: z.url(),
+        approvals: z.url(),
+        recovery: z.url(),
+        today: z.url(),
+      }),
+      policy: z.enum(iloToolPolicies),
+      readOnly: z.boolean(),
+      stage: z.enum(iloToolStages),
     }),
-    policy: z.enum(iloToolPolicies),
-    readOnly: z.boolean(),
-    stage: z.enum(iloToolStages),
-  }),
-  error: errorSchema.optional(),
-  ok: z.boolean().optional(),
-  result: z.unknown().optional(),
-});
+    error: errorSchema.optional(),
+    ok: z.boolean().optional(),
+    result: z.unknown().optional(),
+  })
+  .catchall(z.unknown());
 
 type ToolRegistrationConfig = {
   _meta?: Record<string, unknown>;

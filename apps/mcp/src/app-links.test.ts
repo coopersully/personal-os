@@ -25,6 +25,9 @@ describe("Ilo application links", () => {
     expect(() =>
       resolveAppBaseUrl({ APP_BASE_URL: "https://app.example.com?mode=1" }, { production: true }),
     ).toThrow(/query/);
+    expect(() =>
+      resolveAppBaseUrl({ APP_BASE_URL: "ftp://app.example.com" }, { production: false }),
+    ).toThrow(/HTTP or HTTPS/);
   });
 
   it("maps approvals to the workspace that owns the decision", () => {

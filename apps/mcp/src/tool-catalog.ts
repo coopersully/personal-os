@@ -179,17 +179,34 @@ export const iloToolCatalog = {
   restore_reminder: write("reminders", ["reminders:write"]),
 
   get_finance_guided_setup: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_automation_settings: read("finances", ["finances:read"]),
   get_finance_status: {
     ...read("finances", ["finances:read"]),
     idempotent: true,
     openWorld: false,
   },
+  compare_finance_scenarios: preview("finances", ["finances:read"]),
+  set_finance_budget_plan: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  set_finance_transaction_breakdown: write("finances", ["finances:write"]),
+  list_finance_reimbursements: read("finances", ["finances:read"]),
+  reconcile_finance_reimbursement: write("finances", ["finances:write"], {
+    destructive: true,
+    policy: "approve_each",
+  }),
   maintain_finances: write("finances", ["finances:maintain"], {
     idempotent: false,
     openWorld: false,
     policy: "approved_rule",
     stage: "commit",
   }),
+  get_finance_ledger_challenge: read("finances", ["finances:maintain"]),
+  submit_finance_ledger_challenge: write("finances", ["finances:maintain"], {
+    idempotent: true,
+    openWorld: false,
+    policy: "approved_rule",
+    stage: "commit",
+  }),
+  get_finance_period_review: read("finances", ["finances:read"], "inspect", { ui: true }),
   get_finance_wealth_summary: read("finances", ["finances:read"]),
   get_finance_cashflow: read("finances", ["finances:read"]),
   get_finance_ledger_health: read("finances", ["finances:read"]),
@@ -199,8 +216,122 @@ export const iloToolCatalog = {
   list_finance_merchants: read("finances", ["finances:read"]),
   get_finance_review_queue: read("finances", ["finances:read"], "inspect", { ui: true }),
   propose_finance_categorizations: preview("finances", ["finances:read"]),
+  apply_finance_categorizations: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  // A bounded answer can conditionally replace allocations or create/match a
+  // reimbursement case. The API still chooses applied versus pending review.
+  answer_finance_question: write("finances", ["finances:write"], {
+    destructive: true,
+    policy: "approve_each",
+  }),
+  // Deprecated compatibility alias for answer_finance_question.
+  resolve_finance_review: write("finances", ["finances:write"], {
+    destructive: true,
+    policy: "approve_each",
+  }),
+  update_finance_recurring_obligation: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  resolve_finance_alert: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  update_finance_merchant: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  merge_finance_merchants: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  create_finance_budget: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  update_finance_transaction: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  update_finance_income_stream: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  update_finance_profile: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  refresh_finance_insights: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
   get_finance_overview: read("finances", ["finances:read"], "context", { ui: true }),
   create_finance_attention_item: write("finances", ["finances:write"]),
+  setup_finances: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  get_finance_maintenance_history: read("finances", ["finances:read"]),
+  get_financial_profile: read("finances", ["finances:read"]),
+  update_financial_profile: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  get_finance_budget: read("finances", ["finances:read"]),
+  revise_finance_budget: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  approve_finance_budget: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  list_finance_goals: read("finances", ["finances:read"]),
+  manage_finance_goal: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  get_finance_inbox: read("finances", ["finances:read"], "inspect", { ui: true }),
+  answer_finance_review: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  get_finance_snapshot: read("finances", ["finances:read"], "context", { ui: true }),
+  export_finance_data: read("finances", ["finances:read"]),
+  list_finance_accounts: read("finances", ["finances:read"]),
+  start_finance_account_connection: write("finances", ["finances:write"], {
+    idempotent: true,
+    openWorld: true,
+    policy: "approved_rule",
+  }),
+  sync_finance_accounts: write("finances", ["finances:write"], {
+    openWorld: true,
+    policy: "approved_rule",
+  }),
+  get_finance_account_connection: read("finances", ["finances:read"]),
+  update_finance_account: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  disconnect_finance_account: write("finances", ["finances:write"], {
+    destructive: true,
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  add_finance_transaction: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  get_finance_transaction: read("finances", ["finances:read"]),
+  remove_finance_transaction: write("finances", ["finances:write"], {
+    destructive: true,
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  split_finance_transaction: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  classify_finance_transactions: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  link_finance_transactions: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  import_finance_transactions: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  list_finance_rules: read("finances", ["finances:read"]),
+  manage_finance_rule: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  list_finance_recurring_items: read("finances", ["finances:read"]),
+  manage_finance_recurring_item: write("finances", ["finances:write"], {
+    idempotent: true,
+    policy: "approved_rule",
+  }),
 
   list_x_bookmarks: read("bookmarks", ["bookmarks:read"]),
   sync_x_bookmarks: write("bookmarks", ["bookmarks:read"], { openWorld: true }),

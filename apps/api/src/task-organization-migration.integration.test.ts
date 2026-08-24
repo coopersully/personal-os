@@ -7,6 +7,7 @@ import { migrationsWithout } from "./test-migrations.js";
 const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
 const migrationPath = resolve(migrationsFolder, "0055_task_organization.sql");
 const reconciliationMigration = "0059_task_organization_reconciliation";
+const finalReconciliationMigration = "0071_task_organization_reconciliation";
 
 function databaseUri(connectionUri: string, databaseName: string): string {
   const uri = new URL(connectionUri);
@@ -45,6 +46,19 @@ describe.sequential("Task organization migration", () => {
       "0057_finance_currency_evidence",
       "0058_finance_provider_items",
       reconciliationMigration,
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
+      "0062_finance_reimbursements",
+      "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
+      "0065_finance_period_reviews",
+      "0066_finance_plan_versions",
+      "0067_finance_ledger_protocol",
+      "0068_finance_mutation_leases",
+      "0069_finance_legacy_budget_backfill",
+      "0070_finance_parallel_migration_reconciliation",
+      finalReconciliationMigration,
     ]);
     temporaryMigrationFolders.push(folder);
     return folder;
@@ -317,7 +331,7 @@ describe.sequential("Task organization migration", () => {
     const financeHistory = await migrationsWithout(
       migrationsFolder,
       "ilo-task-organization-parallel-0055-",
-      ["0055_task_organization", reconciliationMigration],
+      ["0055_task_organization", reconciliationMigration, finalReconciliationMigration],
     );
     temporaryMigrationFolders.push(financeHistory);
     await migrateDatabase(database.db, financeHistory);
@@ -343,6 +357,49 @@ describe.sequential("Task organization migration", () => {
     ).resolves.toMatchObject({
       rows: [{ kind: "inbox", task_lifecycle: "open", task_revision: 1 }],
     });
+  });
+
+  it("reconciles Finance after the parallel Task migrations were already applied", async () => {
+    const database = await createIsolatedDatabase("finance_after_task_parallel_history");
+    const taskHistory = await migrationsWithout(
+      migrationsFolder,
+      "ilo-finance-after-task-parallel-history-",
+      [
+        "0055_finance_sync_health",
+        "0059_finance_automation_settings",
+        "0060_finance_agent_action_reviews",
+        "0061_finance_transaction_allocations",
+        "0062_finance_reimbursements",
+        "0063_finance_maintenance_candidates",
+        "0064_finance_ledger_challenges",
+        "0065_finance_period_reviews",
+        "0066_finance_plan_versions",
+        "0067_finance_ledger_protocol",
+        "0068_finance_mutation_leases",
+        "0069_finance_legacy_budget_backfill",
+        "0070_finance_parallel_migration_reconciliation",
+        finalReconciliationMigration,
+      ],
+    );
+    temporaryMigrationFolders.push(taskHistory);
+    await migrateDatabase(database.db, taskHistory);
+
+    await migrateDatabase(database.db, migrationsFolder);
+
+    await expect(
+      database.pool.query(
+        `SELECT sync_state, sync_failure_count
+         FROM finance_accounts
+         LIMIT 0`,
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      database.pool.query(
+        `SELECT review_bypass_enabled
+         FROM finance_automation_settings
+         LIMIT 0`,
+      ),
+    ).resolves.toBeDefined();
   });
 
   it("rejects a Task whose canonical lifecycle is null", async () => {

@@ -114,7 +114,7 @@ jobs:
           HEAD_SHA: ${{ needs.announce.outputs.release_sha }}
         run: echo "tag=sha-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}

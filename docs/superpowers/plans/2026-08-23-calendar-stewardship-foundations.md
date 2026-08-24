@@ -57,7 +57,7 @@
 - `packages/database/src/schema.ts` — declare `calendar_findings` and `calendar_reviews`.
 - `packages/database/src/schema.test.ts` — keep Drizzle constraints and migration SQL aligned.
 - `packages/database/migrations/0066_calendar_stewardship_foundations.sql` — append-only expansion.
-- `packages/database/migrations/meta/_journal.json` — register migration 55 without editing prior entries.
+- `packages/database/migrations/meta/_journal.json` — register migration 0066 without editing prior entries.
 - `packages/domain/src/index.ts` — export the Calendar stewardship contract.
 - `apps/api/src/app.ts` — construct the stewardship service and inject it into Calendar routes.
 - `apps/api/src/openapi.ts` — register the two new HTTP paths.
@@ -645,7 +645,7 @@ it("keeps Calendar findings stable and reviews immutable", async () => {
 
 Run: `pnpm exec vitest run packages/database/src/schema.test.ts`
 
-Expected: FAIL because `calendarFindings`, `calendarReviews`, and migration 0055 do not exist.
+Expected: FAIL because `calendarFindings`, `calendarReviews`, and migration 0066 do not exist.
 
 - [ ] **Step 3: Add the append-only schema expansion and exact SQL migration**
 
@@ -711,7 +711,7 @@ export const calendarReviews = pgTable(
 );
 ```
 
-Create migration 0055 with only the two tables, their foreign keys, checks, and indexes:
+Create migration 0066 with only the two tables, their foreign keys, checks, and indexes:
 
 ```sql
 CREATE TABLE "calendar_findings" (
@@ -775,7 +775,7 @@ Append this exact journal record after index 54, using a monotonically greater `
 
 ```json
 {
-  "idx": 55,
+  "idx": 66,
   "version": "7",
   "when": 1787558400000,
   "tag": "0066_calendar_stewardship_foundations",
@@ -787,7 +787,7 @@ Append this exact journal record after index 54, using a monotonically greater `
 
 Run: `pnpm exec vitest run packages/database/src/schema.test.ts apps/api/src/calendar-service.integration.test.ts && pnpm --filter @personal-os/database typecheck`
 
-Expected: PASS; the integration suite applies every migration through 0055 to a fresh PostgreSQL 17 container.
+Expected: PASS; the integration suite applies every migration through 0066 to a fresh PostgreSQL 17 container.
 
 - [ ] **Step 5: Commit the durable ledger**
 
@@ -1419,7 +1419,7 @@ pnpm exec vitest run \
   apps/web/src/app.test.tsx
 ```
 
-Expected: PASS with PostgreSQL migration 0055 applied in integration tests.
+Expected: PASS with PostgreSQL migration 0066 applied in integration tests.
 
 - [ ] **Step 3: Run deterministic repository verification**
 
@@ -1471,7 +1471,7 @@ Expected: the documentation commit succeeds and `git status --short` is empty.
 
 These changes require Integration-owner review even though they are necessary for the vertical slice:
 
-1. `packages/database/src/schema.ts`, migration 0055, schema test, and migration journal registration.
+1. `packages/database/src/schema.ts`, migration 0066, schema test, and migration journal registration.
 2. `packages/domain/src/index.ts` export registration.
 3. `apps/api/src/app.ts` service construction and route injection.
 4. `apps/api/src/openapi.ts` path registration.

@@ -2,9 +2,16 @@ import { z } from "zod";
 import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
 
+const calendarMaintenanceWindowScopeSchema = z
+  .object({ type: z.literal("window"), start: isoDateTimeSchema, end: isoDateTimeSchema })
+  .refine(({ start, end }) => new Date(start) <= new Date(end), {
+    message: "Calendar maintenance window must end at or after it starts.",
+    path: ["end"],
+  });
+
 export const calendarMaintenanceScopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("all_outstanding") }),
-  z.object({ type: z.literal("window"), start: isoDateTimeSchema, end: isoDateTimeSchema }),
+  calendarMaintenanceWindowScopeSchema,
   z.object({
     type: z.literal("target"),
     entityType: z.enum([

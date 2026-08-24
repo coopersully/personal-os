@@ -836,8 +836,9 @@ function InlineEventComposer({
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const selectedCalendar = writable.find((calendar) => calendar.id === calendarId) ?? writable[0];
   useEffect(() => {
-    if (!calendarId && writable[0]) setCalendarId(writable[0].id);
-  }, [calendarId, writable]);
+    const nextCalendarId = selectedCalendar?.id ?? "";
+    if (calendarId !== nextCalendarId) setCalendarId(nextCalendarId);
+  }, [calendarId, selectedCalendar?.id]);
   useEffect(() => {
     if (conferenceChoice === "google_meet" && selectedCalendar?.provider !== "google") {
       setConferenceChoice("none");

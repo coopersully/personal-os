@@ -16,6 +16,19 @@ describe("Calendar stewardship contracts", () => {
     });
   });
 
+  it("rejects an inverted maintenance window while allowing equal bounds", () => {
+    expect(
+      createCalendarReviewInputSchema.safeParse({
+        scope: { type: "window", start: "2026-08-24T12:00:00.000Z", end: now },
+      }).success,
+    ).toBe(false);
+    expect(
+      createCalendarReviewInputSchema.safeParse({
+        scope: { type: "window", start: now, end: now },
+      }).success,
+    ).toBe(true);
+  });
+
   it("retains the complete target lifecycle even when this slice reaches only settled review states", () => {
     expect(calendarMaintenanceLifecycleSchema.options).toEqual([
       "never_maintained",

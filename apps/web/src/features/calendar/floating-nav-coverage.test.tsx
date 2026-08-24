@@ -174,6 +174,15 @@ describe("Calendar floating navigation edge states", () => {
     view.rerender(renderNav([zulu, alpha]));
 
     expect(await screen.findByRole("button", { name: "Calendar: Alpha" })).toBeInTheDocument();
+    view.rerender(renderNav([zulu]));
+    expect(await screen.findByRole("button", { name: "Calendar: Zulu" })).toBeInTheDocument();
+    await browser.type(screen.getByRole("textbox", { name: "Title" }), "Reconciled calendar");
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await waitFor(() =>
+      expect(mocks.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ calendarId: "calendar-zulu" }),
+      ),
+    );
   });
 
   it("shows the year when the default start crosses into a new year", async () => {

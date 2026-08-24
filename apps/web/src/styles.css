@@ -2653,6 +2653,7 @@ p {
   --calendar-hour-rule: var(--line);
   --calendar-half-hour-rule: color-mix(in srgb, var(--line) 72%, transparent);
   --calendar-quarter-hour-rule: color-mix(in srgb, var(--line) 42%, transparent);
+
   background-color: var(--surface-raised);
   background-image:
     linear-gradient(to bottom, var(--calendar-hour-rule) 0 1px, transparent 1px),

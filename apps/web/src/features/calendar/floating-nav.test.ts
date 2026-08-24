@@ -75,6 +75,20 @@ describe("calendar floating navigation search", () => {
     expect(parseCalendarDateQuery("13/1", "UTC", now)).toBeUndefined();
     expect(parseCalendarDateQuery("2026-02-31", "UTC", now)).toBeUndefined();
     expect(parseCalendarDateQuery("not a date", "UTC", now)).toBeUndefined();
+    expect(parseCalendarDateQuery("December 25, 2027", "UTC", now)?.date).toEqual({
+      day: 25,
+      month: 12,
+      year: 2027,
+    });
+    expect(parseCalendarDateQuery("12/25", "UTC", now)?.date).toEqual({
+      day: 25,
+      month: 12,
+      year: 2026,
+    });
+    expect(parseCalendarDateQuery("0/1", "UTC", now)).toBeUndefined();
+    expect(parseCalendarDateQuery("1/0", "UTC", now)).toBeUndefined();
+    expect(parseCalendarDateQuery("12/32", "UTC", now)).toBeUndefined();
+    expect(parseCalendarDateQuery("2/29", "UTC", now)).toBeUndefined();
   });
 
   it("searches event titles, notes, and locations", () => {

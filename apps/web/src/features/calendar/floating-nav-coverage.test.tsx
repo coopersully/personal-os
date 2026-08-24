@@ -259,4 +259,54 @@ describe("Calendar floating navigation edge states", () => {
       vi.useRealTimers();
     }
   });
+
+  it("keeps all-day dates ordered and repairs an invalid timed end", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-23T12:00:00.000Z"), shouldAdvanceTime: true });
+    try {
+      const browser = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderCalendar();
+      await browser.click(screen.getByRole("button", { name: "Create event" }));
+      await browser.click(screen.getByRole("switch", { name: "All day" }));
+      await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
+      await browser.click(screen.getByRole("button", { name: /Monday, August 24th, 2026/ }));
+      expect(screen.getByRole("button", { name: "Ends date, Aug 24" })).toBeInTheDocument();
+
+      await browser.click(screen.getByRole("button", { name: "Ends date, Aug 24" }));
+      await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
+      expect(screen.getByRole("button", { name: "Ends date, Aug 24" })).toBeInTheDocument();
+
+      await browser.click(screen.getByRole("switch", { name: "All day" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Ends hour" }), {
+        target: { value: "1130" },
+      });
+      await browser.click(screen.getByRole("button", { name: /Ends AM or PM/ }));
+      await browser.click(await screen.findByRole("menuitemradio", { name: "AM" }));
+      expect(screen.getByRole("textbox", { name: "Ends hour" })).toHaveValue("1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("selects and clears a suggested event location", async () => {
+    const browser = userEvent.setup();
+    mocks.searchWeatherLocations.mockResolvedValue([
+      {
+        coordinates: { latitude: 40.7128, longitude: -74.006 },
+        label: "New York, New York, United States",
+        timezone: "America/New_York",
+      },
+    ]);
+    renderCalendar();
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await browser.click(screen.getByRole("button", { name: "Add location" }));
+    await browser.type(screen.getByRole("combobox", { name: "Location" }), "New York");
+    await browser.click(
+      await screen.findByRole("option", { name: "New York, New York, United States" }),
+    );
+    expect(screen.getByRole("combobox", { name: "Location" })).toHaveValue(
+      "New York, New York, United States",
+    );
+    await browser.clear(screen.getByRole("combobox", { name: "Location" }));
+    expect(screen.getByRole("combobox", { name: "Location" })).toHaveValue("");
+  });
 });

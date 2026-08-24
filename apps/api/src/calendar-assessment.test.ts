@@ -137,6 +137,43 @@ describe("Calendar assessment", () => {
     expect(assessCalendar(local).sourceFreshness[0]).toMatchObject({ state: "current" });
   });
 
+  it("orders source evidence deterministically through every identity tie-breaker", () => {
+    const evidence = snapshot([]);
+    evidence.sources = [
+      { ...source, accountId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      {
+        ...source,
+        accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        calendarId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      },
+      {
+        ...source,
+        accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        calendarId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        provider: "google",
+      },
+      {
+        ...source,
+        accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        calendarId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        provider: "icloud",
+      },
+    ];
+
+    expect(
+      assessCalendar(evidence).sourceFreshness.map(({ accountId, calendarId, provider }) => [
+        accountId,
+        calendarId,
+        provider,
+      ]),
+    ).toEqual([
+      ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "google"],
+      ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "icloud"],
+      ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "google"],
+      ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", source.calendarId, "google"],
+    ]);
+  });
+
   it("does not emit a redundant buffer finding for an overlapping pair", () => {
     const result = assessCalendar(
       snapshot([

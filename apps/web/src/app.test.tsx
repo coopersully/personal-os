@@ -4873,6 +4873,7 @@ describe("ilo web app", () => {
     fireEvent.dragStart(readonly, { dataTransfer: readonlyTransfer });
     dropCalendarEvent(monday, readonlyTransfer, 675);
     expect(mocks.updateEvent).toHaveBeenCalledTimes(callsBeforeReadonlyDrop);
+    fireEvent.pointerCancel(readonly);
     fireEvent.pointerDown(readonly);
     expect(
       await screen.findByRole("tooltip", {
@@ -4880,6 +4881,12 @@ describe("ilo web app", () => {
       }),
     ).toBeInTheDocument();
     expect(readonly).toHaveClass("is-move-blocked");
+    fireEvent.click(readonly);
+    expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
+    fireEvent.pointerDown(readonly);
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    fireEvent.click(readonly);
+    expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
     fireEvent.pointerDown(readonly);
     fireEvent.click(readonly);
     expect(await screen.findByText(/write through to Google Calendar/)).toBeInTheDocument();

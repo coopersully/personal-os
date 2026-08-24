@@ -156,6 +156,7 @@ For remote hosts, POST Streamable HTTP requests to `http://localhost:8789/mcp` w
 
 ```bash
 export APP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export MCP_INTERNAL_SECRET="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 

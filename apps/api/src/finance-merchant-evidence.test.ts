@@ -111,4 +111,29 @@ describe("evaluateMerchantEvidence", () => {
       merchantOnlyEligible: false,
     });
   });
+
+  it("keeps empty evidence unknown without inventing a category or confidence", () => {
+    expect(
+      evaluateMerchantEvidence({ merchantName: "New merchant", observations: [] }),
+    ).toMatchObject({
+      behavior: "unknown",
+      category: null,
+      confidence: 0,
+      merchantOnlyEligible: false,
+    });
+  });
+
+  it("honors a confirmed consistent classification while requiring more observations", () => {
+    expect(
+      evaluateMerchantEvidence({
+        behavior: "consistent",
+        merchantName: "Local cafe",
+        observations: [{ category: "Dining", outcome: "confirmed" }],
+      }),
+    ).toMatchObject({
+      behavior: "consistent",
+      category: "Dining",
+      merchantOnlyEligible: false,
+    });
+  });
 });

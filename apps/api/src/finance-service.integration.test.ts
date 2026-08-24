@@ -9,6 +9,7 @@ import {
   type DatabaseClient,
   domainProfileApprovals,
   domainProfiles,
+  financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
@@ -35,6 +36,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { loadFinanceAuthorization } from "./finance/context.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -385,8 +387,12 @@ describe.sequential("finance service", () => {
       "0063_finance_maintenance_candidates",
       "0064_finance_ledger_challenges",
       "0065_finance_period_reviews",
-      "0066_calendar_stewardship_foundations",
-      "0067_calendar_event_links",
+      "0066_finance_plan_versions",
+      "0067_finance_ledger_protocol",
+      "0068_finance_mutation_leases",
+      "0069_finance_legacy_budget_backfill",
+      "0070_calendar_stewardship_foundations",
+      "0071_calendar_event_links",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -1963,12 +1969,35 @@ describe.sequential("finance service", () => {
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "manual-finance" };
+    await expect(service.listMerchants("00000000-0000-4000-8000-000000000000")).resolves.toEqual(
+      [],
+    );
     expect(service.plaidAvailable()).toBe(false);
     await expect(service.createPlaidLinkToken(userId)).rejects.toThrow("Plaid is not configured");
     const account = await service.createAccount(
       { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
       context,
     );
+    const wealthAccounts = await Promise.all(
+      [
+        { balance: 250, kind: "debt" as const, name: "Card" },
+        { balance: 500, kind: "investment" as const, name: "Brokerage" },
+        { balance: 125, kind: "other" as const, name: "Other asset" },
+      ].map((item) =>
+        service.createAccount(
+          { ...item, institution: "Wealth fixture", provider: "manual" },
+          context,
+        ),
+      ),
+    );
+    await expect(service.getWealthSummary(userId)).resolves.toMatchObject({
+      debt: 250,
+      investments: 500,
+      otherAssets: 125,
+    });
+    for (const wealthAccount of wealthAccounts) {
+      await service.deleteAccount(wealthAccount.id, context);
+    }
     const categorized = await service.createTransaction(
       {
         accountId: account.id,
@@ -2417,6 +2446,66 @@ describe.sequential("finance service", () => {
         context,
       );
     }
+    const filteredPage = await service.listTransactions(userId, {
+      accountId: account.id,
+      categoryId: shopping.id,
+      from: "2026-07-01",
+      limit: 1,
+      pending: false,
+      review: "resolved",
+      sortBy: "merchant",
+      sortDirection: "asc",
+      to: "2026-07-31",
+    });
+    expect(filteredPage.items).toHaveLength(1);
+    expect(filteredPage.nextCursor).toEqual(expect.any(String));
+    if (!filteredPage.nextCursor) throw new Error("Expected a second transaction page.");
+    await expect(
+      service.listTransactions(userId, {
+        accountId: account.id,
+        categoryId: shopping.id,
+        cursor: filteredPage.nextCursor,
+        from: "2026-07-01",
+        limit: 1,
+        pending: false,
+        review: "resolved",
+        sortBy: "merchant",
+        sortDirection: "asc",
+        to: "2026-07-31",
+      }),
+    ).resolves.toMatchObject({ items: [expect.objectContaining({ category: "Shopping" })] });
+    await expect(
+      service.listTransactions(userId, {
+        cursor: filteredPage.nextCursor,
+        limit: 1,
+        review: "all",
+        sortBy: "amount",
+        sortDirection: "asc",
+      }),
+    ).rejects.toThrow("does not match this sort");
+    await expect(
+      service.listTransactions(userId, { cursor: "not-a-cursor", limit: 1, review: "all" }),
+    ).rejects.toThrow("cursor is invalid");
+    const amountPage = await service.listTransactions(userId, {
+      limit: 1,
+      review: "all",
+      sortBy: "amount",
+      sortDirection: "desc",
+    });
+    expect(amountPage).toMatchObject({
+      items: [expect.any(Object)],
+      nextCursor: expect.any(String),
+    });
+    if (!amountPage.nextCursor) throw new Error("Expected another amount-sorted page.");
+    await expect(
+      service.listTransactions(userId, {
+        cursor: amountPage.nextCursor,
+        limit: 1,
+        review: "all",
+        sortBy: "amount",
+        sortDirection: "desc",
+      }),
+    ).resolves.toMatchObject({ items: [expect.any(Object)] });
     const evidenceCandidate = await service.createTransaction(
       {
         accountId: account.id,
@@ -4983,6 +5072,11 @@ describe.sequential("finance service", () => {
       planningTimezone: "UTC",
     });
     const context = { principal: financePrincipal(userId), requestId: "cashflow" };
+    const canonicalContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: context.principal,
+      requestId: context.requestId,
+    });
     const service = createFinanceService({ db: database.db, now: () => now });
     const account = await service.createAccount(
       { balance: 5_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
@@ -5268,6 +5362,58 @@ describe.sequential("finance service", () => {
     await expect(
       service.updateRecurringObligation(recurring.id, { status: "active" }, context),
     ).resolves.toMatchObject({ status: "active" });
+    await expect(service.listFinanceRecurringItems(userId)).resolves.toMatchObject({
+      data: {
+        income: [expect.objectContaining({ id: incomeStream.id })],
+        obligations: [expect.objectContaining({ id: recurring.id })],
+      },
+    });
+    await expect(
+      service.manageFinanceRecurringItem(
+        {
+          idempotencyKey: "cashflow-income-pause",
+          itemId: incomeStream.id,
+          itemType: "income",
+          operation: "pause",
+        },
+        canonicalContext,
+      ),
+    ).resolves.toMatchObject({ data: { status: "paused" } });
+    await expect(
+      service.manageFinanceRecurringItem(
+        {
+          idempotencyKey: "cashflow-income-resume",
+          itemId: incomeStream.id,
+          itemType: "income",
+          operation: "resume",
+        },
+        canonicalContext,
+      ),
+    ).resolves.toMatchObject({ data: { status: "active" } });
+    await expect(
+      service.manageFinanceRecurringItem(
+        {
+          idempotencyKey: "cashflow-income-cancel",
+          itemId: incomeStream.id,
+          itemType: "income",
+          operation: "cancel",
+        },
+        canonicalContext,
+      ),
+    ).rejects.toThrow("only obligations can be cancelled");
+    for (const operation of ["pause", "resume", "cancel"] as const) {
+      await expect(
+        service.manageFinanceRecurringItem(
+          {
+            idempotencyKey: `cashflow-obligation-${operation}`,
+            itemId: recurring.id,
+            itemType: "obligation",
+            operation,
+          },
+          canonicalContext,
+        ),
+      ).resolves.toMatchObject({ data: { id: recurring.id } });
+    }
     await expect(service.refreshCashflowInsights(userId)).resolves.toEqual({ refreshed: true });
     await database.db.insert(financeAlerts).values({
       body: "A paycheck was different from its expected amount.",
@@ -5546,6 +5692,34 @@ describe.sequential("finance service", () => {
     };
     expect(service.plaidAvailable()).toBe(true);
     await expect(service.createPlaidLinkToken(plaidOnlyUser.id)).resolves.toBe("link-token");
+    const financeContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: context.principal,
+      requestId: "plaid-connection",
+    });
+    const connectionResult = await service.startFinanceAccountConnection(
+      { idempotencyKey: "plaid-connection", provider: "plaid" },
+      financeContext,
+    );
+    expect(connectionResult).toMatchObject({
+      data: {
+        connectionId: expect.any(String),
+        externalHandoff: {
+          artifact: "link-token",
+          expiresAt: "2026-07-19T12:30:00.000Z",
+        },
+        status: "pending",
+      },
+      outcome: "external_action_required",
+    });
+    const [persistedConnection] = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(eq(financeAccountConnections.id, connectionResult.data.connectionId));
+    expect(persistedConnection).toMatchObject({
+      externalHandoffUrl: "link-token",
+      status: "pending",
+    });
     const accounts = await service.exchangePlaidToken(
       { institution: "Plaid Bank", publicToken: "public-token" },
       context,

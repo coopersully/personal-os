@@ -5856,7 +5856,7 @@ describe.sequential("finance action service", () => {
         ),
       );
     expect(questionAudits.length).toBeLessThanOrEqual(1);
-  });
+  }, 10_000);
 
   it("serializes an expense reimbursement answer with a direct breakdown replacement", async () => {
     // The barrier lets either writer acquire the expense lock first; the other

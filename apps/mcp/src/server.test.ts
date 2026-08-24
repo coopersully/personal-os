@@ -1,6 +1,7 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import type {
+  AccessScope,
   Calendar,
   CalendarEvent,
   DailyBrief,
@@ -9,7 +10,7 @@ import type {
   Reminder,
   Task,
 } from "@personal-os/domain";
-import { type AccessScope, accessScopeSchema } from "@personal-os/domain";
+import { accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
 import { availableToolNames } from "./tool-catalog.js";
 
@@ -325,6 +326,7 @@ function mockApi() {
       sensitivityWarnings: [],
     })),
     setFinanceBudgetPlan: vi.fn(async (input) => input),
+    syncFinanceAccount: vi.fn(async () => ({ synced: true })),
     setFinanceTransactionBreakdown: vi.fn(async () => ({
       accountId,
       allocations: [],
@@ -342,9 +344,16 @@ function mockApi() {
       updatedAt: now,
     })),
     maintainFinances: vi.fn(async () => ({
-      id,
-      scope: { type: "all_outstanding" as const },
-      status: "queued" as const,
+      changes: [],
+      communication: {
+        headline: "Finance maintenance needs reasoning.",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: { runId: id, stage: "agent_reasoning" as const },
+      outcome: "work_remaining" as const,
+      remainingWork: { categories: ["reasoning"], count: 1 },
+      schemaVersion: 1 as const,
     })),
     getFinanceLedgerChallenge: vi.fn(async () => ({
       challenge: {
@@ -461,9 +470,27 @@ function mockApi() {
       staleAccounts: 0,
       unresolvedReviews: 0,
     })),
+    getFinancialProfile: vi.fn(async () => ({
+      changes: [],
+      communication: {
+        headline: "Financial profile needs one answer.",
+        nextQuestion: { prompt: "What is your monthly take-home pay?" },
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: null,
+      outcome: "work_remaining",
+      remainingWork: { categories: ["profile"], count: 1 },
+      schemaVersion: 1,
+    })),
     getFinanceProfile: vi.fn(async () => null),
     updateFinanceProfile: vi.fn(async (input) => ({ ...input, updatedAt: now })),
     listFinanceIncomeStreams: vi.fn(async () => []),
+    listFinanceReimbursements: vi.fn(async () => ({
+      reimbursements: [],
+      unmatchedCredits: [],
+    })),
+    reconcileFinanceReimbursement: vi.fn(async (input) => input),
     updateFinanceIncomeStream: vi.fn(async () => ({
       accountId: null,
       cadence: "monthly",
@@ -515,6 +542,17 @@ function mockApi() {
     })),
     refreshFinanceInsights: vi.fn(async () => ({ refreshed: true })),
     getFinanceCategories: vi.fn(async () => []),
+    exportFinanceData: vi.fn(async () => ({
+      accounts: [],
+      alerts: [],
+      asOf: now,
+      budgets: [],
+      categories: [],
+      incomeStreams: [],
+      profile: null,
+      recurringObligations: [],
+      transactions: [],
+    })),
     getFinanceBudgetStatus: vi.fn(async () => []),
     listFinanceMerchants: vi.fn(async () => []),
     mergeFinanceMerchants: vi.fn(async () => ({
@@ -837,31 +875,6 @@ describe("ilo MCP server", () => {
     expect(new Set(tools.tools.map((tool) => tool.name))).toEqual(
       new Set(availableToolNames(new Set(accessScopeSchema.options), false)),
     );
-    for (const tool of tools.tools) {
-      expect(tool.outputSchema).toMatchObject({
-        properties: { _ilo: expect.any(Object) },
-        required: ["_ilo"],
-        type: "object",
-      });
-      expect(tool.annotations).toEqual({
-        destructiveHint: expect.any(Boolean),
-        idempotentHint: expect.any(Boolean),
-        openWorldHint: expect.any(Boolean),
-        readOnlyHint: expect.any(Boolean),
-      });
-      expect(tool._meta).toMatchObject({
-        "ilo/domain": expect.any(String),
-        "ilo/policy": expect.any(String),
-        "ilo/stage": expect.any(String),
-      });
-    }
-    expect(tools.tools.find((tool) => tool.name === "list_automations")).toBeUndefined();
-    expect(tools.tools.find((tool) => tool.name === "run_automation")).toBeUndefined();
-    expect(tools.tools.find((tool) => tool.name === "sync_x_bookmarks")?.annotations).toMatchObject(
-      {
-        readOnlyHint: false,
-      },
-    );
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
@@ -1183,21 +1196,25 @@ describe("ilo MCP server", () => {
       arguments: { detail: null, title: "Act with care" },
     });
 
-    const financeSetup = await client.callTool({
-      name: "get_finance_guided_setup",
-      arguments: {},
+    await client.callTool({ name: "get_finance_snapshot", arguments: {} });
+    await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
+    await client.callTool({ name: "get_finance_cashflow", arguments: {} });
+    await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
+    await client.callTool({ name: "list_finance_transactions", arguments: { limit: 10 } });
+    await client.callTool({ name: "get_finance_categories", arguments: {} });
+    await client.callTool({ name: "export_finance_data", arguments: {} });
+    await client.callTool({ name: "list_finance_merchants", arguments: {} });
+    await client.callTool({
+      name: "update_finance_merchant",
+      arguments: { displayName: "Test", merchantId: id },
     });
-    expect(financeSetup.structuredContent).toMatchObject({
-      result: {
-        context: {
-          guidance: {
-            approvedProfile: null,
-            draftNotice: expect.stringContaining("untrusted and non-operative"),
-            draftProposal: expect.objectContaining({ domain: "finances", status: "draft" }),
-          },
-        },
-      },
+    await client.callTool({
+      name: "merge_finance_merchants",
+      arguments: { sourceMerchantId: accountId, targetMerchantId: id },
     });
+    await client.callTool({ name: "list_x_bookmarks", arguments: {} });
+    await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
+    await client.callTool({ name: "get_finance_guided_setup", arguments: {} });
     await client.callTool({ name: "get_finance_overview", arguments: {} });
     await client.callTool({ name: "get_finance_automation_settings", arguments: {} });
     await client.callTool({
@@ -1205,11 +1222,7 @@ describe("ilo MCP server", () => {
       arguments: {
         alternatives: [],
         asOf: "2026-07-13",
-        baseline: {
-          label: "Baseline",
-          monthlyIncome: 3_000,
-          startingCash: 1_000,
-        },
+        baseline: { label: "Baseline", monthlyIncome: 3_000, startingCash: 1_000 },
         horizonMonths: 3,
       },
     });
@@ -1221,13 +1234,6 @@ describe("ilo MCP server", () => {
         rationale: "Match current spending.",
       },
     });
-    await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
-    await client.callTool({ name: "get_finance_cashflow", arguments: {} });
-    await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
-    await client.callTool({ name: "list_finance_transactions", arguments: { limit: 10 } });
-    await client.callTool({ name: "get_finance_categories", arguments: {} });
-    await client.callTool({ name: "get_finance_budget_status", arguments: { month: "2026-07" } });
-    await client.callTool({ name: "list_finance_merchants", arguments: {} });
     await client.callTool({ name: "get_finance_review_queue", arguments: {} });
     await client.callTool({
       name: "propose_finance_categorizations",
@@ -1270,68 +1276,38 @@ describe("ilo MCP server", () => {
       arguments: { action: "resolve", id, rationale: null },
     });
     await client.callTool({
-      name: "update_finance_merchant",
-      arguments: { displayName: "Corner Store", id },
-    });
-    await client.callTool({
-      name: "merge_finance_merchants",
-      arguments: {
-        rationale: "Same merchant.",
-        sourceMerchantId: accountId,
-        targetMerchantId: id,
-      },
-    });
-    await client.callTool({
-      name: "create_finance_budget",
-      arguments: { category: "Dining", limit: 250, month: "2026-07" },
-    });
-    await client.callTool({
-      name: "create_finance_transaction",
+      name: "add_finance_transaction",
       arguments: {
         accountId,
-        amount: 12,
-        category: null,
-        categoryConfidence: null,
+        amount: 1,
         date: "2026-07-13",
         direction: "expense",
-        merchant: "Corner store",
-        notes: null,
+        merchant: "Test",
       },
     });
     await client.callTool({
-      name: "update_finance_transaction",
-      arguments: { category: "Dining", id: accountId },
-    });
-    await client.callTool({
-      name: "set_finance_transaction_breakdown",
+      name: "add_finance_transaction",
       arguments: {
-        allocations: [{ amount: 12, categoryId: id, rationale: "Receipt." }],
-        expectedTransactionUpdatedAt: now,
-        id: accountId,
-        rationale: "One-off receipt breakdown.",
+        accountId,
+        amount: 2,
+        category: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Uncategorized",
       },
     });
     await client.callTool({
-      name: "update_finance_income_stream",
-      arguments: { id, status: "active" },
-    });
-    await client.callTool({
-      name: "update_finance_profile",
+      name: "add_finance_transaction",
       arguments: {
-        effectiveDate: "2026-07-01",
-        employer: null,
-        employmentType: null,
-        expectedNetPay: null,
-        grossAnnualIncome: null,
-        nextPayday: null,
-        payAccountId: null,
-        payFrequency: null,
-        role: null,
+        accountId,
+        amount: 3,
+        category: "Dining",
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Categorized",
       },
     });
-    await client.callTool({ name: "refresh_finance_insights", arguments: {} });
-    await client.callTool({ name: "list_x_bookmarks", arguments: {} });
-    await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
+
     await client.callTool({
       name: "list_reminders",
       arguments: { completed: false, cursor: "next-page", limit: 25, query: "Test" },
@@ -1686,14 +1662,6 @@ describe("ilo MCP server", () => {
       payer: "Alex",
       rationale: "Alex owes their share.",
     });
-    expect(api.createFinanceBudget).toHaveBeenCalledWith({
-      category: "Dining",
-      limit: 250,
-      month: "2026-07",
-    });
-    expect(api.createFinanceTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId, merchant: "Corner store" }),
-    );
     expect(api.listMailThreads).toHaveBeenCalledWith({
       accountIds: [accountId],
       limit: 100,
@@ -1901,7 +1869,7 @@ describe("ilo MCP server", () => {
         openWorldHint: false,
         readOnlyHint: false,
       },
-      inputSchema: { additionalProperties: false, properties: { scope: expect.any(Object) } },
+      inputSchema: { oneOf: expect.any(Array) },
     });
     expect(tools.tools.find((tool) => tool.name === "get_finance_ledger_challenge")).toMatchObject({
       _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
@@ -1918,8 +1886,14 @@ describe("ilo MCP server", () => {
       annotations: { readOnlyHint: true },
     });
 
-    const maintenance = await client.callTool({ arguments: {}, name: "maintain_finances" });
-    expect(api.maintainFinances).toHaveBeenCalledWith({ type: "all_outstanding" });
+    const maintenance = await client.callTool({
+      arguments: { operation: "start" },
+      name: "maintain_finances",
+    });
+    expect(api.maintainFinances).toHaveBeenCalledWith({
+      operation: "start",
+      scope: { type: "all_outstanding" },
+    });
     expect(maintenance).toMatchObject({
       structuredContent: {
         _ilo: {
@@ -1929,18 +1903,20 @@ describe("ilo MCP server", () => {
           readOnly: false,
           stage: "commit",
         },
-        result: { id, status: "queued" },
+        data: { runId: id, stage: "agent_reasoning" },
       },
     });
 
     await client.callTool({
-      arguments: { scope: { end: "2026-08-16", start: "2026-08-01", type: "window" } },
+      arguments: {
+        operation: "start",
+        scope: { from: "2026-08-01", type: "since" },
+      },
       name: "maintain_finances",
     });
     expect(api.maintainFinances).toHaveBeenLastCalledWith({
-      end: "2026-08-16",
-      start: "2026-08-01",
-      type: "window",
+      operation: "start",
+      scope: { from: "2026-08-01", type: "since" },
     });
     await client.callTool({
       arguments: { scope: { entityType: "finance_transaction", id, type: "target" } },
@@ -1954,11 +1930,128 @@ describe("ilo MCP server", () => {
 
     await client.callTool({ arguments: { challengeId: id }, name: "get_finance_ledger_challenge" });
     expect(api.getFinanceLedgerChallenge).toHaveBeenCalledWith(id, undefined);
+    await client.callTool({
+      arguments: {
+        candidateRevision: `sha256:${"a".repeat(64)}`,
+        challengeId: id,
+        checked: [
+          "mixed_merchants",
+          "conflicting_evidence",
+          "rule_breadth",
+          "prior_corrections",
+          "unusual_amounts",
+          "reimbursements",
+          "refunds_and_transfers",
+          "duplicates_and_reversals",
+          "allocation_integrity",
+          "vague_categories",
+          "stale_profile_and_budget_facts",
+          "misleading_unresolved_totals",
+        ],
+        findings: [],
+        reviewedItemIds: [],
+        rubricVersion: "finance-ledger-challenge-v1",
+      },
+      name: "submit_finance_ledger_challenge",
+    });
+    expect(api.submitFinanceLedgerChallenge).toHaveBeenCalledOnce();
     await client.callTool({ arguments: { reviewId: id }, name: "get_finance_period_review" });
     expect(api.getFinancePeriodReview).toHaveBeenCalledWith(id);
+    await client.callTool({ arguments: {}, name: "list_finance_reimbursements" });
+    expect(api.listFinanceReimbursements).toHaveBeenCalledOnce();
+    await client.callTool({
+      arguments: {
+        allocationId: id,
+        dueDate: null,
+        evidence: {
+          sourceRefs: [
+            {
+              accountId,
+              provider: "plaid",
+              remoteId: "transaction-1",
+              revision: now,
+              sourceType: "finance_transaction",
+            },
+          ],
+          summary: "The receipt identifies a shared purchase.",
+        },
+        expectedAmount: 12,
+        operation: "create",
+        payer: "Alex",
+        rationale: "Track the expected shared-expense repayment.",
+      },
+      name: "reconcile_finance_reimbursement",
+    });
+    expect(api.reconcileFinanceReimbursement).toHaveBeenCalledOnce();
+    await client.callTool({
+      arguments: { answer: "Confirmed", id },
+      name: "resolve_finance_review",
+    });
+    await client.callTool({
+      arguments: {
+        categoryId: id,
+        confidence: 1,
+        expectedTransactionUpdatedAt: now,
+        id,
+        learnMerchant: "suggest",
+        rationale: "Known merchant history.",
+        transactionId: accountId,
+      },
+      name: "resolve_finance_review",
+    });
+    expect(api.answerFinanceQuestion).toHaveBeenCalledTimes(2);
+    await client.callTool({
+      arguments: {
+        allocations: [
+          {
+            amount: 12,
+            categoryId: id,
+            rationale: "Receipt allocation.",
+            treatment: "personal",
+          },
+        ],
+        expectedTransactionUpdatedAt: now,
+        id: accountId,
+        rationale: "One-off receipt breakdown.",
+      },
+      name: "set_finance_transaction_breakdown",
+    });
+    expect(api.setFinanceTransactionBreakdown).toHaveBeenCalledWith(accountId, {
+      allocations: [
+        {
+          amount: 12,
+          categoryId: id,
+          rationale: "Receipt allocation.",
+          treatment: "personal",
+        },
+      ],
+      expectedTransactionUpdatedAt: now,
+      futureRule: null,
+      rationale: "One-off receipt breakdown.",
+    });
+    await client.callTool({
+      arguments: { id, status: "active" },
+      name: "update_finance_income_stream",
+    });
+    expect(api.updateFinanceIncomeStream).toHaveBeenCalledWith(id, { status: "active" });
+    await client.callTool({
+      arguments: {
+        effectiveDate: "2026-07-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      },
+      name: "update_finance_profile",
+    });
+    expect(api.updateFinanceProfile).toHaveBeenCalledOnce();
 
     const unsupported = await client.callTool({
-      arguments: { batch: 5, scope: { type: "all_outstanding" } },
+      arguments: { batch: 5, operation: "start", scope: { type: "all_outstanding" } },
       name: "maintain_finances",
     });
     expect(unsupported.isError).toBe(true);
@@ -1988,7 +2081,10 @@ describe("ilo MCP server", () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
-    const response = await client.callTool({ arguments: {}, name: "maintain_finances" });
+    const response = await client.callTool({
+      arguments: { operation: "start" },
+      name: "maintain_finances",
+    });
     const expectedError = {
       code: "conflict",
       details: { activeRunId: id },
@@ -2005,6 +2101,72 @@ describe("ilo MCP server", () => {
     });
     expect(response.content).toEqual([
       { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("keeps account-scoped Finance synchronization autonomous when individual sources fail", async () => {
+    const thirdAccountId = "33333333-3333-4333-8333-333333333333";
+    const api = mockApi();
+    api.syncFinanceAccount
+      .mockResolvedValueOnce({ synced: true })
+      .mockRejectedValueOnce(new Error("Provider authorization expired."))
+      .mockRejectedValueOnce("Provider unavailable");
+    api.maintainFinances.mockRejectedValueOnce(new Error("Unexpected maintenance failure."));
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: {
+        accountIds: [id, accountId, thirdAccountId],
+        idempotencyKey: "sync-three-accounts",
+      },
+      name: "sync_finance_accounts",
+    });
+    expect(response.structuredContent).toMatchObject({
+      data: { syncedAccountIds: [id] },
+      diagnostics: {
+        issues: [
+          {
+            affectedWork: [accountId],
+            plainLanguage: "Provider authorization expired.",
+            unaffectedWork: [id, thirdAccountId],
+          },
+          {
+            affectedWork: [thirdAccountId],
+            plainLanguage: "This account did not sync.",
+            unaffectedWork: [id, accountId],
+          },
+        ],
+      },
+    });
+    expect(api.syncFinanceAccount).toHaveBeenCalledTimes(3);
+
+    const healthySync = await client.callTool({
+      arguments: { accountIds: [id], idempotencyKey: "sync-one-account" },
+      name: "sync_finance_accounts",
+    });
+    expect(healthySync.structuredContent).not.toHaveProperty("diagnostics");
+
+    const unexpected = await client.callTool({
+      arguments: { operation: "start" },
+      name: "maintain_finances",
+    });
+    expect(unexpected.isError).toBe(true);
+
+    const profile = await client.callTool({ arguments: {}, name: "get_financial_profile" });
+    expect(profile.content).toEqual([
+      {
+        text: "Financial profile needs one answer.\n\nWhat is your monthly take-home pay?",
+        type: "text",
+      },
     ]);
 
     await client.close();

@@ -25,6 +25,18 @@ describe("Google Pub/Sub authentication", () => {
       .sign(privateKey);
 
     await expect(verify(token)).resolves.toEqual({ subject: "pubsub-push" });
+
+    const tokenWithoutSubject = await new SignJWT({
+      email: serviceAccount,
+      email_verified: true,
+    })
+      .setProtectedHeader({ alg: "ES256", kid: "test-key" })
+      .setAudience(audience)
+      .setExpirationTime(Math.floor(now.getTime() / 1_000) + 300)
+      .setIssuedAt(Math.floor(now.getTime() / 1_000))
+      .setIssuer("https://accounts.google.com")
+      .sign(privateKey);
+    await expect(verify(tokenWithoutSubject)).resolves.toEqual({ subject: null });
   });
 
   it.each([

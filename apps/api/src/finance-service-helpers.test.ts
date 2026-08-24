@@ -11,6 +11,7 @@ import {
   encodeCandidateItemCursor,
   encodeTransactionCursor,
   financeCandidateRevision,
+  financeCsvImportErrorMessage,
   formatCurrency,
   isCardPayment,
   isProviderTransfer,
@@ -19,6 +20,7 @@ import {
   isSoFiVaultTransfer,
   legacyCategorySlug,
   nextMonth,
+  normalizeCandidateDraft,
   normalizedMerchant,
   providerConfidence,
   providerNeedsReview,
@@ -88,6 +90,59 @@ describe("Finance service deterministic helpers", () => {
     expect(financeCandidateRevision([{ ...first, expectedRevision: "v2" }, second])).not.toBe(
       financeCandidateRevision(baseline),
     );
+  });
+
+  it("normalizes prepared candidate identity while leaving questions unchanged", () => {
+    const base = {
+      assumptions: [],
+      evidence: { confidence: 0.9, rationale: "Known merchant history." },
+      expectedRevision: null,
+      fingerprint: `sha256:${"a".repeat(64)}`,
+      safeChanges: [],
+      sourceRefs: [],
+    };
+    const prepared = normalizeCandidateDraft({
+      ...base,
+      actionKind: "categorization",
+      disposition: "prepared",
+      privatePayload: {
+        actionKind: "categorization",
+        input: {
+          decisions: [
+            {
+              categoryId: "11111111-1111-4111-8111-111111111111",
+              confidence: 0.9,
+              expectedTransactionUpdatedAt: "2026-08-20T12:00:00.000Z",
+              learnMerchant: "never",
+              rationale: "Known merchant history.",
+              transactionId: "22222222-2222-4222-8222-222222222222",
+            },
+          ],
+        },
+      },
+    });
+    expect(prepared.fingerprint).not.toBe(base.fingerprint);
+
+    const question = {
+      ...base,
+      actionKind: "question" as const,
+      disposition: "question" as const,
+      privatePayload: {
+        asOf: "2026-08-20T12:00:00.000Z",
+        choices: [],
+        expectedAnswer: [],
+        prompt: "What does this transaction represent?",
+        transactionId: "22222222-2222-4222-8222-222222222222",
+        underlyingAction: "categorization" as const,
+        why: "The merchant evidence is ambiguous.",
+      },
+    };
+    expect(normalizeCandidateDraft(question)).toEqual(question);
+  });
+
+  it("keeps CSV import failures useful without assuming thrown values are Error objects", () => {
+    expect(financeCsvImportErrorMessage(new Error("Invalid header."))).toBe("Invalid header.");
+    expect(financeCsvImportErrorMessage("invalid header")).toBe("The CSV could not be imported.");
   });
 
   it("handles paced calendar ranges and provider categorization signals", () => {

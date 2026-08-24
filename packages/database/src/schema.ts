@@ -2135,6 +2135,105 @@ export const financeReimbursementMatches = pgTable(
   ],
 );
 
+/** A real-world movement that can group transfers, refunds, reimbursements, and splits. */
+export const financeEconomicEvents = pgTable(
+  "finance_economic_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind")
+      .$type<
+        | "duplicate"
+        | "income"
+        | "other"
+        | "purchase"
+        | "refund"
+        | "reimbursement"
+        | "reversal"
+        | "split"
+        | "transfer"
+      >()
+      .notNull(),
+    stableKey: text("stable_key").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_economic_events_user_stable_key_idx").on(table.userId, table.stableKey),
+    index("finance_economic_events_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const financeEventTransactions = pgTable(
+  "finance_event_transactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id")
+      .notNull()
+      .references(() => financeEconomicEvents.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_event_transactions_event_transaction_idx").on(
+      table.economicEventId,
+      table.transactionId,
+    ),
+    uniqueIndex("finance_event_transactions_transaction_idx").on(table.transactionId),
+  ],
+);
+
+export const financeTransactionRevisions = pgTable(
+  "finance_transaction_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    changes: jsonb("changes").$type<Record<string, unknown>>().notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_transaction_revisions_transaction_version_idx").on(
+      table.transactionId,
+      table.version,
+    ),
+    index("finance_transaction_revisions_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const financeTransactionRelationships = pgTable(
+  "finance_transaction_relationships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id")
+      .notNull()
+      .references(() => financeEconomicEvents.id, { onDelete: "cascade" }),
+    relationship: text("relationship")
+      .$type<"duplicate" | "refund" | "reimbursement" | "reversal" | "split" | "transfer">()
+      .notNull(),
+    transactionIds: jsonb("transaction_ids").$type<string[]>().notNull(),
+    rationale: text("rationale").notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_transaction_relationships_event_idx").on(table.economicEventId)],
+);
+
 export const financeClassificationDecisions = pgTable(
   "finance_classification_decisions",
   {
@@ -2172,6 +2271,10 @@ export const financeReviewCases = pgTable(
     transactionId: uuid("transaction_id")
       .notNull()
       .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id").references(() => financeEconomicEvents.id, {
+      onDelete: "set null",
+    }),
+    stableKey: text("stable_key").notNull().default(sql`'legacy:' || gen_random_uuid()::text`),
     status: text("status").$type<"deferred" | "open" | "resolved">().notNull().default("open"),
     reason: text("reason")
       .$type<
@@ -2185,18 +2288,178 @@ export const financeReviewCases = pgTable(
         | "refund_or_reversal"
         | "unknown_merchant"
       >()
-      .notNull(),
+      .notNull()
+      .default("low_confidence"),
+    reasonCode: text("reason_code")
+      .$type<
+        | "budget_variance"
+        | "category_ambiguity"
+        | "merchant_identity"
+        | "missing_provenance"
+        | "possible_duplicate"
+        | "possible_transfer"
+        | "profile_fact"
+        | "recurring_status"
+        | "refund_or_reversal"
+        | "reimbursement"
+        | "source_freshness"
+        | "unusual_amount"
+      >()
+      .notNull()
+      .default("missing_provenance"),
     suggestedCategoryId: uuid("suggested_category_id").references(() => financeCategories.id, {
       onDelete: "set null",
     }),
     rationale: text("rationale"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    proposedResolution: jsonb("proposed_resolution").$type<Record<string, unknown>>(),
+    impactAmount: integer("impact_amount_cents").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    reopenedFromId: uuid("reopened_from_id").references((): AnyPgColumn => financeReviewCases.id, {
+      onDelete: "set null",
+    }),
+    resolution: jsonb("resolution").$type<Record<string, unknown>>(),
+    resolvedByActorType: text("resolved_by_actor_type").$type<ActorType>(),
+    resolvedByActorId: text("resolved_by_actor_id"),
+    resolutionProvenance: jsonb("resolution_provenance").$type<Record<string, unknown>>(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("finance_review_cases_user_status_idx").on(table.userId, table.status),
-    uniqueIndex("finance_review_cases_open_transaction_idx").on(table.transactionId, table.status),
+    uniqueIndex("finance_review_cases_active_stable_key_unique")
+      .on(table.userId, table.stableKey)
+      .where(sql`${table.status} in ('open', 'deferred')`),
+    index("finance_review_cases_event_idx").on(table.economicEventId),
+    index("finance_review_cases_reopened_idx").on(table.reopenedFromId),
   ],
+);
+
+/** Synchronous, caller-resumable maintenance protocol state; never a background job queue. */
+export const financeMaintenanceRuns = pgTable(
+  "finance_maintenance_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    stage: text("stage")
+      .$type<
+        | "agent_audit"
+        | "agent_reasoning"
+        | "deterministic_processing"
+        | "failed"
+        | "reconciliation"
+        | "settled"
+      >()
+      .notNull()
+      .default("deterministic_processing"),
+    scope: jsonb("scope").$type<Record<string, unknown>>().notNull(),
+    version: integer("version").notNull().default(1),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [index("finance_maintenance_runs_user_stage_idx").on(table.userId, table.stage)],
+);
+
+export const financeMaintenanceJudgments = pgTable(
+  "finance_maintenance_judgments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => financeMaintenanceRuns.id, { onDelete: "cascade" }),
+    judgmentKey: text("judgment_key").notNull(),
+    type: text("type")
+      .$type<"classify_transaction" | "link_transactions" | "needs_user_review">()
+      .notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_maintenance_judgments_run_key_idx").on(table.runId, table.judgmentKey),
+  ],
+);
+
+export const financeAuditFindings = pgTable(
+  "finance_audit_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => financeMaintenanceRuns.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id")
+      .notNull()
+      .references(() => financeEconomicEvents.id, { onDelete: "cascade" }),
+    stableKey: text("stable_key").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull(),
+    impactAmount: integer("impact_amount_cents").notNull(),
+    rationale: text("rationale").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_audit_findings_run_stable_key_idx").on(table.runId, table.stableKey),
+  ],
+);
+
+export const financeMutationRecords = pgTable(
+  "finance_mutation_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    operation: text("operation").notNull(),
+    requestHash: text("request_hash").notNull(),
+    actorType: text("actor_type").$type<ActorType>().notNull(),
+    actorId: text("actor_id"),
+    status: text("status").$type<"completed" | "failed" | "started">().notNull(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_mutation_records_user_key_idx").on(table.userId, table.idempotencyKey),
+    index("finance_mutation_records_user_operation_idx").on(table.userId, table.operation),
+    index("finance_mutation_records_started_lease_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.status} = 'started'`),
+  ],
+);
+
+export const financeAccountConnections = pgTable(
+  "finance_account_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    status: text("status")
+      .$type<"connected" | "disconnected" | "failed" | "needs_reauth" | "pending">()
+      .notNull()
+      .default("pending"),
+    accountIds: jsonb("account_ids").$type<string[]>().notNull().default([]),
+    externalHandoffUrl: text("external_handoff_url"),
+    externalHandoffExpiresAt: timestamp("external_handoff_expires_at", { withTimezone: true }),
+    lastError: jsonb("last_error").$type<Record<string, unknown>>(),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [index("finance_account_connections_user_status_idx").on(table.userId, table.status)],
 );
 
 export const financeCategoryRules = pgTable(
@@ -2236,6 +2499,211 @@ export const financeBudgets = pgTable(
       table.category,
       table.month,
     ),
+  ],
+);
+
+/** Per-user controls for agent-initiated Finance mutations. */
+export const financeAgentSettings = pgTable("finance_agent_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+  version: integer("version").notNull().default(1),
+  ...timestamps,
+});
+
+/** Immutable snapshots of the facts used to give financial guidance. */
+export const financeProfileVersions = pgTable(
+  "finance_profile_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    jurisdiction: text("jurisdiction"),
+    householdSize: integer("household_size"),
+    dependents: integer("dependents"),
+    expectedMonthlyTakeHome: integer("expected_monthly_take_home_cents"),
+    incomeStability: text("income_stability")
+      .$type<"seasonal" | "stable" | "unknown" | "variable">()
+      .notNull()
+      .default("unknown"),
+    liquidReserves: integer("liquid_reserves_cents"),
+    debts: jsonb("debts").$type<Record<string, unknown>[]>().notNull().default([]),
+    insurance: jsonb("insurance").$type<Record<string, unknown>[]>().notNull().default([]),
+    preferences: jsonb("preferences")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({ notes: [] }),
+    employment: jsonb("employment").$type<Record<string, unknown>>(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull().default({}),
+    sourceLegacyProfileId: uuid("source_legacy_profile_id").references(() => financeProfiles.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_profile_versions_user_version_idx").on(table.userId, table.version),
+    index("finance_profile_versions_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+/** Stable identity for a budget; revisions are stored in finance_budget_versions. */
+export const financeBudgetPlans = pgTable(
+  "finance_budget_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    month: text("month").notNull().default(sql`'canonical-' || gen_random_uuid()::text`),
+    goalIds: jsonb("goal_ids").$type<string[]>().notNull().default([]),
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull().default(""),
+    replace: boolean("replace_existing").notNull().default(true),
+    scenarioFingerprint: text("scenario_fingerprint"),
+    version: integer("version").notNull().default(1),
+    name: text("name").notNull().default("Monthly plan"),
+    status: text("status").$type<"active" | "archived">().notNull().default("active"),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_budget_plans_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_budget_plans_user_month_idx").on(table.userId, table.month),
+  ],
+);
+
+export const financeGoals = pgTable(
+  "finance_goals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    targetAmount: integer("target_amount_cents").notNull(),
+    currentAmount: integer("current_amount_cents").notNull().default(0),
+    deadline: text("deadline"),
+    priority: text("priority").$type<"high" | "low" | "medium">().notNull().default("medium"),
+    status: text("status")
+      .$type<"active" | "completed" | "paused" | "removed">()
+      .notNull()
+      .default("active"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [index("finance_goals_user_status_idx").on(table.userId, table.status)],
+);
+
+export const financeBudgetVersions = pgTable(
+  "finance_budget_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => financeBudgetPlans.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    status: text("status")
+      .$type<"active" | "incomplete" | "proposed" | "retired">()
+      .notNull()
+      .default("incomplete"),
+    effectiveFrom: text("effective_from").notNull(),
+    expectedResources: integer("expected_resources_cents").notNull(),
+    allocatedTotal: integer("allocated_total_cents").notNull(),
+    balanceDelta: integer("balance_delta_cents").notNull(),
+    resources: jsonb("resources").$type<Record<string, unknown>[]>().notNull().default([]),
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull(),
+    createdByActorType: text("created_by_actor_type").$type<ActorType>(),
+    createdByActorId: text("created_by_actor_id"),
+    approvedByActorType: text("approved_by_actor_type").$type<ActorType>(),
+    approvedByActorId: text("approved_by_actor_id"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
+    index("finance_budget_versions_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.effectiveFrom,
+    ),
+    uniqueIndex("finance_budget_versions_user_active_month_idx")
+      .on(table.userId, table.effectiveFrom)
+      .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+export const financeBudgetAllocations = pgTable(
+  "finance_budget_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    budgetVersionId: uuid("budget_version_id")
+      .notNull()
+      .references(() => financeBudgetVersions.id, { onDelete: "cascade" }),
+    allocationKey: text("allocation_key").notNull(),
+    kind: text("kind").$type<"buffer" | "debt" | "goal" | "savings" | "spending">().notNull(),
+    amount: integer("amount_cents").notNull(),
+    description: text("description"),
+    categoryId: uuid("category_id").references(() => financeCategories.id, {
+      onDelete: "set null",
+    }),
+    accountId: uuid("account_id").references(() => financeAccounts.id, {
+      onDelete: "set null",
+    }),
+    goalId: uuid("goal_id").references(() => financeGoals.id, { onDelete: "set null" }),
+    legacyCategory: text("legacy_category"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_allocations_version_key_idx").on(
+      table.budgetVersionId,
+      table.allocationKey,
+    ),
+    index("finance_budget_allocations_user_idx").on(table.userId),
+  ],
+);
+
+/** Resumable chat setup state. It does not represent a scheduled or background job. */
+export const financeSetupSessions = pgTable(
+  "finance_setup_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<
+        | "budget_approval"
+        | "budget_proposal"
+        | "collecting_profile"
+        | "initial_maintenance"
+        | "settled"
+      >()
+      .notNull()
+      .default("collecting_profile"),
+    currentQuestionKey: text("current_question_key"),
+    budgetVersionId: uuid("budget_version_id").references(() => financeBudgetVersions.id, {
+      onDelete: "set null",
+    }),
+    maintenanceRunId: uuid("maintenance_run_id").references(() => financeMaintenanceRuns.id, {
+      onDelete: "set null",
+    }),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_setup_sessions_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_setup_sessions_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.status} <> 'settled'`),
   ],
 );
 
@@ -2322,26 +2790,6 @@ export const financeAgentActionReviews = pgTable(
       .where(sql`${table.status} = 'pending'`),
     index("finance_agent_action_reviews_target_keys_idx").using("gin", table.semanticTargetKeys),
   ],
-);
-
-/** Durable semantic budget-plan metadata; individual budget rows remain the monthly projection. */
-export const financeBudgetPlans = pgTable(
-  "finance_budget_plans",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    month: text("month").notNull(),
-    goalIds: jsonb("goal_ids").$type<string[]>().notNull().default([]),
-    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
-    rationale: text("rationale").notNull(),
-    replace: boolean("replace_existing").notNull().default(true),
-    scenarioFingerprint: text("scenario_fingerprint"),
-    version: integer("version").notNull().default(1),
-    ...timestamps,
-  },
-  (table) => [uniqueIndex("finance_budget_plans_user_month_idx").on(table.userId, table.month)],
 );
 
 export const financeIncomeStreams = pgTable(

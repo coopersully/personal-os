@@ -1219,3 +1219,14 @@ export const financeOverviewSchema = z.object({
   transactions: z.array(financeTransactionSchema),
 });
 export type FinanceOverview = z.infer<typeof financeOverviewSchema>;
+
+// Canonical Finance contracts are split by responsibility while this file
+// remains the stable public barrel for existing consumers.
+export * from "./finance/budget.js";
+export * from "./finance/capabilities.js";
+export * from "./finance/common.js";
+export * from "./finance/inbox.js";
+export * from "./finance/ledger.js";
+export * from "./finance/maintenance.js";
+export * from "./finance/profile.js";
+export * from "./finance/reporting.js";

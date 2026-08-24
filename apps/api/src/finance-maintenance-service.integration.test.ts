@@ -152,8 +152,12 @@ describe.sequential("Finance maintenance service", () => {
       "0063_finance_maintenance_candidates",
       "0064_finance_ledger_challenges",
       "0065_finance_period_reviews",
-      "0066_calendar_stewardship_foundations",
-      "0067_calendar_event_links",
+      "0066_finance_plan_versions",
+      "0067_finance_ledger_protocol",
+      "0068_finance_mutation_leases",
+      "0069_finance_legacy_budget_backfill",
+      "0070_calendar_stewardship_foundations",
+      "0071_calendar_event_links",
     ]);
     const upgradeContainer = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")

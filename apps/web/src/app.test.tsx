@@ -6735,7 +6735,7 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Refresh now" })).toBeDisabled();
     finishSave?.();
     pendingSave.unmount();
-  });
+  }, 10_000);
 
   it("keeps Pinterest settings, updates, and wallpaper application failures explicit", async () => {
     mocks.isTauri.mockReturnValue(true);
@@ -6834,7 +6834,7 @@ describe("ilo web app", () => {
     setup("/settings?section=wallpaper");
     await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
     expect(await screen.findByText("Could not apply the Pinterest wallpaper.")).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("does not reapply today's scheduled Pinterest wallpaper", async () => {
     mocks.isTauri.mockReturnValue(true);

@@ -51,7 +51,7 @@ describe("database schema contracts", () => {
     const migrationSql = await readFile(
       resolve(
         process.cwd(),
-        "packages/database/migrations/0066_calendar_stewardship_foundations.sql",
+        "packages/database/migrations/0070_calendar_stewardship_foundations.sql",
       ),
       "utf8",
     );
@@ -204,7 +204,7 @@ describe("database schema contracts", () => {
     ) as { entries: Array<{ tag: string }> };
     const journalTags = journal.entries.map((entry) => entry.tag);
     const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
-    expect(journalTags.slice(financeAutomationIndex, financeAutomationIndex + 7)).toEqual([
+    expect(journalTags.slice(financeAutomationIndex)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
@@ -212,6 +212,12 @@ describe("database schema contracts", () => {
       "0063_finance_maintenance_candidates",
       "0064_finance_ledger_challenges",
       "0065_finance_period_reviews",
+      "0066_finance_plan_versions",
+      "0067_finance_ledger_protocol",
+      "0068_finance_mutation_leases",
+      "0069_finance_legacy_budget_backfill",
+      "0070_calendar_stewardship_foundations",
+      "0071_calendar_event_links",
     ]);
   });
 

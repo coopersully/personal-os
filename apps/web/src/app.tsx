@@ -25,7 +25,6 @@ import {
   localDateToIso,
   parseLocalDate,
   sameLocalDate,
-  startOfLocalWeek,
 } from "@personal-os/domain";
 import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
 import {
@@ -41,6 +40,7 @@ import {
   type FormEvent,
   lazy,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent,
@@ -164,7 +164,6 @@ import {
 } from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
-import { Calendar as ShadcnCalendar } from "@/components/ui/calendar";
 import {
   Card as ShadcnCard,
   CardAction as ShadcnCardAction,
@@ -246,7 +245,6 @@ import {
   PopoverTitle as ShadcnPopoverTitle,
   PopoverTrigger as ShadcnPopoverTrigger,
 } from "@/components/ui/popover";
-import { ScrollArea as ShadcnScrollArea } from "@/components/ui/scroll-area";
 import {
   SidebarContent as ShadcnSidebarContent,
   SidebarFooter as ShadcnSidebarFooter,
@@ -258,8 +256,6 @@ import {
   SidebarMenuBadge as ShadcnSidebarMenuBadge,
   SidebarMenuButton as ShadcnSidebarMenuButton,
   SidebarMenuItem as ShadcnSidebarMenuItem,
-  SidebarMenuSub as ShadcnSidebarMenuSub,
-  SidebarMenuSubItem as ShadcnSidebarMenuSubItem,
   SidebarProvider as ShadcnSidebarProvider,
 } from "@/components/ui/sidebar";
 import { Slider as ShadcnSlider } from "@/components/ui/slider";
@@ -382,10 +378,10 @@ type CalendarRangeSelection = {
   currentMinute: number;
   day: LocalDate;
   originClientY: number;
-  pointerId: number;
+  pointerId: number | null;
 };
 type CalendarMap = Map<string, Calendar>;
-type ContextSidebarMode = "calendar" | "finances" | "mail" | "settings" | "tasks" | null;
+type ContextSidebarMode = "finances" | "mail" | "settings" | "tasks" | null;
 
 const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> = [
   { icon: CalendarIcon, label: "Day", value: "day" },
@@ -1007,7 +1003,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const sidebarMode: ContextSidebarMode =
     navigationOwner.kind !== "workspace"
       ? "settings"
-      : navigationOwner.workspace === "today"
+      : navigationOwner.workspace === "today" || navigationOwner.workspace === "calendar"
         ? null
         : navigationOwner.workspace;
   const workspaceSettingsActions = useWorkspaceSettingsActions(sidebarMode === "settings");
@@ -1105,7 +1101,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               )}
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
-              className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}${sidebarMode === "calendar" ? " sidebar__content--calendar" : ""}`}
+              className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
               key={sidebarMode ?? "application-navigation"}
             >
               {sidebarMode === "settings" ? (
@@ -1121,8 +1117,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                   reviewCount={financeOverview.data?.reviewCount ?? 0}
                   section={activeFinanceSection}
                 />
-              ) : sidebarMode === "calendar" ? (
-                <CalendarSidebar user={user} />
               ) : sidebarMode === "tasks" ? (
                 <TasksSidebar onNavigate={closeMobileMenu} />
               ) : sidebarMode === "mail" ? (
@@ -2629,11 +2623,14 @@ function CalendarPage({
     if (initializedFollow.current) return;
     initializedFollow.current = true;
     if (!sameLocalDate(anchor, today)) return;
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      next.set("follow", "1");
-      return next;
-    });
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("follow", "1");
+        return next;
+      },
+      { replace: true },
+    );
   }, [anchor, setSearchParams, today]);
 
   const showDay = (day: LocalDate) => {
@@ -3040,153 +3037,6 @@ function CalendarVisibilitySwitch({ calendar }: { calendar: Calendar }) {
   );
 }
 
-function CalendarSidebar({ user }: { user: User }) {
-  const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
-  const accounts = useQuery({
-    queryFn: api.listConnectors,
-    queryKey: ["connectors"],
-    refetchInterval: visibleConnectorRefreshInterval,
-  });
-
-  return (
-    <div className="calendar-sidebar">
-      <CalendarSidebarDatePicker user={user} />
-      <CalendarVisibilitySidebar accounts={accounts.data ?? []} calendars={calendars.data ?? []} />
-    </div>
-  );
-}
-
-function CalendarSidebarDatePicker({ user }: { user: User }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const requestedAnchor = searchParams.get("date");
-  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
-    ? parseLocalDate(requestedAnchor as string)
-    : localDateAt(new Date(), user.planningTimezone);
-  const selectedDate = calendarDate(anchor);
-  const weekStart = startOfLocalWeek(anchor);
-  const weekEnd = addLocalDays(weekStart, 6);
-  const setAnchor = (nextAnchor: LocalDate) =>
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      next.set("date", localDateToIso(nextAnchor));
-      return next;
-    });
-  const setMonth = (month: number) => {
-    const daysInMonth = new Date(Date.UTC(anchor.year, month, 0)).getUTCDate();
-    setAnchor({ ...anchor, day: Math.min(anchor.day, daysInMonth), month });
-  };
-  const setYear = (year: number) => {
-    const daysInMonth = new Date(Date.UTC(year, anchor.month, 0)).getUTCDate();
-    setAnchor({ ...anchor, day: Math.min(anchor.day, daysInMonth), year });
-  };
-
-  return (
-    <section
-      aria-label="Calendar date picker"
-      className="context-sidebar__section context-sidebar__date-picker"
-    >
-      <ShadcnCalendar
-        className="[--cell-size:--spacing(5)]"
-        classNames={{
-          day: "group/day relative h-6 w-full rounded-(--cell-radius) p-0 text-center select-none",
-          day_button: "aspect-auto h-6 min-w-0 text-xs",
-          month: "flex w-full flex-col gap-2",
-          month_caption:
-            "relative z-10 flex h-(--cell-size) w-full items-center justify-center px-(--cell-size)",
-          week: "mt-0 flex w-full",
-          weekday:
-            "flex h-4 flex-1 items-center justify-center rounded-(--cell-radius) text-[0.6875rem] font-normal text-muted-foreground select-none",
-        }}
-        components={{
-          CaptionLabel: () => (
-            <CalendarSidebarCaption
-              month={anchor.month}
-              onMonthChange={setMonth}
-              onYearChange={setYear}
-              year={anchor.year}
-            />
-          ),
-        }}
-        mode="single"
-        modifiers={{ selectedWeek: { from: calendarDate(weekStart), to: calendarDate(weekEnd) } }}
-        modifiersClassNames={{
-          selectedWeek:
-            "rounded-none bg-secondary text-secondary-foreground first:rounded-s-(--cell-radius) last:rounded-e-(--cell-radius)",
-        }}
-        month={selectedDate}
-        onMonthChange={(month) => {
-          const nextMonth = localDateAt(month, user.planningTimezone);
-          const daysInMonth = new Date(Date.UTC(nextMonth.year, nextMonth.month, 0)).getUTCDate();
-          setAnchor({ ...nextMonth, day: Math.min(anchor.day, daysInMonth) });
-        }}
-        onSelect={(date) => {
-          if (date) setAnchor(localDateAt(date, user.planningTimezone));
-        }}
-        selected={selectedDate}
-        timeZone={user.planningTimezone}
-      />
-    </section>
-  );
-}
-
-function CalendarSidebarCaption({
-  month,
-  onMonthChange,
-  onYearChange,
-  year,
-}: {
-  month: number;
-  onMonthChange: (month: number) => void;
-  onYearChange: (year: number) => void;
-  year: number;
-}) {
-  const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", {
-    month: "long",
-  });
-  return (
-    <div className="calendar-sidebar__caption">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <ShadcnButton aria-label="Choose the month" size="sm" variant="ghost">
-            {monthName}
-          </ShadcnButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="center">
-          <DropdownMenuLabel>Select month</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
-              <DropdownMenuItem key={value} onSelect={() => onMonthChange(value)}>
-                {new Date(Date.UTC(year, value - 1, 1)).toLocaleString("en-US", {
-                  month: "long",
-                })}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <ShadcnButton aria-label="Choose the year" size="sm" variant="ghost">
-            {year}
-          </ShadcnButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="center">
-          <DropdownMenuLabel>Select year</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            {Array.from({ length: 11 }, (_, index) => year - 5 + index).map((value) => (
-              <DropdownMenuItem key={value} onSelect={() => onYearChange(value)}>
-                {value}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
-
 function CalendarProviderEmblem({ provider }: { provider: string }) {
   if (hasBrandMark(provider)) return <BrandMark brand={provider} decorative />;
   return <CalendarIcon aria-hidden="true" />;
@@ -3266,157 +3116,6 @@ function groupCalendarsByAccount(
     .toSorted(
       (left, right) => Number(right.provider === "local") - Number(left.provider === "local"),
     );
-}
-
-function CalendarVisibilitySidebar({
-  accounts,
-  calendars,
-}: {
-  accounts: CalendarAccount[];
-  calendars: Calendar[];
-}) {
-  const [toggleError, setToggleError] = useState<unknown>(null);
-  const calendarGroups = groupCalendarsByAccount(accounts, calendars);
-  return (
-    <section className="context-sidebar__calendar-visibility" aria-label="Calendars">
-      {calendars.length === 0 ? (
-        <div className="context-sidebar__calendar-scroll-content">
-          <ShadcnSidebarGroupLabel>Calendars 0/0</ShadcnSidebarGroupLabel>
-          <p className="context-sidebar__empty">No calendars are available.</p>
-        </div>
-      ) : (
-        <ShadcnScrollArea className="context-sidebar__calendar-scroll">
-          <div className="context-sidebar__calendar-scroll-content">
-            <ShadcnSidebarGroupLabel>
-              Calendars {calendars.filter((calendar) => calendar.isSelected).length}/
-              {calendars.length}
-            </ShadcnSidebarGroupLabel>
-            <ShadcnSidebarMenu className="context-sidebar__calendar-groups">
-              {calendarGroups.map((group) => (
-                <ShadcnCollapsible
-                  asChild
-                  className="group/calendar-account"
-                  defaultOpen
-                  key={group.accountId}
-                >
-                  <ShadcnSidebarMenuItem className="context-sidebar__calendar-account">
-                    <ShadcnCollapsibleTrigger asChild>
-                      <ShadcnSidebarMenuButton
-                        aria-label={`Toggle ${group.label} calendars`}
-                        className="context-sidebar__calendar-account-trigger px-0 hover:!bg-transparent hover:!text-sidebar-foreground active:!bg-transparent active:!text-sidebar-foreground data-[state=open]:!bg-transparent data-[state=open]:!text-sidebar-foreground data-[state=open]:hover:!bg-transparent data-[state=open]:hover:!text-sidebar-foreground"
-                      >
-                        <ConnectedAccountIdentity
-                          avatarUrl={group.account?.avatarUrl}
-                          label={group.label}
-                          provider={group.provider}
-                        />
-                        <span className="context-sidebar__calendar-account-copy truncate">
-                          <span className="context-sidebar__calendar-account-name truncate">
-                            {group.label}
-                          </span>
-                          {group.account?.email && group.account.email !== group.label ? (
-                            <span className="context-sidebar__calendar-account-email truncate">
-                              {group.account.email}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="context-sidebar__calendar-count ml-auto shrink-0 text-xs tabular-nums">
-                          {group.calendars.filter((calendar) => calendar.isSelected).length}/
-                          {group.calendars.length}
-                        </span>
-                        <ChevronDownIcon
-                          aria-hidden="true"
-                          className="transition-transform group-data-[state=closed]/calendar-account:-rotate-90"
-                          data-icon="inline-end"
-                        />
-                      </ShadcnSidebarMenuButton>
-                    </ShadcnCollapsibleTrigger>
-                    <ShadcnCollapsibleContent>
-                      <ShadcnSidebarMenuSub className="context-sidebar__calendar-list">
-                        {group.calendars.map((calendar) => (
-                          <ShadcnSidebarMenuSubItem key={calendar.id}>
-                            <CalendarVisibilityToggle
-                              calendar={calendar}
-                              setError={setToggleError}
-                            />
-                          </ShadcnSidebarMenuSubItem>
-                        ))}
-                      </ShadcnSidebarMenuSub>
-                    </ShadcnCollapsibleContent>
-                  </ShadcnSidebarMenuItem>
-                </ShadcnCollapsible>
-              ))}
-            </ShadcnSidebarMenu>
-            {toggleError ? (
-              <p className="context-sidebar__error" role="alert">
-                {errorMessage(toggleError)}
-              </p>
-            ) : null}
-          </div>
-        </ShadcnScrollArea>
-      )}
-    </section>
-  );
-}
-
-function CalendarVisibilityToggle({
-  calendar,
-  setError,
-}: {
-  calendar: Calendar;
-  setError: (error: unknown) => void;
-}) {
-  const queryClient = useQueryClient();
-  const mutation = useMutation<Calendar, Error, boolean, { previousSelected: boolean }>({
-    mutationFn: (selected) => api.setCalendarSelected(calendar.id, selected),
-    onError: (error, _selected, context) => {
-      queryClient.setQueryData<Calendar[]>(["calendars"], (records) =>
-        records?.map((record) =>
-          record.id === calendar.id && context
-            ? { ...record, isSelected: context.previousSelected }
-            : record,
-        ),
-      );
-      setError(error);
-    },
-    onMutate: async (selected) => {
-      setError(null);
-      await queryClient.cancelQueries({ queryKey: ["calendars"] });
-      queryClient.setQueryData<Calendar[]>(["calendars"], (records) =>
-        records?.map((record) =>
-          record.id === calendar.id ? { ...record, isSelected: selected } : record,
-        ),
-      );
-      return { previousSelected: calendar.isSelected };
-    },
-    onSettled: () => invalidateMaterial(queryClient),
-  });
-  return (
-    <ShadcnField className="context-sidebar__calendar" orientation="horizontal">
-      <ShadcnCheckbox
-        checked={calendar.isSelected}
-        className="data-checked:border-(--calendar-color) data-checked:bg-(--calendar-color)"
-        disabled={mutation.isPending}
-        id={`calendar-${calendar.id}`}
-        onCheckedChange={(checked) => mutation.mutate(checked === true)}
-        style={
-          {
-            "--calendar-color": calendar.color ?? "var(--sidebar-primary)",
-          } as CSSProperties
-        }
-      />
-      <ShadcnFieldLabel htmlFor={`calendar-${calendar.id}`}>
-        <span>{calendar.name}</span>
-        {!calendar.isWritable ? (
-          <ExternalLinkIcon
-            aria-label="Subscribed calendar"
-            className="context-sidebar__calendar-external"
-            role="img"
-          />
-        ) : null}
-      </ShadcnFieldLabel>
-    </ShadcnField>
-  );
 }
 
 function DayCalendarView({
@@ -3526,12 +3225,16 @@ function DayCalendarView({
                 onDrop={(dragEvent) =>
                   dropTimelineEvent(dragEvent, day, events, moveEvent, setDraggedEventId)
                 }
+                onKeyDown={(event) => rangeSelection.keyDown(event, day)}
                 onPointerCancel={rangeSelection.cancel}
                 onPointerDown={(event) => rangeSelection.start(event, day)}
                 onPointerMove={rangeSelection.move}
                 onPointerUp={rangeSelection.finish}
                 style={{ height: calendarTimelineHeight }}
               >
+                <button className="sr-only" type="button">
+                  Create an event range with the keyboard
+                </button>
                 {rangeSelection.selection && sameLocalDate(rangeSelection.selection.day, day) ? (
                   <CalendarCreateSelection selection={rangeSelection.selection} />
                 ) : null}
@@ -3557,7 +3260,7 @@ function DayCalendarView({
             <CalendarBlankContextMenu
               day={day}
               minute={contextMinute}
-              setEditor={setEditor}
+              onCreateRange={onCreateRange}
               timeZone={timeZone}
             />
           </ContextMenu>
@@ -3622,6 +3325,17 @@ function WeekCalendarView({
       ),
     [days, eventsByDay, timeZone],
   );
+  const weekEvents = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          Array.from(eventsByDay.values())
+            .flat()
+            .map((event) => [event.id, event] as const),
+        ).values(),
+      ),
+    [eventsByDay],
+  );
   const scrollContainer = useRef<HTMLDivElement>(null);
   const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const includesToday = days.some((day) => sameLocalDate(day, today));
@@ -3660,9 +3374,8 @@ function WeekCalendarView({
       minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
         container.clientHeight / 2,
     );
-    const todayButton = container.querySelector<HTMLElement>(
-      'button[aria-current="date"]',
-    ) as HTMLElement;
+    const todayButton = container.querySelector<HTMLElement>('button[aria-current="date"]');
+    if (!todayButton) return;
     const containerBounds = container.getBoundingClientRect();
     const todayBounds = todayButton.getBoundingClientRect();
     const horizontalDistance = Math.abs(
@@ -3743,27 +3456,25 @@ function WeekCalendarView({
                 previewTimelineDrop(
                   dragEvent,
                   day,
-                  Array.from(eventsByDay.values()).flat(),
+                  weekEvents,
                   draggedEventId,
                   setDragPreview,
                   timeZone,
                 )
               }
               onDrop={(dragEvent) =>
-                dropTimelineEvent(
-                  dragEvent,
-                  day,
-                  Array.from(eventsByDay.values()).flat(),
-                  moveEvent,
-                  setDraggedEventId,
-                )
+                dropTimelineEvent(dragEvent, day, weekEvents, moveEvent, setDraggedEventId)
               }
+              onKeyDown={(event) => rangeSelection.keyDown(event, day)}
               onPointerCancel={rangeSelection.cancel}
               onPointerDown={(event) => rangeSelection.start(event, day)}
               onPointerMove={rangeSelection.move}
               onPointerUp={rangeSelection.finish}
               style={{ height: calendarTimelineHeight }}
             >
+              <button className="sr-only" type="button">
+                Create an event range on {formatLocalWeekday(day)} with the keyboard
+              </button>
               {rangeSelection.selection && sameLocalDate(rangeSelection.selection.day, day) ? (
                 <CalendarCreateSelection selection={rangeSelection.selection} />
               ) : null}
@@ -3996,9 +3707,53 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     }
     updateSelection(null);
   };
+  const commit = (current: CalendarRangeSelection) => {
+    const { endMinute, startMinute } = calendarCreateRange(current);
+    onCreateRange({
+      endsAt: localDateTimeToUtc(current.day, endMinute, timeZone).toISOString(),
+      startsAt: localDateTimeToUtc(current.day, startMinute, timeZone).toISOString(),
+    });
+    updateSelection(null);
+  };
+  const keyDown = (event: ReactKeyboardEvent<HTMLElement>, day: LocalDate) => {
+    const current = selectionRef.current;
+    if (event.key === "Escape" && current) {
+      event.preventDefault();
+      updateSelection(null);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (current?.pointerId === null) {
+        commit(current);
+      } else if (!current) {
+        updateSelection({
+          active: true,
+          anchorMinute: 9 * 60,
+          currentMinute: 10 * 60,
+          day,
+          originClientY: 0,
+          pointerId: null,
+        });
+      }
+      return;
+    }
+    if (current?.pointerId !== null || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) {
+      return;
+    }
+    event.preventDefault();
+    updateSelection({
+      ...current,
+      currentMinute: Math.min(
+        calendarMinutesPerDay,
+        Math.max(0, current.currentMinute + (event.key === "ArrowDown" ? 15 : -15)),
+      ),
+    });
+  };
   return {
     cancel: () => updateSelection(null),
     finish,
+    keyDown,
     move,
     selection: selection?.active ? selection : null,
     start,
@@ -4102,8 +3857,14 @@ function TimelineEvent({
           onEdit();
         }}
         onPointerCancel={clearBlockedHoldTimer}
-        onPointerDown={startBlockedHold}
-        onPointerLeave={clearBlockedHoldTimer}
+        onPointerDown={() => {
+          blockedHoldTriggered.current = false;
+          startBlockedHold();
+        }}
+        onPointerLeave={() => {
+          clearBlockedHoldTimer();
+          blockedHoldTriggered.current = false;
+        }}
         onPointerUp={clearBlockedHoldTimer}
         style={{
           ...calendarEventColorStyle(calendar?.color),
@@ -4143,12 +3904,12 @@ function TimelineEvent({
 function CalendarBlankContextMenu({
   day,
   minute,
-  setEditor,
+  onCreateRange,
   timeZone,
 }: {
   day: LocalDate;
   minute: number;
-  setEditor: (editor: Editor) => void;
+  onCreateRange: (draft: EventDraft) => void;
   timeZone: string;
 }) {
   const queryClient = useQueryClient();
@@ -4181,7 +3942,7 @@ function CalendarBlankContextMenu({
     <ContextMenuContent>
       <ContextMenuLabel>{formatHour(Math.floor(minute / 60))}</ContextMenuLabel>
       <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => setEditor({ draft: { endsAt, startsAt }, kind: "event" })}>
+      <ContextMenuItem onSelect={() => onCreateRange({ endsAt, startsAt })}>
         <CalendarPlusIcon aria-hidden="true" /> New event here
       </ContextMenuItem>
       <ContextMenuItem disabled={!canPaste || paste.isPending} onSelect={() => paste.mutate()}>
@@ -8349,10 +8110,6 @@ function formatLocalWeekday(date: LocalDate): string {
   return formatLocalDate(date, { weekday: "long" });
 }
 
-function calendarDate(date: LocalDate): Date {
-  return new Date(Date.UTC(date.year, date.month - 1, date.day, 12));
-}
-
 function localDateKey(date: LocalDate): string {
   return localDateToIso(date);
 }
@@ -8657,7 +8414,7 @@ function formatHour(hour: number): string {
 }
 
 function formatMinuteOfDay(minute: number): string {
-  const hour = Math.floor(minute / 60);
+  const hour = Math.floor(minute / 60) % 24;
   const suffix = minute % 60 === 0 ? "" : `:${String(minute % 60).padStart(2, "0")}`;
   if (hour === 0) return `12${suffix} AM`;
   if (hour === 12) return `12${suffix} PM`;

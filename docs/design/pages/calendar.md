@@ -46,7 +46,9 @@ event without losing the shape of the day.
   positional transform. Exiting controls become inert, and the global
   reduced-motion preference remains authoritative. On collapse, expanded
   content fades deliberately while the pill waits until the surface is near its
-  resting size, preventing a full-width pill-navigation flash.
+  resting size, preventing a full-width pill-navigation flash. Opening a pill
+  surface moves focus to its primary control; Escape closes it and restores
+  focus to the action that opened it.
 - Selecting a spatial Calendar event replaces that pill with an event-details
   card in the same floating host used by creation. The card retains the full
   event inspector—including write capability, linked busy blocks, provider
@@ -76,7 +78,9 @@ event without losing the shape of the day.
 - Conferencing follows the selected calendar's real capabilities. Writable Google calendars can
   request a unique Google Meet conference from Google; every calendar can attach an existing Zoom,
   Teams, Webex, or other meeting URL. Provider-generated options are never shown as available when
-  Ilo does not hold that provider's host authority.
+  Ilo does not hold that provider's host authority. Provider acceptance is not treated as link
+  completion: pending generation and provider failure remain explicit in the returned event and
+  produce visible, non-blocking feedback.
 
 ## Acceptance
 
@@ -86,7 +90,9 @@ event without losing the shape of the day.
 - Hour rules align with the time axis in day and week views.
 - Current-time, selection, event, and drag states remain visually dominant over
   the quarter-hour grid. Dragging a writable event visibly lifts it and the
-  drop preview advances only in 15-minute increments.
+  drop preview advances only in 15-minute increments. Pointer range creation
+  cancels with Escape. A keyboard user can start a one-hour range, adjust its
+  end in 15-minute increments, and commit it into the same inline composer.
 - Day, week, and month views retain an explicit app-frame date-range heading
   at every scroll position. The Today control remains a standard action, not a
   selected state. Their grid wayfinding uses the shared secondary app bar, not

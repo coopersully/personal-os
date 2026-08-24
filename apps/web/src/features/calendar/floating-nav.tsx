@@ -18,6 +18,7 @@ import {
   type CSSProperties,
   type FormEvent,
   forwardRef,
+  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useDeferredValue,
@@ -99,11 +100,16 @@ export function CalendarFloatingNav({
 }: CalendarFloatingNavProps) {
   const [mode, setMode] = useState<FloatingMode>("closed");
   const [surfaceInstance, setSurfaceInstance] = useState(0);
+  const dateTrigger = useRef<HTMLButtonElement>(null);
+  const createTrigger = useRef<HTMLButtonElement>(null);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const restoreFocusMode = useRef<Exclude<FloatingMode, "closed"> | null>(null);
   const open = (nextMode: Exclude<FloatingMode, "closed">) => {
     setSurfaceInstance((instance) => instance + 1);
     setMode(nextMode);
   };
   const close = () => {
+    if (mode !== "closed") restoreFocusMode.current = mode;
     setMode("closed");
     if (draft) onDraftDismiss?.();
   };
@@ -113,20 +119,43 @@ export function CalendarFloatingNav({
       setMode("create");
     }
   }, [draft]);
+  useEffect(() => {
+    if (mode !== "closed" || !restoreFocusMode.current) return;
+    const trigger = {
+      create: createTrigger,
+      date: dateTrigger,
+      search: searchTrigger,
+    }[restoreFocusMode.current];
+    restoreFocusMode.current = null;
+    window.requestAnimationFrame(() => trigger.current?.focus());
+  }, [mode]);
   const surfaceState: FloatingSurfaceState = eventDetails ? "details" : mode;
   const content = eventDetails ? (
     eventDetails
   ) : mode === "closed" ? (
     <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
-      <Button aria-label="Choose date" onClick={() => open("date")} size="icon" variant="ghost">
+      <Button
+        aria-label="Choose date"
+        onClick={() => open("date")}
+        ref={dateTrigger}
+        size="icon"
+        variant="ghost"
+      >
         <CalendarIcon aria-hidden="true" />
       </Button>
-      <Button aria-label="Create event" onClick={() => open("create")} size="icon" variant="ghost">
+      <Button
+        aria-label="Create event"
+        onClick={() => open("create")}
+        ref={createTrigger}
+        size="icon"
+        variant="ghost"
+      >
         <PlusIcon aria-hidden="true" />
       </Button>
       <Button
         aria-label="Search calendar"
         onClick={() => open("search")}
+        ref={searchTrigger}
         size="icon"
         variant="ghost"
       >
@@ -163,6 +192,13 @@ export function CalendarFloatingNav({
         initial={false}
         layout
         layoutDependency={surfaceState}
+        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+          if (event.key !== "Escape" || surfaceState === "closed" || surfaceState === "details") {
+            return;
+          }
+          event.preventDefault();
+          close();
+        }}
         style={{ overflow: "hidden", position: "relative" }}
         transition={{
           borderRadius: { duration: 0.18, ease: [0.22, 1, 0.36, 1] },
@@ -236,6 +272,7 @@ function DateJumpCard({
       <CardContent>
         <section aria-label="Calendar date picker">
           <DatePicker
+            autoFocus
             captionLayout="dropdown"
             endMonth={new Date(Date.UTC(anchor.year + 25, 11, 1, 12))}
             mode="single"
@@ -327,27 +364,20 @@ function CalendarSearchCard({
           </InputGroupAddon>
         </InputGroup>
         {query.trim() ? (
-          <div
-            aria-label="Calendar search results"
-            className="calendar-search-results"
-            role="listbox"
-          >
+          <ul aria-label="Calendar search results" className="calendar-search-results">
             {results.length === 0 ? (
-              <p>{events.isPending ? "Searching…" : "No matching events or dates."}</p>
+              <li>{events.isPending ? "Searching…" : "No matching events or dates."}</li>
             ) : (
               results.map((result) => (
-                <button
-                  key={result.key}
-                  onClick={() => selectDate(result.date)}
-                  role="option"
-                  type="button"
-                >
-                  <span>{result.label}</span>
-                  <small>{result.detail}</small>
-                </button>
+                <li key={result.key}>
+                  <button onClick={() => selectDate(result.date)} type="button">
+                    <span>{result.label}</span>
+                    <small>{result.detail}</small>
+                  </button>
+                </li>
               ))
             )}
-          </div>
+          </ul>
         ) : null}
       </CardContent>
     </Card>
@@ -856,8 +886,17 @@ function InlineEventComposer({
     mutationFn: (input: Parameters<typeof api.createEvent>[0]) => api.createEvent(input),
     onError: (error) =>
       toast.error("Event couldn’t be created", { description: errorMessage(error) }),
-    onSuccess: async () => {
+    onSuccess: async (created) => {
       await invalidateMaterial(queryClient);
+      if (created.conferenceStatus === "pending") {
+        toast.info("Event created", {
+          description: "The meeting link is still being prepared.",
+        });
+      } else if (created.conferenceStatus === "failure") {
+        toast.warning("Event created without a meeting link", {
+          description: "The calendar provider couldn’t create the requested meeting.",
+        });
+      }
       close();
     },
   });

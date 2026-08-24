@@ -89,6 +89,22 @@ it("morphs one persistent surface through every pill action", async () => {
   expect(surface).toHaveAttribute("data-state", "search");
 });
 
+it("moves focus into each surface and restores it to the triggering action", async () => {
+  const browser = userEvent.setup();
+  renderCalendar();
+
+  await browser.click(screen.getByRole("button", { name: "Choose date" }));
+  await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  expect(screen.getByLabelText("Jump to date")).toContainElement(document.activeElement);
+  await browser.keyboard("{Escape}");
+  expect(await screen.findByRole("button", { name: "Choose date" })).toHaveFocus();
+
+  await browser.click(screen.getByRole("button", { name: "Create event" }));
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveFocus();
+  await browser.keyboard("{Escape}");
+  expect(await screen.findByRole("button", { name: "Create event" })).toHaveFocus();
+});
+
 it("holds the pill content back while an expanded surface collapses", async () => {
   const { container } = renderCalendar();
   fireEvent.click(screen.getByRole("button", { name: "Create event" }));

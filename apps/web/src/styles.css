@@ -770,150 +770,6 @@ p {
 .sidebar__content--context {
   animation: sidebar-mode-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.sidebar__content--calendar {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding-bottom: 0;
-}
-.context-sidebar__section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0 0.625rem;
-}
-.context-sidebar__section + .context-sidebar__section {
-  margin-top: 1rem;
-}
-.context-sidebar__date-picker {
-  flex: 0 0 auto;
-  padding-bottom: 0.5rem;
-}
-.context-sidebar__date-picker::after {
-  background: color-mix(in srgb, var(--sidebar-border) 55%, transparent);
-  content: "";
-  height: 1px;
-  margin: 0.125rem 0.875rem 0;
-}
-.calendar-sidebar__caption {
-  align-items: center;
-  display: flex;
-  gap: 0;
-}
-.calendar-sidebar__caption [data-slot="button"] {
-  height: var(--cell-size);
-  min-height: var(--cell-size);
-  padding-inline: 0.125rem;
-}
-.calendar-sidebar__caption [data-slot="button"][data-state="open"] {
-  background: var(--sidebar-accent);
-  color: var(--sidebar-accent-foreground);
-}
-.calendar-sidebar {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-.context-sidebar__calendar-visibility {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-.context-sidebar__calendar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.context-sidebar__calendar-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-.context-sidebar__calendar-scroll {
-  --border: var(--sidebar-border);
-  flex: 1;
-  min-height: 0;
-}
-.context-sidebar__calendar-scroll [data-slot="scroll-area-viewport"] > div {
-  display: block !important;
-  min-width: 0 !important;
-  width: 100% !important;
-}
-.context-sidebar__calendar-scroll-content {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: 100%;
-  min-width: 0;
-  padding: 0.5rem 0.625rem 0;
-  width: 100%;
-}
-.context-sidebar__calendar-account {
-  overflow: hidden;
-  padding: 0;
-}
-.context-sidebar__calendar-account-trigger {
-  background: transparent;
-  color: var(--sidebar-foreground);
-  gap: 0.5rem;
-  max-width: 100%;
-  min-width: 0;
-}
-.context-sidebar__calendar-account-trigger:is(:hover, :active, [data-state="open"], [data-state="open"]:hover) {
-  background: transparent;
-  color: var(--sidebar-foreground);
-}
-.context-sidebar__calendar-account-copy {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  text-align: left;
-}
-.context-sidebar__calendar-account-name {
-  color: var(--sidebar-foreground);
-  line-height: 1.15;
-}
-.context-sidebar__calendar-account-email {
-  color: var(--sidebar-muted);
-  font-size: 0.6875rem;
-  line-height: 1.15;
-}
-.context-sidebar__calendar-count {
-  color: var(--sidebar-muted);
-}
-.context-sidebar__calendar {
-  align-items: center;
-  border-radius: calc(var(--radius) - 2px);
-  cursor: pointer;
-  min-height: 2.25rem;
-  padding: 0.25rem;
-}
-.context-sidebar__calendar:hover {
-  background: var(--sidebar-accent);
-}
-.context-sidebar__calendar [data-slot="field-label"] {
-  align-items: center;
-  color: var(--sidebar-foreground);
-  cursor: pointer;
-  display: flex;
-  gap: 0.25rem;
-  min-width: 0;
-}
-.context-sidebar__calendar [data-slot="field-label"] > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.context-sidebar__calendar-external {
-  color: var(--sidebar-muted);
-  flex: 0 0 auto;
-  height: 0.75rem;
-  width: 0.75rem;
-}
 .context-sidebar__empty,
 .context-sidebar__meta {
   color: var(--sidebar-muted);
@@ -2505,7 +2361,7 @@ p {
   max-height: min(20rem, 45dvh);
   overflow-y: auto;
 }
-.calendar-search-results > button {
+.calendar-search-results > li > button {
   align-items: flex-start;
   background: transparent;
   border: 0;
@@ -2518,12 +2374,12 @@ p {
   padding: 0.5rem 0.625rem;
   text-align: left;
 }
-.calendar-search-results > button:hover,
-.calendar-search-results > button:focus-visible {
+.calendar-search-results > li > button:hover,
+.calendar-search-results > li > button:focus-visible {
   background: var(--selection);
 }
 .calendar-search-results small,
-.calendar-search-results > p {
+.calendar-search-results > li {
   color: var(--muted-foreground);
   font-size: 0.75rem;
 }
@@ -2817,7 +2673,7 @@ p {
   padding: 5px 8px;
   pointer-events: none;
   position: absolute;
-  z-index: 7;
+  z-index: 4;
 }
 .calendar-create-selection span {
   color: var(--muted);
@@ -2840,7 +2696,7 @@ p {
     height 90ms linear,
     left 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
     width 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  z-index: 8;
+  z-index: 5;
 }
 .calendar-drag-overlay {
   align-items: flex-start;
@@ -2924,7 +2780,7 @@ p {
 .calendar-timeline-event:hover {
   background: color-mix(in srgb, var(--calendar-color) 48%, var(--surface-raised));
   border-color: color-mix(in srgb, var(--calendar-color) 78%, var(--surface-raised));
-  z-index: 10 !important;
+  z-index: 6 !important;
 }
 .calendar-timeline-event.is-draggable,
 .month-event.is-draggable {
@@ -3064,7 +2920,7 @@ p {
   grid-column: 1 / -1;
   position: sticky;
   top: 0;
-  z-index: 7;
+  z-index: 10;
 }
 .calendar-secondary-app-bar__week-grid {
   background: var(--line);

@@ -3765,12 +3765,12 @@ describe("ilo web app", () => {
     const search = screen.getByRole("textbox", { name: "Search events and dates" });
     expect(search).toHaveFocus();
     await browser.type(search, "last Christmas");
-    await browser.click(await screen.findByRole("option", { name: /last Christmas/i }));
+    await browser.click(await screen.findByRole("button", { name: /last Christmas/i }));
     expect(view.location.value).toContain("date=2025-12-25");
 
     await browser.click(screen.getByRole("button", { name: "Search calendar" }));
     await browser.type(screen.getByRole("textbox", { name: "Search events and dates" }), "Focus");
-    await browser.click(await screen.findByRole("option", { name: /Focus block/ }));
+    await browser.click(await screen.findByRole("button", { name: /Focus block/ }));
     expect(view.location.value).toContain("date=2026-07-13");
 
     await browser.click(screen.getByRole("button", { name: "Create event" }));
@@ -4657,6 +4657,74 @@ describe("ilo web app", () => {
     expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
   });
 
+  it("cancels pointer range creation with Escape and creates a keyboard-selected range", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    Object.defineProperty(tuesday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
+    Object.defineProperties(pointerDown, {
+      button: { value: 0 },
+      clientY: { value: 480 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerDown);
+    const pointerMove = createEvent.pointerMove(tuesday);
+    Object.defineProperties(pointerMove, {
+      clientY: { value: 492 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerMove);
+    fireEvent.keyDown(tuesday, { key: "Escape" });
+    fireEvent.pointerUp(tuesday, { pointerId: 1 });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(document.querySelector(".calendar-floating-nav__composer")).not.toBeInTheDocument();
+
+    const keyboardTarget = within(tuesday).getByRole("button", {
+      name: "Create an event range on Tuesday with the keyboard",
+    });
+    keyboardTarget.focus();
+    fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 10 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 10:15 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+    expect(await screen.findByRole("textbox", { name: "Starts hour" })).toHaveValue("9");
+    expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
+  });
+
+  it("labels a range ending at midnight as 12 AM", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    Object.defineProperty(tuesday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
+    Object.defineProperties(pointerDown, {
+      button: { value: 0 },
+      clientY: { value: 1140 },
+      pointerId: { value: 2 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerDown);
+    const pointerMove = createEvent.pointerMove(tuesday);
+    Object.defineProperties(pointerMove, {
+      clientY: { value: 1152 },
+      pointerId: { value: 2 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerMove);
+
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 11:45 PM to 12 AM");
+  });
+
   it("describes all-day, multi-day, and overnight event ranges", async () => {
     const multiDay = {
       ...allDayEvent,
@@ -4784,8 +4852,7 @@ describe("ilo web app", () => {
       }),
     ).toBeInTheDocument();
     expect(readonly).toHaveClass("is-move-blocked");
-    fireEvent.pointerUp(readonly);
-    fireEvent.click(readonly);
+    fireEvent.pointerDown(readonly);
     fireEvent.click(readonly);
     expect(await screen.findByText(/write through to Google Calendar/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Event" })).toBeDisabled();
@@ -4816,7 +4883,10 @@ describe("ilo web app", () => {
       expect(mocks.updateEvent).toHaveBeenCalledTimes(callsBeforeReadonlyDrop + 1),
     );
     fireEvent.contextMenu(dayTimeline, { clientY: 528 });
-    expect(await screen.findByRole("menuitem", { name: "New event here" })).toBeInTheDocument();
+    await browser.click(await screen.findByRole("menuitem", { name: "New event here" }));
+    expect(await screen.findByLabelText("Create event")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.contextMenu(dayTimeline, { clientY: 528 });
     expect(screen.getByRole("menuitem", { name: "Paste event" })).toBeEnabled();
     await browser.keyboard("{Escape}");
     fireEvent.contextMenu(dayEvent);

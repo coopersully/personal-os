@@ -519,7 +519,7 @@ function EventLocationPicker({ onDismiss }: { onDismiss: () => void }) {
         onValueChange={(nextValue, { reason }) => {
           setSelected(nextValue);
           if (reason === "item-press") {
-            setInputValue(nextValue?.label ?? "");
+            setInputValue((nextValue as WeatherLocationOption).label);
             setOpen(false);
           }
           if (nextValue === null && (reason === "clear-press" || reason === "input-clear")) {

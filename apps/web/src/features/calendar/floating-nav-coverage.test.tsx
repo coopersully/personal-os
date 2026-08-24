@@ -309,4 +309,35 @@ describe("Calendar floating navigation edge states", () => {
     await browser.clear(screen.getByRole("combobox", { name: "Location" }));
     expect(screen.getByRole("combobox", { name: "Location" })).toHaveValue("");
   });
+
+  it("keeps date surfaces open when the selected date is deselected", async () => {
+    const browser = userEvent.setup();
+    renderCalendar();
+
+    await browser.click(screen.getByRole("button", { name: "Choose date" }));
+    await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
+    expect(screen.getByLabelText("Jump to date")).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
+
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
+    const selectedStart = screen.getByRole("button", { name: /Monday, August 24th, 2026/ });
+    await browser.click(selectedStart);
+    expect(screen.getByRole("button", { name: /Monday, August 24th, 2026/ })).toBeInTheDocument();
+  });
+
+  it("sorts equally ranked calendars by name and falls back when a color is missing", async () => {
+    const browser = userEvent.setup();
+    mocks.listEvents.mockResolvedValue([]);
+    renderCalendar([
+      { ...localCalendar, color: null, isPrimary: false, name: "Zulu" },
+      { ...googleCalendar, isPrimary: false, name: "Alpha" },
+    ]);
+
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await browser.click(screen.getByRole("button", { name: "Calendar: Alpha" }));
+    expect(screen.getByRole("button", { name: "Zulu" }).querySelector("i")).toHaveStyle({
+      background: "#777ce3",
+    });
+  });
 });

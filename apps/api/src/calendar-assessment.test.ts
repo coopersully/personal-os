@@ -174,6 +174,31 @@ describe("Calendar assessment", () => {
     ]);
   });
 
+  it("references missing-source event evidence without inventing an account", () => {
+    const missingSource = snapshot([
+      event(
+        "77777777-7777-4777-8777-777777777777",
+        "2026-08-24T13:00:00.000Z",
+        "2026-08-24T14:00:00.000Z",
+        {
+          calendarId: "99999999-9999-4999-8999-999999999999",
+          provider: "local",
+          remoteEventId: null,
+          status: "tentative",
+        },
+      ),
+    ]);
+
+    expect(
+      assessCalendar(missingSource).findings.find(({ kind }) => kind === "tentative_hold")
+        ?.sourceReferences[0],
+    ).toMatchObject({
+      accountId: null,
+      provider: "local",
+      remoteId: "77777777-7777-4777-8777-777777777777",
+    });
+  });
+
   it("does not emit a redundant buffer finding for an overlapping pair", () => {
     const result = assessCalendar(
       snapshot([
@@ -191,6 +216,27 @@ describe("Calendar assessment", () => {
     );
 
     expect(result.findings.map(({ kind }) => kind)).toEqual(["event_overlap"]);
+  });
+
+  it("keeps pair evidence stable when chronological and identity order differ", () => {
+    const result = assessCalendar(
+      snapshot([
+        event(
+          "ffffffff-ffff-4fff-8fff-ffffffffffff",
+          "2026-08-24T13:00:00.000Z",
+          "2026-08-24T14:00:00.000Z",
+        ),
+        event(
+          "11111111-1111-4111-8111-111111111111",
+          "2026-08-24T13:30:00.000Z",
+          "2026-08-24T14:30:00.000Z",
+        ),
+      ]),
+    );
+
+    expect(result.findings.find(({ kind }) => kind === "event_overlap")?.evidence).toMatchObject({
+      eventIds: ["11111111-1111-4111-8111-111111111111", "ffffffff-ffff-4fff-8fff-ffffffffffff"],
+    });
   });
 
   it("measures a transition from the latest ending overlapping event", () => {

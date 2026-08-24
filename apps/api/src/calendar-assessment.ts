@@ -145,9 +145,8 @@ function projectedOpenFindingIdentities(
       kind: finding.kind,
     });
   }
-  return [...projected.values()].sort(
-    (left, right) =>
-      left.fingerprint.localeCompare(right.fingerprint) || left.id.localeCompare(right.id),
+  return [...projected.values()].sort((left, right) =>
+    left.fingerprint.localeCompare(right.fingerprint),
   );
 }
 
@@ -504,11 +503,9 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     );
 
   for (let firstIndex = 0; firstIndex < candidates.length; firstIndex += 1) {
-    const first = candidates[firstIndex];
-    if (!first) continue;
+    const first = candidates[firstIndex] as AssessmentEvent;
     for (let secondIndex = firstIndex + 1; secondIndex < candidates.length; secondIndex += 1) {
-      const second = candidates[secondIndex];
-      if (!second) continue;
+      const second = candidates[secondIndex] as AssessmentEvent;
       const overlapStart = Math.max(
         new Date(first.startsAt).getTime(),
         new Date(second.startsAt).getTime(),
@@ -568,10 +565,9 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       snapshot.activeProfile.afterBufferMinutes,
       snapshot.activeProfile.beforeBufferMinutes,
     );
-    let frontier = candidates[0];
+    let frontier = candidates[0] as AssessmentEvent;
     for (let index = 1; index < candidates.length; index += 1) {
-      const second = candidates[index];
-      if (!frontier || !second) continue;
+      const second = candidates[index] as AssessmentEvent;
       const gapStart = new Date(frontier.endsAt).getTime();
       const gapEnd = new Date(second.startsAt).getTime();
       if (gapEnd > gapStart && gapEnd - gapStart < requiredBufferMinutes * MINUTE_MS) {

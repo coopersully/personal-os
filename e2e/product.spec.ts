@@ -186,11 +186,13 @@ test("a person and an agent share one reminder and calendar surface", async ({
   }
   await expect(page.getByRole("radio", { name: "Week", exact: true, checked: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Today", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Weekends", pressed: true })).toBeVisible();
   await expect(page.getByText("12 AM", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Weekends", pressed: true }).click();
-  await expect(page.getByRole("button", { name: "Weekends", pressed: false })).toBeVisible();
-  await page.getByRole("button", { name: "Weekends", pressed: false }).click();
+  const calendarHeading = page.locator('[data-slot="workspace-app-bar-identity"] h2');
+  const initialCalendarHeading = await calendarHeading.innerText();
+  await page.getByRole("button", { name: "Next week" }).click();
+  await expect.poll(() => calendarHeading.innerText()).not.toBe(initialCalendarHeading);
+  await page.getByRole("button", { name: "Previous week" }).click();
+  await expect.poll(() => calendarHeading.innerText()).toBe(initialCalendarHeading);
   await page.getByRole("radio", { name: "Month" }).click();
   await expect(page.getByRole("radio", { name: "Month", checked: true })).toBeVisible();
   const calendarLayout = await page.evaluate(() => ({

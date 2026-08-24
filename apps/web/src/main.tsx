@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router-dom";
 import "@fontsource/dm-mono/400.css";
 import "@fontsource/dm-mono/500.css";
 import { App } from "./app.js";
+import { MotionProvider } from "./components/motion-provider.js";
 import "./styles.css";
 
 document.documentElement.classList.toggle("desktop", "__TAURI_INTERNALS__" in window);
@@ -42,10 +43,12 @@ if (!root) throw new Error("The application root is missing.");
 
 createRoot(root).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <MotionProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </MotionProvider>
   </StrictMode>,
 );

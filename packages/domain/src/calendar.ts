@@ -16,6 +16,9 @@ export const calendarTimeZoneSchema = timeZoneSchema.refine((value) => {
 export const calendarProviderSchema = z.enum(["local", "google", "icloud"]);
 export type CalendarProvider = z.infer<typeof calendarProviderSchema>;
 
+export const generatedConferenceProviderSchema = z.enum(["google_meet"]);
+export type GeneratedConferenceProvider = z.infer<typeof generatedConferenceProviderSchema>;
+
 export const calendarSchema = z.object({
   id: idSchema,
   accountId: idSchema,
@@ -63,10 +66,20 @@ export const updateLocalCalendarInputSchema = z
   .refine((value) => Object.keys(value).length > 0, "At least one calendar field is required");
 export type UpdateLocalCalendarInput = z.infer<typeof updateLocalCalendarInputSchema>;
 
+const calendarEventHttpUrlSchema = z.url().refine(
+  (value) => {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  },
+  { message: "Calendar event URLs must use HTTP or HTTPS" },
+);
+
 const eventFieldsSchema = z.object({
   title: z.string().trim().min(1).max(500),
   notes: z.string().trim().max(50_000).nullable().default(null),
   location: z.string().trim().max(1_000).nullable().default(null),
+  conferenceUrl: calendarEventHttpUrlSchema.nullable().default(null),
+  url: calendarEventHttpUrlSchema.nullable().default(null),
   startsAt: isoDateTimeSchema,
   endsAt: isoDateTimeSchema,
   timezone: calendarTimeZoneSchema,
@@ -97,6 +110,11 @@ const eventFieldsSchema = z.object({
 export const createEventInputSchema = eventFieldsSchema
   .extend({
     calendarId: idSchema,
+    conferenceProvider: generatedConferenceProviderSchema.nullable().optional(),
+  })
+  .refine((value) => !(value.conferenceProvider && value.conferenceUrl), {
+    message: "Choose either generated conferencing or an existing meeting link",
+    path: ["conferenceUrl"],
   })
   .refine((value) => new Date(value.endsAt) > new Date(value.startsAt), {
     message: "Event end must be after its start",
@@ -109,6 +127,8 @@ const updateEventFieldsSchema = z.object({
   title: z.string().trim().min(1).max(500).optional(),
   notes: z.string().trim().max(50_000).nullable().optional(),
   location: z.string().trim().max(1_000).nullable().optional(),
+  conferenceUrl: calendarEventHttpUrlSchema.nullable().optional(),
+  url: calendarEventHttpUrlSchema.nullable().optional(),
   startsAt: isoDateTimeSchema.optional(),
   endsAt: isoDateTimeSchema.optional(),
   timezone: calendarTimeZoneSchema.optional(),
@@ -210,7 +230,7 @@ export const calendarEventSchema = eventFieldsSchema
   .extend({
     id: idSchema,
     calendarId: idSchema,
-    conferenceUrl: z.url().nullable().default(null),
+    conferenceStatus: z.enum(["failure", "pending", "success"]).nullable().optional(),
     provider: calendarProviderSchema,
     blockSourceEventId: idSchema.nullable().default(null),
     blockMode: eventBlockModeSchema.nullable().default(null),

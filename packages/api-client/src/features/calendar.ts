@@ -4,6 +4,9 @@ import type {
   CalendarCommitmentProposal,
   CalendarEvent,
   CalendarEventMutationRevision,
+  CalendarReview,
+  CalendarStatus,
+  CreateCalendarReviewInput,
   CreateEventBlockInput,
   CreateEventInput,
   CreateLocalCalendarInput,
@@ -29,6 +32,15 @@ export function createCalendarApiClient(request: ApiRequest) {
         method: "POST",
       });
       return response.calendar;
+    },
+    async createCalendarReview(
+      input: CreateCalendarReviewInput = { scope: { type: "all_outstanding" } },
+    ): Promise<CalendarReview> {
+      const response = await request<{ review: CalendarReview }>("/v1/calendars/reviews", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.review;
     },
     async createEvent(input: CreateEventInput): Promise<CalendarEvent> {
       const response = await request<{ event: CalendarEvent }>("/v1/events", {
@@ -73,6 +85,10 @@ export function createCalendarApiClient(request: ApiRequest) {
         },
       );
       return response.event;
+    },
+    async getCalendarStatus(): Promise<CalendarStatus> {
+      const response = await request<{ status: CalendarStatus }>("/v1/calendars/status");
+      return response.status;
     },
     async getEvent(id: string): Promise<CalendarEvent> {
       const response = await request<{ event: CalendarEvent }>(`/v1/events/${id}`);

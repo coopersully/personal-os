@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
 import nodemailer from "nodemailer";
 import { z } from "zod";
@@ -72,6 +73,11 @@ const eventDateSchema = z.object({
 const eventSchema = z.object({
   conferenceData: z
     .object({
+      createRequest: z
+        .object({
+          status: z.object({ statusCode: z.enum(["failure", "pending", "success"]) }),
+        })
+        .optional(),
       entryPoints: z
         .array(
           z.object({
@@ -555,11 +561,14 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     async createEvent(credentials, remoteCalendarId, input) {
-      const result = await authenticatedRequest(
-        credentials,
+      const url = new URL(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events`,
-        { body: JSON.stringify(toGoogleEvent(input)), method: "POST" },
       );
+      url.searchParams.set("conferenceDataVersion", "1");
+      const result = await authenticatedRequest(credentials, url.toString(), {
+        body: JSON.stringify(toGoogleEvent(input)),
+        method: "POST",
+      });
       const event = eventSchema.parse(await parseResponse(result.response));
       return { credentials: result.credentials, value: normalizeEvent(event, input.timezone) };
     },
@@ -849,15 +858,15 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     async updateEvent(credentials, remoteCalendarId, remoteEventId, etag, input) {
-      const result = await authenticatedRequest(
-        credentials,
+      const url = new URL(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events/${encodeURIComponent(remoteEventId)}`,
-        {
-          body: JSON.stringify(toGoogleEvent(input)),
-          ...(etag ? { headers: { "if-match": etag } } : {}),
-          method: "PATCH",
-        },
       );
+      url.searchParams.set("conferenceDataVersion", "1");
+      const result = await authenticatedRequest(credentials, url.toString(), {
+        body: JSON.stringify(toGoogleEvent(input)),
+        ...(etag ? { headers: { "if-match": etag } } : {}),
+        method: "PATCH",
+      });
       const event = eventSchema.parse(await parseResponse(result.response));
       return {
         credentials: result.credentials,
@@ -1062,13 +1071,16 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
       status: 502,
     });
   }
+  const conferenceUrl =
+    event.conferenceData?.entryPoints.find((entryPoint) => entryPoint.entryPointType === "video")
+      ?.uri ??
+    extractConferenceUrl(event.description) ??
+    extractConferenceUrl(event.location);
   return {
     allDay,
-    conferenceUrl:
-      event.conferenceData?.entryPoints.find((entryPoint) => entryPoint.entryPointType === "video")
-        ?.uri ??
-      extractConferenceUrl(event.description) ??
-      extractConferenceUrl(event.location),
+    conferenceStatus:
+      event.conferenceData?.createRequest?.status.statusCode ?? (conferenceUrl ? "success" : null),
+    conferenceUrl,
     endsAt,
     etag: event.etag ?? null,
     location: event.location ?? null,
@@ -1085,9 +1097,21 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
 
 function toGoogleEvent(input: CreateEventInput | UpdateEventInput): Record<string, unknown> {
   const value: Record<string, unknown> = {};
+  const conferenceUrl = "conferenceUrl" in input ? input.conferenceUrl : undefined;
+  const conferenceProvider = "conferenceProvider" in input ? input.conferenceProvider : undefined;
   if (input.title !== undefined) value.summary = input.title;
-  if (input.notes !== undefined) value.description = input.notes;
+  if (input.notes !== undefined || conferenceUrl !== undefined) {
+    value.description = eventDescription(input.notes ?? null, conferenceUrl ?? null);
+  }
   if (input.location !== undefined) value.location = input.location;
+  if (conferenceProvider === "google_meet") {
+    value.conferenceData = {
+      createRequest: {
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+        requestId: randomUUID(),
+      },
+    };
+  }
   const allDay = input.allDay ?? false;
   if (input.startsAt !== undefined) {
     value.start = allDay
@@ -1100,6 +1124,11 @@ function toGoogleEvent(input: CreateEventInput | UpdateEventInput): Record<strin
       : { dateTime: input.endsAt, timeZone: input.timezone };
   }
   return value;
+}
+
+function eventDescription(notes: string | null, conferenceUrl: string | null): string | null {
+  if (!conferenceUrl || notes?.includes(conferenceUrl)) return notes;
+  return [notes, conferenceUrl].filter(Boolean).join("\n\n");
 }
 
 function dateInTimeZone(value: string, timezone: string): string {

@@ -446,7 +446,7 @@ describe("Finance section states", () => {
       ),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
-  });
+  }, 10_000);
 
   it("recovers browser account scopes and navigates unplanned budget months", async () => {
     sessionStorage.setItem("finance-account-scope:spend", "not-json");

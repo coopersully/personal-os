@@ -18,6 +18,10 @@ const blockEffect: CalendarProviderEffect = {
   remoteEventId: "remote-block",
   role: "block",
 };
+const deleteEffect: CalendarProviderEffect = {
+  ...blockEffect,
+  action: "delete",
+};
 
 describe("Calendar provider effect ledger", () => {
   it("rejects duplicate plans and skipped or repeated provider effects", async () => {
@@ -96,6 +100,40 @@ describe("Calendar provider effect ledger", () => {
         stage: "credential_persistence",
       },
       message: "Credential persistence failed.",
+    });
+  });
+
+  it("records a provider delete partial effect without inventing a remote id", async () => {
+    const ledger = createCalendarProviderEffectLedger("delete_event", [deleteEffect]);
+    await expect(
+      ledger.run(deleteEffect, async () =>
+        Promise.reject(
+          new AppError("service_unavailable", "Projection failed after provider deletion.", {
+            partialEffect: "provider_event_deleted",
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      details: {
+        completedEffects: [
+          expect.objectContaining({ action: "delete", remoteEventId: "remote-block" }),
+        ],
+        partialEffect: "provider_event_deleted",
+      },
+    });
+  });
+
+  it("classifies a failed projection after provider deletion", async () => {
+    const ledger = createCalendarProviderEffectLedger("delete_event", [deleteEffect]);
+    await ledger.run(deleteEffect, async () => ({}));
+
+    await expect(
+      ledger.commit(async () => Promise.reject(new Error("Projection failed."))),
+    ).rejects.toMatchObject({
+      details: {
+        completedEffects: [expect.objectContaining({ action: "delete" })],
+        partialEffect: "provider_event_deleted",
+      },
     });
   });
 

@@ -656,6 +656,43 @@ describe.sequential("Calendar stewardship service", () => {
     expect(review.findings.length).toBeLessThanOrEqual(CALENDAR_ASSESSMENT_BUDGETS.findings);
   });
 
+  it("recovers a supported finding ledger that exceeded its read budget", async () => {
+    await database.db
+      .update(calendarEvents)
+      .set({
+        endsAt: new Date("2026-08-24T17:00:00.000Z"),
+        startsAt: new Date("2026-08-24T16:00:00.000Z"),
+        updatedAt: now,
+      })
+      .where(eq(calendarEvents.id, secondEventId));
+    await database.db.insert(calendarFindings).values(
+      Array.from({ length: CALENDAR_ASSESSMENT_BUDGETS.findings + 1 }, (_, index) => ({
+        evidence: { accountId, calendarId, type: "source" as const },
+        evidenceCutoff: now,
+        fingerprint: index.toString(16).padStart(64, "0"),
+        firstObservedAt: now,
+        kind: "source_stale" as const,
+        lastObservedAt: now,
+        playbookVersion: "1.0.0",
+        rulebookVersion: "calendar-profile/v1",
+        severity: "attention" as const,
+        sourceReferences: [],
+        status: "open" as const,
+        summary: "Previously observed source evidence.",
+        userId,
+      })),
+    );
+
+    const review = await service.createReview(userId, { scope: { type: "all_outstanding" } });
+    const openFindings = await database.db
+      .select()
+      .from(calendarFindings)
+      .where(and(eq(calendarFindings.userId, userId), eq(calendarFindings.status, "open")));
+
+    expect(review.sourceFreshness[0]?.state).toBe("current");
+    expect(openFindings).toHaveLength(0);
+  });
+
   it("excludes unselected, disabled, and soft-deleted sources plus events outside the fixed horizon", async () => {
     const [excludedCalendar] = await database.db
       .insert(calendars)

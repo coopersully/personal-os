@@ -156,6 +156,39 @@ describe("Calendar assessment", () => {
     expect(result.findings.map(({ kind }) => kind)).toEqual(["event_overlap"]);
   });
 
+  it("measures a transition from the latest ending overlapping event", () => {
+    const result = assessCalendar(
+      snapshot([
+        event(
+          "44444444-4444-4444-8444-444444444444",
+          "2026-08-24T09:00:00.000Z",
+          "2026-08-24T11:00:00.000Z",
+        ),
+        event(
+          "55555555-5555-4555-8555-555555555555",
+          "2026-08-24T10:00:00.000Z",
+          "2026-08-24T10:15:00.000Z",
+        ),
+        event(
+          "66666666-6666-4666-8666-666666666666",
+          "2026-08-24T11:05:00.000Z",
+          "2026-08-24T12:00:00.000Z",
+        ),
+      ]),
+    );
+
+    expect(result.findings.map(({ kind }) => kind)).toEqual([
+      "event_overlap",
+      "buffer_shortfall",
+    ]);
+    expect(result.findings.find(({ kind }) => kind === "buffer_shortfall")?.evidence).toMatchObject({
+      eventIds: [
+        "44444444-4444-4444-8444-444444444444",
+        "66666666-6666-4666-8666-666666666666",
+      ],
+    });
+  });
+
   it("finds old future tentative holds outside timed-busy analysis but ignores fresh ones", () => {
     const result = assessCalendar(
       snapshot([

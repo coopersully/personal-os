@@ -345,7 +345,7 @@ async function reconcileFindings(
   }
 
   const currentFingerprints = draft.findings.map(({ fingerprint }) => fingerprint);
-  if (!draft.evidenceLimited) {
+  if (draft.findingResolutionSafe) {
     await transaction
       .update(calendarFindings)
       .set({ resolvedAt: observedAt, status: "resolved", updatedAt: observedAt })

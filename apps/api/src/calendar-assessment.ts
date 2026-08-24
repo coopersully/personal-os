@@ -63,6 +63,7 @@ export type CalendarAssessmentSnapshot = {
 
 export type CalendarAssessmentDraft = {
   evidenceLimited: boolean;
+  findingResolutionSafe: boolean;
   findings: Array<
     Omit<CalendarFinding, "firstObservedAt" | "id" | "lastObservedAt" | "resolvedAt" | "status">
   >;
@@ -439,6 +440,11 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
   const recurrenceByCalendarId = new Set(
     events.filter((event) => event.recurrence.length > 0).map((event) => event.calendarId),
   );
+  const sourceEvidenceUnsettled = sources.some(
+    (source) =>
+      sourceState(source, snapshot.evidenceCutoff) !== "current" ||
+      recurrenceByCalendarId.has(source.calendarId),
+  );
   const findings: DraftFinding[] = [];
   let findingBudgetExceeded = false;
   const pushFinding = (finding: DraftFinding): void => {
@@ -562,23 +568,25 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
       snapshot.activeProfile.afterBufferMinutes,
       snapshot.activeProfile.beforeBufferMinutes,
     );
+    let frontier = candidates[0];
     for (let index = 1; index < candidates.length; index += 1) {
-      const first = candidates[index - 1];
       const second = candidates[index];
-      if (!first || !second) continue;
-      const gapStart = new Date(first.endsAt).getTime();
+      if (!frontier || !second) continue;
+      const gapStart = new Date(frontier.endsAt).getTime();
       const gapEnd = new Date(second.startsAt).getTime();
-      if (gapEnd <= gapStart || gapEnd - gapStart >= requiredBufferMinutes * MINUTE_MS) continue;
-      pushFinding(
-        makeFinding({
-          evidence: pairEvidence(first, second, first.endsAt, second.startsAt),
-          kind: "buffer_shortfall",
-          rulebook,
-          severity: "attention",
-          sourceReferences: pairSourceReferences(first, second, sourcesByCalendarId),
-          summary: "Adjacent timed busy events do not meet the active transition buffer.",
-        }),
-      );
+      if (gapEnd > gapStart && gapEnd - gapStart < requiredBufferMinutes * MINUTE_MS) {
+        pushFinding(
+          makeFinding({
+            evidence: pairEvidence(frontier, second, frontier.endsAt, second.startsAt),
+            kind: "buffer_shortfall",
+            rulebook,
+            severity: "attention",
+            sourceReferences: pairSourceReferences(frontier, second, sourcesByCalendarId),
+            summary: "Adjacent timed busy events do not meet the active transition buffer.",
+          }),
+        );
+      }
+      if (new Date(second.endsAt).getTime() > gapStart) frontier = second;
     }
   }
 
@@ -664,14 +672,17 @@ export function assessCalendar(snapshot: CalendarAssessmentSnapshot): CalendarAs
     ...finding,
     evidenceCutoff: snapshot.evidenceCutoff.toISOString(),
   }));
+  const findingResolutionSafe =
+    !snapshot.evidenceLimits.eventBudgetExceeded &&
+    !findingBudgetExceeded &&
+    !missingSource &&
+    !missingProfile &&
+    !sourceEvidenceUnsettled;
   const evidenceLimited =
-    inputEvidenceLimited ||
-    findingBudgetExceeded ||
-    missingSource ||
-    missingProfile ||
-    unsettledSourceEvidence;
+    !findingResolutionSafe || snapshot.evidenceLimits.openFindingBudgetExceeded;
   return {
     evidenceLimited,
+    findingResolutionSafe,
     findings: findingsWithCutoff,
     health,
     projectedOpenFindingCount:

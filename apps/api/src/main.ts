@@ -2,7 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
-import { createApp } from "./app.js";
+import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import {
   closeNodeHttpServer,
@@ -40,6 +40,7 @@ const scheduler = setInterval(() => {
     });
   });
   runtimeLifecycle.startBackgroundTask("scheduled-finance-sync", dispatchFinanceSync);
+  runtimeLifecycle.startBackgroundTask("scheduled-finance-maintenance", dispatchFinanceMaintenance);
   runtimeLifecycle.startBackgroundTask("scheduled-finance-backfill", dispatchFinanceBackfill);
   runtimeLifecycle.startBackgroundTask(
     "scheduled-finance-setup-integrity",
@@ -62,6 +63,7 @@ runtimeLifecycle.startBackgroundTask("startup-mail-rule-dispatch", async () => {
   });
 });
 runtimeLifecycle.startBackgroundTask("startup-finance-sync", dispatchFinanceSync);
+runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFinanceMaintenance);
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
 runtimeLifecycle.startBackgroundTask(
   "startup-finance-setup-integrity",
@@ -77,16 +79,23 @@ runtimeLifecycle.startBackgroundTask(
 );
 
 async function dispatchFinanceSync(): Promise<void> {
+  let backfill: Awaited<ReturnType<PersonalOsApp["backfillFinanceProviderItems"]>>;
   try {
-    const result = await app.syncDueFinances();
-    if (result.failed)
-      process.stderr.write(
-        `[personal-os] scheduled finance sync failed for ${result.failed} accounts: ${result.reasons.join("; ")}\n`,
-      );
-  } catch (error) {
-    process.stderr.write(`[personal-os] scheduled finance sync failed: ${String(error)}\n`);
-    throw error;
+    backfill = await app.backfillFinanceProviderItems();
+  } catch {
+    process.stderr.write("[personal-os] Finance Provider Item backfill failed\n");
+    throw new Error("Finance Provider Item backfill failed.");
   }
+  if (backfill.created || backfill.linked || backfill.blocked || !backfill.complete) {
+    process.stdout.write(
+      `[personal-os] Finance Provider Item backfill: ${backfill.created} Items created, ${backfill.linked} accounts linked, ${backfill.blocked} blocked, ${backfill.replayDue} due for replay, complete=${backfill.complete}.\n`,
+    );
+  }
+  await app.syncDueFinances();
+}
+
+async function dispatchFinanceMaintenance(): Promise<void> {
+  await app.dispatchDueFinanceMaintenance();
 }
 
 async function dispatchFinanceBackfill(): Promise<void> {

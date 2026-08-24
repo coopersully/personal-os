@@ -41,8 +41,8 @@ import {
   type FormEvent,
   lazy,
   type DragEvent as ReactDragEvent,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent,
   Suspense,
   startTransition,
@@ -2737,6 +2737,7 @@ function CalendarPage({
       <CalendarFloatingNav
         anchor={anchor}
         calendars={calendars.data ?? []}
+        events={events.data ?? []}
         {...(floatingDraft ? { draft: floatingDraft } : {})}
         eventDetails={
           inspectedEvent ? (
@@ -2990,6 +2991,9 @@ function CalendarAccountsControl() {
             )}
           </ShadcnFieldGroup>
         )}
+        <ShadcnButton asChild className="w-full justify-start" size="sm" variant="ghost">
+          <Link to="/calendar/review">Schedule health</Link>
+        </ShadcnButton>
       </ShadcnPopoverContent>
     </ShadcnPopover>
   );

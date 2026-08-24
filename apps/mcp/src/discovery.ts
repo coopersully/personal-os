@@ -168,10 +168,19 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
     }),
   );
 
-  registerPrompts(server, options.scopes);
+  registerPrompts(server, options);
 }
 
-function registerPrompts(server: McpServer, scopes: ReadonlySet<AccessScope>): void {
+function registerPrompts(
+  server: McpServer,
+  options: Pick<DiscoveryOptions, "includeCompatibility" | "readOnly" | "scopes">,
+): void {
+  const scopes = options.scopes;
+  const canMaintainFinances =
+    !options.readOnly &&
+    availableToolNames(options.scopes, options.readOnly, options.includeCompatibility).includes(
+      "maintain_finances",
+    );
   const prompts = [
     {
       description: "Orient to Ilo, then continue the next incomplete setup step.",
@@ -206,7 +215,9 @@ function registerPrompts(server: McpServer, scopes: ReadonlySet<AccessScope>): v
     {
       description: "Review finances with freshness, source, and reconciliation context.",
       name: "review_finances",
-      text: "Call get_ilo_context and get_finance_overview, then inspect ledger health and the review queue. State data freshness and uncertainty; proposals are not committed categorizations.",
+      text: canMaintainFinances
+        ? "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. When the caller intends maintenance, invoke maintain_finances once; Ilo keeps questions and approvals pending rather than guessing."
+        : "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. Present pending work and stop after status; questions and approvals remain pending rather than guessed.",
       title: "Review finances",
     },
     {

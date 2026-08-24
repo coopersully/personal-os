@@ -728,6 +728,9 @@ describe("agent access settings", () => {
         }),
       ),
     );
+    expect(mocks.createAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({ scopes: expect.arrayContaining(["finances:maintain"]) }),
+    );
     expect(await screen.findByText("pos_once")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Dismiss token" }));
     await browser.click(screen.getByRole("button", { name: "Revoke Local Codex" }));

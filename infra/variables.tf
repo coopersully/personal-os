@@ -120,7 +120,7 @@ variable "plaid_enabled" {
 variable "plaid_environment" {
   description = "Plaid API environment used when plaid_enabled is true."
   type        = string
-  default     = "sandbox"
+  default     = "production"
 
   validation {
     condition     = contains(["sandbox", "development", "production"], var.plaid_environment)

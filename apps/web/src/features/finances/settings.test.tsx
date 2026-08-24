@@ -101,10 +101,12 @@ const savedFinanceProfile = {
 
 const mocks = vi.hoisted(() => ({
   getDomainProfile: vi.fn(),
+  getFinanceAutomationSettings: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getFinanceOverview: vi.fn(),
   getFinanceProfile: vi.fn(),
   updateFinanceProfile: vi.fn(),
+  updateFinanceAutomationSettings: vi.fn(),
   upsertDomainProfile: vi.fn(),
 }));
 
@@ -131,6 +133,7 @@ describe("Finance settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDomainProfile.mockResolvedValue(draftProfile);
+    mocks.getFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
     mocks.getFinanceGuidedSetup.mockResolvedValue(guidedSetupFixture);
     mocks.getFinanceOverview.mockResolvedValue({
       accounts: [],
@@ -141,11 +144,31 @@ describe("Finance settings", () => {
     });
     mocks.getFinanceProfile.mockResolvedValue(null);
     mocks.updateFinanceProfile.mockResolvedValue(savedFinanceProfile);
+    mocks.updateFinanceAutomationSettings.mockImplementation(async (settings) => {
+      mocks.getFinanceAutomationSettings.mockResolvedValue(settings);
+      return settings;
+    });
     mocks.upsertDomainProfile.mockResolvedValue({
       ...draftProfile,
       status: "active",
       version: 2,
     });
+  });
+
+  it("lets the signed-in person enable the MCP review bypass with one switch", async () => {
+    renderSettings();
+    const bypass = await screen.findByRole("switch", {
+      name: "Let agents apply confident Finance changes",
+    });
+
+    expect(bypass).not.toBeChecked();
+    await userEvent.setup().click(bypass);
+    expect(bypass).toBeChecked();
+    await waitFor(() =>
+      expect(mocks.updateFinanceAutomationSettings).toHaveBeenCalledWith({
+        reviewBypassEnabled: true,
+      }),
+    );
   });
 
   it("reviews and activates draft guidance without claiming a scheduled automation", async () => {
@@ -326,5 +349,58 @@ describe("Finance settings", () => {
     expect(await screen.findByText("Profile save failed")).toBeVisible();
     expect(employer).toHaveValue("Unsaved employer");
     expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+  });
+
+  it("renders an active draft's detailed guidance and pending actions", async () => {
+    const [sourceContext] = draftProfile.sourceContexts;
+    const [accountSource] = guidedSetupFixture.accountSources;
+    if (!sourceContext || !accountSource) throw new Error("Guidance fixtures are incomplete.");
+    const detailedDraft = {
+      ...draftProfile,
+      categories: [{ description: "Meals away from home", label: "Dining" }],
+      sourceContexts: [{ ...sourceContext, notes: "Primary household account" }],
+    };
+    mocks.getDomainProfile.mockResolvedValue(detailedDraft);
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      ...guidedSetupFixture,
+      accountSources: [
+        ...guidedSetupFixture.accountSources,
+        { ...accountSource, id: "22222222-2222-4222-8222-222222222222" },
+      ],
+      guidance: {
+        approvedProfile: { ...detailedDraft, status: "active" as const },
+        draftNotice: "A newer draft awaits review.",
+        draftProposal: detailedDraft,
+      },
+    });
+    let finishActivation: (() => void) | undefined;
+    mocks.upsertDomainProfile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishActivation = () => resolve({ ...detailedDraft, status: "active", version: 2 });
+        }),
+    );
+    let finishSave: (() => void) | undefined;
+    mocks.updateFinanceProfile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSave = () => resolve({ status: "pending" });
+        }),
+    );
+    renderSettings();
+    const browser = userEvent.setup();
+
+    expect(await screen.findByText("Active + draft")).toBeVisible();
+    expect(screen.getAllByText(/Primary household account/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Dining: Meals away from home").length).toBeGreaterThan(0);
+    expect(screen.getByText(/while the pending draft is reviewed/)).toBeVisible();
+    await browser.click(screen.getByRole("button", { name: "Activate guidance" }));
+    expect(screen.getByRole("button", { name: "Activating…" })).toBeDisabled();
+    finishActivation?.();
+
+    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    finishSave?.();
+    await waitFor(() => expect(mocks.updateFinanceProfile).toHaveBeenCalled());
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ConnectorError, classifyICloudError, connectorHttpError } from "./failures.js";
 
 describe("connector failure boundary", () => {
@@ -187,5 +187,59 @@ describe("connector failure boundary", () => {
       category: "transport",
       status: null,
     });
+  });
+
+  it("fails closed for unreadable Plaid bodies and accepts an HTTP-date retry", async () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    const noBody = { body: null, headers, status: 400 } as Response;
+    await expect(connectorHttpError(noBody, "plaid")).resolves.toMatchObject({
+      category: "rejected",
+      code: "plaid_request_rejected",
+    });
+
+    const oversized = new Response(
+      JSON.stringify({ error_code: "INVALID_API_KEYS", padding: "x".repeat(5_000) }),
+      { headers: { "content-type": "application/json" }, status: 400 },
+    );
+    await expect(connectorHttpError(oversized, "plaid")).resolves.toMatchObject({
+      category: "rejected",
+    });
+    const malformed = new Response("{", {
+      headers: { "content-type": "application/json" },
+      status: 400,
+    });
+    await expect(connectorHttpError(malformed, "plaid")).resolves.toMatchObject({
+      category: "rejected",
+    });
+
+    const retryDate = new Date(Date.now() + 30_000).toUTCString();
+    const dated = await connectorHttpError(
+      new Response(null, { headers: { "retry-after": retryDate }, status: 429 }),
+      "x",
+    );
+    expect(dated.retryAfterMs).toBeGreaterThan(0);
+
+    const noRetryHeader = await connectorHttpError(
+      Response.json({ error_code: "RATE_LIMIT_EXCEEDED" }, { status: 429 }),
+      "plaid",
+    );
+    expect(noRetryHeader.retryAfterMs).toBeNull();
+  });
+
+  it("fails closed when a provider body reader throws", async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error("cancel failed"));
+    const response = {
+      body: {
+        cancel,
+        getReader: () => ({ cancel, read: () => Promise.reject(new Error("read failed")) }),
+      },
+      headers: new Headers({ "content-type": "application/json" }),
+      status: 400,
+    } as unknown as Response;
+
+    await expect(connectorHttpError(response, "plaid")).resolves.toMatchObject({
+      category: "rejected",
+    });
+    expect(cancel).toHaveBeenCalled();
   });
 });

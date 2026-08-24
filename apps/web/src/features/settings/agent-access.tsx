@@ -107,6 +107,8 @@ const scopeLabels: Record<AccessScope, string> = {
   "calendar:write": "Manage calendar",
   "finances:read": "Read sensitive financial accounts and activity",
   "finances:write": "Save Finance guidance drafts",
+  "finances:maintain":
+    "Maintain Finances: sync providers, reconcile and categorize under approved rules, create durable runs; questions and approvals stay pending",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "mail:read": "Read mail",
@@ -159,6 +161,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "mail:write",
       "finances:read",
       "finances:write",
+      "finances:maintain",
       "goals:read",
       "goals:write",
       "automations:read",

@@ -9,7 +9,7 @@ import type {
   Reminder,
   Task,
 } from "@personal-os/domain";
-import { accessScopeSchema } from "@personal-os/domain";
+import { type AccessScope, accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
 import { availableToolNames } from "./tool-catalog.js";
 
@@ -300,6 +300,90 @@ function mockApi() {
       },
       suggestedWorkflows: [],
     })),
+    getFinanceAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: true })),
+    getFinanceStatus: vi.fn(async () => ({
+      activeRun: null,
+      domain: "finances",
+      state: "needs_work",
+    })),
+    compareFinanceScenarios: vi.fn(async () => ({
+      alternatives: [],
+      asOf: "2026-07-13",
+      assumptions: [],
+      baseline: {
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Baseline",
+        monthlyCashFlow: 0,
+        projectedLowestBalance: 0,
+        reserveRunwayMonths: null,
+      },
+      fingerprint: `sha256:${"a".repeat(64)}`,
+      goalConflicts: [],
+      missingInputs: [],
+      sensitivityWarnings: [],
+    })),
+    setFinanceBudgetPlan: vi.fn(async (input) => input),
+    setFinanceTransactionBreakdown: vi.fn(async () => ({
+      accountId,
+      allocations: [],
+      amount: 1,
+      category: null,
+      categoryConfidence: null,
+      createdAt: now,
+      currencyCode: null,
+      date: "2026-07-13",
+      direction: "expense",
+      id,
+      merchant: "Test",
+      needsReview: false,
+      notes: null,
+      updatedAt: now,
+    })),
+    maintainFinances: vi.fn(async () => ({
+      id,
+      scope: { type: "all_outstanding" as const },
+      status: "queued" as const,
+    })),
+    getFinanceLedgerChallenge: vi.fn(async () => ({
+      challenge: {
+        candidateId: id,
+        candidateRevision: `sha256:${"a".repeat(64)}`,
+        createdAt: now,
+        cutoff: now,
+        id,
+        rubricVersion: "finance-ledger-challenge-v1" as const,
+        runId: id,
+        state: "prepared" as const,
+        submittedAt: null,
+        submittingAgentId: null,
+        updatedAt: now,
+        userId: id,
+      },
+      checks: [],
+      items: [],
+      nextCursor: null,
+    })),
+    submitFinanceLedgerChallenge: vi.fn(async () => ({
+      candidateId: id,
+      candidateRevision: `sha256:${"a".repeat(64)}`,
+      createdAt: now,
+      cutoff: now,
+      id,
+      rubricVersion: "finance-ledger-challenge-v1" as const,
+      runId: id,
+      state: "submitted" as const,
+      submittedAt: now,
+      submittingAgentId: "agent-test",
+      updatedAt: now,
+      userId: id,
+    })),
+    getFinancePeriodReview: vi.fn(async () => ({ id, status: "completed" as const })),
+    getFinanceMaintenanceRun: vi.fn(async () => ({
+      id,
+      scope: { type: "all_outstanding" as const },
+      status: "queued" as const,
+    })),
     upsertDomainProfile: vi.fn(async () => domainProfile),
     listAttentionItems: vi.fn(async () => [attentionItem]),
     createAttentionItem: vi.fn(async () => attentionItem),
@@ -322,6 +406,12 @@ function mockApi() {
       needsReview: true,
       notes: null,
       updatedAt: now,
+    })),
+    createFinanceBudget: vi.fn(async () => ({
+      category: "Dining",
+      id,
+      limit: 250,
+      month: "2026-07",
     })),
     updateFinanceTransaction: vi.fn(async () => ({
       id,
@@ -371,7 +461,21 @@ function mockApi() {
       unresolvedReviews: 0,
     })),
     getFinanceProfile: vi.fn(async () => null),
+    updateFinanceProfile: vi.fn(async (input) => ({ ...input, updatedAt: now })),
     listFinanceIncomeStreams: vi.fn(async () => []),
+    updateFinanceIncomeStream: vi.fn(async () => ({
+      accountId: null,
+      cadence: "monthly",
+      confidence: 1,
+      displayName: "Pay",
+      expectedAmount: 1,
+      id,
+      lastObservedDate: null,
+      nextExpectedDate: null,
+      payer: "Employer",
+      source: "user",
+      status: "active",
+    })),
     listFinanceRecurringObligations: vi.fn(async () => []),
     listFinanceAlerts: vi.fn(async () => []),
     getFinanceForecast: vi.fn(async () => ({
@@ -408,6 +512,7 @@ function mockApi() {
       title: "Test",
       type: "income_missing",
     })),
+    refreshFinanceInsights: vi.fn(async () => ({ refreshed: true })),
     getFinanceCategories: vi.fn(async () => []),
     getFinanceBudgetStatus: vi.fn(async () => []),
     listFinanceMerchants: vi.fn(async () => []),
@@ -421,7 +526,7 @@ function mockApi() {
     listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
     proposeFinanceCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
     applyFinanceCategorizations: vi.fn(async () => []),
-    resolveFinanceReview: vi.fn(async () => ({ deferred: true })),
+    answerFinanceQuestion: vi.fn(async () => ({ outcome: { status: "needs_input" } })),
     updateFinanceMerchant: vi.fn(async () => ({
       aliases: [],
       displayName: "Test",
@@ -605,6 +710,117 @@ function mockApi() {
 }
 
 describe("ilo MCP server", () => {
+  it("preserves every Finance budget-plan disposition through the MCP tool", async () => {
+    const api = mockApi();
+    const outcomes = [
+      { result: { allocations: [], month: "2026-08", rationale: "Applied." }, status: "applied" },
+      {
+        review: {
+          actionKind: "budget_plan",
+          changes: [{ entityType: "finance_budget", summary: "Set August budget." }],
+          fingerprint: "budget:pending",
+          id,
+          rationale: "Review this budget.",
+          requestedAt: now,
+          requestingAgentId: "finance-agent",
+          sourceRefs: [],
+          status: "pending",
+        },
+        status: "pending_review",
+      },
+      {
+        question: {
+          actionKind: "budget_plan",
+          choices: [],
+          expectedAnswer: [{ name: "category", required: true, type: "string" }],
+          id,
+          prompt: "Provide the missing budget evidence.",
+          sourceRefs: [],
+          why: "The category was unavailable.",
+        },
+        status: "needs_input",
+      },
+    ] as const;
+    for (const outcome of outcomes) api.setFinanceBudgetPlan.mockResolvedValueOnce(outcome);
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    for (const outcome of outcomes) {
+      const result = await client.callTool({
+        arguments: {
+          allocations: [{ categoryId: id, limit: 250 }],
+          month: "2026-08",
+          rationale: "Match current spending.",
+        },
+        name: "set_finance_budget_plan",
+      });
+      expect(result.structuredContent).toMatchObject({ result: outcome });
+    }
+    expect(api.setFinanceBudgetPlan).toHaveBeenCalledTimes(3);
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves every Finance refresh disposition through the MCP tool", async () => {
+    const api = mockApi();
+    const outcomes = [
+      { result: { refreshed: true }, status: "applied" },
+      {
+        review: {
+          actionKind: "alert",
+          changes: [
+            { entityType: "finance_alert", summary: "Refresh Finance cash-flow insights." },
+          ],
+          fingerprint: "refresh:pending",
+          id,
+          rationale: "Review this refresh.",
+          requestedAt: now,
+          requestingAgentId: "finance-agent",
+          sourceRefs: [],
+          status: "pending",
+        },
+        status: "pending_review",
+      },
+      {
+        question: {
+          actionKind: "alert",
+          choices: [],
+          expectedAnswer: [],
+          id,
+          prompt: "Provide the missing refresh evidence.",
+          sourceRefs: [],
+          why: "The refresh evidence changed.",
+        },
+        status: "needs_input",
+      },
+    ] as const;
+    for (const outcome of outcomes)
+      api.refreshFinanceInsights.mockResolvedValueOnce(outcome as never);
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    for (const outcome of outcomes) {
+      const result = await client.callTool({
+        arguments: {},
+        name: "refresh_finance_insights",
+      });
+      expect(result.structuredContent).toMatchObject({ result: outcome });
+    }
+    expect(api.refreshFinanceInsights).toHaveBeenCalledTimes(3);
+    await client.close();
+    await server.close();
+  });
+
   it("exposes and executes the complete agent surface and today resource", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
@@ -648,6 +864,9 @@ describe("ilo MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
+    expect(
+      tools.tools.find((tool) => tool.name === "set_finance_transaction_breakdown")?.description,
+    ).toContain("consequential reusable merchant rule");
     const reminderTools = tools.tools.filter((tool) => tool.name.includes("reminder"));
     expect(reminderTools).toHaveLength(9);
     for (const tool of reminderTools) {
@@ -675,7 +894,7 @@ describe("ilo MCP server", () => {
     });
     for (const tool of tools.tools.filter(
       (candidate) =>
-        candidate.name.includes("finance") && candidate.name !== "create_finance_attention_item",
+        candidate.name.includes("finance") && candidate.annotations?.readOnlyHint === true,
     )) {
       expect(tool.annotations).toEqual({
         destructiveHint: false,
@@ -979,6 +1198,28 @@ describe("ilo MCP server", () => {
       },
     });
     await client.callTool({ name: "get_finance_overview", arguments: {} });
+    await client.callTool({ name: "get_finance_automation_settings", arguments: {} });
+    await client.callTool({
+      name: "compare_finance_scenarios",
+      arguments: {
+        alternatives: [],
+        asOf: "2026-07-13",
+        baseline: {
+          label: "Baseline",
+          monthlyIncome: 3_000,
+          startingCash: 1_000,
+        },
+        horizonMonths: 3,
+      },
+    });
+    await client.callTool({
+      name: "set_finance_budget_plan",
+      arguments: {
+        allocations: [{ categoryId: id, limit: 250 }],
+        month: "2026-07",
+        rationale: "Match current spending.",
+      },
+    });
     await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
     await client.callTool({ name: "get_finance_cashflow", arguments: {} });
     await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
@@ -991,6 +1232,103 @@ describe("ilo MCP server", () => {
       name: "propose_finance_categorizations",
       arguments: { cursor: "next-review-page" },
     });
+    await client.callTool({
+      name: "apply_finance_categorizations",
+      arguments: {
+        decisions: [
+          {
+            categoryId: id,
+            confidence: 0.99,
+            expectedTransactionUpdatedAt: now,
+            learnMerchant: "suggest",
+            rationale: "Known merchant history.",
+            transactionId: accountId,
+          },
+        ],
+      },
+    });
+    await client.callTool({
+      name: "answer_finance_question",
+      arguments: {
+        answer: {
+          amount: 220,
+          dueDate: null,
+          kind: "reimbursable",
+          payer: "Alex",
+          rationale: "Alex owes their share.",
+        },
+        id,
+      },
+    });
+    await client.callTool({
+      name: "update_finance_recurring_obligation",
+      arguments: { id, status: "active" },
+    });
+    await client.callTool({
+      name: "resolve_finance_alert",
+      arguments: { action: "resolve", id, rationale: null },
+    });
+    await client.callTool({
+      name: "update_finance_merchant",
+      arguments: { displayName: "Corner Store", id },
+    });
+    await client.callTool({
+      name: "merge_finance_merchants",
+      arguments: {
+        rationale: "Same merchant.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      },
+    });
+    await client.callTool({
+      name: "create_finance_budget",
+      arguments: { category: "Dining", limit: 250, month: "2026-07" },
+    });
+    await client.callTool({
+      name: "create_finance_transaction",
+      arguments: {
+        accountId,
+        amount: 12,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Corner store",
+        notes: null,
+      },
+    });
+    await client.callTool({
+      name: "update_finance_transaction",
+      arguments: { category: "Dining", id: accountId },
+    });
+    await client.callTool({
+      name: "set_finance_transaction_breakdown",
+      arguments: {
+        allocations: [{ amount: 12, categoryId: id, rationale: "Receipt." }],
+        expectedTransactionUpdatedAt: now,
+        id: accountId,
+        rationale: "One-off receipt breakdown.",
+      },
+    });
+    await client.callTool({
+      name: "update_finance_income_stream",
+      arguments: { id, status: "active" },
+    });
+    await client.callTool({
+      name: "update_finance_profile",
+      arguments: {
+        effectiveDate: "2026-07-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      },
+    });
+    await client.callTool({ name: "refresh_finance_insights", arguments: {} });
     await client.callTool({ name: "list_x_bookmarks", arguments: {} });
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
     await client.callTool({
@@ -1316,9 +1654,44 @@ describe("ilo MCP server", () => {
       limit: 50,
       review: "needs_review",
     });
+    expect(api.compareFinanceScenarios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alternatives: [],
+        asOf: "2026-07-13",
+        baseline: expect.objectContaining({
+          label: "Baseline",
+          monthlyIncome: 3_000,
+          startingCash: 1_000,
+        }),
+        horizonMonths: 3,
+      }),
+    );
+    expect(api.setFinanceBudgetPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allocations: [{ categoryId: id, limit: 250 }],
+        month: "2026-07",
+        rationale: "Match current spending.",
+      }),
+    );
     expect(api.upsertFinanceAttentionItem).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ importance: "high", kind: "important" }),
+    );
+    expect(api.applyFinanceCategorizations).toHaveBeenCalledTimes(1);
+    expect(api.answerFinanceQuestion).toHaveBeenCalledWith(id, {
+      amount: 220,
+      dueDate: null,
+      kind: "reimbursable",
+      payer: "Alex",
+      rationale: "Alex owes their share.",
+    });
+    expect(api.createFinanceBudget).toHaveBeenCalledWith({
+      category: "Dining",
+      limit: 250,
+      month: "2026-07",
+    });
+    expect(api.createFinanceTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId, merchant: "Corner store" }),
     );
     expect(api.listMailThreads).toHaveBeenCalledWith({
       accountIds: [accountId],
@@ -1487,6 +1860,187 @@ describe("ilo MCP server", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("exposes complete-workspace Finance status and maintenance intents", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    expect(tools.tools.find((tool) => tool.name === "get_finance_status")).toMatchObject({
+      _meta: {
+        "ilo/domain": "finances",
+        "ilo/policy": "read_only",
+        "ilo/stage": "inspect",
+      },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
+      inputSchema: { additionalProperties: false, properties: { scope: expect.any(Object) } },
+    });
+    expect(tools.tools.find((tool) => tool.name === "maintain_finances")).toMatchObject({
+      _meta: {
+        "ilo/domain": "finances",
+        "ilo/policy": "approved_rule",
+        "ilo/stage": "commit",
+      },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      inputSchema: { additionalProperties: false, properties: { scope: expect.any(Object) } },
+    });
+    expect(tools.tools.find((tool) => tool.name === "get_finance_ledger_challenge")).toMatchObject({
+      _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+      annotations: { readOnlyHint: true },
+    });
+    expect(
+      tools.tools.find((tool) => tool.name === "submit_finance_ledger_challenge"),
+    ).toMatchObject({
+      _meta: { "ilo/domain": "finances", "ilo/policy": "approved_rule", "ilo/stage": "commit" },
+      annotations: { readOnlyHint: false },
+    });
+    expect(tools.tools.find((tool) => tool.name === "get_finance_period_review")).toMatchObject({
+      _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+      annotations: { readOnlyHint: true },
+    });
+
+    const maintenance = await client.callTool({ arguments: {}, name: "maintain_finances" });
+    expect(api.maintainFinances).toHaveBeenCalledWith({ type: "all_outstanding" });
+    expect(maintenance).toMatchObject({
+      structuredContent: {
+        _ilo: {
+          domain: "finances",
+          links: { recovery: "https://app.example.com/settings?section=connections" },
+          policy: "approved_rule",
+          readOnly: false,
+          stage: "commit",
+        },
+        result: { id, status: "queued" },
+      },
+    });
+
+    await client.callTool({
+      arguments: { scope: { end: "2026-08-16", start: "2026-08-01", type: "window" } },
+      name: "maintain_finances",
+    });
+    expect(api.maintainFinances).toHaveBeenLastCalledWith({
+      end: "2026-08-16",
+      start: "2026-08-01",
+      type: "window",
+    });
+    await client.callTool({
+      arguments: { scope: { entityType: "finance_transaction", id, type: "target" } },
+      name: "get_finance_status",
+    });
+    expect(api.getFinanceStatus).toHaveBeenLastCalledWith({
+      entityType: "finance_transaction",
+      id,
+      type: "target",
+    });
+
+    await client.callTool({ arguments: { challengeId: id }, name: "get_finance_ledger_challenge" });
+    expect(api.getFinanceLedgerChallenge).toHaveBeenCalledWith(id, undefined);
+    await client.callTool({ arguments: { reviewId: id }, name: "get_finance_period_review" });
+    expect(api.getFinancePeriodReview).toHaveBeenCalledWith(id);
+
+    const unsupported = await client.callTool({
+      arguments: { batch: 5, scope: { type: "all_outstanding" } },
+      name: "maintain_finances",
+    });
+    expect(unsupported.isError).toBe(true);
+    expect(api.maintainFinances).toHaveBeenCalledTimes(2);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves Finance maintenance API errors at the durable handoff boundary", async () => {
+    const api = mockApi();
+    api.maintainFinances.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { activeRunId: id },
+        message: "A Finance maintenance run is already active.",
+        requestId: "finance-maintenance-request-123",
+        status: 409,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({ arguments: {}, name: "maintain_finances" });
+    const expectedError = {
+      code: "conflict",
+      details: { activeRunId: id },
+      message: "A Finance maintenance run is already active.",
+      requestId: "finance-maintenance-request-123",
+      status: 409,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        _ilo: { domain: "finances", policy: "approved_rule", stage: "commit" },
+        error: expectedError,
+      },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("renders the Finance review prompt without a maintenance handoff on read-only or status-only access", async () => {
+    const limitedAccessOptions: Array<{ readOnly: boolean; scopes: Set<AccessScope> }> = [
+      { readOnly: true, scopes: new Set(["finances:read", "finances:maintain"]) },
+      { readOnly: false, scopes: new Set(["finances:read"]) },
+    ];
+    for (const options of limitedAccessOptions) {
+      const api = mockApi();
+      const server = createPersonalOsMcpServer({
+        api: api as unknown as PersonalOsApiClient,
+        ...options,
+        timeZone: "America/New_York",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const prompts = await client.listPrompts();
+      expect(prompts.prompts.map((prompt) => prompt.name)).toContain("review_finances");
+      const prompt = await client.getPrompt({ arguments: {}, name: "review_finances" });
+      const text =
+        prompt.messages[0]?.content.type === "text" ? prompt.messages[0].content.text : "";
+      expect(text).toContain("get_finance_status");
+      expect(text).toContain("Present pending work");
+      expect(text).not.toContain("maintain_finances");
+      expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain(
+        "maintain_finances",
+      );
+
+      await client.close();
+      await server.close();
+    }
   });
 
   it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {

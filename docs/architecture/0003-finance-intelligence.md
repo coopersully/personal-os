@@ -39,6 +39,17 @@ also records currently established Finance invariants. Code, tests, migrations, 
 and the implementation log—not this target statement alone—determine which stewardship
 capabilities are shipped.
 
+The shipped maintenance path prepares a durable candidate before it changes the
+canonical ledger. A connected agent must page through every candidate item and
+submit all checks in the versioned Finance challenge rubric. Findings can keep,
+remove, replace, or turn an item into a bounded question. Candidate revision,
+source revisions, run fences, and challenge coverage are revalidated before
+settlement. Bypass off queues one `maintenance_turn` approval for the challenged
+candidate; bypass on commits the same challenged candidate. Both paths resume
+the same durable run, verify the resulting ledger, and publish one immutable
+period review. A retry resumes the recorded checkpoint rather than reconstructing
+an agent-authored workflow.
+
 ## Decision
 
 The Finance vertical slice owns its data model, API route module, typed client,
@@ -58,13 +69,29 @@ seams are:
 - `apps/web/src/features/finances` for the user interface.
 
 All finance endpoints require `finances:read` for reads and `finances:write`
-for mutations. Provider connection, import, account, budget, financial-profile,
-and income-stream administration remain human-only. Permanent merchant rules
-and ambiguous-transfer confirmation also require an interactive human session.
-Finance MCP is proposal/read-only for ledger and review work: categorization
-application, recurring and alert state, merchant changes, manual transactions,
-and review resolution all require a signed-in Ilo user at the API route. A
-scoped agent may create or refresh shared attention for one owned transaction
+for mutations. A Finance write token may mutate the accounting ledger, financial
+profile, income data, and budget plans through the same API and audit path;
+budgets are not human-only. Provider connection, import, account administration,
+and the Finance review-bypass setting remain human-only, as does any external
+financial activity such as moving money, trading, or paying bills. The MCP cannot
+enable its own bypass, approve, or dismiss action reviews. Each supported Finance
+semantic mutation, including insight refresh, returns `applied`, `pending_review`,
+or `needs_input`, derived by the API from evidence, confidence and ambiguity
+checks, ownership, revisions, policy, and the signed-in user's persisted app-only
+bypass setting. Bypass controls only queue-versus-apply after preparation; it
+never overrides evidence, confidence, or ambiguous-transfer protections. The
+signed-in app's Finance review routes alone approve or dismiss queued actions.
+Agents may apply a permanent merchant-learning rule only through an explicitly
+prepared categorization action, under those same checks. A scoped same-user
+agent may list pending questions through bounded public descriptors.
+`answer_finance_question` accepts only the requested bounded fields as evidence
+and prepares the durable original action again; Task 3 retains the server-owned
+apply-versus-review disposition. An authorized same-user `finances:write` agent
+may answer a maintenance-generated question, while an ordinary agent answer is
+limited to its originating agent. Typed reimbursement answers may conditionally
+classify allocations or create/match an internal reimbursement case, but never
+move money or initiate an external payment. The deprecated
+`resolve_finance_review` alias only translates legacy categorization answers. A scoped agent may create or refresh shared attention for one owned transaction
 through the Finance-owned endpoint. That endpoint locks the transaction,
 derives its material source from the account and current transaction revision,
 deduplicates the open transaction/kind pair, and audits atomically; generic
@@ -122,13 +149,13 @@ omits transaction amounts, merchants, notes, and rationales so an `audit:read`
 grant does not imply `finances:read`. Transfer confirmation uses the same
 transactional path.
 
-The pre-existing synchronous batch endpoint still has no durable batch entity:
+The synchronous categorization batch endpoint still has no durable batch entity:
 process loss or request abandonment can occur between individually committed
-decisions. This PR does not widen that risk—the route is now human-only,
-workers are bounded, and each returned decision is atomic—but durable
+decisions. Agent calls receive the same apply-or-review disposition as other
+semantic writes, workers are bounded, and each returned decision is atomic, but durable
 lost-response recovery remains a bounded follow-up. Only exact per-decision
 replays are idempotent today; the synchronous batch itself is not advertised as
-idempotent or exposed through MCP. Durable batch work should add a client
+idempotent. Durable batch work should add a client
 idempotency key, a `finance_categorization_batches` record, per-decision terminal
 state, an endpoint to query or resume unfinished work, and abort-aware scheduling
 with a process-loss integration test.
@@ -157,6 +184,15 @@ versus expense correctly; leaving candidate state clears any transfer group.
 Pending transactions remain distinct from posted spending.
 They may be organized provisionally, but cannot create classification evidence
 or permanent merchant learning before posting.
+
+Plaid transaction synchronization is item-atomic. The Provider Item owns the
+sole authoritative opaque cursor; account cursor fields are compatibility
+shadows only. Missing or divergent legacy shadows force a null-cursor replay,
+never timestamp-based cursor inference. A sync projects deltas for every owned
+sibling account, then advances the Item cursor and compatibility shadows only
+after every page payload has committed. A window or exact maintenance target may narrow later
+reconciliation, categorization, questions, and cash-flow health work; it never
+narrows the raw provider item projection or discards a sibling delta.
 
 ## Income, recurring activity, and cash flow
 
@@ -191,6 +227,13 @@ and matched debt payments, while unresolved candidates remain visible for
 review. Planned, spent, and remaining values therefore use the same ledger
 selection rules across overview, budget, export, and MCP surfaces.
 
+Transaction allocations are the canonical personal-spending projection for
+mixed purchases. Their exact cents must sum to the transaction, may separate
+personal and reimbursable treatment, and retain invalidated history as evidence.
+Reimbursement cases are internal ledger records only: expected, partial,
+received, overdue, needs-input, or cancelled. Matching a posted credit changes
+the accounting projection; it never initiates or claims an external payment.
+
 The budget-pace endpoint returns every cell in the selected calendar period and
 an `asOf` day. A `blank` cell deliberately represents future, missing,
 unbudgeted, or no-activity time; the UI renders all of those with the same
@@ -203,14 +246,21 @@ destructive colors, while neutral activity is muted.
 Read tools expose guided-setup readiness, the durable shared profile, overview,
 ledger health, transactions, budgets, merchants, review queue, wealth, and cash
 flow. Agents should inspect guided context, ledger health, and relevant
-transactions before offering financial guidance. Categorization exposes only a
-read-scoped proposal tool; a signed-in person applies the current decision in
-Finance. Proposal pages use the ledger's opaque cursor and read paths never
-materialize merchant/category enrichment. Direct category edits, merchant
-changes, review decisions, recurring state, alerts, and manual transactions are
-absent from MCP and guarded as human-only API routes. Agents must not turn an
-ambiguous result into a category, transfer, subscription, or permanent rule on
-their own.
+transactions before offering financial guidance. Categorization retains a
+read-scoped proposal tool, and proposal pages use the ledger's opaque cursor;
+read paths never materialize merchant/category enrichment. Finance also exposes
+write-scoped tools for ledger, profile, income, and budget mutations. The API
+continues to enforce ownership, revisions, policy, transactions, and audit, and
+returns `applied`, `pending_review`, or `needs_input` for every supported semantic
+mutation, including insight refresh. MCP cannot enable bypass, approve or dismiss
+action reviews, connect or disconnect providers, import transactions, administer
+accounts, or execute external financial activity. Bypass never waives evidence,
+confidence, or ambiguity checks. Agents can apply an explicitly prepared permanent
+merchant-learning rule through categorization only after those checks. The
+human-only question list returns bounded public descriptors; an originating agent
+may answer a question with only its requested bounded fields, which are merged
+into the original action and prepared again. `resolve_finance_review` safely
+translates legacy categorization answers only.
 
 Every account-onboarding path, including Plaid exchange, provisions the stable
 default category taxonomy inside the account transaction. Category reads remain

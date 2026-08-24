@@ -6,10 +6,14 @@ import type {
   CreateFinanceTransactionInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
+  FinanceActionOutcome,
+  FinanceActionReview,
   FinanceAlert,
+  FinanceAutomationSettings,
   FinanceBudget,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
+  FinanceBudgetPlan,
   FinanceBudgetStatus,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposal,
@@ -20,18 +24,34 @@ import type {
   FinanceForecast,
   FinanceGuidedSetupContext,
   FinanceIncomeStream,
+  FinanceLedgerChallenge,
+  FinanceLedgerChallengePage,
   FinanceLedgerHealth,
   FinanceMerchant,
   FinanceOverview,
+  FinancePeriodReview,
   FinanceProfile,
+  FinanceQuestion,
   FinanceRecurringObligation,
+  FinanceReimbursement,
+  FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceScenarioInput,
+  FinanceScenarioResult,
+  FinanceStatus,
   FinanceTransaction,
   FinanceTransactionQuery,
   FinanceWealthSummary,
+  MaintenanceRun,
+  MaintenanceScope,
   MergeFinanceMerchantsInput,
+  ReconcileFinanceReimbursementInput,
   ResolveFinanceAlertInput,
+  SetFinanceBudgetPlanInput,
+  SetFinanceTransactionBreakdownInput,
+  SubmitFinanceLedgerChallengeInput,
+  UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
@@ -39,23 +59,44 @@ import type {
   UpdateFinanceTransactionInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
+import {
+  financeLedgerChallengePageSchema,
+  financeLedgerChallengeSchema,
+  financePeriodReviewSchema,
+  financeStatusSchema,
+  maintenanceRunSchema,
+} from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+
+type FinanceActionResponse<T> = FinanceActionOutcome<T>;
+
+/** Preserve a human result while honestly forwarding an agent action disposition. */
+function actionResult<T, Key extends string>(
+  response: FinanceActionResponse<T> | Record<Key, T>,
+  legacyKey: Key,
+): FinanceActionOutcome<T> | T {
+  return "status" in response ? response : response[legacyKey];
+}
 
 /** Typed Finance operations sharing the authenticated client transport. */
 export function createFinanceApi(request: FinanceRequest) {
   return {
     async applyFinanceCategorizations(
       input: ApplyFinanceCategorizationsInput,
-    ): Promise<FinanceCategorizationApplyResult[]> {
-      const response = await request<{ results: FinanceCategorizationApplyResult[] }>(
-        "/v1/finances/categorizations/apply",
-        {
-          body: JSON.stringify(input),
-          method: "POST",
-        },
-      );
-      return response.results;
+    ): Promise<
+      FinanceActionOutcome<FinanceCategorizationApplyResult[]> | FinanceCategorizationApplyResult[]
+    > {
+      const response = await request<
+        | FinanceActionResponse<FinanceCategorizationApplyResult[]>
+        | {
+            results: FinanceCategorizationApplyResult[];
+          }
+      >("/v1/finances/categorizations/apply", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return actionResult(response, "results");
     },
     async createFinanceAccount(input: CreateFinanceAccountInput): Promise<FinanceAccount> {
       const response = await request<{ account: FinanceAccount }>("/v1/finances/accounts", {
@@ -64,24 +105,27 @@ export function createFinanceApi(request: FinanceRequest) {
       });
       return response.account;
     },
-    async createFinanceBudget(input: CreateFinanceBudgetInput): Promise<FinanceBudget> {
-      const response = await request<{ budget: FinanceBudget }>("/v1/finances/budgets", {
+    async createFinanceBudget(
+      input: CreateFinanceBudgetInput,
+    ): Promise<FinanceActionOutcome<FinanceBudget> | FinanceBudget> {
+      const response = await request<
+        FinanceActionResponse<FinanceBudget> | { budget: FinanceBudget }
+      >("/v1/finances/budgets", {
         body: JSON.stringify(input),
         method: "POST",
       });
-      return response.budget;
+      return actionResult(response, "budget");
     },
     async createFinanceTransaction(
       input: CreateFinanceTransactionInput,
-    ): Promise<FinanceTransaction> {
-      const response = await request<{ transaction: FinanceTransaction }>(
-        "/v1/finances/transactions",
-        {
-          body: JSON.stringify(input),
-          method: "POST",
-        },
-      );
-      return response.transaction;
+    ): Promise<FinanceActionOutcome<FinanceTransaction> | FinanceTransaction> {
+      const response = await request<
+        FinanceActionResponse<FinanceTransaction> | { transaction: FinanceTransaction }
+      >("/v1/finances/transactions", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return actionResult(response, "transaction");
     },
     async deleteFinanceAccount(id: string): Promise<void> {
       await request<void>(`/v1/finances/accounts/${id}`, { method: "DELETE" });
@@ -100,11 +144,125 @@ export function createFinanceApi(request: FinanceRequest) {
       const response = await request<{ overview: FinanceOverview }>("/v1/finances");
       return response.overview;
     },
+    async getFinanceAutomationSettings(): Promise<FinanceAutomationSettings> {
+      const response = await request<{ settings: FinanceAutomationSettings }>(
+        "/v1/finances/automation-settings",
+      );
+      return response.settings;
+    },
+    async updateFinanceAutomationSettings(
+      input: UpdateFinanceAutomationSettingsInput,
+    ): Promise<FinanceAutomationSettings> {
+      const response = await request<{ settings: FinanceAutomationSettings }>(
+        "/v1/finances/automation-settings",
+        { body: JSON.stringify(input), method: "PATCH" },
+      );
+      return response.settings;
+    },
     async getFinanceGuidedSetup(): Promise<FinanceGuidedSetupContext> {
       const response = await request<{ setup: FinanceGuidedSetupContext }>(
         "/v1/finances/guided-setup",
       );
       return response.setup;
+    },
+    async getFinanceStatus(scope?: MaintenanceScope): Promise<FinanceStatus> {
+      const response = await request<{ status: unknown }>(
+        `/v1/finances/status${financeMaintenanceScopeQuery(scope)}`,
+      );
+      return financeStatusSchema.parse(response.status);
+    },
+    async compareFinanceScenarios(input: FinanceScenarioInput): Promise<FinanceScenarioResult> {
+      const response = await request<{ scenario: FinanceScenarioResult }>(
+        "/v1/finances/scenarios/compare",
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.scenario;
+    },
+    async setFinanceBudgetPlan(
+      input: SetFinanceBudgetPlanInput,
+    ): Promise<FinanceActionOutcome<FinanceBudgetPlan> | FinanceBudgetPlan> {
+      const response = await request<
+        FinanceActionResponse<FinanceBudgetPlan> | { plan: FinanceBudgetPlan }
+      >("/v1/finances/budget-plan", {
+        body: JSON.stringify(input),
+        method: "PUT",
+      });
+      return actionResult(response, "plan");
+    },
+    async setFinanceTransactionBreakdown(
+      id: string,
+      input: SetFinanceTransactionBreakdownInput,
+    ): Promise<FinanceActionOutcome<FinanceTransaction> | FinanceTransaction> {
+      const response = await request<
+        FinanceActionResponse<FinanceTransaction> | { transaction: FinanceTransaction }
+      >(`/v1/finances/transactions/${id}/breakdown`, {
+        body: JSON.stringify(input),
+        method: "PUT",
+      });
+      return actionResult(response, "transaction");
+    },
+    async listFinanceReimbursements(): Promise<{
+      reimbursements: FinanceReimbursement[];
+      unmatchedCredits: Array<{ amount: number; date: string; transactionId: string }>;
+    }> {
+      const response = await request<{
+        reimbursements: {
+          reimbursements: FinanceReimbursement[];
+          unmatchedCredits: Array<{ amount: number; date: string; transactionId: string }>;
+        };
+      }>("/v1/finances/reimbursements");
+      return response.reimbursements;
+    },
+    async reconcileFinanceReimbursement(
+      input: ReconcileFinanceReimbursementInput,
+    ): Promise<FinanceActionOutcome<FinanceReimbursement> | FinanceReimbursement> {
+      const response = await request<
+        FinanceActionResponse<FinanceReimbursement> | { reimbursement: FinanceReimbursement }
+      >("/v1/finances/reimbursements/reconcile", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return actionResult(response, "reimbursement");
+    },
+    async maintainFinances(
+      scope: MaintenanceScope = { type: "all_outstanding" },
+    ): Promise<MaintenanceRun> {
+      const response = await request<{ run: unknown }>("/v1/finances/maintenance", {
+        body: JSON.stringify({ scope }),
+        method: "POST",
+      });
+      return maintenanceRunSchema.parse(response.run);
+    },
+    async getFinanceMaintenanceRun(id: string): Promise<MaintenanceRun> {
+      const response = await request<{ run: unknown }>(
+        `/v1/finances/maintenance/${encodeURIComponent(id)}`,
+      );
+      return maintenanceRunSchema.parse(response.run);
+    },
+    async getFinanceLedgerChallenge(
+      id: string,
+      cursor?: string,
+    ): Promise<FinanceLedgerChallengePage> {
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const response = await request<{ page: unknown }>(
+        `/v1/finances/maintenance/challenges/${encodeURIComponent(id)}${query}`,
+      );
+      return financeLedgerChallengePageSchema.parse(response.page);
+    },
+    async submitFinanceLedgerChallenge(
+      input: SubmitFinanceLedgerChallengeInput,
+    ): Promise<FinanceLedgerChallenge> {
+      const response = await request<{ challenge: unknown }>(
+        `/v1/finances/maintenance/challenges/${encodeURIComponent(input.challengeId)}/submit`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return financeLedgerChallengeSchema.parse(response.challenge);
+    },
+    async getFinancePeriodReview(id: string): Promise<FinancePeriodReview> {
+      const response = await request<{ review: unknown }>(
+        `/v1/finances/period-reviews/${encodeURIComponent(id)}`,
+      );
+      return financePeriodReviewSchema.parse(response.review);
     },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(
@@ -134,12 +292,16 @@ export function createFinanceApi(request: FinanceRequest) {
       const response = await request<{ profile: FinanceProfile | null }>("/v1/finances/profile");
       return response.profile;
     },
-    async updateFinanceProfile(input: UpdateFinanceProfileInput): Promise<FinanceProfile> {
-      const response = await request<{ profile: FinanceProfile }>("/v1/finances/profile", {
+    async updateFinanceProfile(
+      input: UpdateFinanceProfileInput,
+    ): Promise<FinanceActionOutcome<FinanceProfile> | FinanceProfile> {
+      const response = await request<
+        FinanceActionResponse<FinanceProfile> | { profile: FinanceProfile }
+      >("/v1/finances/profile", {
         body: JSON.stringify(input),
         method: "PUT",
       });
-      return response.profile;
+      return actionResult(response, "profile");
     },
     async listFinanceIncomeStreams(): Promise<FinanceIncomeStream[]> {
       const response = await request<{ incomeStreams: FinanceIncomeStream[] }>(
@@ -150,12 +312,11 @@ export function createFinanceApi(request: FinanceRequest) {
     async updateFinanceIncomeStream(
       id: string,
       input: UpdateFinanceIncomeStreamInput,
-    ): Promise<FinanceIncomeStream> {
-      const response = await request<{ incomeStream: FinanceIncomeStream }>(
-        `/v1/finances/income-streams/${id}`,
-        { body: JSON.stringify(input), method: "PATCH" },
-      );
-      return response.incomeStream;
+    ): Promise<FinanceActionOutcome<FinanceIncomeStream> | FinanceIncomeStream> {
+      const response = await request<
+        FinanceActionResponse<FinanceIncomeStream> | { incomeStream: FinanceIncomeStream }
+      >(`/v1/finances/income-streams/${id}`, { body: JSON.stringify(input), method: "PATCH" });
+      return actionResult(response, "incomeStream");
     },
     async listFinanceRecurringObligations(): Promise<FinanceRecurringObligation[]> {
       const response = await request<{ recurring: FinanceRecurringObligation[] }>(
@@ -166,12 +327,14 @@ export function createFinanceApi(request: FinanceRequest) {
     async updateFinanceRecurringObligation(
       id: string,
       input: UpdateFinanceRecurringObligationInput,
-    ): Promise<FinanceRecurringObligation> {
-      const response = await request<{ recurring: FinanceRecurringObligation }>(
-        `/v1/finances/recurring/${id}`,
-        { body: JSON.stringify(input), method: "PATCH" },
-      );
-      return response.recurring;
+    ): Promise<FinanceActionOutcome<FinanceRecurringObligation> | FinanceRecurringObligation> {
+      const response = await request<
+        | FinanceActionResponse<FinanceRecurringObligation>
+        | {
+            recurring: FinanceRecurringObligation;
+          }
+      >(`/v1/finances/recurring/${id}`, { body: JSON.stringify(input), method: "PATCH" });
+      return actionResult(response, "recurring");
     },
     async getFinanceForecast(): Promise<FinanceForecast> {
       const response = await request<{ forecast: FinanceForecast }>("/v1/finances/forecast");
@@ -181,19 +344,28 @@ export function createFinanceApi(request: FinanceRequest) {
       const response = await request<{ alerts: FinanceAlert[] }>("/v1/finances/alerts");
       return response.alerts;
     },
-    async resolveFinanceAlert(id: string, input: ResolveFinanceAlertInput): Promise<FinanceAlert> {
-      const response = await request<{ alert: FinanceAlert }>(`/v1/finances/alerts/${id}`, {
-        body: JSON.stringify(input),
+    async resolveFinanceAlert(
+      id: string,
+      input: ResolveFinanceAlertInput,
+    ): Promise<FinanceActionOutcome<FinanceAlert> | FinanceAlert> {
+      const response = await request<FinanceActionResponse<FinanceAlert> | { alert: FinanceAlert }>(
+        `/v1/finances/alerts/${id}`,
+        {
+          body: JSON.stringify(input),
+          method: "POST",
+        },
+      );
+      return actionResult(response, "alert");
+    },
+    async refreshFinanceInsights(): Promise<
+      FinanceActionOutcome<{ refreshed: boolean }> | { refreshed: boolean }
+    > {
+      const response = await request<
+        FinanceActionResponse<{ refreshed: boolean }> | { result: { refreshed: boolean } }
+      >("/v1/finances/insights/refresh", {
         method: "POST",
       });
-      return response.alert;
-    },
-    async refreshFinanceInsights(): Promise<{ refreshed: boolean }> {
-      const response = await request<{ result: { refreshed: boolean } }>(
-        "/v1/finances/insights/refresh",
-        { method: "POST" },
-      );
-      return response.result;
+      return actionResult(response, "result");
     },
     async getFinanceLedgerHealth(): Promise<FinanceLedgerHealth> {
       const response = await request<{ health: FinanceLedgerHealth }>("/v1/finances/health");
@@ -235,15 +407,16 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return response.merchants;
     },
-    async mergeFinanceMerchants(input: MergeFinanceMerchantsInput): Promise<FinanceMerchant> {
-      const response = await request<{ merchant: FinanceMerchant }>(
-        "/v1/finances/merchants/merge",
-        {
-          body: JSON.stringify(input),
-          method: "POST",
-        },
-      );
-      return response.merchant;
+    async mergeFinanceMerchants(
+      input: MergeFinanceMerchantsInput,
+    ): Promise<FinanceActionOutcome<FinanceMerchant> | FinanceMerchant> {
+      const response = await request<
+        FinanceActionResponse<FinanceMerchant> | { merchant: FinanceMerchant }
+      >("/v1/finances/merchants/merge", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return actionResult(response, "merchant");
     },
     async proposeFinanceCategorizations(
       query: Partial<FinanceTransactionQuery> = {},
@@ -291,18 +464,62 @@ export function createFinanceApi(request: FinanceRequest) {
       }>(`/v1/finances/review/${id}`, { body: JSON.stringify(input), method: "POST" });
       return response.result;
     },
+    /** Answer a Finance question; this cannot change bypass or approve a queued action. */
+    async answerFinanceQuestion(
+      id: string,
+      answer: string | FinanceReimbursementQuestionAnswer,
+    ): Promise<FinanceActionOutcome<unknown>> {
+      const response = await request<{ outcome: FinanceActionOutcome<unknown> }>(
+        `/v1/finances/questions/${id}/answer`,
+        {
+          // Existing question types use their established JSON string. Typed
+          // reimbursement answers are nested under the generic bounded
+          // `answer` field rather than flattened into a prior action input.
+          body: JSON.stringify({
+            answer: typeof answer === "string" ? answer : JSON.stringify({ answer }),
+          }),
+          method: "POST",
+        },
+      );
+      return response.outcome;
+    },
+    async listFinanceActionReviews(limit = 50): Promise<FinanceActionReview[]> {
+      const response = await request<{ reviews: FinanceActionReview[] }>(
+        `/v1/finances/action-reviews?limit=${encodeURIComponent(limit)}`,
+      );
+      return response.reviews;
+    },
+    async listFinanceQuestions(limit = 50): Promise<FinanceQuestion[]> {
+      const response = await request<{ questions: FinanceQuestion[] }>(
+        `/v1/finances/questions?limit=${encodeURIComponent(limit)}`,
+      );
+      return response.questions;
+    },
+    async approveFinanceActionReview(id: string): Promise<FinanceActionOutcome<unknown>> {
+      const response = await request<{ outcome: FinanceActionOutcome<unknown> }>(
+        `/v1/finances/action-reviews/${encodeURIComponent(id)}/approve`,
+        { method: "POST" },
+      );
+      return response.outcome;
+    },
+    async dismissFinanceActionReview(id: string): Promise<FinanceActionReview> {
+      const response = await request<{ review: FinanceActionReview }>(
+        `/v1/finances/action-reviews/${encodeURIComponent(id)}/dismiss`,
+        { method: "POST" },
+      );
+      return response.review;
+    },
     async updateFinanceTransaction(
       id: string,
       input: UpdateFinanceTransactionInput,
-    ): Promise<FinanceTransaction> {
-      const response = await request<{ transaction: FinanceTransaction }>(
-        `/v1/finances/transactions/${id}`,
-        {
-          body: JSON.stringify(input),
-          method: "PATCH",
-        },
-      );
-      return response.transaction;
+    ): Promise<FinanceActionOutcome<FinanceTransaction> | FinanceTransaction> {
+      const response = await request<
+        FinanceActionResponse<FinanceTransaction> | { transaction: FinanceTransaction }
+      >(`/v1/finances/transactions/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+      return actionResult(response, "transaction");
     },
     async upsertFinanceAttentionItem(
       transactionId: string,
@@ -317,15 +534,27 @@ export function createFinanceApi(request: FinanceRequest) {
     async updateFinanceMerchant(
       id: string,
       input: UpdateFinanceMerchantInput,
-    ): Promise<FinanceMerchant> {
-      const response = await request<{ merchant: FinanceMerchant }>(
-        `/v1/finances/merchants/${id}`,
-        {
-          body: JSON.stringify(input),
-          method: "PATCH",
-        },
-      );
-      return response.merchant;
+    ): Promise<FinanceActionOutcome<FinanceMerchant> | FinanceMerchant> {
+      const response = await request<
+        FinanceActionResponse<FinanceMerchant> | { merchant: FinanceMerchant }
+      >(`/v1/finances/merchants/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+      return actionResult(response, "merchant");
     },
   };
+}
+
+function financeMaintenanceScopeQuery(scope?: MaintenanceScope): string {
+  if (!scope || scope.type === "all_outstanding") return "";
+  const parameters = new URLSearchParams();
+  if (scope.type === "window") {
+    parameters.set("start", scope.start);
+    parameters.set("end", scope.end);
+  } else {
+    parameters.set("entityType", scope.entityType);
+    parameters.set("targetId", scope.id);
+  }
+  return `?${parameters}`;
 }

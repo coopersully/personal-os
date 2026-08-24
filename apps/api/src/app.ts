@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   createGoogleConnector,
   createICloudConnector,
+  createPlaidConnector,
   createXConnector,
 } from "@personal-os/connectors";
 import {
@@ -42,7 +43,13 @@ import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createFinanceActionService } from "./finance-action-service.js";
+import { createFinanceChallengeService } from "./finance-challenge-service.js";
+import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
+import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
+import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
+import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createMailService } from "./mail-service.js";
@@ -68,9 +75,17 @@ import { registerTaskRoutes } from "./routes/tasks.js";
 import { createTaskService } from "./task-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
+import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 import { createXBookmarksService } from "./x-bookmarks-service.js";
 
 export type PersonalOsApp = Hono<AppEnv> & {
+  backfillFinanceProviderItems: () => Promise<{
+    blocked: number;
+    complete: boolean;
+    created: number;
+    linked: number;
+    replayDue: number;
+  }>;
   backfillFinanceCashflowInsights: () => Promise<{ processed: number }>;
   backfillFinanceLedgerIntegrity: () => Promise<{
     confirmedMovements: number;
@@ -89,6 +104,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
     userRowsScanned: number;
   }>;
   dispatchDueMailRuleWork: () => Promise<void>;
+  dispatchDueFinanceMaintenance: () => Promise<void>;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
@@ -97,7 +113,13 @@ export type PersonalOsApp = Hono<AppEnv> & {
     skipped: number;
     succeeded: number;
   }>;
-  syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;
+  syncDueFinances: () => Promise<{
+    attempted: number;
+    failed: number;
+    recovered: number;
+    skipped: number;
+    succeeded: number;
+  }>;
 };
 
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
@@ -365,16 +387,30 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     reviewSigningKey: dependencies.config.encryptionKey,
   });
+  const plaid =
+    dependencies.plaid ??
+    (dependencies.config.plaidClientId && dependencies.config.plaidSecret
+      ? createPlaidConnector({
+          clientId: dependencies.config.plaidClientId,
+          environment: dependencies.config.plaidEnvironment,
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+          secret: dependencies.config.plaidSecret,
+        })
+      : undefined);
+  const financeProviderItems = createFinanceProviderItemService({
+    db: dependencies.db,
+    encryptionKey: dependencies.config.encryptionKey,
+    now,
+  });
   const finances = createFinanceService({
     db: dependencies.db,
+    encryptionKey: dependencies.config.encryptionKey,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
-    plaid: {
-      clientId: dependencies.config.plaidClientId,
-      encryptionKey: dependencies.config.encryptionKey,
-      environment: dependencies.config.plaidEnvironment,
-      secret: dependencies.config.plaidSecret,
-    },
+    ...(plaid ? { plaid } : {}),
+    providerItems: financeProviderItems,
   });
+  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
@@ -444,6 +480,35 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const goalService = createGoalsService({ db: dependencies.db, now });
+  const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
+  const financeStatus = createFinanceStatusService({
+    assistant,
+    db: dependencies.db,
+    finances,
+    goals: goalService,
+    maintenance,
+    now,
+  });
+  const financeChallenges = createFinanceChallengeService({
+    actions: financeActions,
+    db: dependencies.db,
+    finances,
+    now,
+  });
+  const financePeriodReviews = createFinancePeriodReviewService({
+    db: dependencies.db,
+    now,
+    status: financeStatus,
+  });
+  const financeMaintenance = createFinanceMaintenanceService({
+    actions: financeActions,
+    challenge: financeChallenges,
+    finances,
+    maintenance,
+    now,
+    periodReviews: financePeriodReviews,
+    status: financeStatus,
+  });
   const pinterest = createPinterestService({ db: dependencies.db, now });
 
   app.use("*", async (context, next) => {
@@ -1075,7 +1140,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
-  registerFinanceRoutes({ app, finances, mutationContext });
+  registerFinanceRoutes({
+    actions: financeActions,
+    app,
+    financeChallenges,
+    financeMaintenance,
+    financePeriodReviews,
+    financeStatus,
+    finances,
+    mutationContext,
+  });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 
@@ -1115,6 +1189,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   }
 
   return Object.assign(app, {
+    async backfillFinanceProviderItems() {
+      return financeProviderItems.backfillLegacyItems();
+    },
     async backfillFinanceCashflowInsights() {
       return finances.backfillCashflowInsights();
     },
@@ -1214,7 +1291,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async syncDueFinances() {
-      return finances.syncDuePlaidAccounts();
+      const startedAt = Date.now();
+      try {
+        return await finances.syncDuePlaidAccounts();
+      } catch {
+        dependencies.log?.({
+          code: "finance_sync_scheduler_failed",
+          durationMs: Date.now() - startedAt,
+          event: "connector_sync_failed",
+          method: "SCHEDULER",
+          path: "/internal/finances/sync",
+          provider: "plaid",
+          requestId: randomUUID(),
+          status: 500,
+        });
+        throw new Error("Scheduled Finance synchronization failed.");
+      }
+    },
+    async dispatchDueFinanceMaintenance() {
+      await financeMaintenance.dispatchDue(5);
     },
   });
 }
@@ -1255,7 +1350,9 @@ const oauthScopeLabels: Record<string, string> = {
   "calendar:read": "Read calendars and events",
   "calendar:write": "Create and manage events",
   "finances:read": "Read sensitive financial accounts, balances, and activity",
-  "finances:write": "Save Finance setup guidance drafts",
+  "finances:write": "Update Finance ledger records, financial profile, and monthly budget plans",
+  "finances:maintain":
+    "Maintain Finances: create a durable Finance maintenance run that can use provider synchronization and rule-approved categorization and reconciliation; questions and approvals stay pending rather than guessed.",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
   "mail:read": "Read connected mail",

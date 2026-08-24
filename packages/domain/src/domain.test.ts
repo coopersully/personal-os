@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   accountSetupStateSchema,
   actorTypeSchema,
@@ -35,8 +36,23 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeAccountSchema,
+  financeActionOutcomeSchema,
+  financeAutomationSettingsSchema,
+  financeBudgetPlanSchema,
+  financeCandidateLedgerProjectionSchema,
   financeGuidedPreferencesSchema,
+  financeMaintenanceCandidateItemDraftSchema,
+  financeMaintenanceCandidateItemSchema,
+  financeMaintenanceCandidatePageSchema,
+  financeMaintenanceCandidateSchema,
+  financeMaintenanceResultSchema,
+  financeProviderItemHealthSchema,
+  financeQuestionSchema,
   financeReviewDecisionInputSchema,
+  financeScenarioInputSchema,
+  financeScenarioProjectionSchema,
+  financeStatusDetailsSchema,
   financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
@@ -57,11 +73,18 @@ import {
   mailRuleActionIsDue,
   mailRuleActionSchema,
   mailThreadSchema,
+  maintenanceRequestSchema,
+  maintenanceRunSchema,
+  maintenanceRunStatusSchema,
+  maintenanceScopeQuerySchema,
+  maintenanceScopeSchema,
+  maintenanceSettlementStatusSchema,
   matchesMailRule,
   paginationSchema,
   passwordRequirementState,
   passwordSchema,
   previewCalendarCommitmentInputSchema,
+  reconcileFinanceReimbursementInputSchema,
   registerInputSchema,
   reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
@@ -80,6 +103,8 @@ import {
   updateAccountSetupInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
+  updateFinanceAutomationSettingsInputSchema,
+  updateFinanceProfileInputSchema,
   updateFinanceTransactionInputSchema,
   updateGoalInputSchema,
   updateLocalCalendarInputSchema,
@@ -98,6 +123,7 @@ import {
   weatherLocationSearchQuerySchema,
   weatherQuerySchema,
   weatherSnapshotSchema,
+  workspaceStatusSchema,
 } from "./index.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -105,7 +131,451 @@ const accountId = "22222222-2222-4222-8222-222222222222";
 const start = "2026-07-13T13:00:00.000Z";
 const end = "2026-07-13T14:00:00.000Z";
 
+describe("workspace maintenance", () => {
+  it("defaults to all outstanding work and validates inclusive scopes", () => {
+    expect(maintenanceRequestSchema.parse({})).toEqual({
+      scope: { type: "all_outstanding" },
+    });
+    expect(
+      maintenanceScopeSchema.parse({ type: "window", start: "2026-08-01", end: "2026-08-01" }),
+    ).toEqual({ type: "window", start: "2026-08-01", end: "2026-08-01" });
+    expect(() =>
+      maintenanceScopeSchema.parse({ type: "window", start: "2026-08-10", end: "2026-08-01" }),
+    ).toThrow();
+    expect(() =>
+      maintenanceScopeSchema.parse({
+        type: "target",
+        entityType: "finance_transaction",
+        id: "not-a-uuid",
+      }),
+    ).toThrow();
+  });
+
+  it("normalizes exactly one supported maintenance query form", () => {
+    expect(maintenanceScopeQuerySchema.parse({})).toEqual({ type: "all_outstanding" });
+    expect(maintenanceScopeQuerySchema.parse({ scope: "all_outstanding" })).toEqual({
+      type: "all_outstanding",
+    });
+    expect(maintenanceScopeQuerySchema.parse({ start: "2026-08-01", end: "2026-08-31" })).toEqual({
+      type: "window",
+      start: "2026-08-01",
+      end: "2026-08-31",
+    });
+    expect(
+      maintenanceScopeQuerySchema.parse({ entityType: "finance_transaction", targetId: id }),
+    ).toEqual({ type: "target", entityType: "finance_transaction", id });
+
+    for (const query of [
+      { start: "2026-08-01" },
+      { entityType: "finance_transaction" },
+      { scope: "all_outstanding", start: "2026-08-01", end: "2026-08-31" },
+      { start: "2026-08-01", end: "2026-08-31", entityType: "transaction", targetId: id },
+    ]) {
+      expect(maintenanceScopeQuerySchema.safeParse(query).success).toBe(false);
+    }
+  });
+
+  it("supports every durable maintenance settlement state", () => {
+    expect(
+      [
+        "queued",
+        "running",
+        "completed",
+        "completed_with_questions",
+        "awaiting_approval",
+        "blocked",
+        "failed_recoverable",
+        "failed_terminal",
+      ].map((status) => maintenanceRunStatusSchema.parse(status)),
+    ).toEqual([
+      "queued",
+      "running",
+      "completed",
+      "completed_with_questions",
+      "awaiting_approval",
+      "blocked",
+      "failed_recoverable",
+      "failed_terminal",
+    ]);
+    expect(maintenanceSettlementStatusSchema.safeParse("queued").success).toBe(false);
+    expect(maintenanceSettlementStatusSchema.safeParse("running").success).toBe(false);
+  });
+
+  it("projects Provider Item synchronization without remote identity or credentials", () => {
+    expect(
+      financeProviderItemHealthSchema.parse({
+        accountIds: [accountId],
+        id,
+        provider: "plaid",
+        synchronization: {
+          failureCode: null,
+          failureCount: 0,
+          lastAttemptAt: null,
+          lastSuccessAt: null,
+          message: null,
+          nextRetryAt: null,
+          recovery: null,
+          state: "stale",
+        },
+      }),
+    ).toEqual({
+      accountIds: [accountId],
+      id,
+      provider: "plaid",
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "stale",
+      },
+    });
+  });
+
+  it("includes Provider Item health in Finance account status details", () => {
+    expect(
+      financeStatusDetailsSchema.shape.accounts.parse({
+        blocked: 0,
+        current: 0,
+        items: [],
+        retrying: 0,
+        stale: 1,
+        tracked: 1,
+      }),
+    ).toMatchObject({ providerItems: [] });
+  });
+
+  it("reports a Finance health step that did not run", () => {
+    expect(
+      financeMaintenanceResultSchema.parse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: { applicability: "not_run", confidence: "insufficient", refreshed: false },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "stale", state: "blocked" },
+      }),
+    ).toMatchObject({
+      health: { applicability: "not_run", refreshed: false },
+    });
+  });
+
+  it("makes scoped Finance health applicability explicit in maintenance results", () => {
+    expect(
+      financeMaintenanceResultSchema.parse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: {
+          applicability: "skipped_scoped",
+          confidence: "provisional",
+          refreshed: false,
+        },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "current", state: "clean" },
+      }),
+    ).toMatchObject({
+      health: { applicability: "skipped_scoped", refreshed: false },
+    });
+    expect(
+      financeMaintenanceResultSchema.safeParse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: { confidence: "provisional", refreshed: false },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "current", state: "clean" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses a generic workspace status with a compact active run summary", () => {
+    const statusSchema = workspaceStatusSchema(z.object({ reviewCount: z.int().nonnegative() }));
+    expect(
+      statusSchema.parse({
+        activeRun: {
+          domain: "finances",
+          id,
+          rulebookVersion: "rules:v1",
+          scope: { type: "all_outstanding" },
+          status: "running",
+          updatedAt: start,
+        },
+        asOf: start,
+        details: { reviewCount: 2 },
+        domain: "finances",
+        freshness: { blockers: [], observedAt: start, state: "current" },
+        state: "needs_work",
+        validNextOperations: [{ href: "/finances", label: "Review finances", operation: "review" }],
+        work: {
+          actionable: 2,
+          awaitingApproval: 0,
+          awaitingInput: 0,
+          blocked: 0,
+          oldestOutstandingAt: start,
+        },
+      }),
+    ).toMatchObject({ activeRun: { id, status: "running" }, details: { reviewCount: 2 } });
+
+    const runBase = {
+      checkpoint: null,
+      createdAt: start,
+      domain: "finances",
+      id,
+      lastSafeError: null,
+      retryAt: null,
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      settledResult: null,
+      sourceSnapshot: null,
+      updatedAt: start,
+      userId: accountId,
+    };
+    expect(
+      maintenanceRunSchema.safeParse({ ...runBase, status: "running", leaseExpiresAt: null })
+        .success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "queued",
+        leaseExpiresAt: end,
+      }).success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "failed_recoverable",
+        leaseExpiresAt: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "failed_recoverable",
+        leaseExpiresAt: null,
+        retryAt: end,
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("finance maintenance candidates", () => {
+  it("rejects arbitrary or mismatched private maintenance drafts before persistence", () => {
+    const valid = {
+      actionKind: "categorization" as const,
+      assumptions: [],
+      disposition: "prepared" as const,
+      evidence: { confidence: 0.9, rationale: "The merchant has a clear grocery pattern." },
+      expectedRevision: start,
+      fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      privatePayload: {
+        actionKind: "categorization" as const,
+        input: {
+          decisions: [
+            {
+              categoryId: accountId,
+              confidence: 0.9,
+              expectedTransactionUpdatedAt: start,
+              learnMerchant: "never" as const,
+              rationale: "The merchant has a clear grocery pattern.",
+              transactionId: id,
+            },
+          ],
+        },
+      },
+      safeChanges: [],
+      sourceRefs: [],
+    };
+    expect(financeMaintenanceCandidateItemDraftSchema.safeParse(valid).success).toBe(true);
+    expect(
+      financeMaintenanceCandidateItemDraftSchema.safeParse({
+        ...valid,
+        privatePayload: { actionKind: "merchant", input: { displayName: "Market" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      financeMaintenanceCandidateItemDraftSchema.safeParse({
+        ...valid,
+        privatePayload: { arbitrary: "untyped" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps prepared semantic work private while exposing a bounded candidate ledger", () => {
+    const candidate = financeMaintenanceCandidateSchema.parse({
+      id,
+      userId: id,
+      runId: accountId,
+      state: "ready_for_challenge",
+      revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      projection: {
+        budgetVariance: -12.5,
+        grossCashSpending: 42.5,
+        personalSpending: 30,
+        questions: 1,
+        reimbursementsOutstanding: 12.5,
+      },
+      createdAt: start,
+      updatedAt: end,
+    });
+    expect(candidate.state).toBe("ready_for_challenge");
+    expect(
+      financeMaintenanceCandidateItemSchema.parse({
+        id,
+        candidateId: accountId,
+        ordinal: 0,
+        actionKind: "categorization",
+        disposition: "prepared",
+        expectedRevision: start,
+        fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        privatePayload: { input: { decisions: [] } },
+        safeChanges: [
+          {
+            entityId: id,
+            entityType: "finance_transaction",
+            summary: "Categorize grocery purchase.",
+          },
+        ],
+        sourceRefs: [
+          {
+            accountId,
+            provider: "local",
+            remoteId: id,
+            revision: start,
+            sourceType: "finance_transaction",
+          },
+        ],
+        evidence: { confidence: 0.98 },
+        createdAt: start,
+        updatedAt: end,
+      }).privatePayload,
+    ).toEqual({ input: { decisions: [] } });
+    expect(financeCandidateLedgerProjectionSchema.parse(candidate.projection)).toMatchObject({
+      grossCashSpending: 42.5,
+      matchedReimbursementIncome: 0,
+      monthlyCapacity: null,
+      plannedIncome: 0,
+      profileExpectedNetIncome: null,
+      questions: 1,
+      recurringCommittedOutflow: 0,
+      workItems: 0,
+    });
+  });
+
+  it("keeps private candidate operations complete while public pages exclude them", () => {
+    const preparedBudget = financeMaintenanceCandidateItemDraftSchema.parse({
+      actionKind: "budget_plan",
+      assumptions: [],
+      disposition: "prepared",
+      evidence: { confidence: 1, rationale: "The selected account is owned." },
+      expectedRevision: start,
+      fingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      privatePayload: {
+        actionKind: "budget_plan",
+        input: {
+          acknowledgeOverAllocation: false,
+          allocations: [{ categoryId: id, limit: 50 }],
+          assumptions: [],
+          goalIds: [],
+          month: "2026-08",
+          payAccountId: accountId,
+          rationale: "Use the selected account for budget recovery.",
+          replace: true,
+          scenarioFingerprint: null,
+        },
+      },
+      safeChanges: [],
+      sourceRefs: [],
+    });
+    if (preparedBudget.disposition !== "prepared")
+      throw new Error("Expected prepared budget draft.");
+    expect(preparedBudget.privatePayload.input).toHaveProperty("payAccountId", accountId);
+    expect(
+      financeMaintenanceCandidatePageSchema.safeParse({
+        candidate: financeMaintenanceCandidateSchema.parse({
+          id,
+          userId: id,
+          runId: accountId,
+          state: "ready_for_challenge",
+          revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          projection: {
+            grossCashSpending: 0,
+            personalSpending: 0,
+            questions: 0,
+            reimbursementsOutstanding: 0,
+          },
+          createdAt: start,
+          updatedAt: end,
+        }),
+        items: [
+          {
+            id,
+            candidateId: accountId,
+            ordinal: 0,
+            actionKind: "budget_plan",
+            disposition: "prepared",
+            expectedRevision: start,
+            fingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            safeChanges: [],
+            sourceRefs: [],
+            evidence: {},
+            createdAt: start,
+            updatedAt: end,
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      financeMaintenanceCandidatePageSchema.safeParse({
+        candidate: { id },
+        items: [{ privatePayload: {} }],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe("domain schemas", () => {
+  it("parses finance account synchronization health", () => {
+    const parsed = financeAccountSchema.parse({
+      balance: 125,
+      createdAt: start,
+      currencyCode: "USD",
+      id,
+      institution: "Example Bank",
+      kind: "cash",
+      lastSyncedAt: null,
+      name: "Checking",
+      provider: "plaid",
+      status: "connected",
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "stale",
+      },
+      updatedAt: start,
+    });
+
+    expect(parsed.synchronization).toEqual({
+      failureCode: null,
+      failureCount: 0,
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      message: null,
+      nextRetryAt: null,
+      recovery: null,
+      state: "stale",
+    });
+    expect(parsed.currencyCode).toBe("USD");
+  });
+
   it("validates paginated Agent Access work items and local actions", () => {
     const page = agentAccessWorkItemPageSchema.parse({
       filteredTotal: 1,
@@ -779,6 +1249,20 @@ describe("domain schemas", () => {
       notes: "Receipt saved",
     });
     expect(
+      updateFinanceTransactionInputSchema.parse({
+        category: "Dining",
+        confidence: 0.965,
+        expectedTransactionUpdatedAt: start,
+        learnMerchant: true,
+        rationale: "Two confirmed merchant observations.",
+      }),
+    ).toMatchObject({
+      category: "Dining",
+      confidence: 0.965,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: true,
+    });
+    expect(
       financeReviewDecisionInputSchema.parse({
         action: "recategorize",
         categoryId: "00000000-0000-4000-8000-000000000000",
@@ -806,6 +1290,12 @@ describe("domain schemas", () => {
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
         .scopes,
     ).toEqual(["audit:read"]);
+    expect(
+      createAccessTokenInputSchema.parse({
+        name: "Finance maintainer",
+        scopes: ["finances:maintain"],
+      }).scopes,
+    ).toEqual(["finances:maintain"]);
     const brief = dailyBriefSchema.parse({
       allDay: [],
       anytime: [],
@@ -1192,6 +1682,318 @@ describe("domain schemas", () => {
 });
 
 describe("finance agent contracts", () => {
+  it("requires an exact-cent, one-off transaction breakdown by default", async () => {
+    const { setFinanceTransactionBreakdownInputSchema, toCents } = await import("./finance.js");
+    const input = {
+      allocations: [
+        { amount: 20, categoryId: id, rationale: "Medication" },
+        { amount: 30, categoryId: "22222222-2222-4222-8222-222222222222", rationale: "Food" },
+        {
+          amount: 12.14,
+          categoryId: "33333333-3333-4333-8333-333333333333",
+          rationale: "Toiletries",
+        },
+      ],
+      expectedTransactionUpdatedAt: "2026-07-13T12:00:00.000Z",
+      rationale: "Split the receipt.",
+    };
+
+    expect(setFinanceTransactionBreakdownInputSchema.parse(input)).toMatchObject({
+      futureRule: null,
+    });
+    expect(
+      setFinanceTransactionBreakdownInputSchema.safeParse({
+        ...input,
+        allocations: [
+          ...input.allocations.slice(0, 2),
+          { ...input.allocations[2], amount: 12.141 },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      setFinanceTransactionBreakdownInputSchema.parse({
+        ...input,
+        allocations: [
+          { amount: 90, categoryId: id, rationale: "Personal dining", treatment: "personal" },
+          {
+            amount: 220,
+            categoryId: id,
+            rationale: "Client dining",
+            treatment: "reimbursable",
+          },
+        ],
+      }).allocations,
+    ).toHaveLength(2);
+    expect(toCents(19.99)).toBe(1999);
+    expect(toCents(1.15)).toBe(115);
+    expect(toCents(0.29)).toBe(29);
+    expect(() => toCents(0.291)).toThrow("exact cents");
+    expect(() => toCents(Number.MAX_SAFE_INTEGER)).toThrow("safe Finance range");
+    expect(
+      setFinanceTransactionBreakdownInputSchema.safeParse({
+        ...input,
+        allocations: [
+          { amount: 10, categoryId: id, rationale: "First" },
+          { amount: 10, categoryId: id, rationale: "Duplicate" },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      setFinanceTransactionBreakdownInputSchema.safeParse({
+        ...input,
+        futureRule: {
+          categoryId: "44444444-4444-4444-8444-444444444444",
+          rationale: "Unsupported future rule",
+        },
+      }).success,
+    ).toBe(false);
+  });
+  it("keeps public Finance question answer descriptors bounded and private-payload free", () => {
+    const question = {
+      actionKind: "profile" as const,
+      expectedAnswer: [
+        {
+          choices: ["active", "paused"],
+          example: "active",
+          name: "status",
+          required: true,
+          type: "string",
+        },
+      ],
+      id,
+      prompt: "Which status should this income stream use?",
+      why: "The proposed status was not valid.",
+    };
+
+    expect(financeQuestionSchema.parse(question)).toMatchObject({
+      expectedAnswer: [
+        { choices: ["active", "paused"], name: "status", nullable: false, type: "string" },
+      ],
+    });
+    expect(
+      financeQuestionSchema.parse({
+        ...question,
+        expectedAnswer: [{ ...question.expectedAnswer[0], nullable: true }],
+      }).expectedAnswer,
+    ).toEqual([expect.objectContaining({ name: "status", nullable: true })]);
+    expect(
+      financeQuestionSchema.safeParse({ ...question, privatePayload: { payAccountId: id } })
+        .success,
+    ).toBe(false);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [{ name: "decisions", required: true, type: "object_array" }],
+      }).success,
+    ).toBe(true);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [
+          {
+            example: '{"kind":"not_reimbursement"}',
+            name: "answer",
+            required: true,
+            type: "object",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [
+          {
+            name: "answer",
+            privateCandidate: { reimbursementIds: [id] },
+            required: true,
+            type: "object",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [{ ...question.expectedAnswer[0], nullable: "yes" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps Finance agent outcomes exclusive and planning inputs bounded", () => {
+    const budgetPlan = {
+      allocations: [{ categoryId: id, limit: 1_200 }],
+      month: "2026-08",
+      rationale: "Fund essential spending before discretionary categories.",
+    };
+    const question = {
+      actionKind: "budget_plan" as const,
+      id,
+      prompt: "What is your monthly housing cost?",
+      why: "Housing is required to make a reliable first budget.",
+    };
+    const review = {
+      actionKind: "budget_plan" as const,
+      changes: [{ entityType: "finance_budget", summary: "Set August essentials budget." }],
+      fingerprint: "budget:2026-08:abc",
+      id,
+      rationale: "The plan uses the stated income and obligations.",
+      requestedAt: start,
+      requestingAgentId: "agent_finance",
+      sourceRefs: [],
+      status: "pending" as const,
+    };
+    const outcome = financeActionOutcomeSchema(financeBudgetPlanSchema);
+
+    expect(outcome.parse({ status: "applied", result: budgetPlan })).toMatchObject({
+      status: "applied",
+    });
+    expect(outcome.parse({ status: "pending_review", review })).toMatchObject({
+      status: "pending_review",
+    });
+    expect(outcome.parse({ status: "needs_input", question })).toMatchObject({
+      status: "needs_input",
+    });
+    expect(() => outcome.parse({ status: "applied", result: budgetPlan, review })).toThrow();
+    expect(() =>
+      outcome.parse({ status: "pending_review", review: { ...review, status: "applied" } }),
+    ).toThrow();
+    expect(() =>
+      outcome.parse({
+        status: "pending_review",
+        review: { ...review, privatePayload: { categoryId: id } },
+      }),
+    ).toThrow();
+    expect(
+      outcome.safeParse({
+        status: "pending_review",
+        review: {
+          ...review,
+          changes: Array.from({ length: 100 }, (_, index) => ({
+            entityType: "finance_budget",
+            summary: `Set budget allocation ${index + 1}.`,
+          })),
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      outcome.safeParse({
+        status: "pending_review",
+        review: {
+          ...review,
+          changes: Array.from({ length: 101 }, (_, index) => ({
+            entityType: "finance_budget",
+            summary: `Set budget allocation ${index + 1}.`,
+          })),
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      updateFinanceProfileInputSchema.parse({
+        dependents: 1,
+        householdSize: 3,
+        housingStatus: "renting",
+        investmentRiskCapacity: "moderate",
+        investmentRiskWillingness: "growth",
+        monthlyHousingCost: 2_450,
+        reserveTargetMonths: 6,
+      }),
+    ).toMatchObject({ householdSize: 3, reserveTargetMonths: 6 });
+    expect(
+      financeBudgetPlanSchema.safeParse({
+        ...budgetPlan,
+        allocations: [budgetPlan.allocations[0], budgetPlan.allocations[0]],
+      }).success,
+    ).toBe(false);
+    expect(financeBudgetPlanSchema.safeParse({ ...budgetPlan, goalIds: [id, id] }).success).toBe(
+      false,
+    );
+    expect(
+      financeScenarioInputSchema.safeParse({
+        alternatives: Array.from({ length: 6 }, (_, index) => ({
+          label: `Alternative ${index + 1}`,
+          monthlyIncome: 6_000,
+          startingCash: 1_000,
+        })),
+        asOf: "2026-08-01",
+        baseline: { label: "Baseline", monthlyIncome: 6_000, startingCash: 1_000 },
+        horizonMonths: 12,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioInputSchema.safeParse({
+        alternatives: [],
+        asOf: "2026-08-01",
+        baseline: {
+          budgetAllocations: [
+            { categoryId: id, limit: 100 },
+            { categoryId: id, limit: 200 },
+          ],
+          label: "Duplicate category",
+          monthlyIncome: 6_000,
+          startingCash: 1_000,
+        },
+        horizonMonths: 12,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioInputSchema.safeParse({
+        alternatives: [],
+        asOf: "2026-08-01",
+        baseline: { label: "Baseline", monthlyIncome: 6_000, startingCash: 1_000 },
+        horizonMonths: 121,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioProjectionSchema.safeParse({
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Already paid",
+        monthlyCashFlow: 1,
+        projectedLowestBalance: 0,
+        reserveRunwayMonths: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      financeScenarioProjectionSchema.safeParse({
+        debtPayoffMonths: 0,
+        goalDateEffects: [],
+        label: "Invalid payoff",
+        monthlyCashFlow: 1,
+        projectedLowestBalance: 0,
+        reserveRunwayMonths: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps the Finance review bypass explicit and off by default", () => {
+    expect(financeAutomationSettingsSchema.parse({})).toEqual({ reviewBypassEnabled: false });
+    expect(updateFinanceAutomationSettingsInputSchema.parse({ reviewBypassEnabled: true })).toEqual(
+      { reviewBypassEnabled: true },
+    );
+    expect(updateFinanceAutomationSettingsInputSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("validates Finance health policy preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        budgetOffTrackForecastRatio: 1.2,
+        budgetWatchForecastRatio: 1.08,
+        emergencyReserveTargetMonths: 6,
+      }),
+    ).toMatchObject({
+      budgetOffTrackForecastRatio: 1.2,
+      budgetWatchForecastRatio: 1.08,
+      emergencyReserveTargetMonths: 6,
+    });
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        budgetOffTrackForecastRatio: 1.05,
+        budgetWatchForecastRatio: 1.1,
+      }).success,
+    ).toBe(false);
+  });
+
   it("uses percentage points for recurring-change preferences", () => {
     expect(
       financeGuidedPreferencesSchema.parse({
@@ -1384,5 +2186,19 @@ describe("connector notification contracts", () => {
       "retry",
       "recovery",
     ]);
+  });
+});
+
+describe("Finance reimbursement contracts", () => {
+  it("requires exact positive cents and optimistic revisions for a credit match", () => {
+    expect(
+      reconcileFinanceReimbursementInputSchema.safeParse({
+        operation: "match_credit",
+        reimbursementId: "00000000-0000-4000-8000-000000000001",
+        creditTransactionId: "00000000-0000-4000-8000-000000000002",
+        amount: 22.005,
+        expectedRevision: 1,
+      }).success,
+    ).toBe(false);
   });
 });

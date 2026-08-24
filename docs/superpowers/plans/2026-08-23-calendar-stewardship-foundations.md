@@ -22,7 +22,7 @@
 - The only findings calculated in this slice are source freshness, unsupported recurrence, direct timed busy-event overlap, active-profile buffer shortfall, and stale tentative holds. All other target health dimensions remain `unknown`.
 - A review is read-only domain work: it may persist Ilo-owned findings and an immutable artifact, but it cannot mutate provider or local events, RSVP, invite, send, move, resize, delete, or activate a rule.
 - Finding and review envelopes contain stable IDs, revisions, timestamps, and bounded calculations, not credentials, raw provider payloads, private model reasoning, attendee identities, notes, locations, or event titles.
-- Existing migrations are immutable. Add one append-only `0055_calendar_stewardship_foundations.sql` migration and one journal entry, and exercise it against a fresh PostgreSQL database.
+- Existing migrations are immutable. Add one append-only `0066_calendar_stewardship_foundations.sql` migration and one journal entry, and exercise it against a fresh PostgreSQL database.
 - Use existing `@/components/icons` and shared shadcn primitives. Do not import `reicon-react` outside `apps/web/src/components/icons.ts` and do not add inline SVG.
 - Keep the existing `/calendar` body spatial: it must still begin directly with the day, week, or month material. Stewardship renders at `/calendar/review`.
 - This slice does not claim the complete Calendar Ilo is shipped. Durable maintenance runs, `maintain_calendar`, MCP adapters, questions, reusable rules, collaboration stewardship, and travel routing remain separate slices from section 17 of the spec.
@@ -56,7 +56,7 @@
 
 - `packages/database/src/schema.ts` — declare `calendar_findings` and `calendar_reviews`.
 - `packages/database/src/schema.test.ts` — keep Drizzle constraints and migration SQL aligned.
-- `packages/database/migrations/0055_calendar_stewardship_foundations.sql` — append-only expansion.
+- `packages/database/migrations/0066_calendar_stewardship_foundations.sql` — append-only expansion.
 - `packages/database/migrations/meta/_journal.json` — register migration 55 without editing prior entries.
 - `packages/domain/src/index.ts` — export the Calendar stewardship contract.
 - `apps/api/src/app.ts` — construct the stewardship service and inject it into Calendar routes.
@@ -603,7 +603,7 @@ git commit -m "feat(calendar): add versioned stewardship assessment"
 **Files:**
 - Modify (Integration): `packages/database/src/schema.ts`
 - Modify (Integration): `packages/database/src/schema.test.ts`
-- Create (Integration): `packages/database/migrations/0055_calendar_stewardship_foundations.sql`
+- Create (Integration): `packages/database/migrations/0066_calendar_stewardship_foundations.sql`
 - Modify (Integration): `packages/database/migrations/meta/_journal.json`
 
 **Interfaces:**
@@ -630,7 +630,7 @@ it("keeps Calendar findings stable and reviews immutable", async () => {
   expect(reviews.indexes.map((index) => index.config.name)).toContain("calendar_reviews_user_created_idx");
   expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
   const migrationSql = await readFile(
-    resolve(process.cwd(), "packages/database/migrations/0055_calendar_stewardship_foundations.sql"),
+    resolve(process.cwd(), "packages/database/migrations/0066_calendar_stewardship_foundations.sql"),
     "utf8",
   );
   expect(migrationSql).toContain('CREATE TABLE "calendar_findings"');
@@ -778,7 +778,7 @@ Append this exact journal record after index 54, using a monotonically greater `
   "idx": 55,
   "version": "7",
   "when": 1787558400000,
-  "tag": "0055_calendar_stewardship_foundations",
+  "tag": "0066_calendar_stewardship_foundations",
   "breakpoints": true
 }
 ```
@@ -792,7 +792,7 @@ Expected: PASS; the integration suite applies every migration through 0055 to a 
 - [ ] **Step 5: Commit the durable ledger**
 
 ```bash
-git add packages/database/src/schema.ts packages/database/src/schema.test.ts packages/database/migrations/0055_calendar_stewardship_foundations.sql packages/database/migrations/meta/_journal.json
+git add packages/database/src/schema.ts packages/database/src/schema.test.ts packages/database/migrations/0066_calendar_stewardship_foundations.sql packages/database/migrations/meta/_journal.json
 git commit -m "feat(calendar): persist findings and reviews"
 ```
 

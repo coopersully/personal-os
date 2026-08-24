@@ -79,6 +79,7 @@ type CalendarFloatingNavProps = {
   calendars: Calendar[];
   draft?: { endsAt: string; startsAt: string };
   eventDetails?: ReactNode;
+  events?: CalendarEvent[];
   onDraftDismiss?: () => void;
   onNavigate: (date: LocalDate) => void;
   timeZone: string;
@@ -90,38 +91,42 @@ export function CalendarFloatingNav({
   calendars,
   draft,
   eventDetails,
+  events = [],
   onDraftDismiss,
   onNavigate,
   timeZone,
   user,
 }: CalendarFloatingNavProps) {
   const [mode, setMode] = useState<FloatingMode>("closed");
+  const [surfaceInstance, setSurfaceInstance] = useState(0);
+  const open = (nextMode: Exclude<FloatingMode, "closed">) => {
+    setSurfaceInstance((instance) => instance + 1);
+    setMode(nextMode);
+  };
   const close = () => {
     setMode("closed");
     if (draft) onDraftDismiss?.();
   };
   useEffect(() => {
-    if (draft) setMode("create");
+    if (draft) {
+      setSurfaceInstance((instance) => instance + 1);
+      setMode("create");
+    }
   }, [draft]);
   const surfaceState: FloatingSurfaceState = eventDetails ? "details" : mode;
   const content = eventDetails ? (
     eventDetails
   ) : mode === "closed" ? (
     <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
-      <Button aria-label="Choose date" onClick={() => setMode("date")} size="icon" variant="ghost">
+      <Button aria-label="Choose date" onClick={() => open("date")} size="icon" variant="ghost">
         <CalendarIcon aria-hidden="true" />
       </Button>
-      <Button
-        aria-label="Create event"
-        onClick={() => setMode("create")}
-        size="icon"
-        variant="ghost"
-      >
+      <Button aria-label="Create event" onClick={() => open("create")} size="icon" variant="ghost">
         <PlusIcon aria-hidden="true" />
       </Button>
       <Button
         aria-label="Search calendar"
-        onClick={() => setMode("search")}
+        onClick={() => open("search")}
         size="icon"
         variant="ghost"
       >
@@ -131,7 +136,12 @@ export function CalendarFloatingNav({
   ) : mode === "date" ? (
     <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
   ) : mode === "search" ? (
-    <CalendarSearchCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
+    <CalendarSearchCard
+      close={close}
+      onNavigate={onNavigate}
+      timeZone={timeZone}
+      visibleEvents={events}
+    />
   ) : (
     <InlineEventComposer
       calendars={calendars}
@@ -160,7 +170,11 @@ export function CalendarFloatingNav({
         }}
       >
         <AnimatePresence custom={surfaceState} initial={false} mode="popLayout">
-          <FloatingNavTransitionContent key={surfaceState}>{content}</FloatingNavTransitionContent>
+          <FloatingNavTransitionContent
+            key={surfaceState === "closed" ? surfaceState : `${surfaceState}:${surfaceInstance}`}
+          >
+            {content}
+          </FloatingNavTransitionContent>
         </AnimatePresence>
       </m.div>
     </div>
@@ -243,36 +257,46 @@ function DateJumpCard({
 }
 
 function CalendarSearchCard({
-  anchor,
   close,
   onNavigate,
   timeZone,
+  visibleEvents,
 }: {
-  anchor: LocalDate;
   close: () => void;
   onNavigate: (date: LocalDate) => void;
   timeZone: string;
+  visibleEvents: CalendarEvent[];
 }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const input = useRef<HTMLInputElement>(null);
+  const searchYear = localDateAt(new Date(), timeZone).year;
   const searchRange = useMemo(
     () =>
       localDateRange(
-        { day: 1, month: 1, year: anchor.year - 1 },
-        { day: 1, month: 1, year: anchor.year + 2 },
+        { day: 1, month: 1, year: searchYear - 1 },
+        { day: 1, month: 1, year: searchYear + 2 },
         timeZone,
       ),
-    [anchor.year, timeZone],
+    [searchYear, timeZone],
   );
   const events = useQuery({
     queryFn: () => api.listEvents(searchRange),
     queryKey: ["events", "calendar-search", searchRange.from, searchRange.to],
     staleTime: 60_000,
   });
+  const searchableEvents = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          [...visibleEvents, ...(events.data ?? [])].map((event) => [event.id, event] as const),
+        ).values(),
+      ),
+    [events.data, visibleEvents],
+  );
   const results = useMemo(
-    () => calendarSearchResults(deferredQuery, events.data ?? [], timeZone),
-    [deferredQuery, events.data, timeZone],
+    () => calendarSearchResults(deferredQuery, searchableEvents, timeZone),
+    [deferredQuery, searchableEvents, timeZone],
   );
 
   useEffect(() => input.current?.focus(), []);

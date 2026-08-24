@@ -88,6 +88,14 @@ separate one-off decisions from reusable rules; score financial health against a
 rubric; and publish a write-up of changes, budget position, outstanding questions, risks, and
 recommended next steps.
 
+The implementation realizes that turn as prepare → agent challenge → settle →
+verify → period review. Preparation is read/project only. The agent reviews the
+entire candidate against a fixed rubric and can correct, remove, or question
+work without mutating the canonical ledger. Settlement applies that exact
+challenged candidate immediately when the user enabled Finance review bypass,
+or places the whole turn into one app approval when they did not. Missing facts
+remain questions in either mode.
+
 Its advice should connect evidence to the person's goals and demonstrated tradeoffs. It may explain
 budget reallocations, savings priorities, investment considerations, and relevant market context as
 informational guidance. Volatile claims must identify their source and as-of time. The Ilo never

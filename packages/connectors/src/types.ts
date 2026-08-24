@@ -137,6 +137,7 @@ export type NormalizedRemoteMailThread = {
 
 export type NormalizedRemoteEvent = {
   allDay: boolean;
+  conferenceStatus?: "failure" | "pending" | "success" | null;
   conferenceUrl: string | null;
   endsAt: Date;
   etag: string | null;

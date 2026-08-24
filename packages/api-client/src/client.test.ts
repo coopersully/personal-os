@@ -270,6 +270,7 @@ const event: CalendarEvent = {
   title: "Focus",
   notes: null,
   location: null,
+  conferenceStatus: null,
   conferenceUrl: null,
   url: null,
   startsAt: now,

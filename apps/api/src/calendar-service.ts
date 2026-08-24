@@ -1,3 +1,4 @@
+import { extractConferenceUrl } from "@personal-os/connectors";
 import {
   attentionItems,
   auditEvents,
@@ -625,6 +626,16 @@ export function createCalendarService({
           "Google Meet can only be generated on a writable Google calendar.",
         );
       }
+      if (
+        calendar.provider !== "local" &&
+        input.conferenceUrl &&
+        !extractConferenceUrl(input.conferenceUrl)
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "This connected calendar cannot preserve that conferencing link. Use a supported meeting provider or add it as a related link.",
+        );
+      }
       const effect =
         calendar.provider === "local" ? null : providerEffect("create", calendar, null, "source");
       const ledger = providerLedger("create_event", effect ? [effect] : [], context);
@@ -881,6 +892,7 @@ export function createCalendarService({
                       endsAt: remote?.endsAt ?? new Date(mirrored.endsAt),
                       location: remote?.location ?? mirrored.location,
                       notes: remote?.notes ?? mirrored.notes,
+                      url: mirrored.url,
                       provider: destination.provider,
                       raw: remote?.raw,
                       recurrence: remote?.recurrence ?? [],
@@ -1468,6 +1480,7 @@ export function createCalendarService({
                           timezone: restoredBlock.values.timezone,
                           title: restoredBlock.values.title,
                         }),
+                    url: restoredBlock.values.url,
                     deletedAt: null,
                     updatedAt: restoredAt,
                   })
@@ -1567,6 +1580,7 @@ export function createCalendarService({
                         timezone: values.timezone,
                         title: values.title,
                       }),
+                  url: values.url,
                   blockMode: input.mode,
                   updatedAt,
                 })
@@ -1635,9 +1649,17 @@ export function createCalendarService({
         ],
         context,
       );
+      const providerChanges =
+        changes.notes !== undefined &&
+        changes.conferenceUrl === undefined &&
+        before.conferenceUrl !== null
+          ? { ...changes, conferenceUrl: before.conferenceUrl }
+          : changes;
       const remote =
         sourceEffect !== null
-          ? await ledger.run(sourceEffect, () => connectedEvents.update(calendar, before, changes))
+          ? await ledger.run(sourceEffect, () =>
+              connectedEvents.update(calendar, before, providerChanges),
+            )
           : null;
       const localValues = {
         ...(changes.allDay === undefined ? {} : { allDay: changes.allDay }),
@@ -1648,6 +1670,7 @@ export function createCalendarService({
         ...(changes.eventType === undefined ? {} : { eventType: changes.eventType }),
         ...(changes.location === undefined ? {} : { location: changes.location }),
         ...(changes.notes === undefined ? {} : { notes: changes.notes }),
+        ...(changes.conferenceUrl === undefined ? {} : { conferenceUrl: changes.conferenceUrl }),
         ...(changes.url === undefined ? {} : { url: changes.url }),
         ...(changes.recurrence === undefined ? {} : { recurrence: changes.recurrence }),
         ...(changes.reminders === undefined ? {} : { reminders: changes.reminders }),
@@ -1660,6 +1683,7 @@ export function createCalendarService({
       const projectedSource: CalendarEventRecord = {
         ...before,
         ...(remote ? connectedEventValues(remote, now()) : localValues),
+        ...(changes.url === undefined ? {} : { url: changes.url }),
       };
       const reconciledBlocks: Array<{
         block: CalendarEventRecord;
@@ -1692,6 +1716,7 @@ export function createCalendarService({
                 .update(calendarEvents)
                 .set({
                   ...(remote ? connectedEventValues(remote, updatedAt) : localValues),
+                  ...(changes.url === undefined ? {} : { url: changes.url }),
                   updatedAt,
                 })
                 .where(eventRevisionWhere(before, false))
@@ -1726,6 +1751,7 @@ export function createCalendarService({
                           timezone: reconciled.values.timezone,
                           title: reconciled.values.title,
                         }),
+                    url: reconciled.values.url,
                     updatedAt,
                   })
                   .where(eventRevisionWhere(reconciled.block, false))

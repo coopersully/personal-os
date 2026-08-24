@@ -73,6 +73,11 @@ const eventDateSchema = z.object({
 const eventSchema = z.object({
   conferenceData: z
     .object({
+      createRequest: z
+        .object({
+          status: z.object({ statusCode: z.enum(["failure", "pending", "success"]) }),
+        })
+        .optional(),
       entryPoints: z
         .array(
           z.object({
@@ -1066,13 +1071,16 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
       status: 502,
     });
   }
+  const conferenceUrl =
+    event.conferenceData?.entryPoints.find((entryPoint) => entryPoint.entryPointType === "video")
+      ?.uri ??
+    extractConferenceUrl(event.description) ??
+    extractConferenceUrl(event.location);
   return {
     allDay,
-    conferenceUrl:
-      event.conferenceData?.entryPoints.find((entryPoint) => entryPoint.entryPointType === "video")
-        ?.uri ??
-      extractConferenceUrl(event.description) ??
-      extractConferenceUrl(event.location),
+    conferenceStatus:
+      event.conferenceData?.createRequest?.status.statusCode ?? (conferenceUrl ? "success" : null),
+    conferenceUrl,
     endsAt,
     etag: event.etag ?? null,
     location: event.location ?? null,

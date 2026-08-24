@@ -17,6 +17,7 @@ import {
   type CalendarProviderFailureObservation,
   createCalendarService,
 } from "./calendar-service.js";
+import type { ConnectedEventGateway } from "./connector-service.js";
 import type { Principal } from "./types.js";
 
 const timestamp = new Date("2026-07-28T15:00:00.000Z");
@@ -33,7 +34,7 @@ describe.sequential("Calendar commitment proposals", () => {
   let userId: string;
   const providerFailureObservations: CalendarProviderFailureObservation[] = [];
   const gateway = {
-    create: vi.fn(async () => ({
+    create: vi.fn<ConnectedEventGateway["create"]>(async () => ({
       allDay: false,
       conferenceUrl: null,
       endsAt: new Date("2026-08-01T17:00:00.000Z"),
@@ -48,8 +49,8 @@ describe.sequential("Calendar commitment proposals", () => {
       timezone: "UTC",
       title: "Provider reservation",
     })),
-    delete: vi.fn(async () => undefined),
-    update: vi.fn(async () => ({
+    delete: vi.fn<ConnectedEventGateway["delete"]>(async () => undefined),
+    update: vi.fn<ConnectedEventGateway["update"]>(async () => ({
       allDay: false,
       conferenceUrl: null,
       endsAt: new Date("2026-08-01T17:00:00.000Z"),
@@ -503,6 +504,140 @@ describe.sequential("Calendar commitment proposals", () => {
       status: 503,
       userId,
     });
+  });
+
+  it("rejects conferencing links a connected provider cannot round-trip", async () => {
+    gateway.create.mockClear();
+
+    await expect(
+      service.createEvent(
+        {
+          allDay: false,
+          calendarId: remoteCalendarId,
+          conferenceUrl: "https://video.example.com/room/123",
+          endsAt: "2026-08-05T17:00:00.000Z",
+          location: null,
+          notes: null,
+          startsAt: "2026-08-05T16:00:00.000Z",
+          timezone: "UTC",
+          title: "Unsupported conferencing",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(gateway.create).not.toHaveBeenCalled();
+  });
+
+  it("preserves related and conference links through connected updates and detailed blocks", async () => {
+    const [source] = await database.db
+      .insert(calendarEvents)
+      .values({
+        calendarId: remoteCalendarId,
+        conferenceUrl: "https://meet.google.com/abc-defg-hij",
+        endsAt: new Date("2026-08-06T17:00:00.000Z"),
+        provider: "google",
+        remoteEventId: "linked-source",
+        startsAt: new Date("2026-08-06T16:00:00.000Z"),
+        timezone: "UTC",
+        title: "Linked source",
+        url: "https://example.com/old",
+        userId,
+      })
+      .returning();
+    if (!source) throw new Error("Linked source fixture was not created.");
+    const [block] = await database.db
+      .insert(calendarEvents)
+      .values({
+        blockMode: "details",
+        blockSourceEventId: source.id,
+        calendarId: localCalendarId,
+        endsAt: source.endsAt,
+        provider: "local",
+        startsAt: source.startsAt,
+        timezone: "UTC",
+        title: source.title,
+        url: source.url,
+        userId,
+      })
+      .returning();
+    if (!block) throw new Error("Detailed block fixture was not created.");
+    gateway.update.mockImplementationOnce(async (_calendar, _event, input) => ({
+      allDay: false,
+      conferenceUrl: input.conferenceUrl ?? null,
+      endsAt: source.endsAt,
+      etag: "linked-source-v2",
+      location: null,
+      notes: input.notes ?? null,
+      raw: { id: "linked-source" },
+      recurrence: [],
+      remoteEventId: "linked-source",
+      startsAt: source.startsAt,
+      status: "confirmed",
+      timezone: "UTC",
+      title: source.title,
+    }));
+
+    const updated = await service.updateEvent(
+      source.id,
+      { notes: "Changed notes", url: "https://example.com/new" },
+      context(),
+    );
+    const [updatedBlock] = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.id, block.id));
+
+    expect(gateway.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: source.id }),
+      expect.objectContaining({
+        conferenceUrl: "https://meet.google.com/abc-defg-hij",
+        notes: "Changed notes",
+      }),
+    );
+    expect(updated).toMatchObject({
+      conferenceUrl: "https://meet.google.com/abc-defg-hij",
+      url: "https://example.com/new",
+    });
+    expect(updatedBlock?.url).toBe("https://example.com/new");
+  });
+
+  it("returns an explicit pending state for accepted Google Meet creation", async () => {
+    gateway.create.mockImplementationOnce(async () => ({
+      allDay: false,
+      conferenceUrl: null,
+      endsAt: new Date("2026-08-07T17:00:00.000Z"),
+      etag: "pending-meet-v1",
+      location: null,
+      notes: null,
+      raw: {
+        conferenceData: { createRequest: { status: { statusCode: "pending" } } },
+        id: "pending-meet",
+      },
+      recurrence: [],
+      remoteEventId: "pending-meet",
+      startsAt: new Date("2026-08-07T16:00:00.000Z"),
+      status: "confirmed",
+      timezone: "UTC",
+      title: "Pending Meet",
+    }));
+
+    const created = await service.createEvent(
+      {
+        allDay: false,
+        calendarId: remoteCalendarId,
+        conferenceProvider: "google_meet",
+        endsAt: "2026-08-07T17:00:00.000Z",
+        location: null,
+        notes: null,
+        startsAt: "2026-08-07T16:00:00.000Z",
+        timezone: "UTC",
+        title: "Pending Meet",
+      },
+      context(),
+    );
+
+    expect(created).toMatchObject({ conferenceStatus: "pending", conferenceUrl: null });
   });
 
   it("reports completed and pending provider effects when an event update fails mid-block", async () => {

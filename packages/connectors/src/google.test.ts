@@ -25,6 +25,7 @@ const fresh: GoogleCredentials = {
 const expired: GoogleCredentials = { ...fresh, expiresAt: "2026-07-13T11:00:00.000Z" };
 const timedEvent = {
   conferenceData: {
+    createRequest: { status: { statusCode: "success" } },
     entryPoints: [
       { entryPointType: "phone", uri: "tel:+15551234567" },
       { entryPointType: "video", uri: "https://meet.google.com/abc-defg-hij" },
@@ -384,6 +385,7 @@ describe("Google Calendar connector", () => {
       timezone: "America/New_York",
       etag: "etag-1",
       conferenceUrl: "https://meet.google.com/abc-defg-hij",
+      conferenceStatus: "success",
       notes: "Notes",
       location: "Desk",
       recurrence: ["RRULE:FREQ=DAILY"],

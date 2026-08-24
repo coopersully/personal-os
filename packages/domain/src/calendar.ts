@@ -127,6 +127,7 @@ const updateEventFieldsSchema = z.object({
   title: z.string().trim().min(1).max(500).optional(),
   notes: z.string().trim().max(50_000).nullable().optional(),
   location: z.string().trim().max(1_000).nullable().optional(),
+  conferenceUrl: calendarEventHttpUrlSchema.nullable().optional(),
   url: calendarEventHttpUrlSchema.nullable().optional(),
   startsAt: isoDateTimeSchema.optional(),
   endsAt: isoDateTimeSchema.optional(),
@@ -229,6 +230,7 @@ export const calendarEventSchema = eventFieldsSchema
   .extend({
     id: idSchema,
     calendarId: idSchema,
+    conferenceStatus: z.enum(["failure", "pending", "success"]).nullable().optional(),
     provider: calendarProviderSchema,
     blockSourceEventId: idSchema.nullable().default(null),
     blockMode: eventBlockModeSchema.nullable().default(null),

@@ -422,7 +422,7 @@ function RecommendationPanel({ review }: { review: CalendarReview | null }) {
       ) : (
         <ItemGroup>
           {recommendations.map((recommendation, index) => (
-            <Item key={recommendationIdentity(review, recommendation, index)} variant="outline">
+            <Item key={recommendationIdentity(recommendation, index)} variant="outline">
               <ItemContent>
                 <ItemTitle>{recommendation.summary}</ItemTitle>
                 <ItemDescription>
@@ -595,13 +595,11 @@ function findingKindLabel(kind: CalendarReview["findings"][number]["kind"]) {
 }
 
 function recommendationIdentity(
-  review: CalendarReview | null,
   recommendation: CalendarReview["recommendations"][number],
   index: number,
 ) {
   const linkedFindings = [...recommendation.findingIds].sort().join(",") || "unlinked";
   return [
-    review?.id ?? "unpublished",
     recommendation.key,
     linkedFindings,
     recommendation.horizon.start,

@@ -13,7 +13,7 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:55433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -25,9 +25,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,tauri://localhost,http://tauri.localhost}
-      API_BASE_URL: ${API_BASE_URL:-http://localhost:8787}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8081,tauri://localhost,http://tauri.localhost}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8788}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8081}
       AUTH_RATE_LIMIT_MAX_REQUESTS: ${AUTH_RATE_LIMIT_MAX_REQUESTS:-20}
       AUTH_RATE_LIMIT_WINDOW_SECONDS: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:-300}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY to a base64-encoded 32-byte key}
@@ -35,13 +35,13 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8787/v1/connectors/google/callback}
-      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:-http://localhost:8788/mcp}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8788/v1/connectors/google/callback}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:-http://localhost:8789/mcp}
       MCP_INTERNAL_SECRET: ${MCP_INTERNAL_SECRET:?Set MCP_INTERNAL_SECRET to a random shared secret}
-      OAUTH_AUTHORIZATION_SERVER_URL: ${API_BASE_URL:-http://localhost:8787}
+      OAUTH_AUTHORIZATION_SERVER_URL: ${API_BASE_URL:-http://localhost:8788}
       X_CLIENT_ID: ${X_CLIENT_ID:-}
       X_CLIENT_SECRET: ${X_CLIENT_SECRET:-}
-      X_REDIRECT_URI: ${X_REDIRECT_URI:-http://localhost:8787/v1/x-bookmarks/callback}
+      X_REDIRECT_URI: ${X_REDIRECT_URI:-http://localhost:8788/v1/x-bookmarks/callback}
       PORT: 8787
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       SESSION_COOKIE_NAME: personal_os_session
@@ -53,7 +53,7 @@ services:
       timeout: 4s
       retries: 20
     ports:
-      - "8787:8787"
+      - "8788:8787"
 
   mcp:
     build:
@@ -69,7 +69,7 @@ services:
       MCP_RATE_LIMIT_MAX_REQUESTS: ${MCP_RATE_LIMIT_MAX_REQUESTS:-120}
       MCP_RATE_LIMIT_WINDOW_SECONDS: ${MCP_RATE_LIMIT_WINDOW_SECONDS:-60}
       MCP_TRUST_PROXY: ${MCP_TRUST_PROXY:-false}
-      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:8788}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:8789}
       MCP_INTERNAL_SECRET: ${MCP_INTERNAL_SECRET:?Set MCP_INTERNAL_SECRET to a random shared secret}
       PORT: 8788
     healthcheck:
@@ -78,19 +78,19 @@ services:
       timeout: 4s
       retries: 20
     ports:
-      - "8788:8788"
+      - "8789:8788"
 
   web:
     build:
       args:
-        VITE_API_BASE_URL: ${API_BASE_URL:-http://localhost:8787}
+        VITE_API_BASE_URL: ${API_BASE_URL:-http://localhost:8788}
       context: .
       target: web
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8081:8080"
 
 volumes:
   postgres-data:

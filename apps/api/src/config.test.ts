@@ -25,7 +25,7 @@ describe("API configuration", () => {
       googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
       logLevel: "info",
       mcpResourceUrl: "https://api.example.com/mcp",
-      port: 8787,
+      port: 8788,
       plaidClientId: "",
       plaidEnvironment: "sandbox",
       plaidSecret: "",

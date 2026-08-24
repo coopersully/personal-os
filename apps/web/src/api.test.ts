@@ -61,7 +61,7 @@ describe("web API adapter", () => {
     ).toBe(false);
     expect(isUnauthorized(new Error("unauthorized"))).toBe(false);
     expect(apiBaseUrl(undefined, false)).toBe(window.location.origin);
-    expect(apiBaseUrl(undefined, true)).toBe("http://localhost:8787");
+    expect(apiBaseUrl(undefined, true)).toBe("http://localhost:8788");
     expect(apiBaseUrl("https://configured.test", false)).toBe("https://configured.test");
   });
 

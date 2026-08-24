@@ -9,10 +9,10 @@ PID_DIR="$RUN_DIR/pids"
 LOG_DIR="$RUN_DIR/logs"
 ENV_FILE="$ROOT/.env"
 
-API_PORT=8787
-MCP_PORT=8788
-WEB_PORT=8080
-DB_PORT=55432
+API_PORT=8788
+MCP_PORT=8789
+WEB_PORT=8081
+DB_PORT=55433
 API_URL="http://127.0.0.1:$API_PORT"
 MCP_URL="http://127.0.0.1:$MCP_PORT"
 WEB_URL="http://localhost:$WEB_PORT"
@@ -63,15 +63,27 @@ generate_encryption_key() {
   fi
 }
 
+generate_internal_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32 | tr -d '\n'
+  else
+    node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))'
+  fi
+}
+
 ensure_env_file() {
   if [[ -f "$ENV_FILE" ]]; then
     return
   fi
 
-  local key temporary
+  local key internal_secret temporary
   key="$(generate_encryption_key)"
+  internal_secret="$(generate_internal_secret)"
   temporary="$(mktemp "$RUN_DIR/env.XXXXXX")"
-  sed "s|^APP_ENCRYPTION_KEY=.*|APP_ENCRYPTION_KEY=$key|" "$ROOT/.env.example" >"$temporary"
+  sed \
+    -e "s|^APP_ENCRYPTION_KEY=.*|APP_ENCRYPTION_KEY=$key|" \
+    -e "s|^MCP_INTERNAL_SECRET=.*|MCP_INTERNAL_SECRET=$internal_secret|" \
+    "$ROOT/.env.example" >"$temporary"
   chmod 600 "$temporary"
   mv "$temporary" "$ENV_FILE"
   log "Created .env with a generated local encryption key."
@@ -85,6 +97,9 @@ load_env() {
   set +a
 
   [[ -n "${DATABASE_URL:-}" ]] || die "DATABASE_URL is missing from .env."
+  [[ -n "${MCP_INTERNAL_SECRET:-}" ]] || die "MCP_INTERNAL_SECRET is missing from .env."
+  [[ "$MCP_INTERNAL_SECRET" != "replace-with-a-random-32-character-secret" ]] ||
+    die "Replace the placeholder MCP_INTERNAL_SECRET in .env or remove .env and run Setup again."
   [[ -n "${APP_ENCRYPTION_KEY:-}" ]] || die "APP_ENCRYPTION_KEY is missing from .env."
   [[ "$APP_ENCRYPTION_KEY" != "replace-with-32-byte-base64-key" ]] ||
     die "Replace the placeholder APP_ENCRYPTION_KEY in .env or remove .env and run Setup again."

@@ -18,7 +18,7 @@ const configSchema = z
     MCP_INTERNAL_SECRET: z.string().min(32).optional(),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     OWNER_EMAILS: z.string().default(""),
-    PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
+    PORT: z.coerce.number().int().min(1).max(65_535).default(8788),
     PLAID_CLIENT_ID: z.string().default(""),
     PLAID_ENV: z.enum(["sandbox", "development", "production"]).default("sandbox"),
     PLAID_SECRET: z.string().default(""),

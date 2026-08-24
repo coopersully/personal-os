@@ -77,7 +77,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/v1": {
           changeOrigin: true,
-          target: environment.VITE_PROXY_API_TARGET || "http://127.0.0.1:8787",
+          target: environment.VITE_PROXY_API_TARGET || "http://127.0.0.1:8788",
         },
       },
     },

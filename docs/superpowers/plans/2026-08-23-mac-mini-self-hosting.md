@@ -14,9 +14,11 @@
 
 - Execute in a fresh `cooper/mac-mini-self-hosting` worktree based on current `main`. Preserve and reconcile the existing uncommitted local-runtime/config work; do not overwrite it.
 - Keep `compose.yaml` for development. Production uses `compose.production.yaml`, project name `ilo-production`, and an explicit `DOCKER_HOST` for the `ilo-production` Colima profile.
-- Do not edit an already published migration. At execution time, rebase before generating `0037_mac_deployment_idempotency.sql`; if `main` already owns `0037`, allocate the next journal number and update this plan's expected filename in the implementing commit.
+- Do not edit an already published migration. Current `main` ends at `0065_finance_period_reviews.sql`. At execution time, rebase before generating `0066_mac_deployment_idempotency.sql`; if `main` has advanced, allocate the next journal number and update this plan's expected filename in the implementing commit.
 - Never store production secrets, Tunnel credentials, Backblaze credentials, database dumps, recovery keys, Terraform/OpenTofu state, or deployment state in Git.
 - Do not place a GitHub Actions runner or any write-capable GitHub credential on the Mac.
+- Preserve the existing `quiesce-v1` API lifecycle and deployment-drain contract. Extend `apps/api/src/runtime-lifecycle.ts` rather than replacing it.
+- Treat `.codex/scripts/production-runtime.mjs` and `infra/local-production-runtime.tf` as reusable RDS-access/rehearsal foundations, not as the final self-hosted production supervisor or Compose stack.
 - Each task is independently reviewable. Run its focused tests before committing. Run `pnpm verify` at the integration gates in Tasks 5, 9, 13, and 17.
 - Pin image references by manifest digest and GitHub Actions by full commit SHA before merging. Version tags in snippets are explanatory locators, not the final trust boundary.
 - Any production-changing command in Tasks 14–17 requires Cooper to be present, a current accepted offsite checkpoint, and the global operation lock.
@@ -25,14 +27,14 @@
 
 | Area | Existing files changed | New files |
 | --- | --- | --- |
-| Runtime identity and drain | `apps/api/src/{app,config,main,types}.ts`, `apps/mcp/src/http.ts`, both tsup configs | `apps/api/src/{deployment-mode,migrate,runtime,scheduler}.ts`, runtime tests, `apps/mcp/src/runtime.ts` |
-| Retry safety | `packages/database/src/schema.ts`, migration journal, `apps/api/src/{auth-service,oauth-service,types}.ts`, API routes/services, `packages/api-client/src/**`, `apps/mcp/src/**` | migration `0037_mac_deployment_idempotency.sql`, `apps/api/src/idempotency.ts` and tests |
+| Runtime identity and drain | `apps/api/src/{app,config,main,runtime-lifecycle,types}.ts`, `apps/api/src/runtime-lifecycle.test.ts`, `apps/api/tsup.config.ts`, `apps/mcp/src/http.ts`, `apps/mcp/tsup.config.ts`, `Dockerfile`, `infra/compute.tf`, CI/deploy workflows | `apps/api/src/{deployment-mode,migrate,scheduler}.ts`, mode/scheduler tests, `apps/mcp/src/runtime.ts` |
+| Retry safety | `packages/database/src/schema.ts`, migration journal, `apps/api/src/{auth-service,oauth-service,types}.ts`, all agent-facing API routes/services, `packages/api-client/src/**`, `apps/mcp/src/**` | migration `0066_mac_deployment_idempotency.sql`, `apps/api/src/idempotency.ts` and tests |
 | Production packaging | `Dockerfile`, `.dockerignore`, `.env.example`, root scripts | `compose.production.yaml`, `deploy/mac-mini/compose-policy.json`, validation scripts/tests, `deploy/mac-mini/nginx.conf` |
 | Release pipeline | `.github/workflows/{ci,deploy}.yml` | `.github/workflows/required-ci.yml`, `scripts/release/**`, release schemas/fixtures/tests |
-| Mac controller | none | `deploy/mac-mini/{bootstrap,launcher,watcher,deploy,reconcile,rollback}.sh`, `deploy/mac-mini/controller/**`, LaunchAgents, runtime manifest |
-| Backup and recovery | none | `deploy/mac-mini/{backup,restore,credential-reset}.sh`, `infra/backup/**`, backup schemas/tests/runbook |
+| Mac controller | none | `deploy/mac-mini/{bootstrap,launcher,watch,deploy,reconcile,rollback}.sh`, `deploy/mac-mini/controller/**`, LaunchAgents, runtime manifest |
+| Backup and recovery | none | `deploy/mac-mini/{backup,restore,credential-reset}.sh`, `infra/backup/**`, `infra/witness/**`, backup/OCI schemas, tests, and runbooks |
 | Edge ownership | `infra/dns.tf`, `infra/waf.tf`, root outputs/state docs | `infra/cloudflare/**` with independent backend/import/recovery docs |
-| AWS transfer/cutover | existing AWS Terraform and deploy workflow | `infra/transfer/**`, `deploy/mac-mini/{rds-inspect,rds-transfer}.sh`, cutover/rollback/retirement runbooks |
+| AWS transfer/cutover | `infra/local-production-runtime.tf`, `.codex/scripts/production-runtime.mjs`, existing AWS deploy workflow | `deploy/mac-mini/{rds-inspect,rds-transfer}.sh`, cutover/rollback/retirement runbooks |
 | Monitoring and rehearsal | API/MCP health tests | `deploy/mac-mini/{probe,witness,rehearse}.sh`, synthetic/restore workflows, fault fixtures |
 
 ## Execution Order
@@ -53,17 +55,26 @@
 - Modify: `packages/domain/src/index.ts`
 - Modify: `apps/api/src/config.ts`
 - Modify: `apps/api/src/config.test.ts`
+- Modify: `apps/web/vite.config.ts`
+- Modify: `Dockerfile`
+- Modify: `infra/compute.tf`
+- Modify: `.github/workflows/{ci,deploy}.yml`
+- Create: `scripts/run-with-build-revision.mjs`
+- Create: `scripts/run-with-build-revision.test.mjs`
+- Modify: `package.json`
 
-- [ ] Write failing tests for three modes (`candidate`, `active`, `rehearsal`), full 40-character lowercase commit revisions, and production rejection when either `BUILD_REVISION` or `DEPLOYMENT_MODE_FILE` is absent.
+- [ ] Write failing tests for three modes (`candidate`, `active`, `rehearsal`), full 40-character lowercase commit revisions, Mac production rejection when `DEPLOYMENT_MODE_FILE` is absent, and transition-AWS rejection when immutable `BUILD_REVISION` or explicit `DEPLOYMENT_MODE=active` is absent.
 
 ```ts
 expect(deploymentModeSchema.parse("candidate")).toBe("candidate");
 expect(buildRevisionSchema.safeParse("abc").success).toBe(false);
-expect(() => loadConfig(productionEnv({ BUILD_REVISION: undefined }))).toThrow();
+expect(() => loadConfig(awsTransitionEnv({ BUILD_REVISION: undefined }))).toThrow();
 ```
 
 - [ ] Run `pnpm vitest run packages/domain/src/deployment.test.ts apps/api/src/config.test.ts` and confirm the new assertions fail.
-- [ ] Implement exported schemas/types and add `buildRevision` plus `deploymentModeFile` to `AppConfig`. The mode file contains exactly `candidate`, `active`, or `rehearsal`; absence is fail-closed in production.
+- [ ] Implement exported schemas/types and add `buildRevision`, `deploymentMode`, `runtimeTopology`, and `deploymentModeFile` to `AppConfig`. Mac production requires the mode file. During the dual-deploy window only, ECS uses explicit `DEPLOYMENT_MODE=active` and `RUNTIME_TOPOLOGY=combined`; no implicit active default is allowed.
+- [ ] Thread the exact event SHA through API/MCP/web Docker build arguments, Vite, CI builds, `.github/workflows/deploy.yml`, and the ECS task definition in `infra/compute.tf` before enforcing the new requirements. Add contract tests proving the live AWS transition task and web artifact report that SHA.
+- [ ] Add the cross-platform `run-with-build-revision.mjs` wrapper used by `pnpm check`, `pnpm verify`, and documented local build commands. It supplies the exact `git rev-parse HEAD` SHA only for local verification, records whether the tree is dirty, refuses dirty production/release builds, and never overrides a CI-provided SHA. Test clean, dirty, detached, missing-Git, and caller-provided cases.
 - [ ] Re-run the focused tests and `pnpm --filter @personal-os/api typecheck`.
 - [ ] Commit: `feat: define production deployment runtime contracts`.
 
@@ -73,13 +84,17 @@ expect(() => loadConfig(productionEnv({ BUILD_REVISION: undefined }))).toThrow()
 - Create: `apps/api/src/deployment-mode.ts`
 - Create: `apps/api/src/deployment-mode.test.ts`
 - Create: `apps/api/src/migrate.ts`
-- Create: `apps/api/src/runtime.ts`
-- Create: `apps/api/src/runtime.test.ts`
 - Create: `apps/api/src/scheduler.ts`
 - Modify: `apps/api/src/main.ts`
+- Create: `apps/api/src/combined.ts`
 - Modify: `apps/api/src/app.ts`
-- Modify: `apps/api/src/tsup.config.ts`
+- Modify: `apps/api/src/runtime-lifecycle.ts`
+- Modify: `apps/api/src/runtime-lifecycle.test.ts`
+- Modify: `apps/api/tsup.config.ts`
 - Modify: `apps/api/package.json`
+- Modify: `Dockerfile`
+- Modify: `infra/compute.tf`
+- Modify: `.github/workflows/deploy.yml`
 
 - [ ] Write failing tests proving: migrations are not run by the HTTP entrypoint; candidate/rehearsal mode blocks provider callbacks, email, manual sync, and background jobs with `503 deployment_inactive`; active mode permits them; a mode-file flip takes effect without restart; readiness returns revision/mode/schema; and SIGTERM waits for tracked requests/jobs before closing the pool.
 
@@ -92,11 +107,12 @@ expect(await json(request("/health/ready"))).toMatchObject({
 expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveStatus(503);
 ```
 
-- [ ] Run `pnpm vitest run apps/api/src/deployment-mode.test.ts apps/api/src/runtime.test.ts apps/api/src/app.integration.test.ts` and capture the expected failures.
+- [ ] Run `pnpm vitest run apps/api/src/deployment-mode.test.ts apps/api/src/runtime-lifecycle.test.ts apps/api/src/app.integration.test.ts` and capture the expected failures.
 - [ ] Implement `readDeploymentMode(path)` with strict parsing and fail-closed I/O handling. The container receives a read-only runtime-control **directory**, not a bind-mounted individual file, so an atomic host rename changes the directory entry visible inside the container. Add middleware/helpers that gate every external side effect, including callback GETs and auth email delivery—not only ordinary POST mutations.
-- [ ] Move startup migrations into the one-shot `migrate.ts` entry. Move interval and startup jobs out of `main.ts` into `scheduler.ts`; the scheduler remains alive but performs no work unless the mode file is `active`.
-- [ ] Make `runtime.ts` own the server, an in-flight request counter, tracked jobs, drain timeout, signal handling, and database shutdown. Keep `main.ts` as a thin entrypoint.
-- [ ] Add `main`, `migrate`, and `scheduler` tsup entries and package scripts. Re-run focused tests and build the API.
+- [ ] Move startup migrations into the one-shot `migrate.ts` entry and interval/startup jobs into `scheduler.ts`. Keep `main.ts` HTTP-only: it must never import or invoke migration or scheduler startup. Preserve AWS compatibility through a distinct `combined.ts` supervisor entry during `DEPLOY_TARGET=aws|dual`; it completes the shared migration module before starting the HTTP and scheduler lifecycles, without putting migration logic in the HTTP entrypoint. The Mac split topology runs the one-shot migration and separate scheduler containers, and the scheduler performs no work unless the mode file is `active`.
+- [ ] Extend the AWS task definition, container command, and deploy contract to use the `combined.ts` supervisor so migration and scheduling remain live throughout the dual window. Add deployment/import-boundary tests proving `main.ts` cannot execute migrations, `combined` is required while AWS is enabled, and it is rejected after `DEPLOY_TARGET=mac`; remove the supervisor only in the AWS-retirement change.
+- [ ] Keep `runtime-lifecycle.ts` authoritative for the existing `quiesce-v1` request/background-task tracking, abort signal, drain timeout, signal handling, and database shutdown. Refactor `main.ts` into a thin entrypoint without weakening the headers or AWS deployment-drain checks that already consume that contract.
+- [ ] Add `main`, `combined`, `migrate`, and `scheduler` tsup entries and package scripts. Re-run focused tests and build the API.
 - [ ] Commit: `refactor: separate api migration scheduler and drain lifecycles`.
 
 ### Task 3: Add coherent revision health to MCP and web
@@ -105,32 +121,31 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `apps/mcp/src/runtime.ts`
 - Create: `apps/mcp/src/runtime.test.ts`
 - Modify: `apps/mcp/src/http.ts`
-- Modify: `apps/mcp/src/tsup.config.ts`
+- Modify: `apps/mcp/tsup.config.ts`
 - Modify: `apps/web/vite.config.ts`
 - Create: `apps/web/src/revision-build.test.ts`
 - Modify: `deploy/nginx.conf`
 
-- [ ] Write failing MCP tests for revision health and graceful request drain. Add a web build test that rejects a missing/malformed revision and asserts `/revision.json` is cache-disabled.
+- [ ] Write failing MCP tests for revision health and graceful request drain. Add a web build test that rejects a missing/malformed revision, asserts `/revision.json` is cache-disabled, and requires the full SHA in an `X-Build-Revision` response header on externally verified web responses.
 - [ ] Run the focused MCP/web tests and confirm failure.
 - [ ] Extract an MCP runtime with tracked requests and bounded SIGTERM drain. Return `{status, revision}` from `/health/live`; API ready, MCP live, and web revision must report the same full SHA.
-- [ ] Have the Vite build emit `dist/revision.json` from `BUILD_REVISION` without tracking a source-tree placeholder; configure nginx with `Cache-Control: no-store, max-age=0` for revision/health responses.
-- [ ] Re-run focused tests and build API, MCP, and web.
+- [ ] Have the Vite build emit `dist/revision.json` from `BUILD_REVISION` without tracking a source-tree placeholder; configure nginx to add `X-Build-Revision: <full SHA>` to every web response and `Cache-Control: no-store, max-age=0` to revision/health responses. Verification sends a nonce-bearing request and rejects a header/body/cache-policy mismatch.
+- [ ] Re-run focused tests and build API, MCP, and web through `node scripts/run-with-build-revision.mjs pnpm build`; also prove a direct production/release build without a revision fails.
 - [ ] Commit: `feat: expose coherent release revision health`.
 
 ### Task 4: Add credential-family identity and idempotency persistence
 
 **Files:**
 - Modify: `packages/database/src/schema.ts`
-- Create: `packages/database/migrations/0037_mac_deployment_idempotency.sql`
+- Create: `packages/database/migrations/0066_mac_deployment_idempotency.sql`
 - Modify: `packages/database/migrations/meta/_journal.json`
-- Create: corresponding Drizzle snapshot under `packages/database/migrations/meta/`
 - Modify: `apps/api/src/types.ts`
 - Modify: `apps/api/src/auth-service.ts`
 - Modify: `apps/api/src/oauth-service.ts`
 - Modify: auth/OAuth integration tests
 
 - [ ] Rebase and reserve the next migration number. Write failing integration tests proving a PAT keeps one `credentialFamilyId`, OAuth refresh rotation preserves the family, session identity uses the `user:` prefix plus the stable user UUID, and token replacement cannot change the idempotency subject.
-- [ ] Add `credential_family_id` using a short expand/backfill/contract migration: nullable UUID column, batched unique-value backfill for existing rows, `NOT NULL`, then `DEFAULT gen_random_uuid()` for new rows. Index it, and add `idempotency_records` with columns `subject`, `method`, `route`, `key`, `request_hash`, `response_status`, `response_body`, `created_at`, `expires_at`; enforce uniqueness on `(subject, method, route, key)` and index expiry.
+- [ ] Add `credential_family_id` using a short expand/backfill/contract migration: nullable UUID column, batched unique-value backfill for existing rows, `NOT NULL`, then `DEFAULT gen_random_uuid()` for new rows. Index it, and add `idempotency_records` with columns `subject`, `method`, `route`, `key`, `request_hash`, `response_status`, `result_type`, `result_reference`, `created_at`, and `expires_at`; enforce uniqueness on `(subject, method, route, key)` and index expiry. `result_type/reference` is a typed, size-bounded pointer to an allowlisted domain result or a minimal non-secret receipt—never an arbitrary/raw response body.
 - [ ] Extend `Principal` with `idempotencySubject`. Backfill existing access-token rows with distinct families; pass the family through OAuth `issue()` during refresh.
 - [ ] Generate and review SQL for locks/default behavior, then test fresh migration and upgrade migration against Testcontainers.
 - [ ] Run database, auth, OAuth, and migration tests.
@@ -141,18 +156,18 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 **Files:**
 - Create: `apps/api/src/idempotency.ts`
 - Create: `apps/api/src/idempotency.integration.test.ts`
-- Modify: `apps/api/src/routes/{calendar,finances,goals,mail,reminders,tasks}.ts`
+- Modify: `apps/api/src/routes/{assistant,calendar,finances,goals,mail,reminders,tasks}.ts` and agent-authenticated mutation handlers still registered in `apps/api/src/app.ts`
 - Modify: mutation-owning services used by those routes to accept a `Database` transaction executor
 - Modify: `apps/api/src/app.ts`
 - Modify: `packages/api-client/src/client.ts`
 - Modify: `packages/api-client/src/features/**`
 - Modify: `apps/mcp/src/server.ts`
-- Modify: `apps/mcp/src/tools/**`
+- Modify: `apps/mcp/src/tools/**` and `apps/mcp/src/tool-surface.ts`
 
-- [ ] Define `Idempotency-Key` semantics in tests: required for agent-authenticated mutations, optional for human browser mutations, 128-character maximum, same key/body replays the stored response, same key/different body returns `409 idempotency_conflict`, concurrent duplicates produce one mutation, and failed transactions store no replay.
+- [ ] Define `Idempotency-Key` semantics in tests: required for agent-authenticated mutations, optional for human browser mutations, 128-character maximum, same key/body reconstructs the allowlisted safe result from its typed reference, same key/different body returns `409 idempotency_conflict`, concurrent duplicates produce one mutation, and failed transactions store no replay. Test result-type allowlisting, reference size limits, redaction/non-secret receipts, expiry, and refusal to persist arbitrary response JSON.
 - [ ] Run the integration test and confirm each behavior fails.
 - [ ] Implement canonical request hashing over method, normalized route template, and parsed JSON body. Execute the domain mutation and idempotency-record insert in one database transaction; use a transaction-scoped PostgreSQL advisory lock derived from the unique tuple to serialize first use.
-- [ ] Refactor each MCP-exposed mutation service to accept the transaction executor. Do not wrap email/provider operations in replayable transactions; gate or redesign those endpoints explicitly and cover the selected behavior in tests.
+- [ ] Refactor every MCP-exposed mutation—including assistant, planning, reminders, calendar, finance, Mail, and X-bookmark surfaces—to accept the transaction executor. Do not wrap email/provider operations in replayable transactions; gate or redesign those endpoints explicitly and cover the selected behavior in tests.
 - [ ] Extend API client request options with `idempotencyKey`. Generate one UUID per MCP tool invocation and reuse it for transport retries. Do not generate a new key inside a retry loop.
 - [ ] Add cleanup for expired records and tests for OAuth rotation, replay retention, concurrent duplicates, rollback, and forced MCP disconnect/retry.
 - [ ] Run focused tests, then `pnpm verify`.
@@ -171,25 +186,39 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `scripts/validate-production-compose.test.mjs`
 - Modify: `package.json`
 
-- [ ] Write policy fixtures that fail for mutable tags, `build:`, published ports, Docker socket, privileged mode, host namespaces, unapproved bind mounts, writable root filesystems, added capabilities, cross-service networks, or secrets outside `/run/secrets`.
-- [ ] Implement a validator over `docker compose -p ilo-production -f compose.production.yaml config --format json` and a service-specific allowlist.
+- [ ] Write raw-YAML and resolved-model policy fixtures that fail for aliases/merge keys, mutable tags, `build:`, `include`, `extends`, `env_file`, providers, lifecycle hooks, configs, published ports, Docker socket, privileged mode, host namespaces, unapproved bind mounts, writable root filesystems, added capabilities, cross-service networks, unknown keys, or any secret declaration/mount outside the exact fixed root-owned host-source-to-`/run/secrets/<name>` map.
+- [ ] Before invoking Docker Compose, use the installed root-owned validator, closed schema, policy, and compatibility manifest to parse raw YAML with a resource-bounded safe parser, so resolution cannot read candidate-selected host files, environment files, configs, providers, includes, extensions, or lifecycle commands. Then run the fixed manifest's pinned Compose version in a credential-free isolated directory over only the prevalidated file, inspect `docker compose -p ilo-production -f compose.production.yaml config --format json`, and enforce the fixed service-specific resolved allowlist. Candidate copies are CI/reference inputs only and never authorize themselves. Test both stages, reject Compose version drift, and prove substitution of any candidate validator/schema/policy/compatibility file cannot affect the installed decision.
 - [ ] Define digest-only services: `postgres`, one-shot `migrate`, `api`, `scheduler`, `mcp`, `web`, and `cloudflared`. Use a Linux named volume for PGDATA. Approve only the read-only runtime-control directory mount and secret files. Publish no ports.
 - [ ] Give each origin a distinct ingress network; give MCP/API a distinct internal network; give only API, scheduler, migrate, backup/restore jobs database access. Set read-only roots, tmpfs, dropped capabilities, resource limits, health checks, and `restart: "no"` for every application/ingress writer controlled by the launcher.
-- [ ] Add a multi-stage web image and distinct API `main`, `migrate`, and `scheduler` targets/commands. Build for `linux/arm64` locally and run the policy validator.
+- [ ] Add a multi-stage web image and distinct API `main`, `combined`, `migrate`, and `scheduler` targets/commands. Build for `linux/arm64` locally and run the policy validator.
 - [ ] Commit: `feat: add hardened mac production compose stack`.
 
 ### Task 7: Define and validate the attested release bundle
 
 **Files:**
+- Create: `scripts/release/candidate-component-set.schema.json`
+- Create: `scripts/release/create-candidate-component-set.mjs`
 - Create: `scripts/release/release-manifest.schema.json`
+- Create: `scripts/release/release-envelope.schema.json`
 - Create: `scripts/release/create-manifest.mjs`
 - Create: `scripts/release/verify-manifest.mjs`
 - Create: `scripts/release/release-manifest.test.mjs`
+- Create: `scripts/release/test-predecessor-compatibility.mjs`
+- Create: `scripts/release/test-predecessor-compatibility.test.mjs`
+- Create: `scripts/release/create-infrastructure-approval.mjs`
+- Create: `scripts/release/verify-infrastructure-approval.mjs`
+- Create: `scripts/release/infrastructure-approval.test.mjs`
+- Create: `deploy/mac-mini/release-trust.json`
 - Create: `scripts/release/fixtures/**`
 - Create: `deploy/mac-mini/runtime-compatibility.json`
 
 - [ ] Write failing fixture tests for checksum substitution, wrong repository/workflow/branch/SHA, non-monotonic sequence, invalid ancestry, unlisted stable predecessor, schema fingerprint mismatch, changed Postgres/cloudflared digest in an application release, incompatible state schema, and too-new bootstrap.
-- [ ] Implement canonical JSON manifest generation containing all fields required by Decision 3 of the spec, including exact platform digests, controller checksums, before/after migration fingerprints, compatible predecessor bundle digests, infrastructure class, and rehearsal approval digest.
+- [ ] Before compatibility testing, generate a canonical candidate component-set descriptor containing exact API/MCP/web platform-image digests, PostgreSQL/cloudflared digests, migration journal and fingerprints, controller checksums, state-schema version, minimum bootstrap version, and the current/new fixed-code/trust-set versions plus checksums/digests for `bootstrap.sh`, `launcher.sh`, `watch.sh`, `verify-release.sh`, `release-trust.json`, the Compose validator/schema/policy, `runtime-compatibility.json`, and the root-owned installer. Its digest is the stable pre-envelope candidate identity: it contains no compatibility evidence, approval, inner-payload digest, or outer-envelope digest.
+- [ ] In CI, restore the actual recorded stable predecessor schema/data fixture, apply the candidate migration, start the predecessor API/MCP images against the migrated schema, run their read/write smoke and rollback checks, then run the candidate. Emit attested evidence binding the recorded stable outer-bundle digest, candidate component-set digest, and before/after schema fingerprints. For skipped releases, test every planned chain edge or the direct stable-to-candidate edge. Never claim or accept a candidate outer-bundle digest before that envelope exists.
+- [ ] Implement a canonical immutable inner release payload containing all fields required by Decision 3 of the spec, including the component-set descriptor/digest, exact platform and fixed-code/trust-set digests, controller checksums, before/after migration fingerprints, compatible predecessor bundle digests, infrastructure class, and compatibility/rehearsal evidence digests. Classify any fixed-code/trust-set change—including `release-trust.json`, the Compose validator/schema/policy, or `runtime-compatibility.json`—as infrastructure and bind old/new fixed-set digests plus cross-version rehearsal evidence into approval. Its digest excludes approval and outer-envelope metadata. The generator accepts predecessor compatibility only from evidence whose stable digest, candidate component-set digest, and fingerprints all match; never from a caller-authored digest list.
+- [ ] For an infrastructure-class release, keep approval in this same protected-main workflow run. A job using the `production-infrastructure` GitHub Environment waits for Cooper as its sole required reviewer, has no production runtime secrets, downloads the inner payload by immutable same-run artifact ID, and rejects mismatched repository, workflow ref, event SHA, run ID, component-set digest, inner-payload digest, or evidence digest. Infrastructure approvals are valid only when `run_attempt == 1`; any failed/cancelled attempt requires a new commit and new run, because GitHub's review-history endpoint is run-scoped rather than attempt-scoped. After the gate opens, fetch `/actions/runs/{run_id}/approvals` and require an `approved` record for the pinned environment ID/name by Cooper's immutable GitHub user ID `29717904`; reject absent, rejected, wrong-user/environment, duplicate-conflicting, or bypass-only completion. Also embed the current environment configuration proving Cooper is still the only reviewer, only protected `main` is eligible, and administrator bypass is disabled. Because Cooper initiates merge-triggered runs, explicitly leave `prevent_self_review` false in this single-user repository or the gate deadlocks; require a distinct reviewer plus self-review prevention if another operator is added. Create a canonical, expiring approval statement bound to the review record, configuration, and old/new PostgreSQL or cloudflared digests.
+- [ ] Attest that approval statement with the approval job's GitHub OIDC identity. Pin verification to this repository, exact approval-workflow path/ref, protected `main` commit, and the environment-bearing OIDC subject, and verify the statement predicate contains the expected run and attempt 1, review record, environment configuration, inner-payload digest, component-set digest, infrastructure digests, rehearsal evidence, issue time, and expiry. Do not accept a follow-on workflow, `repository_dispatch`, rerun, mutable artifact name, repository secret, or offline signature handoff as approval.
+- [ ] Build an attested outer release envelope containing the unchanged inner payload plus the approval attestation bundle when infrastructure class requires it; the outer envelope/bundle digest is the published candidate identity. Ordinary application releases omit approval and remain unattended. Require envelope generation to reject infrastructure changes without a valid non-expired same-run approval. Require the Mac controller to verify the outer attestation, recompute all component/evidence/inner bindings, and verify the pinned approval-job identity and predicate before mutation. Test content-cycle resistance, arbitrary digest, wrong environment/reviewer/workflow/SHA/run, stale or replayed same-run input, component/evidence substitution, missing or expired approval, and application-release misuse.
 - [ ] Implement offline structural/checksum verification separately from online GitHub attestation and ancestry verification. Make verification output machine-readable and fail closed.
 - [ ] Pin the tested host compatibility matrix in `runtime-compatibility.json` rather than using floating Homebrew latest versions.
 - [ ] Run the release test suite and commit: `feat: define verifiable production release bundles`.
@@ -200,21 +229,27 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Modify: `.github/workflows/ci.yml`
 - Modify: `.github/workflows/deploy.yml`
 - Create: `.github/workflows/required-ci.yml`
+- Create: `scripts/release/configure-production-environment.mjs`
+- Create: `scripts/release/configure-production-environment.test.mjs`
 - Modify: `infra/README.md`
 
+- [ ] Before enabling the infrastructure workflow, run the environment configurator locally with separate repository-administration authority—never a workflow token. Create/update `production-infrastructure`, set Cooper user ID `29717904` as the sole required reviewer, restrict deployments to exact `main`, set `prevent_self_review=false`, disable administrator bypass, then read back and fail unless every field matches. Record the returned immutable environment ID/name and expected policy in `release-trust.json`; test missing-environment auto-creation, wrong reviewer/branch, bypass, and drift. Revoke the temporary administration credential after setup.
 - [ ] Move the required infrastructure, lint/format, quality/browser, and desktop jobs into `required-ci.yml` behind `workflow_call`. Make `ci.yml` invoke it for pull requests and feature-branch pushes. Make `deploy.yml` invoke it for `push` to `main`, then make release `needs: required-ci`. Add a workflow-shape test/inspection proving release checks out `github.sha` and cannot run unless that same event SHA passed the called workflow. Remove `workflow_run` release eligibility.
 - [ ] Build API/MCP/web for `linux/arm64` and `linux/amd64`, push to GHCR, resolve platform-manifest digests, rebuild the release bundle from the event SHA without untrusted artifacts/caches, and create GitHub artifact attestations for every image and the bundle.
-- [ ] Grant `packages: write`, `attestations: write`, and `id-token: write` only to the release job. Pin all third-party actions to full SHAs.
+- [ ] Grant `packages: write`, `attestations: write`, and `id-token: write` only to the jobs that publish or attest their own outputs. Give the infrastructure-approval job explicit `contents: read` plus only the Actions/environment read permissions needed for its same-run artifact, approval history, and environment configuration, along with `attestations: write` and `id-token: write`; give it no package push, environment administration, or production-secret access. Pin all third-party actions to full SHAs.
 - [ ] Serialize `production-candidate` updates. Reread the pointer, verify signed sequence and Git ancestry, then move it last. Add test fixtures for delayed A/newer failing B and pointer races.
-- [ ] Preserve a conditional AWS deployment job for `DEPLOY_TARGET=dual|aws`; publish the identical live AWS SHA as the first complete GHCR bundle. `DEPLOY_TARGET=mac` disables AWS deployment only after cutover.
+- [ ] Preserve a conditional AWS deployment job for `DEPLOY_TARGET=dual|aws`; publish the identical live AWS SHA as the first complete GHCR bundle. Require the transition identity/topology contract and predecessor compatibility evidence before either target deploys. `DEPLOY_TARGET=mac` disables AWS deployment only after cutover.
 - [ ] Run local workflow validation and release-script tests. Commit: `ci: publish attested monotonic production bundles`.
 
 ### Task 9: Implement the fixed launcher and durable controller state machine
 
 **Files:**
 - Create: `deploy/mac-mini/bootstrap.sh`
+- Create: `deploy/mac-mini/install-fixed-code.sh`
 - Create: `deploy/mac-mini/launcher.sh`
-- Create: `deploy/mac-mini/watcher.sh`
+- Create: `deploy/mac-mini/watch.sh`
+- Create: `deploy/mac-mini/verify-release.sh`
+- Create: `deploy/mac-mini/verify.sh`
 - Create: `deploy/mac-mini/{deploy,reconcile,rollback}.sh`
 - Create: `deploy/mac-mini/controller/{state,lock,release,compose,reconcile}.mjs`
 - Create: `deploy/mac-mini/controller/*.test.mjs`
@@ -222,11 +257,13 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `deploy/mac-mini/install-layout.md`
 
 - [ ] Write Node test fixtures for `stable`, every interrupted `deploying` step, `failed`, and `recovery-required`; corrupt/truncated state; candidate-controller failure; stable-controller fallback; quarantine; chained upgrades; and lock exclusion.
+- [ ] Install `bootstrap.sh`, `launcher.sh`, `watch.sh`, `verify-release.sh`, `release-trust.json`, the Compose validator/schema/policy, and `runtime-compatibility.json` as a versioned, checksummed fixed-code/trust set outside bundle/controller paths, owned and permissioned so the production runtime cannot modify it. Before any candidate controller or Compose hook executes, fixed code must verify repository/workflow/ref/SHA provenance, outer and inner envelopes, component/evidence/checksum bindings, bootstrap compatibility, pinned environment approval policy, and the fully resolved Compose policy using only those installed inputs. Add hostile fixtures proving substitution of candidate scripts, validator/schema/policy, compatibility manifest, trust config, includes, profiles, providers, interpolations, hooks, or controller code cannot affect the decision and remains inert until all fixed-code checks pass.
+- [ ] Define the only fixed-code/trust update path as `install-fixed-code.sh`, a root-owned installer invoked interactively from a separate Mac administrator identity after the currently installed verifier validates the attested old/new fixed-set versions/digests and infrastructure approval. Stage the exact approved bytes—including `release-trust.json`, the Compose validator/schema/policy, and `runtime-compatibility.json`—beside the current set, run old/new cross-version envelope, Compose-policy substitution, and recovery tests in an isolated directory, atomically switch the fixed-code/trust pointer, retain the prior set, and automatically revert on startup/self-test failure. The production login has no `sudo` or write access to the installer/fixed roots, and a candidate bundle cannot directly replace fixed code or trust data.
 - [ ] Implement atomic state writes using same-directory temporary files, file and directory fsync, rename, schema validation, and preserved prior snapshots. State records current/previous/candidate bundle digests, release sequence, ancestry, schema fingerprints, controller version, backup identity, completed step, retry count, and quarantine reason.
 - [ ] Implement one global `flock`-backed operation lock shared by deploy, reconcile, restore, backup, prune, and infrastructure upgrade. Unit-test contention and owner diagnostics.
 - [ ] Make `launcher.sh` fixed and minimal: verify its own install/version, parse only the backward-compatible envelope, select the recorded stable controller, test a candidate controller in isolation, atomically activate it, and revert on failure.
-- [ ] Implement watcher polling at 10 seconds with ETag/backoff, deployment start under 30 seconds, exact attestation verification, local ancestry revalidation under lock, bounded three-attempt retries, digest quarantine, and hold/deferred status.
-- [ ] Implement controller transitions in this exact order: lock → resolve/verify → write `deploying` → freeze mode → drain/stop ingress and writers → immutable predeploy backup → verify live before fingerprint → one-shot migration → verify after fingerprint → start coherent candidate → local revision tests → start ingress → public revision/auth-safe tests → atomically flip mode active → start scheduler → observe → write `stable` → unlock.
+- [ ] Implement `watch.sh` polling at 10 seconds with ETag/backoff, deployment start under 30 seconds, exact attestation verification, local ancestry revalidation under lock, bounded three-attempt retries, digest quarantine, and hold/deferred status.
+- [ ] Implement controller transitions in this exact order: lock → resolve/verify → write `deploying` → obtain a fresh signed witness observation of the current public stable digest → create maintenance lease → freeze mode → drain/stop ingress and writers → immutable predeploy backup whose manifest binds that observation → wait for the independent witness to accept that exact recovery set → verify live before fingerprint → one-shot migration → verify after fingerprint → start coherent candidate → local revision tests → start ingress → public revision/header/auth-safe tests → atomically flip mode active → start scheduler → observe → write `stable` → unlock. A successful upload without independent acceptance cannot proceed to migration.
 - [ ] On unsafe rollback or corrupt state, stop/detach Tunnel first, prove all hostnames unreachable, stop every writer, write `recovery-required`, and alert. Never infer success from container uptime alone.
 - [ ] Run controller tests, ShellCheck, production Compose validation, and `pnpm verify`.
 - [ ] Commit: `feat: add crash-safe mac deployment controller`.
@@ -240,14 +277,17 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `deploy/mac-mini/backup-manifest.schema.json`
 - Create: `deploy/mac-mini/controller/backup.mjs`
 - Create: `deploy/mac-mini/controller/backup.test.mjs`
+- Create: `deploy/mac-mini/controller/oci-archive.mjs`
+- Create: `deploy/mac-mini/controller/oci-archive.test.mjs`
 - Create: `infra/backup/{versions,variables,main,outputs}.tf`
 - Create: `infra/backup/terraform.tfvars.example`
 - Create: `infra/backup/{README,RECOVERY}.md`
 
-- [ ] Write tests proving unique object names, per-backup data keys, wrapped-key manifests, dump verification before acceptance, manifest/dump digest pairing, lock exclusion, retention selection, stale-checkpoint blocking, and failure when B2 does not report Compliance retention.
-- [ ] Implement a compressed custom-format `pg_dump`, `pg_restore --list` validation, authenticated encryption, FileVault staging copy, and B2 upload. An independently witnessed accepted checkpoint—not merely a successful upload—sets the RPO clock.
+- [ ] Write tests proving unique object names, per-backup data keys, wrapped-key manifests, full-restore verification before acceptance, database/manifest/OCI digest pairing, lock exclusion, retention selection, stale-checkpoint blocking, and failure when B2 does not report Compliance retention.
+- [ ] Implement a compressed custom-format `pg_dump`, authenticated encryption, FileVault staging copy, and B2 upload. `pg_restore --list` is only an early format check: before acceptance, restore every archive into a disposable empty PostgreSQL instance and verify schema fingerprint, representative row counts/data, roles/grants, sequences, and encrypted-field decryption. Destroy the disposable target afterward. An independently witnessed accepted checkpoint—not merely a successful upload—sets the RPO clock.
 - [ ] Implement OpenTofu for a private B2 bucket with 35-day Compliance Object Lock/default retention, lifecycle, server-side encryption, alerting, and a prefix-scoped uploader key without delete or administration capabilities. Prove permissions with integration tests.
 - [ ] Implement restore into a demonstrably empty cluster using `--no-owner --no-acl`, explicit roles/grants, `ANALYZE`, schema/row/sequence/encrypted-field checks, and recovery-manifest validation.
+- [ ] Export the exact both-platform OCI image manifests/blobs, release bundle, controller, GitHub attestation bundles, and trusted verification roots beside every accepted database checkpoint. Encrypt, upload, retain, and witness them as one immutable recovery set. Rehearse a network-isolated restore with GHCR and GitHub unavailable.
 - [ ] For any non-final-frozen backup, run `credential-reset.sh` before ingress to invalidate sessions, PATs, OAuth access/refresh tokens and codes, password/reset/action tokens, and other bearer material. Test that prior credentials no longer authenticate.
 - [ ] Document escrow of the wrapping private key, B2 admin credentials, and encrypted OpenTofu state outside Mac/AWS/GitHub/Cloudflare.
 - [ ] Commit: `feat: add immutable offsite backup and safe restore`.
@@ -276,13 +316,13 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `deploy/mac-mini/host-firewall.sh`
 - Create: `deploy/mac-mini/vm-firewall.sh`
 - Create: `deploy/mac-mini/verify-host.sh`
-- Create: `deploy/mac-mini/launchagents/me.coopersully.ilo.{colima,launcher,watcher,backup}.plist`
+- Create: `deploy/mac-mini/launchagents/me.coopersully.ilo.{colima,launcher,watch,backup}.plist`
 - Create: `deploy/mac-mini/README.md`
 
 - [ ] Make `verify-host.sh` fail unless running as the dedicated non-admin production account with FileVault enabled, automatic login disabled, sleep disabled on AC, at least 25% host memory free, at least 20% disk free, and exact compatibility-manifest versions.
 - [ ] Configure the named `ilo-production` Colima profile with explicit CPU, memory, root disk, data disk, architecture, runtime, `COLIMA_HOME`, and socket. Verify effective VM resources from inside the VM.
-- [ ] Install LaunchAgents that use absolute paths and explicit environment, run Colima foreground, and invoke only the fixed launcher/watcher/backup entrypoints. No application container gets autonomous restart ownership.
-- [ ] Implement macOS PF rules in `host-firewall.sh` and Colima-VM/container-forwarding rules in `vm-firewall.sh` for LAN, loopback, link-local, multicast, host-gateway, private IPv4, ULA and globally addressed LAN IPv6. Allow only the documented DNS/HTTPS and Tunnel endpoint flows; verify TCP/UDP 7844, QUIC preference, and HTTP/2 fallback. Reapply VM rules through the checked-in Colima provisioning lifecycle after every VM start.
+- [ ] Install LaunchAgents that use absolute paths and explicit environment, run Colima foreground, and invoke only the fixed launcher, watch, and backup entrypoints. No application container gets autonomous restart ownership.
+- [ ] Inventory every current provider protocol from code and AWS egress rules. Implement macOS PF rules in `host-firewall.sh` and Colima-VM/container-forwarding rules in `vm-firewall.sh` for LAN, loopback, link-local, multicast, host-gateway, private IPv4, ULA and globally addressed LAN IPv6. Allow destination-scoped DNS/HTTPS, iCloud IMAP TCP 993, iCloud SMTP TCP 587, and documented Tunnel endpoint flows; verify provider sync/IDLE/move/send, TCP/UDP 7844, QUIC preference, and HTTP/2 fallback. Reapply VM rules through the checked-in Colima provisioning lifecycle after every VM start.
 - [ ] Run positive probes for named Compose flows and negative probes for every prohibited address class from every service container.
 - [ ] Commit: `infra: provision isolated mac production runtime`.
 
@@ -295,26 +335,34 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `deploy/mac-mini/rehearsals/**`
 - Create: `deploy/witness/ilo-restore-witness.service`
 - Create: `deploy/witness/ilo-restore-witness.timer`
+- Create: `deploy/witness/ilo-checkpoint-witness.service`
+- Create: `deploy/witness/ilo-checkpoint-witness.timer`
 - Create: `deploy/witness/README.md`
+- Create: `infra/witness/{versions,variables,main,outputs}.tf`
+- Create: `infra/witness/terraform.tfvars.example`
+- Create: `infra/witness/{README,RECOVERY}.md`
 - Create: `docs/runbooks/mac-mini-monitoring.md`
 
 - [ ] Implement public cache-bypassing probes for all three revisions, login-safe API behavior, MCP initialize, TLS/HSTS, maintenance lease, heartbeat, backup age, and revision mismatch. Store correlated logs remotely with request/release IDs.
 - [ ] Make maintenance leases signed, bounded, and release-specific. They may suppress expected availability alerts but never heartbeat, backup, mismatch, or overrun alerts.
-- [ ] Implement an independent witness that validates offsite backup/manifest/attestations and writes accepted-checkpoint evidence unavailable to the Mac uploader. Configure the weekly clean-room restore on a separate Linux machine with the checked-in systemd timer and an independently provisioned read credential; do not schedule it through GitHub, AWS, Cloudflare, or the production Mac.
+- [ ] Provision the witness control plane explicitly: a minimal Debian Hetzner Cloud VPS outside AWS/GitHub/Cloudflare/Backblaze/Mac, no standing inbound access, encrypted disk where supported, provider firewall, a separately escrowed OpenTofu state snapshot, a B2 read-only recovery-set credential, a write-only non-overwriting witness-evidence prefix, and a Healthchecks.io dead-man alert owned outside the Mac uploader context. Use an exact-IP one-time bootstrap rule/key, then remove both and prove console/rescue recovery. Record the selected SKU, region, owner, alert destination, and quoted recurring cost; require Cooper's approval before apply.
+- [ ] Implement an independent witness that validates the full offsite database/manifest/OCI/attestation set and writes accepted-checkpoint evidence unavailable to the Mac uploader. Give the Mac only read access to witness evidence. Configure the weekly clean-room restore with the checked-in systemd timer and prove missed runs alert; do not schedule it through GitHub, AWS, Cloudflare, Backblaze jobs, or the production Mac.
+- [ ] Run checkpoint discovery/validation every 10 minutes with `ilo-checkpoint-witness.timer`, independently of the weekly full-restore timer. Alert when acceptance latency exceeds 30 minutes, a timer run is missed, or accepted-checkpoint age approaches one hour; make stale acceptance block deployments before the RPO is exceeded.
 - [ ] Add deterministic rehearsals for killed migration, killed controller at every state transition, corrupt state, stale pointer, pointer race, bad attestation, digest substitution, incompatible schema, broken candidate controller, Colima `Broken`, sleep/wake, reboot-after-login, Tunnel QUIC failure, and forced MCP retry.
 - [ ] Run the full rehearsal suite plus `pnpm verify`; retain sanitized evidence paths in the runbook.
 - [ ] Commit: `test: add mac deployment failure and recovery rehearsals`.
 
-### Task 14: Build and rehearse the private RDS transfer path
+### Task 14: Extend and rehearse the existing private RDS transfer path
 
 **Files:**
-- Create: `infra/transfer/{versions,variables,main,outputs}.tf`
-- Create: `infra/transfer/terraform.tfvars.example`
+- Modify: `infra/local-production-runtime.tf`
+- Modify: `.codex/scripts/production-runtime.mjs`
+- Modify: `.codex/scripts/production-runtime.test.ts`
 - Create: `deploy/mac-mini/rds-inspect.sh`
 - Create: `deploy/mac-mini/rds-transfer.sh`
 - Create: `docs/runbooks/mac-mini-rds-transfer.md`
 
-- [ ] Add temporary EC2/SSM resources in the existing public application subnet: current SSM agent, no inbound rules, minimal outbound, dedicated security group allowed only to RDS, and Session Manager remote-host forwarding.
+- [ ] Audit and extend the existing `aws_instance.local_production_tunnel`, its no-ingress security group, scoped runtime role, and Session Manager remote-host forwarding. Do not create a second transfer host/root. Add explicit cutover lifecycle and teardown evidence while retaining current IMDSv2, no-keypair, least-privilege, and database-only network constraints.
 - [ ] Capture RDS PostgreSQL major/minor, encoding, locale/collation provider/version, ICU/libc dependencies, extensions, roles/grants, and relevant settings. Select the pinned local Postgres digest only after comparing this report.
 - [ ] Rehearse TLS hostname/CA-validated forwarding, dump with equal/newer major tools, restore to an empty local database, explicit grants, reindex where required, `ANALYZE`, and validation of extensions, sequences, counts, Unicode ordering/case-folding/`ILIKE`/uniqueness, and encrypted fields.
 - [ ] Prove teardown removes the instance and temporary rules. Commit: `infra: add private rds transfer rehearsal path`.
@@ -325,6 +373,7 @@ expect(await request("/v1/connectors/google/callback?code=x&state=y")).toHaveSta
 - Create: `docs/runbooks/mac-mini-cutover.md`
 - Create: `docs/runbooks/mac-mini-aws-return.md`
 - Create: `docs/runbooks/mac-mini-aws-retirement.md`
+- Create: `docs/runbooks/mac-mini.md`
 - Create: `deploy/mac-mini/cutover-check.sh`
 - Create: `deploy/mac-mini/aws-return-check.sh`
 

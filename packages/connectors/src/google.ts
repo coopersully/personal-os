@@ -1,18 +1,31 @@
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
+import nodemailer from "nodemailer";
 import { z } from "zod";
+import { ConnectorError, connectorHttpError } from "./failures.js";
+import { providerFetch } from "./http.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  isCalendarMimeType,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_MIME_DEPTH,
+  MAX_MAIL_MIME_PARTS_PER_MESSAGE,
+  mailAttachmentMetadataIsBounded,
+} from "./mail-attachments.js";
 import type {
   CredentialResult,
+  GoogleAuthorizationService,
   GoogleConnector,
   GoogleCredentials,
   NormalizedRemoteEvent,
   NormalizedRemoteMailThread,
+  ProviderOperationOptions,
   ProviderProfile,
   RemoteCalendar,
   RemoteEventChange,
   RemoteMailbox,
   SyncResult,
 } from "./types.js";
-import { extractConferenceUrl } from "./types.js";
+import { extractConferenceUrl, throwIfProviderOperationCancelled } from "./types.js";
 
 const tokenResponseSchema = z.object({
   access_token: z.string(),
@@ -20,6 +33,12 @@ const tokenResponseSchema = z.object({
   refresh_token: z.string().optional(),
   scope: z.string().default(""),
   token_type: z.string().default("Bearer"),
+});
+
+const mailComposer = nodemailer.createTransport({
+  buffer: true,
+  newline: "unix",
+  streamTransport: true,
 });
 
 const profileSchema = z.object({
@@ -93,6 +112,33 @@ const gmailThreadListResponseSchema = z.object({
   nextPageToken: z.string().optional(),
   threads: z.array(z.object({ id: z.string() })).default([]),
 });
+const gmailProfileSchema = z.object({
+  historyId: z.string().min(1),
+});
+const gmailHistoryMessageSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+});
+const gmailHistoryRecordSchema = z.object({
+  id: z.string(),
+  labelsAdded: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  labelsRemoved: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  messagesAdded: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  messagesDeleted: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+});
+const gmailHistoryResponseSchema = z.object({
+  history: z.array(gmailHistoryRecordSchema).max(1_000).default([]),
+  historyId: z.string().min(1),
+  nextPageToken: z.string().optional(),
+});
+const gmailWatchResponseSchema = z.object({
+  expiration: z.string().regex(/^\d+$/u),
+  historyId: z.string().min(1),
+});
+const calendarWatchResponseSchema = z.object({
+  expiration: z.string().regex(/^\d+$/u),
+  resourceId: z.string().min(1),
+});
 const gmailHeaderSchema = z.object({ name: z.string(), value: z.string() });
 const gmailPartSchema = z.object({
   body: z
@@ -105,9 +151,11 @@ const gmailPartSchema = z.object({
   filename: z.string().default(""),
   headers: z.array(gmailHeaderSchema).default([]),
   mimeType: z.string().default(""),
+  partId: z.string().optional(),
   parts: z.array(z.unknown()).default([]),
 });
 const gmailMessageSchema = z.object({
+  historyId: z.string().optional(),
   id: z.string(),
   internalDate: z.string().optional(),
   labelIds: z.array(z.string()).default([]),
@@ -118,16 +166,21 @@ const gmailThreadSchema = z.object({
   id: z.string(),
   messages: z.array(gmailMessageSchema).min(1),
 });
+const gmailMinimalThreadSchema = z.object({
+  id: z.string(),
+  messages: z.array(z.object({ id: z.string(), labelIds: z.array(z.string()).default([]) })).min(1),
+});
 
 type GoogleEvent = z.infer<typeof eventSchema>;
 
-export class ConnectorError extends Error {
-  public readonly status: number;
+/** A local composition or credential-refresh failure before a Mail send request begins. */
+export class MailSendPreAcceptanceError extends Error {
+  public override readonly cause: unknown;
 
-  public constructor(message: string, status: number) {
+  public constructor(message: string, cause: unknown) {
     super(message);
-    this.name = "ConnectorError";
-    this.status = status;
+    this.name = "MailSendPreAcceptanceError";
+    this.cause = cause;
   }
 }
 
@@ -139,32 +192,38 @@ type GoogleConnectorOptions = {
   redirectUri: string;
 };
 
+const MAX_GMAIL_HISTORY_PAGES = 10;
+const MAX_GMAIL_FULL_SYNC_PAGES = 10;
+const MAX_GMAIL_SYNC_THREADS = 100;
+
 export function createGoogleConnector(options: GoogleConnectorOptions): GoogleConnector {
   const request = options.fetch ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
 
   function requireConfiguration(): void {
     if (!options.clientId || !options.clientSecret) {
-      throw new ConnectorError("Google Calendar is not configured.", 503);
+      throw new ConnectorError({
+        category: "configuration",
+        code: "google_not_configured",
+        disposition: "operator",
+        message: "Google Calendar is not configured.",
+        status: 503,
+      });
     }
   }
 
   async function parseResponse(response: Response): Promise<unknown> {
-    if (!response.ok) {
-      const body = await response.text();
-      throw new ConnectorError(
-        `Google API request failed (${response.status}): ${body}`,
-        response.status,
-      );
-    }
+    if (!response.ok) throw await connectorHttpError(response, "google");
     return response.status === 204 ? null : response.json();
   }
 
   async function exchangeToken(
     parameters: URLSearchParams,
+    operation?: ProviderOperationOptions,
   ): Promise<z.infer<typeof tokenResponseSchema>> {
     requireConfiguration();
-    const response = await request("https://oauth2.googleapis.com/token", {
+    throwIfProviderOperationCancelled(operation);
+    const response = await providerFetch(request, "https://oauth2.googleapis.com/token", {
       body: parameters,
       headers: { "content-type": "application/x-www-form-urlencoded" },
       method: "POST",
@@ -172,7 +231,11 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     return tokenResponseSchema.parse(await parseResponse(response));
   }
 
-  async function validCredentials(credentials: GoogleCredentials): Promise<GoogleCredentials> {
+  async function validCredentials(
+    credentials: GoogleCredentials,
+    operation?: ProviderOperationOptions,
+  ): Promise<GoogleCredentials> {
+    throwIfProviderOperationCancelled(operation);
     if (new Date(credentials.expiresAt).getTime() > now().getTime() + 60_000) {
       return credentials;
     }
@@ -183,6 +246,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         grant_type: "refresh_token",
         refresh_token: credentials.refreshToken,
       }),
+      operation,
     );
     return {
       accessToken: token.access_token,
@@ -197,8 +261,10 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     credentials: GoogleCredentials,
     input: string,
     init: RequestInit = {},
+    operation?: ProviderOperationOptions,
   ): Promise<{ credentials: GoogleCredentials; response: Response }> {
-    const currentCredentials = await validCredentials(credentials);
+    throwIfProviderOperationCancelled(operation);
+    const currentCredentials = await validCredentials(credentials, operation);
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${currentCredentials.accessToken}`);
     if (init.body) {
@@ -206,24 +272,30 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     }
     return {
       credentials: currentCredentials,
-      response: await request(input, { ...init, headers }),
+      response: await providerFetch(request, input, {
+        ...init,
+        headers,
+        ...(operation?.signal ? { signal: operation.signal } : {}),
+      }),
     };
   }
 
   async function listCalendars(
     credentials: GoogleCredentials,
+    operation?: ProviderOperationOptions,
   ): Promise<CredentialResult<RemoteCalendar[]>> {
     let pageToken: string | undefined;
     let currentCredentials = credentials;
     const calendars: RemoteCalendar[] = [];
     do {
+      throwIfProviderOperationCancelled(operation);
       const url = new URL("https://www.googleapis.com/calendar/v3/users/me/calendarList");
       url.searchParams.set("maxResults", "250");
       url.searchParams.set("showDeleted", "false");
       if (pageToken) {
         url.searchParams.set("pageToken", pageToken);
       }
-      const result = await authenticatedRequest(currentCredentials, url.toString());
+      const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
       currentCredentials = result.credentials;
       const page = calendarListResponseSchema.parse(await parseResponse(result.response));
       calendars.push(
@@ -247,12 +319,14 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     credentials: GoogleCredentials,
     remoteCalendarId: string,
     syncToken: string | null,
+    operation?: ProviderOperationOptions,
   ): Promise<SyncResult> {
     let pageToken: string | undefined;
     let currentCredentials = credentials;
     let nextSyncToken: string | undefined;
     const changes: RemoteEventChange[] = [];
     do {
+      throwIfProviderOperationCancelled(operation);
       const url = new URL(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events`,
       );
@@ -265,7 +339,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       if (pageToken) {
         url.searchParams.set("pageToken", pageToken);
       }
-      const result = await authenticatedRequest(currentCredentials, url.toString());
+      const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
       currentCredentials = result.credentials;
       const page = eventListResponseSchema.parse(await parseResponse(result.response));
       changes.push(...page.items.map((event) => normalizeChange(event, "UTC")));
@@ -273,7 +347,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       nextSyncToken = page.nextSyncToken ?? nextSyncToken;
     } while (pageToken);
     if (!nextSyncToken) {
-      throw new ConnectorError("Google Calendar did not return a synchronization token.", 502);
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_sync_token_missing",
+        disposition: "operator",
+        message: "Google Calendar did not return a synchronization token.",
+        status: 502,
+      });
     }
     return {
       credentials: currentCredentials,
@@ -281,26 +361,193 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     };
   }
 
+  async function listMailboxes(
+    credentials: GoogleCredentials,
+    operation?: ProviderOperationOptions,
+  ): Promise<CredentialResult<RemoteMailbox[]>> {
+    const result = await authenticatedRequest(
+      credentials,
+      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      {},
+      operation,
+    );
+    const page = labelListResponseSchema.parse(await parseResponse(result.response));
+    return {
+      credentials: result.credentials,
+      value: page.labels.map((label) => ({
+        id: label.id,
+        name: label.name,
+        role: mailboxRole(label.id),
+        totalCount: label.messagesTotal,
+        unreadCount: label.messagesUnread,
+      })),
+    };
+  }
+
+  async function fetchMailThread(
+    credentials: GoogleCredentials,
+    threadId: string,
+    operation?: ProviderOperationOptions,
+  ): Promise<CredentialResult<NormalizedRemoteMailThread | null>> {
+    const result = await authenticatedRequest(
+      credentials,
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
+      {},
+      operation,
+    );
+    if (result.response.status === 404) {
+      await result.response.body?.cancel().catch(() => undefined);
+      return { credentials: result.credentials, value: null };
+    }
+    return {
+      credentials: result.credentials,
+      value: normalizeMailThread(gmailThreadSchema.parse(await parseResponse(result.response))),
+    };
+  }
+
+  async function fullMailSync(
+    credentials: GoogleCredentials,
+    mailboxes: RemoteMailbox[],
+    operation?: ProviderOperationOptions,
+  ) {
+    const profileResult = await authenticatedRequest(
+      credentials,
+      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+      {},
+      operation,
+    );
+    const profile = gmailProfileSchema.parse(await parseResponse(profileResult.response));
+    const threadIds: string[] = [];
+    let pageToken: string | undefined;
+    const seenPageTokens = new Set<string>();
+    let pageCount = 0;
+    let currentCredentials = profileResult.credentials;
+    do {
+      throwIfProviderOperationCancelled(operation);
+      const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
+      url.searchParams.set("maxResults", String(MAX_GMAIL_SYNC_THREADS - threadIds.length));
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
+      currentCredentials = result.credentials;
+      const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
+      pageCount += 1;
+      threadIds.push(
+        ...page.threads
+          .slice(0, MAX_GMAIL_SYNC_THREADS - threadIds.length)
+          .map((thread) => thread.id),
+      );
+      const nextPageToken =
+        threadIds.length < MAX_GMAIL_SYNC_THREADS ? page.nextPageToken : undefined;
+      if (
+        nextPageToken &&
+        (pageCount >= MAX_GMAIL_FULL_SYNC_PAGES || seenPageTokens.has(nextPageToken))
+      ) {
+        throw new ConnectorError({
+          category: "invalid_response",
+          code: "google_mail_page_limit_exceeded",
+          disposition: "retry",
+          message: "Google Mail pagination did not complete safely.",
+          status: 502,
+        });
+      }
+      if (nextPageToken) seenPageTokens.add(nextPageToken);
+      pageToken = nextPageToken;
+    } while (pageToken);
+    const threads: NormalizedRemoteMailThread[] = [];
+    const deletedThreadIds: string[] = [];
+    for (const threadId of threadIds) {
+      throwIfProviderOperationCancelled(operation);
+      const result = await fetchMailThread(currentCredentials, threadId, operation);
+      currentCredentials = result.credentials;
+      if (result.value) threads.push(result.value);
+      else deletedThreadIds.push(threadId);
+    }
+    return {
+      credentials: currentCredentials,
+      value: {
+        deletedThreadIds,
+        mailboxes,
+        nextSyncToken: profile.historyId,
+        reset: true,
+        threads,
+      },
+    };
+  }
+
+  function providerExpiration(value: string): string {
+    const milliseconds = Number(value);
+    const date = new Date(milliseconds);
+    if (!Number.isSafeInteger(milliseconds) || Number.isNaN(date.getTime())) {
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_watch_expiration_invalid",
+        disposition: "operator",
+        message: "Google returned an invalid notification expiration.",
+        status: 502,
+      });
+    }
+    return date.toISOString();
+  }
+
+  async function watchCalendar(
+    credentials: GoogleCredentials,
+    url: string,
+    channel: { address: string; id: string; token: string },
+    operation?: ProviderOperationOptions,
+  ) {
+    const result = await authenticatedRequest(
+      credentials,
+      url,
+      {
+        body: JSON.stringify({
+          address: channel.address,
+          id: channel.id,
+          token: channel.token,
+          type: "web_hook",
+        }),
+        method: "POST",
+      },
+      operation,
+    );
+    const watch = calendarWatchResponseSchema.parse(await parseResponse(result.response));
+    return {
+      credentials: result.credentials,
+      value: { expiresAt: providerExpiration(watch.expiration), resourceId: watch.resourceId },
+    };
+  }
+
   return {
-    authorizationUrl(state: string, loginHint?: string): string {
+    authorizationUrl(
+      state: string,
+      codeChallenge: string,
+      loginHint?: string,
+      services: GoogleAuthorizationService[] = ["calendar", "mail"],
+    ): string {
       requireConfiguration();
+      const scopes = ["openid", "email", "profile"];
+      if (services.includes("calendar")) {
+        scopes.push(
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+          "https://www.googleapis.com/auth/calendar.events",
+        );
+      }
+      if (services.includes("mail")) {
+        scopes.push(
+          "https://www.googleapis.com/auth/gmail.modify",
+          "https://www.googleapis.com/auth/gmail.send",
+        );
+      }
       const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       url.search = new URLSearchParams({
         access_type: "offline",
         client_id: options.clientId,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
         include_granted_scopes: "true",
         prompt: "consent",
         redirect_uri: options.redirectUri,
         response_type: "code",
-        scope: [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-          "https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/gmail.modify",
-          "https://www.googleapis.com/auth/gmail.send",
-        ].join(" "),
+        scope: scopes.join(" "),
         state,
       }).toString();
       if (loginHint) url.searchParams.set("login_hint", loginHint);
@@ -327,18 +574,29 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async exchangeCode(code: string): Promise<GoogleCredentials> {
+    async exchangeCode(
+      code: string,
+      codeVerifier: string,
+      redirectUri = options.redirectUri,
+    ): Promise<GoogleCredentials> {
       const token = await exchangeToken(
         new URLSearchParams({
           client_id: options.clientId,
           client_secret: options.clientSecret,
           code,
+          code_verifier: codeVerifier,
           grant_type: "authorization_code",
-          redirect_uri: options.redirectUri,
+          redirect_uri: redirectUri,
         }),
       );
       if (!token.refresh_token) {
-        throw new ConnectorError("Google did not return an offline refresh token.", 400);
+        throw new ConnectorError({
+          category: "invalid_response",
+          code: "google_refresh_token_missing",
+          disposition: "operator",
+          message: "Google did not return an offline refresh token.",
+          status: 400,
+        });
       }
       return {
         accessToken: token.access_token,
@@ -368,44 +626,138 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
     listCalendars,
 
-    async syncMail(credentials) {
-      const labelResult = await authenticatedRequest(
+    async watchGmail(credentials, topicName, operation) {
+      const result = await authenticatedRequest(
         credentials,
-        "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+        "https://gmail.googleapis.com/gmail/v1/users/me/watch",
+        { body: JSON.stringify({ topicName }), method: "POST" },
+        operation,
       );
-      const labelPage = labelListResponseSchema.parse(await parseResponse(labelResult.response));
-      const mailboxes: RemoteMailbox[] = labelPage.labels.map((label) => ({
-        id: label.id,
-        name: label.name,
-        role: mailboxRole(label.id),
-        totalCount: label.messagesTotal,
-        unreadCount: label.messagesUnread,
-      }));
-      const threadIds: string[] = [];
+      const watch = gmailWatchResponseSchema.parse(await parseResponse(result.response));
+      return {
+        credentials: result.credentials,
+        value: {
+          expiresAt: providerExpiration(watch.expiration),
+          historyId: watch.historyId,
+        },
+      };
+    },
+
+    async watchCalendarList(credentials, channel, operation) {
+      return watchCalendar(
+        credentials,
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList/watch",
+        channel,
+        operation,
+      );
+    },
+
+    async watchCalendarEvents(credentials, remoteCalendarId, channel, operation) {
+      return watchCalendar(
+        credentials,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events/watch`,
+        channel,
+        operation,
+      );
+    },
+
+    async stopCalendarWatch(credentials, channelId, resourceId, operation) {
+      const result = await authenticatedRequest(
+        credentials,
+        "https://www.googleapis.com/calendar/v3/channels/stop",
+        { body: JSON.stringify({ id: channelId, resourceId }), method: "POST" },
+        operation,
+      );
+      await parseResponse(result.response);
+      return result.credentials;
+    },
+
+    async getMailThreadState(credentials, remoteThreadId) {
+      const result = await authenticatedRequest(
+        credentials,
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(remoteThreadId)}?format=minimal`,
+      );
+      const thread = gmailMinimalThreadSchema.parse(await parseResponse(result.response));
+      const mailboxIds = [...new Set(thread.messages.flatMap((message) => message.labelIds))];
+      return {
+        credentials: result.credentials,
+        value: {
+          mailboxIds,
+          remoteThreadId: thread.id,
+          starred: mailboxIds.includes("STARRED"),
+          unread: mailboxIds.includes("UNREAD"),
+        },
+      };
+    },
+
+    async syncMail(credentials, syncToken, operation) {
+      throwIfProviderOperationCancelled(operation);
+      const mailboxResult = await listMailboxes(credentials, operation);
+      if (!syncToken) {
+        return fullMailSync(mailboxResult.credentials, mailboxResult.value, operation);
+      }
+
+      const threadIds = new Set<string>();
       let pageToken: string | undefined;
-      let currentCredentials = labelResult.credentials;
+      let currentCredentials = mailboxResult.credentials;
+      let nextSyncToken = syncToken;
+      let pageCount = 0;
       do {
-        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
-        url.searchParams.set("maxResults", String(100 - threadIds.length));
+        throwIfProviderOperationCancelled(operation);
+        pageCount += 1;
+        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+        url.searchParams.set("maxResults", "500");
+        url.searchParams.set("startHistoryId", syncToken);
         if (pageToken) url.searchParams.set("pageToken", pageToken);
-        const result = await authenticatedRequest(currentCredentials, url.toString());
-        currentCredentials = result.credentials;
-        const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
-        threadIds.push(...page.threads.map((thread) => thread.id));
-        pageToken = threadIds.length < 100 ? page.nextPageToken : undefined;
-      } while (pageToken);
-      const threadResults: Array<z.infer<typeof gmailThreadSchema>> = [];
-      for (const threadId of threadIds) {
         const result = await authenticatedRequest(
           currentCredentials,
-          `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
+          url.toString(),
+          {},
+          operation,
         );
         currentCredentials = result.credentials;
-        threadResults.push(gmailThreadSchema.parse(await parseResponse(result.response)));
+        if (result.response.status === 404) {
+          await result.response.body?.cancel().catch(() => undefined);
+          return fullMailSync(currentCredentials, mailboxResult.value, operation);
+        }
+        const page = gmailHistoryResponseSchema.parse(await parseResponse(result.response));
+        for (const history of page.history) {
+          for (const change of [
+            ...history.messagesAdded,
+            ...history.messagesDeleted,
+            ...history.labelsAdded,
+            ...history.labelsRemoved,
+          ]) {
+            threadIds.add(change.message.threadId);
+            if (threadIds.size > MAX_GMAIL_SYNC_THREADS) {
+              return fullMailSync(currentCredentials, mailboxResult.value, operation);
+            }
+          }
+        }
+        nextSyncToken = page.historyId;
+        pageToken = page.nextPageToken;
+        if (pageToken && pageCount >= MAX_GMAIL_HISTORY_PAGES) {
+          return fullMailSync(currentCredentials, mailboxResult.value, operation);
+        }
+      } while (pageToken);
+      const threads: NormalizedRemoteMailThread[] = [];
+      const deletedThreadIds: string[] = [];
+      for (const threadId of threadIds) {
+        throwIfProviderOperationCancelled(operation);
+        const result = await fetchMailThread(currentCredentials, threadId, operation);
+        currentCredentials = result.credentials;
+        if (result.value) threads.push(result.value);
+        else deletedThreadIds.push(threadId);
       }
       return {
         credentials: currentCredentials,
-        value: { mailboxes, threads: threadResults.map(normalizeMailThread) },
+        value: {
+          deletedThreadIds,
+          mailboxes: mailboxResult.value,
+          nextSyncToken,
+          reset: false,
+          threads,
+        },
       };
     },
 
@@ -426,44 +778,70 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async sendMail(credentials, input) {
-      const recipients = (addresses: typeof input.to) =>
-        addresses
-          .map((address) =>
-            address.name ? `${address.name} <${address.address}>` : address.address,
-          )
-          .join(", ");
-      const raw = [
-        `To: ${recipients(input.to)}`,
-        ...(input.cc.length ? [`Cc: ${recipients(input.cc)}`] : []),
-        `Subject: ${input.subject}`,
-        "MIME-Version: 1.0",
-        'Content-Type: text/plain; charset="UTF-8"',
-        "",
-        input.body,
-      ].join("\r\n");
+    async trashMailThread(credentials, remoteThreadId) {
       const result = await authenticatedRequest(
         credentials,
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        {
-          body: JSON.stringify({
-            raw: Buffer.from(raw).toString("base64url"),
-            ...(input.threadId ? { threadId: input.threadId } : {}),
-          }),
-          method: "POST",
-        },
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(remoteThreadId)}/trash`,
+        { method: "POST" },
       );
       await parseResponse(result.response);
       return result.credentials;
     },
 
-    /* v8 ignore stop */
-    async syncCalendar(credentials, remoteCalendarId, syncToken) {
+    async sendMail(credentials, input) {
+      let currentCredentials: GoogleCredentials;
+      let raw: Buffer;
       try {
-        return await syncOnce(credentials, remoteCalendarId, syncToken);
+        const composed = (await mailComposer.sendMail({
+          cc: input.cc.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
+          from: input.from,
+          subject: input.subject,
+          text: input.body,
+          to: input.to.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
+        })) as { message: Buffer | string };
+        raw = Buffer.isBuffer(composed.message)
+          ? composed.message
+          : Buffer.from(String(composed.message));
+        currentCredentials = await validCredentials(credentials);
+      } catch (error) {
+        throw new MailSendPreAcceptanceError(
+          "Google Mail could not prepare or authorize the send request.",
+          error,
+        );
+      }
+      const headers = new Headers({ authorization: `Bearer ${currentCredentials.accessToken}` });
+      headers.set("content-type", "application/json");
+      const response = await providerFetch(
+        request,
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        {
+          body: JSON.stringify({
+            raw: raw.toString("base64url"),
+            ...(input.threadId ? { threadId: input.threadId } : {}),
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      // Once the send request begins, every response/transport failure is ambiguous.
+      await parseResponse(response);
+      return currentCredentials;
+    },
+
+    /* v8 ignore stop */
+    async syncCalendar(credentials, remoteCalendarId, syncToken, operation) {
+      try {
+        return await syncOnce(credentials, remoteCalendarId, syncToken, operation);
       } catch (error) {
         if (syncToken && error instanceof ConnectorError && error.status === 410) {
-          const result = await syncOnce(credentials, remoteCalendarId, null);
+          throwIfProviderOperationCancelled(operation);
+          const result = await syncOnce(credentials, remoteCalendarId, null, operation);
           return { ...result, value: { ...result.value, reset: true } };
         }
         throw error;
@@ -489,6 +867,26 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
   };
 }
 
+export function googleGrantedServices(
+  credentials: GoogleCredentials,
+): GoogleAuthorizationService[] {
+  const scopes = new Set(credentials.scope.split(/\s+/).filter(Boolean));
+  const fullCalendar = scopes.has("https://www.googleapis.com/auth/calendar");
+  const calendarList =
+    fullCalendar ||
+    scopes.has("https://www.googleapis.com/auth/calendar.readonly") ||
+    scopes.has("https://www.googleapis.com/auth/calendar.calendarlist.readonly");
+  const calendarEvents =
+    fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
+  const fullMail = scopes.has("https://mail.google.com/");
+  const mailManage = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
+  const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
+  return [
+    ...(calendarList && calendarEvents ? (["calendar"] as const) : []),
+    ...(mailManage && mailSend ? (["mail"] as const) : []),
+  ];
+}
+
 function mailboxRole(id: string): RemoteMailbox["role"] {
   const roles: Record<string, RemoteMailbox["role"]> = {
     DRAFT: "drafts",
@@ -511,14 +909,17 @@ function normalizeMailThread(
     from: parseMailAddress(gmailHeader(last, "from")),
     mailboxIds: [...new Set(thread.messages.flatMap((message) => message.labelIds))],
     messages: thread.messages.map((message) => ({
-      attachments: gmailAttachments(message.payload),
+      attachments: projectGmailAttachments(message.payload),
       bodyText: gmailBody(message.payload).trim(),
       cc: splitAddresses(gmailHeader(message, "cc")),
       from: parseMailAddress(gmailHeader(message, "from")),
+      mailboxIds: message.labelIds,
+      providerRevision: message.historyId ?? message.internalDate ?? null,
       receivedAt: normalizedGmailDate(message.internalDate),
       remoteMessageId: message.id,
       to: splitAddresses(gmailHeader(message, "to")),
     })),
+    messagesComplete: true,
     messageCount: thread.messages.length,
     receivedAt: Number.isNaN(receivedAt.getTime()) ? new Date(0) : receivedAt,
     remoteThreadId: thread.id,
@@ -536,38 +937,81 @@ function normalizedGmailDate(value: string | undefined): Date {
   return Number.isNaN(date.getTime()) ? new Date(0) : date;
 }
 
-/* v8 ignore start -- attachment metadata is projected verbatim; download bytes stay provider-owned */
-function gmailAttachments(part: z.infer<typeof gmailPartSchema>) {
-  const attachments = part.filename
-    ? [
-        {
-          contentType: part.mimeType || "application/octet-stream",
-          filename: part.filename,
-          id: part.body.attachmentId ?? part.filename,
-          size: part.body.size ?? 0,
-        },
-      ]
-    : [];
-  for (const child of part.parts) {
-    const parsed = gmailPartSchema.safeParse(child);
-    if (parsed.success) attachments.push(...gmailAttachments(parsed.data));
+export function projectGmailAttachments(part: z.infer<typeof gmailPartSchema>) {
+  const attachments = [];
+  const pending: Array<{ depth: number; part: z.infer<typeof gmailPartSchema> }> = [
+    { depth: 0, part },
+  ];
+  let calendarParts = 0;
+  let visitedParts = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) break;
+    visitedParts += 1;
+    if (
+      current.depth > MAX_MAIL_MIME_DEPTH ||
+      visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE ||
+      current.part.parts.length + pending.length + visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE
+    ) {
+      return [calendarAttachmentProjectionOverflow("part:projection-overflow")];
+    }
+    const providerPartId = current.part.partId || "root";
+    if (
+      !mailAttachmentMetadataIsBounded(
+        current.part.mimeType,
+        current.part.filename,
+        providerPartId,
+        current.part.body.attachmentId,
+      )
+    ) {
+      return [calendarAttachmentProjectionOverflow("part:projection-overflow")];
+    }
+    const calendarPart = isCalendarMimeType(current.part.mimeType);
+    if (calendarPart && ++calendarParts > MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE) {
+      return [calendarAttachmentProjectionOverflow("part:projection-overflow")];
+    }
+    if (current.part.filename.length > 0 || calendarPart) {
+      attachments.push({
+        contentType: current.part.mimeType || "application/octet-stream",
+        filename: current.part.filename,
+        id: current.part.body.attachmentId ?? `part:${providerPartId}`,
+        providerAttachmentId: current.part.body.attachmentId ?? null,
+        providerPartId,
+        size: current.part.body.size ?? 0,
+      });
+    }
+    for (let index = current.part.parts.length - 1; index >= 0; index -= 1) {
+      const parsed = gmailPartSchema.safeParse(current.part.parts[index]);
+      if (parsed.success) pending.push({ depth: current.depth + 1, part: parsed.data });
+    }
   }
   return attachments;
 }
-/* v8 ignore stop */
 
 function gmailHeader(message: z.infer<typeof gmailMessageSchema>, name: string): string {
   return message.payload.headers.find((header) => header.name.toLowerCase() === name)?.value ?? "";
 }
 
-function gmailBody(part: z.infer<typeof gmailPartSchema>): string {
+function gmailBody(
+  part: z.infer<typeof gmailPartSchema>,
+  state = { visitedParts: 0 },
+  depth = 0,
+): string {
+  state.visitedParts += 1;
+  if (
+    depth > MAX_MAIL_MIME_DEPTH ||
+    state.visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE ||
+    part.parts.length + state.visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE
+  ) {
+    return "";
+  }
   if (part.mimeType === "text/plain" && part.body.data) {
     return Buffer.from(part.body.data, "base64url").toString("utf8");
   }
   for (const child of part.parts) {
     const parsed = gmailPartSchema.safeParse(child);
     if (!parsed.success) continue;
-    const value = gmailBody(parsed.data);
+    const value = gmailBody(parsed.data, state, depth + 1);
     if (value) return value;
   }
   return part.body.data ? Buffer.from(part.body.data, "base64url").toString("utf8") : "";
@@ -595,7 +1039,13 @@ function normalizeChange(event: GoogleEvent, fallbackTimezone: string): RemoteEv
 
 function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): NormalizedRemoteEvent {
   if (!event.start || !event.end) {
-    throw new ConnectorError("Google returned an event without start or end data.", 502);
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "google_event_range_missing",
+      disposition: "operator",
+      message: "Google returned an event without start or end data.",
+      status: 502,
+    });
   }
   const allDay = Boolean(event.start.date);
   const startValue =
@@ -604,7 +1054,13 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
   const startsAt = new Date(startValue);
   const endsAt = new Date(endValue);
   if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
-    throw new ConnectorError("Google returned an event with invalid dates.", 502);
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "google_event_range_invalid",
+      disposition: "operator",
+      message: "Google returned an event with invalid dates.",
+      status: 502,
+    });
   }
   return {
     allDay,

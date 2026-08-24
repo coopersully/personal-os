@@ -4,7 +4,9 @@
  * generic mutable object.
  */
 
+import { z } from "zod";
 import type { AccessScope } from "./auth.js";
+import { idSchema } from "./common.js";
 
 export const featureIds = [
   "automations",
@@ -43,17 +45,42 @@ export const connectorCapabilities = [
 
 export type ConnectorCapability = (typeof connectorCapabilities)[number];
 
+export const googleConnectionServiceSchema = z.enum(["calendar", "mail"]);
+export type GoogleConnectionService = z.infer<typeof googleConnectionServiceSchema>;
+
+export const startGoogleAuthorizationInputSchema = z.object({
+  accountId: idSchema.optional(),
+  returnTo: z
+    .enum(["/setup", "/settings?section=connections"])
+    .default("/settings?section=connections"),
+  services: z.array(googleConnectionServiceSchema).min(1).default(["calendar", "mail"]),
+});
+export type StartGoogleAuthorizationInput = z.infer<typeof startGoogleAuthorizationInputSchema>;
+
 /**
  * A durable attribution record for a projection, recommendation, or proposed
  * mutation. The source provider remains authoritative for connected material.
  */
-export type MaterialSourceReference = {
-  accountId: string | null;
-  provider: "google" | "icloud" | "local" | "plaid" | "x";
-  remoteId: string | null;
-  revision: string | null;
-  sourceType: "calendar_event" | "finance_transaction" | "mail_thread" | "bookmark" | "local";
-};
+export const materialSourceReferenceSchema = z.object({
+  accountId: z.uuid().nullable(),
+  provider: z.enum(["google", "icloud", "local", "paypal", "plaid", "venmo", "x", "zelle"]),
+  remoteId: z.string().nullable(),
+  revision: z.string().nullable(),
+  sourceType: z.enum([
+    "calendar_event",
+    "finance_account",
+    "finance_income_stream",
+    "finance_recurring_obligation",
+    "finance_transaction",
+    "mail_thread",
+    "reminder",
+    "task",
+    "goal",
+    "bookmark",
+    "local",
+  ]),
+});
+export type MaterialSourceReference = z.infer<typeof materialSourceReferenceSchema>;
 
 /**
  * Feature modules use this shape when exposing a provider action to the API,

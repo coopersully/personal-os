@@ -13,7 +13,7 @@ services:
       timeout: 3s
       retries: 20
     ports:
-      - "127.0.0.1:55433:5432"
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-55433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -28,6 +28,9 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8081,tauri://localhost,http://tauri.localhost}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8788}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8081}
+      AGENT_SKILL_REVISION: ${AGENT_SKILL_REVISION:-v0.2.0}
+      AGENT_SKILL_SOURCE_URL: ${AGENT_SKILL_SOURCE_URL:-}
+      AGENT_SKILL_VERSION: ${AGENT_SKILL_VERSION:-0.2.0}
       AUTH_RATE_LIMIT_MAX_REQUESTS: ${AUTH_RATE_LIMIT_MAX_REQUESTS:-20}
       AUTH_RATE_LIMIT_WINDOW_SECONDS: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:-300}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY to a base64-encoded 32-byte key}
@@ -53,7 +56,7 @@ services:
       timeout: 4s
       retries: 20
     ports:
-      - "8788:8787"
+      - "127.0.0.1:${LOCAL_API_PORT:-8788}:8787"
 
   mcp:
     build:
@@ -63,12 +66,14 @@ services:
       api:
         condition: service_healthy
     environment:
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8081}
       HOST: 0.0.0.0
       PERSONAL_OS_API_URL: http://api:8787
       MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
       MCP_RATE_LIMIT_MAX_REQUESTS: ${MCP_RATE_LIMIT_MAX_REQUESTS:-120}
       MCP_RATE_LIMIT_WINDOW_SECONDS: ${MCP_RATE_LIMIT_WINDOW_SECONDS:-60}
       MCP_TRUST_PROXY: ${MCP_TRUST_PROXY:-false}
+      MCP_INCLUDE_COMPATIBILITY_TOOLS: ${MCP_INCLUDE_COMPATIBILITY_TOOLS:-false}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:8789}
       MCP_INTERNAL_SECRET: ${MCP_INTERNAL_SECRET:?Set MCP_INTERNAL_SECRET to a random shared secret}
       PORT: 8788
@@ -78,7 +83,7 @@ services:
       timeout: 4s
       retries: 20
     ports:
-      - "8789:8788"
+      - "127.0.0.1:${LOCAL_MCP_PORT:-8789}:8788"
 
   web:
     build:
@@ -90,7 +95,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "8081:8080"
+      - "127.0.0.1:${LOCAL_WEB_PORT:-8081}:8080"
 
 volumes:
   postgres-data:

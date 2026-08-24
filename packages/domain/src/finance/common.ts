@@ -41,16 +41,16 @@ export const financeOutcomeSchema = z.enum([
 ]);
 export type FinanceOutcome = z.infer<typeof financeOutcomeSchema>;
 
-export const financeQuestionSchema = z.object({
+export const financeInteractionQuestionSchema = z.object({
   answerType: z.string().min(1).max(120),
   id: z.string().min(1).max(240),
   prompt: z.string().trim().min(1).max(1_000),
 });
-export type FinanceQuestion = z.infer<typeof financeQuestionSchema>;
+export type FinanceInteractionQuestion = z.infer<typeof financeInteractionQuestionSchema>;
 
 export const financeCommunicationSchema = z.object({
   headline: z.string().trim().min(1).max(500),
-  nextQuestion: financeQuestionSchema.optional(),
+  nextQuestion: financeInteractionQuestionSchema.optional(),
   optionalDetails: z.array(z.string().trim().min(1).max(2_000)).max(50),
   requiredDisclosures: z
     .array(

@@ -142,35 +142,61 @@ resource "aws_ecs_task_definition" "api" {
     operating_system_family = "LINUX"
   }
 
+  lifecycle {
+    precondition {
+      condition     = !var.plaid_enabled || var.plaid_environment == "production"
+      error_message = "Production Plaid credentials require plaid_environment=production."
+    }
+  }
+
   container_definitions = jsonencode([{
     name           = "api"
     image          = "${aws_ecr_repository.api.repository_url}:bootstrap"
     essential      = true
+    stopTimeout    = 120
     portMappings   = [{ containerPort = 8787, hostPort = 8787, protocol = "tcp" }]
     mountPoints    = []
     systemControls = []
     volumesFrom    = []
-    environment = [
-      { name = "NODE_ENV", value = "production" },
-      { name = "PORT", value = "8787" },
-      { name = "APP_BASE_URL", value = "https://${local.app_domain}" },
-      { name = "API_BASE_URL", value = "https://${local.api_domain}" },
-      { name = "ALLOWED_ORIGINS", value = "https://${local.app_domain}" },
-      { name = "EMAIL_FROM", value = var.email_from },
-      { name = "GOOGLE_CLIENT_ID", value = var.google_client_id },
-      { name = "GOOGLE_REDIRECT_URI", value = "https://${local.api_domain}/v1/connectors/google/callback" },
-      { name = "MCP_RESOURCE_URL", value = "https://${local.mcp_domain}/mcp" },
-      { name = "OWNER_EMAILS", value = var.owner_emails },
-      { name = "PLAID_ENV", value = var.plaid_environment },
-      { name = "REGISTRATION_MODE", value = "invite" },
-      { name = "TRUST_PROXY", value = "true" },
-      { name = "LOG_LEVEL", value = "info" },
-      { name = "X_REDIRECT_URI", value = "https://${local.api_domain}/v1/x-bookmarks/callback" },
-    ]
+    environment = concat(
+      [
+        { name = "NODE_ENV", value = "production" },
+        { name = "PORT", value = "8787" },
+        { name = "APP_BASE_URL", value = "https://${local.app_domain}" },
+        { name = "API_BASE_URL", value = "https://${local.api_domain}" },
+        { name = "API_SHUTDOWN_TIMEOUT_MS", value = "105000" },
+        { name = "ALLOWED_ORIGINS", value = "https://${local.app_domain}" },
+        { name = "EMAIL_FROM", value = var.email_from },
+        { name = "GOOGLE_REDIRECT_URI", value = "https://${local.api_domain}/v1/connectors/google/callback" },
+        { name = "MCP_RESOURCE_URL", value = "https://${local.mcp_domain}/mcp" },
+        { name = "OWNER_EMAILS", value = var.owner_emails },
+        { name = "PLAID_ENV", value = var.plaid_environment },
+        { name = "REGISTRATION_MODE", value = "invite" },
+        { name = "TRUST_PROXY", value = "true" },
+        { name = "LOG_LEVEL", value = "info" },
+        { name = "X_REDIRECT_URI", value = "https://${local.api_domain}/v1/x-bookmarks/callback" },
+      ],
+      var.google_gmail_push_enabled ? [
+        { name = "GOOGLE_GMAIL_PUSH_ENABLED", value = "true" },
+        { name = "GOOGLE_GMAIL_PUBSUB_TOPIC", value = var.google_gmail_pubsub_topic },
+        { name = "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION", value = var.google_gmail_pubsub_subscription },
+        { name = "GOOGLE_GMAIL_PUSH_AUDIENCE", value = "https://${local.api_domain}/v1/connectors/google/gmail/notifications" },
+        { name = "GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT", value = var.google_gmail_push_service_account },
+      ] : [],
+      var.google_calendar_push_enabled ? [
+        { name = "GOOGLE_CALENDAR_PUSH_ENABLED", value = "true" },
+        { name = "GOOGLE_CALENDAR_WEBHOOK_URL", value = "https://${local.api_domain}/v1/connectors/google/calendar/notifications" },
+      ] : [],
+      var.icloud_mail_idle_enabled ? [
+        { name = "ICLOUD_MAIL_IDLE_ENABLED", value = "true" },
+        { name = "ICLOUD_MAIL_IDLE_CONCURRENCY", value = tostring(var.icloud_mail_idle_concurrency) },
+      ] : [],
+    )
     secrets = concat(
       [
         { name = "APP_ENCRYPTION_KEY", valueFrom = local.runtime_parameter_arns.APP_ENCRYPTION_KEY },
         { name = "DATABASE_URL", valueFrom = local.runtime_parameter_arns.DATABASE_URL },
+        { name = "GOOGLE_CLIENT_ID", valueFrom = local.runtime_parameter_arns.GOOGLE_CLIENT_ID },
         { name = "GOOGLE_CLIENT_SECRET", valueFrom = local.runtime_parameter_arns.GOOGLE_CLIENT_SECRET },
         { name = "MCP_INTERNAL_SECRET", valueFrom = local.runtime_parameter_arns.MCP_INTERNAL_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.runtime_parameter_arns.RESEND_API_KEY },
@@ -232,6 +258,7 @@ resource "aws_ecs_task_definition" "mcp" {
     systemControls = []
     volumesFrom    = []
     environment = [
+      { name = "APP_BASE_URL", value = "https://${local.app_domain}" },
       { name = "HOST", value = "0.0.0.0" },
       { name = "PORT", value = "8788" },
       { name = "PERSONAL_OS_API_URL", value = "https://${local.api_domain}" },
@@ -239,6 +266,7 @@ resource "aws_ecs_task_definition" "mcp" {
       { name = "MCP_RATE_LIMIT_MAX_REQUESTS", value = "120" },
       { name = "MCP_RATE_LIMIT_WINDOW_SECONDS", value = "60" },
       { name = "MCP_TRUST_PROXY", value = "true" },
+      { name = "MCP_INCLUDE_COMPATIBILITY_TOOLS", value = "false" },
       { name = "MCP_PUBLIC_URL", value = "https://${local.mcp_domain}" },
       { name = "OAUTH_AUTHORIZATION_SERVER_URL", value = "https://${local.api_domain}" },
     ]
@@ -285,9 +313,9 @@ resource "aws_ecs_service" "api" {
   }
 
   network_configuration {
-    assign_public_ip = false
+    assign_public_ip = true
     security_groups  = [aws_security_group.application.id]
-    subnets          = aws_subnet.application[*].id
+    subnets          = aws_subnet.public[*].id
   }
 
   load_balancer {
@@ -300,7 +328,7 @@ resource "aws_ecs_service" "api" {
     ignore_changes = [desired_count, task_definition]
   }
 
-  depends_on = [aws_route_table_association.application]
+  depends_on = [aws_route_table_association.public]
 }
 
 resource "aws_ecs_service" "mcp" {
@@ -320,9 +348,9 @@ resource "aws_ecs_service" "mcp" {
   }
 
   network_configuration {
-    assign_public_ip = false
+    assign_public_ip = true
     security_groups  = [aws_security_group.application.id]
-    subnets          = aws_subnet.application[*].id
+    subnets          = aws_subnet.public[*].id
   }
 
   load_balancer {
@@ -335,5 +363,5 @@ resource "aws_ecs_service" "mcp" {
     ignore_changes = [desired_count, task_definition]
   }
 
-  depends_on = [aws_route_table_association.application]
+  depends_on = [aws_route_table_association.public]
 }

@@ -1,7 +1,7 @@
 import { type Database, financeCategories, financeSetupSessions } from "@personal-os/database";
 import type {
+  FinanceInteractionQuestion,
   FinanceProfileVersion,
-  FinanceQuestion,
   FinanceSetupInput,
   FinanceSetupPayload,
   FinanceToolResult,
@@ -43,11 +43,11 @@ const questions = {
     id: "profile:monthly_take_home",
     prompt: "What is your expected monthly take-home income?",
   },
-} satisfies Record<string, FinanceQuestion>;
+} satisfies Record<string, FinanceInteractionQuestion>;
 
 type QuestionId = keyof typeof questions;
 
-function nextQuestion(profile: FinanceProfileVersion | null): FinanceQuestion | null {
+function nextQuestion(profile: FinanceProfileVersion | null): FinanceInteractionQuestion | null {
   if (!profile?.jurisdiction) return questions["profile:location"];
   if (!profile.householdSize) return questions["profile:household_size"];
   if (profile.expectedMonthlyTakeHome === null) return questions["profile:monthly_take_home"];
@@ -93,7 +93,7 @@ export function setupResult(input: {
   headline: string;
   maintenanceRunId?: string | null;
   nextAction?: FinanceToolResult<unknown>["nextAction"];
-  question?: FinanceQuestion | null;
+  question?: FinanceInteractionQuestion | null;
   sessionId: string;
   stage: FinanceSetupPayload["stage"];
   version: number;
@@ -217,7 +217,7 @@ export function createSetupService({ db, now, planning }: Options) {
       },
       context,
     );
-    const approvalQuestion: FinanceQuestion = {
+    const approvalQuestion: FinanceInteractionQuestion = {
       answerType: "approval",
       id: "budget:approval",
       prompt: "Approve this balanced starting budget?",

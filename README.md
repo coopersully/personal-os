@@ -47,26 +47,70 @@ For a foreground-only web/API development session, `pnpm dev` remains available 
 
 The checked-in Codex environment exposes deterministic actions backed by one lifecycle controller:
 
-- **Start** runs PostgreSQL plus the current API, MCP, and web source on `:55433`, `:8788`, `:8789`, and `:8081`.
+- **Start** synchronizes the primary checkout's authoritative `.env`, then runs PostgreSQL plus the current API, MCP, and web source on `:55433`, `:8788`, `:8789`, and `:8081`.
 - **Stop** shuts down the runtime without deleting PostgreSQL data.
 - **Restart**, **Status**, and **Logs** provide predictable operational controls without hunting for processes.
+- **Load QA Fixtures** recreates the repository-owned demo, onboarding, empty, and recovery personas.
 - **Test** enforces the repository's coverage floor: 95% statements/functions/lines and 94% branches.
 - **E2E** runs the desktop and mobile Playwright acceptance suite.
 - **Verify** runs mirror checks, lint, types, coverage, every production build, and E2E acceptance tests.
 - **Build** builds all applications and packages, including the native desktop bundles.
 
+Playwright uses local web `5174` and API `8797` by default. When another local project owns either
+port, set `ILO_E2E_WEB_PORT` and `ILO_E2E_API_PORT`; the Playwright client and its isolated fixture
+servers consume the same overrides.
+
 The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down. All runtime state is kept under ignored `.codex/run/` PID and log directories.
+
+Linked worktrees copy the primary `.env` on setup and start, then load a generated, ignored `.env.codex.local` with a deterministic whole-set port shift. This keeps secrets authoritative in the primary checkout while allowing the primary and linked worktrees to run with separate ports, containers, and PostgreSQL volumes.
+
+### Run local source against production
+
+An explicitly acknowledged operator mode runs the current worktree's API, MCP server, and web app
+directly against live production PostgreSQL. It uses the worktree's normal local ports and a private
+Session Manager tunnel; it does not make RDS public or write production values into `.env`.
+
+Prerequisites are the AWS CLI, Session Manager plugin, the applied resources in
+`infra/local-production-runtime.tf`, and an AWS profile allowed to assume
+`personal-os-prod-local-production-runtime`. Start it in an attached terminal:
+
+```bash
+ILO_PRODUCTION_SOURCE_PROFILE=<named-ilo-operator-profile> \
+ILO_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
+pnpm env:prod:start
+```
+
+This is the real product boundary: local reads, writes, migrations, MCP actions, connector calls,
+scheduled work, email, and provider effects operate on production. Production webhooks continue to
+reach the hosted API and update the same database. The helper reads the deployed ECS task's exact
+runtime parameter references into process memory, replaces only local origins and the tunneled
+database address, and removes AWS credentials before spawning product services.
+
+Use another terminal to inspect or stop only this worktree's production runtime:
+
+```bash
+pnpm env:prod:status
+pnpm env:prod:stop
+```
+
+Normal `pnpm env:start` remains isolated on the worktree's Docker PostgreSQL volume.
 
 The same controls are available outside Codex:
 
 ```bash
 pnpm env:start
+pnpm env:prod:status
 pnpm env:status
 pnpm env:logs
 pnpm env:restart
 pnpm env:stop
+pnpm fixtures:list
+pnpm fixtures:load
 pnpm verify
 ```
+
+Fixture credentials and scenario coverage are documented in
+[docs/engineering/qa-fixtures.md](docs/engineering/qa-fixtures.md).
 
 ## Desktop overlay
 

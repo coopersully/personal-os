@@ -1,3 +1,4 @@
+import { providerFetch } from "@personal-os/connectors";
 import type {
   HomeLocation,
   WeatherCoordinates,
@@ -176,7 +177,7 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
     url.searchParams.set("name", weatherLocation.split(",")[0]?.trim() || weatherLocation);
     let response: Response;
     try {
-      response = await fetch(url);
+      response = await providerFetch(fetch, url);
     } catch {
       throw serviceUnavailable();
     }
@@ -235,26 +236,17 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
       url.searchParams.set("lat", String(coordinates.latitude));
       url.searchParams.set("lon", String(coordinates.longitude));
       url.searchParams.set("zoom", "10");
-      const controller = new AbortController();
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      const timedOut = new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => {
-          controller.abort();
-          reject(new Error("Reverse geocoding timed out"));
-        }, 5_000);
-      });
-      const response = await Promise.race([
-        fetch(url, {
+      const response = await providerFetch(
+        fetch,
+        url,
+        {
           headers: {
             "Accept-Language": "en",
             "User-Agent": "ilo/1.0 (https://github.com/coopersully/personal-os)",
           },
-          signal: controller.signal,
-        }),
-        timedOut,
-      ]).finally(() => {
-        if (timeout) clearTimeout(timeout);
-      });
+        },
+        5_000,
+      );
       const value = (await response.json().catch(() => null)) as ReverseGeocodingResponse | null;
       if (!response.ok || !value?.address) return null;
       const address = value.address;
@@ -279,7 +271,7 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
       url.searchParams.set("name", query);
       let response: Response;
       try {
-        response = await fetch(url);
+        response = await providerFetch(fetch, url);
       } catch {
         throw serviceUnavailable();
       }
@@ -330,8 +322,8 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
       airQualityUrl.searchParams.set("current", "us_aqi");
       airQualityUrl.searchParams.set("latitude", String(location.coordinates.latitude));
       airQualityUrl.searchParams.set("longitude", String(location.coordinates.longitude));
-      const forecastRequest = fetch(forecastUrl);
-      const airQualityRequest = fetch(airQualityUrl).catch(() => null);
+      const forecastRequest = providerFetch(fetch, forecastUrl);
+      const airQualityRequest = providerFetch(fetch, airQualityUrl).catch(() => null);
       let forecastResponse: Response;
       try {
         forecastResponse = await forecastRequest;

@@ -4,21 +4,207 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 ROOT="$(git rev-parse --show-toplevel)"
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+PRIMARY_ROOT="$(dirname "$GIT_COMMON_DIR")"
 RUN_DIR="$ROOT/.codex/run"
 PID_DIR="$RUN_DIR/pids"
 LOG_DIR="$RUN_DIR/logs"
 ENV_FILE="$ROOT/.env"
+PRIMARY_ENV_FILE="$PRIMARY_ROOT/.env"
+ENV_OVERLAY_FILE="$ROOT/.env.codex.local"
+AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/ilo-setup-release.json"
+RUNTIME_REGISTRY_DIR="$GIT_COMMON_DIR/ilo-runtime"
+RUNTIME_TIER_DIR="$RUNTIME_REGISTRY_DIR/tiers"
+ACTIVE_ROOT_FILE="$RUNTIME_REGISTRY_DIR/active-root"
+PRODUCTION_RUNTIME_HELPER="${ILO_PRODUCTION_RUNTIME_HELPER:-$ROOT/.codex/scripts/production-runtime.mjs}"
+TIER_FILE="$RUN_DIR/tier"
+REQUESTED_RUNTIME_TIER=""
+if [[ "${1:-}" == "activate" && -n "${2:-}" ]]; then
+  REQUESTED_RUNTIME_TIER="$2"
+fi
 
-API_PORT=8788
-MCP_PORT=8789
-WEB_PORT=8081
-DB_PORT=55433
+BASE_API_PORT=8788
+BASE_MCP_PORT=8789
+BASE_WEB_PORT=8081
+BASE_DB_PORT=55433
+PORT_TIER_STRIDE=5
+
+mkdir -p "$PID_DIR" "$LOG_DIR" "$RUNTIME_TIER_DIR"
+
+validate_runtime_tier() {
+  local tier="$1"
+  [[ "$tier" =~ ^[1-9][0-9]*$ ]] || {
+    printf '[personal-os] error: Runtime tier must be a positive integer; received %s.\n' "$tier" >&2
+    exit 1
+  }
+  if [[ "$ROOT" != "$PRIMARY_ROOT" && "$tier" == "1" ]]; then
+    printf '[personal-os] error: Tier 1 is reserved for the primary checkout.\n' >&2
+    exit 1
+  fi
+}
+
+root_has_live_runtime() {
+  local candidate_root="$1" name file pid working_directory
+  for name in supervisor api mcp web; do
+    file="$candidate_root/.codex/run/pids/$name.pid"
+    [[ -f "$file" ]] || continue
+    pid="$(cat "$file" 2>/dev/null || true)"
+    [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1 || continue
+    working_directory="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+    if [[ "$working_directory" == "$candidate_root" || "$working_directory" == "$candidate_root/"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+compose_project_for_tier() {
+  local tier="$1"
+  if ((tier == 1)); then
+    printf 'personal-os\n'
+  else
+    printf 'personal-os-tier-%s\n' "$tier"
+  fi
+}
+
+compose_project_owner() {
+  local project="$1" container containers owner="" candidate="" candidate_config=""
+  local docker_command="${ILO_RUNTIME_DOCKER_BIN:-docker}"
+  command -v "$docker_command" >/dev/null 2>&1 && "$docker_command" info >/dev/null 2>&1 || return 0
+  if ! containers="$("$docker_command" ps -a --filter "label=com.docker.compose.project=$project" --format '{{.ID}}')"; then
+    printf '[personal-os] error: Could not inspect Compose project %s ownership.\n' "$project" >&2
+    return 1
+  fi
+  while IFS= read -r container; do
+    [[ -n "$container" ]] || continue
+    candidate="$("$docker_command" inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
+      "$container" 2>/dev/null || true)"
+    candidate_config="$("$docker_command" inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' \
+      "$container" 2>/dev/null || true)"
+    if [[ -z "$candidate" || -z "$candidate_config" ]]; then
+      printf '[personal-os] error: Compose project %s has a container with missing ownership labels.\n' \
+        "$project" >&2
+      return 1
+    fi
+    if [[ "$candidate_config" != "$candidate/compose.yaml" ]]; then
+      printf '[personal-os] error: Compose project %s uses unexpected config %s for checkout %s.\n' \
+        "$project" "$candidate_config" "$candidate" >&2
+      return 1
+    fi
+    if [[ -n "$owner" && "$owner" != "$candidate" ]]; then
+      printf '[personal-os] error: Compose project %s has inconsistent checkout owners.\n' "$project" >&2
+      return 1
+    fi
+    owner="$candidate"
+  done <<<"$containers"
+  printf '%s\n' "$owner"
+}
+
+assert_tier_compose_available() {
+  local tier="$1" project owner
+  project="$(compose_project_for_tier "$tier")"
+  owner="$(compose_project_owner "$project")" || return 1
+  if [[ -n "$owner" && "$owner" != "$ROOT" ]]; then
+    printf '[personal-os] error: Runtime tier %s has Compose project %s owned by %s. Clean it up before reassignment.\n' \
+      "$tier" "$project" "$owner" >&2
+    return 1
+  fi
+}
+
+assigned_tier_for_root() {
+  local tier_path assigned_root
+  for tier_path in "$RUNTIME_TIER_DIR"/*; do
+    [[ -f "$tier_path" ]] || continue
+    assigned_root="$(cat "$tier_path" 2>/dev/null || true)"
+    if [[ "$assigned_root" == "$ROOT" ]]; then
+      basename "$tier_path"
+      return 0
+    fi
+  done
+  return 1
+}
+
+write_runtime_assignment() {
+  local requested_tier="$1" make_active="${2:-0}" existing_root="" existing_tier="" tier_path temporary
+  validate_runtime_tier "$requested_tier"
+  assert_tier_compose_available "$requested_tier" || return 1
+  tier_path="$RUNTIME_TIER_DIR/$requested_tier"
+  if [[ -f "$tier_path" ]]; then
+    existing_root="$(cat "$tier_path" 2>/dev/null || true)"
+  fi
+  if [[ -n "$existing_root" && "$existing_root" != "$ROOT" && -d "$existing_root" ]] &&
+    root_has_live_runtime "$existing_root"; then
+    printf '[personal-os] error: Tier %s is in use by %s. Stop it before reassigning the tier.\n' \
+      "$requested_tier" "$existing_root" >&2
+    exit 1
+  fi
+
+  existing_tier="$(assigned_tier_for_root || true)"
+  if [[ -n "$existing_tier" && "$existing_tier" != "$requested_tier" ]]; then
+    rm -f "$RUNTIME_TIER_DIR/$existing_tier"
+  fi
+  temporary="$(mktemp "$RUNTIME_REGISTRY_DIR/tier.XXXXXX")"
+  printf '%s\n' "$ROOT" >"$temporary"
+  mv "$temporary" "$tier_path"
+  printf '%s\n' "$requested_tier" >"$TIER_FILE"
+
+  if [[ "$make_active" == "1" ]]; then
+    temporary="$(mktemp "$RUNTIME_REGISTRY_DIR/active.XXXXXX")"
+    printf '%s\n' "$ROOT" >"$temporary"
+    mv "$temporary" "$ACTIVE_ROOT_FILE"
+  fi
+}
+
+resolve_runtime_tier() {
+  local configured_tier="" candidate=2 assigned_root=""
+  if [[ -n "$REQUESTED_RUNTIME_TIER" ]]; then
+    configured_tier="$REQUESTED_RUNTIME_TIER"
+  elif [[ -n "${ILO_RUNTIME_TIER:-}" ]]; then
+    configured_tier="$ILO_RUNTIME_TIER"
+  elif [[ -f "$TIER_FILE" ]]; then
+    configured_tier="$(cat "$TIER_FILE")"
+  else
+    configured_tier="$(assigned_tier_for_root || true)"
+  fi
+
+  if [[ -z "$configured_tier" ]]; then
+    if [[ "$ROOT" == "$PRIMARY_ROOT" ]]; then
+      configured_tier=1
+    else
+      while true; do
+        if [[ ! -f "$RUNTIME_TIER_DIR/$candidate" ]]; then
+          configured_tier="$candidate"
+          break
+        fi
+        assigned_root="$(cat "$RUNTIME_TIER_DIR/$candidate" 2>/dev/null || true)"
+        if [[ -z "$assigned_root" || ! -d "$assigned_root" ]]; then
+          configured_tier="$candidate"
+          break
+        fi
+        ((candidate += 1))
+      done
+    fi
+  fi
+  validate_runtime_tier "$configured_tier"
+  if [[ "$ROOT" != "$PRIMARY_ROOT" ]]; then
+    write_runtime_assignment "$configured_tier" 0 || return 1
+  fi
+  printf '%s\n' "$configured_tier"
+}
+
+if ! RUNTIME_TIER="$(resolve_runtime_tier)"; then
+  exit 1
+fi
+PORT_OFFSET=$(((RUNTIME_TIER - 1) * PORT_TIER_STRIDE))
+API_PORT=$((BASE_API_PORT + PORT_OFFSET))
+MCP_PORT=$((BASE_MCP_PORT + PORT_OFFSET))
+WEB_PORT=$((BASE_WEB_PORT + PORT_OFFSET))
+DB_PORT=$((BASE_DB_PORT + PORT_OFFSET))
 API_URL="http://127.0.0.1:$API_PORT"
 MCP_URL="http://127.0.0.1:$MCP_PORT"
 WEB_URL="http://localhost:$WEB_PORT"
 LOCAL_DATABASE_URL="postgres://personal_os:personal_os@127.0.0.1:$DB_PORT/personal_os"
-
-mkdir -p "$PID_DIR" "$LOG_DIR"
+export COMPOSE_PROJECT_NAME="$(compose_project_for_tier "$RUNTIME_TIER")"
 
 log() {
   printf '[personal-os] %s\n' "$*"
@@ -71,22 +257,64 @@ generate_internal_secret() {
   fi
 }
 
+migrate_legacy_agent_skill_environment() {
+  [[ -f "$PRIMARY_ENV_FILE" ]] || return
+  node "$ROOT/scripts/migrate-agent-skill-environment.mjs" \
+    "$PRIMARY_ENV_FILE" \
+    "$AGENT_SKILL_RELEASE_MANIFEST"
+}
+
 ensure_env_file() {
-  if [[ -f "$ENV_FILE" ]]; then
-    return
+  local key internal_secret temporary
+
+  if [[ ! -f "$PRIMARY_ENV_FILE" ]]; then
+    [[ -f "$PRIMARY_ROOT/.env.example" ]] ||
+      die "The primary checkout is missing .env.example at $PRIMARY_ROOT/.env.example."
+    key="$(generate_encryption_key)"
+    internal_secret="$(generate_internal_secret)"
+    temporary="$(mktemp "$PRIMARY_ROOT/.env.XXXXXX")"
+    sed \
+      -e "s|^APP_ENCRYPTION_KEY=.*|APP_ENCRYPTION_KEY=$key|" \
+      -e "s|^MCP_INTERNAL_SECRET=.*|MCP_INTERNAL_SECRET=$internal_secret|" \
+      "$PRIMARY_ROOT/.env.example" >"$temporary"
+    chmod 600 "$temporary"
+    mv "$temporary" "$PRIMARY_ENV_FILE"
+    log "Created the primary checkout's .env with generated local secrets."
   fi
 
-  local key internal_secret temporary
-  key="$(generate_encryption_key)"
-  internal_secret="$(generate_internal_secret)"
-  temporary="$(mktemp "$RUN_DIR/env.XXXXXX")"
-  sed \
-    -e "s|^APP_ENCRYPTION_KEY=.*|APP_ENCRYPTION_KEY=$key|" \
-    -e "s|^MCP_INTERNAL_SECRET=.*|MCP_INTERNAL_SECRET=$internal_secret|" \
-    "$ROOT/.env.example" >"$temporary"
-  chmod 600 "$temporary"
-  mv "$temporary" "$ENV_FILE"
-  log "Created .env with a generated local encryption key."
+  migrate_legacy_agent_skill_environment
+
+  if [[ "$ROOT" != "$PRIMARY_ROOT" ]]; then
+    temporary="$(mktemp "$RUN_DIR/env.XXXXXX")"
+    cp "$PRIMARY_ENV_FILE" "$temporary"
+    chmod 600 "$temporary"
+    mv "$temporary" "$ENV_FILE"
+
+    temporary="$(mktemp "$RUN_DIR/env-overlay.XXXXXX")"
+    printf '%s\n' \
+      "# Generated by .codex/scripts/environment.sh; do not edit." \
+      "CODEX_RUNTIME_TIER=$RUNTIME_TIER" \
+      "LOCAL_WEB_PORT=$WEB_PORT" \
+      "LOCAL_API_PORT=$API_PORT" \
+      "LOCAL_MCP_PORT=$MCP_PORT" \
+      "LOCAL_POSTGRES_PORT=$DB_PORT" \
+      "APP_BASE_URL=$WEB_URL" \
+      "ALLOWED_ORIGINS=$WEB_URL,tauri://localhost,http://tauri.localhost" \
+      "API_BASE_URL=$API_URL" \
+      "PORT=$API_PORT" \
+      "DATABASE_URL=$LOCAL_DATABASE_URL" \
+      "MCP_PUBLIC_URL=$MCP_URL" \
+      "MCP_RESOURCE_URL=$MCP_URL/mcp" \
+      "OAUTH_AUTHORIZATION_SERVER_URL=$API_URL" \
+      "GOOGLE_REDIRECT_URI=$API_URL/v1/connectors/google/callback" \
+      "X_REDIRECT_URI=$API_URL/v1/x-bookmarks/callback" \
+      "VITE_API_BASE_URL=$API_URL" >"$temporary"
+    chmod 600 "$temporary"
+    mv "$temporary" "$ENV_OVERLAY_FILE"
+    log "Synchronized .env from the primary checkout for runtime tier $RUNTIME_TIER."
+  else
+    rm -f "$ENV_OVERLAY_FILE"
+  fi
 }
 
 load_env() {
@@ -94,15 +322,19 @@ load_env() {
   set -a
   # shellcheck disable=SC1090
   source "$ENV_FILE"
+  if [[ -f "$ENV_OVERLAY_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$ENV_OVERLAY_FILE"
+  fi
   set +a
 
   [[ -n "${DATABASE_URL:-}" ]] || die "DATABASE_URL is missing from .env."
   [[ -n "${MCP_INTERNAL_SECRET:-}" ]] || die "MCP_INTERNAL_SECRET is missing from .env."
   [[ "$MCP_INTERNAL_SECRET" != "replace-with-a-random-32-character-secret" ]] ||
-    die "Replace the placeholder MCP_INTERNAL_SECRET in .env or remove .env and run Setup again."
+    die "Replace the placeholder MCP_INTERNAL_SECRET in the primary .env or remove it and run Setup again."
   [[ -n "${APP_ENCRYPTION_KEY:-}" ]] || die "APP_ENCRYPTION_KEY is missing from .env."
   [[ "$APP_ENCRYPTION_KEY" != "replace-with-32-byte-base64-key" ]] ||
-    die "Replace the placeholder APP_ENCRYPTION_KEY in .env or remove .env and run Setup again."
+    die "Replace the placeholder APP_ENCRYPTION_KEY in the primary .env or remove it and run Setup again."
 
   APP_ENCRYPTION_KEY="$APP_ENCRYPTION_KEY" node -e '
     const value = process.env.APP_ENCRYPTION_KEY ?? "";
@@ -126,6 +358,10 @@ pid_file() {
   printf '%s/%s.pid' "$PID_DIR" "$1"
 }
 
+owner_file() {
+  printf '%s/%s.owner' "$PID_DIR" "$1"
+}
+
 log_file() {
   printf '%s/%s.log' "$LOG_DIR" "$1"
 }
@@ -134,11 +370,51 @@ pid_is_running() {
   [[ -n "${1:-}" ]] && kill -0 "$1" >/dev/null 2>&1
 }
 
+process_start_identity() {
+  ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+managed_service_for_pid() {
+  local requested_pid="$1" name file recorded_pid
+  for name in supervisor api mcp web; do
+    file="$(pid_file "$name")"
+    [[ -f "$file" ]] || continue
+    recorded_pid="$(cat "$file" 2>/dev/null || true)"
+    if [[ "$recorded_pid" == "$requested_pid" ]]; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+record_pid_ownership() {
+  local name="$1" pid="$2" start temporary
+  start="$(process_start_identity "$pid")"
+  [[ -n "$start" ]] || die "Could not record process identity for $name PID $pid."
+  temporary="$(mktemp "$RUN_DIR/owner.XXXXXX")"
+  printf '%s\n%s\n%s\n' "$ROOT" "$pid" "$start" >"$temporary"
+  mv "$temporary" "$(owner_file "$name")"
+}
+
 pid_belongs_to_repo() {
-  local command_line working_directory
-  command_line="$(ps -p "$1" -o command= 2>/dev/null || true)"
+  local pid="$1" name file recorded_root recorded_pid recorded_start current_start working_directory
+  name="$(managed_service_for_pid "$pid" || true)"
+  [[ -n "$name" ]] || return 1
+  file="$(owner_file "$name")"
+  [[ -f "$file" ]] || return 1
+  recorded_root="$(sed -n '1p' "$file")"
+  recorded_pid="$(sed -n '2p' "$file")"
+  recorded_start="$(sed -n '3p' "$file")"
+  current_start="$(process_start_identity "$pid")"
   working_directory="$(lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
-  [[ "$command_line" == *"$ROOT"* || "$working_directory" == "$ROOT"* ]]
+  [[ "$recorded_root" == "$ROOT" && "$recorded_pid" == "$pid" && -n "$current_start" &&
+    "$recorded_start" == "$current_start" &&
+    ( "$working_directory" == "$ROOT" || "$working_directory" == "$ROOT/"* ) ]]
+}
+
+assert_current_compose_owned() {
+  assert_tier_compose_available "$RUNTIME_TIER"
 }
 
 terminate_pid() {
@@ -173,9 +449,12 @@ stop_managed_service() {
   pid="$(cat "$file")"
   if pid_is_running "$pid"; then
     log "Stopping $name (PID $pid)..."
-    terminate_pid "$pid" || true
+    if ! terminate_pid "$pid"; then
+      warn "Preserving $name PID metadata because ownership could not be verified."
+      return 1
+    fi
   fi
-  rm -f "$file"
+  rm -f "$file" "$(owner_file "$name")"
 }
 
 stop_supervisor() {
@@ -186,12 +465,12 @@ stop_supervisor() {
   fi
   pid="$(cat "$file")"
   if ! pid_is_running "$pid"; then
-    rm -f "$file"
+    rm -f "$file" "$(owner_file supervisor)"
     return 0
   fi
   if ! pid_belongs_to_repo "$pid"; then
     warn "Refusing to stop supervisor PID $pid because it does not belong to this repository."
-    rm -f "$file"
+    warn "Preserving supervisor PID metadata for manual recovery."
     return 1
   fi
 
@@ -199,14 +478,14 @@ stop_supervisor() {
   kill -TERM "$pid" >/dev/null 2>&1 || true
   for _ in {1..40}; do
     if ! pid_is_running "$pid"; then
-      rm -f "$file"
+      rm -f "$file" "$(owner_file supervisor)"
       return 0
     fi
     sleep 0.25
   done
   warn "Supervisor did not stop cleanly; forcing shutdown."
   terminate_pid "$pid" || true
-  rm -f "$file"
+  rm -f "$file" "$(owner_file supervisor)"
 }
 
 clear_repo_port() {
@@ -237,6 +516,7 @@ start_service() {
   disown "$pid" 2>/dev/null || true
   popd >/dev/null
   printf '%s\n' "$pid" >"$file"
+  record_pid_ownership "$name" "$pid"
   log "Started $name on port $port (PID $pid)."
 }
 
@@ -262,6 +542,7 @@ wait_for_url() {
 
 wait_for_postgres() {
   local elapsed=0
+  assert_current_compose_owned
   while ((elapsed < 120)); do
     if docker compose exec -T postgres pg_isready -U personal_os -d personal_os >/dev/null 2>&1; then
       return
@@ -281,6 +562,7 @@ stop_source_services() {
 
 stop_compose_apps() {
   if docker_is_ready; then
+    assert_current_compose_owned
     docker compose stop web mcp api >/dev/null 2>&1 || true
   fi
 }
@@ -292,6 +574,7 @@ runtime_is_healthy() {
     [[ -f "$file" ]] || return 1
     pid="$(cat "$file")"
     pid_is_running "$pid" || return 1
+    pid_belongs_to_repo "$pid" || return 1
   done
   curl --fail --silent --max-time 2 "$API_URL/health/ready" >/dev/null 2>&1 || return 1
   curl --fail --silent --max-time 2 "$MCP_URL/health/live" >/dev/null 2>&1 || return 1
@@ -309,9 +592,10 @@ supervise_runtime() {
     trap - EXIT INT TERM
     stop_source_services
     if docker_is_ready; then
+      assert_current_compose_owned
       docker compose stop postgres >/dev/null 2>&1 || true
     fi
-    rm -f "$(pid_file supervisor)"
+    rm -f "$(pid_file supervisor)" "$(owner_file supervisor)"
   }
 
   handle_shutdown() {
@@ -323,6 +607,7 @@ supervise_runtime() {
   trap cleanup_runtime EXIT
   trap handle_shutdown INT TERM
   printf '%s\n' "$$" >"$(pid_file supervisor)"
+  record_pid_ownership supervisor "$$"
 
   while true; do
     for name in api mcp web; do
@@ -344,7 +629,6 @@ supervise_runtime() {
 
 command_setup() {
   check_toolchain
-  ensure_env_file
   load_env
   log "Installing the locked workspace dependencies..."
   pnpm install --frozen-lockfile
@@ -356,6 +640,7 @@ command_start() {
   check_toolchain
   load_env
   require_docker
+  assert_current_compose_owned
 
   if runtime_is_healthy; then
     log "ilo is already running."
@@ -426,6 +711,7 @@ command_stop() {
   stop_source_services
 
   if docker_is_ready; then
+    assert_current_compose_owned
     log "Stopping ilo containers..."
     docker compose stop web mcp api postgres >/dev/null 2>&1 || true
   fi
@@ -441,7 +727,7 @@ service_status() {
   file="$(pid_file "$name")"
   if [[ -f "$file" ]]; then
     pid="$(cat "$file")"
-    if pid_is_running "$pid"; then
+    if pid_is_running "$pid" && pid_belongs_to_repo "$pid"; then
       process="up (PID $pid)"
     fi
   fi
@@ -452,6 +738,46 @@ service_status() {
   [[ "$process" == up* && "$health" == "ready" ]]
 }
 
+command_config() {
+  printf 'ilo local runtime configuration\n'
+  printf '  Root:      %s\n' "$ROOT"
+  printf '  Tier:      %s\n' "$RUNTIME_TIER"
+  printf '  App:       %s\n' "$WEB_URL"
+  printf '  API:       %s\n' "$API_URL"
+  printf '  MCP:       %s\n' "$MCP_URL"
+  printf '  PostgreSQL 127.0.0.1:%s\n' "$DB_PORT"
+  printf '  Compose:   %s\n' "$COMPOSE_PROJECT_NAME"
+}
+
+command_activate() {
+  local requested_tier="${1:-$RUNTIME_TIER}"
+  write_runtime_assignment "$requested_tier" 1
+  log "Activated $ROOT as runtime tier $requested_tier."
+}
+
+command_active_root() {
+  local active_root=""
+  if [[ -f "$ACTIVE_ROOT_FILE" ]]; then
+    active_root="$(cat "$ACTIVE_ROOT_FILE" 2>/dev/null || true)"
+  fi
+  if [[ -n "$active_root" && -d "$active_root" && -f "$active_root/.codex/scripts/environment.sh" ]]; then
+    printf '%s\n' "$active_root"
+  else
+    printf '%s\n' "$PRIMARY_ROOT"
+  fi
+}
+
+command_start_active() {
+  local active_root
+  active_root="$(command_active_root)"
+  if [[ "$active_root" != "$ROOT" ]]; then
+    log "Routing Start to active worktree $active_root."
+    cd "$active_root"
+    exec bash "$active_root/.codex/scripts/environment.sh" start
+  fi
+  command_start
+}
+
 command_status() {
   local healthy=0 postgres_status="down"
   printf 'ilo local runtime\n'
@@ -459,6 +785,9 @@ command_status() {
   service_status api "$API_URL/health/ready" || healthy=1
   service_status mcp "$MCP_URL/health/live" || healthy=1
 
+  if docker_is_ready; then
+    assert_current_compose_owned
+  fi
   if docker_is_ready && docker compose exec -T postgres pg_isready -U personal_os -d personal_os >/dev/null 2>&1; then
     postgres_status="ready"
   else
@@ -467,6 +796,52 @@ command_status() {
   printf '  %-10s %-18s %s\n' postgres "docker compose" "$postgres_status"
   printf '  %-10s %s\n' logs "$LOG_DIR"
   return "$healthy"
+}
+
+run_production_runtime_helper() {
+  node "$PRODUCTION_RUNTIME_HELPER" "$1" \
+    --root "$ROOT" \
+    --run-dir "$RUN_DIR" \
+    --web-port "$WEB_PORT" \
+    --api-port "$API_PORT" \
+    --mcp-port "$MCP_PORT" \
+    --database-port "$DB_PORT" \
+    --web-url "$WEB_URL" \
+    --api-url "$API_URL" \
+    --mcp-url "$MCP_URL"
+}
+
+command_production_start() {
+  require_command git
+  require_command node
+  require_command pnpm
+  require_command curl
+  require_command lsof
+  require_command aws
+  require_command session-manager-plugin
+
+  stop_supervisor
+  stop_source_services
+  stop_compose_apps
+  if docker_is_ready; then
+    assert_current_compose_owned
+    docker compose stop postgres >/dev/null 2>&1 || true
+  fi
+  clear_repo_port "$WEB_PORT"
+  clear_repo_port "$MCP_PORT"
+  clear_repo_port "$API_PORT"
+  clear_repo_port "$DB_PORT"
+
+  exec node "$PRODUCTION_RUNTIME_HELPER" start \
+    --root "$ROOT" \
+    --run-dir "$RUN_DIR" \
+    --web-port "$WEB_PORT" \
+    --api-port "$API_PORT" \
+    --mcp-port "$MCP_PORT" \
+    --database-port "$DB_PORT" \
+    --web-url "$WEB_URL" \
+    --api-url "$API_URL" \
+    --mcp-url "$MCP_URL"
 }
 
 command_logs() {
@@ -496,6 +871,20 @@ command_test() {
   pnpm test:coverage
 }
 
+command_fixtures() {
+  check_toolchain
+  load_env
+  require_docker
+  assert_current_compose_owned
+
+  log "Starting PostgreSQL for QA fixture loading..."
+  docker compose up -d postgres
+  wait_for_postgres || die "PostgreSQL did not become ready."
+  DATABASE_URL="$LOCAL_DATABASE_URL" \
+    MIGRATIONS_DIR="$ROOT/packages/database/migrations" \
+    pnpm exec tsx scripts/qa-fixtures.ts load
+}
+
 command_e2e() {
   check_toolchain
   require_docker
@@ -519,13 +908,21 @@ usage() {
 Usage: bash ./.codex/scripts/environment.sh <command>
 
 Commands:
+  activate   Register this checkout as the active runtime; optionally provide a tier.
+  active-root Print the checkout currently registered for the Run action.
+  config     Print this checkout's stable runtime tier and ports.
   setup     Install locked dependencies and initialize local configuration.
   start     Start PostgreSQL and the current API, MCP, and web source.
+  start-active Start the checkout registered by activate.
   stop      Stop the local runtime while preserving PostgreSQL data.
   restart   Stop and start the local runtime.
   status    Report process and health-check state.
+  production-start  Start this worktree against the live production database.
+  production-stop   Stop this worktree's local production runtime.
+  production-status Report this worktree's local production runtime state.
   logs      Print recent API, MCP, and web logs; optionally name one service.
   test      Run the test suite with the repository's 100% coverage gate.
+  fixtures  Replace the named local QA accounts with deterministic fixture data.
   e2e       Run desktop and mobile Playwright acceptance tests.
   verify    Run mirror checks, lint, types, coverage, builds, and E2E tests.
   build     Build every application and package.
@@ -534,16 +931,24 @@ EOF
 
 cd "$ROOT"
 case "${1:-}" in
+  activate) command_activate "${2:-}" ;;
+  active-root) command_active_root ;;
+  config) command_config ;;
   setup) command_setup ;;
   start) command_start ;;
+  start-active) command_start_active ;;
   stop) command_stop ;;
   restart)
     command_stop
     command_start
     ;;
   status) command_status ;;
+  production-start) command_production_start ;;
+  production-stop) run_production_runtime_helper stop ;;
+  production-status) run_production_runtime_helper status ;;
   logs) command_logs "${2:-}" ;;
   test) command_test ;;
+  fixtures) command_fixtures ;;
   e2e) command_e2e ;;
   verify) command_verify ;;
   build) command_build ;;

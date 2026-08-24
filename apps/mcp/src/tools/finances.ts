@@ -1,5 +1,5 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { PersonalOsApiClient } from "@personal-os/api-client";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   type FinanceToolResult,
   financeMaintenanceInputSchema,
@@ -39,6 +39,26 @@ function financeResult<T>(value: FinanceToolResult<T>) {
     ],
     structuredContent: value,
   };
+}
+
+async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+  try {
+    return financeResult(await operation());
+  } catch (error) {
+    if (!(error instanceof ApiClientError)) throw error;
+    const value = {
+      code: error.code,
+      details: error.details,
+      message: error.message,
+      requestId: error.requestId,
+      status: error.status,
+    };
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify({ error: value }, null, 2) }],
+      isError: true,
+      structuredContent: { error: value },
+    };
+  }
 }
 
 const allocation = z.discriminatedUnion("kind", [
@@ -112,19 +132,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: true },
       description:
         "Use this to autonomously categorize outstanding transactions, reconcile relationships, account for the active budget, and red-team audit recent activity. It runs deterministic rules first and returns bounded reasoning or audit work immediately; it never queues an automation or waits for the user. Continue until stage settled. Uncertainty becomes deduplicated transaction-backed Inbox rows.",
-      inputSchema: {
-        expectedVersion: z.number().int().positive().optional(),
-        findings: z.array(z.record(z.string(), z.unknown())).optional(),
-        idempotencyKey: idempotencyKey.optional(),
-        judgments: z.array(z.record(z.string(), z.unknown())).optional(),
-        operation: z.enum(["start", "submit_judgments", "submit_audit", "resume"]),
-        runId: id.optional(),
-        scope: z.record(z.string(), z.unknown()).optional(),
-      },
+      inputSchema: financeMaintenanceInputSchema,
       title: "Maintain finances",
     },
     async (input) =>
-      financeResult(await api.maintainFinances(financeMaintenanceInputSchema.parse(input))),
+      financeApiResult(() => api.maintainFinances(financeMaintenanceInputSchema.parse(input))),
   );
 
   server.registerTool(
@@ -699,7 +711,12 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Merge duplicate merchant identities after evidence shows they are the same real merchant.",
-      inputSchema: { idempotencyKey, sourceMerchantId: id, targetMerchantId: id },
+      inputSchema: {
+        idempotencyKey,
+        rationale: z.string().trim().min(1).max(2_000),
+        sourceMerchantId: id,
+        targetMerchantId: id,
+      },
       title: "Merge Finance merchants",
     },
     async (input) => financeResult(await api.mergeFinanceMerchantsCanonical(input)),

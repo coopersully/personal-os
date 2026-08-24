@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { idSchema } from "../common.js";
-import { financeQuestionSchema } from "./common.js";
+import { financeInteractionQuestionSchema } from "./common.js";
 
 export const financeMaintenanceScopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("all_outstanding") }),
@@ -50,28 +50,36 @@ export const financeAuditFindingInputSchema = z.object({
 export type FinanceAuditFindingInput = z.infer<typeof financeAuditFindingInputSchema>;
 
 export const financeMaintenanceInputSchema = z.discriminatedUnion("operation", [
-  z.object({
-    operation: z.literal("start"),
-    scope: financeMaintenanceScopeSchema,
-  }),
-  z.object({
-    expectedVersion: z.number().int().positive(),
-    idempotencyKey: z.string().trim().min(1).max(200),
-    judgments: z.array(financeMaintenanceJudgmentSchema).min(1).max(100),
-    operation: z.literal("submit_judgments"),
-    runId: idSchema,
-  }),
-  z.object({
-    expectedVersion: z.number().int().positive(),
-    findings: z.array(financeAuditFindingInputSchema).max(100),
-    idempotencyKey: z.string().trim().min(1).max(200),
-    operation: z.literal("submit_audit"),
-    runId: idSchema,
-  }),
-  z.object({
-    operation: z.literal("resume"),
-    runId: idSchema,
-  }),
+  z
+    .object({
+      operation: z.literal("start"),
+      scope: financeMaintenanceScopeSchema.default({ type: "all_outstanding" }),
+    })
+    .strict(),
+  z
+    .object({
+      expectedVersion: z.number().int().positive(),
+      idempotencyKey: z.string().trim().min(1).max(200),
+      judgments: z.array(financeMaintenanceJudgmentSchema).min(1).max(100),
+      operation: z.literal("submit_judgments"),
+      runId: idSchema,
+    })
+    .strict(),
+  z
+    .object({
+      expectedVersion: z.number().int().positive(),
+      findings: z.array(financeAuditFindingInputSchema).max(100),
+      idempotencyKey: z.string().trim().min(1).max(200),
+      operation: z.literal("submit_audit"),
+      runId: idSchema,
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("resume"),
+      runId: idSchema,
+    })
+    .strict(),
 ]);
 export type FinanceMaintenanceInput = z.infer<typeof financeMaintenanceInputSchema>;
 
@@ -101,7 +109,7 @@ export type FinanceReasoningItem = z.infer<typeof financeReasoningItemSchema>;
 export const financeMaintenancePayloadSchema = z.object({
   auditContext: z.record(z.string(), z.unknown()).nullable(),
   reasoningBatch: z.array(financeReasoningItemSchema),
-  reviewQuestion: financeQuestionSchema.nullable(),
+  reviewQuestion: financeInteractionQuestionSchema.nullable(),
   runId: idSchema,
   stage: financeMaintenanceStageSchema,
   version: z.number().int().positive(),
@@ -131,7 +139,7 @@ export type FinanceSetupInput = z.infer<typeof financeSetupInputSchema>;
 export const financeSetupPayloadSchema = z.object({
   budgetVersionId: idSchema.nullable(),
   maintenanceRunId: idSchema.nullable(),
-  question: financeQuestionSchema.nullable(),
+  question: financeInteractionQuestionSchema.nullable(),
   sessionId: idSchema,
   stage: z.enum([
     "collecting_profile",

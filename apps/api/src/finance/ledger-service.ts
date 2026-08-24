@@ -49,6 +49,7 @@ function transaction(row: typeof financeTransactions.$inferSelect): FinanceTrans
     categoryRationale: row.categoryRationale,
     categorySource: row.categorySource,
     createdAt: row.createdAt.toISOString(),
+    currencyCode: row.currencyCode,
     date: row.transactionDate,
     direction: row.direction,
     id: row.id,
@@ -61,6 +62,20 @@ function transaction(row: typeof financeTransactions.$inferSelect): FinanceTrans
     providerCategoryConfidence:
       row.providerCategoryConfidence as FinanceTransaction["providerCategoryConfidence"],
     rawMerchant: row.merchant,
+    reconciliationStatus: row.reconciliationStatus,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function transactionAudit(row: typeof financeTransactions.$inferSelect) {
+  return {
+    categoryConfidence: row.categoryConfidence === null ? null : row.categoryConfidence / 10_000,
+    categoryId: row.categoryId,
+    categorySource: row.categorySource,
+    direction: row.direction,
+    id: row.id,
+    needsReview: row.needsReview,
+    pending: row.pending,
     reconciliationStatus: row.reconciliationStatus,
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -132,7 +147,7 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
               actorId: context.actorId,
               actorType: context.actorType,
               after: null,
-              before: transaction(before),
+              before: transactionAudit(before),
               entityId: id,
               entityType: "finance_transaction",
               requestId: context.requestId,

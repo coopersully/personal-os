@@ -668,7 +668,11 @@ export function createProfileBudgetService({ db, now }: Options) {
             await db.insert(auditEvents).values(
               auditValues({
                 action: "finance.goal.created",
-                after: { name: row.name, targetAmount: input.targetAmount, version: row.version },
+                after: {
+                  changedFields: ["deadline", "name", "priority", "targetAmount"],
+                  status: row.status,
+                  version: row.version,
+                },
                 before: null,
                 entityId: row.id,
                 entityType: "finance_goal",

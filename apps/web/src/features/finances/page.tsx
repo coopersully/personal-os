@@ -6,6 +6,7 @@ import type {
   FinanceLedgerHealth,
   FinanceRecurringObligation,
   FinanceReviewCase,
+  FinanceStatus,
   FinanceTransaction,
   FinanceTransactionQuery,
   FinanceWealthSummary,
@@ -14,23 +15,21 @@ import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  CheckCircle2,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  CircleCheck,
-  CircleHelp,
-  Download,
-} from "lucide-react";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { usePlaidLink } from "react-plaid-link";
+import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  CircleCheckIcon,
+  CircleHelpIcon,
+  DownloadIcon,
+  SortIcon,
+} from "@/components/icons";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
@@ -42,6 +41,11 @@ import {
   CardTitle as ShadcnCardTitle,
 } from "@/components/ui/card";
 import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
+import {
+  Collapsible as ShadcnCollapsible,
+  CollapsibleContent as ShadcnCollapsibleContent,
+  CollapsibleTrigger as ShadcnCollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog as ShadcnDialog,
   DialogContent as ShadcnDialogContent,
@@ -88,9 +92,14 @@ import {
 } from "@/components/ui/table";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
+import { PlaidConnectButton } from "./plaid-connect.js";
+import { FinanceReimbursementList } from "./reimbursement-list.js";
+import { FinanceAgentReviewQueue } from "./review-queue.js";
+import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
 
 export function FinancesPage() {
   const location = useLocation();
@@ -100,23 +109,6 @@ export function FinancesPage() {
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
   const [budgetPacePeriod, setBudgetPacePeriod] = useState<FinanceBudgetPacePeriod>("week");
   const [accountScopes, setAccountScopes] = useState<Record<string, string[]>>({});
-  const [profileForm, setProfileForm] = useState({
-    effectiveDate: `${currentMonth}-01`,
-    employer: "",
-    employmentType: "" as
-      | ""
-      | "contract"
-      | "full_time"
-      | "part_time"
-      | "self_employed"
-      | "unemployed",
-    expectedNetPay: "",
-    grossAnnualIncome: "",
-    nextPayday: "",
-    payAccountId: "",
-    payFrequency: "" as "" | "biweekly" | "irregular" | "monthly" | "semimonthly" | "weekly",
-    role: "",
-  });
   const overview = useQuery({
     queryFn: () =>
       section === "budgets"
@@ -145,18 +137,18 @@ export function FinancesPage() {
     queryFn: api.getFinanceWealthSummary,
     queryKey: ["finance-wealth"],
   });
+  const financeStatus = useQuery({
+    enabled: section === "overview",
+    queryFn: () => api.getFinanceStatus(),
+    queryKey: ["finance-status"],
+  });
   const ledgerHealth = useQuery({
     enabled: section === "health" || section === "overview",
     queryFn: api.getFinanceLedgerHealth,
     queryKey: ["finance-ledger-health"],
   });
-  const profile = useQuery({
-    enabled: section === "profile" || section === "cashflow" || section === "overview",
-    queryFn: api.getFinanceProfile,
-    queryKey: ["finance-profile"],
-  });
   const incomeStreams = useQuery({
-    enabled: section === "cashflow" || section === "profile" || section === "overview",
+    enabled: section === "cashflow" || section === "overview",
     queryFn: api.listFinanceIncomeStreams,
     queryKey: ["finance-income-streams"],
   });
@@ -223,10 +215,15 @@ export function FinancesPage() {
   const [learnMerchant, setLearnMerchant] = useState(false);
   const [categorizing, setCategorizing] = useState<{
     category: string;
+    expectedTransactionUpdatedAt: string;
     id: string;
     merchant: string;
+    nonTransferDirection?: "expense" | "income";
+    possibleTransfer?: boolean;
     reviewId?: string;
+    transaction: FinanceTransaction;
   } | null>(null);
+  const [breakdownTransaction, setBreakdownTransaction] = useState<FinanceTransaction | null>(null);
   const [transactionCursor, setTransactionCursor] = useState<string | null>(null);
   const [transactionCursorHistory, setTransactionCursorHistory] = useState<Array<string | null>>(
     [],
@@ -280,23 +277,6 @@ export function FinancesPage() {
       return refresh();
     },
   });
-  const saveProfile = useMutation({
-    mutationFn: () =>
-      api.updateFinanceProfile({
-        effectiveDate: profileForm.effectiveDate,
-        employer: profileForm.employer.trim() || null,
-        employmentType: profileForm.employmentType || null,
-        expectedNetPay: profileForm.expectedNetPay ? Number(profileForm.expectedNetPay) : null,
-        grossAnnualIncome: profileForm.grossAnnualIncome
-          ? Number(profileForm.grossAnnualIncome)
-          : null,
-        nextPayday: profileForm.nextPayday || null,
-        payAccountId: profileForm.payAccountId || null,
-        payFrequency: profileForm.payFrequency || null,
-        role: profileForm.role.trim() || null,
-      }),
-    onSuccess: refresh,
-  });
   const updateRecurring = useMutation({
     mutationFn: ({ id, status }: { id: string; status: "active" | "cancelled" | "paused" }) =>
       api.updateFinanceRecurringObligation(id, { status }),
@@ -316,20 +296,6 @@ export function FinancesPage() {
     mutationFn: api.refreshFinanceInsights,
     onSuccess: refresh,
   });
-  useEffect(() => {
-    if (!profile.data) return;
-    setProfileForm({
-      effectiveDate: profile.data.effectiveDate,
-      employer: profile.data.employer ?? "",
-      employmentType: profile.data.employmentType ?? "",
-      expectedNetPay: profile.data.expectedNetPay?.toString() ?? "",
-      grossAnnualIncome: profile.data.grossAnnualIncome?.toString() ?? "",
-      nextPayday: profile.data.nextPayday ?? "",
-      payAccountId: profile.data.payAccountId ?? "",
-      payFrequency: profile.data.payFrequency ?? "",
-      role: profile.data.role ?? "",
-    });
-  }, [profile.data]);
   const addTransaction = useMutation({
     mutationFn: () =>
       api.createFinanceTransaction({
@@ -386,20 +352,26 @@ export function FinancesPage() {
     mutationFn: ({
       action,
       categoryId,
+      expectedTransactionUpdatedAt,
       id,
       learnMerchant,
+      nonTransferDirection,
       rationale,
     }: {
-      action: "approve" | "defer" | "recategorize";
+      action: "approve" | "confirm_transfer" | "defer" | "recategorize";
       categoryId?: string;
+      expectedTransactionUpdatedAt?: string;
       id: string;
       learnMerchant?: "always" | "never" | "suggest";
+      nonTransferDirection?: "expense" | "income";
       rationale?: string;
     }) =>
       api.resolveFinanceReview(id, {
         action,
         categoryId,
+        expectedTransactionUpdatedAt,
         learnMerchant: learnMerchant ?? "suggest",
+        ...(nonTransferDirection ? { nonTransferDirection } : {}),
         rationale: rationale ?? null,
       }),
     onSuccess: refresh,
@@ -408,8 +380,10 @@ export function FinancesPage() {
     setLearnMerchant(false);
     setCategorizing({
       category: item.category ?? "",
+      expectedTransactionUpdatedAt: item.updatedAt,
       id: item.id,
       merchant: item.merchant,
+      transaction: item,
     });
   }, []);
   const sortTransactions = useCallback((sortBy: FinanceTransactionQuery["sortBy"]) => {
@@ -485,26 +459,20 @@ export function FinancesPage() {
           </div>
         </div>
       ) : null}
-      {section === "profile" ? (
-        <FinancialProfilePanel
-          accounts={overview.data?.accounts ?? []}
-          form={profileForm}
-          onChange={setProfileForm}
-          onSave={() => saveProfile.mutate()}
-          saving={saveProfile.isPending}
-        />
-      ) : null}
       {section === "cashflow" ? (
-        <CashflowPanel
-          alerts={alerts.data ?? []}
-          forecast={forecast.data}
-          incomeStreams={incomeStreams.data ?? []}
-          onRefresh={() => refreshInsights.mutate()}
-          onResolveAlert={(id, action) => resolveAlert.mutate({ action, id })}
-          onUpdateIncome={(id, status) => updateIncomeStream.mutate({ id, status })}
-          onUpdateRecurring={(id, status) => updateRecurring.mutate({ id, status })}
-          recurring={recurring.data ?? []}
-        />
+        <div className="grid gap-6">
+          <CashflowPanel
+            alerts={alerts.data ?? []}
+            forecast={forecast.data}
+            incomeStreams={incomeStreams.data ?? []}
+            onRefresh={() => refreshInsights.mutate()}
+            onResolveAlert={(id, action) => resolveAlert.mutate({ action, id })}
+            onUpdateIncome={(id, status) => updateIncomeStream.mutate({ id, status })}
+            onUpdateRecurring={(id, status) => updateRecurring.mutate({ id, status })}
+            recurring={recurring.data ?? []}
+          />
+          <FinanceReimbursementList />
+        </div>
       ) : null}
       {section === "subscriptions" ? (
         <SubscriptionsPanel
@@ -512,22 +480,22 @@ export function FinancesPage() {
           onUpdate={(id, status) => updateRecurring.mutate({ id, status })}
         />
       ) : null}
-      <section className="grid gap-4 md:grid-cols-3" hidden={section !== "overview"}>
-        <FinanceMetric
-          label="Spent this month"
-          onClick={() => setScopeDialog("spend")}
-          value={formatMoney(spentThisMonth)}
-        />
-        <FinanceMetric label="Accounts tracked" value={String(finance.accounts.length)} />
-        <FinanceMetric label="Needs your judgment" value={String(finance.reviewCount)} />
-      </section>
       {section === "overview" && wealth.data ? (
-        <FinanceWealthSummaryCard
-          cash={scopedBalance("cash")}
-          investments={scopedBalance("investments")}
-          onConfigure={setScopeDialog}
+        <FinanceCurrentPosition
+          cash={
+            finance.accounts.some((account) => account.kind === "cash")
+              ? scopedBalance("cash")
+              : wealth.data.cash
+          }
+          onConfigureCash={() => setScopeDialog("cash")}
+          onConfigureSpend={() => setScopeDialog("spend")}
+          reviewCount={finance.reviewCount}
+          spentThisMonth={spentThisMonth}
           wealth={wealth.data}
         />
+      ) : null}
+      {section === "overview" && financeStatus.data ? (
+        <FinanceAtAGlance status={financeStatus.data} />
       ) : null}
       {section === "overview" ? (
         <BudgetPaceGraph
@@ -536,20 +504,15 @@ export function FinancesPage() {
           period={budgetPacePeriod}
         />
       ) : null}
-      {section === "overview" ? <FinanceOverviewLinks reviewCount={finance.reviewCount} /> : null}
       {section === "overview" && ledgerHealth.data ? (
-        <FinanceLedgerHealthCard health={ledgerHealth.data} />
+        <FinanceLedgerHealthDisclosure health={ledgerHealth.data} />
       ) : null}
+      {section === "review" ? <FinanceAgentReviewQueue /> : null}
       <section
         className={
           section === "budgets" ? "grid gap-6" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
         }
-        hidden={
-          section === "overview" ||
-          section === "profile" ||
-          section === "cashflow" ||
-          section === "subscriptions"
-        }
+        hidden={section === "overview" || section === "cashflow" || section === "subscriptions"}
       >
         <div className="flex min-w-0 flex-col gap-6">
           <ShadcnCard hidden={section !== "health"}>
@@ -602,6 +565,7 @@ export function FinancesPage() {
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
                   nextCursor={transactionList.data?.nextCursor ?? null}
+                  onBreakdown={setBreakdownTransaction}
                   onCategorize={openCategorize}
                   onNextPage={nextTransactionPage}
                   onPreviousPage={previousTransactionPage}
@@ -613,21 +577,40 @@ export function FinancesPage() {
                 <FinanceReviewItems
                   cases={reviewQueue.data}
                   isPending={resolveReview.isPending}
-                  onApprove={(id) => resolveReview.mutate({ action: "approve", id })}
+                  onApprove={(review) =>
+                    resolveReview.mutate({
+                      action: "approve",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
+                      id: review.id,
+                    })
+                  }
                   onCategorize={(review) => {
                     setLearnMerchant(false);
                     setCategorizing({
                       category: review.transaction.category ?? "",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
                       id: review.transaction.id,
                       merchant: review.transaction.merchant,
+                      ...(review.transaction.providerDirection
+                        ? { nonTransferDirection: review.transaction.providerDirection }
+                        : {}),
+                      possibleTransfer: review.reason === "possible_transfer",
                       reviewId: review.id,
+                      transaction: review.transaction,
                     });
                   }}
+                  onConfirmTransfer={(review) =>
+                    resolveReview.mutate({
+                      action: "confirm_transfer",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
+                      id: review.id,
+                    })
+                  }
                   onDefer={(id) => resolveReview.mutate({ action: "defer", id })}
                 />
               ) : visibleTransactions.length === 0 ? (
                 <EmptyState
-                  icon={<CheckCircle2 />}
+                  icon={<CircleCheckIcon />}
                   title={reviewOnly ? "Everything is categorized" : "No transactions yet"}
                 >
                   Add one manually now; connected providers will populate this list after sync.
@@ -679,7 +662,10 @@ export function FinancesPage() {
               <FinanceBudgetContext wealth={wealth.data} />
             ) : null}
             {finance.budgets.length === 0 ? (
-              <EmptyState icon={<CircleHelp />} title={`No budget for ${formatMonth(budgetMonth)}`}>
+              <EmptyState
+                icon={<CircleHelpIcon />}
+                title={`No budget for ${formatMonth(budgetMonth)}`}
+              >
                 {budgetMonth > currentMonth
                   ? "This future month has not been planned yet. Set a budget now or come back when you are ready."
                   : "No category limits were set for this month. You can still inspect raw transactions or create a plan."}
@@ -820,7 +806,7 @@ export function FinancesPage() {
                   >
                     Track account
                   </ShadcnButton>
-                  <PlaidConnect onConnected={refresh} />
+                  <PlaidConnectButton onConnected={refresh} />
                 </div>
               </ShadcnCardAction>
             </ShadcnCardHeader>
@@ -1044,6 +1030,27 @@ export function FinancesPage() {
                   />
                 </ShadcnField>
               ) : null}
+              {categorizing.possibleTransfer ? (
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="finance-non-transfer-direction">
+                    Treat this transaction as
+                  </ShadcnFieldLabel>
+                  <ShadcnNativeSelect
+                    id="finance-non-transfer-direction"
+                    onChange={(event) =>
+                      setCategorizing({
+                        ...categorizing,
+                        nonTransferDirection: event.target.value as "expense" | "income",
+                      })
+                    }
+                    value={categorizing.nonTransferDirection ?? ""}
+                  >
+                    <NativeSelectOption value="">Choose income or expense</NativeSelectOption>
+                    <NativeSelectOption value="expense">Expense</NativeSelectOption>
+                    <NativeSelectOption value="income">Income</NativeSelectOption>
+                  </ShadcnNativeSelect>
+                </ShadcnField>
+              ) : null}
               {categorizing.reviewId ? (
                 <ShadcnFieldDescription>
                   Leave this off for a one-time charge. Turn it on only when this merchant should
@@ -1053,6 +1060,17 @@ export function FinancesPage() {
             </ShadcnFieldGroup>
           ) : null}
           <ShadcnDialogFooter>
+            {categorizing ? (
+              <ShadcnButton
+                onClick={() => {
+                  setBreakdownTransaction(categorizing.transaction);
+                  setCategorizing(null);
+                }}
+                variant="ghost"
+              >
+                Split purchase
+              </ShadcnButton>
+            ) : null}
             <ShadcnButton onClick={() => setCategorizing(null)} variant="outline">
               Cancel
             </ShadcnButton>
@@ -1061,6 +1079,8 @@ export function FinancesPage() {
                 categorize.isPending ||
                 resolveReview.isPending ||
                 !categorizing?.category.trim() ||
+                (categorizing?.possibleTransfer === true &&
+                  categorizing.nonTransferDirection === undefined) ||
                 (categorizing?.reviewId !== undefined &&
                   !categories.data?.some(
                     (item) =>
@@ -1077,8 +1097,12 @@ export function FinancesPage() {
                     {
                       action: "recategorize",
                       categoryId,
+                      expectedTransactionUpdatedAt: categorizing.expectedTransactionUpdatedAt,
                       id: categorizing.reviewId,
                       learnMerchant: learnMerchant ? "always" : "suggest",
+                      ...(categorizing.nonTransferDirection
+                        ? { nonTransferDirection: categorizing.nonTransferDirection }
+                        : {}),
                       rationale: "Reviewed and recategorized by the user.",
                     },
                     {
@@ -1105,6 +1129,12 @@ export function FinancesPage() {
           </ShadcnDialogFooter>
         </ShadcnDialogContent>
       </ShadcnDialog>
+      <TransactionBreakdownDialog
+        categories={categories.data ?? []}
+        onOpenChange={(open) => !open && setBreakdownTransaction(null)}
+        open={breakdownTransaction !== null}
+        transaction={breakdownTransaction}
+      />
       <AccountScopeDialog
         accounts={finance.accounts}
         onChange={(scope, ids) => {
@@ -1162,35 +1192,117 @@ function FinanceMetric({
   );
 }
 
-function FinanceWealthSummaryCard({
+function FinanceCurrentPosition({
   cash,
-  investments,
-  onConfigure,
+  onConfigureCash,
+  onConfigureSpend,
+  reviewCount,
+  spentThisMonth,
   wealth,
 }: {
   cash: number;
-  investments: number;
-  onConfigure: (scope: "cash" | "investments") => void;
+  onConfigureCash: () => void;
+  onConfigureSpend: () => void;
+  reviewCount: number;
+  spentThisMonth: number;
   wealth: FinanceWealthSummary;
 }) {
+  const reviewLabel = `Review ${reviewCount} ${reviewCount === 1 ? "decision" : "decisions"}`;
+  const metrics = [
+    { label: "Cash tracked", onClick: onConfigureCash, value: cash },
+    { label: "Spent this month", onClick: onConfigureSpend, value: spentThisMonth },
+    { label: "Net worth", value: wealth.netWorth },
+  ];
+
   return (
-    <section className="grid gap-4 md:grid-cols-4" aria-label="Wealth summary">
-      <FinanceMetric label="Net worth" value={formatMoney(wealth.netWorth)} />
-      <FinanceMetric
-        label="Investments"
-        onClick={() => onConfigure("investments")}
-        value={formatMoney(investments)}
-      />
-      <FinanceMetric label="Cash" onClick={() => onConfigure("cash")} value={formatMoney(cash)} />
+    <section aria-label="Current financial position">
+      <ShadcnCard>
+        <ShadcnCardHeader>
+          <ShadcnCardTitle>Financial position</ShadcnCardTitle>
+          <ShadcnCardDescription>
+            Current balances and posted activity for this month.
+          </ShadcnCardDescription>
+          <ShadcnCardAction>
+            <div className="flex items-center gap-2">
+              <ShadcnButton asChild size="sm" variant="outline">
+                <Link to="/finances/accounts">Open accounts</Link>
+              </ShadcnButton>
+              {reviewCount > 0 ? (
+                <ShadcnButton asChild size="sm">
+                  <Link to="/finances/review">{reviewLabel}</Link>
+                </ShadcnButton>
+              ) : (
+                <ShadcnBadge variant="secondary">Nothing to review</ShadcnBadge>
+              )}
+            </div>
+          </ShadcnCardAction>
+        </ShadcnCardHeader>
+        <ShadcnCardContent className="grid gap-5 sm:grid-cols-3">
+          {metrics.map((metric) => (
+            <div className="flex min-w-0 flex-col gap-1" key={metric.label}>
+              <span className="text-xs font-medium text-muted-foreground">{metric.label}</span>
+              {metric.onClick ? (
+                <ShadcnButton
+                  aria-label={`${metric.label}: configure included accounts`}
+                  className="h-auto w-fit justify-start p-0 text-2xl font-semibold tabular-nums"
+                  onClick={metric.onClick}
+                  variant="ghost"
+                >
+                  {formatMoney(metric.value)}
+                </ShadcnButton>
+              ) : (
+                <strong className="text-2xl font-semibold tabular-nums">
+                  {formatMoney(metric.value)}
+                </strong>
+              )}
+            </div>
+          ))}
+        </ShadcnCardContent>
+      </ShadcnCard>
+    </section>
+  );
+}
+
+function FinanceAtAGlance({ status }: { status: FinanceStatus }) {
+  const latestReview = status.details.latestReview;
+  return (
+    <section aria-label="Finance at a glance" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <FinanceMetric
         detail={
-          wealth.statedAnnualIncome === null
-            ? "Observed in the trailing 12 months"
-            : `${formatMoney(wealth.observedAnnualIncome)} observed in the trailing 12 months`
+          status.details.evidence.current
+            ? "Sources are current"
+            : "Refresh sources before relying on totals"
         }
-        label={wealth.incomeBasis === "stated" ? "Stated annual income" : "Observed annual income"}
-        value={formatMoney(wealth.annualIncome)}
+        label="Personal spending"
+        value={formatMoney(status.details.month.spending ?? 0)}
       />
+      <FinanceMetric
+        detail={status.details.cashFlow.projectedLowestBalanceDate ?? "No projected low date"}
+        label="Projected low balance"
+        value={formatMoney(status.details.cashFlow.projectedLowestBalance ?? 0)}
+      />
+      <FinanceMetric
+        detail={`${status.details.reimbursements.open} open`}
+        label="Expected back"
+        value={formatMoney(status.details.reimbursements.outstanding)}
+      />
+      <ShadcnCard>
+        <ShadcnCardHeader>
+          <ShadcnCardTitle>Latest review</ShadcnCardTitle>
+          <ShadcnCardDescription>
+            {latestReview
+              ? `Completed ${formatDateOnly(latestReview.completedAt.slice(0, 10), { day: "numeric", month: "short" })}`
+              : "No completed period review yet."}
+          </ShadcnCardDescription>
+        </ShadcnCardHeader>
+        {latestReview ? (
+          <ShadcnCardContent>
+            <ShadcnButton asChild size="sm" variant="outline">
+              <Link to={`/finances/reviews/${latestReview.id}`}>Open review</Link>
+            </ShadcnButton>
+          </ShadcnCardContent>
+        ) : null}
+      </ShadcnCard>
     </section>
   );
 }
@@ -1436,13 +1548,13 @@ function FinanceMonthNavigator({
     <fieldset className="flex items-center rounded-md border bg-background">
       <legend className="sr-only">Budget month</legend>
       <ShadcnButton aria-label="Previous month" onClick={onPrevious} size="icon-sm" variant="ghost">
-        <ChevronLeft />
+        <ChevronLeftIcon />
       </ShadcnButton>
       <span className="min-w-28 px-2 text-center text-sm font-medium tabular-nums">
         {formatMonth(month)}
       </span>
       <ShadcnButton aria-label="Next month" onClick={onNext} size="icon-sm" variant="ghost">
-        <ChevronRight />
+        <ChevronRightIcon />
       </ShadcnButton>
     </fieldset>
   );
@@ -1453,7 +1565,7 @@ function FinanceExportMenu() {
     <ShadcnDropdownMenu>
       <ShadcnDropdownMenuTrigger asChild>
         <ShadcnButton size="sm" variant="outline">
-          <Download data-icon="inline-start" />
+          <DownloadIcon data-icon="inline-start" />
           Export data
         </ShadcnButton>
       </ShadcnDropdownMenuTrigger>
@@ -1513,7 +1625,7 @@ function FinanceBudgetAllocationChart({
   }));
   if (data.length === 0) {
     return (
-      <EmptyState icon={<CircleHelp />} title="No planned categories">
+      <EmptyState icon={<CircleHelpIcon />} title="No planned categories">
         Set a category limit to see its allocation.
       </EmptyState>
     );
@@ -1820,172 +1932,6 @@ function FinanceBudgetDetailDialog({
   );
 }
 
-function FinancialProfilePanel({
-  accounts,
-  form,
-  onChange,
-  onSave,
-  saving,
-}: {
-  accounts: FinanceAccount[];
-  form: {
-    effectiveDate: string;
-    employer: string;
-    employmentType: "" | "contract" | "full_time" | "part_time" | "self_employed" | "unemployed";
-    expectedNetPay: string;
-    grossAnnualIncome: string;
-    nextPayday: string;
-    payAccountId: string;
-    payFrequency: "" | "biweekly" | "irregular" | "monthly" | "semimonthly" | "weekly";
-    role: string;
-  };
-  onChange: React.Dispatch<React.SetStateAction<typeof form>>;
-  onSave: () => void;
-  saving: boolean;
-}) {
-  return (
-    <ShadcnCard>
-      <ShadcnCardHeader>
-        <ShadcnCardTitle>Financial profile</ShadcnCardTitle>
-        <ShadcnCardDescription>
-          Your private baseline for paycheck and cash-flow checks. It is never inferred as a job
-          change without your confirmation.
-        </ShadcnCardDescription>
-        <ShadcnCardAction>
-          <ShadcnButton disabled={saving} onClick={onSave}>
-            {saving ? "Saving…" : "Save profile"}
-          </ShadcnButton>
-        </ShadcnCardAction>
-      </ShadcnCardHeader>
-      <ShadcnCardContent>
-        <ShadcnFieldGroup className="grid gap-4 md:grid-cols-2">
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-employer">Employer</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-employer"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, employer: event.target.value }))
-              }
-              value={form.employer}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-role">Role</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-role"
-              onChange={(event) => onChange((value) => ({ ...value, role: event.target.value }))}
-              value={form.role}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-employment-type">Employment type</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="finance-employment-type"
-              onChange={(event) =>
-                onChange((value) => ({
-                  ...value,
-                  employmentType: event.target.value as typeof form.employmentType,
-                }))
-              }
-              value={form.employmentType}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              <NativeSelectOption value="full_time">Full time</NativeSelectOption>
-              <NativeSelectOption value="part_time">Part time</NativeSelectOption>
-              <NativeSelectOption value="contract">Contract</NativeSelectOption>
-              <NativeSelectOption value="self_employed">Self-employed</NativeSelectOption>
-              <NativeSelectOption value="unemployed">Not employed</NativeSelectOption>
-            </ShadcnNativeSelect>
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-effective-date">Effective date</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-effective-date"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, effectiveDate: event.target.value }))
-              }
-              type="date"
-              value={form.effectiveDate}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-gross-income">Gross annual income</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-gross-income"
-              inputMode="decimal"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, grossAnnualIncome: event.target.value }))
-              }
-              placeholder="0.00"
-              value={form.grossAnnualIncome}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-net-pay">Expected net paycheck</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-net-pay"
-              inputMode="decimal"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, expectedNetPay: event.target.value }))
-              }
-              placeholder="0.00"
-              value={form.expectedNetPay}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-pay-frequency">Pay frequency</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="finance-pay-frequency"
-              onChange={(event) =>
-                onChange((value) => ({
-                  ...value,
-                  payFrequency: event.target.value as typeof form.payFrequency,
-                }))
-              }
-              value={form.payFrequency}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              <NativeSelectOption value="weekly">Weekly</NativeSelectOption>
-              <NativeSelectOption value="biweekly">Every two weeks</NativeSelectOption>
-              <NativeSelectOption value="semimonthly">Twice monthly</NativeSelectOption>
-              <NativeSelectOption value="monthly">Monthly</NativeSelectOption>
-              <NativeSelectOption value="irregular">Irregular</NativeSelectOption>
-            </ShadcnNativeSelect>
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-next-payday">Next payday</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-next-payday"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, nextPayday: event.target.value }))
-              }
-              type="date"
-              value={form.nextPayday}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-pay-account">Pay account</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="finance-pay-account"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, payAccountId: event.target.value }))
-              }
-              value={form.payAccountId}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              {accounts.map((account) => (
-                <NativeSelectOption key={account.id} value={account.id}>
-                  {account.institution} · {account.name}
-                </NativeSelectOption>
-              ))}
-            </ShadcnNativeSelect>
-          </ShadcnField>
-        </ShadcnFieldGroup>
-      </ShadcnCardContent>
-    </ShadcnCard>
-  );
-}
-
 function CashflowPanel({
   alerts,
   forecast,
@@ -2222,7 +2168,7 @@ function SubscriptionsPanel({
               </ShadcnItem>
             ))
           ) : (
-            <EmptyState icon={<CircleHelp />} title="No subscriptions detected">
+            <EmptyState icon={<CircleHelpIcon />} title="No subscriptions detected">
               We need at least three consistent charges to suggest a subscription.
             </EmptyState>
           )}
@@ -2232,68 +2178,39 @@ function SubscriptionsPanel({
   );
 }
 
-function FinanceOverviewLinks({ reviewCount }: { reviewCount: number }) {
-  const links: Array<{ description: string; label: string; path: string }> = [
-    {
-      description: "Set your expected income, pay cadence, and private employment baseline.",
-      label: "Financial profile",
-      path: "/finances/profile",
-    },
-    {
-      description:
-        "See verified income, upcoming obligations, alerts, and your safe-to-spend forecast.",
-      label: "Cash flow",
-      path: "/finances/cashflow",
-    },
-    {
-      description: "Review recurring services and take action on subscription changes.",
-      label: "Subscriptions",
-      path: "/finances/subscriptions",
-    },
-    {
-      description: "See pending activity, transfer candidates, duplicates, and coverage gaps.",
-      label: "Ledger health",
-      path: "/finances/health",
-    },
-    {
-      description: reviewCount
-        ? `${reviewCount} transactions need a category.`
-        : "No categories need attention.",
-      label: "Review queue",
-      path: "/finances/review",
-    },
-    {
-      description: "See balances, sync status, and account connections.",
-      label: "Accounts",
-      path: "/finances/accounts",
-    },
-    {
-      description: "Set category limits and monitor monthly progress.",
-      label: "Budgets",
-      path: "/finances/budgets",
-    },
-    {
-      description: "Browse transactions or add a manual entry.",
-      label: "Transactions",
-      path: "/finances/transactions",
-    },
-  ];
+function FinanceLedgerHealthDisclosure({ health }: { health: FinanceLedgerHealth }) {
+  const affectedChecks = [
+    health.unresolvedReviews,
+    health.candidateTransfers,
+    health.possibleDuplicates,
+    health.pendingTransactions,
+    health.staleAccounts,
+    health.balanceOnlyAccounts,
+    health.missingProvenance,
+  ].filter((count) => count > 0).length;
+  const checkLabel = `${affectedChecks} ledger ${affectedChecks === 1 ? "check" : "checks"}`;
+
   return (
-    <section aria-label="Finance workspaces" className="grid gap-4 md:grid-cols-2">
-      {links.map((item) => (
-        <ShadcnCard key={item.path}>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>{item.label}</ShadcnCardTitle>
-            <ShadcnCardDescription>{item.description}</ShadcnCardDescription>
-            <ShadcnCardAction>
-              <ShadcnButton asChild size="sm" variant="outline">
-                <Link to={item.path}>Open {item.label.toLowerCase()}</Link>
-              </ShadcnButton>
-            </ShadcnCardAction>
-          </ShadcnCardHeader>
-        </ShadcnCard>
-      ))}
-    </section>
+    <ShadcnCollapsible asChild>
+      <section aria-label="Ledger health" className="rounded-xl border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="text-sm font-medium">Ledger health</h2>
+            <ShadcnBadge variant={affectedChecks > 0 ? "destructive" : "secondary"}>
+              {affectedChecks > 0 ? `${affectedChecks} need attention` : "All checks clear"}
+            </ShadcnBadge>
+          </div>
+          <ShadcnCollapsibleTrigger asChild>
+            <ShadcnButton size="sm" variant="outline">
+              Review {checkLabel}
+            </ShadcnButton>
+          </ShadcnCollapsibleTrigger>
+        </div>
+        <ShadcnCollapsibleContent className="pt-4">
+          <FinanceLedgerHealthCard health={health} />
+        </ShadcnCollapsibleContent>
+      </section>
+    </ShadcnCollapsible>
   );
 }
 
@@ -2353,6 +2270,7 @@ function FinanceTransactionsTable({
   isCategorizing,
   isLoading,
   nextCursor,
+  onBreakdown,
   onCategorize,
   onNextPage,
   onPreviousPage,
@@ -2364,6 +2282,7 @@ function FinanceTransactionsTable({
   isCategorizing: boolean;
   isLoading: boolean;
   nextCursor: string | null;
+  onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
   onNextPage: () => void;
   onPreviousPage: () => void;
@@ -2393,7 +2312,7 @@ function FinanceTransactionsTable({
             <div className="flex min-w-0 items-center gap-2">
               {isKnownMerchant ? (
                 <span aria-label="Merchant entity found" role="img" title="Merchant entity found">
-                  <CircleCheck
+                  <CircleCheckIcon
                     aria-hidden="true"
                     className="shrink-0 text-muted-foreground"
                     data-icon="inline-start"
@@ -2405,7 +2324,7 @@ function FinanceTransactionsTable({
                   role="img"
                   title="Merchant entity needs review"
                 >
-                  <CircleHelp
+                  <CircleHelpIcon
                     aria-hidden="true"
                     className="shrink-0 text-muted-foreground"
                     data-icon="inline-start"
@@ -2466,9 +2385,9 @@ function FinanceTransactionsTable({
             >
               {isExpanded ? "Hide" : "Details"}
               {isExpanded ? (
-                <ChevronUp data-icon="inline-end" />
+                <ChevronUpIcon data-icon="inline-end" />
               ) : (
-                <ChevronDown data-icon="inline-end" />
+                <ChevronDownIcon data-icon="inline-end" />
               )}
             </ShadcnButton>
           );
@@ -2497,7 +2416,7 @@ function FinanceTransactionsTable({
 
   if (transactions.length === 0)
     return (
-      <EmptyState icon={<CheckCircle2 />} title="No transactions yet">
+      <EmptyState icon={<CircleCheckIcon />} title="No transactions yet">
         Add one manually now; connected providers will populate this ledger after sync.
       </EmptyState>
     );
@@ -2544,6 +2463,7 @@ function FinanceTransactionsTable({
                     >
                       <TransactionDetails
                         isCategorizing={isCategorizing}
+                        onBreakdown={onBreakdown}
                         onCategorize={onCategorize}
                         transaction={row.original}
                       />
@@ -2599,7 +2519,7 @@ function TransactionSortButton({
   sortBy: FinanceTransactionQuery["sortBy"];
 }) {
   const isActive = sort.sortBy === sortBy;
-  const Icon = !isActive ? ArrowUpDown : sort.sortDirection === "asc" ? ArrowUp : ArrowDown;
+  const Icon = !isActive ? SortIcon : sort.sortDirection === "asc" ? ArrowUpIcon : ArrowDownIcon;
   return (
     <ShadcnButton
       aria-label={`Sort by ${label.toLowerCase()}`}
@@ -2626,10 +2546,12 @@ function transactionTableColumnClass(columnId: string) {
 
 function TransactionDetails({
   isCategorizing,
+  onBreakdown,
   onCategorize,
   transaction,
 }: {
   isCategorizing: boolean;
+  onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
   transaction: FinanceTransaction;
 }) {
@@ -2646,8 +2568,11 @@ function TransactionDetails({
         value={transaction.rawMerchant ?? transaction.merchant}
       />
       {transaction.notes ? <TransactionDetail label="Notes" value={transaction.notes} /> : null}
-      {transaction.needsReview ? (
-        <div className="flex items-end">
+      <div className="flex items-end gap-2">
+        <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
+          Split purchase
+        </ShadcnButton>
+        {transaction.needsReview ? (
           <ShadcnButton
             disabled={isCategorizing}
             onClick={() => onCategorize(transaction)}
@@ -2655,8 +2580,8 @@ function TransactionDetails({
           >
             Categorize
           </ShadcnButton>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </dl>
   );
 }
@@ -2677,17 +2602,19 @@ function FinanceReviewItems({
   isPending,
   onApprove,
   onCategorize,
+  onConfirmTransfer,
   onDefer,
 }: {
   cases: FinanceReviewCase[];
   isPending: boolean;
-  onApprove: (id: string) => void;
+  onApprove: (review: FinanceReviewCase) => void;
   onCategorize: (review: FinanceReviewCase) => void;
+  onConfirmTransfer: (review: FinanceReviewCase) => void;
   onDefer: (id: string) => void;
 }) {
   if (cases.length === 0)
     return (
-      <EmptyState icon={<CheckCircle2 />} title="Nothing needs your judgment">
+      <EmptyState icon={<CircleCheckIcon />} title="Nothing needs your judgment">
         New uncertain transactions will appear here with the evidence behind each suggestion.
       </EmptyState>
     );
@@ -2695,7 +2622,9 @@ function FinanceReviewItems({
     <ShadcnItemGroup>
       {cases.map((review) => {
         const item = review.transaction;
-        const canApprove = item.categoryId !== null && item.category !== null;
+        const isPossibleTransfer = review.reason === "possible_transfer";
+        const canApprove =
+          !isPossibleTransfer && item.categoryId !== null && item.category !== null;
         return (
           <ShadcnItem key={review.id} variant="outline">
             <ShadcnItemContent>
@@ -2711,8 +2640,17 @@ function FinanceReviewItems({
             <ShadcnItemActions>
               <span className="text-sm font-medium">{formatMoney(item.amount)}</span>
               {canApprove ? (
-                <ShadcnButton disabled={isPending} onClick={() => onApprove(review.id)} size="sm">
+                <ShadcnButton disabled={isPending} onClick={() => onApprove(review)} size="sm">
                   Approve
+                </ShadcnButton>
+              ) : null}
+              {isPossibleTransfer ? (
+                <ShadcnButton
+                  disabled={isPending}
+                  onClick={() => onConfirmTransfer(review)}
+                  size="sm"
+                >
+                  Confirm transfer
                 </ShadcnButton>
               ) : null}
               <ShadcnButton
@@ -2765,44 +2703,6 @@ function FinanceTextField({
   );
 }
 
-function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) {
-  const [token, setToken] = useState<string | null>(null);
-  const status = useQuery({ queryFn: api.getPlaidStatus, queryKey: ["plaid-status"] });
-  const exchange = useMutation({
-    mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
-    onSuccess: onConnected,
-  });
-  const { open, ready } = usePlaidLink({
-    onSuccess: (publicToken) => exchange.mutate(publicToken),
-    token,
-  });
-  useEffect(() => {
-    if (token && ready) open();
-  }, [open, ready, token]);
-  if (status.isPending) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Checking Plaid
-      </ShadcnButton>
-    );
-  }
-  if (status.isError || !status.data.available) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Plaid needs keys
-      </ShadcnButton>
-    );
-  }
-  return (
-    <ShadcnButton
-      disabled={exchange.isPending}
-      onClick={() => api.getPlaidLinkToken().then(setToken)}
-      size="sm"
-    >
-      Connect bank
-    </ShadcnButton>
-  );
-}
 function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) {
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const csvCell = (value: unknown) => {
@@ -2883,27 +2783,5 @@ function transactionAmountTone(direction: FinanceTransaction["direction"]) {
 }
 
 function FinancePageSkeleton() {
-  return (
-    <section
-      aria-busy="true"
-      aria-label="Loading finances"
-      className="wide-page flex w-full max-w-6xl flex-col gap-6 pb-8"
-    >
-      <div className="space-y-3">
-        <div className="h-3 w-36 animate-pulse rounded bg-muted" />
-        <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-full max-w-xl animate-pulse rounded bg-muted" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        {["spend", "accounts", "review"].map((name) => (
-          <div className="h-24 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {["primary", "secondary"].map((name) => (
-          <div className="h-40 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-    </section>
-  );
+  return <WorkspaceSkeleton kind="finances" />;
 }

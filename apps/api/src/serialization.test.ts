@@ -196,6 +196,7 @@ describe("auditSnapshot", () => {
       title: "Local event",
       transparency: "busy",
       updatedAt: timestamp,
+      url: null,
       userId: "user-1",
       visibility: "default",
     } satisfies Parameters<typeof serializeEvent>[0];

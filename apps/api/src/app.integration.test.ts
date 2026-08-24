@@ -4658,7 +4658,7 @@ describe.sequential("ilo API", () => {
         .from(reminders)
         .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
     ]);
-    expect(events).toHaveLength(7);
+    expect(events).toHaveLength(9);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
     expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));
@@ -4882,9 +4882,14 @@ describe.sequential("ilo API", () => {
       status: "ready",
     });
     expect(ready.headers.get("x-ilo-drain-protocol")).toBe("quiesce-v1");
-    expect((await payload(await request("/openapi.json", { auth: "none" }))).servers).toEqual([
-      { url: "https://api.example.com" },
-    ]);
+    const openApiDocument = await payload(await request("/openapi.json", { auth: "none" }));
+    expect(openApiDocument.servers).toEqual([{ url: "https://api.example.com" }]);
+    expect(openApiDocument.paths["/v1/calendars/status"].get.responses[200].description).toBe(
+      "Calendar stewardship status",
+    );
+    expect(openApiDocument.paths["/v1/calendars/reviews"].post.responses[201].description).toBe(
+      "Immutable Calendar review created",
+    );
     expect((await request("/missing", { auth: "none" })).status).toBe(404);
     expect((await request("/v1/auth/register", { auth: "none", rawBody: "{" })).status).toBe(400);
 
@@ -6132,6 +6137,22 @@ describe.sequential("ilo API", () => {
     expect((await request("/v1/mailboxes", { auth: "agent" })).status).toBe(403);
     expect((await request("/v1/daily-brief", { auth: "agent" })).status).toBe(403);
     agentToken = fullAgentToken;
+
+    const calendarStatus = await request("/v1/calendars/status", { auth: "agent" });
+    expect(calendarStatus.status).toBe(200);
+    expect((await payload(calendarStatus)).status).toMatchObject({
+      readiness: expect.any(String),
+      validNextOperations: expect.any(Array),
+    });
+    const calendarReview = await request("/v1/calendars/reviews", {
+      auth: "agent",
+      body: {},
+    });
+    expect(calendarReview.status).toBe(201);
+    expect((await payload(calendarReview)).review).toMatchObject({
+      scope: { type: "all_outstanding" },
+      state: expect.any(String),
+    });
 
     const briefOnlyToken = await payload(
       await request("/v1/access-tokens", {

@@ -211,6 +211,7 @@ export function serializeEvent(
     blocks,
     blockSourceEventId: row.blockSourceEventId,
     calendarId: row.calendarId,
+    conferenceStatus: calendarConferenceStatus(row),
     conferenceUrl: row.conferenceUrl,
     createdAt: row.createdAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
@@ -218,6 +219,7 @@ export function serializeEvent(
     id: row.id,
     location: row.location,
     notes: row.notes,
+    url: row.url,
     provider: row.provider,
     recurrence: row.recurrence,
     reminders: row.reminders,
@@ -237,6 +239,20 @@ export function serializeEvent(
     updatedAt: row.updatedAt.toISOString(),
     visibility: row.visibility,
   };
+}
+
+function calendarConferenceStatus(row: CalendarEventRow): "failure" | "pending" | "success" | null {
+  if (row.conferenceUrl) return "success";
+  const conferenceData = row.raw?.conferenceData;
+  if (!conferenceData || typeof conferenceData !== "object") return null;
+  const createRequest = (conferenceData as Record<string, unknown>).createRequest;
+  if (!createRequest || typeof createRequest !== "object") return null;
+  const status = (createRequest as Record<string, unknown>).status;
+  if (!status || typeof status !== "object") return null;
+  const statusCode = (status as Record<string, unknown>).statusCode;
+  return statusCode === "failure" || statusCode === "pending" || statusCode === "success"
+    ? statusCode
+    : null;
 }
 
 export function serializeMailbox(row: MailboxRow): Mailbox {
@@ -427,6 +443,7 @@ const sensitiveAuditFields = new Set([
   "merchant",
   "name",
   "notes",
+  "url",
   "passwordHash",
   "raw",
   "refreshToken",

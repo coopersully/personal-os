@@ -5,6 +5,8 @@ import { getTableConfig, PgDialect, type PgTable } from "drizzle-orm/pg-core";
 import * as databaseSchema from "./schema.js";
 import {
   calendarAccounts,
+  calendarFindings,
+  calendarReviews,
   connectorSubscriptions,
   connectorSyncTriggers,
   domainProfileApprovals,
@@ -34,6 +36,40 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("keeps Calendar findings stable and reviews immutable", async () => {
+    const findings = getTableConfig(calendarFindings);
+    const reviews = getTableConfig(calendarReviews);
+    expect(findings.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "calendar_findings_identity_idx",
+        "calendar_findings_user_status_idx",
+      ]),
+    );
+    expect(findings.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "calendar_findings_fingerprint_check",
+        "calendar_findings_status_check",
+        "calendar_findings_resolution_check",
+      ]),
+    );
+    expect(reviews.indexes.map((index) => index.config.name)).toContain(
+      "calendar_reviews_user_created_idx",
+    );
+    expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0070_calendar_stewardship_foundations.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "calendar_findings"');
+    expect(migrationSql).toContain('CREATE TABLE "calendar_reviews"');
+    expect(migrationSql).toContain("^[0-9a-f]{64}$");
+    expect(migrationSql).toContain('CREATE UNIQUE INDEX "calendar_findings_identity_idx"');
+    expect(migrationSql).not.toContain('ALTER TABLE "calendar_events"');
+  });
+
   it("keeps one active, owned Finance maintenance candidate with durable private items", async () => {
     const candidates = getTableConfig(financeMaintenanceCandidates);
     const items = getTableConfig(financeMaintenanceCandidateItems);
@@ -177,7 +213,7 @@ describe("database schema contracts", () => {
     const journalTags = journal.entries.map((entry) => entry.tag);
     const financeStart = journalTags.indexOf("0059_finance_automation_settings");
     expect(financeStart).toBeGreaterThanOrEqual(0);
-    expect(journalTags.slice(financeStart, financeStart + 11)).toEqual([
+    expect(journalTags.slice(financeStart)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
@@ -189,10 +225,10 @@ describe("database schema contracts", () => {
       "0067_finance_ledger_protocol",
       "0068_finance_mutation_leases",
       "0069_finance_legacy_budget_backfill",
-    ]);
-    expect(journalTags.slice(-2)).toEqual([
-      "0070_finance_parallel_migration_reconciliation",
-      "0071_task_organization_reconciliation",
+      "0070_calendar_stewardship_foundations",
+      "0071_calendar_event_links",
+      "0072_finance_parallel_migration_reconciliation",
+      "0073_task_organization_reconciliation",
     ]);
   });
 

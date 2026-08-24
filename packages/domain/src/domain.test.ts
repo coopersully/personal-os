@@ -1789,10 +1789,18 @@ describe("domain schemas", () => {
     const input = { calendarId: id, title: "Focus", startsAt: start, endsAt: end, timezone: "UTC" };
     expect(createEventInputSchema.parse(input)).toMatchObject({
       allDay: false,
+      conferenceUrl: null,
       notes: null,
       location: null,
     });
     expect(createEventInputSchema.safeParse({ ...input, endsAt: start }).success).toBe(false);
+    expect(
+      createEventInputSchema.safeParse({
+        ...input,
+        conferenceProvider: "google_meet",
+        conferenceUrl: "https://zoom.us/j/12345",
+      }).success,
+    ).toBe(false);
     expect(
       createEventInputSchema.safeParse({ ...input, timezone: "Definitely/Not_A_Time_Zone" })
         .success,

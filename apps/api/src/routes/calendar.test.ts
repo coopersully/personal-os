@@ -1,7 +1,8 @@
-import type { AccessScope } from "@personal-os/domain";
+import type { AccessScope, CalendarReview, CalendarStatus } from "@personal-os/domain";
 import { Hono } from "hono";
 import type { createCalendarService } from "../calendar-service.js";
-import { errorResponse } from "../errors.js";
+import type { createCalendarStewardshipService } from "../calendar-stewardship-service.js";
+import { AppError, errorResponse } from "../errors.js";
 import type { AppEnv } from "../types.js";
 import { registerCalendarRoutes } from "./calendar.js";
 
@@ -60,8 +61,146 @@ const proposal = {
   providerEffect: "local_write" as const,
   warnings: [],
 };
+const review: CalendarReview = {
+  createdAt: now,
+  evidenceCutoff: now,
+  findings: [],
+  health: [],
+  id,
+  ledgerFingerprint: "a".repeat(64),
+  nextMaintenanceAt: "2026-07-28T15:15:00.000Z",
+  playbookVersion: "1.0.0",
+  profileVersion: null,
+  recommendations: [],
+  rulebookVersion: "calendar-defaults-v1",
+  scope: { type: "all_outstanding" },
+  scopeEnd: "2026-11-25T15:00:00.000Z",
+  scopeStart: "2026-06-28T15:00:00.000Z",
+  sourceFreshness: [],
+  state: "maintained",
+};
+const status: CalendarStatus = {
+  asOf: now,
+  authority: {
+    approvedRule: [],
+    automatic: ["inspect", "assess"],
+    individualApproval: ["create_event", "move_event", "resize_event", "trash_event"],
+    unavailable: ["rsvp", "invite", "cancel_attended_event", "book_travel", "send_correspondence"],
+  },
+  backlog: {
+    actionable: 0,
+    ambiguousEffects: null,
+    awaitingApproval: null,
+    awaitingInput: 0,
+    blocked: 0,
+    failed: null,
+    openFindings: 0,
+  },
+  health: [],
+  latestReview: review,
+  lifecycle: "maintained",
+  readiness: "ready",
+  setupBlockers: [],
+  sources: [],
+  validNextOperations: ["assess_calendar"],
+};
 
 describe("Calendar routes", () => {
+  it("keeps status and read-only review creation Calendar-read scoped", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>();
+    const calendarService = {} as ReturnType<typeof createCalendarService>;
+    const stewardship = {
+      createReview: vi.fn(async () => review),
+      getStatus: vi.fn(async () => status),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", { actorId: id, actorType: "agent", scopes, userId: id });
+      context.set("requestId", "calendar-stewardship-route-test");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerCalendarRoutes({
+      app,
+      calendar: calendarService,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+      stewardship: stewardship as unknown as ReturnType<typeof createCalendarStewardshipService>,
+    });
+    const request = (path: string, init?: RequestInit) =>
+      app.request(path, { headers: { "content-type": "application/json" }, ...init });
+
+    expect((await request("/v1/calendars/status")).status).toBe(403);
+    expect((await request("/v1/calendars/reviews", { body: "{}", method: "POST" })).status).toBe(
+      403,
+    );
+    expect(stewardship.getStatus).not.toHaveBeenCalled();
+    expect(stewardship.createReview).not.toHaveBeenCalled();
+
+    scopes = new Set<AccessScope>(["calendar:read"]);
+    const statusResponse = await request("/v1/calendars/status");
+    expect(statusResponse.status).toBe(200);
+    expect(await statusResponse.json()).toEqual({ status });
+    const reviewResponse = await request("/v1/calendars/reviews", {
+      body: "{}",
+      method: "POST",
+    });
+    expect(reviewResponse.status).toBe(201);
+    expect(await reviewResponse.json()).toEqual({ review });
+    expect(stewardship.getStatus).toHaveBeenCalledWith(id);
+    expect(stewardship.createReview).toHaveBeenCalledWith(id, {
+      scope: { type: "all_outstanding" },
+    });
+  });
+
+  it("maps a busy stewardship publication to an honest conflict response", async () => {
+    const app = new Hono<AppEnv>();
+    const stewardship = {
+      createReview: vi.fn(async () => {
+        throw new AppError(
+          "conflict",
+          "A Calendar review is already being published. Try again shortly.",
+        );
+      }),
+      getStatus: vi.fn(async () => status),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set<AccessScope>(["calendar:read"]),
+        userId: id,
+      });
+      context.set("requestId", "calendar-busy-route-test");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerCalendarRoutes({
+      app,
+      calendar: {} as ReturnType<typeof createCalendarService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+      stewardship: stewardship as unknown as ReturnType<typeof createCalendarStewardshipService>,
+    });
+
+    const response = await app.request("/v1/calendars/reviews", {
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      body: "{}",
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "conflict",
+        message: "A Calendar review is already being published. Try again shortly.",
+      },
+    });
+  });
+
   it("keeps commitment intake preview-only and read-scoped", async () => {
     const app = new Hono<AppEnv>();
     let actorType: "agent" | "user" = "agent";
@@ -102,6 +241,10 @@ describe("Calendar routes", () => {
         principal: context.get("principal"),
         requestId: context.get("requestId"),
       }),
+      stewardship: {
+        createReview: vi.fn(),
+        getStatus: vi.fn(),
+      } as unknown as ReturnType<typeof createCalendarStewardshipService>,
     });
     const request = (path: string, init?: RequestInit) =>
       app.request(path, { headers: { "content-type": "application/json" }, ...init });

@@ -850,8 +850,15 @@ function updateEventDocument(data: string, input: UpdateEventInput): string {
 }
 
 function applyEvent(event: ICAL.Event, input: CreateEventInput | UpdateEventInput): void {
+  const conferenceUrl = "conferenceUrl" in input ? input.conferenceUrl : undefined;
   if (input.title !== undefined) event.summary = input.title;
-  if (input.notes !== undefined) event.description = input.notes ?? "";
+  if (input.notes !== undefined || conferenceUrl !== undefined) {
+    const notes = input.notes ?? null;
+    event.description =
+      conferenceUrl && !notes?.includes(conferenceUrl)
+        ? [notes, conferenceUrl].filter(Boolean).join("\n\n")
+        : (notes ?? "");
+  }
   if (input.location !== undefined) event.location = input.location ?? "";
   if (input.startsAt !== undefined) {
     event.startDate = eventTime(input.startsAt, input.allDay ?? false);

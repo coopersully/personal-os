@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
-import type { UpdateAccountSetupInput, User } from "@personal-os/domain";
+import type { CalendarStatus, UpdateAccountSetupInput, User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -17,6 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { App, formatTimelineTimeRange, isNavigator, positionTimelineEvents } from "./app.js";
 import { CircleCheckIcon, type Icon, ListTodoIcon, StarIcon } from "./components/icons.js";
+import { MotionProvider } from "./components/motion-provider.js";
 import {
   getWorkspaceCalendarEntry,
   workspaceCalendarSummary,
@@ -67,6 +68,31 @@ const user: User = {
   createdAt: now,
   updatedAt: now,
 };
+const calendarStatus: CalendarStatus = {
+  asOf: now,
+  authority: {
+    approvedRule: [],
+    automatic: ["inspect", "assess"],
+    individualApproval: ["create_event", "move_event"],
+    unavailable: ["book_travel", "send_correspondence"],
+  },
+  backlog: {
+    actionable: null,
+    ambiguousEffects: 0,
+    awaitingApproval: 0,
+    awaitingInput: 0,
+    blocked: 0,
+    failed: 0,
+    openFindings: null,
+  },
+  health: [],
+  latestReview: null,
+  lifecycle: "never_maintained",
+  readiness: "ready",
+  setupBlockers: [],
+  sources: [],
+  validNextOperations: ["assess_calendar"],
+};
 const calendar = {
   id,
   accountId: secondId,
@@ -99,9 +125,11 @@ const event = {
   blockSourceEventId: null,
   blockMode: null,
   blocks: [],
+  conferenceUrl: null,
   title: "Focus block",
   notes: null,
   location: "Studio",
+  url: null,
   startsAt: "2026-07-13T13:00:00.000Z",
   endsAt: "2026-07-13T14:00:00.000Z",
   timezone: "UTC",
@@ -319,6 +347,7 @@ const mocks = vi.hoisted(() => ({
   createAccessToken: vi.fn(),
   createInvitation: vi.fn(),
   createCalendar: vi.fn(),
+  createCalendarReview: vi.fn(),
   createMailDraft: vi.fn(),
   createEvent: vi.fn(),
   createEventBlock: vi.fn(),
@@ -346,6 +375,7 @@ const mocks = vi.hoisted(() => ({
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
   getDailyBrief: vi.fn(),
+  getCalendarStatus: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
   getIloSetup: vi.fn(),
@@ -496,12 +526,14 @@ function setup(path = "/today") {
   });
   const location = { value: path };
   const view = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <TestLocationObserver current={location} />
-        <App />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MotionProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <TestLocationObserver current={location} />
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MotionProvider>,
   );
   return { ...view, location, queryClient };
 }
@@ -522,6 +554,7 @@ function defaults() {
   mocks.plaidLink.onSuccess = null;
   mocks.plaidLink.ready = false;
   mocks.getMe.mockResolvedValue(user);
+  mocks.getCalendarStatus.mockResolvedValue(calendarStatus);
   mocks.listCalendars.mockResolvedValue([calendar, googleCalendar, nullColorCalendar]);
   mocks.listEvents.mockResolvedValue([event, allDayEvent]);
   mocks.listReminders.mockResolvedValue({
@@ -2780,9 +2813,10 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
     await browser.click(screen.getByRole("menuitem", { name: "Calendar" }));
 
+    expect(await screen.findByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
     expect(
-      await screen.findByRole("complementary", { name: "Calendar Sidebar" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("complementary", { name: "Calendar Sidebar" }),
+    ).not.toBeInTheDocument();
     expect(view.container.querySelector(".workspace-route")).toHaveAttribute(
       "data-direction",
       "up",
@@ -4988,20 +5022,68 @@ describe("ilo web app", () => {
 
     const calendar = setup("/calendar");
     await screen.findByRole("radio", { name: "Week", checked: true });
-    const calendarSidebar = screen.getByRole("complementary", { name: "Calendar Sidebar" });
-    const datePicker = within(calendarSidebar).getByRole("region", {
+    expect(
+      screen.queryByRole("complementary", { name: "Calendar Sidebar" }),
+    ).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Choose date" }));
+    const datePicker = screen.getByRole("region", {
       name: "Calendar date picker",
     });
-    expect(datePicker.querySelector('[data-selected-single="true"]')).toBeInTheDocument();
-    expect(datePicker.querySelectorAll(".bg-secondary")).toHaveLength(7);
-    const nextDate = [...datePicker.querySelectorAll<HTMLButtonElement>("button[data-day]")].find(
-      (button) => button.dataset.selectedSingle !== "true",
-    );
-    expect(nextDate).toBeDefined();
-    await userEvent.setup().click(nextDate as HTMLButtonElement);
-    expect(datePicker.querySelector('[data-selected-single="true"]')).toBeInTheDocument();
+    const nextDate = within(datePicker).getByRole("button", { name: /July 14/ });
+    await userEvent.setup().click(nextDate);
+    expect(screen.queryByRole("region", { name: "Calendar date picker" })).not.toBeInTheDocument();
     expect(await screen.findByText("Focus block")).toBeInTheDocument();
     calendar.unmount();
+  });
+
+  it("routes Calendar stewardship without replacing the spatial schedule", async () => {
+    const review = setup("/calendar/review");
+
+    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to schedule" })).toHaveAttribute(
+      "href",
+      "/calendar",
+    );
+    expect(
+      screen.getByText("Calendar review", { selector: ".workspace-app-bar__title" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Calendar date picker")).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Calendar actions" })).not.toBeInTheDocument();
+    review.unmount();
+
+    const schedule = setup("/calendar");
+    expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: /of \d+ calendars$/ }));
+    expect(screen.getByRole("link", { name: "Schedule health" })).toHaveAttribute(
+      "href",
+      "/calendar/review",
+    );
+    expect(screen.queryByLabelText("Calendar date picker")).not.toBeInTheDocument();
+    schedule.unmount();
+  });
+
+  it("keeps Calendar chrome stable across trailing-slash routes", async () => {
+    const review = setup("/calendar/review/");
+
+    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Calendar review", { selector: ".workspace-app-bar__title" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Calendar actions" })).not.toBeInTheDocument();
+    review.unmount();
+
+    const schedule = setup("/calendar/");
+    expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("heading", {
+        name: "July 12–18, 2026",
+      }),
+    ).toBeInTheDocument();
+    schedule.unmount();
   });
 
   it("keeps the calendar stable if its current-day marker is temporarily absent", async () => {
@@ -5027,7 +5109,14 @@ describe("ilo web app", () => {
     await screen.findByRole("radio", { name: "Week", checked: true });
     expect(screen.queryByRole("region", { name: "Calendar orientation" })).not.toBeInTheDocument();
     const topNavigation = screen.getByRole("navigation", { name: "Top navigation" });
+    const identity = topNavigation.querySelector(
+      '[data-slot="workspace-app-bar-identity"]',
+    ) as HTMLElement;
     const controls = screen.getByRole("group", { name: "Calendar controls" });
+    expect(within(identity).getByRole("button", { name: "Switch workspace" })).toBeVisible();
+    expect(identity.querySelector(".calendar-app-bar__identity-cluster")).toContainElement(
+      within(identity).getByRole("heading", { name: "July 12–18, 2026" }),
+    );
     expect(
       await screen.findByRole("navigation", { name: "Calendar week navigation" }),
     ).toHaveAttribute("data-slot", "workspace-secondary-app-bar");
@@ -5036,7 +5125,10 @@ describe("ilo web app", () => {
     expect(within(controls).getByRole("button", { name: "Today" })).not.toHaveAttribute(
       "aria-pressed",
     );
-    expect(screen.getByRole("button", { name: "New event" })).toHaveAttribute("data-size", "sm");
+    expect(screen.getByRole("button", { name: "Create event" })).toHaveAttribute(
+      "data-size",
+      "icon",
+    );
 
     const viewSwitcher = screen.getByRole("radiogroup", {
       name: "Calendar view: choose day, week, or month",
@@ -5065,6 +5157,68 @@ describe("ilo web app", () => {
     ).toBeVisible();
     view.unmount();
   }, 15_000);
+
+  it("morphs the calendar pill for date search and inline event creation", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/calendar");
+    await screen.findByText("Focus block");
+
+    await browser.click(screen.getByRole("button", { name: "Search calendar" }));
+    const search = screen.getByRole("textbox", { name: "Search events and dates" });
+    expect(search).toHaveFocus();
+    await browser.type(search, "last Christmas");
+    await browser.click(await screen.findByRole("button", { name: /last Christmas/i }));
+    expect(view.location.value).toContain("date=2025-12-25");
+
+    await browser.click(screen.getByRole("button", { name: "Search calendar" }));
+    await browser.type(screen.getByRole("textbox", { name: "Search events and dates" }), "Focus");
+    await browser.click(await screen.findByRole("button", { name: /Focus block/ }));
+    expect(view.location.value).toContain("date=2026-07-13");
+
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    expect(screen.getByRole("button", { name: /^Starts date,/ })).not.toHaveTextContent("2026");
+    expect(screen.getByRole("button", { name: "Calendar: Personal" })).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Calendar: Personal" }));
+    await browser.click(screen.getByRole("button", { name: "Selected Google" }));
+    await browser.click(screen.getByRole("button", { name: "Add conferencing" }));
+    const conferencingMenu =
+      screen.queryByRole("button", { name: "Choose conferencing" }) ??
+      screen.getByRole("button", { name: "Add conferencing" });
+    await browser.click(conferencingMenu);
+    await browser.click(screen.getByRole("menuitemradio", { name: "Paste meeting link" }));
+    expect(screen.getByLabelText("Meeting link")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Meeting link" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Generate Google Meet" }));
+    expect(screen.queryByLabelText("Meeting link")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("switch", { name: "All day" }));
+    expect(screen.queryByLabelText("Starts time")).not.toBeInTheDocument();
+    await browser.type(screen.getByLabelText("Title"), "Planning block");
+    const addLocation = screen.queryByRole("button", { name: "Add location" });
+    if (addLocation) await browser.click(addLocation);
+    const location = screen.getByRole("combobox", { name: "Location" });
+    fireEvent.change(location, { target: { value: "New York" } });
+    await waitFor(() => expect(mocks.searchWeatherLocations).toHaveBeenCalledWith("New York"));
+    await browser.click(
+      await screen.findByRole("option", { name: "New York, New York, United States" }),
+    );
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await waitFor(() =>
+      expect(mocks.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allDay: true,
+          calendarId: nullColorCalendar.id,
+          conferenceProvider: "google_meet",
+          conferenceUrl: null,
+          endsAt: "2026-07-14T00:00:00.000Z",
+          location: "New York, New York, United States",
+          startsAt: "2026-07-13T00:00:00.000Z",
+          title: "Planning block",
+        }),
+      ),
+    );
+    expect(await screen.findByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
+    view.unmount();
+  });
 
   it("uses one slot-based app bar contract for every shell route", async () => {
     const routes = [
@@ -5596,47 +5750,34 @@ describe("ilo web app", () => {
     const view = setup("/calendar");
     const browser = userEvent.setup();
     await screen.findByText("Focus block");
-    const accountToggle = screen.getByRole("button", { name: "Toggle Broken Google calendars" });
-    expect(accountToggle).toHaveAttribute("aria-expanded", "true");
-    expect(accountToggle).toHaveAttribute("data-sidebar", "menu-button");
-    expect(accountToggle.querySelector(".provider-emblem svg")).toBeInTheDocument();
-    expect(document.querySelector('[data-sidebar="group-label"]')).toHaveTextContent(
-      /Calendars \d+\/\d+/,
-    );
-    const initialGoogleToggle = screen.getByRole("checkbox", { name: /Readonly Google/ });
-    expect(initialGoogleToggle).toHaveStyle({ "--calendar-color": "var(--sidebar-primary)" });
-    expect(document.querySelector(".context-sidebar__calendar-dot")).not.toBeInTheDocument();
+    const accountToggle = screen.getByRole("button", { name: "2 of 3 calendars" });
+    expect(accountToggle.querySelectorAll('[data-slot="avatar"]')).not.toHaveLength(0);
     await browser.click(accountToggle);
-    expect(accountToggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("checkbox", { name: /Readonly Google/ })).not.toBeInTheDocument();
-    await browser.click(accountToggle);
-    expect(accountToggle).toHaveAttribute("aria-expanded", "true");
-    const googleToggle = screen.getByRole("checkbox", { name: /Readonly Google/ });
+    const googleToggle = screen.getByRole("switch", { name: /Readonly Google/ });
     const cancelQueries = vi
       .spyOn(view.queryClient, "cancelQueries")
       .mockRejectedValueOnce(new Error("Calendar cache unavailable"));
     await browser.click(googleToggle);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Calendar cache unavailable");
+    expect(await screen.findByText("Calendar cache unavailable")).toBeInTheDocument();
     expect(mocks.setCalendarSelected).not.toHaveBeenCalled();
     cancelQueries.mockRestore();
     await browser.click(googleToggle);
     expect(googleToggle).toBeDisabled();
-    expect(screen.getByText("Calendars 3/3")).toBeInTheDocument();
+    expect(screen.getAllByText("3 of 3 calendars")).not.toHaveLength(0);
     resolveVisibility({ ...googleCalendar, isSelected: true });
     await waitFor(() => expect(mocks.setCalendarSelected).toHaveBeenCalledWith(secondId, true));
 
     mocks.setCalendarSelected.mockRejectedValueOnce(new Error("Visibility update failed"));
-    await browser.click(screen.getByRole("checkbox", { name: /Personal/ }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Visibility update failed");
-    expect(screen.getByRole("checkbox", { name: /Personal/ })).toBeChecked();
+    await browser.click(screen.getByRole("switch", { name: /Personal/ }));
+    expect(await screen.findByText("Visibility update failed")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Personal/ })).toBeChecked();
     view.unmount();
 
     mocks.listCalendars.mockResolvedValueOnce([]);
     const emptyView = setup("/calendar");
     await screen.findByRole("radio", { name: "Week", checked: true });
-    expect(screen.getByText("No calendars are available.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "0 of 0 calendars" })).toBeInTheDocument();
     emptyView.unmount();
-
     mocks.listCalendars.mockResolvedValue([
       { ...googleCalendar, accountId: secondId },
       { ...calendar, accountId: "local-account" },
@@ -5655,11 +5796,11 @@ describe("ilo web app", () => {
       },
     ]);
     const localView = setup("/calendar");
-    const localToggle = await screen.findByRole("button", {
-      name: "Toggle My calendars calendars",
-    });
-    const accountToggles = screen.getAllByRole("button", { name: /^Toggle .* calendars$/ });
-    expect(accountToggles[0]).toBe(localToggle);
+    const accountBrowser = userEvent.setup();
+    await accountBrowser.click(await screen.findByRole("button", { name: /of 2 calendars$/ }));
+    const orderedCalendars = screen.getAllByRole("switch");
+    expect(orderedCalendars[0]).toHaveAccessibleName("Personal");
+    expect(orderedCalendars[1]).toHaveAccessibleName("Readonly Google");
     localView.unmount();
 
     mocks.listCalendars.mockResolvedValue([
@@ -5667,9 +5808,8 @@ describe("ilo web app", () => {
     ]);
     mocks.listConnectors.mockResolvedValue([]);
     const connectedView = setup("/calendar");
-    expect(
-      await screen.findByRole("button", { name: "Toggle Connected calendars calendars" }),
-    ).toBeInTheDocument();
+    await accountBrowser.click(await screen.findByRole("button", { name: /of 1 calendars$/ }));
+    expect(screen.getByRole("switch", { name: "Readonly Google" })).toBeInTheDocument();
     connectedView.unmount();
 
     mocks.listCalendars.mockResolvedValue([
@@ -5689,11 +5829,67 @@ describe("ilo web app", () => {
       },
     ]);
     const icloudView = setup("/calendar");
-    expect(
-      await screen.findByRole("button", { name: "Toggle person@icloud.com calendars" }),
-    ).toBeInTheDocument();
+    await accountBrowser.click(await screen.findByRole("button", { name: /of 1 calendars$/ }));
+    expect(screen.getByRole("switch", { name: "Personal" })).toBeInTheDocument();
     icloudView.unmount();
   }, 30_000);
+
+  it("opens Calendar event details in the shared floating-card host", async () => {
+    const activeEvent = {
+      ...event,
+      blocks: [
+        {
+          calendarId: googleCalendar.id,
+          eventId: secondId,
+          mode: "busy" as const,
+          provider: "google" as const,
+        },
+        {
+          calendarId: nullColorCalendar.id,
+          eventId: thirdId,
+          mode: "details" as const,
+          provider: "google" as const,
+        },
+      ],
+      endsAt: "2026-07-13T12:30:00.000Z",
+      startsAt: "2026-07-13T11:30:00.000Z",
+    };
+    mocks.listEvents.mockResolvedValue([activeEvent]);
+    const view = setup("/calendar");
+    const browser = userEvent.setup();
+
+    const eventCard = await screen.findByRole("button", { name: /^11:30 AM Focus block/ });
+    expect(eventCard.querySelector(".is-details-included")).toBeInTheDocument();
+    expect(eventCard.querySelector(".is-shown-as-busy")).toBeInTheDocument();
+    await browser.click(eventCard);
+
+    const details = await screen.findByRole("dialog", { name: "Focus block" });
+    expect(details.closest('[data-slot="calendar-floating-surface"]')).toHaveAttribute(
+      "data-state",
+      "details",
+    );
+    expect(details).toHaveClass("calendar-floating-nav__composer");
+    expect(details.closest(".calendar-floating-nav")).toBeInTheDocument();
+    expect(view.container.querySelector(".event-sheet-backdrop")).not.toBeInTheDocument();
+    expect(screen.queryByText("Scheduled event")).not.toBeInTheDocument();
+    expect(within(details).getByText("11:30 AM–12:30 PM")).toBeInTheDocument();
+    expect(within(details).getByText("In progress · 30 min left")).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(within(details).getByRole("heading", { name: "Shared With" })).toBeInTheDocument();
+    expect(within(details).getByText("Details Included")).toBeInTheDocument();
+    const fullyVisible = within(details).getByRole("list", {
+      name: "Calendars with details included",
+    });
+    expect(within(fullyVisible).getByText("Selected Google")).toBeInTheDocument();
+    expect(within(details).getByText("Shown as Busy")).toBeInTheDocument();
+    const busyOnly = within(details).getByRole("list", { name: "Calendars shown as busy" });
+    expect(within(busyOnly).getByText("Readonly Google")).toBeInTheDocument();
+    expect(within(details).queryByText("Blocked on")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Event" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
 
   it("renders rich event notes safely and confirms write-through deletion", async () => {
     const richEvent = {
@@ -5750,7 +5946,7 @@ describe("ilo web app", () => {
     expect(mocks.deleteEvent).toHaveBeenCalledWith(id);
   });
 
-  it("links one visible event to private or detailed destination blocks", async () => {
+  it("syncs calendars through details-included and shown-as-busy badges", async () => {
     const block = {
       calendarId: nullColorCalendar.id,
       eventId: thirdId,
@@ -5783,22 +5979,37 @@ describe("ilo web app", () => {
     const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /^1:00 PM Focus block/ }));
-    expect(screen.getByRole("heading", { name: "Blocked time" })).toBeInTheDocument();
-    expect(screen.getByText("1 linked")).toBeInTheDocument();
-    const destination = screen.getByRole("checkbox", { name: /Selected Google/ });
-    expect(destination).toBeChecked();
-    await browser.selectOptions(screen.getByLabelText("Privacy on Selected Google"), "details");
+    expect(
+      within(screen.getByRole("list", { name: "Calendars with details included" })).getByRole(
+        "button",
+        {
+          name: "Add calendar to Details Included",
+        },
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("list", { name: "Calendars shown as busy" })).getByText(
+        "Selected Google",
+      ),
+    ).toBeInTheDocument();
+
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Details Included" }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     await waitFor(() =>
       expect(mocks.updateEventBlock).toHaveBeenCalledWith(id, thirdId, { mode: "details" }),
     );
-    await browser.click(destination);
+    await browser.click(
+      screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
+    );
     await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledWith(id, thirdId));
 
     mocks.createEventBlock.mockRejectedValueOnce(new Error("Block failed"));
-    await browser.click(destination);
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Block failed");
     mocks.createEventBlock.mockResolvedValue(linkedEvent);
-    await browser.click(destination);
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     await waitFor(() =>
       expect(mocks.createEventBlock).toHaveBeenCalledWith(id, {
         calendarId: nullColorCalendar.id,
@@ -5823,6 +6034,146 @@ describe("ilo web app", () => {
 
     expect(stylesheet).toContain(".week-day-header > div:first-child > button,");
     expect(stylesheet).not.toContain(".week-day-header button,");
+    expect(stylesheet).toContain("background-position: 0 0, 0 24px, 0 12px;");
+    expect(stylesheet).toContain("background-size: 100% 48px, 5px 48px, 9px 24px;");
+  });
+
+  it("draws a snapped time range and opens the event composer with that schedule", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    Object.defineProperty(tuesday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    Object.defineProperties(tuesday, {
+      releasePointerCapture: { value: releasePointerCapture },
+      setPointerCapture: { value: setPointerCapture },
+    });
+    fireEvent.pointerDown(tuesday, { button: 1, pointerId: 10, pointerType: "mouse" });
+    fireEvent.pointerDown(tuesday, { button: 0, pointerId: 11, pointerType: "touch" });
+
+    const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
+    Object.defineProperties(pointerDown, {
+      button: { value: 0 },
+      clientY: { value: 480 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerDown);
+    expect(setPointerCapture).toHaveBeenCalledWith(1);
+    fireEvent.pointerMove(tuesday, { clientY: 520, pointerId: 99 });
+    fireEvent.pointerMove(tuesday, { clientY: 482, pointerId: 1 });
+    fireEvent.keyDown(tuesday, { key: "Tab" });
+    const pointerMove = createEvent.pointerMove(tuesday);
+    Object.defineProperties(pointerMove, {
+      clientY: { value: 492 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerMove);
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 10 AM to 10:15 AM");
+    const pointerUp = createEvent.pointerUp(tuesday);
+    Object.defineProperties(pointerUp, {
+      clientY: { value: 492 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerUp);
+    expect(releasePointerCapture).toHaveBeenCalledWith(1);
+
+    await waitFor(() =>
+      expect(document.querySelector(".calendar-floating-nav__composer")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("textbox", { name: "Starts hour" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Starts minute" })).toHaveValue("00");
+    expect(screen.getByRole("textbox", { name: "Ends hour" })).toHaveValue("10");
+    expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
+  });
+
+  it("cancels pointer range creation with Escape and creates a keyboard-selected range", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    Object.defineProperty(tuesday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
+    Object.defineProperties(pointerDown, {
+      button: { value: 0 },
+      clientY: { value: 480 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerDown);
+    const pointerMove = createEvent.pointerMove(tuesday);
+    Object.defineProperties(pointerMove, {
+      clientY: { value: 492 },
+      pointerId: { value: 1 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerMove);
+    fireEvent.keyDown(tuesday, { key: "Enter" });
+    fireEvent.keyDown(tuesday, { key: "Escape" });
+    fireEvent.pointerUp(tuesday, { pointerId: 1 });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(document.querySelector(".calendar-floating-nav__composer")).not.toBeInTheDocument();
+
+    const keyboardTarget = within(tuesday).getByRole("button", {
+      name: "Create an event range on Tuesday with the keyboard",
+    });
+    keyboardTarget.focus();
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+    for (let index = 0; index < 50; index += 1) {
+      fireEvent.keyDown(keyboardTarget, { key: "ArrowUp" });
+    }
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 12 AM to 9 AM");
+    for (let index = 0; index < 100; index += 1) {
+      fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    }
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 12 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "Escape" });
+    fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 10 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowUp" });
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 9:45 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 10:15 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+    expect(await screen.findByRole("textbox", { name: "Starts hour" })).toHaveValue("9");
+    expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
+  });
+
+  it("labels a range ending at midnight as 12 AM", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    Object.defineProperty(tuesday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
+    Object.defineProperties(pointerDown, {
+      button: { value: 0 },
+      clientY: { value: 1140 },
+      pointerId: { value: 2 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerDown);
+    const pointerMove = createEvent.pointerMove(tuesday);
+    Object.defineProperties(pointerMove, {
+      clientY: { value: 1152 },
+      pointerId: { value: 2 },
+      pointerType: { value: "mouse" },
+    });
+    fireEvent(tuesday, pointerMove);
+
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 11:45 PM to 12 AM");
   });
 
   it("describes all-day, multi-day, and overnight event ranges", async () => {
@@ -5901,20 +6252,20 @@ describe("ilo web app", () => {
     expect(monday).toHaveClass("is-drag-target");
     Object.defineProperty(monday, "getBoundingClientRect", {
       configurable: true,
-      value: () => ({ bottom: 1536, height: 1536, left: 0, right: 200, top: 0, width: 200 }),
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
     });
     const cancelQueries = vi
       .spyOn(view.queryClient, "cancelQueries")
       .mockRejectedValueOnce(new Error("Event cache unavailable"));
     fireEvent.dragOver(monday, { dataTransfer: transfer });
-    dropCalendarEvent(monday, transfer, 640);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Event cache unavailable");
+    dropCalendarEvent(monday, transfer, 480);
+    expect(await screen.findByText("Event cache unavailable")).toBeInTheDocument();
     expect(mocks.updateEvent).not.toHaveBeenCalled();
     cancelQueries.mockRestore();
 
     const successfulTransfer = dragDataTransfer();
     fireEvent.dragStart(focusBlock, { dataTransfer: successfulTransfer });
-    dropCalendarEvent(monday, successfulTransfer, 640);
+    dropCalendarEvent(monday, successfulTransfer, 480);
     await waitFor(() =>
       expect(mocks.updateEvent).toHaveBeenCalledWith(id, {
         endsAt: "2026-07-13T11:00:00.000Z",
@@ -5933,18 +6284,33 @@ describe("ilo web app", () => {
     fireEvent.dragStart(screen.getByRole("button", { name: /^1:00 PM Focus block/ }), {
       dataTransfer: secondTransfer,
     });
-    dropCalendarEvent(monday, secondTransfer, 768);
+    dropCalendarEvent(monday, secondTransfer, 576);
     expect(mocks.updateEvent).toHaveBeenCalled();
     rejectMove(new Error("Provider rejected move"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider rejected move");
+    expect(await screen.findByText("Provider rejected move")).toBeInTheDocument();
 
     const callsBeforeReadonlyDrop = mocks.updateEvent.mock.calls.length;
     const readonly = screen.getByRole("button", { name: /^1:00 PM Readonly block/ });
     expect(readonly).toHaveAttribute("draggable", "false");
     const readonlyTransfer = dragDataTransfer();
     fireEvent.dragStart(readonly, { dataTransfer: readonlyTransfer });
-    dropCalendarEvent(monday, readonlyTransfer, 900);
+    dropCalendarEvent(monday, readonlyTransfer, 675);
     expect(mocks.updateEvent).toHaveBeenCalledTimes(callsBeforeReadonlyDrop);
+    fireEvent.pointerCancel(readonly);
+    fireEvent.pointerDown(readonly);
+    expect(
+      await screen.findByRole("tooltip", {
+        name: "Readonly Google is read-only, so this event can’t be moved.",
+      }),
+    ).toBeInTheDocument();
+    expect(readonly).toHaveClass("is-move-blocked");
+    fireEvent.click(readonly);
+    expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
+    fireEvent.pointerDown(readonly);
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    fireEvent.click(readonly);
+    expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
+    fireEvent.pointerDown(readonly);
     fireEvent.click(readonly);
     expect(await screen.findByText(/write through to Google Calendar/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Event" })).toBeDisabled();
@@ -5958,24 +6324,27 @@ describe("ilo web app", () => {
     });
     Object.defineProperty(dayTimeline, "getBoundingClientRect", {
       configurable: true,
-      value: () => ({ bottom: 1536, height: 1536, left: 0, right: 400, top: 0, width: 400 }),
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 400, top: 0, width: 400 }),
     });
     const dayTransfer = dragDataTransfer();
     const dayEvent = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
     fireEvent.dragStart(dayEvent, { dataTransfer: dayTransfer });
-    dragOverCalendarEvent(dayTimeline, dayTransfer, 704);
-    expect(screen.getByRole("status")).toHaveTextContent("Drop at 11 AM");
+    dragOverCalendarEvent(dayTimeline, dayTransfer, 528);
+    expect(screen.getByRole("status")).toHaveAccessibleName("Move to Mon, Jul 13 at 11 AM");
     dragLeaveCalendarEvent(dayTimeline, dayTimeline);
-    expect(screen.getByRole("status")).toHaveTextContent("Drop at 11 AM");
+    expect(document.querySelector(".calendar-drag-overlay")).toHaveTextContent("11 AM");
     dragLeaveCalendarEvent(dayTimeline, null);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    dragOverCalendarEvent(dayTimeline, dayTransfer, 704);
-    dropCalendarEvent(dayTimeline, dayTransfer, 704);
+    dragOverCalendarEvent(dayTimeline, dayTransfer, 528);
+    dropCalendarEvent(dayTimeline, dayTransfer, 528);
     await waitFor(() =>
       expect(mocks.updateEvent).toHaveBeenCalledTimes(callsBeforeReadonlyDrop + 1),
     );
-    fireEvent.contextMenu(dayTimeline, { clientY: 704 });
-    expect(await screen.findByRole("menuitem", { name: "New event here" })).toBeInTheDocument();
+    fireEvent.contextMenu(dayTimeline, { clientY: 528 });
+    await browser.click(await screen.findByRole("menuitem", { name: "New event here" }));
+    expect(await screen.findByLabelText("Create event")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.contextMenu(dayTimeline, { clientY: 528 });
     expect(screen.getByRole("menuitem", { name: "Paste event" })).toBeEnabled();
     await browser.keyboard("{Escape}");
     fireEvent.contextMenu(dayEvent);
@@ -6003,6 +6372,67 @@ describe("ilo web app", () => {
     view.unmount();
   }, 15_000);
 
+  it("keeps the event start under its original grid position when dragging from its middle", async () => {
+    mocks.listEvents.mockResolvedValue([event]);
+    setup("/calendar");
+    const focusBlock = await screen.findByRole("button", { name: /^1:00 PM Focus block/ });
+    const monday = screen.getByRole("region", { name: "Monday timeline" });
+    Object.defineProperty(focusBlock, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 672, height: 48, left: 0, right: 200, top: 624, width: 200 }),
+    });
+    Object.defineProperty(monday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const transfer = dragDataTransfer();
+    const dragStart = createEvent.dragStart(focusBlock, { dataTransfer: transfer });
+    Object.defineProperty(dragStart, "clientY", { value: 648 });
+    fireEvent(focusBlock, dragStart);
+    const protectedTransfer = {
+      ...transfer,
+      getData: () => "",
+    } as DataTransfer;
+    dragOverCalendarEvent(monday, protectedTransfer, 648);
+
+    expect(screen.getByRole("status")).toHaveAccessibleName("Move to Mon, Jul 13 at 1 PM");
+  });
+
+  it("leaves an empty origin and shows the target time on the held event", async () => {
+    mocks.listEvents.mockResolvedValue([event]);
+    setup("/calendar");
+    const focusBlock = await screen.findByRole("button", { name: /^1:00 PM Focus block/ });
+    const monday = screen.getByRole("region", { name: "Monday timeline" });
+    Object.defineProperty(focusBlock, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 672, height: 48, left: 0, right: 200, top: 624, width: 200 }),
+    });
+    Object.defineProperty(monday, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
+    });
+    const transfer = dragDataTransfer();
+    const dragStart = createEvent.dragStart(focusBlock, { dataTransfer: transfer });
+    Object.defineProperties(dragStart, {
+      clientX: { value: 100 },
+      clientY: { value: 648 },
+    });
+    fireEvent(focusBlock, dragStart);
+    expect(focusBlock).toHaveClass("is-dragging");
+    expect(focusBlock).toHaveTextContent("Focus block");
+
+    dragOverCalendarEvent(monday, transfer, 648);
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    expect(document.querySelector(".calendar-drag-overlay")).toHaveTextContent("Mon, Jul 131 PM");
+  });
+
+  it("restores follow mode whenever Calendar first loads on today", async () => {
+    const view = setup("/calendar?date=2026-07-13&follow=0");
+    await screen.findByRole("region", { name: "Monday timeline" });
+
+    await waitFor(() => expect(view.location.value).toContain("follow=1"));
+  });
+
   it("navigates calendar, reminders, activity, and settings workflows", async () => {
     const view = setup("/calendar");
     const browser = userEvent.setup();
@@ -6014,8 +6444,10 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Calendar controls" })).toBeInTheDocument();
     await screen.findByText("Focus block");
-    expect(screen.getByText("Calendars 2/3")).toBeInTheDocument();
-    expect(document.querySelector(".context-sidebar__calendar-count")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2 of 3 calendars" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("complementary", { name: "Calendar Sidebar" }),
+    ).not.toBeInTheDocument();
     expect(document.querySelector('[aria-current="date"]')).toBeInTheDocument();
     const weekCalendar = document.querySelector(".week-calendar") as HTMLDivElement;
     const weekToday = weekCalendar.querySelector(
@@ -6046,71 +6478,38 @@ describe("ilo web app", () => {
     await waitFor(() => expect(view.location.value).toContain("follow=0"));
     fireEvent.scroll(weekCalendar, { target: { scrollTop: 0 } });
     expect(screen.getByText("12 AM")).toBeInTheDocument();
-    expect(screen.getByText("11 PM")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Weekends", pressed: true })).toBeInTheDocument();
+    expect(screen.getByText("12:30 AM")).toBeInTheDocument();
+    expect(screen.getByText("11:30 PM")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveAttribute(
       "aria-label",
       expect.stringContaining("Current time"),
     );
     const focusBlock = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
-    expect(focusBlock).toHaveStyle({ height: "64px", top: "832px" });
-    await browser.click(screen.getByRole("button", { name: "Weekends", pressed: true }));
-    expect(screen.getByRole("button", { name: "Weekends", pressed: false })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "View Sunday, July 19, 2026" }),
-    ).not.toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Weekends", pressed: false }));
-    expect(screen.getByRole("button", { name: "Weekends", pressed: true })).toBeInTheDocument();
+    expect(focusBlock).toHaveStyle({ height: "48px", top: "624px" });
     await browser.click(screen.getByRole("button", { name: "All day Quiet day" }));
     fireEvent.keyDown(window, { key: "Escape" });
-    await browser.click(screen.getByRole("button", { name: "New event" }));
-    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    expect(screen.getByLabelText("Title")).toHaveFocus();
+    await browser.click(screen.getByRole("button", { name: "Close" }));
     await browser.click(screen.getByRole("button", { name: /^1:00 PM Focus block/ }));
     fireEvent.keyDown(window, { key: "Escape" });
+    await browser.click(screen.getByRole("button", { name: "Choose date" }));
     const datePicker = screen.getByRole("region", { name: "Calendar date picker" });
-    await browser.click(within(datePicker).getByLabelText("Choose the month"));
-    await browser.click(screen.getByRole("menuitem", { name: "July" }));
-    expect(
-      within(screen.getByRole("region", { name: "Calendar date picker" })).getByLabelText(
-        "Choose the month",
-      ),
-    ).toHaveTextContent("July");
-    await browser.click(within(datePicker).getByLabelText("Choose the year"));
-    await browser.click(screen.getByRole("menuitem", { name: "2027" }));
-    expect(within(datePicker).getByLabelText("Choose the year")).toHaveTextContent("2027");
-    await browser.click(within(datePicker).getByLabelText("Choose the year"));
-    await browser.click(screen.getByRole("menuitem", { name: "2026" }));
-    const firstCalendarDay = screen
-      .getAllByRole("button")
-      .find((button) => button.getAttribute("aria-label")?.startsWith("View "));
-    expect(firstCalendarDay).toBeDefined();
-    await browser.click(firstCalendarDay as HTMLButtonElement);
+    await browser.click(within(datePicker).getByRole("button", { name: /July 29/ }));
+    await browser.click(screen.getByRole("radio", { name: "Day" }));
     expect(await screen.findByRole("radio", { name: "Day", checked: true })).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "24-hour schedule with 15-minute marks" }),
     ).toBeInTheDocument();
-    const anotherDate = [
-      ...screen
-        .getByRole("region", { name: "Calendar date picker" })
-        .querySelectorAll<HTMLButtonElement>("button[data-day]"),
-    ].find((button) => button.dataset.selectedSingle !== "true");
-    expect(anotherDate).toBeDefined();
-    await browser.click(anotherDate as HTMLButtonElement);
-    expect(
-      await screen.findByRole("region", { name: "24-hour schedule with 15-minute marks" }),
-    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Today" }));
-    expect(await screen.findByText("Now")).toBeInTheDocument();
+    expect(await screen.findByRole("timer")).toBeInTheDocument();
     const dayTimelineScroll = document.querySelector(".calendar-timeline-scroll") as HTMLDivElement;
     Object.defineProperty(dayTimelineScroll, "clientHeight", { configurable: true, value: 400 });
     fireEvent.scroll(dayTimelineScroll, { target: { scrollTop: 0 } });
     await waitFor(() => expect(view.location.value).toContain("follow=0"));
     fireEvent.scroll(dayTimelineScroll, { target: { scrollTop: 0 } });
     await browser.click(screen.getByRole("radio", { name: "Week" }));
-    await browser.click(
-      within(datePicker).getByRole("button", { name: "Wednesday, July 29th, 2026" }),
-    );
-    expect(await screen.findByRole("region", { name: "Wednesday timeline" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Monday timeline" })).toBeInTheDocument();
 
     mocks.listEvents.mockResolvedValue([
       event,
@@ -6133,6 +6532,7 @@ describe("ilo web app", () => {
     ]);
     await browser.click(screen.getByRole("radio", { name: "Month" }));
     expect(await screen.findByText("+1 more")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Choose date" }));
     await browser.click(
       within(screen.getByRole("region", { name: "Calendar date picker" })).getByRole("button", {
         name: "Go to the Previous Month",
@@ -6143,6 +6543,7 @@ describe("ilo web app", () => {
         name: "Go to the Next Month",
       }),
     );
+    await browser.click(screen.getByRole("button", { name: "Close" }));
     await browser.click(screen.getByRole("button", { name: "All day Quiet day" }));
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "View Monday, July 13, 2026" }));
@@ -7155,8 +7556,9 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("dialog")).toHaveTextContent("Calendar");
     expect(screen.getByRole("button", { name: "Edit Event" })).toBeDisabled();
     fireEvent.keyDown(window, { key: "Escape" });
-    await browser.click(screen.getByRole("button", { name: "New event" }));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    expect(await screen.findByLabelText("Description")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create event" })).toBeDisabled();
     calendarPendingView.unmount();
 
     mocks.listCalendars.mockResolvedValue([calendar, googleCalendar, nullColorCalendar]);

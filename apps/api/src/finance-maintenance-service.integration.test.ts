@@ -156,8 +156,10 @@ describe.sequential("Finance maintenance service", () => {
       "0067_finance_ledger_protocol",
       "0068_finance_mutation_leases",
       "0069_finance_legacy_budget_backfill",
-      "0070_finance_parallel_migration_reconciliation",
-      "0071_task_organization_reconciliation",
+      "0070_calendar_stewardship_foundations",
+      "0071_calendar_event_links",
+      "0072_finance_parallel_migration_reconciliation",
+      "0073_task_organization_reconciliation",
     ]);
     const upgradeContainer = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")

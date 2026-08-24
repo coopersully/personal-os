@@ -7,7 +7,7 @@ import { migrationsWithout } from "./test-migrations.js";
 const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
 const migrationPath = resolve(migrationsFolder, "0055_task_organization.sql");
 const reconciliationMigration = "0059_task_organization_reconciliation";
-const finalReconciliationMigration = "0071_task_organization_reconciliation";
+const finalReconciliationMigration = "0073_task_organization_reconciliation";
 
 function databaseUri(connectionUri: string, databaseName: string): string {
   const uri = new URL(connectionUri);
@@ -57,7 +57,9 @@ describe.sequential("Task organization migration", () => {
       "0067_finance_ledger_protocol",
       "0068_finance_mutation_leases",
       "0069_finance_legacy_budget_backfill",
-      "0070_finance_parallel_migration_reconciliation",
+      "0070_calendar_stewardship_foundations",
+      "0071_calendar_event_links",
+      "0072_finance_parallel_migration_reconciliation",
       finalReconciliationMigration,
     ]);
     temporaryMigrationFolders.push(folder);
@@ -377,7 +379,9 @@ describe.sequential("Task organization migration", () => {
         "0067_finance_ledger_protocol",
         "0068_finance_mutation_leases",
         "0069_finance_legacy_budget_backfill",
-        "0070_finance_parallel_migration_reconciliation",
+        "0070_calendar_stewardship_foundations",
+        "0071_calendar_event_links",
+        "0072_finance_parallel_migration_reconciliation",
         finalReconciliationMigration,
       ],
     );

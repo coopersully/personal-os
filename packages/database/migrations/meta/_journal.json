@@ -510,14 +510,28 @@
       "idx": 70,
       "version": "7",
       "when": 1787566200000,
-      "tag": "0070_finance_parallel_migration_reconciliation",
+      "tag": "0070_calendar_stewardship_foundations",
       "breakpoints": true
     },
     {
       "idx": 71,
       "version": "7",
       "when": 1787569800000,
-      "tag": "0071_task_organization_reconciliation",
+      "tag": "0071_calendar_event_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1787573400000,
+      "tag": "0072_finance_parallel_migration_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1787577000000,
+      "tag": "0073_task_organization_reconciliation",
       "breakpoints": true
     }
   ]

@@ -208,4 +208,43 @@ describe("detectFinanceAnomalies", () => {
       }),
     ).toBeNull();
   });
+
+  it("uses the midpoint of an even-sized history without overstating an anomaly", () => {
+    const history = [9_000, 10_000, 10_000, 11_000, 12_000, 12_000].map((amountCents, index) => ({
+      amountCents,
+      category: "Pharmacy",
+      date: `2026-0${index + 1}-10`,
+      id: `00000000-0000-4000-8000-00000000001${index}`,
+      merchant: "Different merchant",
+      sourceRef: sourceRef(`even-${index}`),
+    }));
+    expect(
+      detectFinanceAnomalies({
+        budgetMaterialityCents: 1_000,
+        history,
+        transaction: {
+          amountCents: 11_500,
+          category: "Pharmacy",
+          date: "2026-08-17",
+          id: "00000000-0000-4000-8000-000000000001",
+          merchant: "CVS",
+          sourceRef: sourceRef("current-even"),
+        },
+      }),
+    ).toBeNull();
+    expect(
+      detectFinanceAnomalies({
+        budgetMaterialityCents: 1_000,
+        history,
+        transaction: {
+          amountCents: 14_500,
+          category: "Pharmacy",
+          date: "2026-08-18",
+          id: "00000000-0000-4000-8000-000000000002",
+          merchant: "CVS",
+          sourceRef: sourceRef("anomalous-even"),
+        },
+      }),
+    ).toMatchObject({ baselineCents: 10_500 });
+  });
 });

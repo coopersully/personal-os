@@ -26,6 +26,7 @@ import {
   createAttentionItemInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
+  createFinanceAccountInputSchema,
   createGoalInputSchema,
   createLocalCalendarInputSchema,
   createMailRuleInputSchema,
@@ -170,9 +171,20 @@ describe("workspace maintenance", () => {
       { entityType: "finance_transaction" },
       { scope: "all_outstanding", start: "2026-08-01", end: "2026-08-31" },
       { start: "2026-08-01", end: "2026-08-31", entityType: "transaction", targetId: id },
+      { start: "2026-08-31", end: "2026-08-01" },
     ]) {
       expect(maintenanceScopeQuerySchema.safeParse(query).success).toBe(false);
     }
+  });
+
+  it("rejects account balances that cannot be represented in exact cents", () => {
+    expect(
+      createFinanceAccountInputSchema.safeParse({
+        balance: 12.345,
+        institution: "Local bank",
+        name: "Checking",
+      }).success,
+    ).toBe(false);
   });
 
   it("supports every durable maintenance settlement state", () => {
@@ -391,7 +403,7 @@ describe("finance maintenance candidates", () => {
     expect(
       financeMaintenanceCandidateItemDraftSchema.safeParse({
         ...valid,
-        privatePayload: { actionKind: "merchant", input: { displayName: "Market" } },
+        privatePayload: { actionKind: "merchant", input: { displayName: "Market", id } },
       }).success,
     ).toBe(false);
     expect(

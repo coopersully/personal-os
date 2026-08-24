@@ -1141,6 +1141,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   registerFinanceRoutes({
     actions: financeActions,
     app,
+    db: dependencies.db,
     financeChallenges,
     financeMaintenance,
     financePeriodReviews,

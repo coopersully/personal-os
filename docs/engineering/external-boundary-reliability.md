@@ -121,3 +121,29 @@ A change to an external dependency is incomplete until:
 Specialized standards may add stricter rules. Connector work additionally follows
 [`connector-reliability.md`](connector-reliability.md), and database changes follow
 [`database-migrations.md`](database-migrations.md).
+
+## Finance provider authorization handoff
+
+The Finance account-connection boundary creates a Plaid Link authorization handoff; the API owns
+the attempt record and the Plaid connector owns the provider request. The configured Plaid client
+identity, allowed products, country, redirect/callback settings, and the user's consent authorize
+the operation. Connector transport must use the shared HTTPS timeout policy and the request must
+fit within the API deadline without retrying an unbounded provider workflow.
+
+The durable commit point is a `finance_account_connections` row in `pending` state, created before
+the provider request. A successful provider response stores the short-lived handoff artifact and
+its expiry before returning it. Provider rejection or transport failure changes the attempt to
+`failed` with a redacted, retryable error. Completed exchange changes it to `connected`; expired
+artifacts remain observable as pending-but-expired and require a new connection attempt. Process
+loss after the pending commit is therefore visible and recoverable rather than indistinguishable
+from a request that never started.
+
+API and MCP structured content may expose only the short-lived authorization artifact, provider,
+and expiry. It must never contain Plaid access tokens, refresh tokens, encrypted credentials, or
+raw provider errors. Idempotency is scoped to the user and requested attempt; a failed attempt is
+retried with a new key, while replay of a completed key returns the original result.
+
+Behavior coverage must prove pending persistence, success metadata, expiry, redacted failure, and
+idempotent replay. Production-equivalent evidence must separately prove runtime authority,
+outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
+from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.

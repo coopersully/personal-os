@@ -115,6 +115,25 @@ describe("Finance health assessment", () => {
     ).toBe("reliable");
   });
 
+  it("does not invent cash reserves for a current account without a balance", () => {
+    const health = assessFinanceHealth(
+      input({
+        accounts: [
+          {
+            balance: null,
+            kind: "cash",
+            lastSuccessAt: null,
+            provider: "manual",
+            synchronizationState: "current",
+          },
+        ],
+      }),
+      now,
+    );
+
+    expect(health.dimensions.save.rating).toBe("unknown");
+  });
+
   it.each([
     [1.04, "on_track"],
     [1.1, "watch"],

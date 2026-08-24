@@ -7,6 +7,7 @@ import { registerActivityTools } from "./tools/activity.js";
 import { registerAssistantTools } from "./tools/assistant.js";
 import { registerCalendarEventTools, registerCalendarListTools } from "./tools/calendar.js";
 import { registerFinanceTools } from "./tools/finances.js";
+import { registerFinanceStewardshipTools } from "./tools/finances-stewardship.js";
 import { registerMailTools } from "./tools/mail.js";
 import { registerPlanningTools } from "./tools/planning.js";
 import { registerReminderTools } from "./tools/reminders.js";
@@ -64,6 +65,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   registerReminderTools(tools, options.api);
   registerMailTools(tools, options.api);
   registerFinanceTools(tools, options.api);
+  registerFinanceStewardshipTools(tools, options.api);
   registerXBookmarkTools(tools, options.api);
   registerActivityTools(tools, options.api);
 

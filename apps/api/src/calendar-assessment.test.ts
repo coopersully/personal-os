@@ -177,16 +177,12 @@ describe("Calendar assessment", () => {
       ]),
     );
 
-    expect(result.findings.map(({ kind }) => kind)).toEqual([
-      "event_overlap",
-      "buffer_shortfall",
-    ]);
-    expect(result.findings.find(({ kind }) => kind === "buffer_shortfall")?.evidence).toMatchObject({
-      eventIds: [
-        "44444444-4444-4444-8444-444444444444",
-        "66666666-6666-4666-8666-666666666666",
-      ],
-    });
+    expect(result.findings.map(({ kind }) => kind)).toEqual(["event_overlap", "buffer_shortfall"]);
+    expect(result.findings.find(({ kind }) => kind === "buffer_shortfall")?.evidence).toMatchObject(
+      {
+        eventIds: ["44444444-4444-4444-8444-444444444444", "66666666-6666-4666-8666-666666666666"],
+      },
+    );
   });
 
   it("finds old future tentative holds outside timed-busy analysis but ignores fresh ones", () => {

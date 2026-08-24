@@ -120,6 +120,7 @@ export const financeSetupInputSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("start") }),
   z.object({
     answer: z.string().trim().min(1).max(10_000),
+    expectedVersion: z.number().int().positive(),
     idempotencyKey: z.string().trim().min(1).max(200),
     operation: z.literal("answer"),
     questionId: z.string().min(1).max(240),
@@ -128,6 +129,7 @@ export const financeSetupInputSchema = z.discriminatedUnion("operation", [
   z.object({
     approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
     budgetVersionId: idSchema,
+    expectedVersion: z.number().int().positive(),
     idempotencyKey: z.string().trim().min(1).max(200),
     operation: z.literal("approve_budget"),
     sessionId: idSchema,

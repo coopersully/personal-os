@@ -49,6 +49,54 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await container.stop();
   });
 
+  it("serializes concurrent profile version allocation per user", async () => {
+    const [profileUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Concurrent profile",
+        email: "concurrent-profile@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!profileUser) throw new Error("Concurrent profile user was not created.");
+    const service = createProfileBudgetService({ db: database.db, now: () => now });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: profileUser.id,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId: profileUser.id,
+      },
+      requestId: "concurrent-profile",
+    });
+    const outcomes = await Promise.allSettled([
+      service.updateFinancialProfile(
+        {
+          changes: { householdSize: 1 },
+          expectedVersion: 0,
+          idempotencyKey: "concurrent-profile-a",
+        },
+        context,
+      ),
+      service.updateFinancialProfile(
+        {
+          changes: { householdSize: 2 },
+          expectedVersion: 0,
+          idempotencyKey: "concurrent-profile-b",
+        },
+        context,
+      ),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ code: "conflict" }) }),
+    ]);
+    await expect(service.getFinancialProfile(profileUser.id)).resolves.toMatchObject({
+      data: { version: 1 },
+    });
+  });
+
   it("persists profile answers and activates a balanced successor budget", async () => {
     const service = createProfileBudgetService({ db: database.db, now: () => now });
     const principal: Principal = {
@@ -267,6 +315,22 @@ describe.sequential("Finance profile and budget lifecycle", () => {
         noBypass,
       ),
     ).rejects.toMatchObject({ code: "not_found" });
+
+    const newestPlan = await service.createFinanceBudget(
+      {
+        allocations: [{ amount: 8_000, key: "buffer", kind: "buffer" }],
+        assumptions: [],
+        effectiveFrom: "2026-10",
+        idempotencyKey: "budget-newest-plan",
+        name: "October plan",
+        rationale: "Newest plan fixture.",
+        resources: [{ amount: 8_000, key: "take-home", kind: "income" }],
+      },
+      noBypass,
+    );
+    await expect(service.getFinanceBudget(userId)).resolves.toMatchObject({
+      data: { id: newestPlan.data.id },
+    });
   });
 
   it("rejects an unbalanced budget proposal", async () => {

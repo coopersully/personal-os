@@ -4630,18 +4630,44 @@ export function createFinanceService({
           payload: input,
         },
         async () => {
-          const linkToken = await this.createPlaidLinkToken(context.userId);
           const [connection] = await db
             .insert(financeAccountConnections)
             .values({ provider: input.provider, status: "pending", userId: context.userId })
             .returning();
           if (!connection)
             throw new AppError("internal_error", "The account connection was not started.");
+          let linkToken: string;
+          try {
+            linkToken = await this.createPlaidLinkToken(context.userId);
+          } catch (error) {
+            await db
+              .update(financeAccountConnections)
+              .set({
+                lastError: {
+                  code: "provider_handoff_failed",
+                  message: error instanceof Error ? error.message : "The provider handoff failed.",
+                  retryable: true,
+                },
+                status: "failed",
+                updatedAt: now(),
+              })
+              .where(eq(financeAccountConnections.id, connection.id));
+            throw error;
+          }
+          const externalHandoffExpiresAt = new Date(now().getTime() + 30 * 60 * 1_000);
+          await db
+            .update(financeAccountConnections)
+            .set({ externalHandoffExpiresAt, externalHandoffUrl: linkToken, updatedAt: now() })
+            .where(eq(financeAccountConnections.id, connection.id));
           return {
             ...canonicalResult(
               {
                 connectionId: connection.id,
-                externalHandoff: { linkToken, provider: input.provider },
+                externalHandoff: {
+                  artifact: linkToken,
+                  expiresAt: externalHandoffExpiresAt.toISOString(),
+                  provider: input.provider,
+                },
                 status: connection.status,
               },
               "The secure bank authorization handoff is ready.",
@@ -5240,13 +5266,13 @@ export function createFinanceService({
           operation: "finance.rule.manage",
           payload: input,
         },
-        async () => {
+        async (tx) => {
           const auditContext = legacyMutationContext(context);
           if (input.operation === "create") {
             if (!input.category || !input.merchant)
               throw new AppError("invalid_request", "A merchant and category are required.");
             const normalized = normalizedMerchant(input.merchant);
-            const [saved] = await db
+            const [saved] = await tx
               .insert(financeCategoryRules)
               .values({
                 category: input.category,
@@ -5260,7 +5286,7 @@ export function createFinanceService({
               .returning();
             if (!saved)
               throw new AppError("internal_error", "The Finance rule could not be saved.");
-            await db.insert(auditEvents).values(
+            await tx.insert(auditEvents).values(
               auditValues({
                 action: "finance.rule_saved",
                 after: {
@@ -5278,7 +5304,7 @@ export function createFinanceService({
           }
           if (!input.ruleId)
             throw new AppError("invalid_request", "A ruleId is required for this operation.");
-          const [before] = await db
+          const [before] = await tx
             .select()
             .from(financeCategoryRules)
             .where(
@@ -5290,8 +5316,8 @@ export function createFinanceService({
             .limit(1);
           if (!before) throw new AppError("not_found", "The Finance rule was not found.");
           if (input.operation === "remove") {
-            await db.delete(financeCategoryRules).where(eq(financeCategoryRules.id, before.id));
-            await db.insert(auditEvents).values(
+            await tx.delete(financeCategoryRules).where(eq(financeCategoryRules.id, before.id));
+            await tx.insert(auditEvents).values(
               auditValues({
                 action: "finance.rule_removed",
                 after: null,
@@ -5306,7 +5332,7 @@ export function createFinanceService({
               "Categorization rule removed.",
             );
           }
-          const [saved] = await db
+          const [saved] = await tx
             .update(financeCategoryRules)
             .set({
               category: input.category,
@@ -5319,7 +5345,7 @@ export function createFinanceService({
             .returning();
           if (!saved)
             throw new AppError("internal_error", "The Finance rule could not be updated.");
-          await db.insert(auditEvents).values(
+          await tx.insert(auditEvents).values(
             auditValues({
               action: "finance.rule_updated",
               after: {
@@ -5378,7 +5404,7 @@ export function createFinanceService({
           operation: "finance.recurring.manage",
           payload: input,
         },
-        async () => {
+        async (tx) => {
           const auditContext = legacyMutationContext(context);
           if (input.itemType === "income") {
             if (input.operation === "cancel")
@@ -5390,6 +5416,7 @@ export function createFinanceService({
               input.itemId,
               { status: input.operation === "pause" ? "paused" : "active" },
               auditContext,
+              tx,
             );
             return canonicalResult(
               item,
@@ -5407,6 +5434,7 @@ export function createFinanceService({
                     : "active",
             },
             auditContext,
+            tx,
           );
           return canonicalResult(item, `Recurring obligation ${input.operation}d.`);
         },
@@ -7374,34 +7402,40 @@ export function createFinanceService({
       };
       return executor ? write(executor) : db.transaction(write);
     },
-    async importCsv(input: FinanceCsvImportInput, context: MutationContext) {
-      const destination = await ownedAccount(context.principal.userId, input.accountId);
-      if (destination.provider !== input.provider) {
-        throw new AppError(
-          "invalid_request",
-          `Choose a ${input.provider} account before importing that export.`,
-        );
-      }
+    async importCsv(
+      input: FinanceCsvImportInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
       let records: ReturnType<typeof parseFinanceCsv>;
       try {
         records = parseFinanceCsv(input.provider, input.csv);
       } catch (error) {
         throw new AppError("invalid_request", financeCsvImportErrorMessage(error));
       }
-      const result = await db.transaction(async (tx) => {
+      const write = async (tx: FinanceActionWriteExecutor) => {
+        const destination = await ownedAccount(context.principal.userId, input.accountId, tx);
+        if (destination.provider !== input.provider) {
+          throw new AppError(
+            "invalid_request",
+            `Choose a ${input.provider} account before importing that export.`,
+          );
+        }
         let imported = 0;
         for (const record of records) {
           const automatic = await automaticCategorization(
             context.principal.userId,
             record.merchant,
+            tx,
           );
           const merchantRecord = await merchantFor(
             context.principal.userId,
             record.merchant,
             "provider",
+            tx,
           );
           const categoryRecord = automatic.category
-            ? await categoryForName(context.principal.userId, automatic.category)
+            ? await categoryForName(context.principal.userId, automatic.category, tx)
             : null;
           const providerTransactionId = createHash("sha256")
             .update(`${input.provider}:${record.externalId}`)
@@ -7430,20 +7464,21 @@ export function createFinanceService({
             .returning({ id: financeTransactions.id });
           if (created) imported += 1;
         }
-        return { imported, skipped: records.length - imported };
-      });
-      await db.insert(auditEvents).values(
-        auditValues({
-          action: "finance.csv_imported",
-          after: { ...result, provider: input.provider },
-          before: null,
-          entityId: destination.id,
-          entityType: "finance_account",
-          ...context,
-        }),
-      );
-      await refreshCashflowIntelligence(context.principal.userId);
-      return result;
+        const result = { imported, skipped: records.length - imported };
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.csv_imported",
+            after: { ...result, provider: input.provider },
+            before: null,
+            entityId: destination.id,
+            entityType: "finance_account",
+            ...context,
+          }),
+        );
+        await refreshCashflowIntelligence(context.principal.userId, tx);
+        return result;
+      };
+      return executor ? write(executor) : db.transaction(write);
     },
     async deleteAccount(id: string, context: MutationContext) {
       await db.transaction(async (tx) => {
@@ -8462,9 +8497,9 @@ export function createFinanceService({
           operation: "finance.transactions.import",
           payload: input,
         },
-        async () => {
+        async (tx) => {
           const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
-          const data = await this.importCsv(legacyInput, legacyMutationContext(context));
+          const data = await this.importCsv(legacyInput, legacyMutationContext(context), tx);
           return canonicalResult(data, `${data.imported} transactions imported.`);
         },
       );
@@ -8482,12 +8517,13 @@ export function createFinanceService({
           operation: "finance.transaction.update",
           payload: { id, ...input },
         },
-        async () => {
+        async (tx) => {
           const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
           const data = await this.updateTransaction(
             id,
             legacyInput,
             legacyMutationContext(context),
+            tx,
           );
           return canonicalResult(data, "Transaction updated.");
         },
@@ -8506,9 +8542,14 @@ export function createFinanceService({
           operation: "finance.merchant.update",
           payload: { id, ...input },
         },
-        async () => {
+        async (tx) => {
           const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
-          const data = await this.updateMerchant(id, legacyInput, legacyMutationContext(context));
+          const data = await this.updateMerchant(
+            id,
+            legacyInput,
+            legacyMutationContext(context),
+            tx,
+          );
           return canonicalResult(data, "Merchant updated.");
         },
       );
@@ -8525,9 +8566,9 @@ export function createFinanceService({
           operation: "finance.merchant.merge",
           payload: input,
         },
-        async () => {
+        async (tx) => {
           const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
-          const data = await this.mergeMerchants(legacyInput, legacyMutationContext(context));
+          const data = await this.mergeMerchants(legacyInput, legacyMutationContext(context), tx);
           return canonicalResult(data, "Merchants merged.");
         },
       );

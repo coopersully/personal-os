@@ -40,8 +40,8 @@ The implementation introduces focused modules while preserving existing public b
 - packages/domain/src/finance/maintenance.ts owns setup and maintenance protocol unions.
 - packages/domain/src/finance/reporting.ts owns snapshot, cashflow, wealth, budget-status, and ledger-health projections.
 - packages/database/src/schema.ts remains the single Drizzle schema.
-- packages/database/migrations/0037_finance_plan_versions.sql adds agent settings, setup sessions, profile versions, budget plans and versions, allocations, and financial goals.
-- packages/database/migrations/0038_finance_ledger_protocol.sql adds events, relationships, revisions, review identity/lineage, maintenance runs, judgments, findings, and provenance.
+- packages/database/migrations/0066_finance_plan_versions.sql adds agent settings, setup sessions, profile versions, budget plans and versions, allocations, and financial goals.
+- packages/database/migrations/0067_finance_ledger_protocol.sql adds events, relationships, revisions, review identity/lineage, maintenance runs, judgments, findings, and provenance.
 - apps/api/src/finance-service.ts remains the compatibility façade and composes focused services.
 - apps/api/src/finance/context.ts owns trusted actor, idempotency, approval, and bypass context.
 - apps/api/src/finance/profile-budget-service.ts owns profile, setup-state primitives, budgets, approvals, and goals.
@@ -252,13 +252,14 @@ git commit -m "feat(finance): define canonical agent contracts"
 
 **Files:**
 - Modify: packages/database/src/schema.ts
-- Create: packages/database/migrations/0037_finance_plan_versions.sql
+- Create: packages/database/migrations/0066_finance_plan_versions.sql
 - Modify: packages/database/migrations/meta/_journal.json
 - Create: packages/database/src/finance-schema.integration.test.ts
 
 **Interfaces:**
 - Produces Drizzle tables: financeAgentSettings, financeSetupSessions, financeProfileVersions, financeBudgetPlans, financeBudgetVersions, financeBudgetAllocations, financeGoals.
-- Enforces one current profile version per user, monotonically increasing budget versions per plan, and unique allocation keys per budget version.
+- The current profile is the row with the greatest `version` for a user; there is no mutable current marker. Allocate `max(version) + 1` only while holding the shared per-user `finance-profile:<userId>` transaction-scoped advisory lock, and keep the latest-version read and insert in that transaction. The unique `(user_id, version)` index is the final integrity guard. Concurrent-allocation tests must prove one successor and one typed stale-version conflict.
+- Enforces monotonically increasing budget versions per plan and unique allocation keys per budget version.
 
 - [ ] **Step 1: Add a failing fresh-migration persistence test**
 
@@ -280,9 +281,9 @@ it("persists versioned Finance plans and bypass settings", async () => {
       version: 1,
       status: "proposed",
       effectiveFrom: "2026-08",
-      expectedResources: "5000.00",
-      allocatedTotal: "5000.00",
-      balanceDelta: "0.00",
+      expectedResources: 500000,
+      allocatedTotal: 500000,
+      balanceDelta: 0,
       rationale: "Initial plan",
       assumptions: [],
     })
@@ -298,15 +299,14 @@ Run: pnpm vitest run packages/database/src/finance-schema.integration.test.ts
 
 Expected: FAIL because the new Drizzle exports do not exist.
 
-- [ ] **Step 3: Add schema tables and generate the named migration**
+- [ ] **Step 3: Add schema tables and the named manual migration**
 
 Use UUID primary keys, user foreign keys with cascade deletion, timestamptz audit fields, integer versions, integer-cent money columns consistent with the existing Finance schema, and jsonb assumptions/provenance where structure is already validated by the domain boundary. This repository stopped producing Drizzle snapshots after `0009`; follow the established manual SQL plus journal-entry convention rather than generating a misleading snapshot from stale metadata.
 
-Generate the migration:
-
-~~~bash
-pnpm --filter @personal-os/database db:generate -- --name finance_plan_versions
-~~~
+Create `0066_finance_plan_versions.sql` manually and append exactly one matching entry to
+`packages/database/migrations/meta/_journal.json`. Do not run `db:generate`: repository snapshots
+stop at `0009`, so generation would compare against stale metadata and create unsupported snapshot
+artifacts. Review the schema, SQL, and journal as one release transition.
 
 Review the generated SQL and ensure it includes:
 
@@ -319,7 +319,14 @@ CREATE UNIQUE INDEX "finance_budget_allocations_version_key_unique"
   ON "finance_budget_allocations" ("budget_version_id", "allocation_key");
 ~~~
 
-Backfill existing finance_profiles into version 1 profile rows. Convert each user's legacy budget rows into an inactive incomplete historical plan unless the rows contain both expected resources and a zero balance delta. Do not activate an inferred balanced plan.
+Backfill existing `finance_profiles` into versioned profile rows. Integer cents are the canonical
+persisted money unit; convert dollar-formatted boundary inputs before storage and convert cents only
+when constructing public domain values. Convert every legacy `finance_budgets` row into an
+`incomplete` version linked to the user's canonical legacy plan, preserve every allocation, and
+never activate it: the legacy table has no expected-resource or balance-delta evidence. Join the
+plan by `month = 'canonical'`, normalize a legacy month to `YYYY-MM` before insertion, and cover
+status, linkage, allocation preservation, invalid legacy month normalization, and non-activation in
+a migration preservation test.
 
 - [ ] **Step 4: Run migration, database tests, and schema type checking**
 
@@ -338,7 +345,7 @@ git commit -m "feat(finance): add versioned planning persistence"
 
 **Files:**
 - Modify: packages/database/src/schema.ts
-- Create: packages/database/migrations/0038_finance_ledger_protocol.sql
+- Create: packages/database/migrations/0067_finance_ledger_protocol.sql
 - Modify: packages/database/migrations/meta/_journal.json
 - Modify: packages/database/src/finance-schema.integration.test.ts
 
@@ -387,13 +394,10 @@ Run: pnpm vitest run packages/database/src/finance-schema.integration.test.ts
 
 Expected: FAIL because economic-event and protocol tables are absent.
 
-- [ ] **Step 3: Add schema changes and generate the named migration**
+- [ ] **Step 3: Add schema changes and the named manual migration**
 
-Generate:
-
-~~~bash
-pnpm --filter @personal-os/database db:generate -- --name finance_ledger_protocol
-~~~
+Create `0067_finance_ledger_protocol.sql` manually and append its journal entry without creating a
+snapshot from stale metadata.
 
 Ensure the generated migration replaces the old transaction/status uniqueness rule with a partial active-case constraint:
 
@@ -403,7 +407,14 @@ CREATE UNIQUE INDEX "finance_review_cases_active_stable_key_unique"
   WHERE "status" IN ('open', 'deferred');
 ~~~
 
-Edit the branch-local generated SQL into an expand/backfill/constrain sequence: add stable_key and reason_code as nullable, backfill them from existing transaction ID and reason, verify no nulls remain, then set both columns NOT NULL and create the partial unique index. Preserve existing resolved rows. Do not copy the transaction ledger into a new table; add events and relationships lazily so transaction IDs remain stable and deployment does not perform an unbounded ledger backfill.
+Use an expand/backfill/constrain sequence: add `stable_key` and `reason_code` as nullable, backfill
+them from existing transaction ID and reason, then deterministically rank active duplicates by
+`updated_at`, `created_at`, and `id`. Retain the newest survivor, mark other active rows resolved,
+preserve all already-resolved rows, and update any populated lineage references to the survivor.
+Only then set both columns `NOT NULL` and create the partial unique index. Existing review rows do
+not invent an economic event; event mapping remains lazy and transaction-backed, without copying
+the ledger or changing transaction IDs. The preservation fixture must prove duplicate collapse,
+resolved-row preservation, and stable transaction identity before the index is created.
 
 - [ ] **Step 4: Run fresh migration tests and inspect SQL**
 
@@ -488,7 +499,13 @@ export type FinanceMutationContext = {
 };
 ~~~
 
-Persist idempotency results in financeMutationRecords using userId plus idempotencyKey uniqueness. A repeated key with a different operation hash returns invalid_request instead of replaying unrelated data.
+Claim `(userId, idempotencyKey)` inside the same database transaction that performs the mutation and
+stores its completed response. Serialize concurrent callers with a transaction-scoped advisory
+lock so they reuse the one committed result; never execute `mutate` twice. A `started` row carries a
+five-minute lease and an expired legacy claim is reclaimable. Persist a terminal failed record only
+after the mutation transaction rolls back. Unique-conflict retry is bounded to one retry, and a
+repeated key with a different operation hash returns `invalid_request`. Tests must cover concurrent
+coalescing, mutation rollback, failed replay, and expired-lease reclamation.
 
 Remove requireHuman from Finance profile, income, insight-refresh, connection, import, and account lifecycle routes. Keep requireHuman available for other domains. Finance routes continue to use requireFeatureAccess("finances"), which returns the exact missing scope.
 
@@ -536,7 +553,8 @@ it("persists each profile answer and activates a balanced successor budget", asy
     {
       idempotencyKey: "budget-1",
       effectiveFrom: "2026-09",
-      expectedResources: 8000,
+      name: "Monthly plan",
+      resources: [{ key: "take-home", kind: "income", amount: 8000 }],
       rationale: "Initial plan",
       assumptions: [],
       allocations: [
@@ -576,15 +594,20 @@ Expected: FAIL because the focused service and canonical routes do not exist.
 Use a database transaction for version allocation, complete allocation insertion, balance validation, and activation:
 
 ~~~ts
-if (roundMoney(input.expectedResources - allocatedTotal) !== 0) {
+if (roundMoney(expectedResources - allocatedTotal) !== 0) {
   throw new AppError(
     "invalid_request",
-    "A complete budget must assign every expected resource or show an explicit funding source.",
+    "A complete budget must allocate every resource.",
   );
 }
 ~~~
 
-Activating a version retires the previous active version in the same transaction. Reporting stores the governing version ID. Return FinanceToolResult values whose required disclosures include expected resources, total allocation, buffer or deficit, and material assumptions.
+`resources` is the only funding-source contract: income, reserve draws, and borrowing are explicit
+resource variants. Create and revise sum those resources and require resources minus allocations to
+equal exactly zero; there is no separate implicit deficit escape hatch. Activating a version retires
+the previous active version in the same transaction. Reporting stores the governing version ID.
+Return FinanceToolResult values whose required disclosures include expected resources, total
+allocation, balance, and material assumptions.
 
 Add typed routes under:
 
@@ -666,7 +689,13 @@ Expose:
 - PATCH /v1/finances/accounts/:id
 - DELETE /v1/finances/accounts/:id
 
-Return the provider authorization URL or token in data.externalHandoff and never an ilo web URL.
+Before this boundary is implemented, record its capability, authority, HTTPS transport, 15-second
+provider-attempt timeout, commit point, recovery, and evidence requirements in
+`docs/engineering/external-boundary-reliability.md`. Persist the connection attempt and handoff
+metadata before returning. `data.externalHandoff` contains only a short-lived non-secret
+authorization URL/artifact with expiry; access tokens, refresh tokens, encrypted credentials, and
+provider response bodies never enter API or MCP structured content. Connection status exposes
+`pending`, `connected`, `failed`, `needs_reauth`, expiry, and a safe retry path.
 
 - [ ] **Step 4: Run account, legacy Finance integration, and client tests**
 
@@ -902,7 +931,15 @@ Expected: FAIL because maintainFinances does not exist.
 
 - [ ] **Step 3: Implement the durable synchronous stage machine**
 
-Use SELECT FOR UPDATE on the run row and expectedVersion on continuation. Start performs source sync and deterministic rules before returning. Deterministic rules may create relationships and high-confidence classifications but must record source rule provenance.
+Use `SELECT FOR UPDATE` on the run row and `expectedVersion` on continuation. Start reads the durable
+provider projection and applies deterministic rules; it does not perform multi-page provider sync
+inside the maintenance request. Explicit account sync is a separate bounded caller-driven action,
+and stale or failed sources remain visible in maintenance diagnostics with their persisted retry or
+reconnect state. This removes an unbounded source-sync stage from the synchronous protocol and
+ensures caller abort or process loss cannot strand hidden provider work. Deterministic rules may
+create relationships and high-confidence classifications but must record source-rule provenance.
+Tests cover stale and partially failed sources, caller retry, and process loss between committed
+maintenance stages.
 
 Reasoning batches include complete transaction evidence, existing preferences, candidate relationships, category choices, budget context, and allowed judgment variants. Persist submitted judgments before advancing.
 

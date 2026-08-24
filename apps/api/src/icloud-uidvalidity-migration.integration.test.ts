@@ -52,6 +52,8 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0065_finance_period_reviews",
         "0066_finance_plan_versions",
         "0067_finance_ledger_protocol",
+        "0068_finance_mutation_leases",
+        "0069_finance_legacy_budget_backfill",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);

@@ -50,13 +50,14 @@ type QuestionId = keyof typeof questions;
 function nextQuestion(profile: FinanceProfileVersion | null): FinanceInteractionQuestion | null {
   if (!profile?.jurisdiction) return questions["profile:location"];
   if (!profile.householdSize) return questions["profile:household_size"];
-  if (profile.expectedMonthlyTakeHome === null) return questions["profile:monthly_take_home"];
+  if (!profile.expectedMonthlyTakeHome) return questions["profile:monthly_take_home"];
   if (profile.liquidReserves === null) return questions["profile:liquid_reserves"];
   return null;
 }
 
 export function parseSetupMoney(answer: string): number {
-  const value = Number(answer.replace(/[$,\s]/g, ""));
+  const normalized = answer.replace(/[$,\s]/g, "");
+  const value = normalized === "" ? Number.NaN : Number(normalized);
   if (!Number.isFinite(value) || value < 0)
     throw new AppError("invalid_request", "Enter a non-negative amount.");
   return Math.round(value * 100) / 100;
@@ -82,8 +83,12 @@ export function setupProfileChange(
       throw new AppError("invalid_request", "Household size must be a positive whole number.");
     return { householdSize: value };
   }
-  if (questionId === "profile:monthly_take_home")
-    return { expectedMonthlyTakeHome: parseSetupMoney(answer) };
+  if (questionId === "profile:monthly_take_home") {
+    const value = parseSetupMoney(answer);
+    if (value <= 0)
+      throw new AppError("invalid_request", "Monthly take-home income must be positive.");
+    return { expectedMonthlyTakeHome: value };
+  }
   return { liquidReserves: parseSetupMoney(answer) };
 }
 
@@ -176,7 +181,7 @@ export function createSetupService({ db, now, planning }: Options) {
         version: updated.version,
       });
     }
-    if (!currentProfile?.expectedMonthlyTakeHome)
+    if (!currentProfile?.expectedMonthlyTakeHome || currentProfile.expectedMonthlyTakeHome <= 0)
       throw new AppError("invalid_request", "Monthly take-home income is required for a budget.");
     const [category] = await db
       .insert(financeCategories)
@@ -245,6 +250,51 @@ export function createSetupService({ db, now, planning }: Options) {
     });
   }
 
+  async function continueSession(
+    session: typeof financeSetupSessions.$inferSelect,
+    context: FinanceMutationContext,
+  ): Promise<FinanceToolResult<FinanceSetupPayload>> {
+    if (session.status === "budget_approval") {
+      return setupResult({
+        budgetVersionId: session.budgetVersionId,
+        headline: "Your balanced budget proposal is ready for approval.",
+        question: {
+          answerType: "approval",
+          id: "budget:approval",
+          prompt: "Approve this balanced starting budget?",
+        },
+        sessionId: session.id,
+        stage: "budget_approval",
+        version: session.version,
+      });
+    }
+    if (session.status === "initial_maintenance") {
+      return setupResult({
+        budgetVersionId: session.budgetVersionId,
+        headline: "Your profile and budget are set; maintenance is the next step.",
+        nextAction: {
+          arguments: { operation: "start", scope: { type: "all_outstanding" } },
+          reason: "Categorize, reconcile, and audit current activity.",
+          tool: "maintain_finances",
+        },
+        sessionId: session.id,
+        stage: "initial_maintenance",
+        version: session.version,
+      });
+    }
+    if (session.status === "settled") {
+      return setupResult({
+        budgetVersionId: session.budgetVersionId,
+        headline: "Your Finance setup session is complete.",
+        maintenanceRunId: session.maintenanceRunId,
+        sessionId: session.id,
+        stage: "settled",
+        version: session.version,
+      });
+    }
+    return advance(session, await profile(context.userId), context);
+  }
+
   return {
     async setupFinances(
       input: FinanceSetupInput,
@@ -262,39 +312,22 @@ export function createSetupService({ db, now, planning }: Options) {
               status: question ? "collecting_profile" : "budget_proposal",
               userId: context.userId,
             })
+            .onConflictDoNothing()
             .returning();
-          if (!created) throw new AppError("internal_error", "Finance setup did not start.");
-          session = created;
+          session = created ?? (await activeSession(context.userId));
+          if (!session) throw new AppError("internal_error", "Finance setup did not start.");
         }
-        if (session.status === "budget_approval") {
+        if (session.status === "collecting_profile" && session.version === 1) {
           return setupResult({
             budgetVersionId: session.budgetVersionId,
-            headline: "Your balanced budget proposal is ready for approval.",
-            question: {
-              answerType: "approval",
-              id: "budget:approval",
-              prompt: "Approve this balanced starting budget?",
-            },
+            headline: "I need one answer to continue your financial setup.",
+            question: nextQuestion(await profile(context.userId)),
             sessionId: session.id,
-            stage: "budget_approval",
+            stage: "collecting_profile",
             version: session.version,
           });
         }
-        if (session.status === "initial_maintenance") {
-          return setupResult({
-            budgetVersionId: session.budgetVersionId,
-            headline: "Your profile and budget are set; maintenance is the next step.",
-            nextAction: {
-              arguments: { operation: "start", scope: { type: "all_outstanding" } },
-              reason: "Categorize, reconcile, and audit current activity.",
-              tool: "maintain_finances",
-            },
-            sessionId: session.id,
-            stage: "initial_maintenance",
-            version: session.version,
-          });
-        }
-        return advance(session, await profile(context.userId), context);
+        return continueSession(session, context);
       }
       if (input.operation === "resume") {
         const session = await db.query.financeSetupSessions.findFirst({
@@ -304,7 +337,7 @@ export function createSetupService({ db, now, planning }: Options) {
           ),
         });
         if (!session) throw new AppError("not_found", "That Finance setup session was not found.");
-        return this.setupFinances({ operation: "start" }, context);
+        return continueSession(session, context);
       }
       return executeFinanceIdempotently(
         db,
@@ -323,6 +356,11 @@ export function createSetupService({ db, now, planning }: Options) {
           });
           if (!session)
             throw new AppError("not_found", "That Finance setup session was not found.");
+          if (session.version !== input.expectedVersion)
+            throw new AppError(
+              "conflict",
+              `Finance setup is at version ${session.version}; resume it before continuing.`,
+            );
           if (input.operation === "answer") {
             if (
               session.status !== "collecting_profile" ||

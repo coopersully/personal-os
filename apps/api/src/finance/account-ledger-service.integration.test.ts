@@ -95,7 +95,7 @@ describe.sequential("canonical Finance account and ledger mutations", () => {
     await expect(service.getConnection(userId, connection.id)).resolves.toMatchObject({
       data: {
         accountIds: [account.id],
-        externalHandoff: { url: "https://provider.example/connect" },
+        externalHandoff: { artifact: "https://provider.example/connect" },
         lastError: { code: "expired", retryable: true },
         status: "connected",
       },

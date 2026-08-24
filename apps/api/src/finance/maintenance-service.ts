@@ -28,12 +28,14 @@ import {
   requireFinanceMutation,
 } from "./context.js";
 import type { createInboxService } from "./inbox-service.js";
+import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
 
 type Options = {
   db: Database;
   inbox: ReturnType<typeof createInboxService>;
   now: () => Date;
 };
+type FinanceExecutor = Pick<Database, "execute" | "insert" | "query" | "select" | "update">;
 
 function maintenanceResult(
   payload: FinanceMaintenancePayload,
@@ -82,15 +84,32 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       .replace(/[^a-z0-9]+/g, " ")
       .trim();
 
-  async function applyDeterministicRules(userId: string, runId: string) {
+  function scopedTransactionConditions(userId: string, scope: Record<string, unknown>) {
+    const conditions = [
+      eq(financeTransactions.userId, userId),
+      eq(financeTransactions.needsReview, true),
+    ];
+    const accountIds =
+      scope.type === "accounts" && Array.isArray(scope.accountIds)
+        ? (scope.accountIds as string[])
+        : null;
+    const from = scope.type === "since" && typeof scope.from === "string" ? scope.from : null;
+    if (accountIds?.length) conditions.push(inArray(financeTransactions.accountId, accountIds));
+    if (from) conditions.push(gte(financeTransactions.transactionDate, from));
+    return conditions;
+  }
+
+  async function applyDeterministicRules(
+    userId: string,
+    runId: string,
+    scope: Record<string, unknown>,
+  ) {
     const [rules, transactions, categories] = await Promise.all([
       db.select().from(financeCategoryRules).where(eq(financeCategoryRules.userId, userId)),
       db
         .select()
         .from(financeTransactions)
-        .where(
-          and(eq(financeTransactions.userId, userId), eq(financeTransactions.needsReview, true)),
-        ),
+        .where(and(...scopedTransactionConditions(userId, scope))),
       db.select().from(financeCategories).where(eq(financeCategories.userId, userId)),
     ]);
     const ruleByMerchant = new Map(rules.map((rule) => [rule.merchantNormalized, rule]));
@@ -99,77 +118,66 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       const rule = ruleByMerchant.get(normalizeMerchant(transaction.merchant));
       const category = rule ? categoryByName.get(rule.category) : undefined;
       if (!rule || !category) continue;
-      const counts = await db
-        .select({ count: sql<number>`count(*)::integer` })
-        .from(financeTransactionRevisions)
-        .where(eq(financeTransactionRevisions.transactionId, transaction.id));
-      await db.insert(financeTransactionRevisions).values({
-        changes: { category: { after: category.name, before: transaction.category } },
-        provenance: {
-          actorId: rule.id,
-          actorType: "deterministic_rule",
-          confidence: 1,
-          maintenanceRunId: runId,
-          source: "finance_category_rule",
-        },
-        transactionId: transaction.id,
-        userId,
-        version: (counts[0]?.count ?? 0) + 1,
+      await db.transaction(async (tx) => {
+        const version = await nextFinanceTransactionRevision(tx, transaction.id);
+        await tx.insert(financeTransactionRevisions).values({
+          changes: { category: { after: category.name, before: transaction.category } },
+          provenance: {
+            actorId: rule.id,
+            actorType: "deterministic_rule",
+            confidence: 1,
+            maintenanceRunId: runId,
+            source: "finance_category_rule",
+          },
+          transactionId: transaction.id,
+          userId,
+          version,
+        });
+        await tx
+          .update(financeTransactions)
+          .set({
+            category: category.name,
+            categoryConfidence: 10_000,
+            categoryDecidedAt: now(),
+            categoryId: category.id,
+            categoryRationale: "Applied an existing exact merchant rule.",
+            categorySource: "rule",
+            needsReview: false,
+            updatedAt: now(),
+          })
+          .where(eq(financeTransactions.id, transaction.id));
       });
-      await db
-        .update(financeTransactions)
-        .set({
-          category: category.name,
-          categoryConfidence: 10_000,
-          categoryDecidedAt: now(),
-          categoryId: category.id,
-          categoryRationale: "Applied an existing exact merchant rule.",
-          categorySource: "rule",
-          needsReview: false,
-          updatedAt: now(),
-        })
-        .where(eq(financeTransactions.id, transaction.id));
     }
   }
 
-  async function ownedRun(userId: string, runId: string) {
-    const row = await db.query.financeMaintenanceRuns.findFirst({
+  async function ownedRun(userId: string, runId: string, executor: FinanceExecutor = db) {
+    const row = await executor.query.financeMaintenanceRuns.findFirst({
       where: and(eq(financeMaintenanceRuns.id, runId), eq(financeMaintenanceRuns.userId, userId)),
     });
     if (!row) throw new AppError("not_found", "That Finance maintenance run was not found.");
     return row;
   }
 
-  async function openReviewCount(userId: string) {
-    return (await inbox.getFinanceInbox(userId)).remainingWork.count;
+  async function openReviewCount(userId: string, executor: FinanceExecutor = db) {
+    return (await inbox.getFinanceInbox(userId, executor)).remainingWork.count;
   }
 
   async function reasoningBatch(
     userId: string,
     scope: Record<string, unknown>,
+    executor: FinanceExecutor = db,
   ): Promise<FinanceReasoningItem[]> {
-    const categories = await db
+    const categories = await executor
       .select({ id: financeCategories.id, name: financeCategories.name })
       .from(financeCategories)
       .where(eq(financeCategories.userId, userId));
-    const accountIds =
-      scope.type === "accounts" && Array.isArray(scope.accountIds)
-        ? (scope.accountIds as string[])
-        : null;
-    const from = scope.type === "since" && typeof scope.from === "string" ? scope.from : null;
-    const conditions = [
-      eq(financeTransactions.userId, userId),
-      eq(financeTransactions.needsReview, true),
-    ];
-    if (accountIds?.length) conditions.push(inArray(financeTransactions.accountId, accountIds));
-    if (from) conditions.push(gte(financeTransactions.transactionDate, from));
-    const transactions = await db
+    const transactions = await executor
       .select()
       .from(financeTransactions)
-      .where(and(...conditions))
+      .where(and(...scopedTransactionConditions(userId, scope)))
       .orderBy(financeTransactions.transactionDate)
       .limit(100);
-    const activeBudget = await db.query.financeBudgetVersions.findFirst({
+    const activeBudget = await executor.query.financeBudgetVersions.findFirst({
       orderBy: [desc(financeBudgetVersions.effectiveFrom), desc(financeBudgetVersions.version)],
       where: and(
         eq(financeBudgetVersions.userId, userId),
@@ -191,8 +199,8 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
     }));
   }
 
-  async function auditContext(userId: string) {
-    const rows = await db
+  async function auditContext(userId: string, executor: FinanceExecutor = db) {
+    const rows = await executor
       .select({
         amount: financeTransactions.amount,
         category: financeTransactions.category,
@@ -210,11 +218,14 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
 
   async function payloadFor(
     run: typeof financeMaintenanceRuns.$inferSelect,
+    executor: FinanceExecutor = db,
   ): Promise<FinanceMaintenancePayload> {
     return {
-      auditContext: run.stage === "agent_audit" ? await auditContext(run.userId) : null,
+      auditContext: run.stage === "agent_audit" ? await auditContext(run.userId, executor) : null,
       reasoningBatch:
-        run.stage === "agent_reasoning" ? await reasoningBatch(run.userId, run.scope) : [],
+        run.stage === "agent_reasoning"
+          ? await reasoningBatch(run.userId, run.scope, executor)
+          : [],
       reviewQuestion: null,
       runId: run.id,
       stage: run.stage,
@@ -222,22 +233,9 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
     };
   }
 
-  async function ensureEvent(userId: string, transactionId: string) {
+  async function ensureEvent(executor: FinanceExecutor, userId: string, transactionId: string) {
     const stableKey = `transaction:${transactionId}`;
-    const existing = await db.query.financeEconomicEvents.findFirst({
-      where: and(
-        eq(financeEconomicEvents.userId, userId),
-        eq(financeEconomicEvents.stableKey, stableKey),
-      ),
-    });
-    if (existing) {
-      await db
-        .insert(financeEventTransactions)
-        .values({ economicEventId: existing.id, transactionId, userId })
-        .onConflictDoNothing();
-      return existing;
-    }
-    const transaction = await db.query.financeTransactions.findFirst({
+    const transaction = await executor.query.financeTransactions.findFirst({
       where: and(eq(financeTransactions.id, transactionId), eq(financeTransactions.userId, userId)),
     });
     if (!transaction) throw new AppError("invalid_request", "A judged transaction was not found.");
@@ -247,20 +245,24 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         : transaction.direction === "transfer"
           ? "transfer"
           : "purchase";
-    const [created] = await db
+    const [created] = await executor
       .insert(financeEconomicEvents)
       .values({ kind, stableKey, userId })
+      .onConflictDoUpdate({
+        set: { updatedAt: now() },
+        target: [financeEconomicEvents.userId, financeEconomicEvents.stableKey],
+      })
       .returning();
     if (!created) throw new AppError("internal_error", "The economic event was not created.");
-    await db.insert(financeEventTransactions).values({
-      economicEventId: created.id,
-      transactionId,
-      userId,
-    });
+    await executor
+      .insert(financeEventTransactions)
+      .values({ economicEventId: created.id, transactionId, userId })
+      .onConflictDoNothing();
     return created;
   }
 
   async function applyJudgment(
+    executor: FinanceExecutor,
     run: typeof financeMaintenanceRuns.$inferSelect,
     judgment: Extract<
       FinanceMaintenanceInput,
@@ -269,7 +271,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
     context: FinanceMutationContext,
     index: number,
   ) {
-    await db.insert(financeMaintenanceJudgments).values({
+    await executor.insert(financeMaintenanceJudgments).values({
       judgmentKey: `${judgment.type}:${index}`,
       payload: judgment,
       provenance: {
@@ -282,13 +284,13 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       userId: context.userId,
     });
     if (judgment.type === "classify_transaction") {
-      const category = await db.query.financeCategories.findFirst({
+      const category = await executor.query.financeCategories.findFirst({
         where: and(
           eq(financeCategories.id, judgment.categoryId),
           eq(financeCategories.userId, context.userId),
         ),
       });
-      const transaction = await db.query.financeTransactions.findFirst({
+      const transaction = await executor.query.financeTransactions.findFirst({
         where: and(
           eq(financeTransactions.id, judgment.transactionId),
           eq(financeTransactions.userId, context.userId),
@@ -296,11 +298,8 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       });
       if (!category || !transaction)
         throw new AppError("invalid_request", "A classification target was not found.");
-      const counts = await db
-        .select({ count: sql<number>`count(*)::integer` })
-        .from(financeTransactionRevisions)
-        .where(eq(financeTransactionRevisions.transactionId, transaction.id));
-      await db.insert(financeTransactionRevisions).values({
+      const version = await nextFinanceTransactionRevision(executor, transaction.id);
+      await executor.insert(financeTransactionRevisions).values({
         changes: {
           category: { after: category.name, before: transaction.category },
           meaning: judgment.meaning,
@@ -314,9 +313,9 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         },
         transactionId: transaction.id,
         userId: context.userId,
-        version: (counts[0]?.count ?? 0) + 1,
+        version,
       });
-      await db
+      await executor
         .update(financeTransactions)
         .set({
           category: category.name,
@@ -330,23 +329,30 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         })
         .where(eq(financeTransactions.id, transaction.id));
     } else if (judgment.type === "needs_user_review") {
-      const event = await ensureEvent(context.userId, judgment.transactionId);
-      const transaction = await db.query.financeTransactions.findFirst({
+      const event = await ensureEvent(executor, context.userId, judgment.transactionId);
+      const transaction = await executor.query.financeTransactions.findFirst({
         where: eq(financeTransactions.id, judgment.transactionId),
       });
       if (!transaction) throw new AppError("invalid_request", "A review target was not found.");
-      await inbox.upsertFinanceReview({
-        economicEventId: event.id,
-        evidence: { questionReason: judgment.questionReason, merchant: transaction.merchant },
-        impactAmount: Math.abs(transaction.amount) / 100,
-        reason: "category_ambiguity",
-        transactionId: transaction.id,
-        userId: context.userId,
-      });
+      await inbox.upsertFinanceReview(
+        {
+          economicEventId: event.id,
+          evidence: { questionReason: judgment.questionReason, merchant: transaction.merchant },
+          impactAmount: Math.abs(transaction.amount) / 100,
+          reason: "category_ambiguity",
+          transactionId: transaction.id,
+          userId: context.userId,
+        },
+        executor,
+      );
     } else {
-      const first = await ensureEvent(context.userId, judgment.transactionIds[0] as string);
+      const first = await ensureEvent(
+        executor,
+        context.userId,
+        judgment.transactionIds[0] as string,
+      );
       for (const transactionId of judgment.transactionIds.slice(1)) {
-        const transaction = await db.query.financeTransactions.findFirst({
+        const transaction = await executor.query.financeTransactions.findFirst({
           where: and(
             eq(financeTransactions.id, transactionId),
             eq(financeTransactions.userId, context.userId),
@@ -354,7 +360,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         });
         if (!transaction)
           throw new AppError("invalid_request", "A relationship target was not found.");
-        await db
+        await executor
           .insert(financeEventTransactions)
           .values({
             economicEventId: first.id,
@@ -363,7 +369,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
           })
           .onConflictDoNothing();
       }
-      await db.insert(financeTransactionRelationships).values({
+      await executor.insert(financeTransactionRelationships).values({
         economicEventId: first.id,
         provenance: {
           actorId: context.actorId,
@@ -380,49 +386,78 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
     }
   }
 
+  async function continuePreparation(run: typeof financeMaintenanceRuns.$inferSelect) {
+    if (run.stage === "deterministic_processing") {
+      await applyDeterministicRules(run.userId, run.id, run.scope);
+      const batch = await reasoningBatch(run.userId, run.scope);
+      const stage: FinanceMaintenanceStage = batch.length ? "agent_reasoning" : "agent_audit";
+      const [advanced] = await db
+        .update(financeMaintenanceRuns)
+        .set({ stage, updatedAt: now(), version: run.version + 1 })
+        .where(
+          and(
+            eq(financeMaintenanceRuns.id, run.id),
+            eq(financeMaintenanceRuns.version, run.version),
+          ),
+        )
+        .returning();
+      if (!advanced) return ownedRun(run.userId, run.id);
+      return advanced;
+    }
+    if (run.stage === "reconciliation") {
+      const [advanced] = await db
+        .update(financeMaintenanceRuns)
+        .set({ stage: "agent_audit", updatedAt: now(), version: run.version + 1 })
+        .where(
+          and(
+            eq(financeMaintenanceRuns.id, run.id),
+            eq(financeMaintenanceRuns.version, run.version),
+          ),
+        )
+        .returning();
+      if (!advanced) return ownedRun(run.userId, run.id);
+      return advanced;
+    }
+    return run;
+  }
+
   return {
     async maintainFinances(input: FinanceMaintenanceInput, context: FinanceMutationContext) {
       requireFinanceMutation(context);
       if (input.operation === "start") {
-        const existing = await db.query.financeMaintenanceRuns.findFirst({
-          orderBy: [desc(financeMaintenanceRuns.updatedAt)],
-          where: and(
-            eq(financeMaintenanceRuns.userId, context.userId),
-            inArray(financeMaintenanceRuns.stage, [
-              "deterministic_processing",
-              "agent_reasoning",
-              "reconciliation",
-              "agent_audit",
-            ]),
-          ),
-        });
-        if (existing)
-          return maintenanceResult(
-            await payloadFor(existing),
-            await openReviewCount(context.userId),
+        const run = await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance-start:${context.userId}`}, 0))`,
           );
-        const [run] = await db
-          .insert(financeMaintenanceRuns)
-          .values({
-            scope: input.scope,
-            stage: "deterministic_processing",
-            userId: context.userId,
-          })
-          .returning();
-        if (!run) throw new AppError("internal_error", "Maintenance did not start.");
-        await applyDeterministicRules(context.userId, run.id);
-        const batch = await reasoningBatch(context.userId, input.scope);
-        const stage: FinanceMaintenanceStage = batch.length ? "agent_reasoning" : "agent_audit";
-        const [advanced] = await db
-          .update(financeMaintenanceRuns)
-          .set({ stage, updatedAt: now(), version: run.version + 1 })
-          .where(eq(financeMaintenanceRuns.id, run.id))
-          .returning();
-        if (!advanced) throw new AppError("internal_error", "Maintenance did not advance.");
+          const existing = await tx.query.financeMaintenanceRuns.findFirst({
+            orderBy: [desc(financeMaintenanceRuns.updatedAt)],
+            where: and(
+              eq(financeMaintenanceRuns.userId, context.userId),
+              inArray(financeMaintenanceRuns.stage, [
+                "deterministic_processing",
+                "agent_reasoning",
+                "reconciliation",
+                "agent_audit",
+              ]),
+            ),
+          });
+          if (existing) return existing;
+          const [created] = await tx
+            .insert(financeMaintenanceRuns)
+            .values({
+              scope: input.scope,
+              stage: "deterministic_processing",
+              userId: context.userId,
+            })
+            .returning();
+          if (!created) throw new AppError("internal_error", "Maintenance did not start.");
+          return created;
+        });
+        const advanced = await continuePreparation(run);
         return maintenanceResult(await payloadFor(advanced), await openReviewCount(context.userId));
       }
       if (input.operation === "resume") {
-        const run = await ownedRun(context.userId, input.runId);
+        const run = await continuePreparation(await ownedRun(context.userId, input.runId));
         return maintenanceResult(await payloadFor(run), await openReviewCount(context.userId));
       }
       return executeFinanceIdempotently(
@@ -433,8 +468,8 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
           operation: `maintain_finances:${input.operation}`,
           payload: input,
         },
-        async () => {
-          const run = await ownedRun(context.userId, input.runId);
+        async (tx) => {
+          const run = await ownedRun(context.userId, input.runId, tx);
           if (run.version !== input.expectedVersion)
             throw new AppError(
               "conflict",
@@ -444,9 +479,9 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
             if (run.stage !== "agent_reasoning")
               throw new AppError("conflict", "Maintenance is not awaiting judgments.");
             for (const [index, judgment] of input.judgments.entries()) {
-              await applyJudgment(run, judgment, context, index);
+              await applyJudgment(tx, run, judgment, context, index);
             }
-            const [updated] = await db
+            const [updated] = await tx
               .update(financeMaintenanceRuns)
               .set({ stage: "agent_audit", updatedAt: now(), version: run.version + 1 })
               .where(
@@ -459,15 +494,15 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
             if (!updated)
               throw new AppError("conflict", "Maintenance advanced in another request.");
             return maintenanceResult(
-              await payloadFor(updated),
-              await openReviewCount(context.userId),
+              await payloadFor(updated, tx),
+              await openReviewCount(context.userId, tx),
             );
           }
           if (run.stage !== "agent_audit")
             throw new AppError("conflict", "Maintenance is not awaiting audit findings.");
           for (const finding of input.findings) {
             const stableKey = `${finding.economicEventId}:${finding.reason}`;
-            await db
+            await tx
               .insert(financeAuditFindings)
               .values({
                 economicEventId: finding.economicEventId,
@@ -480,21 +515,24 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
                 userId: context.userId,
               })
               .onConflictDoNothing();
-            const eventTransaction = await db.query.financeEventTransactions.findFirst({
+            const eventTransaction = await tx.query.financeEventTransactions.findFirst({
               where: eq(financeEventTransactions.economicEventId, finding.economicEventId),
             });
             if (eventTransaction) {
-              await inbox.upsertFinanceReview({
-                economicEventId: finding.economicEventId,
-                evidence: finding.evidence,
-                impactAmount: finding.impactAmount,
-                reason: finding.reason,
-                transactionId: eventTransaction.transactionId,
-                userId: context.userId,
-              });
+              await inbox.upsertFinanceReview(
+                {
+                  economicEventId: finding.economicEventId,
+                  evidence: finding.evidence,
+                  impactAmount: finding.impactAmount,
+                  reason: finding.reason,
+                  transactionId: eventTransaction.transactionId,
+                  userId: context.userId,
+                },
+                tx,
+              );
             }
           }
-          const [updated] = await db
+          const [updated] = await tx
             .update(financeMaintenanceRuns)
             .set({ settledAt: now(), stage: "settled", updatedAt: now(), version: run.version + 1 })
             .where(
@@ -506,8 +544,8 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
             .returning();
           if (!updated) throw new AppError("conflict", "Maintenance advanced in another request.");
           return maintenanceResult(
-            await payloadFor(updated),
-            await openReviewCount(context.userId),
+            await payloadFor(updated, tx),
+            await openReviewCount(context.userId, tx),
           );
         },
       );
@@ -528,7 +566,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         .orderBy(desc(financeMaintenanceRuns.createdAt))
         .limit(query.limit);
       return {
-        items: await Promise.all(rows.map(payloadFor)),
+        items: await Promise.all(rows.map((row) => payloadFor(row))),
         nextCursor: null,
       };
     },

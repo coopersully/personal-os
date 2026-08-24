@@ -477,6 +477,20 @@
       "when": 1787517000000,
       "tag": "0067_finance_ledger_protocol",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787562000000,
+      "tag": "0068_finance_mutation_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787562600000,
+      "tag": "0069_finance_legacy_budget_backfill",
+      "breakpoints": true
     }
   ]
 }

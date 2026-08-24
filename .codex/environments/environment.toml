@@ -8,22 +8,22 @@ script = "bash ./.codex/scripts/environment.sh setup"
 [[actions]]
 name = "Start"
 icon = "run"
-command = "$HOME/.codex/skills/cooper-run/scripts/cooper-run.sh start"
+command = "bash ./.codex/scripts/environment.sh start"
 
 [[actions]]
 name = "Stop"
 icon = "run"
-command = "$HOME/.codex/skills/cooper-run/scripts/cooper-run.sh stop"
+command = "bash ./.codex/scripts/environment.sh stop"
 
 [[actions]]
 name = "Restart"
 icon = "run"
-command = "$HOME/.codex/skills/cooper-run/scripts/cooper-run.sh restart"
+command = "bash ./.codex/scripts/environment.sh restart"
 
 [[actions]]
 name = "Status"
 icon = "check"
-command = "$HOME/.codex/skills/cooper-run/scripts/cooper-run.sh status"
+command = "bash ./.codex/scripts/environment.sh status"
 
 [[actions]]
 name = "Production Status"
@@ -38,7 +38,7 @@ command = "bash ./.codex/scripts/environment.sh production-stop"
 [[actions]]
 name = "Logs"
 icon = "check"
-command = "$HOME/.codex/skills/cooper-run/scripts/cooper-run.sh logs"
+command = "bash ./.codex/scripts/environment.sh logs"
 
 [[actions]]
 name = "Test"

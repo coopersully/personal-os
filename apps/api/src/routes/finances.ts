@@ -9,6 +9,7 @@ import {
   createFinanceBudgetInputSchema,
   createFinanceBudgetVersionInputSchema,
   createFinanceTransactionInputSchema,
+  disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
@@ -25,6 +26,8 @@ import {
   maintenanceRequestSchema,
   maintenanceScopeQuerySchema,
   manageFinanceGoalInputSchema,
+  manageFinanceRecurringItemInputSchema,
+  manageFinanceRuleInputSchema,
   mergeFinanceMerchantsInputSchema,
   reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
@@ -32,7 +35,9 @@ import {
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
   splitFinanceTransactionInputSchema,
+  startFinanceAccountConnectionInputSchema,
   submitFinanceLedgerChallengeInputSchema,
+  updateFinanceAccountInputSchema,
   updateFinanceAutomationSettingsInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
@@ -375,16 +380,7 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/rules", async (context) =>
     context.json(
       await finances.manageFinanceRule(
-        await parseBody(
-          context,
-          z.object({
-            category: z.string().trim().min(1).max(80).optional(),
-            idempotencyKey: z.string().trim().min(1).max(200),
-            merchant: z.string().trim().min(1).max(240).optional(),
-            operation: z.enum(["create", "update", "remove"]),
-            ruleId: z.string().uuid().optional(),
-          }),
-        ),
+        await parseBody(context, manageFinanceRuleInputSchema),
         await financeContext(context),
       ),
     ),
@@ -395,35 +391,13 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/recurring-items", async (context) =>
     context.json(
       await finances.manageFinanceRecurringItem(
-        await parseBody(
-          context,
-          z.object({
-            idempotencyKey: z.string().trim().min(1).max(200),
-            itemId: z.string().uuid(),
-            itemType: z.enum(["income", "obligation"]),
-            operation: z.enum(["pause", "resume", "cancel"]),
-          }),
-        ),
+        await parseBody(context, manageFinanceRecurringItemInputSchema),
         await financeContext(context),
       ),
     ),
   );
   app.patch("/v1/finances/merchants/:id", async (context) => {
-    const input = await parseBody(
-      context,
-      updateFinanceMerchantInputSchema.extend({
-        idempotencyKey: z.string().trim().min(1).max(200).optional(),
-      }),
-    );
-    if (input.idempotencyKey) {
-      return context.json(
-        await finances.updateFinanceMerchant(
-          context.req.param("id"),
-          { displayName: input.displayName, idempotencyKey: input.idempotencyKey },
-          await financeContext(context),
-        ),
-      );
-    }
+    const input = await parseBody(context, updateFinanceMerchantInputSchema);
     const actionInput = { id: routeId(context), displayName: input.displayName };
     return act(context, "merchant", actionInput, async () =>
       context.json({
@@ -435,32 +409,41 @@ export function registerFinanceRoutes({
       }),
     );
   });
-  app.post("/v1/finances/merchants/merge", async (context) => {
-    const input = await parseBody(
-      context,
-      mergeFinanceMerchantsInputSchema.and(
-        z.object({ idempotencyKey: z.string().trim().min(1).max(200).optional() }),
-      ),
-    );
-    if (input.idempotencyKey) {
-      return context.json(
-        await finances.mergeFinanceMerchantRecords(
-          {
-            idempotencyKey: input.idempotencyKey,
-            rationale: input.rationale,
-            sourceMerchantId: input.sourceMerchantId,
-            targetMerchantId: input.targetMerchantId,
-          },
-          await financeContext(context),
+  app.patch("/v1/finances/merchants/:id/canonical", async (context) =>
+    context.json(
+      await finances.updateFinanceMerchant(
+        routeId(context),
+        await parseBody(
+          context,
+          updateFinanceMerchantInputSchema.extend({
+            idempotencyKey: z.string().trim().min(1).max(200),
+          }),
         ),
-      );
-    }
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.post("/v1/finances/merchants/merge", async (context) => {
+    const input = await parseBody(context, mergeFinanceMerchantsInputSchema);
     return act(context, "merchant", input, async () =>
       context.json({
         merchant: await finances.mergeMerchants(input, financeMutationContext(context)),
       }),
     );
   });
+  app.post("/v1/finances/merchants/merge/canonical", async (context) =>
+    context.json(
+      await finances.mergeFinanceMerchantRecords(
+        await parseBody(
+          context,
+          mergeFinanceMerchantsInputSchema.and(
+            z.object({ idempotencyKey: z.string().trim().min(1).max(200) }),
+          ),
+        ),
+        await financeContext(context),
+      ),
+    ),
+  );
   app.get("/v1/finances/transactions", async (context) =>
     context.json(
       await finances.listTransactions(
@@ -660,21 +643,7 @@ export function registerFinanceRoutes({
     }),
   );
   app.patch("/v1/finances/transactions/:id", async (context) => {
-    const body = await parseBody(
-      context,
-      updateFinanceTransactionInputSchema.and(
-        z.object({ idempotencyKey: z.string().trim().min(1).max(200).optional() }),
-      ),
-    );
-    if (body.idempotencyKey) {
-      return context.json(
-        await finances.updateFinanceTransaction(
-          routeId(context),
-          { ...body, idempotencyKey: body.idempotencyKey },
-          await financeContext(context),
-        ),
-      );
-    }
+    const body = await parseBody(context, updateFinanceTransactionInputSchema);
     const input = { id: routeId(context), ...body };
     return act(context, "transaction", input, async () =>
       context.json({
@@ -686,6 +655,20 @@ export function registerFinanceRoutes({
       }),
     );
   });
+  app.patch("/v1/finances/transactions/:id/canonical", async (context) =>
+    context.json(
+      await finances.updateFinanceTransaction(
+        routeId(context),
+        await parseBody(
+          context,
+          updateFinanceTransactionInputSchema.and(
+            z.object({ idempotencyKey: z.string().trim().min(1).max(200) }),
+          ),
+        ),
+        await financeContext(context),
+      ),
+    ),
+  );
   app.put("/v1/finances/transactions/:id/breakdown", async (context) => {
     const body = await parseBody(context, setFinanceTransactionBreakdownInputSchema);
     const input = { id: routeId(context), ...body };
@@ -719,7 +702,7 @@ export function registerFinanceRoutes({
     ),
   );
   app.post("/v1/finances/budget-plans/:id/revisions", async (context) => {
-    const body = await context.req.json();
+    const body = await parseBody(context, z.record(z.string(), z.unknown()));
     return context.json(
       await finances.reviseFinanceBudget(
         reviseFinanceBudgetInputSchema.parse({
@@ -732,7 +715,7 @@ export function registerFinanceRoutes({
     );
   });
   app.post("/v1/finances/budget-versions/:id/approve", async (context) => {
-    const body = await context.req.json();
+    const body = await parseBody(context, z.record(z.string(), z.unknown()));
     return context.json(
       await finances.approveFinanceBudget(
         approveFinanceBudgetInputSchema.parse({
@@ -759,7 +742,7 @@ export function registerFinanceRoutes({
     ),
   );
   app.patch("/v1/finances/goals/:id", async (context) => {
-    const body = await context.req.json();
+    const body = await parseBody(context, z.record(z.string(), z.unknown()));
     return context.json(
       await finances.manageFinanceGoal(
         manageFinanceGoalInputSchema.parse({
@@ -772,7 +755,7 @@ export function registerFinanceRoutes({
     );
   });
   app.delete("/v1/finances/goals/:id", async (context) => {
-    const body = await context.req.json();
+    const body = await parseBody(context, z.record(z.string(), z.unknown()));
     return context.json(
       await finances.manageFinanceGoal(
         manageFinanceGoalInputSchema.parse({
@@ -825,12 +808,12 @@ export function registerFinanceRoutes({
   app.get("/v1/finances/plaid/status", async (context) =>
     context.json({ available: finances.plaidAvailable() }),
   );
-  app.post("/v1/finances/plaid/link-token", async (context) =>
+  app.post("/v1/finances/plaid/link-token", requireHuman, async (context) =>
     context.json({
       linkToken: await finances.createPlaidLinkToken(context.get("principal").userId),
     }),
   );
-  app.post("/v1/finances/plaid/exchange", async (context) =>
+  app.post("/v1/finances/plaid/exchange", requireHuman, async (context) =>
     context.json(
       {
         accounts: await finances.exchangePlaidToken(
@@ -857,13 +840,7 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/account-connections", async (context) =>
     context.json(
       await finances.startFinanceAccountConnection(
-        await parseBody(
-          context,
-          z.object({
-            idempotencyKey: z.string().trim().min(1).max(200),
-            provider: z.literal("plaid"),
-          }),
-        ),
+        await parseBody(context, startFinanceAccountConnectionInputSchema),
         await financeContext(context),
       ),
     ),
@@ -872,25 +849,13 @@ export function registerFinanceRoutes({
     context.json(
       await finances.updateFinanceAccount(
         context.req.param("id"),
-        await parseBody(
-          context,
-          z.object({
-            balance: z.number().finite().nullable().optional(),
-            idempotencyKey: z.string().trim().min(1).max(200),
-            institution: z.string().trim().min(1).max(160).optional(),
-            kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
-            name: z.string().trim().min(1).max(160).optional(),
-          }),
-        ),
+        await parseBody(context, updateFinanceAccountInputSchema),
         await financeContext(context),
       ),
     ),
   );
   app.post("/v1/finances/accounts/:id/disconnect", async (context) => {
-    const input = await parseBody(
-      context,
-      z.object({ idempotencyKey: z.string().trim().min(1).max(200) }),
-    );
+    const input = await parseBody(context, disconnectFinanceAccountInputSchema);
     return context.json(
       await finances.disconnectFinanceAccount(
         context.req.param("id"),
@@ -900,25 +865,7 @@ export function registerFinanceRoutes({
     );
   });
   app.post("/v1/finances/accounts/:id/import", async (context) => {
-    const input = await parseBody(
-      context,
-      financeCsvImportInputSchema.extend({
-        idempotencyKey: z.string().trim().min(1).max(200).optional(),
-      }),
-    );
-    if (input.idempotencyKey) {
-      return context.json(
-        await finances.importFinanceTransactions(
-          {
-            ...input,
-            accountId: context.req.param("id"),
-            idempotencyKey: input.idempotencyKey,
-          },
-          await financeContext(context),
-        ),
-        201,
-      );
-    }
+    const input = await parseBody(context, financeCsvImportInputSchema);
     return context.json(
       {
         result: await finances.importCsv(
@@ -926,6 +873,21 @@ export function registerFinanceRoutes({
           mutationContext(context),
         ),
       },
+      201,
+    );
+  });
+  app.post("/v1/finances/accounts/:id/import/canonical", async (context) => {
+    const input = await parseBody(
+      context,
+      financeCsvImportInputSchema.extend({
+        idempotencyKey: z.string().trim().min(1).max(200),
+      }),
+    );
+    return context.json(
+      await finances.importFinanceTransactions(
+        { ...input, accountId: routeId(context) },
+        await financeContext(context),
+      ),
       201,
     );
   });

@@ -5,6 +5,7 @@ import {
   financeInboxCaseSchema,
   financeMaintenanceInputSchema,
   financeToolResultSchema,
+  manageFinanceRuleInputSchema,
 } from "./finance.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -126,5 +127,22 @@ describe("canonical Finance contracts", () => {
     });
 
     expect(parsed.communication.nextQuestion?.id).toBe("profile:household_size");
+  });
+
+  it("requires rule updates to change the category or merchant", () => {
+    const mutation = { idempotencyKey: "rule-update", operation: "update", ruleId: id } as const;
+    expect(
+      manageFinanceRuleInputSchema.parse({ ...mutation, category: "Groceries" }),
+    ).toMatchObject({
+      category: "Groceries",
+    });
+    expect(
+      manageFinanceRuleInputSchema.parse({ ...mutation, merchant: "Corner market" }),
+    ).toMatchObject({
+      merchant: "Corner market",
+    });
+    expect(() => manageFinanceRuleInputSchema.parse(mutation)).toThrow(
+      "Provide a category or merchant to update",
+    );
   });
 });

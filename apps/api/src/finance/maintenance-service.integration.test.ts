@@ -9,6 +9,7 @@ import {
   financeCategoryRules,
   financeEconomicEvents,
   financeEventTransactions,
+  financeMaintenanceRuns,
   financeTransactions,
   migrateDatabase,
   users,
@@ -243,6 +244,69 @@ describe.sequential("caller-driven Finance maintenance", () => {
       context,
     );
     expect(settled).toMatchObject({ data: { stage: "settled" }, remainingWork: { count: 1 } });
+  });
+
+  it("recovers persisted preparation stages after process loss", async () => {
+    const now = () => new Date("2026-08-24T22:00:00Z");
+    const service = createMaintenanceService({
+      db: database.db,
+      inbox: createInboxService({ db: database.db, now }),
+      now,
+    });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: "agent",
+        actorType: "agent",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "recover-maintenance",
+    });
+    const [run] = await database.db
+      .insert(financeMaintenanceRuns)
+      .values({
+        scope: { from: "2099-01-01", type: "since" },
+        stage: "deterministic_processing",
+        userId,
+      })
+      .returning();
+    if (!run) throw new Error("Recovery run was not created.");
+
+    const recovered = await service.maintainFinances(
+      { operation: "resume", runId: run.id },
+      context,
+    );
+    expect(recovered).toMatchObject({ data: { stage: "agent_audit" } });
+    await service.maintainFinances(
+      {
+        expectedVersion: recovered.data.version,
+        findings: [],
+        idempotencyKey: "settle-recovered-maintenance",
+        operation: "submit_audit",
+        runId: run.id,
+      },
+      context,
+    );
+    await database.db
+      .update(financeMaintenanceRuns)
+      .set({ stage: "reconciliation", version: 2 })
+      .where(eq(financeMaintenanceRuns.id, run.id));
+    const reconciled = await service.maintainFinances(
+      { operation: "resume", runId: run.id },
+      context,
+    );
+    expect(reconciled).toMatchObject({ data: { stage: "agent_audit" } });
+    await service.maintainFinances(
+      {
+        expectedVersion: reconciled.data.version,
+        findings: [],
+        idempotencyKey: "settle-reconciled-maintenance",
+        operation: "submit_audit",
+        runId: run.id,
+      },
+      context,
+    );
   });
 
   it("runs deterministic rules, creates review work, and links related transactions", async () => {

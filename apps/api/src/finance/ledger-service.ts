@@ -11,10 +11,17 @@ import {
   financeTransactionRevisions,
   financeTransactions,
 } from "@personal-os/database";
-import type { FinanceToolResult, FinanceTransaction } from "@personal-os/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import type {
+  FinanceToolResult,
+  FinanceTransaction,
+  FinanceTransactionRelationship,
+} from "@personal-os/domain";
+import { and, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
+
+type FinanceExecutor = Pick<Database, "delete" | "insert" | "select" | "update">;
 
 type Classification = {
   categoryId: string;
@@ -81,6 +88,20 @@ function transactionAudit(row: typeof financeTransactions.$inferSelect) {
   };
 }
 
+function relationship(
+  row: typeof financeTransactionRelationships.$inferSelect,
+): FinanceTransactionRelationship {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    eventId: row.economicEventId,
+    id: row.id,
+    provenance: row.provenance as FinanceTransactionRelationship["provenance"],
+    rationale: row.rationale,
+    relationship: row.relationship,
+    transactionIds: row.transactionIds,
+  };
+}
+
 function provenance(context: FinanceMutationContext, now: Date, confidence: number | null = null) {
   return {
     actorId: context.actorId,
@@ -97,8 +118,8 @@ function provenance(context: FinanceMutationContext, now: Date, confidence: numb
 export function createFinanceLedgerService(input: { db: Database; now: () => Date }) {
   const { db, now } = input;
 
-  async function ownedTransaction(userId: string, id: string) {
-    const [row] = await db
+  async function ownedTransaction(userId: string, id: string, executor: FinanceExecutor = db) {
+    const [row] = await executor
       .select()
       .from(financeTransactions)
       .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
@@ -107,8 +128,8 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
     return row;
   }
 
-  async function ownedCategory(userId: string, id: string) {
-    const [row] = await db
+  async function ownedCategory(userId: string, id: string, executor: FinanceExecutor = db) {
+    const [row] = await executor
       .select()
       .from(financeCategories)
       .where(and(eq(financeCategories.id, id), eq(financeCategories.userId, userId)))
@@ -127,9 +148,9 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
         db,
         context,
         { idempotencyKey, operation: "finance.transaction.remove", payload: { id } },
-        async () => {
-          const before = await ownedTransaction(context.userId, id);
-          const [source] = await db
+        async (tx) => {
+          const before = await ownedTransaction(context.userId, id, tx);
+          const [source] = await tx
             .select({ provider: financeAccounts.provider })
             .from(financeAccounts)
             .where(eq(financeAccounts.id, before.accountId))
@@ -140,19 +161,17 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
               "Provider transactions must be linked as duplicates or reversals so imported evidence is preserved.",
             );
           }
-          await db.transaction(async (tx) => {
-            await tx.delete(financeTransactions).where(eq(financeTransactions.id, id));
-            await tx.insert(auditEvents).values({
-              action: "finance.transaction_removed",
-              actorId: context.actorId,
-              actorType: context.actorType,
-              after: null,
-              before: transactionAudit(before),
-              entityId: id,
-              entityType: "finance_transaction",
-              requestId: context.requestId,
-              userId: context.userId,
-            });
+          await tx.delete(financeTransactions).where(eq(financeTransactions.id, id));
+          await tx.insert(auditEvents).values({
+            action: "finance.transaction_removed",
+            actorId: context.actorId,
+            actorType: context.actorType,
+            after: null,
+            before: transactionAudit(before),
+            entityId: id,
+            entityType: "finance_transaction",
+            requestId: context.requestId,
+            userId: context.userId,
           });
           return result({ id, removed: true }, "Manual transaction removed.", [
             {
@@ -175,15 +194,15 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
         db,
         context,
         { idempotencyKey, operation: "finance.transaction.classify", payload: { classifications } },
-        async () => {
+        async (tx) => {
           const changed: FinanceTransaction[] = [];
           for (const classification of classifications) {
             const [before, category] = await Promise.all([
-              ownedTransaction(context.userId, classification.transactionId),
-              ownedCategory(context.userId, classification.categoryId),
+              ownedTransaction(context.userId, classification.transactionId, tx),
+              ownedCategory(context.userId, classification.categoryId, tx),
             ]);
             const decidedAt = now();
-            const [updated] = await db
+            const [updated] = await tx
               .update(financeTransactions)
               .set({
                 category: category.name,
@@ -199,7 +218,7 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
               .returning();
             if (!updated)
               throw new AppError("internal_error", "The transaction could not be classified.");
-            await db.insert(financeClassificationDecisions).values({
+            await tx.insert(financeClassificationDecisions).values({
               categoryId: category.id,
               categoryName: category.name,
               confidence: Math.round(classification.confidence * 10_000),
@@ -244,56 +263,58 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
           operation: "finance.transaction.link",
           payload: input,
         },
-        async () => {
+        async (tx) => {
           const ids = [...new Set(input.transactionIds)].toSorted();
           if (ids.length < 2)
             throw new AppError(
               "invalid_request",
               "Choose at least two different transactions to link.",
             );
-          await Promise.all(ids.map((id) => ownedTransaction(context.userId, id)));
+          await Promise.all(ids.map((id) => ownedTransaction(context.userId, id, tx)));
           const stableKey = `${input.relationship}:${createHash("sha256").update(ids.join(":")).digest("hex")}`;
           const timestamp = now();
-          const linked = await db.transaction(async (tx) => {
-            const [event] = await tx
-              .insert(financeEconomicEvents)
-              .values({ kind: input.relationship, stableKey, userId: context.userId })
-              .onConflictDoUpdate({
-                set: { updatedAt: timestamp },
-                target: [financeEconomicEvents.userId, financeEconomicEvents.stableKey],
-              })
-              .returning();
-            if (!event)
-              throw new AppError("internal_error", "The economic event could not be created.");
-            await tx
-              .insert(financeEventTransactions)
-              .values(
-                ids.map((transactionId) => ({
-                  economicEventId: event.id,
-                  transactionId,
-                  userId: context.userId,
-                })),
-              )
-              .onConflictDoNothing();
-            const [relationship] = await tx
-              .insert(financeTransactionRelationships)
-              .values({
+          const [event] = await tx
+            .insert(financeEconomicEvents)
+            .values({ kind: input.relationship, stableKey, userId: context.userId })
+            .onConflictDoUpdate({
+              set: { updatedAt: timestamp },
+              target: [financeEconomicEvents.userId, financeEconomicEvents.stableKey],
+            })
+            .returning();
+          if (!event)
+            throw new AppError("internal_error", "The economic event could not be created.");
+          await tx
+            .insert(financeEventTransactions)
+            .values(
+              ids.map((transactionId) => ({
                 economicEventId: event.id,
-                provenance: provenance(context, timestamp),
-                rationale: input.rationale,
-                relationship: input.relationship,
-                transactionIds: ids,
+                transactionId,
                 userId: context.userId,
-              })
-              .returning();
-            await tx
-              .update(financeTransactions)
-              .set({ reconciliationStatus: "matched", updatedAt: timestamp })
-              .where(inArray(financeTransactions.id, ids));
-            return relationship;
-          });
+              })),
+            )
+            .onConflictDoNothing();
+          const [linked] = await tx
+            .insert(financeTransactionRelationships)
+            .values({
+              economicEventId: event.id,
+              provenance: provenance(context, timestamp),
+              rationale: input.rationale,
+              relationship: input.relationship,
+              transactionIds: ids,
+              userId: context.userId,
+            })
+            .returning();
+          if (!linked)
+            throw new AppError(
+              "internal_error",
+              "The transaction relationship could not be created.",
+            );
+          await tx
+            .update(financeTransactions)
+            .set({ reconciliationStatus: "matched", updatedAt: timestamp })
+            .where(inArray(financeTransactions.id, ids));
           return result(
-            linked,
+            relationship(linked),
             `Linked ${ids.length} transactions as ${input.relationship}.`,
             ids.map((id) => ({
               affectedEntityId: id,
@@ -323,19 +344,14 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
           operation: "finance.transaction.split",
           payload: input,
         },
-        async () => {
-          const original = await ownedTransaction(context.userId, input.transactionId);
-          const [latest] = await db
-            .select({ version: financeTransactionRevisions.version })
-            .from(financeTransactionRevisions)
-            .where(eq(financeTransactionRevisions.transactionId, original.id))
-            .orderBy(desc(financeTransactionRevisions.version))
-            .limit(1);
-          const version = latest?.version ?? 1;
-          if (input.expectedVersion !== version)
+        async (tx) => {
+          const original = await ownedTransaction(context.userId, input.transactionId, tx);
+          const nextRevision = await nextFinanceTransactionRevision(tx, original.id);
+          const currentVersion = Math.max(1, nextRevision - 1);
+          if (input.expectedVersion !== currentVersion)
             throw new AppError(
               "conflict",
-              `The transaction changed; retry with expectedVersion ${version}.`,
+              `The transaction changed; retry with expectedVersion ${currentVersion}.`,
             );
           const cents = input.parts.map((part) => Math.round(part.amount * 100));
           if (cents.reduce((sum, amount) => sum + amount, 0) !== original.amount)
@@ -344,7 +360,7 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
               "Split part amounts must exactly equal the original transaction amount.",
             );
           const categories = await Promise.all(
-            input.parts.map((part) => ownedCategory(context.userId, part.categoryId)),
+            input.parts.map((part) => ownedCategory(context.userId, part.categoryId, tx)),
           );
           const timestamp = now();
           const splitValues: Array<typeof financeTransactions.$inferInsert> = input.parts.map(
@@ -374,60 +390,57 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
               };
             },
           );
-          const parts = await db.transaction(async (tx) => {
-            const created = await tx.insert(financeTransactions).values(splitValues).returning();
-            const stableKey = `split:${original.id}`;
-            const [event] = await tx
-              .insert(financeEconomicEvents)
-              .values({ kind: "split", stableKey, userId: context.userId })
-              .onConflictDoUpdate({
-                set: { updatedAt: timestamp },
-                target: [financeEconomicEvents.userId, financeEconomicEvents.stableKey],
-              })
-              .returning();
-            if (!event)
-              throw new AppError("internal_error", "The split event could not be created.");
-            const ids = [original.id, ...created.map((item) => item.id)];
-            await tx
-              .insert(financeEventTransactions)
-              .values(
-                ids.map((transactionId) => ({
-                  economicEventId: event.id,
-                  transactionId,
-                  userId: context.userId,
-                })),
-              )
-              .onConflictDoNothing();
-            await tx.insert(financeTransactionRelationships).values({
-              economicEventId: event.id,
-              provenance: provenance(context, timestamp),
-              rationale: "Transaction split across budget categories.",
-              relationship: "split",
-              transactionIds: ids,
-              userId: context.userId,
-            });
-            await tx
-              .update(financeTransactions)
-              .set({
-                category: "Split",
-                categoryId: null,
-                categoryRationale: "Replaced by linked split parts.",
-                categorySource: context.actorType === "agent" ? "agent" : "user",
-                direction: "transfer",
-                needsReview: false,
-                reconciliationStatus: "matched",
-                updatedAt: timestamp,
-              })
-              .where(eq(financeTransactions.id, original.id));
-            await tx.insert(financeTransactionRevisions).values({
-              changes: { splitPartIds: created.map((item) => item.id) },
-              provenance: provenance(context, timestamp),
-              transactionId: original.id,
-              userId: context.userId,
-              version: version + 1,
-            });
-            return created.map(transaction);
+          const created = await tx.insert(financeTransactions).values(splitValues).returning();
+          const stableKey = `split:${original.id}`;
+          const [event] = await tx
+            .insert(financeEconomicEvents)
+            .values({ kind: "split", stableKey, userId: context.userId })
+            .onConflictDoUpdate({
+              set: { updatedAt: timestamp },
+              target: [financeEconomicEvents.userId, financeEconomicEvents.stableKey],
+            })
+            .returning();
+          if (!event) throw new AppError("internal_error", "The split event could not be created.");
+          const ids = [original.id, ...created.map((item) => item.id)];
+          await tx
+            .insert(financeEventTransactions)
+            .values(
+              ids.map((transactionId) => ({
+                economicEventId: event.id,
+                transactionId,
+                userId: context.userId,
+              })),
+            )
+            .onConflictDoNothing();
+          await tx.insert(financeTransactionRelationships).values({
+            economicEventId: event.id,
+            provenance: provenance(context, timestamp),
+            rationale: "Transaction split across budget categories.",
+            relationship: "split",
+            transactionIds: ids,
+            userId: context.userId,
           });
+          await tx
+            .update(financeTransactions)
+            .set({
+              category: "Split",
+              categoryId: null,
+              categoryRationale: "Replaced by linked split parts.",
+              categorySource: context.actorType === "agent" ? "agent" : "user",
+              direction: "transfer",
+              needsReview: false,
+              reconciliationStatus: "matched",
+              updatedAt: timestamp,
+            })
+            .where(eq(financeTransactions.id, original.id));
+          await tx.insert(financeTransactionRevisions).values({
+            changes: { splitPartIds: created.map((item) => item.id) },
+            provenance: provenance(context, timestamp),
+            transactionId: original.id,
+            userId: context.userId,
+            version: Math.max(2, nextRevision),
+          });
+          const parts = created.map(transaction);
           return result(parts, `Split the transaction into ${parts.length} balanced parts.`, [
             {
               affectedEntityId: original.id,

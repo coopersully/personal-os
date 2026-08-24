@@ -1,10 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
+  answerFinanceReviewInputSchema,
   type FinanceToolResult,
   financeMaintenanceInputSchema,
   financeSetupInputSchema,
   manageFinanceGoalInputSchema,
+  manageFinanceRecurringItemInputSchema,
+  manageFinanceRuleInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -103,6 +106,9 @@ const budget = {
   rationale: z.string().min(1).max(4000),
   resources: z.array(resource).min(1).max(100),
 };
+const answerFinanceReviewToolInputSchema = z
+  .object({ reviewId: id })
+  .and(answerFinanceReviewInputSchema);
 
 /** Intent-first Finance MCP surface. Domain policy and accounting stay in the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
@@ -112,18 +118,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. It inspects existing state, returns one question at a time, persists each answer, shows the proposed budget, accepts a plain approval or authorized bypass self-approval, then continues into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
-      inputSchema: {
-        answer: z.string().max(10000).optional(),
-        approvalSource: z.enum(["user_instruction", "agent_self_approval"]).optional(),
-        budgetVersionId: id.optional(),
-        idempotencyKey: idempotencyKey.optional(),
-        operation: z.enum(["start", "answer", "approve_budget", "resume"]),
-        questionId: z.string().max(240).optional(),
-        sessionId: id.optional(),
-      },
+      inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
-    async (input) => financeResult(await api.setupFinances(financeSetupInputSchema.parse(input))),
+    async (input) =>
+      financeApiResult(() => api.setupFinances(financeSetupInputSchema.parse(input))),
   );
 
   server.registerTool(
@@ -152,7 +151,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Get Finance maintenance history",
     },
     async (input) =>
-      financeResult(
+      financeApiResult(async () =>
         envelope(
           await api.getFinanceMaintenanceHistory(input),
           "Finance maintenance history loaded.",
@@ -169,7 +168,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get financial profile",
     },
-    async () => financeResult(await api.getFinancialProfile()),
+    async () => financeApiResult(() => api.getFinancialProfile()),
   );
 
   server.registerTool(
@@ -192,7 +191,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Update financial profile",
     },
-    async (input) => financeResult(await api.updateFinancialProfile(input)),
+    async (input) => financeApiResult(() => api.updateFinancialProfile(input)),
   );
 
   server.registerTool(
@@ -204,7 +203,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: { planId: id.optional() },
       title: "Get Finance budget",
     },
-    async ({ planId }) => financeResult(await api.getFinanceBudget(planId)),
+    async ({ planId }) => financeApiResult(() => api.getFinanceBudget(planId)),
   );
 
   server.registerTool(
@@ -216,7 +215,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: budget,
       title: "Create Finance budget",
     },
-    async (input) => financeResult(await api.createFinanceBudget(input)),
+    async (input) => financeApiResult(() => api.createFinanceBudget(input)),
   );
 
   server.registerTool(
@@ -228,7 +227,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: { ...budget, expectedVersion: z.number().int().positive(), planId: id },
       title: "Revise Finance budget",
     },
-    async (input) => financeResult(await api.reviseFinanceBudget(input)),
+    async (input) => financeApiResult(() => api.reviseFinanceBudget(input)),
   );
 
   server.registerTool(
@@ -245,7 +244,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Approve Finance budget",
     },
-    async (input) => financeResult(await api.approveFinanceBudget(input)),
+    async (input) => financeApiResult(() => api.approveFinanceBudget(input)),
   );
 
   server.registerTool(
@@ -257,7 +256,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get Finance budget status",
     },
-    async () => financeResult(await api.getCanonicalFinanceBudgetStatus()),
+    async () => financeApiResult(() => api.getCanonicalFinanceBudgetStatus()),
   );
 
   server.registerTool(
@@ -268,7 +267,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "List Finance goals",
     },
-    async () => financeResult(await api.listFinanceGoals()),
+    async () => financeApiResult(() => api.listFinanceGoals()),
   );
 
   server.registerTool(
@@ -291,7 +290,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Manage Finance goal",
     },
     async (input) =>
-      financeResult(await api.manageFinanceGoal(manageFinanceGoalInputSchema.parse(input))),
+      financeApiResult(() => api.manageFinanceGoal(manageFinanceGoalInputSchema.parse(input))),
   );
 
   server.registerTool(
@@ -303,7 +302,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get Finance Inbox",
     },
-    async () => financeResult(await api.getFinanceInbox()),
+    async () => financeApiResult(() => api.getFinanceInbox()),
   );
 
   server.registerTool(
@@ -312,16 +311,13 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Call immediately after the user's answer. It applies the change and resolves the row atomically. Briefly acknowledge changes, then ask only the returned next question.",
-      inputSchema: {
-        answer: z.string().min(1).max(10000),
-        idempotencyKey,
-        resolution: z.record(z.string(), z.unknown()),
-        reviewId: id,
-      },
+      inputSchema: answerFinanceReviewToolInputSchema,
       title: "Answer Finance review",
     },
-    async ({ reviewId, ...input }) =>
-      financeResult(await api.answerFinanceReview(reviewId, input as never)),
+    async (input) => {
+      const { reviewId, ...answer } = answerFinanceReviewToolInputSchema.parse(input);
+      return financeApiResult(() => api.answerFinanceReview(reviewId, answer));
+    },
   );
 
   const reads: Array<[string, string, () => Promise<unknown>]> = [
@@ -360,7 +356,10 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         inputSchema: {},
         title: name.replaceAll("_", " "),
       },
-      async () => financeResult(envelope(await read(), `${name.replaceAll("_", " ")} loaded.`)),
+      async () =>
+        financeApiResult(async () =>
+          envelope(await read(), `${name.replaceAll("_", " ")} loaded.`),
+        ),
     );
   }
 
@@ -374,17 +373,18 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Get Finance cash flow",
     },
     async () =>
-      financeResult(
-        envelope(
-          {
-            alerts: await api.listFinanceAlerts(),
-            forecast: await api.getFinanceForecast(),
-            incomeStreams: await api.listFinanceIncomeStreams(),
-            recurringItems: await api.listFinanceRecurringObligations(),
-          },
+      financeApiResult(async () => {
+        const [alerts, forecast, incomeStreams, recurringItems] = await Promise.all([
+          api.listFinanceAlerts(),
+          api.getFinanceForecast(),
+          api.listFinanceIncomeStreams(),
+          api.listFinanceRecurringObligations(),
+        ]);
+        return envelope(
+          { alerts, forecast, incomeStreams, recurringItems },
           "Cash-flow evidence loaded.",
-        ),
-      ),
+        );
+      }),
   );
 
   server.registerTool(
@@ -396,12 +396,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "List Finance accounts",
     },
-    async () => {
-      const overview = await api.getFinanceOverview();
-      return financeResult(
-        envelope(overview.accounts, `Found ${overview.accounts.length} Finance accounts.`),
-      );
-    },
+    async () =>
+      financeApiResult(async () => {
+        const overview = await api.getFinanceOverview();
+        return envelope(overview.accounts, `Found ${overview.accounts.length} Finance accounts.`);
+      }),
   );
 
   server.registerTool(
@@ -413,7 +412,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: { idempotencyKey, provider: z.literal("plaid").default("plaid") },
       title: "Start Finance account connection",
     },
-    async (input) => financeResult(await api.startFinanceAccountConnection(input)),
+    async (input) => financeApiResult(() => api.startFinanceAccountConnection(input)),
   );
 
   server.registerTool(
@@ -422,7 +421,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: true },
       description:
         "Synchronize the requested accounts now. Continue healthy accounts when one source fails and return each failure as an account-scoped diagnostic with the precise remedy.",
-      inputSchema: { accountIds: z.array(id).min(1).max(100), idempotencyKey },
+      inputSchema: { accountIds: z.array(id).min(1).max(100) },
       title: "Sync Finance accounts",
     },
     async ({ accountIds }) => {
@@ -464,7 +463,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: { connectionId: id },
       title: "Get Finance account connection",
     },
-    async ({ connectionId }) => financeResult(await api.getFinanceAccountConnection(connectionId)),
+    async ({ connectionId }) =>
+      financeApiResult(() => api.getFinanceAccountConnection(connectionId)),
   );
 
   server.registerTool(
@@ -485,7 +485,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Update Finance account",
     },
     async ({ accountId, ...input }) =>
-      financeResult(await api.updateFinanceAccount(accountId, input)),
+      financeApiResult(() => api.updateFinanceAccount(accountId, input)),
   );
 
   server.registerTool(
@@ -498,7 +498,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Disconnect Finance account",
     },
     async ({ accountId, ...input }) =>
-      financeResult(await api.disconnectFinanceAccount(accountId, input)),
+      financeApiResult(() => api.disconnectFinanceAccount(accountId, input)),
   );
 
   server.registerTool(
@@ -520,7 +520,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "List Finance transactions",
     },
     async (input) =>
-      financeResult(envelope(await api.listFinanceTransactions(input), "Transactions loaded.")),
+      financeApiResult(async () =>
+        envelope(await api.listFinanceTransactions(input), "Transactions loaded."),
+      ),
   );
 
   server.registerTool(
@@ -541,7 +543,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Add Finance transaction",
     },
     async (input) =>
-      financeResult(
+      financeApiResult(async () =>
         envelope(
           await api.createFinanceTransaction({
             ...input,
@@ -561,7 +563,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: { transactionId: id },
       title: "Get Finance transaction",
     },
-    async ({ transactionId }) => financeResult(await api.getFinanceTransaction(transactionId)),
+    async ({ transactionId }) => financeApiResult(() => api.getFinanceTransaction(transactionId)),
   );
 
   server.registerTool(
@@ -580,7 +582,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Update Finance transaction",
     },
     async ({ transactionId, ...input }) =>
-      financeResult(await api.updateFinanceTransactionCanonical(transactionId, input)),
+      financeApiResult(() => api.updateFinanceTransactionCanonical(transactionId, input)),
   );
 
   server.registerTool(
@@ -593,7 +595,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Remove Finance transaction",
     },
     async ({ transactionId, ...input }) =>
-      financeResult(await api.removeFinanceTransaction(transactionId, input)),
+      financeApiResult(() => api.removeFinanceTransaction(transactionId, input)),
   );
 
   server.registerTool(
@@ -620,7 +622,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Split Finance transaction",
     },
-    async (input) => financeResult(await api.splitFinanceTransaction(input)),
+    async (input) => financeApiResult(() => api.splitFinanceTransaction(input)),
   );
 
   server.registerTool(
@@ -646,7 +648,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Classify Finance transactions",
     },
-    async (input) => financeResult(await api.classifyFinanceTransactions(input)),
+    async (input) => financeApiResult(() => api.classifyFinanceTransactions(input)),
   );
 
   server.registerTool(
@@ -663,7 +665,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Link Finance transactions",
     },
-    async (input) => financeResult(await api.linkFinanceTransactions(input)),
+    async (input) => financeApiResult(() => api.linkFinanceTransactions(input)),
   );
 
   server.registerTool(
@@ -680,7 +682,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Import Finance transactions",
     },
-    async (input) => financeResult(await api.importFinanceTransactions(input)),
+    async (input) => financeApiResult(() => api.importFinanceTransactions(input)),
   );
 
   server.registerTool(
@@ -692,7 +694,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "List Finance merchants",
     },
     async ({ limit }) =>
-      financeResult(envelope(await api.listFinanceMerchants(limit), "Merchants loaded.")),
+      financeApiResult(async () =>
+        envelope(await api.listFinanceMerchants(limit), "Merchants loaded."),
+      ),
   );
   server.registerTool(
     "update_finance_merchant",
@@ -703,7 +707,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Update Finance merchant",
     },
     async ({ merchantId, ...input }) =>
-      financeResult(await api.updateFinanceMerchantCanonical(merchantId, input)),
+      financeApiResult(() => api.updateFinanceMerchantCanonical(merchantId, input)),
   );
   server.registerTool(
     "merge_finance_merchants",
@@ -719,7 +723,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Merge Finance merchants",
     },
-    async (input) => financeResult(await api.mergeFinanceMerchantsCanonical(input)),
+    async (input) => financeApiResult(() => api.mergeFinanceMerchantsCanonical(input)),
   );
 
   server.registerTool(
@@ -731,7 +735,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "List Finance rules",
     },
-    async () => financeResult(await api.listFinanceRules()),
+    async () => financeApiResult(() => api.listFinanceRules()),
   );
   server.registerTool(
     "manage_finance_rule",
@@ -739,16 +743,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Create, update, or remove an exact merchant categorization rule when repeated evidence supports deterministic handling.",
-      inputSchema: {
-        category: z.string().min(1).max(80).optional(),
-        idempotencyKey,
-        merchant: z.string().min(1).max(240).optional(),
-        operation: z.enum(["create", "update", "remove"]),
-        ruleId: id.optional(),
-      },
+      inputSchema: manageFinanceRuleInputSchema,
       title: "Manage Finance rule",
     },
-    async (input) => financeResult(await api.manageFinanceRule(input)),
+    async (input) =>
+      financeApiResult(() => api.manageFinanceRule(manageFinanceRuleInputSchema.parse(input))),
   );
   server.registerTool(
     "list_finance_recurring_items",
@@ -759,7 +758,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "List Finance recurring items",
     },
-    async () => financeResult(await api.listFinanceRecurringItems()),
+    async () => financeApiResult(() => api.listFinanceRecurringItems()),
   );
   server.registerTool(
     "manage_finance_recurring_item",
@@ -767,14 +766,12 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Pause, resume, cancel, or correct a detected recurring income or obligation used by forecasts.",
-      inputSchema: {
-        idempotencyKey,
-        itemId: id,
-        itemType: z.enum(["income", "obligation"]),
-        operation: z.enum(["pause", "resume", "cancel"]),
-      },
+      inputSchema: manageFinanceRecurringItemInputSchema,
       title: "Manage Finance recurring item",
     },
-    async (input) => financeResult(await api.manageFinanceRecurringItem(input)),
+    async (input) =>
+      financeApiResult(() =>
+        api.manageFinanceRecurringItem(manageFinanceRecurringItemInputSchema.parse(input)),
+      ),
   );
 }

@@ -983,17 +983,13 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/merchants" && method === "GET")
       return json({ merchants: [financeMerchant] });
     if (url.pathname === "/v1/finances/merchants/merge" && method === "POST")
-      return json(
-        String(init?.body).includes("idempotencyKey")
-          ? financeEnvelope(financeMerchant)
-          : { merchant: financeMerchant },
-      );
+      return json({ merchant: financeMerchant });
+    if (url.pathname === "/v1/finances/merchants/merge/canonical" && method === "POST")
+      return json(financeEnvelope(financeMerchant));
     if (url.pathname === `/v1/finances/merchants/${id}` && method === "PATCH")
-      return json(
-        String(init?.body).includes("idempotencyKey")
-          ? financeEnvelope({ ...financeMerchant, isUserConfirmed: true })
-          : { merchant: { ...financeMerchant, isUserConfirmed: true } },
-      );
+      return json({ merchant: { ...financeMerchant, isUserConfirmed: true } });
+    if (url.pathname === `/v1/finances/merchants/${id}/canonical` && method === "PATCH")
+      return json(financeEnvelope({ ...financeMerchant, isUserConfirmed: true }));
     if (url.pathname === "/v1/finances/review") return json({ reviews: [] });
     if (url.pathname === "/v1/finances/inbox") return json(financeEnvelope([]));
     if (url.pathname === `/v1/finances/inbox/${id}/answer`) return json(financeEnvelope([]));
@@ -1026,22 +1022,19 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/transactions" && method === "POST")
       return json({ transaction: financeTransaction }, 201);
     if (url.pathname === `/v1/finances/transactions/${accountId}` && method === "PATCH")
+      return json({
+        transaction: { ...financeTransaction, category: "Dining", needsReview: false },
+      });
+    if (url.pathname === `/v1/finances/transactions/${accountId}/canonical` && method === "PATCH")
       return json(
-        String(init?.body).includes("idempotencyKey")
-          ? financeEnvelope({ ...financeTransaction, category: "Dining", needsReview: false })
-          : {
-              transaction: { ...financeTransaction, category: "Dining", needsReview: false },
-            },
+        financeEnvelope({ ...financeTransaction, category: "Dining", needsReview: false }),
       );
     if (url.pathname === `/v1/finances/accounts/${id}/sync`)
       return json({ result: { changed: 2 } });
     if (url.pathname === `/v1/finances/accounts/${id}/import`)
-      return json(
-        String(init?.body).includes("idempotencyKey")
-          ? financeEnvelope({ imported: 2, skipped: 1 })
-          : { result: { imported: 2, skipped: 1 } },
-        201,
-      );
+      return json({ result: { imported: 2, skipped: 1 } }, 201);
+    if (url.pathname === `/v1/finances/accounts/${id}/import/canonical`)
+      return json(financeEnvelope({ imported: 2, skipped: 1 }), 201);
     if (url.pathname === "/v1/finances")
       return json({
         overview: {
@@ -2052,24 +2045,58 @@ describe("ilo API client", () => {
     await expect(
       api.removeFinanceTransaction(id, { idempotencyKey: "remove-1" }),
     ).resolves.toMatchObject({ data: { removed: true } });
-    await expect(api.splitFinanceTransaction({ idempotencyKey: "split-1" })).resolves.toMatchObject(
-      { data: [financeTransaction] },
-    );
     await expect(
-      api.classifyFinanceTransactions({ idempotencyKey: "classify-1" }),
+      api.splitFinanceTransaction({
+        expectedVersion: 1,
+        idempotencyKey: "split-1",
+        parts: [
+          { amount: 1, categoryId: id, meaning: "First", notes: null },
+          { amount: 1, categoryId: accountId, meaning: "Second", notes: null },
+        ],
+        transactionId: id,
+      }),
     ).resolves.toMatchObject({ data: [financeTransaction] });
-    await expect(api.linkFinanceTransactions({ idempotencyKey: "link-1" })).resolves.toMatchObject({
-      data: { relationship: "transfer" },
-    });
+    await expect(
+      api.classifyFinanceTransactions({
+        classifications: [
+          {
+            categoryId: id,
+            confidence: 0.9,
+            meaning: "Dining",
+            rationale: "Restaurant purchase",
+            transactionId: accountId,
+          },
+        ],
+        idempotencyKey: "classify-1",
+      }),
+    ).resolves.toMatchObject({ data: [financeTransaction] });
+    await expect(
+      api.linkFinanceTransactions({
+        idempotencyKey: "link-1",
+        rationale: "Matching transfer",
+        relationship: "transfer",
+        transactionIds: [id, accountId],
+      }),
+    ).resolves.toMatchObject({ data: { relationship: "transfer" } });
     await expect(api.listFinanceRules()).resolves.toMatchObject({ data: [] });
     await expect(
-      api.manageFinanceRule({ idempotencyKey: "rule-1", operation: "create" }),
+      api.manageFinanceRule({
+        category: "Dining",
+        idempotencyKey: "rule-1",
+        merchant: "Cafe",
+        operation: "create",
+      }),
     ).resolves.toMatchObject({ data: { id } });
     await expect(api.listFinanceRecurringItems()).resolves.toMatchObject({
       data: { income: [], obligations: [] },
     });
     await expect(
-      api.manageFinanceRecurringItem({ idempotencyKey: "recurring-1", operation: "pause" }),
+      api.manageFinanceRecurringItem({
+        idempotencyKey: "recurring-1",
+        itemId: id,
+        itemType: "obligation",
+        operation: "pause",
+      }),
     ).resolves.toMatchObject({ data: { id } });
     await expect(api.syncFinanceAccount(id)).resolves.toBe(2);
     await expect(

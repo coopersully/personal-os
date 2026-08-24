@@ -2343,11 +2343,15 @@ export const financeMutationRecords = pgTable(
     response: jsonb("response").$type<Record<string, unknown>>(),
     error: jsonb("error").$type<Record<string, unknown>>(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("finance_mutation_records_user_key_idx").on(table.userId, table.idempotencyKey),
     index("finance_mutation_records_user_operation_idx").on(table.userId, table.operation),
+    index("finance_mutation_records_started_lease_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.status} = 'started'`),
   ],
 );
 

@@ -210,7 +210,8 @@ The resumable protocol:
 2. obtains usable account evidence through MCP or an external provider handoff;
 3. infers reliable facts from recent activity;
 4. returns one missing high-value question;
-5. accepts the answer, persists it atomically, and returns the next question;
+5. accepts the answer with the setup session's `expectedVersion`, persists it atomically, and
+   returns the next question; stale answers and budget approvals return a conflict;
 6. produces and discloses a complete budget proposal;
 7. activates the proposal after user or authorized agent approval;
 8. initiates the first maintenance protocol;
@@ -350,7 +351,7 @@ name or repeated budget details.
 Every Finance tool uses a shared envelope:
 
 ```ts
-type FinanceToolResult = {
+type FinanceToolResult<T> = {
   schemaVersion: 1;
   outcome:
     | "completed"
@@ -377,6 +378,7 @@ type FinanceToolResult = {
     affectedEntityId: string;
     reversible: boolean;
   }>;
+  data: T;
   remainingWork: {
     count: number;
     categories: string[];
@@ -490,4 +492,3 @@ At minimum, supported agent hosts must demonstrate:
 
 Before handoff, run focused tests throughout implementation and the repository's
 required `pnpm verify` action.
-

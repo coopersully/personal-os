@@ -134,6 +134,9 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     );
     expect(answered.communication.nextQuestion?.id).not.toBe(first.id);
     expect(answered.remainingWork.count).toBe(1);
+    expect(answered.communication.headline).toBe("I applied that answer.");
+    const remaining = await service.getFinanceInbox(userId);
+    expect(remaining.communication.headline).toBe("1 transaction needs review.");
     expect(answered.changes).toHaveLength(1);
   });
 

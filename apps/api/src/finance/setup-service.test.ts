@@ -16,9 +16,10 @@ describe("Finance setup answer parsing", () => {
     expect(parseSetupJurisdiction(answer)).toBe(expected);
   });
 
-  it("parses formatted money and rejects invalid or negative amounts", () => {
+  it("parses formatted money and rejects empty or negative amounts", () => {
     expect(parseSetupMoney("$8,000.25")).toBe(8000.25);
     expect(parseSetupMoney("0")).toBe(0);
+    expect(() => parseSetupMoney("   ")).toThrow("non-negative");
     expect(() => parseSetupMoney("unknown")).toThrow("non-negative");
     expect(() => parseSetupMoney("-1")).toThrow("non-negative");
   });
@@ -31,6 +32,7 @@ describe("Finance setup answer parsing", () => {
     expect(setupProfileChange("profile:monthly_take_home", "5000")).toEqual({
       expectedMonthlyTakeHome: 5000,
     });
+    expect(() => setupProfileChange("profile:monthly_take_home", "0")).toThrow("positive");
     expect(setupProfileChange("profile:liquid_reserves", "10000")).toEqual({
       liquidReserves: 10000,
     });

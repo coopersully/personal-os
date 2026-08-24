@@ -77,9 +77,9 @@ function connection(row: typeof financeAccountConnections.$inferSelect): Finance
     accountIds: row.accountIds,
     externalHandoff: row.externalHandoffUrl
       ? {
+          artifact: row.externalHandoffUrl,
           expiresAt: row.externalHandoffExpiresAt?.toISOString() ?? null,
           provider: row.provider,
-          url: row.externalHandoffUrl,
         }
       : null,
     id: row.id,
@@ -99,8 +99,8 @@ function connection(row: typeof financeAccountConnections.$inferSelect): Finance
 export function createFinanceAccountService(input: { db: Database; now: () => Date }) {
   const { db, now } = input;
 
-  async function owned(userId: string, id: string) {
-    const [row] = await db
+  async function owned(executor: Pick<Database, "select">, userId: string, id: string) {
+    const [row] = await executor
       .select()
       .from(financeAccounts)
       .where(and(eq(financeAccounts.id, id), eq(financeAccounts.userId, userId)))
@@ -135,9 +135,9 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
           operation: "finance.account.update",
           payload: { ...change, id },
         },
-        async () => {
-          const before = await owned(context.userId, id);
-          const [updated] = await db
+        async (tx) => {
+          const before = await owned(tx, context.userId, id);
+          const [updated] = await tx
             .update(financeAccounts)
             .set({
               balance:
@@ -155,7 +155,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
             .returning();
           if (!updated)
             throw new AppError("internal_error", "The financial account could not be updated.");
-          await db.insert(auditEvents).values({
+          await tx.insert(auditEvents).values({
             action: "finance.account_updated",
             actorId: context.actorId,
             actorType: context.actorType,
@@ -187,9 +187,9 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
           operation: "finance.account.disconnect",
           payload: { id },
         },
-        async () => {
-          const before = await owned(context.userId, id);
-          const [updated] = await db
+        async (tx) => {
+          const before = await owned(tx, context.userId, id);
+          const [updated] = await tx
             .update(financeAccounts)
             .set({
               encryptedCredentials: null,
@@ -206,7 +206,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "internal_error",
               "The financial account could not be disconnected.",
             );
-          const connections = await db
+          const connections = await tx
             .select()
             .from(financeAccountConnections)
             .where(
@@ -219,12 +219,12 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
             .filter((connection) => connection.accountIds.includes(id))
             .map((connection) => connection.id);
           for (const connectionId of connectionIds) {
-            await db
+            await tx
               .update(financeAccountConnections)
               .set({ status: "disconnected", updatedAt: now() })
               .where(eq(financeAccountConnections.id, connectionId));
           }
-          await db.insert(auditEvents).values({
+          await tx.insert(auditEvents).values({
             action: "finance.account_disconnected",
             actorId: context.actorId,
             actorType: context.actorType,

@@ -32,8 +32,10 @@ import {
   type FinanceMutationContext,
   requireFinanceMutation,
 } from "./context.js";
+import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 
 type Options = { db: Database; now: () => Date };
+type FinanceExecutor = Pick<Database, "insert" | "query" | "select" | "update">;
 
 const defaultPreferences = {
   bufferTarget: null,
@@ -133,15 +135,19 @@ export function createProfileBudgetService({ db, now }: Options) {
     });
   }
 
-  async function ownedGoal(userId: string, goalId: string) {
-    const row = await db.query.financeGoals.findFirst({
+  async function ownedGoal(executor: FinanceExecutor, userId: string, goalId: string) {
+    const row = await executor.query.financeGoals.findFirst({
       where: and(eq(financeGoals.userId, userId), eq(financeGoals.id, goalId)),
     });
     if (!row) throw new AppError("not_found", "That financial goal was not found.");
     return row;
   }
 
-  async function validateAllocations(userId: string, allocations: FinanceBudgetAllocation[]) {
+  async function validateAllocations(
+    executor: FinanceExecutor,
+    userId: string,
+    allocations: FinanceBudgetAllocation[],
+  ) {
     const categoryIds = allocations.flatMap((allocation) =>
       allocation.kind === "spending" && allocation.categoryId ? [allocation.categoryId] : [],
     );
@@ -151,7 +157,7 @@ export function createProfileBudgetService({ db, now }: Options) {
       throw new AppError("invalid_request", "Every new spending allocation needs a category.");
     }
     if (categoryIds.length > 0) {
-      const rows = await db
+      const rows = await executor
         .select({ id: financeCategories.id })
         .from(financeCategories)
         .where(
@@ -165,7 +171,7 @@ export function createProfileBudgetService({ db, now }: Options) {
       allocation.kind === "debt" ? [allocation.accountId] : [],
     );
     if (accountIds.length > 0) {
-      const rows = await db
+      const rows = await executor
         .select({ id: financeAccounts.id })
         .from(financeAccounts)
         .where(and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, accountIds)));
@@ -179,7 +185,7 @@ export function createProfileBudgetService({ db, now }: Options) {
       return [];
     });
     if (goalIds.length > 0) {
-      const rows = await db
+      const rows = await executor
         .select({ id: financeGoals.id })
         .from(financeGoals)
         .where(and(eq(financeGoals.userId, userId), inArray(financeGoals.id, goalIds)));
@@ -189,8 +195,11 @@ export function createProfileBudgetService({ db, now }: Options) {
     }
   }
 
-  async function budgetValue(row: typeof financeBudgetVersions.$inferSelect) {
-    const allocationRows = await db
+  async function budgetValue(
+    row: typeof financeBudgetVersions.$inferSelect,
+    executor: Pick<Database, "select"> = db,
+  ) {
+    const allocationRows = await executor
       .select()
       .from(financeBudgetAllocations)
       .where(eq(financeBudgetAllocations.budgetVersionId, row.id));
@@ -249,11 +258,12 @@ export function createProfileBudgetService({ db, now }: Options) {
   }
 
   async function insertBudgetVersion(
+    executor: FinanceExecutor,
     input: CreateFinanceBudgetVersionInput,
     context: FinanceMutationContext,
     existingPlan?: { id: string; latestVersion: number },
   ) {
-    await validateAllocations(context.userId, input.allocations);
+    await validateAllocations(executor, context.userId, input.allocations);
     const resourceTotal = input.resources.reduce((sum, item) => sum + toCents(item.amount), 0);
     const allocatedTotal = input.allocations.reduce((sum, item) => sum + toCents(item.amount), 0);
     if (resourceTotal !== allocatedTotal) {
@@ -262,17 +272,17 @@ export function createProfileBudgetService({ db, now }: Options) {
         "A complete budget must assign every expected resource or show an explicit funding source.",
       );
     }
-    const row = await db.transaction(async (tx) => {
+    const row = await (async () => {
       let planId = existingPlan?.id;
       if (!planId) {
-        const [plan] = await tx
+        const [plan] = await executor
           .insert(financeBudgetPlans)
           .values({ name: input.name, userId: context.userId })
           .returning();
         if (!plan) throw new AppError("internal_error", "The budget plan was not created.");
         planId = plan.id;
       }
-      const [version] = await tx
+      const [version] = await executor
         .insert(financeBudgetVersions)
         .values({
           allocatedTotal,
@@ -294,7 +304,7 @@ export function createProfileBudgetService({ db, now }: Options) {
         })
         .returning();
       if (!version) throw new AppError("internal_error", "The budget version was not created.");
-      await tx.insert(financeBudgetAllocations).values(
+      await executor.insert(financeBudgetAllocations).values(
         input.allocations.map((allocation) => ({
           accountId: allocation.kind === "debt" ? allocation.accountId : null,
           allocationKey: allocation.key,
@@ -312,7 +322,7 @@ export function createProfileBudgetService({ db, now }: Options) {
           userId: context.userId,
         })),
       );
-      await tx.insert(auditEvents).values(
+      await executor.insert(auditEvents).values(
         auditValues({
           action: existingPlan ? "finance.budget.revised" : "finance.budget.created",
           after: { planId, version: version.version },
@@ -324,8 +334,8 @@ export function createProfileBudgetService({ db, now }: Options) {
         }),
       );
       return version;
-    });
-    return budgetValue(row);
+    })();
+    return budgetValue(row, executor);
   }
 
   function budgetDisclosures(budget: FinanceBudgetVersion): string[] {
@@ -358,8 +368,12 @@ export function createProfileBudgetService({ db, now }: Options) {
           operation: "update_financial_profile",
           payload: input,
         },
-        async () => {
-          const before = await latestProfile(context.userId);
+        async (tx) => {
+          await lockFinanceProfileVersion(tx, context.userId);
+          const before = await tx.query.financeProfileVersions.findFirst({
+            orderBy: [desc(financeProfileVersions.version)],
+            where: eq(financeProfileVersions.userId, context.userId),
+          });
           const currentVersion = before?.version ?? 0;
           if (input.expectedVersion !== currentVersion) {
             throw new AppError(
@@ -387,7 +401,7 @@ export function createProfileBudgetService({ db, now }: Options) {
           for (const field of Object.keys(input.changes)) {
             nextProvenance[field] = provenance(context, observedAt);
           }
-          const [row] = await db
+          const [row] = await tx
             .insert(financeProfileVersions)
             .values({
               debts: next.debts as unknown as Record<string, unknown>[],
@@ -406,7 +420,7 @@ export function createProfileBudgetService({ db, now }: Options) {
             })
             .returning();
           if (!row) throw new AppError("internal_error", "The financial profile was not updated.");
-          await db.insert(auditEvents).values(
+          await tx.insert(auditEvents).values(
             auditValues({
               action: "finance.profile.updated",
               after: { changedFields: Object.keys(input.changes), version: row.version },
@@ -436,7 +450,9 @@ export function createProfileBudgetService({ db, now }: Options) {
 
     async getFinanceBudget(userId: string, planId?: string) {
       const row = await db.query.financeBudgetVersions.findFirst({
-        orderBy: [desc(financeBudgetVersions.version)],
+        orderBy: planId
+          ? [desc(financeBudgetVersions.version)]
+          : [desc(financeBudgetVersions.createdAt), desc(financeBudgetVersions.version)],
         where: planId
           ? and(eq(financeBudgetVersions.userId, userId), eq(financeBudgetVersions.planId, planId))
           : eq(financeBudgetVersions.userId, userId),
@@ -463,8 +479,8 @@ export function createProfileBudgetService({ db, now }: Options) {
           operation: "create_finance_budget",
           payload: input,
         },
-        async () => {
-          const data = await insertBudgetVersion(input, context);
+        async (tx) => {
+          const data = await insertBudgetVersion(tx, input, context);
           return result({
             changes: [
               {
@@ -491,15 +507,15 @@ export function createProfileBudgetService({ db, now }: Options) {
           operation: "revise_finance_budget",
           payload: input,
         },
-        async () => {
-          const plan = await db.query.financeBudgetPlans.findFirst({
+        async (tx) => {
+          const plan = await tx.query.financeBudgetPlans.findFirst({
             where: and(
               eq(financeBudgetPlans.id, input.planId),
               eq(financeBudgetPlans.userId, context.userId),
             ),
           });
           if (!plan) throw new AppError("not_found", "That budget plan was not found.");
-          const latest = await db.query.financeBudgetVersions.findFirst({
+          const latest = await tx.query.financeBudgetVersions.findFirst({
             orderBy: [desc(financeBudgetVersions.version)],
             where: eq(financeBudgetVersions.planId, plan.id),
           });
@@ -509,7 +525,7 @@ export function createProfileBudgetService({ db, now }: Options) {
               `The budget is at version ${latest?.version ?? 0}; reload it before revising.`,
             );
           }
-          const data = await insertBudgetVersion(input, context, {
+          const data = await insertBudgetVersion(tx, input, context, {
             id: plan.id,
             latestVersion: latest.version,
           });
@@ -540,9 +556,9 @@ export function createProfileBudgetService({ db, now }: Options) {
           operation: "approve_finance_budget",
           payload: input,
         },
-        async () => {
+        async (tx) => {
           const approvedAt = now();
-          const row = await db.transaction(async (tx) => {
+          const row = await (async () => {
             const version = await tx.query.financeBudgetVersions.findFirst({
               where: and(
                 eq(financeBudgetVersions.id, input.budgetVersionId),
@@ -596,8 +612,8 @@ export function createProfileBudgetService({ db, now }: Options) {
               }),
             );
             return active;
-          });
-          const data = await budgetValue(row);
+          })();
+          const data = await budgetValue(row, tx);
           return result({
             changes: [
               {
@@ -652,9 +668,9 @@ export function createProfileBudgetService({ db, now }: Options) {
           operation: `manage_finance_goal:${input.operation}`,
           payload: input,
         },
-        async () => {
+        async (tx) => {
           if (input.operation === "create") {
-            const [row] = await db
+            const [row] = await tx
               .insert(financeGoals)
               .values({
                 deadline: input.deadline,
@@ -665,7 +681,7 @@ export function createProfileBudgetService({ db, now }: Options) {
               })
               .returning();
             if (!row) throw new AppError("internal_error", "The financial goal was not created.");
-            await db.insert(auditEvents).values(
+            await tx.insert(auditEvents).values(
               auditValues({
                 action: "finance.goal.created",
                 after: {
@@ -693,7 +709,7 @@ export function createProfileBudgetService({ db, now }: Options) {
               headline: "I created the financial goal.",
             });
           }
-          const before = await ownedGoal(context.userId, input.goalId);
+          const before = await ownedGoal(tx, context.userId, input.goalId);
           if (before.version !== input.expectedVersion) {
             throw new AppError(
               "conflict",
@@ -724,13 +740,14 @@ export function createProfileBudgetService({ db, now }: Options) {
                           ? ("removed" as const)
                           : ("active" as const),
                 };
-          const [row] = await db
+          const [row] = await tx
             .update(financeGoals)
             .set({ ...changes, updatedAt: now(), version: before.version + 1 })
-            .where(eq(financeGoals.id, before.id))
+            .where(and(eq(financeGoals.id, before.id), eq(financeGoals.version, before.version)))
             .returning();
-          if (!row) throw new AppError("internal_error", "The financial goal was not updated.");
-          await db.insert(auditEvents).values(
+          if (!row)
+            throw new AppError("conflict", "The financial goal changed in another request.");
+          await tx.insert(auditEvents).values(
             auditValues({
               action: `finance.goal.${input.operation}`,
               after: { status: row.status, version: row.version },

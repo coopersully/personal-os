@@ -1,12 +1,14 @@
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  type Database,
   type DatabaseClient,
   financeAgentSettings,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq, sql } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import {
   executeFinanceIdempotently,
@@ -100,9 +102,49 @@ describe.sequential("trusted Finance mutation context", () => {
         mutate,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      executeFinanceIdempotently(
+        database.db,
+        context,
+        { ...operation, payload: { name: "Different reserve" } },
+        mutate,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("rejects missing scope and distinguishes in-progress from failed retries", async () => {
+  it("bounds a unique-claim retry to one additional transaction attempt", async () => {
+    const retryResult = { retried: true };
+    const transaction = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("claim collision"), { code: "23505" }))
+      .mockResolvedValueOnce(retryResult);
+    const retryDatabase = { transaction } as unknown as Database;
+    const context = {
+      actorId: userId,
+      actorType: "user" as const,
+      bypassEnabled: false,
+      canMutate: true,
+      canSelfApprove: false,
+      requestId: "bounded-retry",
+      userId,
+    };
+
+    await expect(
+      executeFinanceIdempotently(
+        retryDatabase,
+        context,
+        {
+          idempotencyKey: "bounded-retry",
+          operation: "finance.retry",
+          payload: { test: true },
+        },
+        async () => ({ unexpected: true }),
+      ),
+    ).resolves.toEqual(retryResult);
+    expect(transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects missing scope, records failures, and coalesces concurrent retries", async () => {
     const readOnly = await loadFinanceAuthorization({
       db: database.db,
       principal: {
@@ -143,32 +185,123 @@ describe.sequential("trusted Finance mutation context", () => {
       executeFinanceIdempotently(database.db, userContext, failed, async () => ({ ok: true })),
     ).rejects.toThrow("previously failed");
 
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
     const runningOperation = {
       idempotencyKey: "running-operation",
       operation: "finance.running",
       payload: { test: true },
     };
-    const running = executeFinanceIdempotently(
-      database.db,
-      userContext,
-      runningOperation,
-      async () => {
-        await gate;
-        return { ok: true };
-      },
-    );
-    await vi.waitFor(async () => {
-      await expect(
-        executeFinanceIdempotently(database.db, userContext, runningOperation, async () => ({
-          ok: false,
-        })),
-      ).rejects.toThrow("already in progress");
+    const concurrentMutate = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { ok: true };
     });
-    release?.();
-    await expect(running).resolves.toEqual({ ok: true });
+    await expect(
+      Promise.all([
+        executeFinanceIdempotently(database.db, userContext, runningOperation, concurrentMutate),
+        executeFinanceIdempotently(database.db, userContext, runningOperation, concurrentMutate),
+      ]),
+    ).resolves.toEqual([{ ok: true }, { ok: true }]);
+    expect(concurrentMutate).toHaveBeenCalledOnce();
+  });
+
+  it("rolls back mutation work and reclaims an expired started record", async () => {
+    const userContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "transactional-idempotency",
+    });
+    const rollbackOperation = {
+      idempotencyKey: "rollback-operation",
+      operation: "finance.rollback",
+      payload: { test: true },
+    };
+    await expect(
+      executeFinanceIdempotently(database.db, userContext, rollbackOperation, async (tx) => {
+        await tx
+          .update(financeAgentSettings)
+          .set({ reviewBypassEnabled: false })
+          .where(eq(financeAgentSettings.userId, userId));
+        throw new Error("rollback fixture");
+      }),
+    ).rejects.toThrow("rollback fixture");
+    await expect(
+      database.db.query.financeAgentSettings.findFirst({
+        where: eq(financeAgentSettings.userId, userId),
+      }),
+    ).resolves.toMatchObject({ reviewBypassEnabled: true });
+
+    await database.db.execute(sql`
+      insert into finance_mutation_records
+        (user_id, idempotency_key, operation, request_hash, actor_type, actor_id, status, lease_expires_at)
+      values
+        (${userId}, 'expired-operation', 'finance.expired',
+         'sha256:b4765fb84de668511c997d65df15a1ad68aa92b593cdaef898392c7337eb680a',
+         'user', ${userId}, 'started', ${new Date("2026-08-23T19:00:00Z")})
+    `);
+    await expect(
+      executeFinanceIdempotently(
+        database.db,
+        userContext,
+        {
+          idempotencyKey: "expired-operation",
+          operation: "finance.expired",
+          payload: { test: true },
+        },
+        async () => ({ reclaimed: true }),
+      ),
+    ).resolves.toEqual({ reclaimed: true });
+
+    await database.db.execute(sql`
+      insert into finance_mutation_records
+        (user_id, idempotency_key, operation, request_hash, actor_type, actor_id, status, lease_expires_at)
+      values
+        (${userId}, 'expired-failure', 'finance.expired',
+         'sha256:b4765fb84de668511c997d65df15a1ad68aa92b593cdaef898392c7337eb680a',
+         'user', ${userId}, 'started', ${new Date("2026-08-23T19:00:00Z")})
+    `);
+    await expect(
+      executeFinanceIdempotently(
+        database.db,
+        userContext,
+        {
+          idempotencyKey: "expired-failure",
+          operation: "finance.expired",
+          payload: { test: true },
+        },
+        async () => {
+          throw new Error("reclaimed failure");
+        },
+      ),
+    ).rejects.toThrow("reclaimed failure");
+
+    for (const [idempotencyKey, leaseExpiresAt] of [
+      ["active-explicit-lease", new Date("2999-08-23T19:00:00Z")],
+      ["active-legacy-lease", null],
+    ] as const) {
+      await database.db.execute(sql`
+        insert into finance_mutation_records
+          (user_id, idempotency_key, operation, request_hash, actor_type, actor_id, status, lease_expires_at)
+        values
+          (${userId}, ${idempotencyKey}, 'finance.expired',
+           'sha256:b4765fb84de668511c997d65df15a1ad68aa92b593cdaef898392c7337eb680a',
+           'user', ${userId}, 'started', ${leaseExpiresAt})
+      `);
+      await expect(
+        executeFinanceIdempotently(
+          database.db,
+          userContext,
+          {
+            idempotencyKey,
+            operation: "finance.expired",
+            payload: { test: true },
+          },
+          async () => ({ unexpected: true }),
+        ),
+      ).rejects.toThrow("already in progress");
+    }
   });
 });

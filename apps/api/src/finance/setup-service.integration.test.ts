@@ -3,10 +3,12 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAgentSettings,
+  financeSetupSessions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createProfileBudgetService } from "./profile-budget-service.js";
@@ -54,12 +56,31 @@ describe.sequential("guided Finance setup", () => {
       principal,
       requestId: "setup",
     });
-    let response = await service.setupFinances({ operation: "start" }, context);
+    const concurrentStarts = await Promise.all([
+      service.setupFinances({ operation: "start" }, context),
+      service.setupFinances({ operation: "start" }, context),
+    ]);
+    expect(concurrentStarts[1]?.data.sessionId).toBe(concurrentStarts[0]?.data.sessionId);
+    let response = concurrentStarts[0] as NonNullable<(typeof concurrentStarts)[number]>;
     expect(response.communication.nextQuestion?.id).toBe("profile:location");
     await expect(
       service.setupFinances(
         {
+          answer: "Brooklyn, New York",
+          expectedVersion: response.data.version + 1,
+          idempotencyKey: "setup-stale-version",
+          operation: "answer",
+          questionId: "profile:location",
+          sessionId: response.data.sessionId,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.setupFinances(
+        {
           answer: "Wrong question",
+          expectedVersion: response.data.version,
           idempotencyKey: "setup-wrong-question",
           operation: "answer",
           questionId: "profile:household_size",
@@ -88,6 +109,7 @@ describe.sequential("guided Finance setup", () => {
       response = await service.setupFinances(
         {
           answer,
+          expectedVersion: response.data.version,
           idempotencyKey: `setup-answer-${index}`,
           operation: "answer",
           questionId,
@@ -111,6 +133,7 @@ describe.sequential("guided Finance setup", () => {
         {
           approvalSource: "agent_self_approval",
           budgetVersionId: "00000000-0000-4000-8000-000000000000",
+          expectedVersion: response.data.version,
           idempotencyKey: "setup-wrong-budget",
           operation: "approve_budget",
           sessionId: response.data.sessionId,
@@ -125,6 +148,7 @@ describe.sequential("guided Finance setup", () => {
       {
         approvalSource: "agent_self_approval",
         budgetVersionId: response.data.budgetVersionId as string,
+        expectedVersion: response.data.version,
         idempotencyKey: "setup-approve",
         operation: "approve_budget",
         sessionId: response.data.sessionId,
@@ -142,5 +166,16 @@ describe.sequential("guided Finance setup", () => {
     await expect(
       service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
     ).resolves.toMatchObject({ data: { stage: "initial_maintenance" } });
+
+    await database.db
+      .update(financeSetupSessions)
+      .set({ status: "settled" })
+      .where(eq(financeSetupSessions.id, response.data.sessionId));
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
+    ).resolves.toMatchObject({
+      data: { sessionId: response.data.sessionId, stage: "settled" },
+      outcome: "completed",
+    });
   });
 });

@@ -9,6 +9,7 @@ import {
   type DatabaseClient,
   domainProfileApprovals,
   domainProfiles,
+  financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
@@ -388,6 +389,8 @@ describe.sequential("finance service", () => {
       "0065_finance_period_reviews",
       "0066_finance_plan_versions",
       "0067_finance_ledger_protocol",
+      "0068_finance_mutation_leases",
+      "0069_finance_legacy_budget_backfill",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -5692,14 +5695,28 @@ describe.sequential("finance service", () => {
       principal: context.principal,
       requestId: "plaid-connection",
     });
-    await expect(
-      service.startFinanceAccountConnection(
-        { idempotencyKey: "plaid-connection", provider: "plaid" },
-        financeContext,
-      ),
-    ).resolves.toMatchObject({
-      data: { connectionId: expect.any(String), status: "pending" },
+    const connectionResult = await service.startFinanceAccountConnection(
+      { idempotencyKey: "plaid-connection", provider: "plaid" },
+      financeContext,
+    );
+    expect(connectionResult).toMatchObject({
+      data: {
+        connectionId: expect.any(String),
+        externalHandoff: {
+          artifact: "link-token",
+          expiresAt: "2026-07-19T12:30:00.000Z",
+        },
+        status: "pending",
+      },
       outcome: "external_action_required",
+    });
+    const [persistedConnection] = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(eq(financeAccountConnections.id, connectionResult.data.connectionId));
+    expect(persistedConnection).toMatchObject({
+      externalHandoffUrl: "link-token",
+      status: "pending",
     });
     const accounts = await service.exchangePlaidToken(
       { institution: "Plaid Bank", publicToken: "public-token" },

@@ -17,11 +17,14 @@ import {
   type FinanceToolResult,
   financialProfileChangesSchema,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
-import { AppError, isUniqueViolation } from "../errors.js";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import { lockFinanceProfileVersion } from "./profile-version-lock.js";
+import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
 
 type Options = { db: Database; now: () => Date };
+type FinanceExecutor = Pick<Database, "insert" | "query" | "select" | "update">;
 type ReviewFinding = {
   economicEventId: string;
   evidence: Record<string, unknown>;
@@ -110,8 +113,8 @@ function inboxResult(
 }
 
 export function createInboxService({ db, now }: Options) {
-  async function activeRows(userId: string) {
-    return db
+  async function activeRows(userId: string, executor: Pick<Database, "select"> = db) {
+    return executor
       .select()
       .from(financeReviewCases)
       .where(
@@ -125,9 +128,9 @@ export function createInboxService({ db, now }: Options) {
   }
 
   return {
-    async upsertFinanceReview(input: ReviewFinding) {
+    async upsertFinanceReview(input: ReviewFinding, executor: FinanceExecutor = db) {
       const stableKey = `${input.economicEventId}:${input.reason}`;
-      const existing = await db.query.financeReviewCases.findFirst({
+      const existing = await executor.query.financeReviewCases.findFirst({
         where: and(
           eq(financeReviewCases.userId, input.userId),
           eq(financeReviewCases.stableKey, stableKey),
@@ -135,7 +138,7 @@ export function createInboxService({ db, now }: Options) {
         ),
       });
       if (existing) {
-        const [updated] = await db
+        const [updated] = await executor
           .update(financeReviewCases)
           .set({
             evidence: input.evidence,
@@ -149,8 +152,8 @@ export function createInboxService({ db, now }: Options) {
         if (!updated) throw new AppError("internal_error", "The Finance review was not updated.");
         return caseValue(updated);
       }
-      try {
-        const [created] = await db
+      const create = async (tx: FinanceExecutor) => {
+        const [row] = await tx
           .insert(financeReviewCases)
           .values({
             economicEventId: input.economicEventId,
@@ -162,36 +165,43 @@ export function createInboxService({ db, now }: Options) {
             transactionId: input.transactionId,
             userId: input.userId,
           })
+          .onConflictDoNothing()
           .returning();
-        if (!created) throw new AppError("internal_error", "The Finance review was not created.");
-        await db
-          .insert(financeEventTransactions)
-          .values({
-            economicEventId: input.economicEventId,
-            transactionId: input.transactionId,
-            userId: input.userId,
-          })
-          .onConflictDoNothing();
-        return caseValue(created);
-      } catch (error) {
-        if (!isUniqueViolation(error)) throw error;
-        const concurrent = await db.query.financeReviewCases.findFirst({
+        if (row) {
+          await tx
+            .insert(financeEventTransactions)
+            .values({
+              economicEventId: input.economicEventId,
+              transactionId: input.transactionId,
+              userId: input.userId,
+            })
+            .onConflictDoNothing();
+          return row;
+        }
+        const concurrent = await tx.query.financeReviewCases.findFirst({
           where: and(
             eq(financeReviewCases.userId, input.userId),
             eq(financeReviewCases.stableKey, stableKey),
             inArray(financeReviewCases.status, ["open", "deferred"]),
           ),
         });
-        if (!concurrent) throw error;
-        return caseValue(concurrent);
-      }
+        if (!concurrent)
+          throw new AppError("internal_error", "The Finance review was not created.");
+        return concurrent;
+      };
+      const created = executor === db ? await db.transaction(create) : await create(executor);
+      return caseValue(created);
     },
 
-    async getFinanceInbox(userId: string) {
-      const rows = await activeRows(userId);
+    async getFinanceInbox(userId: string, executor: FinanceExecutor = db) {
+      const rows = await activeRows(userId, executor);
       return inboxResult(
         rows,
-        rows.length ? `${rows.length} transactions need review.` : "Your Finance Inbox is clear.",
+        rows.length === 0
+          ? "Your Finance Inbox is clear."
+          : rows.length === 1
+            ? "1 transaction needs review."
+            : `${rows.length} transactions need review.`,
       );
     },
 
@@ -208,8 +218,8 @@ export function createInboxService({ db, now }: Options) {
           operation: "answer_finance_review",
           payload: { caseId, ...input },
         },
-        async () => {
-          const change = await db.transaction(async (tx) => {
+        async (tx) => {
+          const change = await (async () => {
             const review = await tx.query.financeReviewCases.findFirst({
               where: and(
                 eq(financeReviewCases.id, caseId),
@@ -249,10 +259,7 @@ export function createInboxService({ db, now }: Options) {
               });
               if (!transaction)
                 throw new AppError("not_found", "The reviewed transaction was not found.");
-              const revisionCounts = await tx
-                .select({ count: sql<number>`count(*)::integer` })
-                .from(financeTransactionRevisions)
-                .where(eq(financeTransactionRevisions.transactionId, transaction.id));
+              const revisionVersion = await nextFinanceTransactionRevision(tx, transaction.id);
               await tx.insert(financeTransactionRevisions).values({
                 changes: { category: { after: category.name, before: transaction.category } },
                 provenance: {
@@ -263,7 +270,7 @@ export function createInboxService({ db, now }: Options) {
                 },
                 transactionId: transaction.id,
                 userId: context.userId,
-                version: (revisionCounts[0]?.count ?? 0) + 1,
+                version: revisionVersion,
               });
               await tx
                 .update(financeTransactions)
@@ -321,6 +328,7 @@ export function createInboxService({ db, now }: Options) {
                 .onConflictDoNothing();
             } else if (input.resolution.type === "update_profile") {
               const changes = financialProfileChangesSchema.parse(input.resolution.changes);
+              await lockFinanceProfileVersion(tx, context.userId);
               const before = await tx.query.financeProfileVersions.findFirst({
                 orderBy: [desc(financeProfileVersions.version)],
                 where: eq(financeProfileVersions.userId, context.userId),
@@ -401,8 +409,8 @@ export function createInboxService({ db, now }: Options) {
               reversible: true,
               type: "finance_review_resolved",
             } satisfies FinanceChange;
-          });
-          const rows = await activeRows(context.userId);
+          })();
+          const rows = await activeRows(context.userId, tx);
           return inboxResult(
             rows,
             change

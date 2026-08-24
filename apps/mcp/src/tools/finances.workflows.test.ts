@@ -53,6 +53,9 @@ describe("Finance MCP workflows", () => {
     expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual(
       financeCapabilityManifest.map((capability) => capability.mcpTool).toSorted(),
     );
+    expect(tools.tools.find((tool) => tool.name === "sync_finance_accounts")?.inputSchema).toEqual(
+      expect.not.objectContaining({ required: expect.arrayContaining(["idempotencyKey"]) }),
+    );
     for (const toolName of [
       "update_finance_transaction",
       "import_finance_transactions",
@@ -62,9 +65,12 @@ describe("Finance MCP workflows", () => {
       "manage_finance_recurring_item",
     ]) {
       const tool = tools.tools.find((candidate) => candidate.name === toolName);
-      expect(tool?.inputSchema).toMatchObject({
-        required: expect.arrayContaining(["idempotencyKey"]),
-      });
+      const variants = tool?.inputSchema.oneOf ?? tool?.inputSchema.anyOf ?? [tool?.inputSchema];
+      expect(variants).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ required: expect.arrayContaining(["idempotencyKey"]) }),
+        ]),
+      );
     }
 
     const called = await client.callTool({

@@ -3,12 +3,15 @@ import type {
   ApplyFinanceCategorizationsInput,
   ApproveFinanceBudgetInput,
   AttentionItem,
+  ClassifyFinanceTransactionsInput,
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
   CreateFinanceBudgetVersionInput,
   CreateFinanceTransactionInput,
+  DisconnectFinanceAccountInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
+  FinanceAccountConnection,
   FinanceActionOutcome,
   FinanceActionReview,
   FinanceAlert,
@@ -47,6 +50,7 @@ import type {
   FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceRule,
   FinanceScenarioInput,
   FinanceScenarioResult,
   FinanceSetupInput,
@@ -55,17 +59,25 @@ import type {
   FinanceToolResult,
   FinanceTransaction,
   FinanceTransactionQuery,
+  FinanceTransactionRelationship,
   FinanceWealthSummary,
+  LinkFinanceTransactionsInput,
   MaintenanceRun,
   MaintenanceScope,
   ManageFinanceGoalInput,
+  ManageFinanceRecurringItemInput,
+  ManageFinanceRuleInput,
   MergeFinanceMerchantsInput,
   ReconcileFinanceReimbursementInput,
+  RemoveFinanceTransactionInput,
   ResolveFinanceAlertInput,
   ReviseFinanceBudgetInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
+  SplitFinanceTransactionInput,
+  StartFinanceAccountConnectionInput,
   SubmitFinanceLedgerChallengeInput,
+  UpdateFinanceAccountInput,
   UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
@@ -157,10 +169,13 @@ export function createFinanceApi(request: FinanceRequest) {
     async approveFinanceBudget(
       input: ApproveFinanceBudgetInput,
     ): Promise<FinanceToolResult<FinanceBudgetVersion>> {
-      return request(`/v1/finances/budget-versions/${input.budgetVersionId}/approve`, {
-        body: JSON.stringify(input),
-        method: "POST",
-      });
+      return request(
+        `/v1/finances/budget-versions/${encodeURIComponent(input.budgetVersionId)}/approve`,
+        {
+          body: JSON.stringify(input),
+          method: "POST",
+        },
+      );
     },
     async createFinanceTransaction(
       input: CreateFinanceTransactionInput,
@@ -174,7 +189,7 @@ export function createFinanceApi(request: FinanceRequest) {
       return actionResult(response, "transaction");
     },
     async deleteFinanceAccount(id: string): Promise<void> {
-      await request<void>(`/v1/finances/accounts/${id}`, { method: "DELETE" });
+      await request<void>(`/v1/finances/accounts/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     async exchangePlaidToken(input: ExchangePlaidTokenInput): Promise<FinanceAccount[]> {
       const response = await request<{ accounts: FinanceAccount[] }>(
@@ -241,7 +256,7 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceActionOutcome<FinanceTransaction> | FinanceTransaction> {
       const response = await request<
         FinanceActionResponse<FinanceTransaction> | { transaction: FinanceTransaction }
-      >(`/v1/finances/transactions/${id}/breakdown`, {
+      >(`/v1/finances/transactions/${encodeURIComponent(id)}/breakdown`, {
         body: JSON.stringify(input),
         method: "PUT",
       });
@@ -359,7 +374,7 @@ export function createFinanceApi(request: FinanceRequest) {
     async reviseFinanceBudget(
       input: ReviseFinanceBudgetInput,
     ): Promise<FinanceToolResult<FinanceBudgetVersion>> {
-      return request(`/v1/finances/budget-plans/${input.planId}/revisions`, {
+      return request(`/v1/finances/budget-plans/${encodeURIComponent(input.planId)}/revisions`, {
         body: JSON.stringify(input),
         method: "POST",
       });
@@ -403,7 +418,10 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceActionOutcome<FinanceIncomeStream> | FinanceIncomeStream> {
       const response = await request<
         FinanceActionResponse<FinanceIncomeStream> | { incomeStream: FinanceIncomeStream }
-      >(`/v1/finances/income-streams/${id}`, { body: JSON.stringify(input), method: "PATCH" });
+      >(`/v1/finances/income-streams/${encodeURIComponent(id)}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
       return actionResult(response, "incomeStream");
     },
     async listFinanceRecurringObligations(): Promise<FinanceRecurringObligation[]> {
@@ -421,7 +439,10 @@ export function createFinanceApi(request: FinanceRequest) {
         | {
             recurring: FinanceRecurringObligation;
           }
-      >(`/v1/finances/recurring/${id}`, { body: JSON.stringify(input), method: "PATCH" });
+      >(`/v1/finances/recurring/${encodeURIComponent(id)}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
       return actionResult(response, "recurring");
     },
     async getFinanceForecast(): Promise<FinanceForecast> {
@@ -437,7 +458,7 @@ export function createFinanceApi(request: FinanceRequest) {
       input: ResolveFinanceAlertInput,
     ): Promise<FinanceActionOutcome<FinanceAlert> | FinanceAlert> {
       const response = await request<FinanceActionResponse<FinanceAlert> | { alert: FinanceAlert }>(
-        `/v1/finances/alerts/${id}`,
+        `/v1/finances/alerts/${encodeURIComponent(id)}`,
         {
           body: JSON.stringify(input),
           method: "POST",
@@ -475,7 +496,7 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async getFinanceReviewQueue(limit = 50): Promise<FinanceReviewCase[]> {
       const response = await request<{ reviews: FinanceReviewCase[] }>(
-        `/v1/finances/review?limit=${limit}`,
+        `/v1/finances/review?limit=${encodeURIComponent(limit)}`,
       );
       return response.reviews;
     },
@@ -486,7 +507,7 @@ export function createFinanceApi(request: FinanceRequest) {
       id: string,
       input: AnswerFinanceReviewInput,
     ): Promise<FinanceToolResult<FinanceInboxCase[]>> {
-      return request(`/v1/finances/inbox/${id}/answer`, {
+      return request(`/v1/finances/inbox/${encodeURIComponent(id)}/answer`, {
         body: JSON.stringify(input),
         method: "POST",
       });
@@ -512,7 +533,7 @@ export function createFinanceApi(request: FinanceRequest) {
       return request(`/v1/finances/maintenance${search.size ? `?${search}` : ""}`);
     },
     async getFinanceMaintenanceRun(id: string): Promise<FinanceMaintenancePayload> {
-      return request(`/v1/finances/maintenance/protocol/${id}`);
+      return request(`/v1/finances/maintenance/protocol/${encodeURIComponent(id)}`);
     },
     async listFinanceTransactions(query: Partial<FinanceTransactionQuery> = {}): Promise<{
       items: FinanceTransaction[];
@@ -524,12 +545,14 @@ export function createFinanceApi(request: FinanceRequest) {
       }
       return request(`/v1/finances/transactions${search.size ? `?${search}` : ""}`);
     },
-    async getFinanceAccountConnection(id: string): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/account-connections/${id}`);
+    async getFinanceAccountConnection(
+      id: string,
+    ): Promise<FinanceToolResult<FinanceAccountConnection>> {
+      return request(`/v1/finances/account-connections/${encodeURIComponent(id)}`);
     },
     async startFinanceAccountConnection(
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
+      input: StartFinanceAccountConnectionInput,
+    ): Promise<FinanceToolResult<FinanceAccountConnection>> {
       return request("/v1/finances/account-connections", {
         body: JSON.stringify(input),
         method: "POST",
@@ -537,73 +560,80 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async updateFinanceAccount(
       id: string,
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/accounts/${id}`, {
+      input: UpdateFinanceAccountInput,
+    ): Promise<FinanceToolResult<FinanceAccount>> {
+      return request(`/v1/finances/accounts/${encodeURIComponent(id)}`, {
         body: JSON.stringify(input),
         method: "PATCH",
       });
     },
     async disconnectFinanceAccount(
       id: string,
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/accounts/${id}/disconnect`, {
+      input: DisconnectFinanceAccountInput,
+    ): Promise<FinanceToolResult<FinanceAccount>> {
+      return request(`/v1/finances/accounts/${encodeURIComponent(id)}/disconnect`, {
         body: JSON.stringify(input),
         method: "POST",
       });
     },
-    async getFinanceTransaction(id: string): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/transactions/${id}`);
+    async getFinanceTransaction(id: string): Promise<FinanceToolResult<FinanceTransaction>> {
+      return request(`/v1/finances/transactions/${encodeURIComponent(id)}`);
     },
     async removeFinanceTransaction(
       id: string,
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/transactions/${id}/remove`, {
+      input: RemoveFinanceTransactionInput,
+    ): Promise<FinanceToolResult<{ id: string; removed: true }>> {
+      return request(`/v1/finances/transactions/${encodeURIComponent(id)}/remove`, {
         body: JSON.stringify(input),
         method: "POST",
       });
     },
     async splitFinanceTransaction(
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
+      input: SplitFinanceTransactionInput,
+    ): Promise<FinanceToolResult<FinanceTransaction[]>> {
       return request("/v1/finances/transactions/split", {
         body: JSON.stringify(input),
         method: "POST",
       });
     },
     async classifyFinanceTransactions(
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
+      input: ClassifyFinanceTransactionsInput,
+    ): Promise<FinanceToolResult<FinanceTransaction[]>> {
       return request("/v1/finances/transactions/classify", {
         body: JSON.stringify(input),
         method: "POST",
       });
     },
     async linkFinanceTransactions(
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
+      input: LinkFinanceTransactionsInput,
+    ): Promise<FinanceToolResult<FinanceTransactionRelationship>> {
       return request("/v1/finances/transactions/link", {
         body: JSON.stringify(input),
         method: "POST",
       });
     },
-    async listFinanceRules(): Promise<FinanceToolResult<unknown>> {
+    async listFinanceRules(): Promise<FinanceToolResult<FinanceRule[]>> {
       return request("/v1/finances/rules");
     },
-    async manageFinanceRule(input: Record<string, unknown>): Promise<FinanceToolResult<unknown>> {
+    async manageFinanceRule(
+      input: ManageFinanceRuleInput,
+    ): Promise<FinanceToolResult<FinanceRule | { id: string; removed: true }>> {
       return request("/v1/finances/rules", {
         body: JSON.stringify(input),
         method: "POST",
       });
     },
-    async listFinanceRecurringItems(): Promise<FinanceToolResult<unknown>> {
+    async listFinanceRecurringItems(): Promise<
+      FinanceToolResult<{
+        income: FinanceIncomeStream[];
+        obligations: FinanceRecurringObligation[];
+      }>
+    > {
       return request("/v1/finances/recurring-items");
     },
     async manageFinanceRecurringItem(
-      input: Record<string, unknown>,
-    ): Promise<FinanceToolResult<unknown>> {
+      input: ManageFinanceRecurringItemInput,
+    ): Promise<FinanceToolResult<FinanceIncomeStream | FinanceRecurringObligation>> {
       return request("/v1/finances/recurring-items", {
         body: JSON.stringify(input),
         method: "POST",
@@ -611,7 +641,7 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async listFinanceMerchants(limit = 50): Promise<FinanceMerchant[]> {
       const response = await request<{ merchants: FinanceMerchant[] }>(
-        `/v1/finances/merchants?limit=${limit}`,
+        `/v1/finances/merchants?limit=${encodeURIComponent(limit)}`,
       );
       return response.merchants;
     },
@@ -629,7 +659,7 @@ export function createFinanceApi(request: FinanceRequest) {
     async mergeFinanceMerchantsCanonical(
       input: MergeFinanceMerchantsInput & { idempotencyKey: string },
     ): Promise<FinanceToolResult<unknown>> {
-      return request("/v1/finances/merchants/merge", {
+      return request("/v1/finances/merchants/merge/canonical", {
         body: JSON.stringify(input),
         method: "POST",
       });
@@ -660,7 +690,7 @@ export function createFinanceApi(request: FinanceRequest) {
       input: FinanceCsvImportInput,
     ): Promise<{ imported: number; skipped: number }> {
       const response = await request<{ result: { imported: number; skipped: number } }>(
-        `/v1/finances/accounts/${input.accountId}/import`,
+        `/v1/finances/accounts/${encodeURIComponent(input.accountId)}/import`,
         { body: JSON.stringify(input), method: "POST" },
       );
       return response.result;
@@ -668,14 +698,17 @@ export function createFinanceApi(request: FinanceRequest) {
     async importFinanceTransactions(
       input: FinanceCsvImportInput & { idempotencyKey: string },
     ): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/accounts/${input.accountId}/import`, {
-        body: JSON.stringify(input),
-        method: "POST",
-      });
+      return request(
+        `/v1/finances/accounts/${encodeURIComponent(input.accountId)}/import/canonical`,
+        {
+          body: JSON.stringify(input),
+          method: "POST",
+        },
+      );
     },
     async syncFinanceAccount(id: string): Promise<number> {
       const response = await request<{ result: { changed: number } }>(
-        `/v1/finances/accounts/${id}/sync`,
+        `/v1/finances/accounts/${encodeURIComponent(id)}/sync`,
         { method: "POST" },
       );
       return response.result.changed;
@@ -685,7 +718,10 @@ export function createFinanceApi(request: FinanceRequest) {
         result:
           | { deferred: true }
           | { applied: boolean; threshold: number; transaction: FinanceTransaction };
-      }>(`/v1/finances/review/${id}`, { body: JSON.stringify(input), method: "POST" });
+      }>(`/v1/finances/review/${encodeURIComponent(id)}`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
       return response.result;
     },
     /** Answer a Finance question; this cannot change bypass or approve a queued action. */
@@ -694,7 +730,7 @@ export function createFinanceApi(request: FinanceRequest) {
       answer: string | FinanceReimbursementQuestionAnswer,
     ): Promise<FinanceActionOutcome<unknown>> {
       const response = await request<{ outcome: FinanceActionOutcome<unknown> }>(
-        `/v1/finances/questions/${id}/answer`,
+        `/v1/finances/questions/${encodeURIComponent(id)}/answer`,
         {
           // Existing question types use their established JSON string. Typed
           // reimbursement answers are nested under the generic bounded
@@ -739,7 +775,7 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceActionOutcome<FinanceTransaction> | FinanceTransaction> {
       const response = await request<
         FinanceActionResponse<FinanceTransaction> | { transaction: FinanceTransaction }
-      >(`/v1/finances/transactions/${id}`, {
+      >(`/v1/finances/transactions/${encodeURIComponent(id)}`, {
         body: JSON.stringify(input),
         method: "PATCH",
       });
@@ -750,7 +786,7 @@ export function createFinanceApi(request: FinanceRequest) {
       input: UpsertFinanceAttentionItemInput,
     ): Promise<AttentionItem> {
       const response = await request<{ item: AttentionItem }>(
-        `/v1/finances/transactions/${transactionId}/attention`,
+        `/v1/finances/transactions/${encodeURIComponent(transactionId)}/attention`,
         { body: JSON.stringify(input), method: "PUT" },
       );
       return response.item;
@@ -759,7 +795,7 @@ export function createFinanceApi(request: FinanceRequest) {
       id: string,
       input: UpdateFinanceTransactionInput & { idempotencyKey: string },
     ): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/transactions/${id}`, {
+      return request(`/v1/finances/transactions/${encodeURIComponent(id)}/canonical`, {
         body: JSON.stringify(input),
         method: "PATCH",
       });
@@ -770,7 +806,7 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceActionOutcome<FinanceMerchant> | FinanceMerchant> {
       const response = await request<
         FinanceActionResponse<FinanceMerchant> | { merchant: FinanceMerchant }
-      >(`/v1/finances/merchants/${id}`, {
+      >(`/v1/finances/merchants/${encodeURIComponent(id)}`, {
         body: JSON.stringify(input),
         method: "PATCH",
       });
@@ -780,7 +816,7 @@ export function createFinanceApi(request: FinanceRequest) {
       id: string,
       input: UpdateFinanceMerchantInput & { idempotencyKey: string },
     ): Promise<FinanceToolResult<unknown>> {
-      return request(`/v1/finances/merchants/${id}`, {
+      return request(`/v1/finances/merchants/${encodeURIComponent(id)}/canonical`, {
         body: JSON.stringify(input),
         method: "PATCH",
       });

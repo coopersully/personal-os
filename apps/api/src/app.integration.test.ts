@@ -1059,7 +1059,7 @@ describe.sequential("ilo API", () => {
     };
     const firstCanonicalTransactionUpdate = await payload(
       await request(
-        `/v1/finances/transactions/${financeTransaction.id}`,
+        `/v1/finances/transactions/${financeTransaction.id}/canonical`,
         canonicalTransactionUpdate,
       ),
     );
@@ -1070,7 +1070,7 @@ describe.sequential("ilo API", () => {
     await expect(
       payload(
         await request(
-          `/v1/finances/transactions/${financeTransaction.id}`,
+          `/v1/finances/transactions/${financeTransaction.id}/canonical`,
           canonicalTransactionUpdate,
         ),
       ),
@@ -1090,7 +1090,7 @@ describe.sequential("ilo API", () => {
     ).toBe(200);
     expect(
       await payload(
-        await request(`/v1/finances/merchants/${merchant.id}`, {
+        await request(`/v1/finances/merchants/${merchant.id}/canonical`, {
           body: {
             displayName: "Trader Joe's Market",
             idempotencyKey: "route-merchant-update",
@@ -1318,7 +1318,7 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(201);
     const canonicalImport = await payload(
-      await request(`/v1/finances/accounts/${paypalAccount.id}/import`, {
+      await request(`/v1/finances/accounts/${paypalAccount.id}/import/canonical`, {
         body: {
           accountId: paypalAccount.id,
           csv: "Date,Name,Amount,Transaction ID\n2026-07-14,Corner store,8.5,paypal-import-2",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type Database, financeAgentSettings, financeMutationRecords } from "@personal-os/database";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
 import type { Principal } from "../types.js";
 
@@ -59,9 +59,10 @@ type IdempotentOperation = {
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
       .join(",")}}`;
   }
   return JSON.stringify(value);
@@ -90,65 +91,122 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   db: Database,
   context: FinanceMutationContext,
   operation: IdempotentOperation,
-  mutate: () => Promise<T>,
+  mutate: (tx: Parameters<Parameters<Database["transaction"]>[0]>[0]) => Promise<T>,
 ): Promise<T> {
   requireFinanceMutation(context);
   const hash = requestHash(operation);
-  const existing = await db.query.financeMutationRecords.findFirst({
-    where: and(
-      eq(financeMutationRecords.userId, context.userId),
-      eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
-    ),
-  });
-  if (existing) {
-    assertMatchingMutation(existing, operation, hash);
-    if (existing.status === "completed" && existing.response) return existing.response as T;
-    throw new AppError(
-      "conflict",
-      existing.status === "started"
-        ? "That Finance mutation is already in progress."
-        : "That Finance mutation previously failed; use a new idempotency key to retry.",
-    );
-  }
+  const lockIdentity = `finance-mutation:${context.userId}:${operation.idempotencyKey}`;
+  const leaseDurationMs = 5 * 60 * 1_000;
+  const whereKey = and(
+    eq(financeMutationRecords.userId, context.userId),
+    eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
+  );
 
-  let record: typeof financeMutationRecords.$inferSelect;
-  try {
-    const [inserted] = await db
-      .insert(financeMutationRecords)
-      .values({
-        actorId: context.actorId,
-        actorType: context.actorType,
-        idempotencyKey: operation.idempotencyKey,
-        operation: operation.operation,
-        requestHash: hash,
-        status: "started",
-        userId: context.userId,
-      })
-      .returning();
-    if (!inserted) throw new AppError("internal_error", "Finance mutation state was not created.");
-    record = inserted;
-  } catch (error) {
-    if (!isUniqueViolation(error)) throw error;
-    return executeFinanceIdempotently(db, context, operation, mutate);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let claimed = false;
+    try {
+      return await db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
+        const existing = await tx.query.financeMutationRecords.findFirst({ where: whereKey });
+        const claimedAt = new Date();
+        const leaseExpiresAt = new Date(claimedAt.getTime() + leaseDurationMs);
+        let record = existing;
+        if (record) {
+          assertMatchingMutation(record, operation, hash);
+          if (record.status === "completed" && record.response) return record.response as T;
+          if (record.status === "failed")
+            throw new AppError(
+              "conflict",
+              "That Finance mutation previously failed; use a new idempotency key to retry.",
+            );
+          const existingLease =
+            record.leaseExpiresAt ?? new Date(record.updatedAt.getTime() + leaseDurationMs);
+          if (existingLease > claimedAt)
+            throw new AppError("conflict", "That Finance mutation is already in progress.");
+          const [reclaimed] = await tx
+            .update(financeMutationRecords)
+            .set({ leaseExpiresAt, updatedAt: claimedAt })
+            .where(
+              and(
+                eq(financeMutationRecords.id, record.id),
+                eq(financeMutationRecords.status, "started"),
+              ),
+            )
+            .returning();
+          /* v8 ignore start -- the advisory lock keeps the selected started row stable in this transaction. */
+          if (!reclaimed)
+            throw new AppError("conflict", "That Finance mutation could not be reclaimed.");
+          /* v8 ignore stop */
+          record = reclaimed;
+        } else {
+          const [inserted] = await tx
+            .insert(financeMutationRecords)
+            .values({
+              actorId: context.actorId,
+              actorType: context.actorType,
+              idempotencyKey: operation.idempotencyKey,
+              leaseExpiresAt,
+              operation: operation.operation,
+              requestHash: hash,
+              status: "started",
+              userId: context.userId,
+            })
+            .returning();
+          /* v8 ignore start -- PostgreSQL INSERT ... RETURNING yields the inserted row or throws. */
+          if (!inserted)
+            throw new AppError("internal_error", "Finance mutation state was not created.");
+          /* v8 ignore stop */
+          record = inserted;
+        }
+        claimed = true;
+        const response = await mutate(tx);
+        await tx
+          .update(financeMutationRecords)
+          .set({
+            completedAt: new Date(),
+            leaseExpiresAt: null,
+            response,
+            status: "completed",
+            updatedAt: new Date(),
+          })
+          .where(eq(financeMutationRecords.id, record.id));
+        return response;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error) && !claimed && attempt === 0) continue;
+      if (claimed) {
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
+          const existing = await tx.query.financeMutationRecords.findFirst({ where: whereKey });
+          if (existing?.status === "completed" || existing?.status === "failed") return;
+          const failure = {
+            completedAt: new Date(),
+            error: { message: error instanceof Error ? error.message : "Unknown Finance error" },
+            leaseExpiresAt: null,
+            status: "failed" as const,
+            updatedAt: new Date(),
+          };
+          if (existing) {
+            await tx
+              .update(financeMutationRecords)
+              .set(failure)
+              .where(eq(financeMutationRecords.id, existing.id));
+          } else {
+            await tx.insert(financeMutationRecords).values({
+              actorId: context.actorId,
+              actorType: context.actorType,
+              idempotencyKey: operation.idempotencyKey,
+              operation: operation.operation,
+              requestHash: hash,
+              ...failure,
+              userId: context.userId,
+            });
+          }
+        });
+      }
+      throw error;
+    }
   }
-
-  try {
-    const response = await mutate();
-    await db
-      .update(financeMutationRecords)
-      .set({ completedAt: new Date(), response, status: "completed", updatedAt: new Date() })
-      .where(eq(financeMutationRecords.id, record.id));
-    return response;
-  } catch (error) {
-    await db
-      .update(financeMutationRecords)
-      .set({
-        completedAt: new Date(),
-        error: { message: error instanceof Error ? error.message : "Unknown Finance error" },
-        status: "failed",
-        updatedAt: new Date(),
-      })
-      .where(eq(financeMutationRecords.id, record.id));
-    throw error;
-  }
+  /* v8 ignore next -- each bounded attempt returns, throws, or advances only to the final throwing attempt. */
+  throw new AppError("conflict", "That Finance mutation could not obtain its idempotency record.");
 }

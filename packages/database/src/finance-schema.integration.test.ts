@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
@@ -10,6 +11,7 @@ import {
   financeAuditFindings,
   financeBudgetAllocations,
   financeBudgetPlans,
+  financeBudgets,
   financeBudgetVersions,
   financeEconomicEvents,
   financeEventTransactions,
@@ -187,6 +189,60 @@ describe.sequential("canonical finance persistence", () => {
         expect.objectContaining({ allocationKey: "reserve", amount: 150_000 }),
       ]),
     );
+  });
+
+  it("repairs canonical legacy-budget backfill without activating inferred plans", async () => {
+    const [legacyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy budget",
+        email: "legacy-budget@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!legacyUser) throw new Error("Legacy budget user was not created.");
+    const [plan] = await database.db
+      .insert(financeBudgetPlans)
+      .values({ month: "canonical", name: "Monthly plan", userId: legacyUser.id })
+      .returning();
+    if (!plan) throw new Error("Canonical legacy plan was not created.");
+    const createdAt = new Date("2026-08-05T12:00:00Z");
+    await database.db.insert(financeBudgets).values({
+      category: "Housing",
+      createdAt,
+      limit: 250_000,
+      month: "August 2026",
+      updatedAt: createdAt,
+      userId: legacyUser.id,
+    });
+
+    const migration = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0069_finance_legacy_budget_backfill.sql",
+      ),
+      "utf8",
+    );
+    await database.pool.query(migration);
+
+    const version = await database.db.query.financeBudgetVersions.findFirst({
+      where: eq(financeBudgetVersions.planId, plan.id),
+    });
+    expect(version).toMatchObject({
+      allocatedTotal: 250_000,
+      balanceDelta: -250_000,
+      effectiveFrom: "2026-08",
+      expectedResources: 0,
+      status: "incomplete",
+    });
+    const allocations = version
+      ? await database.db.query.financeBudgetAllocations.findMany({
+          where: eq(financeBudgetAllocations.budgetVersionId, version.id),
+        })
+      : [];
+    expect(allocations).toEqual([
+      expect.objectContaining({ amount: 250_000, legacyCategory: "Housing" }),
+    ]);
   });
 
   it("deduplicates active reviews while retaining ledger and resolved lineage", async () => {

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { CalendarFloatingNav } from "./floating-nav.js";
 
 const mocks = vi.hoisted(() => ({
@@ -71,6 +72,7 @@ async function openConferenceMenu(browser: ReturnType<typeof userEvent.setup>) {
 
 describe("Calendar floating navigation edge states", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     mocks.createEvent.mockReset();
     mocks.listEvents.mockReset();
     mocks.searchWeatherLocations.mockReset();
@@ -204,5 +206,57 @@ describe("Calendar floating navigation edge states", () => {
         }),
       ),
     );
+  });
+
+  it.each([
+    ["pending", "info"],
+    ["failure", "warning"],
+    [null, null],
+  ] as const)("surfaces a %s provider conference outcome", async (conferenceStatus, toastMethod) => {
+    const browser = userEvent.setup();
+    const info = vi.spyOn(toast, "info");
+    const warning = vi.spyOn(toast, "warning");
+    mocks.createEvent.mockResolvedValue({ conferenceStatus });
+    renderCalendar();
+
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await browser.type(screen.getByRole("textbox", { name: "Title" }), "Provider meeting");
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+
+    expect(await screen.findByRole("button", { name: "Create event" })).toBeInTheDocument();
+    expect(info).toHaveBeenCalledTimes(toastMethod === "info" ? 1 : 0);
+    expect(warning).toHaveBeenCalledTimes(toastMethod === "warning" ? 1 : 0);
+  });
+
+  it("validates and normalizes independently edited time segments", () => {
+    vi.useFakeTimers({ now: new Date("2026-08-23T12:00:00.000Z"), shouldAdvanceTime: true });
+    try {
+      renderCalendar();
+      fireEvent.click(screen.getByRole("button", { name: "Create event" }));
+      const hour = screen.getByRole("textbox", { name: "Starts hour" });
+      const minute = screen.getByRole("textbox", { name: "Starts minute" });
+
+      fireEvent.change(hour, { target: { value: "x" } });
+      expect(hour).toHaveAttribute("aria-invalid", "true");
+      fireEvent.blur(hour);
+      expect((hour as HTMLInputElement).value).toBe("12");
+
+      fireEvent.change(hour, { target: { value: "13" } });
+      fireEvent.blur(hour);
+      expect((hour as HTMLInputElement).value).toBe("12");
+      hour.focus();
+      fireEvent.change(hour, { target: { value: "1" } });
+      expect(hour).toHaveFocus();
+      fireEvent.blur(hour);
+
+      fireEvent.change(minute, { target: { value: "99" } });
+      expect(minute).toHaveAttribute("aria-invalid", "true");
+      fireEvent.blur(minute);
+      fireEvent.change(minute, { target: { value: "5" } });
+      fireEvent.blur(minute);
+      expect(minute).toHaveValue("05");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

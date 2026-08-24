@@ -4623,6 +4623,14 @@ describe("ilo web app", () => {
       configurable: true,
       value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
     });
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    Object.defineProperties(tuesday, {
+      releasePointerCapture: { value: releasePointerCapture },
+      setPointerCapture: { value: setPointerCapture },
+    });
+    fireEvent.pointerDown(tuesday, { button: 1, pointerId: 10, pointerType: "mouse" });
+    fireEvent.pointerDown(tuesday, { button: 0, pointerId: 11, pointerType: "touch" });
 
     const pointerDown = createEvent.pointerDown(tuesday, { button: 0 });
     Object.defineProperties(pointerDown, {
@@ -4632,6 +4640,10 @@ describe("ilo web app", () => {
       pointerType: { value: "mouse" },
     });
     fireEvent(tuesday, pointerDown);
+    expect(setPointerCapture).toHaveBeenCalledWith(1);
+    fireEvent.pointerMove(tuesday, { clientY: 520, pointerId: 99 });
+    fireEvent.pointerMove(tuesday, { clientY: 482, pointerId: 1 });
+    fireEvent.keyDown(tuesday, { key: "Tab" });
     const pointerMove = createEvent.pointerMove(tuesday);
     Object.defineProperties(pointerMove, {
       clientY: { value: 492 },
@@ -4647,6 +4659,7 @@ describe("ilo web app", () => {
       pointerType: { value: "mouse" },
     });
     fireEvent(tuesday, pointerUp);
+    expect(releasePointerCapture).toHaveBeenCalledWith(1);
 
     await waitFor(() =>
       expect(document.querySelector(".calendar-floating-nav__composer")).toBeInTheDocument(),
@@ -4680,6 +4693,7 @@ describe("ilo web app", () => {
       pointerType: { value: "mouse" },
     });
     fireEvent(tuesday, pointerMove);
+    fireEvent.keyDown(tuesday, { key: "Enter" });
     fireEvent.keyDown(tuesday, { key: "Escape" });
     fireEvent.pointerUp(tuesday, { pointerId: 1 });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -4689,8 +4703,22 @@ describe("ilo web app", () => {
       name: "Create an event range on Tuesday with the keyboard",
     });
     keyboardTarget.focus();
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+    for (let index = 0; index < 50; index += 1) {
+      fireEvent.keyDown(keyboardTarget, { key: "ArrowUp" });
+    }
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 12 AM to 9 AM");
+    for (let index = 0; index < 100; index += 1) {
+      fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
+    }
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 12 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "Escape" });
     fireEvent.keyDown(keyboardTarget, { key: "Enter" });
     expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 10 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowUp" });
+    expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 9:45 AM");
+    fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
     fireEvent.keyDown(keyboardTarget, { key: "ArrowDown" });
     expect(screen.getByRole("status")).toHaveAccessibleName("New event from 9 AM to 10:15 AM");
     fireEvent.keyDown(keyboardTarget, { key: "Enter" });

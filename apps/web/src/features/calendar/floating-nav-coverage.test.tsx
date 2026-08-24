@@ -275,6 +275,12 @@ describe("Calendar floating navigation edge states", () => {
       await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
       expect(screen.getByRole("button", { name: "Ends date, Aug 24" })).toBeInTheDocument();
 
+      await browser.click(screen.getByRole("button", { name: "Ends date, Aug 24" }));
+      await browser.click(screen.getByRole("button", { name: /Tuesday, August 25th, 2026/ }));
+      expect(screen.getByRole("button", { name: "Ends date, Aug 25" })).toBeInTheDocument();
+      await browser.click(screen.getByRole("button", { name: "Ends date, Aug 25" }));
+      await browser.click(screen.getByRole("button", { name: /Monday, August 24th, 2026/ }));
+
       await browser.click(screen.getByRole("switch", { name: "All day" }));
       fireEvent.change(screen.getByRole("textbox", { name: "Ends hour" }), {
         target: { value: "1130" },

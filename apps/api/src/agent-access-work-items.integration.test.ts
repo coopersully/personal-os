@@ -10,8 +10,11 @@ import {
   financeReviewCases,
   financeTransactions,
   mailRules,
+  mailStewardshipQuestions,
+  mailThreads,
   migrateDatabase,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import type { AccessScope, AgentConnectionGuide } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -478,5 +481,108 @@ describe.sequential("Agent Access work-item projection", () => {
 
     expect(page.unavailableDomains).not.toContain("mail");
     expect(page.summary.byKind.review).toBe(0);
+  });
+
+  it("projects redacted Mail questions and deduplicates a represented maintenance block", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.userId, principal.userId))
+      .limit(1);
+    if (!account) throw new Error("Mail account fixture was not found.");
+    const privateSubject = "Acquisition terms for Private Company";
+    const privateBody = "The confidential offer is 12.7 million dollars.";
+    const privateAddress = "counsel@private-company.example";
+    const [thread] = await database.db
+      .insert(mailThreads)
+      .values({
+        accountId: account.id,
+        bodyText: privateBody,
+        from: { address: privateAddress, name: "Private Counsel" },
+        provider: "google",
+        receivedAt: new Date("2026-08-11T14:00:00.000Z"),
+        remoteThreadId: "private-review-thread",
+        snippet: privateBody,
+        subject: privateSubject,
+        to: [],
+        userId: principal.userId,
+      })
+      .returning();
+    if (!thread) throw new Error("Mail thread fixture was not created.");
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId: account.id,
+        createdAt: new Date("2026-08-11T14:05:00.000Z"),
+        evidence: [],
+        fingerprint: "a".repeat(64),
+        kind: "needs_disposition",
+        options: [
+          { label: "Keep active", value: "active" },
+          { label: "Reference", value: "reference" },
+        ],
+        reason: "Choose the durable disposition for this thread.",
+        threadId: thread.id,
+        updatedAt: new Date("2026-08-11T14:05:00.000Z"),
+        userId: principal.userId,
+      })
+      .returning();
+    if (!question) throw new Error("Mail question fixture was not created.");
+
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+    });
+    const questionPage = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(questionPage.items).toContainEqual(
+      expect.objectContaining({
+        action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
+        domain: "mail",
+        id: `mail-question:${question.id}`,
+        kind: "review",
+        priority: "person_review",
+      }),
+    );
+    const serialized = JSON.stringify(questionPage.items);
+    expect(serialized).not.toContain(privateSubject);
+    expect(serialized).not.toContain(privateBody);
+    expect(serialized).not.toContain(privateAddress);
+    expect(serialized).toContain(account.id);
+    expect(serialized).toContain(thread.id);
+
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        createdAt: new Date("2026-08-11T14:10:00.000Z"),
+        domain: "mail",
+        rulebookVersion: "mail-playbook@1.0.0",
+        scope: { type: "all_outstanding" },
+        status: "blocked",
+        updatedAt: new Date("2026-08-11T14:10:00.000Z"),
+        userId: principal.userId,
+      })
+      .returning();
+    if (!run) throw new Error("Mail maintenance fixture was not created.");
+
+    const blockedPage = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(blockedPage.items).toContainEqual(
+      expect.objectContaining({
+        action: { label: "Review Mail", to: "/mail/review" },
+        id: `mail-run:${run.id}`,
+        priority: "blocked",
+      }),
+    );
+    expect(blockedPage.items.some((item) => item.id === `mail-question:${question.id}`)).toBe(
+      false,
+    );
   });
 });

@@ -143,6 +143,17 @@ export const iloToolCatalog = {
   create_mail_attention_item: write("mail", ["mail:write"]),
   create_mail_rule: write("mail", ["mail:write"], { openWorld: true }),
   update_mail_rule: write("mail", ["mail:write"]),
+  get_mail_status: {
+    ...read("mail", ["mail:read"]),
+    idempotent: true,
+    openWorld: false,
+  },
+  maintain_mail: write("mail", ["mail:write"], {
+    idempotent: false,
+    openWorld: true,
+    policy: "approved_rule",
+    stage: "commit",
+  }),
 
   list_reminders: read("reminders", ["reminders:read"]),
   get_reminder: read("reminders", ["reminders:read"]),

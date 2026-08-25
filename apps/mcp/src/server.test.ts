@@ -695,6 +695,16 @@ function mockApi() {
       updatedIds: items.map((item) => item.id),
     })),
     snoozeMailThread: vi.fn(async () => undefined),
+    getMailStatus: vi.fn(async () => ({
+      activeRun: null,
+      domain: "mail" as const,
+      state: "needs_work" as const,
+    })),
+    maintainMail: vi.fn(async () => ({
+      run: { domain: "mail" as const, id, status: "completed_with_questions" as const },
+      summary: "One question remains.",
+      verification: { blockers: [], checkedAt: now, status: "questions" as const },
+    })),
     listEvents: vi.fn(async () => [event]),
     getEvent: vi.fn(async () => event),
     createEvent: vi.fn(async () => event),
@@ -956,6 +966,8 @@ describe("ilo MCP server", () => {
         "review_mail_rule",
         "create_mail_rule",
         "update_mail_rule",
+        "get_mail_status",
+        "maintain_mail",
       ].includes(candidate.name),
     )) {
       expect(tool.annotations).toEqual({
@@ -2016,6 +2028,64 @@ describe("ilo MCP server", () => {
     });
     expect(unsupported.isError).toBe(true);
     expect(api.maintainFinances).toHaveBeenCalledTimes(2);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("exposes Mail stewardship as two stateless API intents", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      scopes: new Set(["mail:read", "mail:write"]),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    expect(tools.tools.find((tool) => tool.name === "get_mail_status")).toMatchObject({
+      _meta: {
+        "ilo/domain": "mail",
+        "ilo/policy": "read_only",
+        "ilo/stage": "inspect",
+      },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
+    });
+    expect(tools.tools.find((tool) => tool.name === "maintain_mail")).toMatchObject({
+      _meta: {
+        "ilo/domain": "mail",
+        "ilo/policy": "approved_rule",
+        "ilo/stage": "commit",
+      },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+    });
+
+    const status = await client.callTool({ arguments: {}, name: "get_mail_status" });
+    expect(api.getMailStatus).toHaveBeenCalledTimes(1);
+    expect(status.structuredContent).toMatchObject({ result: { domain: "mail" } });
+
+    const maintenance = await client.callTool({
+      arguments: { scope: { type: "all_outstanding" } },
+      name: "maintain_mail",
+    });
+    expect(api.maintainMail).toHaveBeenCalledTimes(1);
+    expect(api.maintainMail).toHaveBeenCalledWith({ scope: { type: "all_outstanding" } });
+    expect(maintenance.structuredContent).toMatchObject({
+      result: { run: { domain: "mail", status: "completed_with_questions" } },
+    });
 
     await client.close();
     await server.close();

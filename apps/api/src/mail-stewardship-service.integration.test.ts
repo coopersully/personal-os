@@ -4,9 +4,12 @@ import {
   calendarAccounts,
   createDatabaseClient,
   type DatabaseClient,
+  mailDrafts,
   mailObligations,
   mailReviews,
+  mailRuleProposals,
   mailStewardshipFeedback,
+  mailStewardshipQuestions,
   mailThreadDispositions,
   mailThreads,
   migrateDatabase,
@@ -14,6 +17,8 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { assessMail } from "./mail-assessment.js";
+import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
 import type { Principal } from "./types.js";
 
@@ -83,6 +88,8 @@ describe.sequential("Mail stewardship service", () => {
       .insert(calendarAccounts)
       .values({
         label: "Mail account",
+        lastSyncedAt: now,
+        mailEnabled: true,
         provider: "google",
         providerAccountId: "mail-stewardship-owner",
         syncStatus: "idle",
@@ -102,6 +109,7 @@ describe.sequential("Mail stewardship service", () => {
         receivedAt: now,
         remoteThreadId: "stewardship-thread",
         snippet: "Private snippet",
+        starred: true,
         subject: "Private subject",
         to: [{ address: "owner@example.com", name: "Owner" }],
         updatedAt: now,
@@ -344,5 +352,215 @@ describe.sequential("Mail stewardship service", () => {
         .from(mailReviews)
         .where(eq(mailReviews.id, review.id)),
     ).resolves.toEqual([{ id: review.id }]);
+  });
+
+  it("answers one question without generalizing by default", async () => {
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId,
+        evidence: [
+          {
+            accountId,
+            provider: "google",
+            remoteId: "stewardship-thread",
+            revision: threadUpdatedAt,
+            sourceType: "mail_thread",
+          },
+        ],
+        fingerprint: "b".repeat(64),
+        kind: "needs_disposition",
+        reason: "Choose a disposition.",
+        threadId,
+        userId: principal.userId,
+      })
+      .returning();
+    if (!question) throw new Error("Question fixture was not created.");
+
+    const answered = await service.answerQuestion(
+      principal.userId,
+      question.id,
+      { answer: "Reference only", expectedVersion: 1, generalize: false },
+      { principal, requestId: "answer-without-generalizing" },
+    );
+
+    expect(answered).toMatchObject({ answer: "Reference only", status: "answered", version: 2 });
+    await expect(service.listRuleProposals(principal.userId)).resolves.toEqual([]);
+  });
+
+  it("creates a disabled proposal only when the user explicitly generalizes", async () => {
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId,
+        evidence: [
+          {
+            accountId,
+            provider: "google",
+            remoteId: "stewardship-thread",
+            revision: threadUpdatedAt,
+            sourceType: "mail_thread",
+          },
+        ],
+        fingerprint: "c".repeat(64),
+        kind: "needs_exception",
+        reason: "Should this become a reusable preference?",
+        threadId,
+        userId: principal.userId,
+      })
+      .returning();
+    if (!question) throw new Error("Question fixture was not created.");
+
+    await service.answerQuestion(
+      principal.userId,
+      question.id,
+      {
+        answer: "Treat matching receipts as reference",
+        expectedVersion: 1,
+        generalize: true,
+      },
+      { principal, requestId: "answer-with-generalizing" },
+    );
+
+    await expect(service.listRuleProposals(principal.userId)).resolves.toEqual([
+      expect.objectContaining({
+        approvedRuleId: null,
+        counterexamples: [],
+        examples: [`question:${question.id}`],
+        exceptions: [],
+        status: "proposed",
+        version: 1,
+      }),
+    ]);
+    const [proposal] = await database.db.select().from(mailRuleProposals);
+    expect(proposal?.approvedRuleId).toBeNull();
+  });
+
+  it("applies only an exact selected disposition from an answered question", async () => {
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId,
+        evidence: [
+          {
+            accountId,
+            provider: "google",
+            remoteId: "stewardship-thread",
+            revision: threadUpdatedAt,
+            sourceType: "mail_thread",
+          },
+        ],
+        fingerprint: "d".repeat(64),
+        kind: "needs_disposition",
+        options: [{ label: "Reference", value: "reference" }],
+        reason: "Choose a disposition.",
+        threadId,
+        userId: principal.userId,
+      })
+      .returning();
+    if (!question) throw new Error("Question fixture was not created.");
+
+    await service.answerQuestion(
+      principal.userId,
+      question.id,
+      { answer: "reference", expectedVersion: 1, generalize: false },
+      { principal, requestId: "answer-disposition" },
+    );
+
+    await expect(service.getThreadStewardship(principal.userId, threadId)).resolves.toMatchObject({
+      disposition: { disposition: "reference", version: 1 },
+    });
+  });
+
+  it("returns a non-transmittable response brief without persisting correspondence", async () => {
+    const beforeDrafts = await database.db.select({ id: mailDrafts.id }).from(mailDrafts);
+    const brief = await service.previewResponseBrief(principal.userId, threadId, {
+      expectedThreadUpdatedAt: threadUpdatedAt,
+      factsToAddress: ["Confirm the recorded decision."],
+      materialsNeeded: ["Decision record"],
+      openQuestions: ["Who owns the next step?"],
+      purpose: "Prepare for a response outside Ilo.",
+      toneConsiderations: ["Direct"],
+    });
+
+    expect(brief).toMatchObject({
+      purpose: "Prepare for a response outside Ilo.",
+      sourceThreadRevision: threadUpdatedAt,
+      transmittable: false,
+    });
+    expect(brief).not.toHaveProperty("body");
+    expect(brief).not.toHaveProperty("to");
+    await expect(database.db.select({ id: mailDrafts.id }).from(mailDrafts)).resolves.toEqual(
+      beforeDrafts,
+    );
+  });
+
+  it("records incorrect feedback and opens one bounded correction question", async () => {
+    const disposition = await service.setDisposition(
+      principal.userId,
+      threadId,
+      {
+        disposition: "reference",
+        expectedThreadUpdatedAt: threadUpdatedAt,
+        rationale: "Initial judgment.",
+      },
+      { principal, requestId: "feedback-target" },
+    );
+
+    const feedback = await service.createFeedback(
+      principal.userId,
+      {
+        comment: "This disposition is incorrect.",
+        kind: "incorrect",
+        targetId: disposition.id,
+        targetType: "disposition",
+      },
+      { principal, requestId: "incorrect-feedback" },
+    );
+
+    expect(feedback).toMatchObject({ kind: "incorrect", targetId: disposition.id });
+    const questions = await database.db
+      .select()
+      .from(mailStewardshipQuestions)
+      .where(eq(mailStewardshipQuestions.userId, principal.userId));
+    expect(questions).toEqual([
+      expect.objectContaining({ kind: "needs_correction", status: "open", threadId }),
+    ]);
+  });
+
+  it("publishes an immutable review and honest status from a content-free snapshot", async () => {
+    const sourceSnapshot = await service.snapshot(principal.userId, {
+      type: "all_outstanding",
+    });
+    expect(sourceSnapshot).toMatchObject({
+      profileId: null,
+      profileVersion: null,
+      sourceFreshness: "current",
+      threads: [expect.objectContaining({ id: threadId, starred: true })],
+    });
+    expect(JSON.stringify(sourceSnapshot)).not.toContain("Private mail body");
+    expect(JSON.stringify(sourceSnapshot)).not.toContain("Private subject");
+
+    const assessment = assessMail(sourceSnapshot, MAIL_PLAYBOOK);
+    await service.reconcileAssessment(principal.userId, sourceSnapshot, assessment);
+    const review = await service.createReview(principal.userId, sourceSnapshot, assessment);
+
+    expect(review).toMatchObject({
+      ledgerFingerprint: assessment.ledgerFingerprint,
+      openQuestionCount: 1,
+      playbookVersion: MAIL_PLAYBOOK.version,
+      sourceFreshness: "current",
+      state: "maintained_with_questions",
+    });
+    await expect(service.getReview(principal.userId, review.id)).resolves.toEqual(review);
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      details: {
+        authority: { unavailable: expect.arrayContaining(["send_email"]) },
+        latestReview: { id: review.id },
+        openQuestionCount: 1,
+      },
+      domain: "mail",
+      state: "needs_input",
+    });
   });
 });

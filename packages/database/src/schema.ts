@@ -1632,6 +1632,7 @@ export const mailReviews = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex("mail_reviews_user_fingerprint_idx").on(table.userId, table.ledgerFingerprint),
     index("mail_reviews_user_created_idx").on(table.userId, table.createdAt),
     check("mail_reviews_fingerprint_check", sql`${table.ledgerFingerprint} ~ '^[0-9a-f]{64}$'`),
     check(

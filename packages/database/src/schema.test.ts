@@ -60,6 +60,9 @@ describe("database schema contracts", () => {
     expect(proposals.columns.map((column) => column.name)).toContain("version");
     expect(feedback.columns.map((column) => column.name)).not.toContain("updated_at");
     expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
+    expect(reviews.indexes.map((index) => index.config.name)).toContain(
+      "mail_reviews_user_fingerprint_idx",
+    );
 
     const migrationSql = await readFile(
       resolve(process.cwd(), "packages/database/migrations/0072_mail_workspace_stewardship.sql"),

@@ -19,6 +19,7 @@ function thread(
     id: "20000000-0000-4000-8000-000000000001",
     messages: [],
     obligations: [],
+    openQuestions: [],
     snoozedUntil: null,
     source: {
       accountId: "10000000-0000-4000-8000-000000000001",
@@ -40,6 +41,7 @@ function snapshot(
   return {
     effectCounts: { failed: 0, pending: 0, reconcile: 0 },
     now,
+    profileId: null,
     profileVersion: null,
     rulebookVersion: "rules-v1",
     sourceFreshness: "current",

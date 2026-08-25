@@ -157,3 +157,5 @@ CREATE INDEX "mail_stewardship_feedback_user_created_idx" ON "mail_stewardship_f
 CREATE INDEX "mail_stewardship_feedback_target_idx" ON "mail_stewardship_feedback" USING btree ("target_type", "target_id");
 --> statement-breakpoint
 CREATE INDEX "mail_reviews_user_created_idx" ON "mail_reviews" USING btree ("user_id", "created_at");
+--> statement-breakpoint
+CREATE UNIQUE INDEX "mail_reviews_user_fingerprint_idx" ON "mail_reviews" USING btree ("user_id", "ledger_fingerprint");

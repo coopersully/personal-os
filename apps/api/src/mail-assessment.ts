@@ -37,6 +37,7 @@ export type MailAssessmentThreadSnapshot = {
   id: string;
   messages: MailAssessmentMessageSnapshot[];
   obligations: MailAssessmentObligationSnapshot[];
+  openQuestions: Array<{ fingerprint: string; id: string; version: number }>;
   snoozedUntil: string | null;
   source: MaterialSourceReference;
   starred: boolean;
@@ -46,6 +47,7 @@ export type MailAssessmentThreadSnapshot = {
 export type MailAssessmentSnapshot = {
   effectCounts: { failed: number; pending: number; reconcile: number };
   now: string;
+  profileId: string | null;
   profileVersion: number | null;
   rulebookVersion: string;
   sourceFreshness: "current" | "stale" | "partial" | "unavailable";
@@ -72,6 +74,7 @@ export type MailAssessment = {
     reasonCode: "newer_outbound_observed";
     threadId: string;
   }>;
+  openQuestionCount: number;
   proposedSettlement: "maintained" | "maintained_with_questions" | "blocked";
   questions: Array<{
     accountId: string;
@@ -113,6 +116,8 @@ function fingerprint(value: unknown): string {
 function assessmentIdentity(snapshot: MailAssessmentSnapshot, playbook: MailPlaybook) {
   return {
     playbookVersion: playbook.version,
+    effectCounts: snapshot.effectCounts,
+    profileId: snapshot.profileId,
     profileVersion: snapshot.profileVersion,
     rulebookVersion: snapshot.rulebookVersion,
     sourceFreshness: snapshot.sourceFreshness,
@@ -142,6 +147,9 @@ function assessmentIdentity(snapshot: MailAssessmentSnapshot, playbook: MailPlay
             state,
             version,
           })),
+        openQuestions: [...thread.openQuestions].sort((left, right) =>
+          left.id.localeCompare(right.id),
+        ),
         snoozedUntil: thread.snoozedUntil,
         source: thread.source,
         updatedAt: thread.updatedAt,
@@ -160,6 +168,10 @@ export function assessMail(
   const obligationCounts = zeroRecord(obligationStates);
   const dispositionCounts = zeroRecord(dispositionKinds);
   const now = new Date(snapshot.now).getTime();
+  let openQuestionCount = snapshot.threads.reduce(
+    (count, thread) => count + thread.openQuestions.length,
+    0,
+  );
 
   for (const thread of snapshot.threads) {
     if (thread.currentDisposition) {
@@ -208,7 +220,12 @@ export function assessMail(
       thread.goalLinked ||
       thread.approvedRuleMatched ||
       (thread.approvedRuleMatches?.length ?? 0) > 0;
-    if (snapshot.sourceFreshness === "current" && surfaced && !thread.currentDisposition) {
+    if (
+      snapshot.sourceFreshness === "current" &&
+      surfaced &&
+      !thread.currentDisposition &&
+      thread.openQuestions.length === 0
+    ) {
       questions.push({
         accountId: thread.accountId,
         evidence: [thread.source],
@@ -227,6 +244,7 @@ export function assessMail(
           "This surfaced thread has no recorded disposition. Choose how Ilo should steward it.",
         threadId: thread.id,
       });
+      openQuestionCount += 1;
     }
     for (const match of thread.approvedRuleMatches ?? []) {
       ruleWorkIntentions.push({ ...match, threadId: thread.id });
@@ -243,7 +261,7 @@ export function assessMail(
   const proposedSettlement =
     blockers.length > 0
       ? "blocked"
-      : questions.length > 0 || snapshot.effectCounts.pending > 0
+      : openQuestionCount > 0 || snapshot.effectCounts.pending > 0
         ? "maintained_with_questions"
         : "maintained";
   const sourceSignal =
@@ -272,11 +290,16 @@ export function assessMail(
     },
     {
       dimension: "ambiguity",
-      evidenceIds: questions.map((question) => question.threadId),
-      signal: questions.length > 0 ? "attention" : "healthy",
+      evidenceIds: [
+        ...snapshot.threads.flatMap((thread) =>
+          thread.openQuestions.map((question) => question.id),
+        ),
+        ...questions.map((question) => question.threadId),
+      ],
+      signal: openQuestionCount > 0 ? "attention" : "healthy",
       summary:
-        questions.length > 0
-          ? `${questions.length} material disposition question(s) need user judgment.`
+        openQuestionCount > 0
+          ? `${openQuestionCount} material disposition question(s) need user judgment.`
           : "No material disposition ambiguity was found.",
     },
     {
@@ -306,6 +329,7 @@ export function assessMail(
     ledgerFingerprint: fingerprint(assessmentIdentity(snapshot, playbook)),
     obligationCounts,
     obligationTransitions,
+    openQuestionCount,
     proposedSettlement,
     questions,
     ruleWorkIntentions,

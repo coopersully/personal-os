@@ -306,6 +306,58 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           security,
         },
       },
+      "/v1/mail/status": {
+        get: {
+          security,
+          responses: { 200: { description: "Authoritative Mail stewardship status" } },
+        },
+      },
+      "/v1/mail/maintenance": {
+        post: {
+          security,
+          responses: {
+            200: { description: "Durable Mail maintenance result with honest settlement" },
+            403: { description: "The caller lacks mail:write" },
+            409: { description: "A conflicting Mail maintenance run is active" },
+          },
+        },
+      },
+      "/v1/mail/maintenance/{id}": {
+        get: {
+          security,
+          responses: { 200: { description: "Owned Mail maintenance run" } },
+        },
+      },
+      "/v1/mail/reviews/{id}": {
+        get: { security, responses: { 200: { description: "Immutable Mail review artifact" } } },
+      },
+      "/v1/mail/threads/{id}/stewardship": {
+        get: { security, responses: { 200: { description: "Exact-thread stewardship ledger" } } },
+      },
+      "/v1/mail/threads/{id}/disposition": {
+        put: { security, responses: { 200: { description: "Revision-checked disposition" } } },
+      },
+      "/v1/mail/threads/{id}/obligations": {
+        post: { security, responses: { 201: { description: "Revision-bound Mail obligation" } } },
+      },
+      "/v1/mail/threads/{id}/response-brief/preview": {
+        post: {
+          security,
+          responses: { 200: { description: "Private non-transmittable response checklist" } },
+        },
+      },
+      "/v1/mail/obligations/{id}": {
+        patch: { security, responses: { 200: { description: "Version-checked obligation" } } },
+      },
+      "/v1/mail/questions/{id}/answer": {
+        post: { security, responses: { 200: { description: "Version-checked Mail answer" } } },
+      },
+      "/v1/mail/feedback": {
+        post: {
+          security,
+          responses: { 201: { description: "Immutable Mail stewardship feedback" } },
+        },
+      },
       "/v1/reminders": {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },

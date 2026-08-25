@@ -34,6 +34,7 @@ import { createCalendarApiClient } from "./features/calendar.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
+import { createMailStewardshipApiClient } from "./features/mail-stewardship.js";
 import { createReminderApiClient } from "./features/reminders.js";
 import { createTaskApiClient } from "./features/tasks.js";
 
@@ -194,6 +195,7 @@ export function createApiClient(options: ClientOptions) {
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createMailApiClient(request, toQuery),
+    ...createMailStewardshipApiClient(request),
     ...createReminderApiClient(request, toQuery),
     ...createTaskApiClient(request, toQuery),
     async connectICloud(

@@ -1679,6 +1679,91 @@ describe("ilo API client", () => {
     });
   });
 
+  it("keeps Mail stewardship calls surgical and leaves sequencing to the API", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path,
+        });
+        if (path === "/v1/mail/status") return json({ status: { domain: "mail" } });
+        if (path === "/v1/mail/maintenance")
+          return json({ run: { domain: "mail", id }, summary: "Maintained", verification: null });
+        if (path === `/v1/mail/maintenance/${id}`) return json({ run: { id } });
+        if (path === `/v1/mail/reviews/${id}`) return json({ review: { id } });
+        if (path.endsWith("/stewardship")) return json({ stewardship: { threadId: id } });
+        if (path.endsWith("/response-brief/preview"))
+          return json({ brief: { transmittable: false } });
+        if (path.endsWith("/disposition")) return json({ disposition: { id } });
+        if (path.endsWith("/obligations")) return json({ obligation: { id } });
+        if (path === `/v1/mail/obligations/${id}`) return json({ obligation: { id } });
+        if (path.endsWith("/answer")) return json({ question: { id } });
+        return json({ feedback: { id } });
+      },
+    });
+    const revision = "2026-08-25T16:00:00.000Z";
+
+    await api.getMailStatus();
+    await api.maintainMail({ scope: { type: "all_outstanding" } });
+    await api.getMailMaintenanceRun(id);
+    await api.getMailReview(id);
+    await api.getMailThreadStewardship(id);
+    await api.previewMailResponseBrief(id, {
+      expectedThreadUpdatedAt: revision,
+      factsToAddress: [],
+      materialsNeeded: [],
+      openQuestions: [],
+      purpose: "Prepare privately.",
+      toneConsiderations: [],
+    });
+    await api.setMailDisposition(id, {
+      disposition: "reference",
+      expectedThreadUpdatedAt: revision,
+      rationale: "Reference only.",
+    });
+    await api.createMailObligation(id, {
+      dueAt: null,
+      goalIds: [],
+      kind: "decide",
+      nextReviewAt: null,
+      owner: { kind: "user" },
+      rationale: "A decision remains.",
+      sourceMessageId: null,
+      sourceThreadRevision: revision,
+    });
+    await api.updateMailObligation(id, { expectedVersion: 1, state: "resolved" });
+    await api.answerMailQuestion(id, {
+      answer: "reference",
+      expectedVersion: 1,
+      generalize: false,
+    });
+    await api.createMailStewardshipFeedback({
+      comment: "Correct.",
+      kind: "correct",
+      targetId: id,
+      targetType: "review",
+    });
+
+    expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "GET /v1/mail/status",
+      "POST /v1/mail/maintenance",
+      `GET /v1/mail/maintenance/${id}`,
+      `GET /v1/mail/reviews/${id}`,
+      `GET /v1/mail/threads/${id}/stewardship`,
+      `POST /v1/mail/threads/${id}/response-brief/preview`,
+      `PUT /v1/mail/threads/${id}/disposition`,
+      `POST /v1/mail/threads/${id}/obligations`,
+      `PATCH /v1/mail/obligations/${id}`,
+      `POST /v1/mail/questions/${id}/answer`,
+      "POST /v1/mail/feedback",
+    ]);
+    expect(api).not.toHaveProperty("sendMail");
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({

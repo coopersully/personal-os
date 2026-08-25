@@ -65,6 +65,7 @@ import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
+import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
 import {
   requestMetadata as metadata,
@@ -1159,6 +1160,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
 
   registerMailRoutes({ app, mail, mutationContext });
+  registerMailStewardshipRoutes({
+    app,
+    maintenance: mailMaintenance,
+    mutationContext,
+    stewardship: mailStewardship,
+  });
 
   registerAssistantRoutes({
     workItems: agentAccessWorkItems,

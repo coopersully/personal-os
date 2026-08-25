@@ -43,6 +43,7 @@ const cleanStatus = {
     },
     obligationCounts: { deferred: 0, dismissed: 0, open: 0, resolved: 0, waiting: 0 },
     openQuestionCount: 0,
+    openQuestions: [],
     playbookVersion: "1.0.0",
     rulebookVersion: "mail-rules-v1",
   },

@@ -16,6 +16,7 @@ import {
   mailStewardshipQuestions,
   mailThreadDispositions,
   mailThreads,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import type {
   AnswerMailQuestionInput,
@@ -1258,6 +1259,35 @@ export function createMailStewardshipService({ db, now }: Options) {
         .where(eq(mailReviews.userId, userId))
         .orderBy(desc(mailReviews.createdAt))
         .limit(1);
+      const [activeRun] = await db
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.userId, userId),
+            eq(workspaceMaintenanceRuns.domain, "mail"),
+            inArray(workspaceMaintenanceRuns.status, [
+              "queued",
+              "running",
+              "awaiting_agent_challenge",
+              "awaiting_approval",
+              "blocked",
+              "failed_recoverable",
+            ]),
+          ),
+        )
+        .orderBy(desc(workspaceMaintenanceRuns.updatedAt))
+        .limit(1);
+      const openQuestions = await db
+        .select()
+        .from(mailStewardshipQuestions)
+        .where(
+          and(
+            eq(mailStewardshipQuestions.userId, userId),
+            eq(mailStewardshipQuestions.status, "open"),
+          ),
+        )
+        .orderBy(asc(mailStewardshipQuestions.createdAt));
       const unresolvedObligations =
         assessment.obligationCounts.open +
         assessment.obligationCounts.waiting +
@@ -1274,7 +1304,16 @@ export function createMailStewardshipService({ db, now }: Options) {
               ? "needs_work"
               : "clean";
       return mailStatusSchema.parse({
-        activeRun: null,
+        activeRun: activeRun
+          ? {
+              domain: activeRun.domain,
+              id: activeRun.id,
+              rulebookVersion: activeRun.rulebookVersion,
+              scope: activeRun.scope,
+              status: activeRun.status,
+              updatedAt: activeRun.updatedAt.toISOString(),
+            }
+          : null,
         asOf: snapshot.now,
         details: {
           authority: {
@@ -1303,6 +1342,7 @@ export function createMailStewardshipService({ db, now }: Options) {
           },
           obligationCounts: assessment.obligationCounts,
           openQuestionCount: assessment.openQuestionCount,
+          openQuestions: openQuestions.map(serializeQuestion),
           playbookVersion: MAIL_PLAYBOOK.version,
           rulebookVersion: snapshot.rulebookVersion,
         },

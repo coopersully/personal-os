@@ -3429,6 +3429,40 @@ p {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+.mail-thread-stewardship {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  margin: 0 auto;
+  max-width: 760px;
+  padding: 0 clamp(24px, 4vw, 48px) clamp(24px, 4vw, 48px);
+}
+.mail-thread-stewardship > header {
+  display: grid;
+  gap: 4px;
+  padding-top: 24px;
+}
+.mail-thread-stewardship > header h3 { font-size: 1.15rem; }
+.mail-thread-stewardship > header p:last-child,
+.mail-obligation-row p { color: var(--muted); font-size: 0.8125rem; }
+.mail-stewardship-form { display: grid; gap: 10px; }
+.mail-stewardship-form label { display: grid; gap: 5px; font-size: 0.8125rem; font-weight: 600; }
+.mail-stewardship-form select,
+.mail-obligation-row select {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+}
+.mail-obligation-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-bottom: 10px;
+}
 .page-intro {
   color: var(--muted);
   font-size: 13px;
@@ -4908,6 +4942,7 @@ p {
   .mail-reader__article {
     padding: 20px;
   }
+  .mail-thread-stewardship { padding: 0 20px 20px; }
   .mail-reader__article pre {
     font-size: 13px;
   }

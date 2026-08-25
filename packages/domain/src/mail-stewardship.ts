@@ -271,6 +271,7 @@ export const mailStatusDetailsSchema = z.object({
   }),
   obligationCounts: z.record(mailObligationStateSchema, z.int().nonnegative()),
   openQuestionCount: z.int().nonnegative(),
+  openQuestions: z.array(mailStewardshipQuestionSchema).max(100),
   playbookVersion: semanticVersionSchema,
   rulebookVersion: z.string().trim().min(1).max(200),
 });

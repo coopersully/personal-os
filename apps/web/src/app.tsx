@@ -314,6 +314,7 @@ import {
   MailSidebar as MailFeatureSidebar,
   MailTopbarSearch,
 } from "./features/mail/mail.js";
+import { MailStewardshipPage } from "./features/mail/stewardship-page.js";
 import {
   ReminderRow,
   RemindersCreateButton,
@@ -1371,6 +1372,7 @@ function WorkspaceRoutes({
         }
       />
       <Route path="/mail" element={<MailFeaturePage user={user} />} />
+      <Route path="/mail/review" element={<MailStewardshipPage />} />
       <Route
         path="/automations"
         element={<Navigate replace to="/settings?section=workspace-access" />}
@@ -2424,6 +2426,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
     return searchParams.get("view") === "completed" ? "Completed reminders" : "Reminders";
   }
   if (pathname === "/tasks") return "Tasks";
+  if (pathname === "/mail/review") return "Mail stewardship";
   if (pathname === "/mail") return "Mail";
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";

@@ -3,7 +3,7 @@ import type { LegacyMailDraft, Mailbox, MailMessage, MailThread, User } from "@p
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ChevronDownIcon,
@@ -59,6 +59,7 @@ import {
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
+import { ThreadStewardship } from "./thread-stewardship.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
 export const mailListScopes = ["all", "unread", "starred", "snoozed"] as const;
@@ -389,6 +390,16 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
       <SidebarGroupLabel>Mailboxes</SidebarGroupLabel>
       <SidebarGroupContent>
         <nav aria-label="Mailboxes">
+          <SidebarMenu className="mail-sidebar__menu">
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild>
+                <Link onClick={onNavigate} to="/mail/review">
+                  <EyeIcon aria-hidden="true" />
+                  <span>Stewardship review</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
           {accounts.isPending || mailboxes.isPending ? (
             <p className="context-sidebar__empty">Loading mailboxes…</p>
           ) : accounts.isError || mailboxes.isError ? (
@@ -592,11 +603,14 @@ export function MailPage({ user }: { user: User }) {
         </section>
         <section aria-label="Message reader" className="mail-reader">
           {selected ? (
-            <Reader
-              messages={messages.data ?? []}
-              thread={selected}
-              timeZone={user.planningTimezone}
-            />
+            <>
+              <Reader
+                messages={messages.data ?? []}
+                thread={selected}
+                timeZone={user.planningTimezone}
+              />
+              <ThreadStewardship threadId={selected.id} />
+            </>
           ) : selectedId && loaded.isPending ? (
             <PageLoading />
           ) : (

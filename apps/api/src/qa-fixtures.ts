@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   attentionItems,
   auditEvents,
@@ -23,8 +24,12 @@ import {
   mailboxes,
   mailDrafts,
   mailMessages,
+  mailReviews,
   mailRules,
+  mailRuleWorkItems,
   mailSnoozes,
+  mailStewardshipQuestions,
+  mailThreadDispositions,
   mailThreads,
   motives,
   pinterestConnections,
@@ -33,6 +38,8 @@ import {
 } from "@personal-os/database";
 import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@personal-os/domain";
 import { inArray, or } from "drizzle-orm";
+import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
+import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 import { hashPassword } from "./security.js";
 
 export const QA_PASSWORD = ["Testing", "12345", "!"].join("");
@@ -180,8 +187,12 @@ type FixtureData = {
   goals: Array<typeof goals.$inferInsert>;
   mailDrafts: Array<typeof mailDrafts.$inferInsert>;
   mailMessages: Array<typeof mailMessages.$inferInsert>;
+  mailReviews: Array<typeof mailReviews.$inferInsert>;
+  mailRuleWorkItems: Array<typeof mailRuleWorkItems.$inferInsert>;
   mailRules: Array<typeof mailRules.$inferInsert>;
   mailSnoozes: Array<typeof mailSnoozes.$inferInsert>;
+  mailStewardshipQuestions: Array<typeof mailStewardshipQuestions.$inferInsert>;
+  mailThreadDispositions: Array<typeof mailThreadDispositions.$inferInsert>;
   mailThreads: Array<typeof mailThreads.$inferInsert>;
   mailboxes: Array<typeof mailboxes.$inferInsert>;
   motives: Array<typeof motives.$inferInsert>;
@@ -214,8 +225,12 @@ function emptyFixtureData(): FixtureData {
     goals: [],
     mailDrafts: [],
     mailMessages: [],
+    mailReviews: [],
+    mailRuleWorkItems: [],
     mailRules: [],
     mailSnoozes: [],
+    mailStewardshipQuestions: [],
+    mailThreadDispositions: [],
     mailThreads: [],
     mailboxes: [],
     motives: [],
@@ -968,6 +983,15 @@ function addLoadedWorkspace(
     userId: account.id,
   });
 
+  seedMailStewardshipFixtures({
+    account,
+    accountId: connectedAccountId,
+    data,
+    degraded,
+    now,
+    threads,
+  });
+
   const attentionDomains = ["mail", "calendar", "tasks", "finances"] as const;
   const attentionLabels = {
     calendar: "Calendar",
@@ -1481,6 +1505,163 @@ function addLoadedWorkspace(
   );
 }
 
+function seedMailStewardshipFixtures({
+  account,
+  accountId,
+  data,
+  degraded,
+  now,
+  threads,
+}: {
+  account: QaFixtureAccount;
+  accountId: string;
+  data: FixtureData;
+  degraded: boolean;
+  now: Date;
+  threads: Array<{ hours: number; record: number; starred: boolean }>;
+}) {
+  const needsInput = account.key === "qa-loaded";
+  const activeRuleId = fixtureId(account, 332);
+  const ambiguousThreadId = fixtureId(account, 311);
+  const rulebookVersion = createHash("sha256")
+    .update(JSON.stringify([{ id: activeRuleId, version: 1 }]))
+    .digest("hex");
+  if (degraded) {
+    data.mailRuleWorkItems.push({
+      accountId,
+      action: { afterDays: 0, mailboxId: null, type: "mark_read" },
+      actionFingerprint: "e".repeat(64),
+      attemptCount: 1,
+      createdAt: now,
+      dueAt: now,
+      id: fixtureId(account, 615),
+      nextAttemptAt: now,
+      profileId: null,
+      profileVersion: 1,
+      providerEffect: "indeterminate",
+      remoteThreadId: `fixture-thread-${account.key}-1`,
+      ruleId: activeRuleId,
+      ruleVersion: 1,
+      sourceUpdatedAt: now,
+      status: "reconcile",
+      threadId: ambiguousThreadId,
+      updatedAt: now,
+      userId: account.id,
+    });
+  }
+
+  for (const [index, thread] of threads.entries()) {
+    if (needsInput && index === 0) continue;
+    const disposition = index === threads.length - 1 ? "deferred" : "reference";
+    data.mailThreadDispositions.push({
+      createdAt: now,
+      current: true,
+      disposition,
+      id: fixtureId(account, 600 + index),
+      rationale:
+        disposition === "deferred"
+          ? "Deferred until the recorded snooze ends."
+          : "Reviewed as reference material in the deterministic fixture.",
+      sourceThreadRevision: now,
+      threadId: fixtureId(account, thread.record),
+      userId: account.id,
+      version: 1,
+    });
+  }
+
+  const snapshot: MailAssessmentSnapshot = {
+    effectCounts: degraded
+      ? { failed: 0, pending: 0, reconcile: 1 }
+      : { failed: 0, pending: 0, reconcile: 0 },
+    now: now.toISOString(),
+    profileId: null,
+    profileVersion: null,
+    rulebookVersion,
+    sourceFreshness: degraded ? "stale" : "current",
+    threads: threads.map((thread, index) => {
+      const threadId = fixtureId(account, thread.record);
+      const disposition =
+        needsInput && index === 0
+          ? null
+          : {
+              disposition:
+                index === threads.length - 1 ? ("deferred" as const) : ("reference" as const),
+              sourceThreadRevision: now.toISOString(),
+            };
+      return {
+        accountId,
+        approvedRuleMatched: degraded && threadId === ambiguousThreadId,
+        approvedRuleMatches:
+          degraded && threadId === ambiguousThreadId
+            ? [{ ruleId: activeRuleId, ruleVersion: 1 }]
+            : [],
+        attentionLinked: false,
+        currentDisposition: disposition,
+        goalLinked: false,
+        id: threadId,
+        messages: data.mailMessages
+          .filter((message) => message.threadId === threadId)
+          .map((message) => ({
+            authority: "provider_projected" as const,
+            direction: "inbound" as const,
+            id: message.id as string,
+            observedAt: (message.receivedAt as Date).toISOString(),
+            revision: message.providerRevision ?? null,
+          })),
+        obligations: [],
+        openQuestions: [],
+        snoozedUntil:
+          index === threads.length - 1
+            ? (data.mailSnoozes
+                .find((snooze) => snooze.threadId === threadId)
+                ?.until?.toISOString() ?? null)
+            : null,
+        source: {
+          accountId,
+          provider: "google" as const,
+          remoteId: `fixture-thread-${account.key}-${index}`,
+          revision: now.toISOString(),
+          sourceType: "mail_thread" as const,
+        },
+        starred: thread.starred,
+        updatedAt: now.toISOString(),
+      };
+    }),
+  };
+  const assessment = assessMail(snapshot, MAIL_PLAYBOOK);
+  const [question] = assessment.questions;
+  if (question) {
+    data.mailStewardshipQuestions.push({
+      ...question,
+      createdAt: now,
+      id: fixtureId(account, 610),
+      status: "open",
+      updatedAt: now,
+      userId: account.id,
+      version: 1,
+    });
+  }
+  data.mailReviews.push({
+    createdAt: now,
+    effectCounts: snapshot.effectCounts,
+    evidenceCutoff: now,
+    health: assessment.health,
+    id: fixtureId(account, 611),
+    ledgerFingerprint: assessment.ledgerFingerprint,
+    nextMaintenanceAt: new Date(
+      now.getTime() + MAIL_PLAYBOOK.freshness.currentWithinMinutes * 60_000,
+    ),
+    obligationCounts: assessment.obligationCounts,
+    openQuestionCount: assessment.openQuestionCount,
+    playbookVersion: MAIL_PLAYBOOK.version,
+    profileVersion: null,
+    rulebookVersion,
+    sourceFreshness: snapshot.sourceFreshness,
+    state: assessment.proposedSettlement,
+    userId: account.id,
+  });
+}
+
 export type LoadQaFixturesOptions = {
   accounts?: readonly QaFixtureAccount[];
   now?: Date;
@@ -1532,6 +1713,13 @@ export async function loadQaFixtures(
     if (data.domainProfiles.length)
       await transaction.insert(domainProfiles).values(data.domainProfiles);
     if (data.mailRules.length) await transaction.insert(mailRules).values(data.mailRules);
+    if (data.mailRuleWorkItems.length)
+      await transaction.insert(mailRuleWorkItems).values(data.mailRuleWorkItems);
+    if (data.mailThreadDispositions.length)
+      await transaction.insert(mailThreadDispositions).values(data.mailThreadDispositions);
+    if (data.mailStewardshipQuestions.length)
+      await transaction.insert(mailStewardshipQuestions).values(data.mailStewardshipQuestions);
+    if (data.mailReviews.length) await transaction.insert(mailReviews).values(data.mailReviews);
     if (data.financeAccounts.length)
       await transaction.insert(financeAccounts).values(data.financeAccounts);
     if (data.financeCategories.length)

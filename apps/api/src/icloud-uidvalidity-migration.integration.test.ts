@@ -137,8 +137,8 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
       .insert(mailDrafts)
       .values({
         accountId,
-        body: "Keep this reply",
-        subject: "Re: Historical source",
+        body: "Keep this historical draft record",
+        subject: "Historical source draft",
         threadId: thread.id,
         to: [{ address: "sender@example.com", name: null }],
         userId: user.id,

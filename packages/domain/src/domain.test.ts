@@ -95,7 +95,6 @@ import {
   reminderTimeZoneSchema,
   resolveStoredMailRule,
   semanticVersionSchema,
-  sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
@@ -1053,17 +1052,6 @@ describe("domain schemas", () => {
         policy: "approved_rule",
       }).success,
     ).toBe(false);
-    expect(
-      sendMailInputSchema.parse({
-        accountId: "00000000-0000-4000-8000-000000000001",
-        body: "No subject",
-        subject: "   ",
-        to: [{ address: "To@Example.COM", name: null }],
-      }),
-    ).toMatchObject({
-      subject: "",
-      to: [{ address: "To@Example.COM", name: null }],
-    });
     expect(
       createMailRuleInputSchema.safeParse({
         actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],

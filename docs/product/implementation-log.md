@@ -2,6 +2,17 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-25 — Mail no-send boundary
+
+- Removed Gmail send authority, iCloud SMTP delivery, application TCP 587 egress, and every typed
+  client, MCP, and web compose/send affordance. Ilo never sends user email.
+- Retained an authenticated compatibility window for historical Ilo drafts: owners can list,
+  export locally, or permanently delete them, while former mutation endpoints return a permanent
+  `410 feature_unavailable` response.
+- This contraction establishes the safety boundary for the approved Mail steward design; it does
+  not claim that the stewardship ledger, maintenance turn, learning loop, or review artifact have
+  shipped.
+
 ## 2026-08-23 — Provider-aware event conferencing
 
 - Added unique Google Meet generation for events created on writable Google calendars using the

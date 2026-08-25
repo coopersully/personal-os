@@ -10,7 +10,15 @@ const variables = readFileSync(resolve(root, "infra/variables.tf"), "utf8");
 const waf = readFileSync(resolve(root, "infra/waf.tf"), "utf8");
 const config = readFileSync(resolve(root, "apps/api/src/config.ts"), "utf8");
 const providerHttp = readFileSync(resolve(root, "packages/connectors/src/http.ts"), "utf8");
+const google = readFileSync(resolve(root, "packages/connectors/src/google.ts"), "utf8");
 const icloud = readFileSync(resolve(root, "packages/connectors/src/icloud.ts"), "utf8");
+const mailMcp = readFileSync(resolve(root, "apps/mcp/src/tools/mail.ts"), "utf8");
+
+function rejectContract(source, pattern, description) {
+  if (pattern.test(source)) {
+    throw new Error(`Provider network contract forbids ${description}.`);
+  }
+}
 
 function numericSetting(source, pattern, description) {
   const match = source.match(pattern);
@@ -78,12 +86,15 @@ if (!/host:\s*"imap\.mail\.me\.com"[\s\S]*?port:\s*993/.test(icloud)) {
   throw new Error("iCloud IMAP must declare imap.mail.me.com:993.");
 }
 
-if (!/host:\s*"smtp\.mail\.me\.com"[\s\S]*?port:\s*587/.test(icloud)) {
-  throw new Error("iCloud SMTP must declare smtp.mail.me.com:587.");
-}
-
 requireApplicationEgress(993, "iCloud Mail IMAP over TLS");
-requireApplicationEgress(587, "iCloud Mail SMTP submission");
+rejectContract(google, /gmail\.send/, "Gmail send authority");
+rejectContract(icloud, /smtp\.mail\.me\.com|nodemailer|createTransport/, "iCloud SMTP delivery");
+rejectContract(mailMcp, /["'](?:create_mail_draft|send_mail)["']/, "Mail delivery MCP tools");
+rejectContract(
+  network,
+  /description\s*=\s*"iCloud Mail SMTP submission"[\s\S]*?from_port\s*=\s*587/,
+  "Mail SMTP egress",
+);
 requireSsmRuntimeKey("GOOGLE_CLIENT_ID");
 requireSsmRuntimeKey("GOOGLE_CLIENT_SECRET");
 if (/name\s*=\s*"GOOGLE_CLIENT_ID"\s*,\s*value\s*=/.test(compute)) {

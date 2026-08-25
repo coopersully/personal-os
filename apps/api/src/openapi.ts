@@ -495,17 +495,29 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Source-aware Mail setup context" } } },
       },
       "/v1/mail/drafts": {
-        get: { security, responses: { 200: { description: "Mail drafts" } } },
-        post: { security, responses: { 201: { description: "Mail draft created" } } },
+        get: { security, responses: { 200: { description: "Historical Mail drafts" } } },
+        post: {
+          deprecated: true,
+          security,
+          responses: { 410: { description: "Mail sending is permanently unavailable" } },
+        },
+      },
+      "/v1/mail/drafts/{id}": {
+        delete: { security, responses: { 204: { description: "Historical Mail draft deleted" } } },
       },
       "/v1/mail/drafts/{id}/reconcile": {
         post: {
+          deprecated: true,
           security,
-          responses: { 200: { description: "Uncertain Mail draft reconciled by its owner" } },
+          responses: { 410: { description: "Mail sending is permanently unavailable" } },
         },
       },
       "/v1/mail/send": {
-        post: { security, responses: { 202: { description: "Mail send accepted" } } },
+        post: {
+          deprecated: true,
+          security,
+          responses: { 410: { description: "Mail sending is permanently unavailable" } },
+        },
       },
       "/v1/mail/threads": {
         get: { security, responses: { 200: { description: "Unified mail conversations" } } },

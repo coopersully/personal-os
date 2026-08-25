@@ -3,7 +3,6 @@ import type { CreateEventInput, MailAddress, UpdateEventInput } from "@personal-
 import ICAL from "ical.js";
 import { ImapFlow } from "imapflow";
 import { type AddressObject, simpleParser } from "mailparser";
-import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject, type DAVResponse } from "tsdav";
 import { ConnectorError, classifyICloudError } from "./failures.js";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
@@ -51,10 +50,6 @@ type ICloudConnectorOptions = {
     operation?: ProviderOperationOptions,
   ) => Promise<DavClient>;
   createImapClient?: (credentials: ICloudCredentials) => ImapClient;
-  createSmtpTransport?: (credentials: ICloudCredentials) => {
-    close: () => void;
-    sendMail: (input: unknown) => Promise<unknown>;
-  };
 };
 
 const MAX_CALDAV_SYNC_PAGES = 10;
@@ -509,50 +504,6 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         operation?.signal?.removeEventListener("abort", abort);
         if (operation?.signal?.aborted) close();
         else if (connected) await client.logout();
-      }
-    },
-
-    /* v8 ignore stop */
-    /* v8 ignore start -- SMTP formatting variants are covered by connector contract tests */
-    async sendMail(credentials, input) {
-      /* v8 ignore start -- the default SMTP factory is exercised only against Apple's live service */
-      const transport = (
-        options.createSmtpTransport ??
-        ((smtpCredentials: ICloudCredentials) =>
-          nodemailer.createTransport({
-            auth: { pass: smtpCredentials.appSpecificPassword, user: smtpCredentials.email },
-            connectionTimeout: PROVIDER_REQUEST_TIMEOUT_MS,
-            greetingTimeout: 10_000,
-            host: "smtp.mail.me.com",
-            port: 587,
-            secure: false,
-            socketTimeout: 60_000,
-          }))
-      )(credentials);
-      /* v8 ignore stop */
-      /* v8 ignore start -- SMTP response handling is exercised by the transport contract test */
-      try {
-        await transport.sendMail({
-          from: credentials.email,
-          text: input.body,
-          subject: input.subject,
-          to: input.to.map((address) => ({
-            address: address.address,
-            ...(address.name ? { name: address.name } : {}),
-          })),
-          ...(input.cc.length
-            ? {
-                cc: input.cc.map((address) => ({
-                  address: address.address,
-                  ...(address.name ? { name: address.name } : {}),
-                })),
-              }
-            : {}),
-        });
-      } catch (error) {
-        throw providerError("mail", error);
-      } finally {
-        transport.close();
       }
     },
 

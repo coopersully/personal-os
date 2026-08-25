@@ -26,6 +26,50 @@ const thread = {
 };
 
 describe("Mail routes", () => {
+  it("keeps legacy drafts readable/deletable and permanently rejects former send mutations", async () => {
+    const app = new Hono<AppEnv>();
+    const deleteLegacyDraft = vi.fn(async () => undefined);
+    const listLegacyDrafts = vi.fn(async () => []);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set<AccessScope>(["mail:read", "mail:write"]),
+        userId: id,
+      });
+      context.set("requestId", "request-legacy-drafts");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerMailRoutes({
+      app,
+      mail: { deleteLegacyDraft, listLegacyDrafts } as unknown as ReturnType<
+        typeof createMailService
+      >,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+    const request = (path: string, init?: RequestInit) =>
+      app.request(path, { headers: { "content-type": "application/json" }, ...init });
+
+    expect((await request("/v1/mail/drafts")).status).toBe(200);
+    expect((await request(`/v1/mail/drafts/${id}`, { method: "DELETE" })).status).toBe(204);
+    expect(deleteLegacyDraft).toHaveBeenCalledWith(id, id);
+
+    for (const path of ["/v1/mail/drafts", `/v1/mail/drafts/${id}/reconcile`, "/v1/mail/send"]) {
+      const response = await request(path, { body: "{}", method: "POST" });
+      expect(response.status).toBe(410);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "feature_unavailable",
+          details: { capability: "mail_send", permanent: true },
+        },
+      });
+    }
+  });
+
   it("routes the complete read and write surface through the Mail service", async () => {
     const app = new Hono<AppEnv>();
     let actorType: "agent" | "user" = "user";
@@ -38,10 +82,10 @@ describe("Mail routes", () => {
         updatedCount: 1,
         updatedIds: [id],
       })),
-      createDraft: vi.fn(async () => ({ id })),
+      deleteLegacyDraft: vi.fn(async () => undefined),
       createRule: vi.fn(async () => ({ id })),
       getThread: vi.fn(async () => thread),
-      listDrafts: vi.fn(async () => [{ body: "Body", id, subject: "Subject" }]),
+      listLegacyDrafts: vi.fn(async () => [{ body: "Body", id, subject: "Subject" }]),
       listMailboxes: vi.fn(async () => []),
       listMessages: vi.fn(async () => []),
       listRules: vi.fn(async () => []),
@@ -49,8 +93,6 @@ describe("Mail routes", () => {
       listThreads: vi.fn(async () => [thread]),
       previewRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
       previewSavedRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
-      reconcileDraft: vi.fn(async () => ({ id, sendStatus: "draft" })),
-      send: vi.fn(async () => undefined),
       snoozeThread: vi.fn(async () => undefined),
       updateRule: vi.fn(async () => ({ id })),
       updateThread: vi.fn(async () => thread),
@@ -85,20 +127,6 @@ describe("Mail routes", () => {
     expect((await request("/v1/mail/threads?limit=10")).status).toBe(200);
     expect((await request(`/v1/mail/threads/${id}`)).status).toBe(200);
     expect((await request(`/v1/mail/threads/${id}/messages`)).status).toBe(200);
-    expect(
-      (
-        await request("/v1/mail/drafts", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Subject",
-            to: [{ address: "to@example.com", name: null }],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(201);
     expect(
       (
         await request("/v1/mail/rules", {
@@ -153,14 +181,6 @@ describe("Mail routes", () => {
     actorType = "agent";
     expect(
       (
-        await request(`/v1/mail/drafts/${id}/reconcile`, {
-          body: JSON.stringify({ outcome: "not_sent" }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(403);
-    expect(
-      (
         await request(`/v1/mail/rules/${id}/activate`, {
           body: JSON.stringify({
             expectedCandidateIds: [],
@@ -207,132 +227,6 @@ describe("Mail routes", () => {
     ).toBe(200);
     expect(
       (
-        await request("/v1/mail/send", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Subject",
-            to: [{ address: "to@example.com", name: null }],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(202);
-    expect(
-      (
-        await request("/v1/mail/send", {
-          body: JSON.stringify({
-            accountId,
-            body: "No subject",
-            subject: "",
-            to: [{ address: "to@example.com", name: null }],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(202);
-    expect(
-      (
-        await request(`/v1/mail/drafts/${id}/reconcile`, {
-          body: JSON.stringify({ outcome: "not_sent" }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(200);
-    expect(mail.send).toHaveBeenCalledWith(
-      id,
-      expect.objectContaining({ accountId, subject: "Subject" }),
-      {
-        principal: {
-          actorId: id,
-          actorType: "user",
-          scopes,
-          userId: id,
-        },
-        requestId: "request-1",
-      },
-    );
-    expect(
-      (
-        await request("/v1/mail/send", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Subject",
-            to: [{ address: "not-an-email", name: null }],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request("/v1/mail/send", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Safe\r\nBcc: attacker@example.com",
-            to: [{ address: "to@example.com", name: null }],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request("/v1/mail/send", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Subject",
-            to: [
-              {
-                address: "to@example.com",
-                name: "Safe\r\nBcc: attacker@example.com",
-              },
-            ],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request("/v1/mail/drafts", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Subject",
-            to: [{ address: "to@example.com", name: "x".repeat(201) }],
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await request("/v1/mail/send", {
-          body: JSON.stringify({
-            accountId,
-            body: "Body",
-            cc: [],
-            subject: "Subject",
-            to: Array.from({ length: 101 }, (_, index) => ({
-              address: `recipient-${index}@example.com`,
-              name: null,
-            })),
-          }),
-          method: "POST",
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
         await request(`/v1/mail/threads/${id}`, {
           body: JSON.stringify({ starred: true }),
           method: "PATCH",
@@ -371,5 +265,6 @@ describe("Mail routes", () => {
         })
       ).status,
     ).toBe(403);
+    expect((await request("/v1/mail/drafts", { body: "{}", method: "POST" })).status).toBe(403);
   });
 });

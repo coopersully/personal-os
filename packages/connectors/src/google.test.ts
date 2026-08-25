@@ -1,11 +1,5 @@
-import { simpleParser } from "mailparser";
 import { ConnectorError } from "./failures.js";
-import {
-  createGoogleConnector,
-  googleGrantedServices,
-  MailSendPreAcceptanceError,
-  projectGmailAttachments,
-} from "./google.js";
+import { createGoogleConnector, googleGrantedServices, projectGmailAttachments } from "./google.js";
 import {
   calendarAttachmentProjectionOverflow,
   MAX_MAIL_ATTACHMENT_METADATA_LENGTH,
@@ -130,7 +124,7 @@ describe("Google Calendar connector", () => {
     expect(url.searchParams.get("state")).toBe("state-value");
     expect(url.searchParams.get("scope")).toContain("calendar.events");
     expect(url.searchParams.get("scope")).toContain("gmail.modify");
-    expect(url.searchParams.get("scope")).toContain("gmail.send");
+    expect(url.searchParams.get("scope")).not.toContain("gmail.send");
     expect(url.searchParams.get("login_hint")).toBe("test@example.com");
     expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
@@ -174,7 +168,7 @@ describe("Google Calendar connector", () => {
     expect(calendarScopes).toContain("calendar.events");
     expect(calendarScopes).not.toContain("gmail.modify");
     expect(mailScopes).toContain("gmail.modify");
-    expect(mailScopes).toContain("gmail.send");
+    expect(mailScopes).not.toContain("gmail.send");
     expect(mailScopes).not.toContain("calendar.events");
   });
 
@@ -188,7 +182,6 @@ describe("Google Calendar connector", () => {
             "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
             "https://www.googleapis.com/auth/calendar.events",
             "https://www.googleapis.com/auth/gmail.modify",
-            "https://www.googleapis.com/auth/gmail.send",
           ].join(" "),
         ),
       ),
@@ -199,7 +192,7 @@ describe("Google Calendar connector", () => {
           "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/gmail.modify",
         ),
       ),
-    ).toEqual([]);
+    ).toEqual(["mail"]);
     expect(
       googleGrantedServices(
         credentialsWith(
@@ -208,11 +201,7 @@ describe("Google Calendar connector", () => {
       ),
     ).toEqual(["calendar"]);
     expect(
-      googleGrantedServices(
-        credentialsWith(
-          "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
-        ),
-      ),
+      googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.modify")),
     ).toEqual(["mail"]);
     expect(
       googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
@@ -229,6 +218,10 @@ describe("Google Calendar connector", () => {
     ).toEqual(["calendar"]);
     expect(googleGrantedServices(credentialsWith("https://mail.google.com/"))).toEqual(["mail"]);
     expect(googleGrantedServices(credentialsWith(""))).toEqual([]);
+  });
+
+  it("does not expose user mail delivery", () => {
+    expect("sendMail" in connector(queued())).toBe(false);
   });
 
   it("refreshes credentials and reads a paginated profile and calendar list", async () => {
@@ -905,84 +898,18 @@ describe("Google Calendar connector", () => {
     expect(maximumThreadRequests).toBe(1);
   });
 
-  it("writes Gmail labels and sends composed mail", async () => {
-    const fetch = queued(response({}), response({}), response({}), response({}), response({}));
+  it("writes Gmail labels", async () => {
+    const fetch = queued(response({}));
     const google = connector(fetch);
-    if (!google.updateMailThread || !google.sendMail)
-      throw new Error("Google Mail writes are missing.");
+    if (!google.updateMailThread) throw new Error("Google Mail writes are missing.");
     await google.updateMailThread(fresh, "thread/1", {
       addMailboxIds: ["STARRED"],
       removeMailboxIds: ["UNREAD"],
-    });
-    await google.sendMail(fresh, {
-      body: "Hello",
-      cc: [{ address: "cc@example.com", name: 'Zoë "Ops, Inc."' }],
-      from: "sender@example.com",
-      subject: "Résumé, review",
-      threadId: "thread/1",
-      to: [{ address: "to@example.com", name: 'Renée "Primary, Team"' }],
-    });
-    await google.sendMail(fresh, {
-      body: "Hello",
-      cc: [],
-      from: "sender@example.com",
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    await google.sendMail(fresh, {
-      body: "Hello",
-      cc: [],
-      from: "sender@example.com",
-      subject: "Safe\r\nBcc: attacker@example.com",
-      to: [
-        {
-          address: "to@example.com",
-          name: "Visible\r\nBcc: attacker@example.com",
-        },
-      ],
-    });
-    await google.sendMail(fresh, {
-      body: "No subject",
-      cc: [],
-      from: "sender@example.com",
-      subject: "",
-      to: [{ address: "to@example.com", name: null }],
     });
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
       addLabelIds: ["STARRED"],
       removeLabelIds: ["UNREAD"],
     });
-    const firstMessage = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
-    expect(firstMessage.threadId).toBe("thread/1");
-    const parsedFirst = await simpleParser(Buffer.from(firstMessage.raw, "base64url"));
-    expect(parsedFirst.subject).toBe("Résumé, review");
-    const parsedFirstTo = Array.isArray(parsedFirst.to)
-      ? parsedFirst.to.flatMap((value) => value.value)
-      : parsedFirst.to?.value;
-    const parsedFirstCc = Array.isArray(parsedFirst.cc)
-      ? parsedFirst.cc.flatMap((value) => value.value)
-      : parsedFirst.cc?.value;
-    expect(parsedFirstTo).toEqual([{ address: "to@example.com", name: 'Renée "Primary, Team"' }]);
-    expect(parsedFirstCc).toEqual([{ address: "cc@example.com", name: 'Zoë "Ops, Inc."' }]);
-    expect(parsedFirst.from?.value).toEqual([{ address: "sender@example.com", name: "" }]);
-    const secondMessage = JSON.parse(String(fetch.mock.calls[2]?.[1]?.body));
-    expect(secondMessage.threadId).toBeUndefined();
-    expect(Buffer.from(secondMessage.raw, "base64url").toString()).toContain("To: to@example.com");
-    const injectedMessage = JSON.parse(String(fetch.mock.calls[3]?.[1]?.body));
-    const parsedInjected = await simpleParser(Buffer.from(injectedMessage.raw, "base64url"));
-    expect(parsedInjected.headers.has("bcc")).toBe(false);
-    const injectedRecipients = Array.isArray(parsedInjected.to)
-      ? parsedInjected.to.flatMap((value) => value.value)
-      : (parsedInjected.to?.value ?? []);
-    expect(injectedRecipients.map((recipient) => recipient.address)).toEqual(["to@example.com"]);
-    expect(Buffer.from(injectedMessage.raw, "base64url").toString()).not.toContain(
-      "\r\nBcc: attacker@example.com",
-    );
-    const emptySubjectMessage = JSON.parse(String(fetch.mock.calls[4]?.[1]?.body));
-    const parsedEmptySubject = await simpleParser(
-      Buffer.from(emptySubjectMessage.raw, "base64url"),
-    );
-    expect(parsedEmptySubject.subject ?? "").toBe("");
   });
 
   it("reads exact minimal Gmail state and uses recoverable Trash", async () => {
@@ -1012,39 +939,6 @@ describe("Google Calendar connector", () => {
     expect(String(fetch.mock.calls[0]?.[0])).toContain("thread%2F1?format=minimal");
     expect(String(fetch.mock.calls[1]?.[0])).toContain("thread%2F1/trash");
     expect(fetch.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
-  });
-
-  it("distinguishes pre-request Mail send failures from ambiguous provider outcomes", async () => {
-    const input = {
-      body: "Hello",
-      cc: [],
-      from: "sender@example.com",
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
-    };
-    for (const status of [400, 401, 500]) {
-      const sendMail = connector(queued(new Response(`status ${status}`, { status }))).sendMail;
-      if (!sendMail) throw new Error("Google Mail send is unavailable.");
-      await expect(sendMail(fresh, input)).rejects.toMatchObject({
-        name: "ConnectorError",
-        status,
-      });
-    }
-    const timeout = new DOMException("Timed out", "AbortError");
-    const timeoutFetch = vi.fn(async () => {
-      throw timeout;
-    });
-    const timedSend = connector(timeoutFetch).sendMail;
-    if (!timedSend) throw new Error("Google Mail send is unavailable.");
-    await expect(timedSend(fresh, input)).rejects.toBe(timeout);
-
-    const refreshRejected = connector(
-      queued(new Response("refresh rejected", { status: 401 })),
-    ).sendMail;
-    if (!refreshRejected) throw new Error("Google Mail send is unavailable.");
-    await expect(refreshRejected(expired, input)).rejects.toBeInstanceOf(
-      MailSendPreAcceptanceError,
-    );
   });
 
   it("surfaces provider, synchronization, and malformed-event failures", async () => {
@@ -1173,11 +1067,10 @@ describe("Google Calendar connector", () => {
     ).resolves.toBeDefined();
   });
 
-  it("writes Gmail thread labels and sends RFC 2822 mail", async () => {
-    const fetch = queued(response({}), response({ id: "sent" }));
+  it("writes Gmail thread labels", async () => {
+    const fetch = queued(response({}));
     const google = connector(fetch);
-    if (!google.updateMailThread || !google.sendMail)
-      throw new Error("Mail writes are unavailable.");
+    if (!google.updateMailThread) throw new Error("Mail writes are unavailable.");
     await expect(
       google.updateMailThread(fresh, "thread/1", {
         addMailboxIds: ["STARRED"],
@@ -1189,21 +1082,5 @@ describe("Google Calendar connector", () => {
       addLabelIds: ["STARRED"],
       removeLabelIds: ["UNREAD"],
     });
-
-    await expect(
-      google.sendMail(fresh, {
-        body: "Hello",
-        cc: [{ address: "cc@example.com", name: "CC" }],
-        from: "sender@example.com",
-        subject: "Hello there",
-        threadId: "thread/1",
-        to: [{ address: "to@example.com", name: "To" }],
-      }),
-    ).resolves.toEqual(fresh);
-    const sent = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
-    expect(sent.threadId).toBe("thread/1");
-    expect(Buffer.from(sent.raw, "base64url").toString()).toContain("Cc: CC <cc@example.com>");
-    expect(Buffer.from(sent.raw, "base64url").toString()).toContain("From: sender@example.com");
-    expect(Buffer.from(sent.raw, "base64url").toString()).toContain("Subject: Hello there");
   });
 });

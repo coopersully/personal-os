@@ -95,7 +95,9 @@ change signals only; they never replace the authoritative five-minute reconcilia
 | OAuth and provider APIs | Google, X, Plaid, Pinterest, weather, Resend | HTTPS | TCP 443 |
 | iCloud Calendar | `caldav.icloud.com` | HTTPS/CalDAV | TCP 443 |
 | iCloud Mail read and projection | `imap.mail.me.com` | IMAP over TLS | TCP 993 |
-| iCloud Mail send | `smtp.mail.me.com` | SMTP submission | TCP 587 |
+
+Ilo never sends user email. iCloud Mail is an inbound projection with supported provider mailbox
+mutations; no SMTP delivery transport or egress is part of the runtime contract.
 
 Adding or changing a non-HTTPS transport requires the infrastructure change in the same pull
 request. `scripts/check-provider-network-contract.mjs`, run by `pnpm lint`, checks that connector

@@ -1,19 +1,19 @@
 import type { CalendarAccount } from "@personal-os/api-client";
-import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
+import type { LegacyMailDraft, Mailbox, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ChevronDownIcon,
   ClockIcon,
+  DownloadIcon,
   EyeIcon,
   EyeOffIcon,
   InboxIcon,
   MailIcon,
   MoreHorizontalIcon,
-  ReplyIcon,
   SearchIcon,
   StarIcon,
   TrashIcon,
@@ -25,6 +25,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -215,78 +223,122 @@ function mailDate(value: string, timeZone: string) {
   }).format(new Date(value));
 }
 
-function MailSendRecovery({
+function downloadLegacyMailDraft(draft: LegacyMailDraft) {
+  const blob = new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const filename = (draft.subject || "historical-draft")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+  link.href = href;
+  link.download = `ilo-mail-draft-${filename || "historical-draft"}.json`;
+  link.click();
+  URL.revokeObjectURL(href);
+}
+
+function HistoricalMailDrafts({
+  accounts,
   drafts,
   error,
   isPending,
   mutationError,
   mutationPending,
-  reconcile,
+  remove,
 }: {
-  drafts: MailDraft[];
+  accounts: CalendarAccount[];
+  drafts: LegacyMailDraft[];
   error: Error | null;
   isPending: boolean;
   mutationError: Error | null;
   mutationPending: boolean;
-  reconcile: (id: string, outcome: "not_sent" | "sent") => void;
+  remove: (id: string) => void;
 }) {
-  if (isPending)
-    return (
-      <p aria-live="polite" className="mail-send-recovery__loading">
-        Checking uncertain sends…
-      </p>
-    );
+  const [pendingDelete, setPendingDelete] = useState<LegacyMailDraft | null>(null);
+  if (isPending) return null;
   if (error) return <InlineError error={error} />;
   if (drafts.length === 0) return null;
   return (
-    <section aria-labelledby="mail-send-recovery-title" className="mail-send-recovery">
-      <div>
-        <p className="eyebrow">Send safety</p>
-        <h2 id="mail-send-recovery-title">Resolve an uncertain send</h2>
-        <p>
-          First inspect this account’s provider Sent Mail. Never resend until you confirm whether
-          the message is there.
-        </p>
-      </div>
-      <div className="mail-send-recovery__items">
-        {drafts.map((draft) => (
-          <article className="mail-send-recovery__item" key={draft.id}>
-            <div>
-              <strong>{draft.subject || "(No subject)"}</strong>
-              <span>
-                {draft.reconciliationState === "in_progress"
-                  ? "This send is still in progress. Ilo will refresh its state automatically."
-                  : "Ilo could not confirm the provider result."}
-              </span>
-            </div>
-            {draft.reconciliationState === "sent_mail_review_required" ? (
-              <div className="mail-send-recovery__actions">
-                <Button
-                  aria-label={`I found it in Sent Mail: ${draft.subject || "this message"}`}
-                  disabled={mutationPending}
-                  onClick={() => reconcile(draft.id, "sent")}
-                  type="button"
-                >
-                  I found it in Sent Mail
-                </Button>
-                <Button
-                  aria-label={`It was not sent: ${draft.subject || "this message"}`}
-                  disabled={mutationPending}
-                  onClick={() => reconcile(draft.id, "not_sent")}
-                  tone="ghost"
-                  type="button"
-                >
-                  It was not sent
-                </Button>
-              </div>
-            ) : (
-              <span aria-live="polite">Waiting for the provider result…</span>
-            )}
-          </article>
-        ))}
-      </div>
-      {mutationError ? <InlineError error={mutationError} /> : null}
-    </section>
+    <>
+      <Collapsible className="mail-legacy-drafts" defaultOpen>
+        <CollapsibleTrigger asChild>
+          <Button tone="ghost" type="button">
+            <ChevronDownIcon aria-hidden="true" data-icon="inline-start" />
+            Historical drafts ({drafts.length})
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mail-legacy-drafts__content">
+          <p>
+            Ilo never sends email. These historical records can only be exported to this device or
+            permanently deleted.
+          </p>
+          <div className="mail-legacy-drafts__items">
+            {drafts.map((draft) => (
+              <article className="mail-legacy-drafts__item" key={draft.id}>
+                <div>
+                  <strong>{draft.subject || "(No subject)"}</strong>
+                  <span>{accounts.find((account) => account.id === draft.accountId)?.label}</span>
+                  <span>To: {draft.to.join(", ") || "No recipients"}</span>
+                  <span>Updated {mailDate(draft.updatedAt, "UTC")}</span>
+                  <Badge>{draft.deliveryState.replaceAll("_", " ")}</Badge>
+                </div>
+                <div className="mail-legacy-drafts__actions">
+                  <Button
+                    aria-label={`Export historical draft: ${draft.subject || "No subject"}`}
+                    onClick={() => downloadLegacyMailDraft(draft)}
+                    tone="ghost"
+                    type="button"
+                  >
+                    <DownloadIcon aria-hidden="true" data-icon="inline-start" />
+                    Export
+                  </Button>
+                  <Button
+                    aria-label={`Delete historical draft: ${draft.subject || "No subject"}`}
+                    disabled={mutationPending}
+                    onClick={() => setPendingDelete(draft)}
+                    tone="ghost"
+                    type="button"
+                  >
+                    <TrashIcon aria-hidden="true" data-icon="inline-start" />
+                    Delete
+                  </Button>
+                </div>
+              </article>
+            ))}
+          </div>
+          {mutationError ? <InlineError error={mutationError} /> : null}
+        </CollapsibleContent>
+      </Collapsible>
+      <Dialog
+        onOpenChange={(open) => (open ? undefined : setPendingDelete(null))}
+        open={Boolean(pendingDelete)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete historical draft?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the draft from Ilo. Export it first if you need a copy.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setPendingDelete(null)} tone="ghost" type="button">
+              Cancel
+            </Button>
+            <Button
+              disabled={mutationPending}
+              onClick={() => {
+                if (pendingDelete) remove(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+              type="button"
+            >
+              {mutationPending ? "Deleting…" : "Delete historical draft"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -398,9 +450,6 @@ export function MailPage({ user }: { user: User }) {
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
   const listScope = mailListScopeFromSearch(params);
-  const composing = params.get("compose") === "1";
-  const [composeThread, setComposeThread] = useState<MailThread | null>(null);
-  const composeFormRef = useRef<HTMLFormElement>(null);
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -423,13 +472,10 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-threads", accountId, mailboxId, search, listScope],
     refetchInterval: 60_000,
   });
-  const drafts = useQuery({
-    queryFn: api.listMailDrafts,
-    queryKey: ["mail-drafts"],
-    refetchInterval: 15_000,
+  const legacyDrafts = useQuery({
+    queryFn: api.listLegacyMailDrafts,
+    queryKey: ["mail-legacy-drafts"],
   });
-  const uncertainDrafts =
-    drafts.data?.filter((draft) => draft.reconciliationState !== "none") ?? [];
   const listed = threads.data?.find((thread) => thread.id === selectedId);
   const loaded = useQuery({
     enabled: Boolean(selectedId && threads.data && !listed),
@@ -459,63 +505,19 @@ export function MailPage({ user }: { user: User }) {
       api.snoozeMailThread(id, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
-  const send = useMutation({
-    mutationFn: (form: FormData) => {
-      const threadId = String(form.get("threadId") ?? "");
-      return api.sendMail({
-        accountId: String(form.get("accountId")),
-        body: String(form.get("body")),
-        cc: [],
-        subject: String(form.get("subject")),
-        ...(threadId ? { threadId } : {}),
-        to: String(form.get("to"))
-          .split(",")
-          .map((address) => address.trim())
-          .filter(Boolean)
-          .map((address) => ({ address, name: null })),
-      });
-    },
-    onSuccess: () => {
-      update({ compose: null });
-      setComposeThread(null);
-      return client.invalidateQueries({ queryKey: ["mail-threads"] });
-    },
+  const deleteLegacyDraft = useMutation({
+    mutationFn: (id: string) => api.deleteLegacyMailDraft(id),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-legacy-drafts"] }),
   });
-  const saveDraft = useMutation({
-    mutationFn: (form: FormData) => {
-      const threadId = String(form.get("threadId") ?? "");
-      return api.createMailDraft({
-        accountId: String(form.get("accountId")),
-        body: String(form.get("body")),
-        cc: [],
-        subject: String(form.get("subject")),
-        ...(threadId ? { threadId } : {}),
-        to: String(form.get("to"))
-          .split(",")
-          .map((address) => address.trim())
-          .filter(Boolean)
-          .map((address) => ({ address, name: null })),
-      });
-    },
-    onSuccess: () => {
-      update({ compose: null });
-      setComposeThread(null);
-      return client.invalidateQueries({ queryKey: ["mail-drafts"] });
-    },
-  });
-  const reconcileDraft = useMutation({
-    mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
-      api.reconcileMailDraft(id, { outcome }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
-  });
-  const sendRecovery = (
-    <MailSendRecovery
-      drafts={uncertainDrafts}
-      error={drafts.error}
-      isPending={drafts.isPending}
-      mutationError={reconcileDraft.error}
-      mutationPending={reconcileDraft.isPending}
-      reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
+  const historicalDrafts = (
+    <HistoricalMailDrafts
+      accounts={enabled}
+      drafts={legacyDrafts.data ?? []}
+      error={legacyDrafts.error}
+      isPending={legacyDrafts.isPending}
+      mutationError={deleteLegacyDraft.error}
+      mutationPending={deleteLegacyDraft.isPending}
+      remove={(id) => deleteLegacyDraft.mutate(id)}
     />
   );
   if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
@@ -524,7 +526,7 @@ export function MailPage({ user }: { user: User }) {
   if (!enabled.length)
     return (
       <div className="mail-page">
-        {sendRecovery}
+        {historicalDrafts}
         <ConnectionRecoveryAlert accounts={enabled} />
         <div className="narrow-page">
           <p className="eyebrow">Mail for people and agents</p>
@@ -538,76 +540,8 @@ export function MailPage({ user }: { user: User }) {
   if (threads.isPending) return <WorkspaceSkeleton kind="mail" />;
   return (
     <div className="mail-page">
-      {sendRecovery}
+      {historicalDrafts}
       <ConnectionRecoveryAlert accounts={enabled} />
-      {composing ? (
-        <form
-          className="mail-compose"
-          onSubmit={(event) => {
-            event.preventDefault();
-            send.mutate(new FormData(event.currentTarget));
-          }}
-          ref={composeFormRef}
-        >
-          <input name="accountId" type="hidden" value={enabled[0]?.id ?? ""} />
-          <input name="threadId" type="hidden" value={composeThread?.id ?? ""} />
-          <label>
-            To
-            <input
-              aria-label="To"
-              defaultValue={composeThread?.from.address ?? ""}
-              name="to"
-              required
-              type="email"
-            />
-          </label>
-          <label>
-            Subject
-            <input
-              aria-label="Subject"
-              defaultValue={
-                composeThread
-                  ? composeThread.subject.toLowerCase().startsWith("re:")
-                    ? composeThread.subject
-                    : `Re: ${composeThread.subject}`
-                  : ""
-              }
-              name="subject"
-            />
-          </label>
-          <label>
-            Message
-            <textarea aria-label="Message" name="body" required />
-          </label>
-          {send.isError ? <InlineError error={send.error} /> : null}
-          {saveDraft.isError ? <InlineError error={saveDraft.error} /> : null}
-          <div>
-            <Button
-              onClick={() => {
-                update({ compose: null });
-                setComposeThread(null);
-              }}
-              tone="ghost"
-              type="button"
-            >
-              Discard
-            </Button>
-            <Button
-              disabled={saveDraft.isPending}
-              onClick={() => {
-                if (composeFormRef.current) saveDraft.mutate(new FormData(composeFormRef.current));
-              }}
-              tone="ghost"
-              type="button"
-            >
-              {saveDraft.isPending ? "Saving…" : "Save draft"}
-            </Button>
-            <Button disabled={send.isPending} type="submit">
-              {send.isPending ? "Sending…" : "Send"}
-            </Button>
-          </div>
-        </form>
-      ) : null}
       {selected ? (
         <MailSecondaryNavigation
           archive={() =>
@@ -619,10 +553,6 @@ export function MailPage({ user }: { user: User }) {
             })
           }
           pending={updateThread.isPending}
-          reply={() => {
-            setComposeThread(selected);
-            update({ compose: "1" });
-          }}
           selected={selected}
           snooze={() => snoozeThread.mutate(selected.id)}
           toggleStar={() => updateThread.mutate({ id: selected.id, starred: !selected.starred })}
@@ -683,7 +613,6 @@ export function MailPage({ user }: { user: User }) {
 function MailSecondaryNavigation({
   archive,
   pending,
-  reply,
   selected,
   snooze,
   toggleStar,
@@ -692,7 +621,6 @@ function MailSecondaryNavigation({
 }: {
   archive: () => void;
   pending: boolean;
-  reply: () => void;
   selected: MailThread;
   snooze: () => void;
   toggleStar: () => void;
@@ -702,10 +630,6 @@ function MailSecondaryNavigation({
   return (
     <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
-        <Button onClick={reply} tone="ghost">
-          <ReplyIcon aria-hidden="true" className="size-4" />
-          <span>Reply</span>
-        </Button>
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
           <ArchiveIcon aria-hidden="true" className="size-4" />
           <span>Archive</span>

@@ -203,15 +203,6 @@ export type UpdateRemoteMailThreadInput = {
   removeMailboxIds?: string[];
 };
 
-export type SendRemoteMailInput = {
-  body: string;
-  cc: MailAddress[];
-  from: string;
-  subject: string;
-  threadId?: string;
-  to: MailAddress[];
-};
-
 export type ProviderOperationOptions = {
   deadlineMs?: number;
   signal?: AbortSignal;
@@ -258,10 +249,6 @@ export type GoogleConnector = {
     credentials: GoogleCredentials,
     operation?: ProviderOperationOptions,
   ) => Promise<CredentialResult<RemoteCalendar[]>>;
-  sendMail?: (
-    credentials: GoogleCredentials,
-    input: SendRemoteMailInput,
-  ) => Promise<GoogleCredentials>;
   updateMailThread?: (
     credentials: GoogleCredentials,
     remoteThreadId: string,
@@ -333,7 +320,6 @@ export type ICloudConnector = {
     onChange: () => Promise<void> | void,
     operation?: ProviderOperationOptions,
   ) => Promise<void>;
-  sendMail?: (credentials: ICloudCredentials, input: SendRemoteMailInput) => Promise<void>;
   updateMailThread?: (
     credentials: ICloudCredentials,
     remoteThreadId: string,

@@ -140,8 +140,6 @@ export const iloToolCatalog = {
   update_mail: write("mail", ["mail:write"], { openWorld: true }),
   bulk_update_mail: write("mail", ["mail:write"], { openWorld: true }),
   snooze_mail: write("mail", ["mail:write"]),
-  create_mail_draft: write("mail", ["mail:write"], { openWorld: true }),
-  send_mail: write("mail", ["mail:write"], { openWorld: true }),
   create_mail_attention_item: write("mail", ["mail:write"]),
   create_mail_rule: write("mail", ["mail:write"], { openWorld: true }),
   update_mail_rule: write("mail", ["mail:write"]),

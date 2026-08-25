@@ -3174,34 +3174,28 @@ p {
   min-height: 0;
   min-width: 0;
 }
-.mail-send-recovery {
+.mail-legacy-drafts {
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
   border-radius: var(--radius);
-  display: grid;
-  gap: 16px;
   margin-bottom: 12px;
-  padding: 18px;
+  padding: 10px;
 }
-.mail-send-recovery h2 {
-  font-size: 18px;
-  margin: 2px 0 6px;
+.mail-legacy-drafts__content {
+  display: grid;
+  gap: 12px;
+  padding: 8px;
 }
-.mail-send-recovery p {
+.mail-legacy-drafts__content > p {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
 }
-.mail-send-recovery__loading {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 0 0 10px;
-}
-.mail-send-recovery__items {
+.mail-legacy-drafts__items {
   display: grid;
   gap: 10px;
 }
-.mail-send-recovery__item {
+.mail-legacy-drafts__item {
   align-items: center;
   background: var(--paper);
   border: 1px solid var(--line);
@@ -3212,20 +3206,20 @@ p {
   min-width: 0;
   padding: 12px;
 }
-.mail-send-recovery__item > div:first-child {
+.mail-legacy-drafts__item > div:first-child {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
-.mail-send-recovery__item strong,
-.mail-send-recovery__item span {
+.mail-legacy-drafts__item strong,
+.mail-legacy-drafts__item span {
   overflow-wrap: anywhere;
 }
-.mail-send-recovery__item span {
+.mail-legacy-drafts__item span {
   color: var(--muted);
   font-size: 13px;
 }
-.mail-send-recovery__actions {
+.mail-legacy-drafts__actions {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -4883,15 +4877,15 @@ p {
     min-width: 7rem;
     width: min(12rem, 42vw);
   }
-  .mail-send-recovery {
+  .mail-legacy-drafts {
     border-radius: 12px;
     padding: 14px;
   }
-  .mail-send-recovery__item {
+  .mail-legacy-drafts__item {
     align-items: stretch;
     flex-direction: column;
   }
-  .mail-send-recovery__actions {
+  .mail-legacy-drafts__actions {
     display: grid;
   }
   .mail-workspace {

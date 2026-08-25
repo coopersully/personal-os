@@ -282,7 +282,6 @@ const mocks = vi.hoisted(() => ({
   createInvitation: vi.fn(),
   createCalendar: vi.fn(),
   createCalendarReview: vi.fn(),
-  createMailDraft: vi.fn(),
   createEvent: vi.fn(),
   createEventBlock: vi.fn(),
   createGoal: vi.fn(),
@@ -303,6 +302,7 @@ const mocks = vi.hoisted(() => ({
   deleteTask: vi.fn(),
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
+  deleteLegacyMailDraft: vi.fn(),
   getDailyBrief: vi.fn(),
   getCalendarStatus: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
@@ -328,14 +328,12 @@ const mocks = vi.hoisted(() => ({
   listXBookmarks: vi.fn(),
   listEvents: vi.fn(),
   listMailboxes: vi.fn(),
-  listMailDrafts: vi.fn(),
+  listLegacyMailDrafts: vi.fn(),
   listMailMessages: vi.fn(),
   listMailRules: vi.fn(),
   listMailThreads: vi.fn(),
   listInvitations: vi.fn(),
   listOAuthClients: vi.fn(),
-  reconcileMailDraft: vi.fn(),
-  sendMail: vi.fn(),
   snoozeMailThread: vi.fn(),
   listGoals: vi.fn(),
   listMotives: vi.fn(),
@@ -868,14 +866,12 @@ function defaults() {
       unsubscribeAutomation: false,
     },
   });
-  mocks.listMailDrafts.mockResolvedValue([]);
+  mocks.listLegacyMailDrafts.mockResolvedValue([]);
   mocks.listMailThreads.mockResolvedValue([mailThread, secondMailThread]);
   mocks.listMailMessages.mockResolvedValue([]);
   mocks.listMailRules.mockResolvedValue([]);
   mocks.getMailThread.mockResolvedValue(mailThread);
-  mocks.sendMail.mockResolvedValue(undefined);
-  mocks.createMailDraft.mockResolvedValue({ id });
-  mocks.reconcileMailDraft.mockResolvedValue({ id, sendStatus: "draft" });
+  mocks.deleteLegacyMailDraft.mockResolvedValue(undefined);
   mocks.snoozeMailThread.mockResolvedValue(undefined);
   mocks.updateMailThread.mockResolvedValue(mailThread);
   mocks.listAccessTokens.mockResolvedValue([
@@ -3848,7 +3844,12 @@ describe("ilo web app", () => {
     const mail = setup("/mail/thread/example");
     const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
     expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
-    expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
+    expect(
+      within(mailAppBar).getByRole("button", { name: "Sync all mail accounts" }),
+    ).toBeInTheDocument();
+    expect(
+      within(mailAppBar).queryByRole("button", { name: /compose|send/i }),
+    ).not.toBeInTheDocument();
     mail.unmount();
 
     const finances = setup("/finances/transactions");
@@ -5409,10 +5410,9 @@ describe("ilo web app", () => {
     const filledStarMarkup = iconMarkup(StarIcon, "Filled");
     const topNavigation = await screen.findByRole("navigation", { name: "Top navigation" });
     expect(within(topNavigation).queryByRole("heading")).not.toBeInTheDocument();
-    // The app bar hides action labels at narrow width, so these buttons carry a
-    // descriptive accessible name for their icon-only state.
-    const composeButton = within(topNavigation).getByRole("button", { name: "Compose mail" });
-    expect(composeButton).toHaveAttribute("aria-pressed", "false");
+    expect(
+      within(topNavigation).queryByRole("button", { name: /compose|send/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
@@ -5446,45 +5446,9 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.snoozeMailThread).toHaveBeenCalledWith(mailThread.id, expect.any(String)),
     );
-    await browser.click(screen.getByRole("button", { name: "Reply" }));
-    expect(screen.getByLabelText("To")).toHaveValue("ada@example.com");
-    expect(screen.getByLabelText("Subject")).toHaveValue("Re: Project update");
-    await browser.click(screen.getByRole("button", { name: "Discard" }));
-    await browser.click(composeButton);
-    expect(composeButton).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("To")).toBeInTheDocument();
-    await browser.click(composeButton);
-    expect(composeButton).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByLabelText("To")).not.toBeInTheDocument();
-    await browser.click(composeButton);
-    await browser.type(screen.getByLabelText("To"), "to@example.com");
-    await browser.type(screen.getByLabelText("Subject"), "Subject");
-    await browser.type(screen.getByLabelText("Message"), "Hello");
-    await browser.click(screen.getByRole("button", { name: "Save draft" }));
-    await waitFor(() =>
-      expect(mocks.createMailDraft).toHaveBeenCalledWith({
-        accountId: secondId,
-        body: "Hello",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    );
-    await waitFor(() => expect(composeButton).toHaveAttribute("aria-pressed", "false"));
-    await browser.click(composeButton);
-    await browser.type(await screen.findByLabelText("To"), "to@example.com");
-    await browser.type(screen.getByLabelText("Subject"), "Subject");
-    await browser.type(screen.getByLabelText("Message"), "Hello");
-    await browser.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() =>
-      expect(mocks.sendMail).toHaveBeenCalledWith({
-        accountId: secondId,
-        body: "Hello",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    );
+    expect(
+      screen.queryByRole("button", { name: /^(Compose mail|Reply|Forward|Send)$/i }),
+    ).not.toBeInTheDocument();
 
     await browser.click(screen.getByRole("button", { name: /No body/ }));
     expect(
@@ -5520,158 +5484,49 @@ describe("ilo web app", () => {
     view.unmount();
   }, 10_000);
 
-  it("keeps uncertain draft recovery human-readable and keyboard-accessible", async () => {
-    const recentAndReconcileDrafts = [
-      {
-        accountId: secondId,
-        body: "Private body",
-        cc: [],
-        createdAt: now,
-        id,
-        reconciliationState: "sent_mail_review_required" as const,
-        sendClaimedAt: now,
-        sendStatus: "reconcile",
-        sentAt: null,
-        subject: "Quarterly reply",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-      {
-        accountId: secondId,
-        body: "Another body",
-        cc: [],
-        createdAt: now,
-        id: secondId,
-        reconciliationState: "in_progress" as const,
-        sendClaimedAt: now,
-        sendStatus: "sending",
-        sentAt: null,
-        subject: "Travel details",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-    ];
-    mocks.listMailDrafts.mockResolvedValueOnce(recentAndReconcileDrafts).mockResolvedValue([
-      {
-        ...recentAndReconcileDrafts[1],
-        reconciliationState: "sent_mail_review_required",
-      },
-    ]);
-    mocks.reconcileMailDraft.mockResolvedValue({ id, sendStatus: "sent" });
-    setup("/mail");
-    const browser = userEvent.setup();
-    const recovery = await screen.findByRole("region", { name: "Resolve an uncertain send" });
-    expect(recovery).toHaveTextContent("First inspect this account’s provider Sent Mail");
-    expect(
-      within(recovery).queryByRole("button", {
-        name: "It was not sent: Travel details",
-      }),
-    ).not.toBeInTheDocument();
-    expect(within(recovery).getByText("Waiting for the provider result…")).toBeInTheDocument();
-    await browser.click(
-      within(recovery).getByRole("button", {
-        name: "I found it in Sent Mail: Quarterly reply",
-      }),
-    );
-    await waitFor(() =>
-      expect(mocks.reconcileMailDraft).toHaveBeenCalledWith(id, { outcome: "sent" }),
-    );
-    await browser.click(
-      await within(recovery).findByRole("button", {
-        name: "It was not sent: Travel details",
-      }),
-    );
-    await waitFor(() =>
-      expect(mocks.reconcileMailDraft).toHaveBeenCalledWith(secondId, {
-        outcome: "not_sent",
-      }),
-    );
-    expect(mocks.reconcileMailDraft).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps uncertain send recovery errors visible without hiding the draft", async () => {
-    mocks.listMailDrafts.mockResolvedValue([
-      {
-        accountId: secondId,
-        body: "Untitled body",
-        cc: [],
-        createdAt: now,
-        id,
-        reconciliationState: "sent_mail_review_required",
-        sendClaimedAt: now,
-        sendStatus: "reconcile",
-        sentAt: null,
-        subject: "",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-    ]);
-    mocks.reconcileMailDraft.mockRejectedValueOnce(new Error("Recovery unavailable"));
-    setup("/mail");
+  it("exports and deletes historical drafts without exposing an editor", async () => {
+    const draft = {
+      accountId: secondId,
+      body: "Private historical body",
+      cc: [],
+      createdAt: now,
+      deliveryState: "delivery_unknown" as const,
+      id,
+      subject: "Quarterly reply",
+      threadId: null,
+      to: ["to@example.com"],
+      updatedAt: now,
+    };
+    mocks.listLegacyMailDrafts.mockResolvedValue([draft]);
+    const createObjectUrl = vi.fn(() => "blob:historical-draft");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    setup("/mail?compose=1");
     const browser = userEvent.setup();
 
-    const recovery = await screen.findByRole("region", { name: "Resolve an uncertain send" });
-    expect(within(recovery).getByText("(No subject)")).toBeInTheDocument();
+    expect(await screen.findByText("Historical drafts (1)")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Ilo never sends email. These historical records can only be exported to this device or permanently deleted.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     await browser.click(
-      within(recovery).getByRole("button", {
-        name: "I found it in Sent Mail: this message",
-      }),
+      screen.getByRole("button", { name: "Export historical draft: Quarterly reply" }),
     );
-    expect(await within(recovery).findByRole("alert")).toHaveTextContent("Recovery unavailable");
-    expect(
-      within(recovery).getByRole("button", {
-        name: "It was not sent: this message",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows progress and query failures while checking uncertain sends", async () => {
-    let rejectDrafts: ((error: Error) => void) | undefined;
-    mocks.listMailDrafts.mockImplementationOnce(
-      () =>
-        new Promise((_, reject) => {
-          rejectDrafts = reject;
-        }),
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:historical-draft");
+    await browser.click(
+      screen.getByRole("button", { name: "Delete historical draft: Quarterly reply" }),
     );
-    setup("/mail");
-
-    expect(await screen.findByText("Checking uncertain sends…")).toBeInTheDocument();
-    rejectDrafts?.(new Error("Draft recovery unavailable"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Draft recovery unavailable");
-  });
-
-  it("keeps uncertain send recovery visible without an enabled Mail connector", async () => {
-    mocks.listConnectors.mockResolvedValue([]);
-    mocks.listMailDrafts.mockResolvedValue([
-      {
-        accountId: secondId,
-        body: "Disconnected body",
-        cc: [],
-        createdAt: now,
-        id,
-        reconciliationState: "sent_mail_review_required",
-        sendClaimedAt: now,
-        sendStatus: "reconcile",
-        sentAt: null,
-        subject: "Disconnected send",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-    ]);
-    setup("/mail");
-    expect(
-      await screen.findByRole("region", { name: "Resolve an uncertain send" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Connect a mailbox")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "I found it in Sent Mail: Disconnected send",
-      }),
-    ).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Delete historical draft" }));
+    await waitFor(() => expect(mocks.deleteLegacyMailDraft).toHaveBeenCalledWith(id));
+    click.mockRestore();
   });
 
   it("moves a conversation to the account trash", async () => {
@@ -5692,15 +5547,6 @@ describe("ilo web app", () => {
         mailboxIds: [trash.id],
       }),
     );
-  });
-
-  it("keeps an existing reply subject when replying", async () => {
-    mocks.listMailThreads.mockResolvedValue([{ ...mailThread, subject: "Re: Project update" }]);
-    setup("/mail");
-    const browser = userEvent.setup();
-    await browser.click(await screen.findByRole("button", { name: /Re: Project update/ }));
-    await browser.click(screen.getByRole("button", { name: "Reply" }));
-    expect(screen.getByLabelText("Subject")).toHaveValue("Re: Project update");
   });
 
   it("presents provider mailboxes as friendly, collapsible account groups", async () => {

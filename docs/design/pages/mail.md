@@ -4,6 +4,10 @@
 
 Read and act on one unified mailbox while retaining clear source-account and provider authority.
 
+Ilo never sends email. It has no compose, reply, forward, draft-creation, provider-delivery, or MCP
+send capability. Historical Ilo draft records may only be exported locally or permanently deleted
+by their owner.
+
 ## Connection health
 
 - Mail uses the shared connected-account health contract; it does not interpret provider errors.
@@ -25,9 +29,9 @@ Read and act on one unified mailbox while retaining clear source-account and pro
 - Unified inbox is a disclosure category in the contextual sidebar. Its All
   mail, Unread, Starred, and Snoozed children govern the cross-account
   conversation list; account headers use the same category pattern.
-- Mail keeps the global app bar for its identity, search, Sync, and Compose.
+- Mail keeps the global app bar for its identity, search, and Sync.
   It composes the same shared secondary app bar as Calendar only for a selected
-  conversation: Reply and Archive retain labels; Snooze, Star, and read state
+  conversation: Archive retains its label; Snooze, Star, and read state
   are icon controls; Delete stays in the More menu. The bar uses the shared
   neutral surface rather than a Mail-specific color. At narrow widths, the
   compact controls move into More rather than overflowing horizontally.

@@ -16,9 +16,9 @@ This directory defines an AWS deployment baseline in `us-east-1`:
 
 The tasks receive public IP addresses for direct provider egress but accept inbound traffic only
 from the ALB security group. Their security group permits only DNS, PostgreSQL inside the VPC,
-HTTPS provider traffic on TCP 443, iCloud Mail IMAP over TLS on TCP 993, and
-iCloud Mail SMTP submission on TCP 587. PostgreSQL remains in dedicated private
-subnets and accepts traffic only from application tasks.
+HTTPS provider traffic on TCP 443 and iCloud Mail IMAP over TLS on TCP 993. PostgreSQL remains in
+dedicated private subnets and accepts traffic only from application tasks. Ilo has no user-Mail
+SMTP egress because it never sends email.
 
 The optional local production runtime reaches the same private PostgreSQL instance through a
 dedicated, no-ingress EC2 host managed by Systems Manager. The host has no SSH key, accepts no network

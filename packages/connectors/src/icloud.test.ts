@@ -72,11 +72,7 @@ function davClient(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function connector(
-  client = davClient(),
-  imap?: Record<string, unknown>,
-  createSmtpTransport?: () => { close: () => void; sendMail: (input: unknown) => Promise<unknown> },
-) {
+function connector(client = davClient(), imap?: Record<string, unknown>) {
   const createDavClient = vi.fn(async () => client as never);
   return {
     client,
@@ -84,12 +80,15 @@ function connector(
     value: createICloudConnector({
       createDavClient,
       ...(imap ? { createImapClient: vi.fn(() => imap as never) } : {}),
-      ...(createSmtpTransport ? { createSmtpTransport } : {}),
     }),
   };
 }
 
 describe("iCloud connector", () => {
+  it("does not expose user mail delivery", () => {
+    expect("sendMail" in connector().value).toBe(false);
+  });
+
   it("uses a bounded abortable IMAP IDLE session only as a change signal", async () => {
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     let finishIdle: (() => void) | undefined;
@@ -895,50 +894,6 @@ describe("iCloud connector", () => {
       calendar: expect.objectContaining({ url: calendarId }),
       fetchOptions: { signal: controller.signal },
     });
-  });
-
-  it("sends iCloud mail through the authenticated SMTP transport", async () => {
-    const transport = { close: vi.fn(), sendMail: vi.fn(async () => undefined) };
-    const { value } = connector(davClient(), undefined, () => transport);
-    if (!value.sendMail) throw new Error("Mail sending is unavailable.");
-    await value.sendMail(credentials, {
-      body: "Hello",
-      cc: [{ address: "cc@example.com", name: "CC" }],
-      from: credentials.email,
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: "To" }],
-    });
-    expect(transport.sendMail).toHaveBeenCalledWith({
-      cc: [{ address: "cc@example.com", name: "CC" }],
-      from: credentials.email,
-      subject: "Subject",
-      text: "Hello",
-      to: [{ address: "to@example.com", name: "To" }],
-    });
-    expect(transport.close).toHaveBeenCalledOnce();
-
-    const failingTransport = {
-      close: vi.fn(),
-      sendMail: vi.fn(async () => {
-        throw new Error("SMTP unavailable");
-      }),
-    };
-    const { value: failing } = connector(davClient(), undefined, () => failingTransport);
-    if (!failing.sendMail) throw new Error("Mail sending is unavailable.");
-    await expect(
-      failing.sendMail(credentials, {
-        body: "Hello",
-        cc: [],
-        from: credentials.email,
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toMatchObject({
-      category: "transport",
-      disposition: "retry",
-      status: null,
-    });
-    expect(failingTransport.close).toHaveBeenCalledOnce();
   });
 
   it("writes iCloud flags and mailbox moves through IMAP", async () => {

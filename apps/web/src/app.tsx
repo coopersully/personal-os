@@ -1545,10 +1545,7 @@ function WorkspaceAppBarForRoute({
           ) : workspace === "tasks" ? (
             <TasksCreateButton onCreate={() => setEditor({ kind: "task" })} />
           ) : workspace === "calendar" ? null : workspace === "mail" ? (
-            <>
-              <MailSyncButton />
-              <MailComposeButton />
-            </>
+            <MailSyncButton />
           ) : workspace === "finances" ? (
             <FinanceAddTransactionButton />
           ) : workspace === "account" ? null : (
@@ -4593,31 +4590,6 @@ function MailSyncButton({
         <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
       </ShadcnButton>
     </>
-  );
-}
-
-function MailComposeButton({ onSelect }: { onSelect?: () => void }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const composing = searchParams.get("compose") === "1";
-
-  return (
-    <ShadcnButton
-      aria-label="Compose mail"
-      aria-pressed={composing}
-      onClick={() => {
-        onSelect?.();
-        setSearchParams((current) => {
-          const next = new URLSearchParams(current);
-          if (composing) next.delete("compose");
-          else next.set("compose", "1");
-          return next;
-        });
-      }}
-      size="sm"
-    >
-      <PlusIcon aria-hidden="true" data-icon="inline-start" />
-      <span>Compose</span>
-    </ShadcnButton>
   );
 }
 

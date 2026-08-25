@@ -872,10 +872,10 @@ function addLoadedWorkspace(
   });
   data.mailDrafts.push({
     accountId: connectedAccountId,
-    body: "Thanks for the thoughtful notes. I’ll send the revised outline tomorrow.",
+    body: "Historical unsent Ilo draft retained for export or deletion.",
     createdAt: ago(3),
     id: fixtureId(account, 330),
-    subject: "Re: Research synthesis",
+    subject: "Historical Ilo draft",
     to: [{ address: "research@example.com", name: "Research Team" }],
     updatedAt: ago(2),
     userId: account.id,

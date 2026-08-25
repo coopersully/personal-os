@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
-import nodemailer from "nodemailer";
 import { z } from "zod";
 import { ConnectorError, connectorHttpError } from "./failures.js";
 import { providerFetch } from "./http.js";
@@ -34,12 +33,6 @@ const tokenResponseSchema = z.object({
   refresh_token: z.string().optional(),
   scope: z.string().default(""),
   token_type: z.string().default("Bearer"),
-});
-
-const mailComposer = nodemailer.createTransport({
-  buffer: true,
-  newline: "unix",
-  streamTransport: true,
 });
 
 const profileSchema = z.object({
@@ -178,17 +171,6 @@ const gmailMinimalThreadSchema = z.object({
 });
 
 type GoogleEvent = z.infer<typeof eventSchema>;
-
-/** A local composition or credential-refresh failure before a Mail send request begins. */
-export class MailSendPreAcceptanceError extends Error {
-  public override readonly cause: unknown;
-
-  public constructor(message: string, cause: unknown) {
-    super(message);
-    this.name = "MailSendPreAcceptanceError";
-    this.cause = cause;
-  }
-}
 
 type GoogleConnectorOptions = {
   clientId: string;
@@ -538,10 +520,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         );
       }
       if (services.includes("mail")) {
-        scopes.push(
-          "https://www.googleapis.com/auth/gmail.modify",
-          "https://www.googleapis.com/auth/gmail.send",
-        );
+        scopes.push("https://www.googleapis.com/auth/gmail.modify");
       }
       const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       url.search = new URLSearchParams({
@@ -797,52 +776,6 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async sendMail(credentials, input) {
-      let currentCredentials: GoogleCredentials;
-      let raw: Buffer;
-      try {
-        const composed = (await mailComposer.sendMail({
-          cc: input.cc.map((address) => ({
-            address: address.address,
-            ...(address.name ? { name: address.name } : {}),
-          })),
-          from: input.from,
-          subject: input.subject,
-          text: input.body,
-          to: input.to.map((address) => ({
-            address: address.address,
-            ...(address.name ? { name: address.name } : {}),
-          })),
-        })) as { message: Buffer | string };
-        raw = Buffer.isBuffer(composed.message)
-          ? composed.message
-          : Buffer.from(String(composed.message));
-        currentCredentials = await validCredentials(credentials);
-      } catch (error) {
-        throw new MailSendPreAcceptanceError(
-          "Google Mail could not prepare or authorize the send request.",
-          error,
-        );
-      }
-      const headers = new Headers({ authorization: `Bearer ${currentCredentials.accessToken}` });
-      headers.set("content-type", "application/json");
-      const response = await providerFetch(
-        request,
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        {
-          body: JSON.stringify({
-            raw: raw.toString("base64url"),
-            ...(input.threadId ? { threadId: input.threadId } : {}),
-          }),
-          headers,
-          method: "POST",
-        },
-      );
-      // Once the send request begins, every response/transport failure is ambiguous.
-      await parseResponse(response);
-      return currentCredentials;
-    },
-
     /* v8 ignore stop */
     async syncCalendar(credentials, remoteCalendarId, syncToken, operation) {
       try {
@@ -889,10 +822,9 @@ export function googleGrantedServices(
     fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
   const fullMail = scopes.has("https://mail.google.com/");
   const mailManage = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
-  const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
   return [
     ...(calendarList && calendarEvents ? (["calendar"] as const) : []),
-    ...(mailManage && mailSend ? (["mail"] as const) : []),
+    ...(mailManage ? (["mail"] as const) : []),
   ];
 }
 

@@ -1195,10 +1195,8 @@ function apiFetch() {
     if (url.pathname === "/v1/assistant/attention" && method === "POST")
       return json({ item: attentionItem }, 201);
     if (url.pathname === "/v1/assistant/attention") return json({ items: [attentionItem] });
-    if (url.pathname === "/v1/mail/drafts" && method === "POST")
-      return json({ draft: { id } }, 201);
-    if (url.pathname === `/v1/mail/drafts/${id}/reconcile`)
-      return json({ draft: { id, sendStatus: "draft" } });
+    if (url.pathname === `/v1/mail/drafts/${id}` && method === "DELETE")
+      return new Response(null, { status: 204 });
     if (url.pathname === "/v1/mail/drafts")
       return json({
         drafts: [
@@ -1208,13 +1206,10 @@ function apiFetch() {
             cc: [],
             createdAt: now,
             id,
-            reconciliationState: "none",
-            sendClaimedAt: null,
-            sendStatus: "draft",
-            sentAt: null,
+            deliveryState: "unsent",
             subject: "Subject",
             threadId: null,
-            to: [{ address: "to@example.com", name: null }],
+            to: ["to@example.com"],
             updatedAt: now,
           },
         ],
@@ -1694,6 +1689,9 @@ describe("ilo API client", () => {
     });
     expect(api).not.toHaveProperty("listAutomations");
     expect(api).not.toHaveProperty("runAutomation");
+    expect(api).not.toHaveProperty("createMailDraft");
+    expect(api).not.toHaveProperty("reconcileMailDraft");
+    expect(api).not.toHaveProperty("sendMail");
     await expect(api.getMe()).resolves.toEqual(user);
     await expect(api.listGoals()).resolves.toEqual([goal]);
     await expect(
@@ -2292,22 +2290,10 @@ describe("ilo API client", () => {
         to: [],
       },
     ]);
-    await expect(
-      api.createMailDraft({
-        accountId,
-        body: "Draft",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).resolves.toEqual({ id });
-    await expect(api.listMailDrafts()).resolves.toEqual([
-      expect.objectContaining({ body: "Draft", id, reconciliationState: "none" }),
+    await expect(api.listLegacyMailDrafts()).resolves.toEqual([
+      expect.objectContaining({ body: "Draft", deliveryState: "unsent", id }),
     ]);
-    await expect(api.reconcileMailDraft(id, { outcome: "not_sent" })).resolves.toEqual({
-      id,
-      sendStatus: "draft",
-    });
+    await expect(api.deleteLegacyMailDraft(id)).resolves.toBeUndefined();
     await expect(
       api.createMailRule({
         actions: mailRule.actions,
@@ -2373,13 +2359,6 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
-    await api.sendMail({
-      accountId,
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
     await expect(api.syncConnector(id)).resolves.toBe(3);
     await api.deleteConnector(id);
     await expect(api.listAccessTokens()).resolves.toHaveLength(1);

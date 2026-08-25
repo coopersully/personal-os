@@ -684,7 +684,6 @@ function mockApi() {
         truncated: false,
       },
     })),
-    createMailDraft: vi.fn(async () => ({ id })),
     createMailRule: vi.fn(async () => mailRule),
     upsertMailAttentionItem: vi.fn(async () => attentionItem),
     updateMailRule: vi.fn(async () => ({ ...mailRule, enabled: true, version: 2 })),
@@ -696,7 +695,6 @@ function mockApi() {
       updatedIds: items.map((item) => item.id),
     })),
     snoozeMailThread: vi.fn(async () => undefined),
-    sendMail: vi.fn(async () => undefined),
     listEvents: vi.fn(async () => [event]),
     getEvent: vi.fn(async () => event),
     createEvent: vi.fn(async () => event),
@@ -952,8 +950,6 @@ describe("ilo MCP server", () => {
         "update_mail",
         "bulk_update_mail",
         "snooze_mail",
-        "create_mail_draft",
-        "send_mail",
         "create_mail_attention_item",
         "list_mail_rules",
         "preview_mail_rule",
@@ -969,16 +965,9 @@ describe("ilo MCP server", () => {
         readOnlyHint: expect.any(Boolean),
       });
     }
-    expect(tools.tools.find((tool) => tool.name === "send_mail")?.annotations).toMatchObject({
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-      readOnlyHint: false,
-    });
-    const sendMailInput = tools.tools.find((tool) => tool.name === "send_mail")?.inputSchema as {
-      required?: string[];
-    };
-    expect(sendMailInput.required).toContain("draftId");
+    expect(tools.tools.map((tool) => tool.name)).not.toEqual(
+      expect.arrayContaining(["create_mail_draft", "send_mail"]),
+    );
     const updateMailInput = tools.tools.find((tool) => tool.name === "update_mail")
       ?.inputSchema as { required?: string[] };
     expect(updateMailInput.required).toContain("expectedUpdatedAt");
@@ -995,8 +984,6 @@ describe("ilo MCP server", () => {
       "update_mail",
       "bulk_update_mail",
       "snooze_mail",
-      "create_mail_draft",
-      "send_mail",
       "create_mail_attention_item",
       "create_mail_rule",
       "update_mail_rule",
@@ -1417,25 +1404,6 @@ describe("ilo MCP server", () => {
       arguments: { id, until: "2026-07-14T12:00:00.000Z" },
     });
     await client.callTool({
-      name: "create_mail_draft",
-      arguments: {
-        accountId,
-        body: "Reply body",
-        subject: "Re: Test mail",
-        to: [{ address: "Recipient@Example.COM", name: null }],
-      },
-    });
-    await client.callTool({
-      name: "send_mail",
-      arguments: {
-        accountId,
-        body: "Reply body",
-        draftId: id,
-        subject: "Re: Test mail",
-        to: [{ address: "Recipient@Example.COM", name: null }],
-      },
-    });
-    await client.callTool({
       name: "create_mail_attention_item",
       arguments: {
         importance: "high",
@@ -1678,14 +1646,6 @@ describe("ilo MCP server", () => {
       unread: false,
     });
     expect(api.snoozeMailThread).toHaveBeenCalledWith(id, "2026-07-14T12:00:00.000Z");
-    expect(api.sendMail).toHaveBeenCalledWith({
-      accountId,
-      body: "Reply body",
-      cc: [],
-      draftId: id,
-      subject: "Re: Test mail",
-      to: [{ address: "Recipient@Example.COM", name: null }],
-    });
     expect(api.upsertDomainProfile).toHaveBeenCalledWith(
       expect.objectContaining({ domain: "mail", status: "draft" }),
     );
@@ -2204,81 +2164,6 @@ describe("ilo MCP server", () => {
       await client.close();
       await server.close();
     }
-  });
-
-  it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {
-    const api = mockApi();
-    const server = createPersonalOsMcpServer({
-      api: api as unknown as PersonalOsApiClient,
-      now: () => new Date("2026-07-13T16:00:00.000Z"),
-      timeZone: "America/New_York",
-    });
-    const client = new Client({ name: "test", version: "1.0.0" });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-
-    const invalidSubject = await client.callTool({
-      arguments: {
-        accountId,
-        body: "Body",
-        draftId: id,
-        subject: "Hello\r\nBcc: attacker@example.com",
-        to: [{ address: "recipient@example.com", name: null }],
-      },
-      name: "send_mail",
-    });
-    const invalidName = await client.callTool({
-      arguments: {
-        accountId,
-        body: "Body",
-        draftId: id,
-        subject: "Hello",
-        to: [
-          {
-            address: "recipient@example.com",
-            name: "Recipient\r\nBcc: attacker@example.com",
-          },
-        ],
-      },
-      name: "send_mail",
-    });
-    expect(invalidSubject).toMatchObject({ isError: true });
-    expect(invalidName).toMatchObject({ isError: true });
-    expect(api.sendMail).not.toHaveBeenCalled();
-    const missingDraft = await client.callTool({
-      arguments: {
-        accountId,
-        body: "Body",
-        subject: "Hello",
-        to: [{ address: "recipient@example.com", name: null }],
-      },
-      name: "send_mail",
-    });
-    expect(missingDraft).toMatchObject({ isError: true });
-    expect(api.sendMail).not.toHaveBeenCalled();
-
-    const normalized = await client.callTool({
-      arguments: {
-        accountId,
-        body: "Body",
-        draftId: id,
-        subject: "Hello",
-        to: [{ address: "Recipient@Example.COM", name: null }],
-      },
-      name: "send_mail",
-    });
-    expect(normalized.isError).not.toBe(true);
-    expect(api.sendMail).toHaveBeenCalledWith({
-      accountId,
-      body: "Body",
-      cc: [],
-      draftId: id,
-      subject: "Hello",
-      to: [{ address: "Recipient@Example.COM", name: null }],
-    });
-
-    await client.close();
-    await server.close();
   });
 
   it("preserves structured Mail API partial-effect errors at the tool boundary", async () => {

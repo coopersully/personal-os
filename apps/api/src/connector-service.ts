@@ -14,7 +14,6 @@ import {
   ConnectorError,
   createICloudConnector,
   googleGrantedServices,
-  MailSendPreAcceptanceError,
 } from "@personal-os/connectors";
 import {
   attentionItems,
@@ -204,17 +203,6 @@ export type ConnectedEventGateway = {
 };
 
 export type ConnectedMailGateway = {
-  send: (
-    userId: string,
-    accountId: string,
-    input: {
-      body: string;
-      cc: Array<{ address: string; name: string | null }>;
-      subject: string;
-      threadId?: string;
-      to: Array<{ address: string; name: string | null }>;
-    },
-  ) => Promise<void>;
   update: (
     userId: string,
     accountId: string,
@@ -227,8 +215,7 @@ type MailProviderPartialEffectContext = {
   accountId: string;
   cause: unknown;
   credentialsPersisted: boolean;
-  draftId?: string;
-  operation: "rule_execution" | "send" | "thread_update";
+  operation: "rule_execution" | "thread_update";
   remoteThreadId?: string;
   ruleId?: string;
   threadId?: string;
@@ -238,7 +225,6 @@ export function mailProviderPartialEffectError({
   accountId,
   cause,
   credentialsPersisted,
-  draftId,
   operation,
   remoteThreadId,
   ruleId,
@@ -253,37 +239,22 @@ export function mailProviderPartialEffectError({
   ) {
     return cause;
   }
-  const sentMessageNeedsReconciliation = operation === "send";
-  const sentDraftNeedsReconciliation = sentMessageNeedsReconciliation && draftId !== undefined;
   const repairAction = !credentialsPersisted
     ? "reconnect_then_sync_mail_account"
-    : sentDraftNeedsReconciliation
-      ? "verify_sent_mail_then_reconcile_draft"
-      : sentMessageNeedsReconciliation
-        ? "verify_sent_mail_never_retry"
-        : "sync_mail_account";
+    : "sync_mail_account";
   const userAction = !credentialsPersisted
     ? "Open Settings → Connections, reconnect this Mail account, then open Mail and choose Sync."
-    : sentMessageNeedsReconciliation
-      ? "Inspect the provider's Sent Mail before any retry. If the message exists, do not resend it; return to Ilo to reconcile the local state."
-      : "Open Mail and choose Sync before retrying this action.";
+    : "Open Mail and choose Sync before retrying this action.";
   const userActionDestination = !credentialsPersisted
     ? "Settings → Connections → reconnect; Mail → Sync"
-    : sentMessageNeedsReconciliation
-      ? "Provider Sent Mail; then Ilo Mail"
-      : "Mail → Sync";
+    : "Mail → Sync";
   const message = !credentialsPersisted
     ? "The provider Mail mutation may have committed, but Ilo could not persist rotated provider credentials. Reconnect this Mail account, then sync it to reconcile provider state before retrying."
-    : sentDraftNeedsReconciliation
-      ? "The provider may have sent this message, but Ilo could not mark its draft as sent. Verify Sent Mail before retrying, then reconcile or remove the local draft."
-      : sentMessageNeedsReconciliation
-        ? "The provider may have sent this message, but this draftless send has no durable Ilo recovery object. Inspect Sent Mail and never automatically retry this request."
-        : "The provider Mail mutation may have committed, but Ilo could not persist its local projection and audit. Sync this Mail account to reconcile provider state before retrying.";
+    : "The provider Mail mutation may have committed, but Ilo could not persist its local projection and audit. Sync this Mail account to reconcile provider state before retrying.";
   return new AppError("service_unavailable", message, {
     accountId,
     ...(cause instanceof AppError ? { causeCode: cause.code } : {}),
     credentialPersistenceMayHaveFailed: !credentialsPersisted,
-    ...(draftId ? { draftId } : {}),
     operation,
     partialEffect: true,
     repairAction,
@@ -294,22 +265,6 @@ export function mailProviderPartialEffectError({
     ...(ruleId ? { ruleId } : {}),
     ...(threadId ? { threadId } : {}),
   });
-}
-
-/**
- * A provider response that proves a send was rejected before acceptance.
- *
- * Transport failures are deliberately not classified this way: a connection can
- * fail after the provider accepted the message, so callers must reconcile those.
- */
-export class MailProviderRejectedError extends Error {
-  public override readonly cause: unknown;
-
-  public constructor(message: string, cause: unknown) {
-    super(message);
-    this.name = "MailProviderRejectedError";
-    this.cause = cause;
-  }
 }
 
 type ConnectorServiceOptions = {
@@ -642,52 +597,6 @@ export function createConnectorService({
   };
 
   const mailGateway: ConnectedMailGateway = {
-    async send(userId, accountId, input) {
-      const account = await getAccount(userId, accountId);
-      if (!account.mailEnabled) {
-        throw new AppError("invalid_request", "Mail is not enabled for this connected account.");
-      }
-      if (!account.email) {
-        throw new AppError("internal_error", "The connected Mail account has no sender address.");
-      }
-      const providerInput = { ...input, from: account.email };
-      if (account.provider === "icloud" && icloud.sendMail) {
-        await icloud.sendMail(credentials<ICloudCredentials>(account), providerInput);
-        return;
-      }
-      if (account.provider !== "google" || !google.sendMail) {
-        throw new AppError(
-          "service_unavailable",
-          "This mail provider does not yet support sending mail.",
-        );
-      }
-      let updatedCredentials: GoogleCredentials;
-      try {
-        updatedCredentials = await google.sendMail(
-          credentials<GoogleCredentials>(account),
-          providerInput,
-        );
-      } catch (error) {
-        if (error instanceof MailSendPreAcceptanceError) {
-          throw new MailProviderRejectedError(
-            "The Mail provider rejected the message before accepting it.",
-            error,
-          );
-        }
-        throw error;
-      }
-      try {
-        await saveGoogleCredentials(account.id, updatedCredentials, true);
-      } catch (error) {
-        throw mailProviderPartialEffectError({
-          accountId: account.id,
-          cause: error,
-          credentialsPersisted: false,
-          operation: "send",
-          ...(input.threadId ? { remoteThreadId: input.threadId } : {}),
-        });
-      }
-    },
     /* v8 ignore start -- provider dispatch variants are exercised in connector contracts */
     async update(userId, accountId, remoteThreadId, input) {
       const account = await getAccount(userId, accountId);

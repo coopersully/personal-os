@@ -2,6 +2,30 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-25 — Mail workspace stewardship
+
+- Added the owner-scoped Mail stewardship ledger for obligations, versioned dispositions,
+  deduplicated questions, explicit rule proposals, durable feedback, and immutable reviews.
+- Added `mail-playbook-v1` with six bounded professional roles, a renewable research registry,
+  explicit authority tiers, a deterministic assessment engine, and status that reports Clean,
+  Needs work, Needs your input, or Blocked without inferring intent from message prose.
+- Added a recoverable seven-step maintenance turn on the shared lease/checkpoint substrate. The
+  domain/API owns snapshots, assessment, reconciliation, approved-rule dispatch, review
+  publication, verification, retry, and settlement; no external client automation was added.
+- Added first-party status, maintenance, exact-thread surgical operations, learning feedback, and
+  private response-brief APIs plus a typed client. Response briefs are permanently
+  `transmittable: false`.
+- Added the `/mail/review` workspace and exact-thread ledger controls, including immutable review
+  evidence and honest revision-conflict refresh. The UI has no recipient/body composition,
+  copy-to-send, `mailto:`, reply, forward, or send action.
+- Added only two complete-workspace MCP intents—`get_mail_status` and `maintain_mail`. MCP remains a
+  stateless one-call intent surface and owns no playbook, maintenance loop, retry, approval,
+  learning, or completion judgment.
+- Shared Integration changes were kept separate: owner-fenced connector rule-work dispatch,
+  application route/navigation composition, deterministic QA states, and redacted Mail
+  question/blocker projection into Today-owned Reviews. Shared Reviews never owns Mail mutation.
+- Ilo never sends email.
+
 ## 2026-08-25 — Mail no-send boundary
 
 - Removed Gmail send authority, iCloud SMTP delivery, application TCP 587 egress, and every typed

@@ -233,7 +233,9 @@ export function MailStewardshipPage() {
         ) : (
           questions.map((question) => (
             <Card
-              className={question.id === focusedQuestion ? "ring-2 ring-primary" : undefined}
+              className={
+                question.id === focusedQuestion ? "border-foreground bg-muted/30" : undefined
+              }
               key={question.id}
             >
               <CardHeader>

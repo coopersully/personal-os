@@ -64,7 +64,7 @@ describe("Mail routes", () => {
       await expect(response.json()).resolves.toMatchObject({
         error: {
           code: "feature_unavailable",
-          details: { capability: "mail_send", permanent: true },
+          details: { capability: "email_transmission", permanent: true },
         },
       });
     }

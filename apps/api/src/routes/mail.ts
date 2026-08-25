@@ -25,7 +25,7 @@ type MailRouteOptions = {
 
 function mailSendingUnavailable(): never {
   throw new AppError("feature_unavailable", "Ilo does not send email.", {
-    capability: "mail_send",
+    capability: "email_transmission",
     permanent: true,
   });
 }

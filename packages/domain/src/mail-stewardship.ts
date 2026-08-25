@@ -48,6 +48,7 @@ export const mailQuestionKindSchema = z.enum([
 export type MailObligationKind = z.infer<typeof mailObligationKindSchema>;
 export type MailObligationState = z.infer<typeof mailObligationStateSchema>;
 export type MailDispositionKind = z.infer<typeof mailDispositionKindSchema>;
+export type MailStewardshipFeedbackKind = z.infer<typeof mailStewardshipFeedbackKindSchema>;
 
 const obligationOwnerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("user") }),

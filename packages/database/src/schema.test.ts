@@ -21,13 +21,69 @@ import {
   financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
+  mailObligations,
+  mailReviews,
+  mailRuleProposals,
   mailRuleWorkItems,
+  mailStewardshipFeedback,
+  mailStewardshipQuestions,
+  mailThreadDispositions,
   oauthStates,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps the Mail stewardship ledger owned, revisioned, and historically reviewable", async () => {
+    const obligations = getTableConfig(mailObligations);
+    const dispositions = getTableConfig(mailThreadDispositions);
+    const questions = getTableConfig(mailStewardshipQuestions);
+    const proposals = getTableConfig(mailRuleProposals);
+    const feedback = getTableConfig(mailStewardshipFeedback);
+    const reviews = getTableConfig(mailReviews);
+
+    for (const table of [obligations, dispositions, questions, proposals, feedback, reviews]) {
+      expect(table.columns.map((column) => column.name)).toContain("user_id");
+    }
+    expect(obligations.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "mail_obligations_user_state_idx",
+        "mail_obligations_open_identity_idx",
+      ]),
+    );
+    expect(dispositions.indexes.map((index) => index.config.name)).toContain(
+      "mail_thread_dispositions_current_thread_idx",
+    );
+    expect(questions.indexes.map((index) => index.config.name)).toContain(
+      "mail_stewardship_questions_open_fingerprint_idx",
+    );
+    expect(proposals.columns.map((column) => column.name)).toContain("version");
+    expect(feedback.columns.map((column) => column.name)).not.toContain("updated_at");
+    expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0072_mail_workspace_stewardship.sql"),
+      "utf8",
+    );
+    for (const table of [
+      "mail_obligations",
+      "mail_thread_dispositions",
+      "mail_stewardship_questions",
+      "mail_rule_proposals",
+      "mail_stewardship_feedback",
+      "mail_reviews",
+    ]) {
+      expect(migrationSql).toContain(`CREATE TABLE "${table}"`);
+    }
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "mail_thread_dispositions_current_thread_idx"',
+    );
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "mail_stewardship_questions_open_fingerprint_idx"',
+    );
+    expect(migrationSql).not.toContain('ALTER TABLE "mail_threads"');
+  });
+
   it("keeps Calendar findings stable and reviews immutable", async () => {
     const findings = getTableConfig(calendarFindings);
     const reviews = getTableConfig(calendarReviews);
@@ -218,6 +274,7 @@ describe("database schema contracts", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
+      "0072_mail_workspace_stewardship",
     ]);
   });
 

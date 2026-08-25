@@ -38,11 +38,16 @@ import type {
   MailAddress,
   MailAttachment,
   MailboxRole,
+  MailDispositionKind,
+  MailHealthDimension,
+  MailObligationKind,
+  MailObligationState,
   MailProvider,
   MailRuleAction,
   MailRuleCondition,
   MailRuleProviderEffect,
   MailRuleWorkStatus,
+  MailStewardshipFeedbackKind,
   MaintenanceRunStatus,
   MaintenanceScope,
   MaterialSourceReference,
@@ -1388,6 +1393,258 @@ export const mailRuleWorkItems = pgTable(
           AND ${table.completedAt} IS NOT NULL
         )
       `,
+    ),
+  ],
+);
+
+export const mailObligations = pgTable(
+  "mail_obligations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => mailThreads.id, { onDelete: "cascade" }),
+    sourceMessageId: uuid("source_message_id").references(() => mailMessages.id, {
+      onDelete: "set null",
+    }),
+    sourceThreadRevision: timestamp("source_revision", { withTimezone: true }).notNull(),
+    kind: text("kind").$type<MailObligationKind>().notNull(),
+    state: text("state").$type<MailObligationState>().notNull().default("open"),
+    owner: jsonb("owner")
+      .$type<{ kind: "user" } | { kind: "other"; relationshipRef: string | null }>()
+      .notNull(),
+    goalIds: jsonb("goal_ids").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    nextReviewAt: timestamp("next_review_at", { withTimezone: true }),
+    closureEvidence: jsonb("closure_evidence")
+      .$type<MaterialSourceReference[]>()
+      .notNull()
+      .default([]),
+    confidence: text("confidence")
+      .$type<"explicit" | "confirmed" | "inferred_candidate">()
+      .notNull()
+      .default("explicit"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    index("mail_obligations_user_state_idx").on(
+      table.userId,
+      table.state,
+      table.nextReviewAt,
+      table.dueAt,
+    ),
+    uniqueIndex("mail_obligations_open_identity_idx")
+      .on(table.userId, table.threadId, table.kind, table.sourceThreadRevision)
+      .where(sql`${table.state} IN ('open', 'waiting', 'deferred')`),
+    check(
+      "mail_obligations_kind_check",
+      sql`${table.kind} IN ('reply', 'follow_up', 'decide', 'schedule', 'record', 'security_review')`,
+    ),
+    check(
+      "mail_obligations_state_check",
+      sql`${table.state} IN ('open', 'waiting', 'deferred', 'resolved', 'dismissed')`,
+    ),
+    check(
+      "mail_obligations_confidence_check",
+      sql`${table.confidence} IN ('explicit', 'confirmed', 'inferred_candidate')`,
+    ),
+    check("mail_obligations_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const mailThreadDispositions = pgTable(
+  "mail_thread_dispositions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => mailThreads.id, { onDelete: "cascade" }),
+    disposition: text("disposition").$type<MailDispositionKind>().notNull(),
+    rationale: text("rationale").notNull(),
+    sourceThreadRevision: timestamp("source_thread_revision", { withTimezone: true }).notNull(),
+    version: integer("version").notNull(),
+    current: boolean("current").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("mail_thread_dispositions_current_thread_idx")
+      .on(table.threadId)
+      .where(sql`${table.current} = true`),
+    uniqueIndex("mail_thread_dispositions_thread_version_idx").on(table.threadId, table.version),
+    index("mail_thread_dispositions_user_current_idx").on(table.userId, table.current),
+    check(
+      "mail_thread_dispositions_kind_check",
+      sql`${table.disposition} IN ('active', 'deferred', 'waiting', 'delegated', 'reference', 'noise', 'resolved')`,
+    ),
+    check("mail_thread_dispositions_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const mailStewardshipQuestions = pgTable(
+  "mail_stewardship_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => mailThreads.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    kind: text("kind")
+      .$type<
+        | "needs_disposition"
+        | "needs_owner"
+        | "needs_due_date"
+        | "needs_correction"
+        | "needs_exception"
+      >()
+      .notNull(),
+    reason: text("reason").notNull(),
+    options: jsonb("options")
+      .$type<Array<{ label: string; value: string }>>()
+      .notNull()
+      .default([]),
+    evidence: jsonb("evidence").$type<MaterialSourceReference[]>().notNull(),
+    status: text("status").$type<"open" | "answered" | "dismissed">().notNull().default("open"),
+    answer: text("answer"),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_stewardship_questions_open_fingerprint_idx")
+      .on(table.userId, table.fingerprint)
+      .where(sql`${table.status} = 'open'`),
+    index("mail_stewardship_questions_user_status_idx").on(table.userId, table.status),
+    check(
+      "mail_stewardship_questions_fingerprint_check",
+      sql`${table.fingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_stewardship_questions_status_check",
+      sql`${table.status} IN ('open', 'answered', 'dismissed')`,
+    ),
+    check(
+      "mail_stewardship_questions_answer_check",
+      sql`(${table.status} = 'answered') = (${table.answer} IS NOT NULL AND ${table.answeredAt} IS NOT NULL)`,
+    ),
+    check("mail_stewardship_questions_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const mailRuleProposals = pgTable(
+  "mail_rule_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    rationale: text("rationale").notNull(),
+    examples: jsonb("examples").$type<string[]>().notNull(),
+    counterexamples: jsonb("counterexamples").$type<string[]>().notNull().default([]),
+    exceptions: jsonb("exceptions").$type<string[]>().notNull().default([]),
+    status: text("status")
+      .$type<"proposed" | "dismissed" | "approved">()
+      .notNull()
+      .default("proposed"),
+    approvedRuleId: uuid("approved_rule_id").references(() => mailRules.id, {
+      onDelete: "set null",
+    }),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_rule_proposals_user_fingerprint_idx").on(table.userId, table.fingerprint),
+    index("mail_rule_proposals_user_status_idx").on(table.userId, table.status),
+    check("mail_rule_proposals_fingerprint_check", sql`${table.fingerprint} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "mail_rule_proposals_status_check",
+      sql`${table.status} IN ('proposed', 'dismissed', 'approved')`,
+    ),
+    check("mail_rule_proposals_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const mailStewardshipFeedback = pgTable(
+  "mail_stewardship_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetType: text("target_type")
+      .$type<"obligation" | "disposition" | "question" | "rule_proposal" | "review">()
+      .notNull(),
+    targetId: uuid("target_id").notNull(),
+    kind: text("kind").$type<MailStewardshipFeedbackKind>().notNull(),
+    comment: text("comment").notNull(),
+    evidence: jsonb("evidence").$type<MaterialSourceReference[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("mail_stewardship_feedback_user_created_idx").on(table.userId, table.createdAt),
+    index("mail_stewardship_feedback_target_idx").on(table.targetType, table.targetId),
+    check(
+      "mail_stewardship_feedback_kind_check",
+      sql`${table.kind} IN ('correct', 'incorrect', 'outdated', 'exception')`,
+    ),
+  ],
+);
+
+export const mailReviews = pgTable(
+  "mail_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: text("state").$type<"maintained" | "maintained_with_questions" | "blocked">().notNull(),
+    evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
+    nextMaintenanceAt: timestamp("next_maintenance_at", { withTimezone: true }).notNull(),
+    playbookVersion: text("playbook_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    profileVersion: integer("profile_version"),
+    ledgerFingerprint: text("ledger_fingerprint").notNull(),
+    sourceFreshness: text("source_freshness")
+      .$type<"current" | "stale" | "partial" | "unavailable">()
+      .notNull(),
+    health: jsonb("health").$type<MailHealthDimension[]>().notNull(),
+    obligationCounts: jsonb("obligation_counts")
+      .$type<Record<MailObligationState, number>>()
+      .notNull(),
+    openQuestionCount: integer("open_question_count").notNull(),
+    effectCounts: jsonb("effect_counts")
+      .$type<{ failed: number; pending: number; reconcile: number }>()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("mail_reviews_user_created_idx").on(table.userId, table.createdAt),
+    check("mail_reviews_fingerprint_check", sql`${table.ledgerFingerprint} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "mail_reviews_state_check",
+      sql`${table.state} IN ('maintained', 'maintained_with_questions', 'blocked')`,
+    ),
+    check(
+      "mail_reviews_source_freshness_check",
+      sql`${table.sourceFreshness} IN ('current', 'stale', 'partial', 'unavailable')`,
+    ),
+    check(
+      "mail_reviews_count_check",
+      sql`${table.openQuestionCount} >= 0 AND (${table.profileVersion} IS NULL OR ${table.profileVersion} > 0)`,
     ),
   ],
 );

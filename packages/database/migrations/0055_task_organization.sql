@@ -189,6 +189,10 @@ SET
 		WHEN 'cancelled' THEN 'cancelled'
 		ELSE 'open'
 	END,
+	"completed_at" = CASE
+		WHEN "reminder"."status" = 'completed' THEN COALESCE("reminder"."completed_at", "reminder"."updated_at")
+		ELSE NULL
+	END,
 	"task_revision" = 1,
 	"task_cancelled_at" = CASE
 		WHEN "reminder"."status" = 'cancelled' THEN "reminder"."updated_at"

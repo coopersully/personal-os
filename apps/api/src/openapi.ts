@@ -135,32 +135,42 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           type: "object",
         },
         MaintenanceScope: {
-          discriminator: { propertyName: "type" },
+          discriminator: {
+            mapping: {
+              all_outstanding: "#/components/schemas/MaintenanceScopeAllOutstanding",
+              target: "#/components/schemas/MaintenanceScopeTarget",
+              window: "#/components/schemas/MaintenanceScopeWindow",
+            },
+            propertyName: "type",
+          },
           oneOf: [
-            {
-              properties: { type: { const: "all_outstanding" } },
-              required: ["type"],
-              type: "object",
-            },
-            {
-              properties: {
-                end: { format: "date", type: "string" },
-                start: { format: "date", type: "string" },
-                type: { const: "window" },
-              },
-              required: ["type", "start", "end"],
-              type: "object",
-            },
-            {
-              properties: {
-                entityType: { type: "string" },
-                id: { format: "uuid", type: "string" },
-                type: { const: "target" },
-              },
-              required: ["type", "entityType", "id"],
-              type: "object",
-            },
+            { $ref: "#/components/schemas/MaintenanceScopeAllOutstanding" },
+            { $ref: "#/components/schemas/MaintenanceScopeWindow" },
+            { $ref: "#/components/schemas/MaintenanceScopeTarget" },
           ],
+        },
+        MaintenanceScopeAllOutstanding: {
+          properties: { type: { const: "all_outstanding" } },
+          required: ["type"],
+          type: "object",
+        },
+        MaintenanceScopeTarget: {
+          properties: {
+            entityType: { type: "string" },
+            id: { format: "uuid", type: "string" },
+            type: { const: "target" },
+          },
+          required: ["type", "entityType", "id"],
+          type: "object",
+        },
+        MaintenanceScopeWindow: {
+          properties: {
+            end: { format: "date", type: "string" },
+            start: { format: "date", type: "string" },
+            type: { const: "window" },
+          },
+          required: ["type", "start", "end"],
+          type: "object",
         },
         TaskListArchiveInput: {
           additionalProperties: false,

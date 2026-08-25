@@ -343,21 +343,51 @@ describe.sequential("Task organization migration", () => {
        VALUES ('10000000-0000-4000-8000-000000000099', 'parallel-0055@example.com', 'unused', 'Parallel 0055')`,
     );
     await database.pool.query(
-      `INSERT INTO reminders (user_id, title, kind, status)
-       VALUES ('10000000-0000-4000-8000-000000000099', 'Legacy parallel Task', 'task', 'inbox')`,
+      `INSERT INTO reminders (user_id, title, kind, status, completed_at, updated_at)
+       VALUES
+         ('10000000-0000-4000-8000-000000000099', 'Legacy open Task', 'task', 'inbox', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
+         ('10000000-0000-4000-8000-000000000099', 'Legacy completed Task', 'task', 'completed', NULL, '2026-01-03T00:00:00Z'),
+         ('10000000-0000-4000-8000-000000000099', 'Legacy cancelled Task', 'task', 'cancelled', '2026-01-04T00:00:00Z', '2026-01-05T00:00:00Z')`,
     );
 
     await migrateDatabase(database.db, migrationsFolder);
 
     await expect(
       database.pool.query(
-        `SELECT reminder.task_lifecycle, reminder.task_revision, list.kind
+        `SELECT reminder.title, reminder.completed_at, reminder.task_cancelled_at,
+                reminder.task_lifecycle, reminder.task_revision, list.kind
          FROM reminders AS reminder
          JOIN task_lists AS list ON list.id = reminder.task_list_id
-         WHERE reminder.user_id = '10000000-0000-4000-8000-000000000099'`,
+         WHERE reminder.user_id = '10000000-0000-4000-8000-000000000099'
+         ORDER BY reminder.title`,
       ),
     ).resolves.toMatchObject({
-      rows: [{ kind: "inbox", task_lifecycle: "open", task_revision: 1 }],
+      rows: [
+        {
+          completed_at: null,
+          kind: "inbox",
+          task_cancelled_at: new Date("2026-01-05T00:00:00Z"),
+          task_lifecycle: "cancelled",
+          task_revision: 1,
+          title: "Legacy cancelled Task",
+        },
+        {
+          completed_at: new Date("2026-01-03T00:00:00Z"),
+          kind: "inbox",
+          task_cancelled_at: null,
+          task_lifecycle: "completed",
+          task_revision: 1,
+          title: "Legacy completed Task",
+        },
+        {
+          completed_at: null,
+          kind: "inbox",
+          task_cancelled_at: null,
+          task_lifecycle: "open",
+          task_revision: 1,
+          title: "Legacy open Task",
+        },
+      ],
     });
   });
 
@@ -435,7 +465,7 @@ describe.sequential("Task organization migration", () => {
     ).rejects.toThrow();
   });
 
-  it("upgrades every legacy Task in place without changing shared material fields", async () => {
+  it("upgrades every legacy Task in place while normalizing lifecycle timestamps", async () => {
     await requireTaskOrganizationMigration();
     const database = await createIsolatedDatabase("task_organization_upgrade");
     const priorMigrations = await migrationsBeforeTaskOrganization(
@@ -455,17 +485,17 @@ describe.sequential("Task organization migration", () => {
          scheduled_at, estimate_minutes, tags, completed_at, deleted_at, created_at, updated_at
        ) VALUES
          ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Inbox Task', 'inbox notes', NULL, NULL, 'medium', 'task', 'inbox', NULL, 10, '["inbox"]', NULL, NULL, '2026-03-01T01:00:00Z', '2026-03-02T01:00:00Z'),
-         ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'Next Task', NULL, '2026-04-01T12:00:00Z', 'America/New_York', 'high', 'task', 'next', NULL, 20, '["next","work"]', NULL, NULL, '2026-03-01T02:00:00Z', '2026-03-02T02:00:00Z'),
+         ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'Next Task', NULL, '2026-04-01T12:00:00Z', 'America/New_York', 'high', 'task', 'next', NULL, 20, '["next","work"]', '2026-03-04T02:00:00Z', NULL, '2026-03-01T02:00:00Z', '2026-03-02T02:00:00Z'),
          ('20000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001', 'Scheduled Task', 'scheduled notes', '2026-04-02T12:00:00Z', 'UTC', 'low', 'task', 'scheduled', '2026-04-01T12:00:00Z', 30, '["scheduled"]', NULL, NULL, '2026-03-01T03:00:00Z', '2026-03-02T03:00:00Z'),
-         ('20000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000001', 'Completed Task', 'done notes', '2026-04-03T12:00:00Z', 'UTC', 'medium', 'task', 'completed', NULL, 40, '["done"]', '2026-03-05T04:00:00Z', NULL, '2026-03-01T04:00:00Z', '2026-03-05T04:00:00Z'),
-         ('20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', 'Cancelled Task', 'cancelled notes', NULL, 'UTC', 'medium', 'task', 'cancelled', NULL, NULL, '[]', NULL, NULL, '2026-03-01T05:00:00Z', '2026-03-06T05:00:00Z'),
+         ('20000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000001', 'Completed Task', 'done notes', '2026-04-03T12:00:00Z', 'UTC', 'medium', 'task', 'completed', NULL, 40, '["done"]', NULL, NULL, '2026-03-01T04:00:00Z', '2026-03-05T04:00:00Z'),
+         ('20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', 'Cancelled Task', 'cancelled notes', NULL, 'UTC', 'medium', 'task', 'cancelled', NULL, NULL, '[]', '2026-03-05T05:00:00Z', NULL, '2026-03-01T05:00:00Z', '2026-03-06T05:00:00Z'),
          ('20000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-000000000001', 'Trashed Task', 'trash notes', NULL, NULL, 'high', 'task', 'next', NULL, 5, '["trash"]', NULL, '2026-03-07T06:00:00Z', '2026-03-01T06:00:00Z', '2026-03-07T06:00:00Z'),
          ('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Ordinary Reminder', 'reminder notes', '2026-04-04T12:00:00Z', 'UTC', 'low', 'reminder', 'next', NULL, NULL, '["reminder"]', '2026-03-08T07:00:00Z', NULL, '2026-03-01T07:00:00Z', '2026-03-08T07:00:00Z')`,
     );
 
     const materialColumns = `
       id, user_id, title, notes, due_at, timezone, priority, kind, status,
-      scheduled_at, estimate_minutes, tags, completed_at, deleted_at, created_at, updated_at
+      scheduled_at, estimate_minutes, tags, deleted_at, created_at, updated_at
     `;
     const before = await database.pool.query(
       `SELECT ${materialColumns} FROM reminders ORDER BY id`,
@@ -477,6 +507,7 @@ describe.sequential("Task organization migration", () => {
     expect(after.rows).toEqual(before.rows);
 
     const migratedTasks = await database.pool.query<{
+      completed_at: Date | null;
       id: string;
       inbox_name: string;
       status: string;
@@ -485,7 +516,7 @@ describe.sequential("Task organization migration", () => {
       task_project_id: string | null;
       task_revision: number;
     }>(
-      `SELECT reminder.id, reminder.status, reminder.task_lifecycle,
+      `SELECT reminder.id, reminder.status, reminder.completed_at, reminder.task_lifecycle,
               reminder.task_revision, reminder.task_project_id, reminder.task_cancelled_at,
               list.name AS inbox_name
        FROM reminders AS reminder
@@ -496,6 +527,7 @@ describe.sequential("Task organization migration", () => {
     );
     expect(migratedTasks.rows).toEqual([
       expect.objectContaining({
+        completed_at: null,
         id: "20000000-0000-4000-8000-000000000001",
         inbox_name: "Inbox",
         status: "inbox",
@@ -505,6 +537,7 @@ describe.sequential("Task organization migration", () => {
         task_revision: 1,
       }),
       expect.objectContaining({
+        completed_at: null,
         id: "20000000-0000-4000-8000-000000000002",
         inbox_name: "Inbox",
         status: "next",
@@ -514,6 +547,7 @@ describe.sequential("Task organization migration", () => {
         task_revision: 1,
       }),
       expect.objectContaining({
+        completed_at: null,
         id: "20000000-0000-4000-8000-000000000003",
         inbox_name: "Inbox",
         status: "scheduled",
@@ -523,6 +557,7 @@ describe.sequential("Task organization migration", () => {
         task_revision: 1,
       }),
       expect.objectContaining({
+        completed_at: new Date("2026-03-05T04:00:00Z"),
         id: "20000000-0000-4000-8000-000000000004",
         inbox_name: "Inbox",
         status: "completed",
@@ -532,6 +567,7 @@ describe.sequential("Task organization migration", () => {
         task_revision: 1,
       }),
       expect.objectContaining({
+        completed_at: null,
         id: "20000000-0000-4000-8000-000000000005",
         inbox_name: "Inbox",
         status: "cancelled",
@@ -541,6 +577,7 @@ describe.sequential("Task organization migration", () => {
         task_revision: 1,
       }),
       expect.objectContaining({
+        completed_at: null,
         id: "20000000-0000-4000-8000-000000000006",
         inbox_name: "Inbox",
         status: "next",
@@ -552,7 +589,7 @@ describe.sequential("Task organization migration", () => {
     ]);
 
     const reminderFields = await database.pool.query(
-      `SELECT task_list_id, task_project_id, task_why, task_lifecycle, task_revision,
+      `SELECT completed_at, task_list_id, task_project_id, task_why, task_lifecycle, task_revision,
               task_cancelled_at, task_create_idempotency_key,
               task_create_idempotency_fingerprint
        FROM reminders
@@ -560,6 +597,7 @@ describe.sequential("Task organization migration", () => {
     );
     expect(reminderFields.rows).toEqual([
       {
+        completed_at: new Date("2026-03-08T07:00:00Z"),
         task_cancelled_at: null,
         task_create_idempotency_fingerprint: null,
         task_create_idempotency_key: null,

@@ -336,9 +336,13 @@ describe("Calendar floating navigation edge states", () => {
 
     await browser.click(screen.getByRole("button", { name: "Create event" }));
     await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
-    const selectedStart = screen.getByRole("button", { name: /Monday, August 24th, 2026/ });
+    const selectedStart = document.querySelector<HTMLButtonElement>(
+      '[data-selected-single="true"]',
+    );
+    expect(selectedStart).toBeInTheDocument();
+    if (!selectedStart) throw new Error("The start-date picker has no selected date.");
     await browser.click(selectedStart);
-    expect(screen.getByRole("button", { name: /Monday, August 24th, 2026/ })).toBeInTheDocument();
+    expect(document.querySelector('[data-selected-single="true"]')).toBeInTheDocument();
   });
 
   it("sorts equally ranked calendars by name and falls back when a color is missing", async () => {

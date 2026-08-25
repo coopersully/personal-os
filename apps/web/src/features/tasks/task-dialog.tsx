@@ -62,11 +62,13 @@ export function TaskDialog({
   const [projectId, setProjectId] = useState(task?.projectId ?? "");
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const inbox = lists.data?.items.find((list) => list.kind === "inbox");
+  const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
   const requestedProject = projects.data?.items.find(
     (project) =>
       project.id === requestedProjectId &&
       project.availability === "active" &&
-      project.lifecycle === "open",
+      project.lifecycle === "open" &&
+      activeLists.some((list) => list.id === project.listId),
   );
   const requestedList = lists.data?.items.find(
     (list) => list.id === searchParams.get("list") && list.availability === "active",
@@ -80,7 +82,6 @@ export function TaskDialog({
     if (!task && requestedProject && !projectId) setProjectId(requestedProject.id);
   }, [projectId, requestedProject, task]);
 
-  const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
   const availableProjects =
     projects.data?.items.filter(
       (project) =>

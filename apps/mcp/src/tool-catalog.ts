@@ -120,7 +120,7 @@ export const iloToolCatalog = {
   trash_task: write("tasks", ["tasks:write"], { destructive: true }),
   restore_task: write("tasks", ["tasks:write"]),
   preview_task_move: preview("tasks", ["tasks:read"]),
-  move_task: write("tasks", ["tasks:write"]),
+  move_task: write("tasks", ["tasks:write"], { destructive: true }),
   list_goals: read("goals", ["goals:read"]),
   create_goal: write("goals", ["goals:write"]),
   update_goal: write("goals", ["goals:write"]),

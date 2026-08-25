@@ -1018,6 +1018,7 @@ describe("ilo MCP server", () => {
       "archive_task_list",
       "archive_task_project",
       "move_task_project",
+      "move_task",
       "trash_task",
     ]);
     for (const tool of taskTools) {

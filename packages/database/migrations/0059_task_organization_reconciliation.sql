@@ -133,6 +133,7 @@ BEGIN
 	SET
 		"task_list_id" = "inbox"."id",
 		"task_lifecycle" = CASE "reminder"."status" WHEN 'completed' THEN 'completed' WHEN 'cancelled' THEN 'cancelled' ELSE 'open' END,
+		"completed_at" = CASE WHEN "reminder"."status" = 'completed' THEN COALESCE("reminder"."completed_at", "reminder"."updated_at") ELSE NULL END,
 		"task_revision" = 1,
 		"task_cancelled_at" = CASE WHEN "reminder"."status" = 'cancelled' THEN "reminder"."updated_at" ELSE NULL END
 	FROM "task_lists" AS "inbox"
@@ -149,7 +150,8 @@ BEGIN
 				AND "task_create_idempotency_fingerprint" ~ '^[0-9a-f]{64}$')
 		),
 		ADD CONSTRAINT "reminders_task_fields_check" CHECK (
-			("kind" = 'task' AND "task_list_id" IS NOT NULL AND "task_lifecycle" IN ('open', 'completed', 'cancelled')
+			("kind" = 'task' AND "task_list_id" IS NOT NULL AND "task_lifecycle" IS NOT NULL
+				AND "task_lifecycle" IN ('open', 'completed', 'cancelled')
 				AND "task_revision" IS NOT NULL AND (
 					("task_lifecycle" = 'open' AND "completed_at" IS NULL AND "task_cancelled_at" IS NULL)
 					OR ("task_lifecycle" = 'completed' AND "completed_at" IS NOT NULL AND "task_cancelled_at" IS NULL)

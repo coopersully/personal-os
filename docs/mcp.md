@@ -287,7 +287,7 @@ confidence, ambiguity, evidence, ownership, and revision checks; bypass never
 waives those checks. A scoped same-user agent may list pending Finance questions
 through their public descriptors only. `answer_finance_question` accepts only
 the requested bounded fields as person-provided evidence and prepares the
-stored action again; Task 3's server-owned disposition still decides whether it
+stored action again; the server-owned disposition still decides whether it
 is applied or queued for individual review. An authorized same-user
 `finances:write` agent may answer a maintenance-generated question, while an
 ordinary agent answer remains limited to its originating agent. Reimbursement

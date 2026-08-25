@@ -116,7 +116,7 @@ it("does not invent Project completion outcomes omitted by the API", () => {
   rerender(
     <ProjectConflictDialog
       close={vi.fn()}
-      conflict={{ ...boundedConflict, resolutions: [] }}
+      conflict={{ ...conflict, resolutions: [] } as unknown as TaskProjectCompletionConflict}
       lists={[destinationList]}
       onResolve={vi.fn()}
       pending={false}

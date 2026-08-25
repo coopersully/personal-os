@@ -133,6 +133,7 @@ BEGIN
 	SET
 		"task_list_id" = "inbox"."id",
 		"task_lifecycle" = CASE "reminder"."status" WHEN 'completed' THEN 'completed' WHEN 'cancelled' THEN 'cancelled' ELSE 'open' END,
+		"completed_at" = CASE WHEN "reminder"."status" = 'completed' THEN COALESCE("reminder"."completed_at", "reminder"."updated_at") ELSE NULL END,
 		"task_revision" = 1,
 		"task_cancelled_at" = CASE WHEN "reminder"."status" = 'cancelled' THEN "reminder"."updated_at" ELSE NULL END
 	FROM "task_lists" AS "inbox"

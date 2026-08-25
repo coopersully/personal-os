@@ -1899,7 +1899,7 @@ export function createConnectorService({
     shutdown.signal.throwIfAborted();
   }
 
-  async function claimDueMailRuleWork(): Promise<{
+  async function claimDueMailRuleWork(userId?: string): Promise<{
     claimed: MailRuleWorkRow[];
     maintenanceFailed: number;
     touchedAccountIds: string[];
@@ -1936,6 +1936,7 @@ export function createConnectorService({
             eq(mailRuleWorkItems.status, "claimed"),
             lt(mailRuleWorkItems.claimedAt, staleBefore),
             sql`${mailRuleWorkItems.attemptCount} >= ${MAIL_RULE_WORK_MAX_ATTEMPTS}`,
+            userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -1965,6 +1966,7 @@ export function createConnectorService({
             eq(mailRuleWorkItems.status, "claimed"),
             lt(mailRuleWorkItems.claimedAt, staleBefore),
             lt(mailRuleWorkItems.attemptCount, MAIL_RULE_WORK_MAX_ATTEMPTS),
+            userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -1985,6 +1987,7 @@ export function createConnectorService({
           and(
             inArray(mailRuleWorkItems.status, ["pending", "reconcile"]),
             isNull(mailRuleWorkItems.threadId),
+            userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2000,6 +2003,7 @@ export function createConnectorService({
             min(work.due_at) AS next_due
           FROM mail_rule_work_items work
           WHERE work.thread_id IS NOT NULL
+            AND (${userId ?? null}::uuid IS NULL OR work.user_id = ${userId ?? null}::uuid)
             AND work.status IN ('pending', 'reconcile')
             AND work.due_at <= ${current}
             AND work.next_attempt_at <= ${current}
@@ -2031,6 +2035,7 @@ export function createConnectorService({
             WHERE active.thread_id = threads.id
               AND active.status = 'claimed'
           )
+            AND (${userId ?? null}::uuid IS NULL OR threads.user_id = ${userId ?? null}::uuid)
           ORDER BY due.next_due, threads.id
           FOR UPDATE OF threads, accounts SKIP LOCKED
           LIMIT ${MAIL_RULE_EXECUTION_LIMIT_PER_RUN}
@@ -2074,6 +2079,7 @@ export function createConnectorService({
       .where(
         and(
           inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+          userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           notExists(
             db
               .select({ id: attentionItems.id })
@@ -2107,6 +2113,7 @@ export function createConnectorService({
           eq(attentionItems.status, "open"),
           eq(attentionItems.relatedEntityType, "mail_account"),
           isNotNull(attentionItems.relatedEntityId),
+          userId ? eq(attentionItems.userId, userId) : undefined,
         ),
       )
       .groupBy(attentionItems.relatedEntityId)
@@ -2969,14 +2976,14 @@ export function createConnectorService({
     if (firstError) throw firstError;
   }
 
-  async function dispatchDueMailRuleWork(): Promise<{
+  async function dispatchDueMailRuleWork(userId?: string): Promise<{
     claimed: number;
     failed: number;
     pending: number;
     reconciliation: number;
     succeeded: number;
   }> {
-    const claim = await claimDueMailRuleWork();
+    const claim = await claimDueMailRuleWork(userId);
     const { claimed } = claim;
     const groups = new Map<string, MailRuleWorkRow[]>();
     for (const work of claimed) {

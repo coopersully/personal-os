@@ -138,4 +138,31 @@ describe("Mail stewardship assessment", () => {
       assessMail(snapshot([second]), MAIL_PLAYBOOK).ledgerFingerprint,
     );
   });
+
+  it("keeps the fingerprint stable when a proposed question is durably reconciled", () => {
+    const surfaced = thread({ starred: true });
+    const before = assessMail(snapshot([surfaced]), MAIL_PLAYBOOK);
+    const question = before.questions[0];
+    if (!question) throw new Error("Expected a proposed question.");
+
+    const after = assessMail(
+      snapshot([
+        {
+          ...surfaced,
+          openQuestions: [
+            {
+              fingerprint: question.fingerprint,
+              id: "50000000-0000-4000-8000-000000000001",
+              version: 1,
+            },
+          ],
+        },
+      ]),
+      MAIL_PLAYBOOK,
+    );
+
+    expect(after.questions).toEqual([]);
+    expect(after.openQuestionCount).toBe(1);
+    expect(after.ledgerFingerprint).toBe(before.ledgerFingerprint);
+  });
 });

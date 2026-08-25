@@ -6426,6 +6426,42 @@ describe.sequential("connector service", () => {
     expect(updateMailThread).toHaveBeenCalledTimes(7);
   });
 
+  it("fences a stewardship-triggered Mail rule dispatch to its owner", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const first = await createDurableMailWorkFixture("Owner-scoped first", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const second = await createDurableMailWorkFixture("Owner-scoped second", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    await expect(service.dispatchDueMailRuleWork(first.user.id)).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    await expect(
+      database.db
+        .select({ id: mailRuleWorkItems.id, status: mailRuleWorkItems.status })
+        .from(mailRuleWorkItems)
+        .orderBy(asc(mailRuleWorkItems.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: first.work.id, status: "succeeded" },
+        { id: second.work.id, status: "pending" },
+      ]),
+    );
+    expect(updateMailThread).toHaveBeenCalledOnce();
+  });
+
   it("moves one-day cleanup work to recoverable Trash without permanent deletion", async () => {
     await database.db.delete(mailRuleWorkItems);
     const fixture = await createDurableMailWorkFixture("One day Trash", {

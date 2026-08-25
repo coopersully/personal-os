@@ -113,7 +113,11 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function assessmentIdentity(snapshot: MailAssessmentSnapshot, playbook: MailPlaybook) {
+function assessmentIdentity(
+  snapshot: MailAssessmentSnapshot,
+  playbook: MailPlaybook,
+  effectiveQuestionFingerprints: string[],
+) {
   return {
     playbookVersion: playbook.version,
     effectCounts: snapshot.effectCounts,
@@ -121,6 +125,7 @@ function assessmentIdentity(snapshot: MailAssessmentSnapshot, playbook: MailPlay
     profileVersion: snapshot.profileVersion,
     rulebookVersion: snapshot.rulebookVersion,
     sourceFreshness: snapshot.sourceFreshness,
+    questionFingerprints: [...effectiveQuestionFingerprints].sort(),
     threads: [...snapshot.threads]
       .sort((left, right) => left.id.localeCompare(right.id))
       .map((thread) => ({
@@ -147,9 +152,6 @@ function assessmentIdentity(snapshot: MailAssessmentSnapshot, playbook: MailPlay
             state,
             version,
           })),
-        openQuestions: [...thread.openQuestions].sort((left, right) =>
-          left.id.localeCompare(right.id),
-        ),
         snoozedUntil: thread.snoozedUntil,
         source: thread.source,
         updatedAt: thread.updatedAt,
@@ -326,7 +328,14 @@ export function assessMail(
     dispositionCounts,
     dispositionTransitions,
     health,
-    ledgerFingerprint: fingerprint(assessmentIdentity(snapshot, playbook)),
+    ledgerFingerprint: fingerprint(
+      assessmentIdentity(snapshot, playbook, [
+        ...snapshot.threads.flatMap((thread) =>
+          thread.openQuestions.map((question) => question.fingerprint),
+        ),
+        ...questions.map((question) => question.fingerprint),
+      ]),
+    ),
     obligationCounts,
     obligationTransitions,
     openQuestionCount,

@@ -11,6 +11,7 @@ export * from "./finance-maintenance.js";
 export * from "./goals.js";
 export * from "./ilo-setup-release.js";
 export * from "./mail.js";
+export * from "./mail-stewardship.js";
 export * from "./maintenance.js";
 export * from "./pinterest.js";
 export * from "./reflection.js";

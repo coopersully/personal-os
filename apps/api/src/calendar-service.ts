@@ -122,6 +122,28 @@ function deduplicateCalendars(records: CalendarRecord[]): CalendarRecord[] {
   });
 }
 
+function iCalendarUidValue(line: string): string | null {
+  if (!/^UID(?:;|:)/i.test(line)) return null;
+
+  let escaped = false;
+  let quoted = false;
+  for (let index = 3; index < line.length; index += 1) {
+    const character = line[index];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === '"') {
+      quoted = !quoted;
+    } else if (character === ":" && !quoted) {
+      const value = line.slice(index + 1).trim();
+      return value || null;
+    }
+  }
+  return null;
+}
+
+/** Reads the stable iCalendar UID shared by projections from different providers. */
 function providerIndependentEventUid(record: CalendarEventRecord): string | null {
   const googleUid = record.raw?.iCalUID;
   if (typeof googleUid === "string" && googleUid.trim()) {
@@ -130,17 +152,23 @@ function providerIndependentEventUid(record: CalendarEventRecord): string | null
 
   const calendarData = record.raw?.data;
   if (typeof calendarData !== "string") return null;
-  const match = calendarData.match(
-    /(?:^|\r?\n)UID(?:;[^:\r\n]*)?:([^\r\n]*(?:\r?\n[ \t][^\r\n]*)*)/i,
-  );
-  const icloudUid = match?.[1]?.replace(/\r?\n[ \t]/g, "").trim();
-  return icloudUid || null;
+  const unfoldedLines = calendarData.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  for (const line of unfoldedLines) {
+    const uid = iCalendarUidValue(line);
+    if (uid) return uid;
+  }
+  return null;
 }
 
-/** Collapses provider projections only when they identify the same calendar occurrence. */
-function deduplicateEvents(records: CalendarEventRecord[]): CalendarEventRecord[] {
-  const seen = new Set<string>();
-  return records.filter((record) => {
+/** Collapses provider projections while retaining every source-to-canonical association. */
+function deduplicateEvents(records: CalendarEventRecord[]): {
+  canonicalIdBySourceId: Map<string, string>;
+  records: CalendarEventRecord[];
+} {
+  const canonicalIdBySourceId = new Map<string, string>();
+  const canonicalIdByKey = new Map<string, string>();
+  const deduplicated: CalendarEventRecord[] = [];
+  for (const record of records) {
     const sharedUid = providerIndependentEventUid(record);
     const key = sharedUid
       ? JSON.stringify([
@@ -152,12 +180,16 @@ function deduplicateEvents(records: CalendarEventRecord[]): CalendarEventRecord[
       : record.remoteEventId
         ? `${record.provider}:${record.calendarId}:${record.remoteEventId}`
         : record.id;
-    if (seen.has(key)) {
-      return false;
+    const canonicalId = canonicalIdByKey.get(key);
+    if (canonicalId) {
+      canonicalIdBySourceId.set(record.id, canonicalId);
+      continue;
     }
-    seen.add(key);
-    return true;
-  });
+    canonicalIdByKey.set(key, record.id);
+    canonicalIdBySourceId.set(record.id, record.id);
+    deduplicated.push(record);
+  }
+  return { canonicalIdBySourceId, records: deduplicated };
 }
 
 function blockInput(
@@ -1310,7 +1342,7 @@ export function createCalendarService({
         return !source || !visibleCalendarIds.has(source.calendarId);
       });
       const deduplicated = deduplicateEvents(visibleRecords);
-      const displayedSourceIds = deduplicated
+      const displayedSourceIds = visibleRecords
         .filter((record) => !record.blockSourceEventId)
         .map((record) => record.id);
       const blockRecords =
@@ -1330,9 +1362,13 @@ export function createCalendarService({
       const blocksBySource = new Map<string, CalendarEventBlock[]>();
       for (const block of blockRecords) {
         const sourceId = block.blockSourceEventId as string;
-        blocksBySource.set(sourceId, [...(blocksBySource.get(sourceId) ?? []), eventBlock(block)]);
+        const canonicalId = deduplicated.canonicalIdBySourceId.get(sourceId) ?? sourceId;
+        blocksBySource.set(canonicalId, [
+          ...(blocksBySource.get(canonicalId) ?? []),
+          eventBlock(block),
+        ]);
       }
-      return deduplicated.map((record) =>
+      return deduplicated.records.map((record) =>
         serializeEvent(
           record,
           blocksBySource.get(record.id) ?? [],

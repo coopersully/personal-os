@@ -31,11 +31,17 @@ parallel worktree ownership. It complements the system boundary in
 | --- | --- | --- |
 | Finances | `apps/web/src/features/finances`, `apps/api/src/routes/finances.ts`, `apps/api/src/finance-*`, `packages/domain/src/finance.ts`, `packages/api-client/src/features/finances.ts`, `apps/mcp/src/tools/finances.ts`, `packages/connectors/src/plaid*` | Sessions, generic OAuth, Today composition, global navigation |
 | Mail | `apps/web/src/features/mail`, `apps/api/src/routes/mail.ts`, `apps/api/src/mail-*`, `packages/domain/src/mail.ts`, `packages/connectors/src/google/mail.ts`, `packages/connectors/src/icloud-mail*` | Google OAuth core, Calendar provider adapter, Today composition |
+| Commitments | `apps/web/src/features/reminders`, `apps/web/src/features/tasks`, `apps/api/src/routes/reminders.ts`, `apps/api/src/routes/tasks.ts`, `apps/api/src/reminder-service.ts`, `apps/api/src/task-service.ts`, `packages/domain/src/reminder.ts`, `packages/domain/src/task.ts`, `packages/api-client/src/features/reminders.ts`, `packages/api-client/src/features/tasks.ts` | Today composition, global navigation, generic Add menu |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
-| Integration | app/API/MCP composition roots, global navigation, Today, shared shadcn primitives, shared style tokens, cross-domain automations, migration journal | Feature-specific implementation details owned above |
+| Integration | app/API/MCP composition roots, global navigation, Today, Reviews composition, shared shadcn primitives, shared style tokens, migration journal | Feature-specific implementation details owned above |
 
 The following are Integration-owned until they are reduced to thin registries:
+
+- The typed workspace/navigation-owner manifest is the source of truth for the
+  five workspace defaults and route-to-sidebar ownership. Feature routes must
+  register an owner or explicitly use the account-utility owner; they must not
+  infer sidebar composition from a leaf route.
 
 - `apps/web/src/app.tsx`
 - `apps/api/src/app.ts`
@@ -47,6 +53,26 @@ The following are Integration-owned until they are reduced to thin registries:
 Feature owners may add new feature modules freely. The Integration owner wires
 those modules into the composition roots, which keeps parallel feature branches
 from repeatedly conflicting on the same file.
+
+## Workspace Ilo ownership
+
+A workspace owner owns the semantics of its Ilo: living ledger, researched expert playbook,
+definition of maintained, rulebook, surgical operations, maintenance-step graph, questions and
+proposals, learning behavior, health/advisory model, review artifact, and domain status. These
+contracts stay in the domain's normal paths and are described in a completed
+[`workspace Ilo charter`](../product/workspace-ilo-charter-template.md).
+
+Integration may own generic durable maintenance infrastructure such as run/step identifiers,
+leases, fencing, idempotency, retry history, terminal settlement, and shared result envelopes. It
+does not own domain judgment. A shared service must not decide what counts as a Finance transfer, a
+Mail response obligation, a Calendar conflict, a healthy budget, or a useful recommendation.
+
+Parallel workspace branches should deliver independently testable vertical slices and list shared
+schema, migration-journal, registry, and composition-root changes as explicit Integration handoffs.
+Do not move orchestration into an MCP host or coding-agent skill to avoid those seams. The governing
+product and architecture contracts are
+[`Ilo workspace stewardship`](../product/ilo-workspace-stewardship.md) and
+[`ADR 0004`](../architecture/0004-workspace-ilo-stewardship.md).
 
 ## Required seams
 
@@ -67,8 +93,21 @@ from repeatedly conflicting on the same file.
   adapters consume it through capability-specific interfaces.
 - A connector reports selected accounts/sources, granted capabilities, freshness,
   retry/reconnect state, and provider error. UI never calls a provider directly.
-- Read/write capability is checked before a UI, MCP, or automation operation is
+- Read/write capability is checked before a UI, MCP, or agent operation is
   offered or executed.
+
+### External dependencies
+
+- A feature owner owns the capability, domain state, degraded behavior, and repair path for an
+  external dependency it introduces.
+- Integration owns shared edge deadlines, composition-root wiring, runtime configuration, network
+  policy, deployment ordering, and cross-feature infrastructure. A change that adds a credential,
+  callback, webhook, host class, protocol, port, queue, or native bridge crosses both ownership
+  surfaces.
+- The feature and Integration owners use the boundary record in
+  [`external-boundary-reliability.md`](external-boundary-reliability.md) to agree on the durable
+  commit point and production evidence. Neither side may infer that the other supplied the missing
+  runtime contract.
 
 ### Agent actions and source links
 
@@ -89,7 +128,7 @@ and redacted before/after state.
 ## Integration queue
 
 Feature work must not directly add cross-domain behavior to Today, the global
-Add menu, or generic automations. Each feature instead supplies a typed
+Add menu, or a generic routine catalog. Each feature instead supplies a typed
 candidate/proposal surface. The Integration owner composes these after the
 vertical features are independently verified.
 

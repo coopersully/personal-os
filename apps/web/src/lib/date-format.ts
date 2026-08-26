@@ -11,6 +11,21 @@ export function formatOrdinalDate(date: Date, timeZone: string): string {
   return `${values.get("weekday")}, ${values.get("month")} ${day}${ordinalSuffix(day)}`;
 }
 
+export function formatMaterialDateTime(
+  value: string,
+  timeZone: string,
+  { includeYear = false }: { includeYear?: boolean } = {},
+): string {
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    timeZone,
+    ...(includeYear ? { year: "numeric" } : {}),
+  }).format(new Date(value));
+}
+
 export function ordinalSuffix(value: number): "st" | "nd" | "rd" | "th" {
   const remainder = Math.abs(value) % 100;
   if (remainder >= 11 && remainder <= 13) return "th";

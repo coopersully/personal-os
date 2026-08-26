@@ -38,18 +38,24 @@ describe("X Bookmarks connector", () => {
       response({ access_token: "new", expires_in: 3600, refresh_token: "offline" }),
     );
     const x = connector(fetch);
-    const url = new URL(x.authorizationUrl("state", "verifier"));
+    const url = new URL(x.authorizationUrl("state", "challenge"));
     expect(url.origin).toBe("https://x.com");
     expect(url.searchParams.get("state")).toBe("state");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("code_challenge")).toBe("challenge");
     expect(url.searchParams.get("scope")).toContain("bookmark.read");
-    await expect(x.exchangeCode("code", "verifier")).resolves.toMatchObject({
+    await expect(
+      x.exchangeCode("code", "verifier", "https://original.example.com/callback"),
+    ).resolves.toMatchObject({
       accessToken: "new",
       expiresAt: "2026-07-20T13:00:00.000Z",
       refreshToken: "offline",
     });
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("code_verifier=verifier");
-    expect(() => connector(fetch, false).authorizationUrl("state", "verifier")).toThrow(
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain(
+      "redirect_uri=https%3A%2F%2Foriginal.example.com%2Fcallback",
+    );
+    expect(() => connector(fetch, false).authorizationUrl("state", "challenge")).toThrow(
       "not configured",
     );
   });
@@ -102,6 +108,10 @@ describe("X Bookmarks connector", () => {
       value: { id: "user-1", name: "Example User", username: "example_user" },
     });
     await expect(x.listBookmarkFolders(credentials, "user-1")).rejects.toMatchObject({
+      category: "authorization",
+      code: "x_authorization_failed",
+      disposition: "reconnect",
+      message: "X authorization is no longer valid.",
       name: "ConnectorError",
       status: 403,
     });

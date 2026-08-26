@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workspace Ilo"
+  short_description: "Design expert workspace stewardship."
+  default_prompt: "Use $personal-os-workspace-ilo to design this workspace as an expert, self-maintaining Ilo."

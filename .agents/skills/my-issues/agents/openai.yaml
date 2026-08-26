@@ -1,0 +1,4 @@
+interface:
+  display_name: "My Issues"
+  short_description: "Review your current GitHub issue queue."
+  default_prompt: "Use $my-issues to show my current assigned or authored GitHub issues."

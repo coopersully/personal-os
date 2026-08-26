@@ -6,7 +6,7 @@
 
 ## 1. Decision and intentional scope expansion
 
-ilo will be a private, cross-device operating layer for an individual's commitments, communications, reflection, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
+ilo will be a private, cross-device operating layer for an individual's commitments, communications, priorities, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
 
 This design intentionally expands scope beyond the current MVP. The expansion is necessary to make safe automation usable: a permission prompt alone is not a workflow. Every automated mutation therefore needs a comprehensible UI path, a preview or rule policy, audit evidence, undo/recovery where possible, and a way to stop future runs.
 
@@ -17,6 +17,12 @@ There are no deferred product domains in this document. Delivery is phased for d
 > At any moment, ilo shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
 
 It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
+
+Each material workspace has an Ilo: a persistent expert steward that maintains the workspace's
+living ledger, applies its approved rulebook, asks only for irreducible human judgment, learns from
+explicit answers, and produces an evidence-backed review and recommendations. Clients express
+intent; the workspace domain owns the expertise and durable workflow. The shared product doctrine
+is [`Ilo workspace stewardship`](ilo-workspace-stewardship.md).
 
 ### 2.1 Target user and jobs
 
@@ -47,7 +53,7 @@ The primary user is an individual with multiple Google/iCloud accounts, variable
 11. **A sync reset only resets projections.** A provider-required full resync may replace its disposable normalized projection and cursor, but never user-authored links, local annotations, approvals, rules, or immutable audit evidence.
 12. **Untrusted content cannot authorize an action.** Mail bodies, event text, attachments, webpages, and imported content are data, not instructions. They cannot grant scopes, choose an external recipient, escalate a policy, or silently cause cross-domain disclosure.
 13. **Unification is a graph, not a generic record.** Mail, calendar, commitments, and finance retain native models and source semantics. Typed links, annotations, search, activity, and Today create the unified experience without flattening provider behavior into lossy nullable fields.
-14. **Every automation has a viable manual and degraded path.** A runner, webhook, native widget, or paid connector may enhance an action, but cannot be its only recovery path. The user can inspect, pause, repair, complete, or defer work when that dependency is unavailable.
+14. **Every durable domain workflow has a viable manual and degraded path.** A runner, webhook, native widget, or paid connector may enhance an action, but cannot be its only recovery path. The user can inspect, pause, repair, complete, or defer work when that dependency is unavailable.
 
 ## 4. Information architecture
 
@@ -61,7 +67,7 @@ App
 ├── Reminders & Tasks
 ├── Goals & Motives
 ├── Finances
-├── Automations
+├── Reviews
 ├── Activity
 └── Account menu
     ├── Profile
@@ -74,7 +80,7 @@ Settings
 ├── Personal: Profile, Appearance, Locale & time
 ├── Security: Sessions, recovery, privacy, exports
 ├── Workspace: Connections, calendars, mail, notifications, widgets
-└── Automation: Agent access, routines, rules, approvals, audit retention
+└── Agents: Connected agents, Workspace access
 ```
 
 ### 4.1 Shared chrome
@@ -98,6 +104,9 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Reminder/task | Title, notes, status, project/area, priority, due date, scheduled time, estimate, recurrence, subtasks, tags, energy/context, defer history, source material, goal/motive links. |
 | Goal/motive/habit | Outcome, timeframe, progress metric, parent/child relationship, rationale, rewards, constraints, coaching preference, habit schedule/flexibility and completion data. |
 | Finance | Institution/account, balance, transaction, merchant, category/tag, split, recurring stream, rule, budget, cash-flow forecast, goal, review state and confidence. |
+| Domain profile | Domain, objective, source meanings, categories, durable instructions/preferences, status, and optimistic version. |
+| Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
+| Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
 | Automation | Template, versioned instructions/skill, trigger, schedule/event trigger, inputs, scopes, policy, model host, state, run and approval queue. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
@@ -112,7 +121,7 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 5. iCloud connection prefers Apple Account authorization when the platform supports it and otherwise accepts an app-specific password through an encrypted credential flow. Mail and CalDAV calendar are independently enabled, discovered, health-checked, and designed for revocation when an Apple password reset invalidates app passwords.
 6. Plaid uses Link, explains read-only access and data freshness, lets the user select institutions/accounts, and requires a finance-specific consent screen before the first sync.
 7. Source selection lets the user include/exclude individual calendars, mailboxes, and financial accounts; it also defines busy-mirror destinations and notification privacy.
-8. The finishing screen creates a private local calendar/reminder inbox, offers the first Morning Brief routine in preview mode, and clearly states that no agent has access until a token is created.
+8. The finishing screen creates a private local calendar/reminder inbox, previews the generated daily brief, and clearly states that no agent has access until a token is created.
 
 Failure UX: expired OAuth, app-password rejection, partial capability grant, unsupported provider, stale sync, duplicate account, and connector reconnection each retain progress, explain consequence, and provide one retry/reconnect action.
 
@@ -127,7 +136,7 @@ Now
 ├── Remaining today: committed blocks, hard deadlines, and a short, feasible task queue
 ├── Needs triage: mail, finance, RSVP, approvals, and unscheduled commitments requiring a decision
 ├── Tomorrow / upcoming: only items worth preparing for
-└── Done: collapsed by default; completed tasks, processed mail, and automation outcomes
+└── Done: collapsed by default; completed tasks, processed mail, and resolved review outcomes
 ```
 
 - Calculate current time in the displayed timezone; show ongoing multi-hour and all-day events distinctly.
@@ -151,7 +160,9 @@ Now
 4. Batch mode exposes the same actions, confirms destructive change count, supports undo where the provider permits it, and writes one auditable material action per affected item.
 5. A triage session shows one category or bounded batch, with shortcuts and a visible “done for now” exit. Nothing is auto-archived just because it was read.
 6. The agent can propose classifications, labels, archives, task/event drafts, unsubscribe candidates, or reply drafts. The person can approve one, approve a category/rule, edit, reject, or allow safe recurring application.
-7. Mail rules use deterministic conditions plus optional agent classification. Each rule has scope, dry-run results, confidence threshold, effective date, undo/review behavior, and a kill switch.
+7. MVP Mail rules use exact deterministic conditions, explicit scope, dry-run results, effective
+   date, undo/review behavior, and a kill switch; their shared-envelope confidence threshold stays
+   null. Optional server-owned agent classification and scored confidence remain future scope.
 8. Briefs cite source threads and distinguish “needs reply,” “FYI,” “deadline,” “event/invite,” “financial,” and “newsletter.”
 
 Mail policy tiers:
@@ -196,26 +207,35 @@ Mail policy tiers:
 
 ### 6.7 Finances
 
+- The Finance Ilo combines the useful methods of a bookkeeper, accountant/controller, financial
+  planner, investment analyst, auditor, and coach. Its maintenance turn reconciles and classifies a
+  selected period, balances it against budgets and goals, updates income/recurring/cash-flow/wealth
+  models, isolates questions, learns only explicitly approved rules, and publishes a period review.
 - Connect Plaid-supported institutions and selected accounts; show connection health, consent, refresh time, duplicate detection, data removal, and the connector's production-cost state. Manual accounts and CSV/OFX import remain first-class so budgeting and review do not require a paid connector.
 - Normalize balances, pending/posted transactions, transfers, merchant, location, category confidence, recurring inflow/outflow, account type, investments, liabilities, and manual transactions.
 - The daily finance queue is: new/uncategorized, low-confidence, split-needed, suspected transfer, recurring/subscription change, unusual spend, bills due, and review-complete. It is never mixed into Today unless it requires a decision.
 - Categorization uses provider categories, deterministic merchant rules, and agent suggestions. The user can correct one transaction, apply a rule to matching future items, split transactions, exclude/transfers, tag projects, and review all changed history.
 - Budgets support category, flexible, envelope/zero-based optional modes, rollovers, targets, recurring bills/income, cash-flow forecast, safe-to-spend/left-this-month, savings goals, watchlists, net worth, investments, subscriptions, and reports.
-- The agent may explain and propose categorization/review work under a finance-read scope. It cannot transfer money, trade, pay a bill, or make a financial recommendation/action beyond the product's permitted informational workflows.
+- The agent may explain and propose categorization/review work under a finance-read scope. The
+  Finance Ilo may provide evidence-backed informational planning, budget, savings, investment, and
+  market-context recommendations within the product's approved advisory model. It cannot transfer
+  money, trade, pay a bill, file a return, or claim a human professional credential.
 - Pending and posted transactions are separate states. Pending categorization is provisional, cannot create durable merchant rules or definitive budget/"safe to spend" claims, and must reconcile against provider removals/replacements before becoming settled data.
 - Finance data uses stronger consent, redaction, retention, export/delete, no-notification-content defaults, an explicit warning before sharing with an agent, and a visible last-refresh/provider-freshness indicator.
 
-### 6.8 Agent access, routines, and activity
+### 6.8 Agent controls, Reviews, and activity
 
-**Token/scopes:** `mail:read`, `mail:manage`, `mail:send`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
+**Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. Settings → Workspace access then explains the actual read, write, approval, source-scope, and unavailable boundaries for Mail, Calendar, Tasks, and Finances while supervising one server-owned setup plan. After authentication the agent calls `get_ilo_setup`, which returns the current semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Personal preferences live in Ilo rather than in a host skill or conversation memory.
 
-**Presets:** Read my day; Calendar manager; Reminder/task manager; Mail triage (preview); Mail manager; Goals coach; Finance categorizer (preview); Morning routine; Midday reset; Nightly cleanup; Weekly review; Monthly finance close.
+Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 
-**Routine lifecycle:** choose template → choose optional host/skill/model runner → select scope and sources → set trigger/schedule/timezone → set approval policy → test dry run on bounded data → inspect result → enable → inspect/pause/edit/version/revoke later. ilo owns the routine definition, trigger, policy, run state, approval, and recovery lifecycle; a host such as Codex or Claude receives only a bounded invocation and cannot become the policy authority.
+**Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 
-Triggers include cron/calendar time, new mail, calendar changes, new finance transactions, a reminder deadline, manual run, and platform notification action. Runs are queued, idempotent, bounded by concurrency/time/tool-call limits, resumable only where safe, and never overlap unless declared safe.
+**Reviews:** `/reviews` is a Today-owned operational destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
 
-The Activity view filters by material, actor, routine, source, result, date, and reversible state. Every event links to the affected material and source evidence. An approval inbox groups proposed changes, gives bulk approval only for homogeneous low-risk actions, and records rejection feedback for future rules.
+Ilo does not publish a generic routine catalog, routine-run API, or routine scheduler. Durable background behavior is domain-owned—for example, reviewed Mail rule work—and must expose domain-specific pending, success, reconciliation, and failure state.
+
+The Activity view filters by material, actor, source, result, date, and reversible state. Every event links to the affected material and source evidence.
 
 ### 6.9 Desktop overlay, widgets, notifications, and mobile
 
@@ -264,7 +284,11 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
               └──► Google / iCloud / Plaid / future provider connectors
 ```
 
-- Add a durable job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before enabling real recurring automation.
+- Mail retention is the first domain-owned durable execution implementation: stable work identity,
+  bounded scheduler claims, lease recovery, exact provider reconciliation, terminal state, and
+  redacted audit/attention observations. Other recurring domains still require a shared durable
+  job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before
+  enabling real recurring automation.
 - Model native domain records separately and expose a typed material-link/source-reference graph above them. A link carries relation type, source reference, ownership, revision/reconciliation state, and policy/audit references; it never makes a provider record and a local note falsely interchangeable.
 - Maintain provider-neutral connectors with capability discovery. Google uses incremental OAuth and Gmail write scopes only when needed; iCloud uses IMAP/CalDAV and app-specific passwords; Plaid uses Link, webhook/sync cursor, and transaction enrichment.
 - Add connector contracts for mail mutations, calendar RSVP/availability, attachments, finance transactions/rules, notification targets, and platform widgets. A capability matrix prevents unsupported controls from appearing enabled. Gmail "delete" means move to Trash unless a provider offers a separately scoped reversible behavior; permanent deletion is never implied by an archive/triage shortcut.

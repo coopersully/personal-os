@@ -6,13 +6,22 @@ github_repository = "your-handle/personal-os"
 # subject shown in CloudTrail, for example:
 # github_oidc_subject = "repo:your-handle@12345678/personal-os@87654321:environment:production"
 owner_emails      = "owner@example.com"
+alert_email       = "owner@example.com"
+monthly_budget_usd = 50
+# Reuse the account's default service anomaly monitor at a lower threshold.
+# cost_anomaly_monitor_arn = "arn:aws:ce::123456789012:anomalymonitor/example"
 email_from        = "ilo <noreply@example.com>"
-
-# This must be the client ID for the public production OAuth client, not the
-# client secret. Leave blank only while Google connections are disabled.
-google_client_id = ""
 
 # Enable only when the matching client ID and secret parameters are configured.
 plaid_enabled     = false
-plaid_environment = "sandbox"
+plaid_environment = "production"
 x_enabled         = false
+
+# Keep low-latency modes disabled until the production evidence checklist is complete.
+google_gmail_push_enabled          = false
+google_calendar_push_enabled       = false
+icloud_mail_idle_enabled           = false
+icloud_mail_idle_concurrency       = 5
+# google_gmail_pubsub_topic          = "projects/example/topics/ilo-gmail"
+# google_gmail_pubsub_subscription   = "projects/example/subscriptions/ilo-gmail-push"
+# google_gmail_push_service_account  = "ilo-gmail-push@example.iam.gserviceaccount.com"

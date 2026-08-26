@@ -17,6 +17,7 @@ locals {
   runtime_parameter_names = setunion(
     toset([
       "APP_ENCRYPTION_KEY",
+      "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
       "MCP_INTERNAL_SECRET",
       "RESEND_API_KEY",

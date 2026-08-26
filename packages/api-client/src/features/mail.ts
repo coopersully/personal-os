@@ -1,28 +1,55 @@
 import type {
+  ActivateMailRuleInput,
+  AttentionItem,
+  BulkUpdateMailInput,
+  BulkUpdateMailResult,
+  CreateMailRuleInput,
   Mailbox,
+  MailDraft,
   MailDraftInput,
   MailListQuery,
   MailMessage,
-  MailRuleInput,
+  MailRule,
+  MailRulePreview,
+  MailSetupContext,
   MailThread,
+  PreviewMailRuleInput,
+  ReconcileMailDraftInput,
   SendMailInput,
+  UpdateMailRuleInput,
   UpdateMailThreadInput,
+  UpsertMailAttentionItemInput,
 } from "@personal-os/domain";
 
 export type MailApiClient = {
+  activateMailRule(
+    id: string,
+    input: ActivateMailRuleInput,
+  ): Promise<{ preview: MailRulePreview; rule: MailRule }>;
+  bulkUpdateMail(input: BulkUpdateMailInput): Promise<BulkUpdateMailResult>;
   createMailDraft(input: MailDraftInput): Promise<{ id: string }>;
-  createMailRule(input: MailRuleInput): Promise<{ id: string }>;
+  createMailRule(input: CreateMailRuleInput): Promise<MailRule>;
   getMailThread(id: string): Promise<MailThread>;
   listMailMessages(threadId: string): Promise<MailMessage[]>;
-  listMailDrafts(): Promise<Array<{ body: string; id: string; subject: string }>>;
-  listMailRules(): Promise<
-    Array<{ action: string; enabled: boolean; id: string; name: string; query: string }>
-  >;
+  listMailDrafts(): Promise<MailDraft[]>;
+  listMailRules(): Promise<MailRule[]>;
+  getMailSetupContext(): Promise<MailSetupContext>;
   listMailboxes(): Promise<Mailbox[]>;
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
   sendMail(input: SendMailInput): Promise<void>;
+  previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
+  previewSavedMailRule(id: string): Promise<MailRulePreview>;
+  reconcileMailDraft(
+    id: string,
+    input: ReconcileMailDraftInput,
+  ): Promise<Pick<MailDraft, "id" | "sendStatus">>;
+  updateMailRule(id: string, input: UpdateMailRuleInput): Promise<MailRule>;
   updateMailThread(id: string, input: UpdateMailThreadInput): Promise<MailThread>;
+  upsertMailAttentionItem(
+    threadId: string,
+    input: UpsertMailAttentionItemInput,
+  ): Promise<AttentionItem>;
 };
 
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -33,6 +60,19 @@ export function createMailApiClient(
   toQuery: (query: object) => string,
 ): MailApiClient {
   return {
+    async activateMailRule(id, input) {
+      return request<{ preview: MailRulePreview; rule: MailRule }>(
+        `/v1/mail/rules/${id}/activate`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+    },
+    async bulkUpdateMail(input) {
+      const response = await request<{ result: BulkUpdateMailResult }>("/v1/mail/threads/bulk", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.result;
+    },
     async createMailDraft(input) {
       const response = await request<{ draft: { id: string } }>("/v1/mail/drafts", {
         body: JSON.stringify(input),
@@ -41,7 +81,7 @@ export function createMailApiClient(
       return response.draft;
     },
     async createMailRule(input) {
-      const response = await request<{ rule: { id: string } }>("/v1/mail/rules", {
+      const response = await request<{ rule: MailRule }>("/v1/mail/rules", {
         body: JSON.stringify(input),
         method: "POST",
       });
@@ -50,6 +90,10 @@ export function createMailApiClient(
     async getMailThread(id) {
       const response = await request<{ thread: MailThread }>(`/v1/mail/threads/${id}`);
       return response.thread;
+    },
+    async getMailSetupContext() {
+      const response = await request<{ setup: MailSetupContext }>("/v1/mail/setup-context");
+      return response.setup;
     },
     async listMailMessages(threadId) {
       const response = await request<{ messages: MailMessage[] }>(
@@ -62,16 +106,32 @@ export function createMailApiClient(
       return response.mailboxes;
     },
     async listMailDrafts() {
-      const response = await request<{
-        drafts: Array<{ body: string; id: string; subject: string }>;
-      }>("/v1/mail/drafts");
+      const response = await request<{ drafts: MailDraft[] }>("/v1/mail/drafts");
       return response.drafts;
     },
     async listMailRules() {
-      const response = await request<{
-        rules: Array<{ action: string; enabled: boolean; id: string; name: string; query: string }>;
-      }>("/v1/mail/rules");
+      const response = await request<{ rules: MailRule[] }>("/v1/mail/rules");
       return response.rules;
+    },
+    async previewMailRule(input) {
+      const response = await request<{ preview: MailRulePreview }>("/v1/mail/rules/preview", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.preview;
+    },
+    async previewSavedMailRule(id) {
+      const response = await request<{ preview: MailRulePreview }>(`/v1/mail/rules/${id}/preview`);
+      return response.preview;
+    },
+    async reconcileMailDraft(id, input) {
+      const response = await request<{
+        draft: Pick<MailDraft, "id" | "sendStatus">;
+      }>(`/v1/mail/drafts/${id}/reconcile`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.draft;
     },
     async listMailThreads(query = {}) {
       const response = await request<{ threads: MailThread[] }>(
@@ -85,6 +145,20 @@ export function createMailApiClient(
         method: "PATCH",
       });
       return response.thread;
+    },
+    async updateMailRule(id, input) {
+      const response = await request<{ rule: MailRule }>(`/v1/mail/rules/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+      return response.rule;
+    },
+    async upsertMailAttentionItem(threadId, input) {
+      const response = await request<{ item: AttentionItem }>(
+        `/v1/mail/threads/${threadId}/attention`,
+        { body: JSON.stringify(input), method: "PUT" },
+      );
+      return response.item;
     },
     async snoozeMailThread(id, until) {
       await request<void>(`/v1/mail/threads/${id}/snooze`, {

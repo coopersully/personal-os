@@ -1063,6 +1063,45 @@ describe.sequential("connector service", () => {
       .returning();
     if (!mirroredEvent) throw new Error("Mirrored event fixture is missing.");
 
+    const [icloudAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "iCloud account",
+        provider: "icloud",
+        providerAccountId: "icloud-person",
+        userId,
+      })
+      .returning();
+    if (!icloudAccount) throw new Error("iCloud account fixture is missing.");
+    const [icloudCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: icloudAccount.id,
+        isWritable: true,
+        name: "iCloud primary",
+        provider: "icloud",
+        remoteCalendarId: "icloud-primary",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!icloudCalendar) throw new Error("iCloud calendar fixture is missing.");
+    const [icloudEvent] = await database.db
+      .insert(calendarEvents)
+      .values({
+        calendarId: icloudCalendar.id,
+        endsAt: new Date("2026-07-13T14:00:00.000Z"),
+        provider: "icloud",
+        remoteEtag: "icloud-etag",
+        remoteEventId: "icloud-domain-created",
+        startsAt: new Date("2026-07-13T13:00:00.000Z"),
+        timezone: "UTC",
+        title: "Provider create",
+        userId,
+      })
+      .returning();
+    if (!icloudEvent) throw new Error("iCloud event fixture is missing.");
+
     const unifiedCalendars = await calendarService.list(userId);
     expect(unifiedCalendars.some((value) => value.id === primary.id)).toBe(true);
     expect(unifiedCalendars.some((value) => value.id === duplicateCalendar.id)).toBe(false);
@@ -1074,6 +1113,9 @@ describe.sequential("connector service", () => {
       expect.objectContaining({ calendarId: primary.id }),
     ]);
     expect(unifiedEvents.some((value) => value.remoteEventId === mirroredEvent.remoteEventId)).toBe(
+      false,
+    );
+    expect(unifiedEvents.some((value) => value.remoteEventId === icloudEvent.remoteEventId)).toBe(
       false,
     );
     await expect(

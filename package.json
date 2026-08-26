@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "pnpm --filter './apps/**' --filter './packages/**' --filter '!@personal-os/desktop' --if-present run build",
-    "check": "bash ./.codex/scripts/check.sh && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build",
+    "check": "bash ./.codex/scripts/check.sh && pnpm test:ci-scope && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build",
     "dev": "pnpm --parallel --filter @personal-os/api --filter @personal-os/web run dev",
     "env:logs": "bash ./.codex/scripts/environment.sh logs",
     "env:prod:start": "bash ./.codex/scripts/environment.sh production-start",
@@ -30,6 +30,7 @@
     "format": "biome format --write .",
     "lint": "biome check . && node scripts/check-frontend-theme-contract.mjs && node scripts/check-icon-contract.mjs && node scripts/check-theme-token-contract.mjs && node scripts/check-provider-network-contract.mjs && node scripts/check-plaid-production-contract.mjs && node scripts/check-deployment-drain-contract.mjs && node scripts/check-deployment-drain-scenarios.mjs && node scripts/check-waf-health-probe-contract.mjs && node scripts/check-connector-observability-contract.mjs && node scripts/check-production-cost-floor-contract.mjs && node scripts/check-local-production-runtime-contract.mjs && node scripts/check-agent-skill-release-contract.mjs",
     "test": "vitest run",
+    "test:ci-scope": "node --test .github/scripts/ci-scope.test.mjs",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p e2e/tsconfig.json && pnpm --filter './apps/**' --filter './packages/**' --if-present run typecheck",

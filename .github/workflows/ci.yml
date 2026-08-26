@@ -8,7 +8,60 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      repo: ${{ steps.scope.outputs.repo }}
+      terraform: ${{ steps.scope.outputs.terraform }}
+      node: ${{ steps.scope.outputs.node }}
+      database: ${{ steps.scope.outputs.database }}
+      browser: ${{ steps.scope.outputs.browser }}
+      desktop: ${{ steps.scope.outputs.desktop }}
+      containers: ${{ steps.scope.outputs.containers }}
+      dependencies: ${{ steps.scope.outputs.dependencies }}
+      changed_packages: ${{ steps.scope.outputs.changed_packages }}
+      scope_json: ${{ steps.scope.outputs.scope_json }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Classify affected validation scopes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed_files="$RUNNER_TEMP/changed-files.txt"
+          scope_json="$RUNNER_TEMP/ci-scope.json"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if ! git diff --name-only --diff-filter=ACMRD "$BASE_SHA...$HEAD_SHA" > "$changed_files"; then
+              echo "Unable to calculate the pull-request diff; selecting full CI." >&2
+              : > "$changed_files"
+            fi
+          else
+            : > "$changed_files"
+          fi
+          node .github/scripts/ci-scope.mjs \
+            --files "$changed_files" \
+            --json \
+            --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
+          {
+            echo "## CI scope (shadow mode)"
+            echo '```json'
+            cat "$scope_json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   infrastructure:
     name: Terraform
     runs-on: ubuntu-latest

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
-import { classifyChanges } from "./ci-scope.mjs";
+import { fileURLToPath } from "node:url";
+import { classifyChanges, requiredGate } from "./ci-scope.mjs";
+
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 
 const emptyScope = {
   full: false,
@@ -120,7 +126,12 @@ const cases = [
     ["apps/desktop/src-tauri/src/main.rs"],
     scope({ desktop: true, changed_packages: ["@personal-os/desktop"] }),
   ],
-  ["container definition", ["Dockerfile"], scope({ containers: true })],
+  ["container definition", ["Dockerfile"], scope({ node: true, containers: true })],
+  [
+    "repository contract script",
+    ["scripts/check-deployment-drain-contract.mjs"],
+    scope({ repo: true, node: true }),
+  ],
   ["lockfile", ["pnpm-lock.yaml"], scope({ full: true, dependencies: true })],
   ["workflow", [".github/workflows/ci.yml"], scope({ full: true })],
   ["classifier", [".github/scripts/ci-scope.mjs"], scope({ full: true })],
@@ -140,3 +151,38 @@ test("rejects absolute paths and traversal fail closed", () => {
   assert.equal(classifyChanges(["/tmp/file.ts"]).full, true);
   assert.equal(classifyChanges(["apps/web/../api/src/app.ts"]).full, true);
 });
+
+test("required gate accepts only successful or intentionally skipped dependencies", () => {
+  assert.equal(requiredGate({ lint: "success", terraform: "skipped" }), true);
+  assert.equal(requiredGate({ lint: "success", quality: "success" }), true);
+  assert.equal(requiredGate({ lint: "failure", terraform: "skipped" }), false);
+  assert.equal(requiredGate({ lint: "success", quality: "cancelled" }), false);
+  assert.equal(requiredGate({}), false);
+});
+
+const fixtureCases = [
+  ["docs", { full: false, node: false, terraform: false }],
+  ["terraform", { full: false, node: false, terraform: true }],
+  ["mcp", { full: false, node: true, containers: true }],
+  ["web", { full: false, node: true, browser: true, desktop: true }],
+  ["database", { full: false, node: true, database: true }],
+  ["lockfile", { full: true, dependencies: true }],
+  ["unknown", { full: true }],
+];
+
+for (const [name, expected] of fixtureCases) {
+  test(`CLI classifies the ${name} fixture`, () => {
+    const fixture = resolve(scriptDirectory, "fixtures", "ci-scope", `${name}.txt`);
+    assert.ok(readFileSync(fixture, "utf8").trim());
+    const output = execFileSync(
+      process.execPath,
+      [resolve(scriptDirectory, "ci-scope.mjs"), "--files", fixture, "--json"],
+      { encoding: "utf8" },
+    );
+    const actual = JSON.parse(output);
+    assert.deepEqual(
+      Object.fromEntries(Object.keys(expected).map((key) => [key, actual[key]])),
+      expected,
+    );
+  });
+}

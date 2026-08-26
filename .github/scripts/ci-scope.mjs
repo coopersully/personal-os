@@ -115,6 +115,7 @@ export function classifyChanges(paths, options = {}) {
     }
 
     if (path === "Dockerfile" || path === "compose.yaml" || path === "compose.yml") {
+      result.node = true;
       result.containers = true;
       continue;
     }
@@ -125,8 +126,14 @@ export function classifyChanges(paths, options = {}) {
       continue;
     }
 
-    if (path.startsWith(".codex/") || path.startsWith("scripts/")) {
+    if (path.startsWith(".codex/")) {
       result.repo = true;
+      continue;
+    }
+
+    if (path.startsWith("scripts/")) {
+      result.repo = true;
+      result.node = true;
       continue;
     }
 
@@ -165,6 +172,14 @@ export function classifyChanges(paths, options = {}) {
   }
 
   return result;
+}
+
+export function requiredGate(results) {
+  const conclusions = Object.values(results);
+  return (
+    conclusions.length > 0 &&
+    conclusions.every((conclusion) => conclusion === "success" || conclusion === "skipped")
+  );
 }
 
 function githubOutputs(scope) {

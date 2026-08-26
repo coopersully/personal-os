@@ -15,7 +15,10 @@
   },
   "scripts": {
     "build": "pnpm --filter './apps/**' --filter './packages/**' --filter '!@personal-os/desktop' --if-present run build",
-    "check": "bash ./.codex/scripts/check.sh && pnpm test:ci-scope && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build",
+    "check": "pnpm check:all",
+    "check:all": "pnpm check:repo && pnpm lint && pnpm check:node",
+    "check:node": "pnpm typecheck && pnpm test:coverage && pnpm build",
+    "check:repo": "bash ./.codex/scripts/check.sh && pnpm test:ci-scope",
     "dev": "pnpm --parallel --filter @personal-os/api --filter @personal-os/web run dev",
     "env:logs": "bash ./.codex/scripts/environment.sh logs",
     "env:prod:start": "bash ./.codex/scripts/environment.sh production-start",

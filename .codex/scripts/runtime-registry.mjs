@@ -340,11 +340,17 @@ export async function acquireAllocation(context, options = {}) {
     const allocations = await listAllocationsUnlocked(context);
     const existing = allocations.find((allocation) => allocation.root === context.root);
     if (existing) {
+      if (options.requestedTier !== undefined && options.requestedTier !== existing.tier) {
+        throw new Error(`Runtime root already owns tier ${existing.tier}, not requested tier ${options.requestedTier}.`);
+      }
       return existing;
     }
 
     let tier;
     if (context.root === context.primaryRoot) {
+      if (options.requestedTier !== undefined && options.requestedTier !== 1) {
+        throw new Error('The primary checkout can only own runtime tier 1.');
+      }
       const owner = allocations.find((allocation) => allocation.tier === 1);
       if (owner) {
         throw new Error(`Runtime tier 1 is already owned by ${owner.root}.`);
@@ -353,8 +359,17 @@ export async function acquireAllocation(context, options = {}) {
     } else {
       const occupied = new Set(allocations.map((allocation) => allocation.tier));
       const probePort = options.probePort ?? (async () => true);
-      for (let candidate = 2; candidate <= MAX_TIER; candidate += 1) {
+      const candidates = options.requestedTier === undefined
+        ? Array.from({ length: MAX_TIER - 1 }, (_, index) => index + 2)
+        : [options.requestedTier];
+      if (candidates.some((candidate) => !Number.isInteger(candidate) || candidate < 2 || candidate > MAX_TIER)) {
+        throw new Error(`Linked runtime tier must be between 2 and ${MAX_TIER}.`);
+      }
+      for (const candidate of candidates) {
         if (occupied.has(candidate)) {
+          if (options.requestedTier !== undefined) {
+            throw new Error(`Runtime tier ${candidate} is already owned by another checkout.`);
+          }
           continue;
         }
         const candidatePorts = Object.values(portsForSlot(candidate));
@@ -362,6 +377,9 @@ export async function acquireAllocation(context, options = {}) {
         if (results.every(Boolean)) {
           tier = candidate;
           break;
+        }
+        if (options.requestedTier !== undefined) {
+          throw new Error(`Runtime tier ${candidate} has an occupied host port.`);
         }
       }
       if (!tier) {

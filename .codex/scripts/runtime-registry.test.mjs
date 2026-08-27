@@ -320,3 +320,15 @@ test('replaceAllocation compare-and-swap refuses stale state and cleanup tokens'
   }), false);
   assert.equal((await getAllocationForRoot(context)).cleanup.operationToken, 'winning-token');
 });
+
+test('linked allocations honor a requested free tier and reject conflicts', async (t) => {
+  const repository = await createRepository(t);
+  const contextA = await resolveRepositoryContext(repository.linked.a);
+  const contextB = await resolveRepositoryContext(repository.linked.b);
+  const requested = await acquireAllocation(contextA, { ...deterministicOptions(), requestedTier: 5 });
+  assert.equal(requested.tier, 5);
+  await assert.rejects(
+    () => acquireAllocation(contextB, { ...deterministicOptions(), requestedTier: 5 }),
+    /tier 5 is already owned/i,
+  );
+});

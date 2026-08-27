@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { open, mkdir, readFile } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -240,7 +241,7 @@ async function main() {
   process.exitCode = await runSupervisor({ allocation, root: allocation.root });
 }
 
-if (path.resolve(process.argv[1] ?? '') === modulePath) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(modulePath)) {
   main().catch((error) => {
     process.stderr.write(`[ilo-runtime] ${error.message}\n`);
     process.exitCode = 1;

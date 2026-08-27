@@ -266,6 +266,35 @@ async function writeActiveRoot(context, root) {
   await rename(temporary, destination);
 }
 
+async function executablePath(name, fallback) {
+  try {
+    return (await execFile('which', [name])).stdout.trim();
+  } catch {
+    return fallback;
+  }
+}
+
+async function reaperOptions(context) {
+  let sourceCommit = 'unknown';
+  try {
+    sourceCommit = (await execFile('git', ['-C', context.root, 'rev-parse', 'HEAD'])).stdout.trim();
+  } catch {}
+  return {
+    platform: process.platform,
+    uid: process.getuid?.(),
+    repositoryId: context.repositoryId,
+    gitCommonDir: context.gitCommonDir,
+    sourceDir: path.join(context.root, '.codex/scripts'),
+    sourceCommit,
+    nodePath: process.execPath,
+    gitPath: await executablePath('git', '/usr/bin/git'),
+    dockerPath: await executablePath('docker', 'docker'),
+    lsofPath: await executablePath('lsof', '/usr/sbin/lsof'),
+    psPath: await executablePath('ps', '/bin/ps'),
+    execFile,
+  };
+}
+
 export async function runManager(argv, overrides = {}) {
   const adapters = { ...defaults, ...overrides };
   let parsed;
@@ -280,7 +309,29 @@ export async function runManager(argv, overrides = {}) {
   const root = options.root ?? process.cwd();
   let context;
   try {
-    context = await adapters.resolveRepositoryContext(root);
+    if (options['installed-reaper']) {
+      if (command !== 'gc' || !options['git-common-dir'] || !options['repository-id']) {
+        throw new Error('Installed reaper mode only supports pinned GC.');
+      }
+      const storedId = (await readFile(path.join(options['git-common-dir'], 'ilo-runtime/repository-id'), 'utf8')).trim();
+      if (storedId !== options['repository-id']) throw new Error('Installed reaper repository identity mismatch.');
+      context = {
+        gitCommonDir: options['git-common-dir'],
+        registryDir: path.join(options['git-common-dir'], 'ilo-runtime'),
+        repositoryId: storedId,
+      };
+      const manifest = JSON.parse(await readFile(path.join(path.dirname(modulePath), 'manifest.json'), 'utf8'));
+      if (manifest.repositoryId !== storedId || manifest.gitCommonDir !== context.gitCommonDir) {
+        throw new Error('Installed reaper manifest identity mismatch.');
+      }
+      adapters.runtimeExecFile = (file, args, execOptions) => execFile(
+        manifest.executables[file] ?? file,
+        args,
+        execOptions,
+      );
+    } else {
+      context = await adapters.resolveRepositoryContext(root);
+    }
     if (['stop', 'status', 'config', 'list', 'doctor', 'purge', 'acquire', 'activate'].includes(command)) {
       await reconcile(context, adapters, { dryRun: command === 'gc' && options['dry-run'] });
     }
@@ -324,7 +375,10 @@ export async function runManager(argv, overrides = {}) {
       return 0;
     }
     if (command === 'gc') {
-      const report = await adapters.reconcileRegistry(context, { dryRun: Boolean(options['dry-run']) });
+      const report = await adapters.reconcileRegistry(context, {
+        dryRun: Boolean(options['dry-run']),
+        ...(adapters.runtimeExecFile ? { execFile: adapters.runtimeExecFile } : {}),
+      });
       adapters.stdout(options.json ? JSON.stringify(report, null, 2) : `Reconciled ${report.length} runtime allocation(s).`);
       return 0;
     }
@@ -332,6 +386,17 @@ export async function runManager(argv, overrides = {}) {
       const allocations = await adapters.listAllocations(context);
       adapters.stdout(`Registry: ${context.registryDir}\nAllocations: ${allocations.length}\nSchema: supported`);
       return 0;
+    }
+    if (['reaper-enable', 'reaper-disable', 'reaper-status'].includes(command)) {
+      const installer = await import('./runtime-reaper-install.mjs');
+      const installOptions = await reaperOptions(context);
+      const result = command === 'reaper-enable'
+        ? await installer.installReaper(installOptions)
+        : command === 'reaper-disable'
+          ? await installer.uninstallReaper(installOptions)
+          : await installer.inspectInstalledReaper(installOptions);
+      adapters.stdout(`Automatic cleanup: ${result.status}`);
+      return result.status === 'unsupported' ? 1 : 0;
     }
     adapters.stderr(`Unknown runtime command: ${command}`);
     return 2;

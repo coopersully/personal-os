@@ -66,6 +66,7 @@ require_docker() { docker info >/dev/null 2>&1 || die "Docker is not running. St
 command_setup() {
   check_toolchain; ensure_primary_env
   node "$MANAGER" gc --root "$ROOT"
+  node "$MANAGER" reaper-status --root "$ROOT" || true
   log "Installing the locked workspace dependencies..."
   pnpm install --frozen-lockfile
   bash "$ROOT/.codex/scripts/check.sh"
@@ -84,7 +85,7 @@ command_logs() {
   done
 }
 
-usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|list|doctor|gc|purge|activate|active-root|test|e2e|verify|build>'; }
+usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|list|doctor|gc|purge|activate|active-root|reaper-enable|reaper-disable|reaper-status|test|e2e|verify|build>'; }
 
 cd "$ROOT"
 case "${1:-}" in
@@ -92,7 +93,7 @@ case "${1:-}" in
   start) command_start ;;
   stop) command_stop ;;
   restart) command_stop; command_start ;;
-  status | config | list | doctor | gc | purge | activate | active-root)
+  status | config | list | doctor | gc | purge | activate | active-root | reaper-enable | reaper-disable | reaper-status)
     command_name="$1"; shift; node "$MANAGER" "$command_name" --root "$ROOT" "$@" ;;
   logs) command_logs "${2:-}" ;;
   test) check_toolchain; require_docker; pnpm test:coverage ;;

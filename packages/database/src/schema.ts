@@ -1780,6 +1780,20 @@ export const financeAccounts = pgTable(
     institution: text("institution").notNull(),
     name: text("name").notNull(),
     kind: text("kind").$type<"cash" | "investment" | "debt" | "other">().notNull().default("cash"),
+    kindSource: text("kind_source")
+      .$type<"provider" | "user" | "default">()
+      .notNull()
+      .default("default"),
+    providerType: text("provider_type").$type<
+      "depository" | "investment" | "brokerage" | "credit" | "loan" | "other"
+    >(),
+    providerSubtype: text("provider_subtype"),
+    includeInPlanning: boolean("include_in_planning").notNull().default(true),
+    ownershipType: text("ownership_type")
+      .$type<"individual" | "joint" | "unknown">()
+      .notNull()
+      .default("unknown"),
+    ownershipShareBps: integer("ownership_share_bps"),
     balance: integer("balance_cents"),
     currencyCode: text("currency_code"),
     status: text("status")
@@ -1840,6 +1854,22 @@ export const financeAccounts = pgTable(
     check(
       "finance_accounts_currency_code_check",
       sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
+    ),
+    check(
+      "finance_accounts_kind_source_check",
+      sql`${table.kindSource} IN ('provider', 'user', 'default')`,
+    ),
+    check(
+      "finance_accounts_provider_type_check",
+      sql`${table.providerType} IS NULL OR ${table.providerType} IN ('depository', 'investment', 'brokerage', 'credit', 'loan', 'other')`,
+    ),
+    check(
+      "finance_accounts_ownership_check",
+      sql`(
+        (${table.ownershipType} = 'individual' AND ${table.ownershipShareBps} = 10000)
+        OR (${table.ownershipType} = 'joint' AND ${table.ownershipShareBps} BETWEEN 1 AND 10000)
+        OR (${table.ownershipType} = 'unknown' AND ${table.ownershipShareBps} IS NULL)
+      )`,
     ),
     check(
       "finance_accounts_sync_claim_check",

@@ -58,8 +58,9 @@ The merged state obeys these invariants:
 - an unknown account has a null share;
 - an excluded account does not affect planning totals but retains its metadata and ledger.
 
-Manual accounts default to individual ownership with share 1. Existing and newly connected
-provider accounts default to unknown ownership with a null share until the user confirms them.
+New manual accounts default to individual ownership with share 1. Existing accounts and newly
+connected provider accounts default to unknown ownership with a null share until the user confirms
+them; the migration does not guess legacy intent from account names or provider fields.
 Provider synchronization never changes ownership or inclusion.
 
 ### Account discovery
@@ -138,4 +139,3 @@ Tests will prove:
 - Creating custom categories.
 - Retirement projections or personalized setup questions.
 - Changing provider credentials, account-connection authorization, or Finance mutation policy.
-

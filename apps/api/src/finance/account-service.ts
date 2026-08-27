@@ -7,17 +7,23 @@ import {
 import type {
   FinanceAccount,
   FinanceAccountConnection,
+  FinanceAccountList,
+  FinanceAccountQuery,
   FinanceToolResult,
 } from "@personal-os/domain";
 import { and, eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import { accountMatchesQuery, summarizeFinanceAccounts } from "./account-semantics.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 
 type AccountChange = {
   balance?: number | null | undefined;
+  includeInPlanning?: boolean | undefined;
   institution?: string | undefined;
   kind?: "cash" | "investment" | "debt" | "other" | undefined;
   name?: string | undefined;
+  ownershipShare?: number | null | undefined;
+  ownershipType?: "individual" | "joint" | "unknown" | undefined;
 };
 
 function result<T>(
@@ -41,11 +47,17 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
     createdAt: row.createdAt.toISOString(),
     currencyCode: row.currencyCode,
     id: row.id,
+    includeInPlanning: row.includeInPlanning,
     institution: row.institution,
     kind: row.kind,
+    kindSource: row.kindSource,
     lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
+    ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
+    ownershipType: row.ownershipType,
     provider: row.provider,
+    providerSubtype: row.providerSubtype,
+    providerType: row.providerType,
     status: row.status,
     synchronization: {
       failureCode: row.syncErrorCode,
@@ -65,6 +77,10 @@ function accountAudit(row: typeof financeAccounts.$inferSelect) {
   return {
     id: row.id,
     kind: row.kind,
+    includeInPlanning: row.includeInPlanning,
+    kindSource: row.kindSource,
+    ownershipShareBps: row.ownershipShareBps,
+    ownershipType: row.ownershipType,
     provider: row.provider,
     status: row.status,
     updatedAt: row.updatedAt.toISOString(),
@@ -110,6 +126,22 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
   }
 
   return {
+    async list(userId: string, query: FinanceAccountQuery): Promise<FinanceAccountList> {
+      const rows = await db
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.userId, userId));
+      const matching = rows.map(account).filter((item) => accountMatchesQuery(item, query));
+      const { accountSemantics, totals } = summarizeFinanceAccounts(matching);
+      return {
+        accounts: query.includeExcluded
+          ? matching
+          : matching.filter((item) => item.includeInPlanning),
+        accountSemantics,
+        totals,
+      };
+    },
+
     async getConnection(userId: string, id: string) {
       const [row] = await db
         .select()
@@ -137,6 +169,20 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
         },
         async (tx) => {
           const before = await owned(tx, context.userId, id);
+          const ownershipType = change.ownershipType ?? before.ownershipType;
+          const ownershipShareBps =
+            change.ownershipShare === undefined
+              ? before.ownershipShareBps
+              : change.ownershipShare === null
+                ? null
+                : Math.round(change.ownershipShare * 10_000);
+          if (
+            (ownershipType === "individual" && ownershipShareBps !== 10_000) ||
+            (ownershipType === "joint" && (ownershipShareBps === null || ownershipShareBps <= 0)) ||
+            (ownershipType === "unknown" && ownershipShareBps !== null)
+          ) {
+            throw new AppError("invalid_request", "The account ownership type and share conflict.");
+          }
           const [updated] = await tx
             .update(financeAccounts)
             .set({
@@ -148,7 +194,11 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
                     : Math.round(change.balance * 100),
               institution: change.institution,
               kind: change.kind,
+              kindSource: change.kind === undefined ? undefined : "user",
+              includeInPlanning: change.includeInPlanning,
               name: change.name,
+              ownershipShareBps,
+              ownershipType,
               updatedAt: now(),
             })
             .where(eq(financeAccounts.id, before.id))

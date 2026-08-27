@@ -237,6 +237,10 @@ remaining tools include transactions, categories, budgets, merchants, review
 work, wealth, cash flow, recurring obligations, and alerts. Agents should read
 ledger health and the relevant transactions before offering a budget or
 cash-flow recommendation.
+`list_finance_accounts` accepts optional account text, kind, status, and inclusion filters. Its
+structured result includes planning totals plus excluded-account, unresolved-ownership, and
+possible-duplicate disclosures calculated by the Finance API; the MCP adapter only forwards the
+typed query and response.
 `create_finance_attention_item` is the bounded exception to the otherwise read/proposal Finance
 surface: it locks one owned transaction, derives provider/account/remote/revision attribution
 server-side, deduplicates the same open transaction/kind item, and writes a redacted audit in the

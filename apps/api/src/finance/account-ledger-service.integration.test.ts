@@ -421,4 +421,77 @@ describe.sequential("canonical Finance account and ledger mutations", () => {
       data: { status: "manual" },
     });
   });
+
+  it("filters accounts and reports ownership-weighted planning totals", async () => {
+    const now = () => new Date("2026-08-25T20:00:00Z");
+    const service = createFinanceAccountService({ db: database.db, now });
+    const rows = await database.db
+      .insert(financeAccounts)
+      .values([
+        {
+          balance: 100_000,
+          institution: "Semantics Bank",
+          kind: "investment" as const,
+          kindSource: "user" as const,
+          name: "Shared IRA",
+          ownershipShareBps: 5_000,
+          ownershipType: "joint" as const,
+          provider: "manual" as const,
+          userId,
+        },
+        {
+          balance: 20_000,
+          includeInPlanning: false,
+          institution: "Semantics Bank",
+          kind: "cash" as const,
+          kindSource: "user" as const,
+          name: "Excluded",
+          ownershipShareBps: 10_000,
+          ownershipType: "individual" as const,
+          provider: "manual" as const,
+          userId,
+        },
+        {
+          balance: -15_000,
+          institution: "Semantics Bank",
+          kind: "debt" as const,
+          kindSource: "user" as const,
+          name: "Card",
+          ownershipShareBps: 10_000,
+          ownershipType: "individual" as const,
+          provider: "manual" as const,
+          userId,
+        },
+      ])
+      .returning();
+
+    await expect(
+      service.list(userId, { includeExcluded: true, query: "Semantics Bank" }),
+    ).resolves.toMatchObject({
+      accounts: expect.arrayContaining([expect.objectContaining({ name: "Shared IRA" })]),
+      accountSemantics: { excludedAccountIds: [rows[1]?.id], trustworthy: true },
+      totals: { cash: 0, debt: 150, investments: 500, netWorth: 350, otherAssets: 0 },
+    });
+    await expect(
+      service.update(
+        rows[0]?.id ?? "",
+        {
+          idempotencyKey: "resolve-joint-account",
+          kind: "other",
+          ownershipShare: 1,
+          ownershipType: "individual",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      data: { kind: "other", kindSource: "user", ownershipShare: 1, ownershipType: "individual" },
+    });
+    await expect(
+      service.update(
+        rows[0]?.id ?? "",
+        { idempotencyKey: "invalid-joint-account", ownershipShare: null, ownershipType: "joint" },
+        context,
+      ),
+    ).rejects.toThrow("ownership type and share conflict");
+  });
 });

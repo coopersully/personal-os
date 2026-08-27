@@ -113,9 +113,12 @@ export type StartFinanceAccountConnectionInput = z.infer<
 export const updateFinanceAccountInputSchema = z
   .object({
     balance: z.number().finite().nullable().optional(),
+    includeInPlanning: z.boolean().optional(),
     institution: z.string().trim().min(1).max(160).optional(),
     kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
     name: z.string().trim().min(1).max(160).optional(),
+    ownershipShare: z.number().finite().gt(0).max(1).nullable().optional(),
+    ownershipType: z.enum(["individual", "joint", "unknown"]).optional(),
   })
   .and(financeMutationMetaSchema);
 export type UpdateFinanceAccountInput = z.infer<typeof updateFinanceAccountInputSchema>;

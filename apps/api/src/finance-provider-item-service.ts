@@ -10,6 +10,7 @@ import type { FinanceAccount } from "@personal-os/domain";
 import { and, asc, eq, inArray, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { financeAccountKindFromProviderType } from "./finance/account-semantics.js";
 import { decryptJson, encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
 
@@ -77,11 +78,17 @@ function serializeAccount(row: typeof financeAccounts.$inferSelect): FinanceAcco
     createdAt: row.createdAt.toISOString(),
     currencyCode: row.currencyCode,
     id: row.id,
+    includeInPlanning: row.includeInPlanning,
     institution: row.institution,
     kind: row.kind,
+    kindSource: row.kindSource,
     lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
+    ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
+    ownershipType: row.ownershipType,
     provider: row.provider,
+    providerSubtype: row.providerSubtype,
+    providerType: row.providerType,
     status: row.status,
     synchronization: {
       failureCode: row.syncErrorCode,
@@ -368,11 +375,15 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
               currencyCode: remote.currencyCode,
               encryptedCredentials,
               institution: input.institution,
+              kind: financeAccountKindFromProviderType(remote.type),
+              kindSource: "provider",
               lastSyncedAt: null,
               name: remote.officialName ?? remote.name,
               nextSyncAt: connectedAt,
               provider: "plaid",
               providerAccountId: remote.accountId,
+              providerSubtype: remote.subtype ?? null,
+              providerType: remote.type ?? null,
               providerItemId: input.itemId,
               providerItemRecordId: item.id,
               status: "connected",
@@ -387,12 +398,16 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
                 currencyCode: remote.currencyCode,
                 encryptedCredentials,
                 institution: input.institution,
+                kind: sql`CASE WHEN ${financeAccounts.kindSource} = 'user' THEN ${financeAccounts.kind} ELSE ${financeAccountKindFromProviderType(remote.type)} END`,
+                kindSource: sql`CASE WHEN ${financeAccounts.kindSource} = 'user' THEN 'user' ELSE 'provider' END`,
                 lastSyncAttemptAt: null,
                 lastSyncedAt: null,
                 name: remote.officialName ?? remote.name,
                 nextSyncAt: connectedAt,
                 providerItemId: input.itemId,
                 providerItemRecordId: item.id,
+                providerSubtype: remote.subtype ?? null,
+                providerType: remote.type ?? null,
                 status: "connected",
                 syncClaimExpiresAt: null,
                 syncClaimId: null,

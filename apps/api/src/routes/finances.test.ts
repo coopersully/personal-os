@@ -9,6 +9,51 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("parses account discovery filters and returns the structured account list", async () => {
+    const app = new Hono<AppEnv>();
+    const listFinanceAccounts = vi.fn(async () => ({
+      accounts: [],
+      accountSemantics: {
+        excludedAccountIds: [],
+        possibleDuplicateGroups: [],
+        trustworthy: true,
+        unresolvedOwnershipAccountIds: [],
+      },
+      totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+    }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      context.set("requestId", "request-accounts");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: { listFinanceAccounts } as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request(
+      "/v1/finances/accounts?kind=investment&query=%20IRA%20&includeExcluded=false",
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ totals: { netWorth: 0 } });
+    expect(listFinanceAccounts).toHaveBeenCalledWith(id, {
+      includeExcluded: false,
+      kind: "investment",
+      query: "IRA",
+    });
+  });
+
   it("returns read-only Finance status for a parsed maintenance scope", async () => {
     const app = new Hono<AppEnv>();
     const getFinanceStatus = vi.fn(async () => ({ domain: "finances" }));

@@ -133,9 +133,9 @@ Expected: PASS.
 
 - [ ] **Step 1: Write a failing fresh-migration preservation test**
 
-Insert one legacy-shaped Plaid account and one manual account, run through the migrated schema,
-and assert safe defaults: included in planning, Plaid ownership unknown/null, manual ownership
-individual/10,000, and no guessed provider type.
+Insert legacy-shaped Plaid and manual accounts, run through the migrated schema, and assert safe
+defaults: included in planning, ownership unknown/null, and no guessed provider type. New manual
+accounts receive individual/10,000 semantics through the account creation service.
 
 - [ ] **Step 2: Run the database test and verify RED**
 
@@ -320,4 +320,3 @@ Expected: only the approved Finance vertical slice and planning documents are pr
 Use a concise Finance-scoped commit message, push `cooper/finance-account-semantics`, and create a
 PR summarizing the production failure reproduced, account semantics added, trust disclosures, and
 verification evidence.
-

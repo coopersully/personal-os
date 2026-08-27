@@ -165,7 +165,7 @@ export function composeCommand(allocation, root, args) {
 
 function ownershipLabels(allocation) {
   return {
-    "org.docker.compose.project": allocation.composeProject,
+    "com.docker.compose.project": allocation.composeProject,
     "app.ilo.runtime.id": allocation.runtimeId,
     "app.ilo.runtime.repository": allocation.repositoryId,
     "app.ilo.runtime.root": allocation.rootHash,
@@ -175,7 +175,7 @@ function ownershipLabels(allocation) {
 function discoveryArgs(type, label, value) {
   const args = type === "container" ? ["ps", "--all"] : [type, "ls"];
   args.push("--filter", `label=${label}=${value}`);
-  args.push("--format", "{{.ID}}");
+  args.push("--format", type === "volume" ? "{{.Name}}" : "{{.ID}}");
   return args;
 }
 
@@ -204,7 +204,7 @@ export async function inspectOwnedDockerResources(allocation, adapters = {}) {
       ["volume", "volumes"],
     ]) {
       const ids = new Set();
-      for (const label of ["org.docker.compose.project", "app.ilo.runtime.id"]) {
+      for (const label of ["com.docker.compose.project", "app.ilo.runtime.id"]) {
         const result = normalizeCommandResult(
           await run("docker", discoveryArgs(type, label, expected[label])),
         );

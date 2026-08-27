@@ -105,7 +105,7 @@ function dockerFixture({
 } = {}) {
   const calls = [];
   const labels = {
-    "org.docker.compose.project": allocation.composeProject,
+    "com.docker.compose.project": allocation.composeProject,
     "app.ilo.runtime.id": allocation.runtimeId,
     "app.ilo.runtime.repository": allocation.repositoryId,
     "app.ilo.runtime.root": allocation.rootHash,
@@ -139,7 +139,7 @@ function dockerFixture({
           delete inspectedLabels["app.ilo.runtime.repository"];
         }
         if (foreignProject && id === "volume-1") {
-          inspectedLabels["org.docker.compose.project"] = "ilo-wt-foreign";
+          inspectedLabels["com.docker.compose.project"] = "ilo-wt-foreign";
         }
         return {
           stdout: `${JSON.stringify([{ Id: id, Name: id, Labels: inspectedLabels }])}\n`,
@@ -166,6 +166,10 @@ test("Docker inspection accepts only resources with complete ownership labels", 
     networks: ["network-1"],
     volumes: ["volume-1"],
   });
+  assert.equal(
+    fixture.calls.some((call) => call[1] === "volume" && call.at(-1) === "{{.Name}}"),
+    true,
+  );
 });
 
 test("Docker inspection fails closed when Docker is unavailable or a label differs", async () => {

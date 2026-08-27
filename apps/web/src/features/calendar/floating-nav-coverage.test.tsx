@@ -325,8 +325,8 @@ describe("Calendar floating navigation edge states", () => {
     expect(screen.getByRole("combobox", { name: "Location" })).toHaveValue("");
   });
 
-  it("keeps date surfaces open when the selected date is deselected", async () => {
-    vi.useFakeTimers({ now: new Date("2026-08-23T12:00:00.000Z"), shouldAdvanceTime: true });
+  it("keeps required dates selected and their surfaces open when reselected", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-24T12:00:00.000Z"), shouldAdvanceTime: true });
     try {
       const browser = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderCalendar();
@@ -344,7 +344,12 @@ describe("Calendar floating navigation edge states", () => {
       expect(selectedStart).not.toBeNull();
       if (!selectedStart) throw new Error("Selected start date was not rendered.");
       await browser.click(selectedStart);
-      expect(selectedStart).toBeInTheDocument();
+      const reselectedStart = document.querySelector<HTMLButtonElement>(
+        '[data-slot="popover-content"] button[data-selected-single="true"]',
+      );
+      expect(reselectedStart).not.toBeNull();
+      expect(reselectedStart).toHaveAttribute("data-selected-single", "true");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

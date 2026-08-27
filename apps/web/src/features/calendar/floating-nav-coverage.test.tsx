@@ -326,19 +326,24 @@ describe("Calendar floating navigation edge states", () => {
   });
 
   it("keeps date surfaces open when the selected date is deselected", async () => {
-    const browser = userEvent.setup();
-    renderCalendar();
+    vi.useFakeTimers({ now: new Date("2026-08-24T12:00:00.000Z"), shouldAdvanceTime: true });
+    try {
+      const browser = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderCalendar();
 
-    await browser.click(screen.getByRole("button", { name: "Choose date" }));
-    await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
-    expect(screen.getByLabelText("Jump to date")).toBeInTheDocument();
-    await browser.keyboard("{Escape}");
+      await browser.click(screen.getByRole("button", { name: "Choose date" }));
+      await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
+      expect(screen.getByLabelText("Jump to date")).toBeInTheDocument();
+      await browser.keyboard("{Escape}");
 
-    await browser.click(screen.getByRole("button", { name: "Create event" }));
-    await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
-    const selectedStart = screen.getByRole("button", { name: /Monday, August 24th, 2026/ });
-    await browser.click(selectedStart);
-    expect(screen.getByRole("button", { name: /Monday, August 24th, 2026/ })).toBeInTheDocument();
+      await browser.click(screen.getByRole("button", { name: "Create event" }));
+      await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
+      const selectedStart = screen.getByRole("button", { name: /Monday, August 24th, 2026/ });
+      await browser.click(selectedStart);
+      expect(screen.getByRole("button", { name: /Monday, August 24th, 2026/ })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sorts equally ranked calendars by name and falls back when a color is missing", async () => {

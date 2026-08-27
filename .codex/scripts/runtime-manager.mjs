@@ -6,7 +6,7 @@ import { open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-
+import { reconcileRegistry } from "./runtime-reconciler.mjs";
 import {
   acquireAllocation,
   deleteAllocation,
@@ -16,7 +16,6 @@ import {
   replaceAllocation,
   resolveRepositoryContext,
 } from "./runtime-registry.mjs";
-import { reconcileRegistry } from "./runtime-reconciler.mjs";
 import {
   composeCommand,
   inspectOwnedDockerResources,

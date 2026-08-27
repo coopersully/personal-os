@@ -71,7 +71,10 @@ test("child records its process group and all services only after all readiness 
     root: allocation.root,
     env: {},
     supervisorChild: true,
-    spawn: () => Object.assign(new EventEmitter(), { pid: (nextPid += 1) }),
+    spawn: () => {
+      nextPid += 1;
+      return Object.assign(new EventEmitter(), { pid: nextPid });
+    },
     processIdentity: async (pid) => ({ pid, startIdentity: `start-${pid}` }),
     recordProcesses: async (processes) => records.push(structuredClone(processes)),
     readiness: async (name) => {
@@ -96,7 +99,8 @@ test("one child exit terminates the verified process group", async () => {
     env: {},
     supervisorChild: true,
     spawn: () => {
-      const child = Object.assign(new EventEmitter(), { pid: (nextPid += 1) });
+      nextPid += 1;
+      const child = Object.assign(new EventEmitter(), { pid: nextPid });
       children.push(child);
       return child;
     },
@@ -120,7 +124,8 @@ test("a child failure interrupts readiness immediately", async () => {
     env: {},
     supervisorChild: true,
     spawn: () => {
-      const child = Object.assign(new EventEmitter(), { pid: (nextPid += 1) });
+      nextPid += 1;
+      const child = Object.assign(new EventEmitter(), { pid: nextPid });
       children.push(child);
       return child;
     },

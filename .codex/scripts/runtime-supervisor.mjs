@@ -2,7 +2,7 @@
 
 import { spawn as nodeSpawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { open, mkdir, readFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

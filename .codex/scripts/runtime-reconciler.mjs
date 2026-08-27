@@ -4,8 +4,8 @@ import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import {
-  deleteAllocation as registryDeleteAllocation,
   listAllocations,
+  deleteAllocation as registryDeleteAllocation,
   replaceAllocation as registryReplaceAllocation,
 } from "./runtime-registry.mjs";
 import {

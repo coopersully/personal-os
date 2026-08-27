@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
 import {
-  SCHEMA_VERSION,
-  UnsupportedRegistrySchemaError,
   acquireAllocation,
   appendAuditEvent,
   deleteAllocation,
@@ -18,6 +16,8 @@ import {
   portsForSlot,
   replaceAllocation,
   resolveRepositoryContext,
+  SCHEMA_VERSION,
+  UnsupportedRegistrySchemaError,
   withRegistryLock,
 } from "./runtime-registry.mjs";
 

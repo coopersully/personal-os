@@ -11,6 +11,7 @@ import {
   UnsupportedRegistrySchemaError,
   acquireAllocation,
   appendAuditEvent,
+  deleteAllocation,
   getAllocationForRoot,
   listAllocations,
   migrateLegacyTiers,
@@ -278,4 +279,44 @@ test('replaceAllocation rejects a tier collision and preserves the first record'
 
   await assert.rejects(() => replaceAllocation(contextB, allocationB), /tier 2 is already owned/i);
   assert.equal((await getAllocationForRoot(contextA, repository.linked.a)).runtimeId, allocationA.runtimeId);
+});
+
+test('deleteAllocation refuses an operation-token mismatch', async (t) => {
+  const repository = await createRepository(t);
+  const context = await resolveRepositoryContext(repository.linked.a);
+  const allocation = await acquireAllocation(context, deterministicOptions());
+  await replaceAllocation(context, {
+    ...allocation,
+    state: 'releasing',
+    cleanup: { operationToken: 'current-token' },
+  });
+
+  assert.equal(await deleteAllocation(context, allocation.runtimeId, {
+    operationToken: 'stale-token',
+  }), false);
+  assert.equal((await getAllocationForRoot(context)).cleanup.operationToken, 'current-token');
+});
+
+test('replaceAllocation compare-and-swap refuses stale state and cleanup tokens', async (t) => {
+  const repository = await createRepository(t);
+  const context = await resolveRepositoryContext(repository.linked.a);
+  const allocation = await acquireAllocation(context, deterministicOptions());
+  const claimed = {
+    ...allocation,
+    state: 'releasing',
+    cleanup: { operationToken: 'winning-token' },
+  };
+  assert.notEqual(await replaceAllocation(context, claimed, {
+    expectedState: 'allocated',
+    expectedOperationToken: null,
+  }), false);
+
+  assert.equal(await replaceAllocation(context, {
+    ...claimed,
+    cleanup: { operationToken: 'stale-token' },
+  }, {
+    expectedState: 'allocated',
+    expectedOperationToken: null,
+  }), false);
+  assert.equal((await getAllocationForRoot(context)).cleanup.operationToken, 'winning-token');
 });

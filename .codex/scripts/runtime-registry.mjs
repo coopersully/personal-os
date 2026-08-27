@@ -397,13 +397,23 @@ export async function getAllocationForRoot(context, root = context.root) {
   return allocation;
 }
 
-export async function replaceAllocation(context, allocation) {
+export async function replaceAllocation(context, allocation, options = {}) {
   return withRegistryLock(context, async () => {
     validateAllocation(allocation);
     if (allocation.repositoryId !== context.repositoryId) {
       throw new Error('Allocation belongs to a different repository identity.');
     }
     const allocations = await listAllocationsUnlocked(context);
+    const current = allocations.find((candidate) => candidate.runtimeId === allocation.runtimeId);
+    if (Object.hasOwn(options, 'expectedState') && current?.state !== options.expectedState) {
+      return false;
+    }
+    if (
+      Object.hasOwn(options, 'expectedOperationToken')
+      && (current?.cleanup?.operationToken ?? null) !== options.expectedOperationToken
+    ) {
+      return false;
+    }
     const tierOwner = allocations.find((candidate) =>
       candidate.tier === allocation.tier && candidate.runtimeId !== allocation.runtimeId,
     );
@@ -421,7 +431,7 @@ export async function replaceAllocation(context, allocation) {
   });
 }
 
-export async function deleteAllocation(context, runtimeId) {
+export async function deleteAllocation(context, runtimeId, options = {}) {
   return withRegistryLock(context, async () => {
     let allocation;
     try {
@@ -431,6 +441,9 @@ export async function deleteAllocation(context, runtimeId) {
         return false;
       }
       throw error;
+    }
+    if (options.operationToken && allocation.cleanup?.operationToken !== options.operationToken) {
+      return false;
     }
     await rm(allocationPath(context, runtimeId), { force: true });
     await rm(rootIndexPath(context, allocation.rootHash), { force: true });

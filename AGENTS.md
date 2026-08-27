@@ -15,8 +15,11 @@ This repository is the ilo monorepo and also stores personal agent skills and ro
 - Use the checked-in lifecycle actions instead of inventing ad hoc background commands.
 - `pnpm env:start` runs the current source and remains attached so failures are visible.
 - Use `pnpm env:status`, `pnpm env:logs`, `pnpm env:restart`, and `pnpm env:stop` to operate it.
-- The local runtime uses stable ports: web `8080`, API `8787`, MCP `8788`, and PostgreSQL `55432`.
-- Runtime PID and log files live under ignored `.codex/run/`.
+- Each checkout keeps a stable allocation until Purge or confirmed orphan cleanup. The primary checkout owns tier 1 (web `8081`, API `8788`, MCP `8789`, PostgreSQL `55433`); the first linked worktree normally gets tier 2 (`8086`, `8793`, `8794`, `55438`).
+- Allocations are shared under `<git-common-dir>/ilo-runtime`; checkout-local logs and generated runtime configuration remain ignored.
+- The primary checkout `.env` is authoritative and is copied into linked worktrees. `.env.codex.local` contains only generated, non-secret runtime URLs and ports.
+- Run `pnpm env:doctor` for ownership, port, Git, callback, or cleanup diagnostics.
+- Automatic orphan cleanup is an explicit macOS opt-in through the Enable/Disable Automatic Cleanup actions. Setup never installs it silently.
 
 ## Validation
 

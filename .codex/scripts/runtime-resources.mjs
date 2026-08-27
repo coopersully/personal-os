@@ -1,31 +1,31 @@
-import { execFile as execFileCallback } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
-import net from 'node:net';
-import path from 'node:path';
-import { promisify } from 'node:util';
+import { execFile as execFileCallback } from "node:child_process";
+import { realpath } from "node:fs/promises";
+import net from "node:net";
+import path from "node:path";
+import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 
 function normalizeCommandResult(result) {
-  if (typeof result === 'string') {
-    return { stdout: result, stderr: '' };
+  if (typeof result === "string") {
+    return { stdout: result, stderr: "" };
   }
-  return { stdout: result?.stdout ?? '', stderr: result?.stderr ?? '' };
+  return { stdout: result?.stdout ?? "", stderr: result?.stderr ?? "" };
 }
 
 export async function probePort(port) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('Port must be an integer between 1 and 65535.');
+    throw new Error("Port must be an integer between 1 and 65535.");
   }
   const server = net.createServer();
   try {
     await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen({ host: '127.0.0.1', port, exclusive: true }, resolve);
+      server.once("error", reject);
+      server.listen({ host: "127.0.0.1", port, exclusive: true }, resolve);
     });
     return { available: true, port };
   } catch (error) {
-    if (error.code === 'EADDRINUSE' || error.code === 'EACCES') {
+    if (error.code === "EADDRINUSE" || error.code === "EACCES") {
       return { available: false, port, code: error.code };
     }
     throw error;
@@ -39,20 +39,22 @@ export async function probePort(port) {
 export async function inspectListener(port, adapters = {}) {
   const run = adapters.execFile ?? execFile;
   try {
-    const result = normalizeCommandResult(await run('lsof', [
-      '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpctn',
-    ]));
+    const result = normalizeCommandResult(
+      await run("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpctn"]),
+    );
     return { available: true, output: result.stdout, port };
   } catch (error) {
-    if (error.code === 1 || error.code === 'ENOENT') {
-      return { available: false, output: '', port };
+    if (error.code === 1 || error.code === "ENOENT") {
+      return { available: false, output: "", port };
     }
-    return { available: false, error: error.message, output: error.stdout ?? '', port };
+    return { available: false, error: error.message, output: error.stdout ?? "", port };
   }
 }
 
 function parseLsofCwd(output) {
-  const line = String(output).split(/\r?\n/).find((entry) => entry.startsWith('n'));
+  const line = String(output)
+    .split(/\r?\n/)
+    .find((entry) => entry.startsWith("n"));
   return line ? line.slice(1) : null;
 }
 
@@ -63,14 +65,14 @@ export async function inspectProcess(pid, adapters = {}) {
   const run = adapters.execFile ?? execFile;
   try {
     const [start, command] = await Promise.all([
-      run('ps', ['-p', String(pid), '-o', 'lstart=']),
-      run('ps', ['-p', String(pid), '-o', 'command=']),
+      run("ps", ["-p", String(pid), "-o", "lstart="]),
+      run("ps", ["-p", String(pid), "-o", "command="]),
     ]);
     let cwd = null;
     try {
-      const cwdResult = normalizeCommandResult(await run('lsof', [
-        '-a', '-p', String(pid), '-d', 'cwd', '-Fn',
-      ]));
+      const cwdResult = normalizeCommandResult(
+        await run("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]),
+      );
       cwd = parseLsofCwd(cwdResult.stdout);
       if (cwd) {
         cwd = await realpath(cwd).catch(() => null);
@@ -80,12 +82,12 @@ export async function inspectProcess(pid, adapters = {}) {
     }
     return {
       pid,
-      startIdentity: normalizeCommandResult(start).stdout.trim().replace(/\s+/g, ' '),
+      startIdentity: normalizeCommandResult(start).stdout.trim().replace(/\s+/g, " "),
       command: normalizeCommandResult(command).stdout.trim(),
       cwd,
     };
   } catch (error) {
-    if (error.code === 1 || error.code === 'ESRCH') {
+    if (error.code === 1 || error.code === "ESRCH") {
       return null;
     }
     throw error;
@@ -99,7 +101,10 @@ export function processMatches(record, observed) {
   if (record.pid !== observed.pid || record.startIdentity !== observed.startIdentity) {
     return false;
   }
-  if (typeof record.commandMarker !== 'string' || !observed.command?.includes(record.commandMarker)) {
+  if (
+    typeof record.commandMarker !== "string" ||
+    !observed.command?.includes(record.commandMarker)
+  ) {
     return false;
   }
   if (observed.cwd && record.cwd !== observed.cwd) {
@@ -119,31 +124,34 @@ export async function stopOwnedProcessGroup(allocation, adapters = {}) {
     return { ok: true, stopped: false };
   }
   if (!processMatches(record, observed)) {
-    return { ok: false, code: 'process-identity-mismatch' };
+    return { ok: false, code: "process-identity-mismatch" };
   }
   if (!Number.isInteger(record.pgid) || record.pgid <= 0) {
-    return { ok: false, code: 'process-group-invalid' };
+    return { ok: false, code: "process-group-invalid" };
   }
   try {
-    (adapters.kill ?? process.kill)(-record.pgid, adapters.signal ?? 'SIGTERM');
+    (adapters.kill ?? process.kill)(-record.pgid, adapters.signal ?? "SIGTERM");
     return { ok: true, stopped: true };
   } catch (error) {
-    if (error.code === 'ESRCH') {
+    if (error.code === "ESRCH") {
       return { ok: true, stopped: false };
     }
-    return { ok: false, code: 'process-stop-failed' };
+    return { ok: false, code: "process-stop-failed" };
   }
 }
 
 export function composeCommand(allocation, root, args) {
   if (!path.isAbsolute(root)) {
-    throw new Error('Compose root must be absolute.');
+    throw new Error("Compose root must be absolute.");
   }
   return {
-    file: 'docker',
+    file: "docker",
     args: [
-      'compose', '-p', allocation.composeProject,
-      '-f', path.join(root, '.codex/runtime/compose.yaml'),
+      "compose",
+      "-p",
+      allocation.composeProject,
+      "-f",
+      path.join(root, ".codex/runtime/compose.yaml"),
       ...args,
     ],
     env: {
@@ -157,26 +165,29 @@ export function composeCommand(allocation, root, args) {
 
 function ownershipLabels(allocation) {
   return {
-    'org.docker.compose.project': allocation.composeProject,
-    'app.ilo.runtime.id': allocation.runtimeId,
-    'app.ilo.runtime.repository': allocation.repositoryId,
-    'app.ilo.runtime.root': allocation.rootHash,
+    "org.docker.compose.project": allocation.composeProject,
+    "app.ilo.runtime.id": allocation.runtimeId,
+    "app.ilo.runtime.repository": allocation.repositoryId,
+    "app.ilo.runtime.root": allocation.rootHash,
   };
 }
 
 function discoveryArgs(type, label, value) {
-  const args = type === 'container' ? ['ps', '--all'] : [type, 'ls'];
-  args.push('--filter', `label=${label}=${value}`);
-  args.push('--format', '{{.ID}}');
+  const args = type === "container" ? ["ps", "--all"] : [type, "ls"];
+  args.push("--filter", `label=${label}=${value}`);
+  args.push("--format", "{{.ID}}");
   return args;
 }
 
 function parseIds(output) {
-  return String(output).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  return String(output)
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 async function inspectDockerResource(run, type, id) {
-  const result = normalizeCommandResult(await run('docker', ['inspect', '--type', type, id]));
+  const result = normalizeCommandResult(await run("docker", ["inspect", "--type", type, id]));
   const parsed = JSON.parse(result.stdout);
   const resource = parsed[0];
   return { id, labels: resource?.Labels ?? resource?.Config?.Labels ?? {} };
@@ -188,22 +199,26 @@ export async function inspectOwnedDockerResources(allocation, adapters = {}) {
   const found = { containers: [], networks: [], volumes: [] };
   try {
     for (const [type, key] of [
-      ['container', 'containers'],
-      ['network', 'networks'],
-      ['volume', 'volumes'],
+      ["container", "containers"],
+      ["network", "networks"],
+      ["volume", "volumes"],
     ]) {
       const ids = new Set();
-      for (const label of ['org.docker.compose.project', 'app.ilo.runtime.id']) {
-        const result = normalizeCommandResult(await run('docker', discoveryArgs(type, label, expected[label])));
+      for (const label of ["org.docker.compose.project", "app.ilo.runtime.id"]) {
+        const result = normalizeCommandResult(
+          await run("docker", discoveryArgs(type, label, expected[label])),
+        );
         for (const id of parseIds(result.stdout)) {
           ids.add(id);
         }
       }
       for (const id of ids) {
         const inspected = await inspectDockerResource(run, type, id);
-        const matches = Object.entries(expected).every(([label, value]) => inspected.labels[label] === value);
+        const matches = Object.entries(expected).every(
+          ([label, value]) => inspected.labels[label] === value,
+        );
         if (!matches) {
-          return { ok: false, code: 'docker-label-mismatch', resource: { type, id } };
+          return { ok: false, code: "docker-label-mismatch", resource: { type, id } };
         }
         found[key].push(id);
       }
@@ -212,7 +227,7 @@ export async function inspectOwnedDockerResources(allocation, adapters = {}) {
   } catch (error) {
     return {
       ok: false,
-      code: error.code === 'ENOENT' ? 'docker-unavailable' : 'docker-inspect-failed',
+      code: error.code === "ENOENT" ? "docker-unavailable" : "docker-inspect-failed",
     };
   }
 }
@@ -225,16 +240,16 @@ export async function removeOwnedDockerResources(allocation, adapters = {}) {
   }
   try {
     for (const id of inspected.resources.containers) {
-      await run('docker', ['container', 'rm', '--force', id]);
+      await run("docker", ["container", "rm", "--force", id]);
     }
     for (const id of inspected.resources.networks) {
-      await run('docker', ['network', 'rm', id]);
+      await run("docker", ["network", "rm", id]);
     }
     for (const id of inspected.resources.volumes) {
-      await run('docker', ['volume', 'rm', id]);
+      await run("docker", ["volume", "rm", id]);
     }
     return { ok: true, removed: inspected.resources };
   } catch {
-    return { ok: false, code: 'docker-remove-failed' };
+    return { ok: false, code: "docker-remove-failed" };
   }
 }

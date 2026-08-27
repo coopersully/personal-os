@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { execFile as execFileCallback, spawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { open, readFile, rename, rm } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
+import { execFile as execFileCallback, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { open, readFile, rename, rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import {
   acquireAllocation,
@@ -15,15 +15,15 @@ import {
   migrateLegacyTiers,
   replaceAllocation,
   resolveRepositoryContext,
-} from './runtime-registry.mjs';
-import { reconcileRegistry } from './runtime-reconciler.mjs';
+} from "./runtime-registry.mjs";
+import { reconcileRegistry } from "./runtime-reconciler.mjs";
 import {
   composeCommand,
   inspectOwnedDockerResources,
   probePort,
   removeOwnedDockerResources,
   stopOwnedProcessGroup,
-} from './runtime-resources.mjs';
+} from "./runtime-resources.mjs";
 
 const execFile = promisify(execFileCallback);
 const modulePath = fileURLToPath(import.meta.url);
@@ -71,21 +71,23 @@ export function buildRuntimeOverlay(allocation) {
     GOOGLE_REDIRECT_URI: `${urls.api}/v1/connectors/google/callback`,
     X_REDIRECT_URI: `${urls.api}/v1/x-bookmarks/callback`,
     ALLOWED_ORIGINS: `${urls.web},tauri://localhost,http://tauri.localhost`,
-    MCP_ALLOWED_ORIGINS: '',
+    MCP_ALLOWED_ORIGINS: "",
     OAUTH_AUTHORIZATION_SERVER_URL: urls.api,
     PERSONAL_OS_API_URL: urls.api,
     VITE_API_BASE_URL: urls.api,
     VITE_PROXY_API_TARGET: urls.api,
   };
-  return `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n')}\n`;
+  return `${Object.entries(values)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n")}\n`;
 }
 
 export async function writeRuntimeOverlay(root, allocation) {
-  const destination = path.join(root, '.env.codex.local');
+  const destination = path.join(root, ".env.codex.local");
   const temporary = `${destination}.tmp-${process.pid}-${Date.now()}`;
-  const handle = await open(temporary, 'wx', 0o600);
+  const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(buildRuntimeOverlay(allocation), 'utf8');
+    await handle.writeFile(buildRuntimeOverlay(allocation), "utf8");
     await handle.sync();
   } finally {
     await handle.close();
@@ -103,7 +105,7 @@ export function formatAllocation(allocation) {
     `  MCP:       ${urls.mcp}`,
     `  PostgreSQL 127.0.0.1:${allocation.ports.postgres}`,
     `  Compose:   ${allocation.composeProject}`,
-  ].join('\n');
+  ].join("\n");
 }
 
 function parseArgs(argv) {
@@ -111,13 +113,15 @@ function parseArgs(argv) {
   const options = { positional: [] };
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index];
-    if (!value.startsWith('--')) {
+    if (!value.startsWith("--")) {
       options.positional.push(value);
-    } else if (['--dry-run', '--json', '--acknowledge-data-loss', '--installed-reaper'].includes(value)) {
+    } else if (
+      ["--dry-run", "--json", "--acknowledge-data-loss", "--installed-reaper"].includes(value)
+    ) {
       options[value.slice(2)] = true;
     } else {
       const next = argv[index + 1];
-      if (next === undefined || next.startsWith('--')) {
+      if (next === undefined || next.startsWith("--")) {
         throw new Error(`Option ${value} requires a value.`);
       }
       options[value.slice(2)] = next;
@@ -137,7 +141,14 @@ async function runCommand(command, adapters) {
 
 async function waitForPostgres(allocation, adapters) {
   const command = composeCommand(allocation, allocation.root, [
-    'exec', '-T', 'postgres', 'pg_isready', '-U', 'personal_os', '-d', 'personal_os',
+    "exec",
+    "-T",
+    "postgres",
+    "pg_isready",
+    "-U",
+    "personal_os",
+    "-d",
+    "personal_os",
   ]);
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
@@ -147,14 +158,14 @@ async function waitForPostgres(allocation, adapters) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
-  throw new Error('PostgreSQL did not become ready.');
+  throw new Error("PostgreSQL did not become ready.");
 }
 
 async function spawnAttached(file, args, options) {
-  const child = spawn(file, args, { ...options, stdio: 'inherit' });
+  const child = spawn(file, args, { ...options, stdio: "inherit" });
   return new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code) => resolve(code ?? 1));
+    child.once("error", reject);
+    child.once("exit", (code) => resolve(code ?? 1));
   });
 }
 
@@ -173,8 +184,8 @@ async function commandStart(context, options, adapters) {
     probePort: async (port) => (await adapters.probePort(port)).available,
     ...(options.tier ? { requestedTier: Number(options.tier) } : {}),
   });
-  if (allocation.state === 'running' && allocation.processes?.supervisor) {
-    throw new Error('This checkout already has a running supervisor. Use Status or Stop.');
+  if (allocation.state === "running" && allocation.processes?.supervisor) {
+    throw new Error("This checkout already has a running supervisor. Use Status or Stop.");
   }
   await writeRuntimeOverlay(context.root, allocation);
   const inspected = await adapters.inspectOwnedDockerResources(allocation, adapters);
@@ -183,28 +194,41 @@ async function commandStart(context, options, adapters) {
   }
   let postgresStarted = false;
   try {
-    await runCommand(composeCommand(allocation, context.root, ['up', '-d', 'postgres']), adapters);
+    await runCommand(composeCommand(allocation, context.root, ["up", "-d", "postgres"]), adapters);
     postgresStarted = true;
     await waitForPostgres(allocation, adapters);
     adapters.stdout(formatAllocation(allocation));
-    const supervisorPath = path.join(context.root, '.codex/scripts/runtime-supervisor.mjs');
-    const recordPath = path.join(context.registryDir, 'allocations', `${allocation.runtimeId}.json`);
-    const code = await (adapters.spawnAttached ?? spawnAttached)(process.execPath, [
-      supervisorPath, '--allocation', recordPath, '--runtime-id', allocation.runtimeId,
-    ], { cwd: context.root, env: process.env });
+    const supervisorPath = path.join(context.root, ".codex/scripts/runtime-supervisor.mjs");
+    const recordPath = path.join(
+      context.registryDir,
+      "allocations",
+      `${allocation.runtimeId}.json`,
+    );
+    const code = await (adapters.spawnAttached ?? spawnAttached)(
+      process.execPath,
+      [supervisorPath, "--allocation", recordPath, "--runtime-id", allocation.runtimeId],
+      { cwd: context.root, env: process.env },
+    );
     const latest = await adapters.getAllocationForRoot(context, context.root);
-    if (latest?.state === 'running') {
-      await adapters.replaceAllocation(context, {
-        ...latest,
-        state: 'stopped',
-        processes: {},
-        updatedAt: new Date().toISOString(),
-      }, { expectedState: 'running' });
+    if (latest?.state === "running") {
+      await adapters.replaceAllocation(
+        context,
+        {
+          ...latest,
+          state: "stopped",
+          processes: {},
+          updatedAt: new Date().toISOString(),
+        },
+        { expectedState: "running" },
+      );
     }
     return code;
   } catch (error) {
     if (postgresStarted) {
-      await runCommand(composeCommand(allocation, context.root, ['stop', 'postgres']), adapters).catch(() => {});
+      await runCommand(
+        composeCommand(allocation, context.root, ["stop", "postgres"]),
+        adapters,
+      ).catch(() => {});
     }
     throw error;
   }
@@ -213,7 +237,7 @@ async function commandStart(context, options, adapters) {
 async function commandStop(context, adapters) {
   const allocation = await currentAllocation(context, adapters);
   if (!allocation) {
-    adapters.stdout('State: unallocated');
+    adapters.stdout("State: unallocated");
     return 0;
   }
   const processResult = await adapters.stopOwnedProcessGroup(allocation, adapters);
@@ -225,41 +249,41 @@ async function commandStop(context, adapters) {
     throw new Error(`Refusing Docker stop: ${inspected.code}.`);
   }
   if (inspected.resources.containers.length > 0) {
-    await runCommand(composeCommand(allocation, context.root, ['stop', 'postgres']), adapters);
+    await runCommand(composeCommand(allocation, context.root, ["stop", "postgres"]), adapters);
   }
   await adapters.replaceAllocation(context, {
     ...allocation,
-    state: 'stopped',
+    state: "stopped",
     processes: {},
     updatedAt: new Date().toISOString(),
   });
-  adapters.stdout('ilo is stopped. PostgreSQL data and the runtime allocation are preserved.');
+  adapters.stdout("ilo is stopped. PostgreSQL data and the runtime allocation are preserved.");
   return 0;
 }
 
 async function commandPurge(context, options, adapters) {
-  if (!options['acknowledge-data-loss']) {
-    adapters.stderr('Purge requires --acknowledge-data-loss.');
+  if (!options["acknowledge-data-loss"]) {
+    adapters.stderr("Purge requires --acknowledge-data-loss.");
     return 2;
   }
   const allocation = await currentAllocation(context, adapters);
   if (!allocation) return 0;
   if (allocation.processes?.supervisor) {
-    adapters.stderr('Stop the runtime before purging it.');
+    adapters.stderr("Stop the runtime before purging it.");
     return 2;
   }
   const removed = await adapters.removeOwnedDockerResources(allocation, adapters);
   if (!removed.ok) throw new Error(`Refusing purge: ${removed.code}.`);
   await adapters.deleteAllocation(context, allocation.runtimeId);
-  await rm(path.join(context.root, '.env.codex.local'), { force: true });
+  await rm(path.join(context.root, ".env.codex.local"), { force: true });
   adapters.stdout(`Purged runtime ${allocation.runtimeId} and its PostgreSQL data.`);
   return 0;
 }
 
 async function writeActiveRoot(context, root) {
-  const destination = path.join(context.registryDir, 'active-root');
+  const destination = path.join(context.registryDir, "active-root");
   const temporary = `${destination}.tmp-${process.pid}`;
-  const handle = await open(temporary, 'w', 0o600);
+  const handle = await open(temporary, "w", 0o600);
   await handle.writeFile(`${root}\n`);
   await handle.sync();
   await handle.close();
@@ -268,29 +292,29 @@ async function writeActiveRoot(context, root) {
 
 async function executablePath(name, fallback) {
   try {
-    return (await execFile('which', [name])).stdout.trim();
+    return (await execFile("which", [name])).stdout.trim();
   } catch {
     return fallback;
   }
 }
 
 async function reaperOptions(context) {
-  let sourceCommit = 'unknown';
+  let sourceCommit = "unknown";
   try {
-    sourceCommit = (await execFile('git', ['-C', context.root, 'rev-parse', 'HEAD'])).stdout.trim();
+    sourceCommit = (await execFile("git", ["-C", context.root, "rev-parse", "HEAD"])).stdout.trim();
   } catch {}
   return {
     platform: process.platform,
     uid: process.getuid?.(),
     repositoryId: context.repositoryId,
     gitCommonDir: context.gitCommonDir,
-    sourceDir: path.join(context.root, '.codex/scripts'),
+    sourceDir: path.join(context.root, ".codex/scripts"),
     sourceCommit,
     nodePath: process.execPath,
-    gitPath: await executablePath('git', '/usr/bin/git'),
-    dockerPath: await executablePath('docker', 'docker'),
-    lsofPath: await executablePath('lsof', '/usr/sbin/lsof'),
-    psPath: await executablePath('ps', '/bin/ps'),
+    gitPath: await executablePath("git", "/usr/bin/git"),
+    dockerPath: await executablePath("docker", "docker"),
+    lsofPath: await executablePath("lsof", "/usr/sbin/lsof"),
+    psPath: await executablePath("ps", "/bin/ps"),
     execFile,
   };
 }
@@ -309,94 +333,118 @@ export async function runManager(argv, overrides = {}) {
   const root = options.root ?? process.cwd();
   let context;
   try {
-    if (options['installed-reaper']) {
-      if (command !== 'gc' || !options['git-common-dir'] || !options['repository-id']) {
-        throw new Error('Installed reaper mode only supports pinned GC.');
+    if (options["installed-reaper"]) {
+      if (command !== "gc" || !options["git-common-dir"] || !options["repository-id"]) {
+        throw new Error("Installed reaper mode only supports pinned GC.");
       }
-      const storedId = (await readFile(path.join(options['git-common-dir'], 'ilo-runtime/repository-id'), 'utf8')).trim();
-      if (storedId !== options['repository-id']) throw new Error('Installed reaper repository identity mismatch.');
+      const storedId = (
+        await readFile(path.join(options["git-common-dir"], "ilo-runtime/repository-id"), "utf8")
+      ).trim();
+      if (storedId !== options["repository-id"])
+        throw new Error("Installed reaper repository identity mismatch.");
       context = {
-        gitCommonDir: options['git-common-dir'],
-        registryDir: path.join(options['git-common-dir'], 'ilo-runtime'),
+        gitCommonDir: options["git-common-dir"],
+        registryDir: path.join(options["git-common-dir"], "ilo-runtime"),
         repositoryId: storedId,
       };
-      const manifest = JSON.parse(await readFile(path.join(path.dirname(modulePath), 'manifest.json'), 'utf8'));
-      if (manifest.repositoryId !== storedId || manifest.gitCommonDir !== context.gitCommonDir) {
-        throw new Error('Installed reaper manifest identity mismatch.');
-      }
-      adapters.runtimeExecFile = (file, args, execOptions) => execFile(
-        manifest.executables[file] ?? file,
-        args,
-        execOptions,
+      const manifest = JSON.parse(
+        await readFile(path.join(path.dirname(modulePath), "manifest.json"), "utf8"),
       );
+      if (manifest.repositoryId !== storedId || manifest.gitCommonDir !== context.gitCommonDir) {
+        throw new Error("Installed reaper manifest identity mismatch.");
+      }
+      adapters.runtimeExecFile = (file, args, execOptions) =>
+        execFile(manifest.executables[file] ?? file, args, execOptions);
     } else {
       context = await adapters.resolveRepositoryContext(root);
     }
-    if (['stop', 'status', 'config', 'list', 'doctor', 'purge', 'acquire', 'activate'].includes(command)) {
-      await reconcile(context, adapters, { dryRun: command === 'gc' && options['dry-run'] });
+    if (
+      ["stop", "status", "config", "list", "doctor", "purge", "acquire", "activate"].includes(
+        command,
+      )
+    ) {
+      await reconcile(context, adapters, { dryRun: command === "gc" && options["dry-run"] });
     }
-    if (command === 'start') return await commandStart(context, options, adapters);
-    if (command === 'restart') {
+    if (command === "start") return await commandStart(context, options, adapters);
+    if (command === "restart") {
       await commandStop(context, adapters);
       return commandStart(context, options, adapters);
     }
-    if (command === 'stop') return commandStop(context, adapters);
-    if (command === 'purge') return commandPurge(context, options, adapters);
-    if (command === 'status') {
+    if (command === "stop") return commandStop(context, adapters);
+    if (command === "purge") return commandPurge(context, options, adapters);
+    if (command === "status") {
       const allocation = await currentAllocation(context, adapters);
-      adapters.stdout(allocation ? `State: ${allocation.state}\n${formatAllocation(allocation)}` : 'State: unallocated');
+      adapters.stdout(
+        allocation
+          ? `State: ${allocation.state}\n${formatAllocation(allocation)}`
+          : "State: unallocated",
+      );
       return 0;
     }
-    if (command === 'config') {
+    if (command === "config") {
       const allocation = await currentAllocation(context, adapters);
-      if (!allocation) throw new Error('Current checkout has no runtime allocation. Run Start first.');
-      adapters.stdout(options.json ? JSON.stringify(allocation, null, 2) : formatAllocation(allocation));
+      if (!allocation)
+        throw new Error("Current checkout has no runtime allocation. Run Start first.");
+      adapters.stdout(
+        options.json ? JSON.stringify(allocation, null, 2) : formatAllocation(allocation),
+      );
       return 0;
     }
-    if (command === 'acquire' || command === 'activate') {
+    if (command === "acquire" || command === "activate") {
       await adapters.migrateLegacyTiers(context);
       const allocation = await adapters.acquireAllocation(context, {
         probePort: async (port) => (await adapters.probePort(port)).available,
         ...(options.positional[0] ? { requestedTier: Number(options.positional[0]) } : {}),
       });
       await writeRuntimeOverlay(context.root, allocation);
-      if (command === 'activate') await writeActiveRoot(context, context.root);
+      if (command === "activate") await writeActiveRoot(context, context.root);
       adapters.stdout(options.json ? JSON.stringify(allocation) : formatAllocation(allocation));
       return 0;
     }
-    if (command === 'active-root') {
-      const active = (await readFile(path.join(context.registryDir, 'active-root'), 'utf8')).trim();
+    if (command === "active-root") {
+      const active = (await readFile(path.join(context.registryDir, "active-root"), "utf8")).trim();
       adapters.stdout(active);
       return 0;
     }
-    if (command === 'list') {
+    if (command === "list") {
       const allocations = await adapters.listAllocations(context);
-      adapters.stdout(options.json ? JSON.stringify(allocations, null, 2) : allocations.map(formatAllocation).join('\n\n'));
+      adapters.stdout(
+        options.json
+          ? JSON.stringify(allocations, null, 2)
+          : allocations.map(formatAllocation).join("\n\n"),
+      );
       return 0;
     }
-    if (command === 'gc') {
+    if (command === "gc") {
       const report = await adapters.reconcileRegistry(context, {
-        dryRun: Boolean(options['dry-run']),
+        dryRun: Boolean(options["dry-run"]),
         ...(adapters.runtimeExecFile ? { execFile: adapters.runtimeExecFile } : {}),
       });
-      adapters.stdout(options.json ? JSON.stringify(report, null, 2) : `Reconciled ${report.length} runtime allocation(s).`);
+      adapters.stdout(
+        options.json
+          ? JSON.stringify(report, null, 2)
+          : `Reconciled ${report.length} runtime allocation(s).`,
+      );
       return 0;
     }
-    if (command === 'doctor') {
+    if (command === "doctor") {
       const allocations = await adapters.listAllocations(context);
-      adapters.stdout(`Registry: ${context.registryDir}\nAllocations: ${allocations.length}\nSchema: supported`);
+      adapters.stdout(
+        `Registry: ${context.registryDir}\nAllocations: ${allocations.length}\nSchema: supported`,
+      );
       return 0;
     }
-    if (['reaper-enable', 'reaper-disable', 'reaper-status'].includes(command)) {
-      const installer = await import('./runtime-reaper-install.mjs');
+    if (["reaper-enable", "reaper-disable", "reaper-status"].includes(command)) {
+      const installer = await import("./runtime-reaper-install.mjs");
       const installOptions = await reaperOptions(context);
-      const result = command === 'reaper-enable'
-        ? await installer.installReaper(installOptions)
-        : command === 'reaper-disable'
-          ? await installer.uninstallReaper(installOptions)
-          : await installer.inspectInstalledReaper(installOptions);
+      const result =
+        command === "reaper-enable"
+          ? await installer.installReaper(installOptions)
+          : command === "reaper-disable"
+            ? await installer.uninstallReaper(installOptions)
+            : await installer.inspectInstalledReaper(installOptions);
       adapters.stdout(`Automatic cleanup: ${result.status}`);
-      return result.status === 'unsupported' ? 1 : 0;
+      return result.status === "unsupported" ? 1 : 0;
     }
     adapters.stderr(`Unknown runtime command: ${command}`);
     return 2;

@@ -39,7 +39,7 @@ bash ./.codex/scripts/environment.sh setup
 pnpm env:start
 ```
 
-Open `http://localhost:8080`. The API serves health checks at `http://localhost:8787/health/ready` and its OpenAPI document at `http://localhost:8787/openapi.json`.
+The primary checkout opens at `http://localhost:8081`; its API health check is `http://127.0.0.1:8788/health/ready` and MCP endpoint is `http://127.0.0.1:8789/mcp`. Linked worktrees receive other stable tiers automatically. See [local development](docs/local-development.md) for the complete port table and recovery workflow.
 
 For a foreground-only web/API development session, `pnpm dev` remains available on Vite's default `:5173`; use the environment actions for the repeatable full-stack path.
 
@@ -47,15 +47,16 @@ For a foreground-only web/API development session, `pnpm dev` remains available 
 
 The checked-in Codex environment exposes deterministic actions backed by one lifecycle controller:
 
-- **Start** runs PostgreSQL plus the current API, MCP, and web source on `:55432`, `:8787`, `:8788`, and `:8080`.
+- **Start** allocates an isolated tier and runs PostgreSQL plus the current worktree's API, MCP, and web source directly. Multiple Codex worktree tasks can remain running concurrently.
 - **Stop** shuts down the runtime without deleting PostgreSQL data.
-- **Restart**, **Status**, and **Logs** provide predictable operational controls without hunting for processes.
+- **Restart**, **Status**, **Logs**, **List Runtimes**, **Doctor**, and **GC Dry Run** provide predictable operational controls without hunting for processes.
+- **Enable/Disable Automatic Cleanup** explicitly manages the repository-scoped macOS orphan reaper; it is never installed by Setup.
 - **Test** enforces the repository's coverage floor: 95% statements/functions/lines and 94% branches.
 - **E2E** runs the desktop and mobile Playwright acceptance suite.
 - **Verify** runs mirror checks, lint, types, coverage, every production build, and E2E acceptance tests.
 - **Build** builds all applications and packages, including the native desktop bundles.
 
-The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down. All runtime state is kept under ignored `.codex/run/` PID and log directories.
+The first environment setup installs the lockfile exactly and creates the primary checkout `.env` with valid local secrets only when missing. Linked worktrees receive a private copy plus a generated runtime overlay. Start remains attached so crashes are visible; Stop preserves that checkout's allocation and PostgreSQL data.
 
 The same controls are available outside Codex:
 
@@ -63,10 +64,15 @@ The same controls are available outside Codex:
 pnpm env:start
 pnpm env:status
 pnpm env:logs
+pnpm env:list
+pnpm env:doctor
+pnpm env:gc
 pnpm env:restart
 pnpm env:stop
 pnpm verify
 ```
+
+`cooper-run activate <tier>` remains a saved-project selection convenience. It does not stop or replace other running worktree allocations.
 
 ## Desktop overlay
 

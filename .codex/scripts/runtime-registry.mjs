@@ -1,5 +1,5 @@
-import { execFile as execFileCallback } from 'node:child_process';
-import { createHash, randomBytes as nodeRandomBytes } from 'node:crypto';
+import { execFile as execFileCallback } from "node:child_process";
+import { createHash, randomBytes as nodeRandomBytes } from "node:crypto";
 import {
   appendFile,
   mkdir,
@@ -10,9 +10,9 @@ import {
   rename,
   rm,
   stat,
-} from 'node:fs/promises';
-import path from 'node:path';
-import { promisify } from 'node:util';
+} from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 
@@ -22,20 +22,20 @@ export const MIN_TIER = 1;
 export const MAX_TIER = 16;
 
 const ALLOCATION_STATES = new Set([
-  'allocated',
-  'running',
-  'stopped',
-  'orphan-pending',
-  'drifted',
-  'releasing',
-  'cleanup-failed',
+  "allocated",
+  "running",
+  "stopped",
+  "orphan-pending",
+  "drifted",
+  "releasing",
+  "cleanup-failed",
 ]);
 const AUDIT_LIMIT_BYTES = 1024 * 1024;
 
 export class UnsupportedRegistrySchemaError extends Error {
   constructor(version) {
     super(`Runtime registry schema ${version} is newer than supported schema ${SCHEMA_VERSION}.`);
-    this.name = 'UnsupportedRegistrySchemaError';
+    this.name = "UnsupportedRegistrySchemaError";
     this.version = version;
   }
 }
@@ -54,7 +54,7 @@ export function portsForSlot(tier) {
 }
 
 function sha256(value) {
-  return createHash('sha256').update(value).digest('hex');
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function trimOutput(result) {
@@ -62,13 +62,13 @@ function trimOutput(result) {
 }
 
 async function git(root, ...args) {
-  return trimOutput(await execFile('git', ['-C', root, ...args]));
+  return trimOutput(await execFile("git", ["-C", root, ...args]));
 }
 
 async function writeAtomic(filePath, contents, mode = 0o600) {
   await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${filePath}.tmp-${process.pid}-${nodeRandomBytes(4).toString('hex')}`;
-  const handle = await open(temporaryPath, 'wx', mode);
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${nodeRandomBytes(4).toString("hex")}`;
+  const handle = await open(temporaryPath, "wx", mode);
   try {
     await handle.writeFile(contents);
     await handle.sync();
@@ -77,37 +77,37 @@ async function writeAtomic(filePath, contents, mode = 0o600) {
   }
   await rename(temporaryPath, filePath);
   try {
-    const directory = await open(path.dirname(filePath), 'r');
+    const directory = await open(path.dirname(filePath), "r");
     try {
       await directory.sync();
     } finally {
       await directory.close();
     }
   } catch (error) {
-    if (!['EINVAL', 'ENOTSUP', 'EISDIR'].includes(error.code)) {
+    if (!["EINVAL", "ENOTSUP", "EISDIR"].includes(error.code)) {
       throw error;
     }
   }
 }
 
 async function readOrCreateRepositoryId(registryDir) {
-  const filePath = path.join(registryDir, 'repository-id');
+  const filePath = path.join(registryDir, "repository-id");
   try {
-    const existing = (await readFile(filePath, 'utf8')).trim();
+    const existing = (await readFile(filePath, "utf8")).trim();
     if (!/^[a-f0-9]{32}$/.test(existing)) {
       throw new Error(`Invalid runtime repository identity in ${filePath}.`);
     }
     return existing;
   } catch (error) {
-    if (error.code !== 'ENOENT') {
+    if (error.code !== "ENOENT") {
       throw error;
     }
   }
-  const repositoryId = nodeRandomBytes(16).toString('hex');
+  const repositoryId = nodeRandomBytes(16).toString("hex");
   try {
     await writeAtomic(filePath, `${repositoryId}\n`);
   } catch (error) {
-    if (error.code !== 'EEXIST') {
+    if (error.code !== "EEXIST") {
       throw error;
     }
     return readOrCreateRepositoryId(registryDir);
@@ -116,16 +116,21 @@ async function readOrCreateRepositoryId(registryDir) {
 }
 
 export async function resolveRepositoryContext(root) {
-  if (String(root).includes('\0')) {
-    throw new Error('Runtime root cannot contain NUL.');
+  if (String(root).includes("\0")) {
+    throw new Error("Runtime root cannot contain NUL.");
   }
   const canonicalRoot = await realpath(root);
-  const gitCommonDir = await git(canonicalRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir');
-  const gitDir = await git(canonicalRoot, 'rev-parse', '--path-format=absolute', '--git-dir');
+  const gitCommonDir = await git(
+    canonicalRoot,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  );
+  const gitDir = await git(canonicalRoot, "rev-parse", "--path-format=absolute", "--git-dir");
   const primaryRoot = await realpath(path.dirname(gitCommonDir));
-  const registryDir = path.join(gitCommonDir, 'ilo-runtime');
-  await mkdir(path.join(registryDir, 'allocations'), { recursive: true, mode: 0o700 });
-  await mkdir(path.join(registryDir, 'roots'), { recursive: true, mode: 0o700 });
+  const registryDir = path.join(gitCommonDir, "ilo-runtime");
+  await mkdir(path.join(registryDir, "allocations"), { recursive: true, mode: 0o700 });
+  await mkdir(path.join(registryDir, "roots"), { recursive: true, mode: 0o700 });
   const repositoryId = await readOrCreateRepositoryId(registryDir);
   return {
     root: canonicalRoot,
@@ -140,14 +145,14 @@ export async function resolveRepositoryContext(root) {
 
 async function processStartIdentity(pid) {
   try {
-    return trimOutput(await execFile('ps', ['-p', String(pid), '-o', 'lstart=']));
+    return trimOutput(await execFile("ps", ["-p", String(pid), "-o", "lstart="]));
   } catch {
-    return '';
+    return "";
   }
 }
 
 async function lockOwnerIsLive(owner) {
-  if (!Number.isInteger(owner?.pid) || typeof owner?.startIdentity !== 'string') {
+  if (!Number.isInteger(owner?.pid) || typeof owner?.startIdentity !== "string") {
     return false;
   }
   try {
@@ -165,7 +170,7 @@ function sleep(milliseconds) {
 export async function withRegistryLock(context, operation, options = {}) {
   const timeoutMs = options.timeoutMs ?? 5000;
   const retryMs = options.retryMs ?? 50;
-  const lockDirectory = path.join(context.registryDir, 'lock');
+  const lockDirectory = path.join(context.registryDir, "lock");
   const deadline = Date.now() + timeoutMs;
   const owner = {
     pid: process.pid,
@@ -176,23 +181,23 @@ export async function withRegistryLock(context, operation, options = {}) {
   while (true) {
     try {
       await mkdir(lockDirectory, { mode: 0o700 });
-      await writeAtomic(path.join(lockDirectory, 'owner.json'), `${JSON.stringify(owner)}\n`);
+      await writeAtomic(path.join(lockDirectory, "owner.json"), `${JSON.stringify(owner)}\n`);
       break;
     } catch (error) {
-      if (error.code !== 'EEXIST') {
+      if (error.code !== "EEXIST") {
         throw error;
       }
       let existing = null;
       try {
-        existing = JSON.parse(await readFile(path.join(lockDirectory, 'owner.json'), 'utf8'));
+        existing = JSON.parse(await readFile(path.join(lockDirectory, "owner.json"), "utf8"));
       } catch (readError) {
-        if (readError.code !== 'ENOENT' && !(readError instanceof SyntaxError)) {
+        if (readError.code !== "ENOENT" && !(readError instanceof SyntaxError)) {
           throw readError;
         }
       }
       if (!existing) {
         if (Date.now() >= deadline) {
-          throw new Error('Runtime registry lock owner is unavailable.');
+          throw new Error("Runtime registry lock owner is unavailable.");
         }
         await sleep(retryMs);
         continue;
@@ -223,39 +228,39 @@ function validatePorts(ports, tier) {
 }
 
 function validateAllocation(value) {
-  if (!value || typeof value !== 'object') {
-    throw new Error('Allocation must be an object.');
+  if (!value || typeof value !== "object") {
+    throw new Error("Allocation must be an object.");
   }
   if (Number.isInteger(value.schemaVersion) && value.schemaVersion > SCHEMA_VERSION) {
     throw new UnsupportedRegistrySchemaError(value.schemaVersion);
   }
   if (value.schemaVersion !== SCHEMA_VERSION) {
-    throw new Error('Allocation has an unsupported schema version.');
+    throw new Error("Allocation has an unsupported schema version.");
   }
   if (!/^[a-f0-9]{12}$/.test(value.runtimeId)) {
-    throw new Error('Allocation has an invalid runtime ID.');
+    throw new Error("Allocation has an invalid runtime ID.");
   }
   if (!/^[a-f0-9]{32}$/.test(value.repositoryId)) {
-    throw new Error('Allocation has an invalid repository ID.');
+    throw new Error("Allocation has an invalid repository ID.");
   }
   if (!path.isAbsolute(value.root) || !/^[a-f0-9]{64}$/.test(value.rootHash)) {
-    throw new Error('Allocation has an invalid root identity.');
+    throw new Error("Allocation has an invalid root identity.");
   }
   if (!path.isAbsolute(value.gitDir)) {
-    throw new Error('Allocation has an invalid Git directory.');
+    throw new Error("Allocation has an invalid Git directory.");
   }
   if (!ALLOCATION_STATES.has(value.state)) {
-    throw new Error('Allocation has an invalid state.');
+    throw new Error("Allocation has an invalid state.");
   }
   validatePorts(value.ports, value.tier);
   if (value.composeProject !== `ilo-wt-${value.runtimeId}`) {
-    throw new Error('Allocation has an invalid Compose project.');
+    throw new Error("Allocation has an invalid Compose project.");
   }
   return value;
 }
 
 async function quarantineRecord(context, filePath, contents) {
-  const quarantineDirectory = path.join(context.registryDir, 'quarantine');
+  const quarantineDirectory = path.join(context.registryDir, "quarantine");
   await mkdir(quarantineDirectory, { recursive: true, mode: 0o700 });
   const destination = path.join(quarantineDirectory, `${path.basename(filePath)}.quarantined`);
   await writeAtomic(destination, contents);
@@ -263,12 +268,12 @@ async function quarantineRecord(context, filePath, contents) {
 }
 
 async function listAllocationsUnlocked(context) {
-  const directory = path.join(context.registryDir, 'allocations');
-  const names = (await readdir(directory)).filter((name) => name.endsWith('.json')).sort();
+  const directory = path.join(context.registryDir, "allocations");
+  const names = (await readdir(directory)).filter((name) => name.endsWith(".json")).sort();
   const allocations = [];
   for (const name of names) {
     const filePath = path.join(directory, name);
-    const contents = await readFile(filePath, 'utf8');
+    const contents = await readFile(filePath, "utf8");
     let parsed;
     try {
       parsed = JSON.parse(contents);
@@ -296,26 +301,32 @@ export async function listAllocations(context) {
 }
 
 function allocationPath(context, runtimeId) {
-  return path.join(context.registryDir, 'allocations', `${runtimeId}.json`);
+  return path.join(context.registryDir, "allocations", `${runtimeId}.json`);
 }
 
 function rootIndexPath(context, rootHash) {
-  return path.join(context.registryDir, 'roots', `${rootHash}.json`);
+  return path.join(context.registryDir, "roots", `${rootHash}.json`);
 }
 
 async function writeAllocationUnlocked(context, allocation) {
   validateAllocation(allocation);
-  await writeAtomic(allocationPath(context, allocation.runtimeId), `${JSON.stringify(allocation, null, 2)}\n`);
-  await writeAtomic(rootIndexPath(context, allocation.rootHash), `${JSON.stringify({
-    runtimeId: allocation.runtimeId,
-    root: allocation.root,
-  })}\n`);
+  await writeAtomic(
+    allocationPath(context, allocation.runtimeId),
+    `${JSON.stringify(allocation, null, 2)}\n`,
+  );
+  await writeAtomic(
+    rootIndexPath(context, allocation.rootHash),
+    `${JSON.stringify({
+      runtimeId: allocation.runtimeId,
+      root: allocation.root,
+    })}\n`,
+  );
 }
 
 function createAllocation(context, tier, options) {
   const now = options.now?.() ?? new Date();
   const randomBytes = options.randomBytes ?? nodeRandomBytes;
-  const runtimeId = randomBytes(6).toString('hex');
+  const runtimeId = randomBytes(6).toString("hex");
   return {
     schemaVersion: SCHEMA_VERSION,
     runtimeId,
@@ -326,7 +337,7 @@ function createAllocation(context, tier, options) {
     tier,
     ports: portsForSlot(tier),
     composeProject: `ilo-wt-${runtimeId}`,
-    state: 'allocated',
+    state: "allocated",
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     orphanedAt: null,
@@ -341,7 +352,9 @@ export async function acquireAllocation(context, options = {}) {
     const existing = allocations.find((allocation) => allocation.root === context.root);
     if (existing) {
       if (options.requestedTier !== undefined && options.requestedTier !== existing.tier) {
-        throw new Error(`Runtime root already owns tier ${existing.tier}, not requested tier ${options.requestedTier}.`);
+        throw new Error(
+          `Runtime root already owns tier ${existing.tier}, not requested tier ${options.requestedTier}.`,
+        );
       }
       return existing;
     }
@@ -349,7 +362,7 @@ export async function acquireAllocation(context, options = {}) {
     let tier;
     if (context.root === context.primaryRoot) {
       if (options.requestedTier !== undefined && options.requestedTier !== 1) {
-        throw new Error('The primary checkout can only own runtime tier 1.');
+        throw new Error("The primary checkout can only own runtime tier 1.");
       }
       const owner = allocations.find((allocation) => allocation.tier === 1);
       if (owner) {
@@ -359,10 +372,15 @@ export async function acquireAllocation(context, options = {}) {
     } else {
       const occupied = new Set(allocations.map((allocation) => allocation.tier));
       const probePort = options.probePort ?? (async () => true);
-      const candidates = options.requestedTier === undefined
-        ? Array.from({ length: MAX_TIER - 1 }, (_, index) => index + 2)
-        : [options.requestedTier];
-      if (candidates.some((candidate) => !Number.isInteger(candidate) || candidate < 2 || candidate > MAX_TIER)) {
+      const candidates =
+        options.requestedTier === undefined
+          ? Array.from({ length: MAX_TIER - 1 }, (_, index) => index + 2)
+          : [options.requestedTier];
+      if (
+        candidates.some(
+          (candidate) => !Number.isInteger(candidate) || candidate < 2 || candidate > MAX_TIER,
+        )
+      ) {
         throw new Error(`Linked runtime tier must be between 2 and ${MAX_TIER}.`);
       }
       for (const candidate of candidates) {
@@ -383,7 +401,9 @@ export async function acquireAllocation(context, options = {}) {
         }
       }
       if (!tier) {
-        throw new Error('No linked runtime tiers are available. Run runtime Doctor for owners and conflicts.');
+        throw new Error(
+          "No linked runtime tiers are available. Run runtime Doctor for owners and conflicts.",
+        );
       }
     }
 
@@ -398,9 +418,9 @@ export async function getAllocationForRoot(context, root = context.root) {
   const rootHash = sha256(canonicalRoot);
   let index;
   try {
-    index = JSON.parse(await readFile(rootIndexPath(context, rootHash), 'utf8'));
+    index = JSON.parse(await readFile(rootIndexPath(context, rootHash), "utf8"));
   } catch (error) {
-    if (error.code === 'ENOENT') {
+    if (error.code === "ENOENT") {
       return null;
     }
     throw error;
@@ -408,7 +428,9 @@ export async function getAllocationForRoot(context, root = context.root) {
   if (index.root !== canonicalRoot || !/^[a-f0-9]{12}$/.test(index.runtimeId)) {
     throw new Error(`Invalid runtime root index for ${canonicalRoot}.`);
   }
-  const allocation = validateAllocation(JSON.parse(await readFile(allocationPath(context, index.runtimeId), 'utf8')));
+  const allocation = validateAllocation(
+    JSON.parse(await readFile(allocationPath(context, index.runtimeId), "utf8")),
+  );
   if (allocation.root !== canonicalRoot || allocation.rootHash !== rootHash) {
     throw new Error(`Runtime root index does not match allocation ${index.runtimeId}.`);
   }
@@ -419,27 +441,29 @@ export async function replaceAllocation(context, allocation, options = {}) {
   return withRegistryLock(context, async () => {
     validateAllocation(allocation);
     if (allocation.repositoryId !== context.repositoryId) {
-      throw new Error('Allocation belongs to a different repository identity.');
+      throw new Error("Allocation belongs to a different repository identity.");
     }
     const allocations = await listAllocationsUnlocked(context);
     const current = allocations.find((candidate) => candidate.runtimeId === allocation.runtimeId);
-    if (Object.hasOwn(options, 'expectedState') && current?.state !== options.expectedState) {
+    if (Object.hasOwn(options, "expectedState") && current?.state !== options.expectedState) {
       return false;
     }
     if (
-      Object.hasOwn(options, 'expectedOperationToken')
-      && (current?.cleanup?.operationToken ?? null) !== options.expectedOperationToken
+      Object.hasOwn(options, "expectedOperationToken") &&
+      (current?.cleanup?.operationToken ?? null) !== options.expectedOperationToken
     ) {
       return false;
     }
-    const tierOwner = allocations.find((candidate) =>
-      candidate.tier === allocation.tier && candidate.runtimeId !== allocation.runtimeId,
+    const tierOwner = allocations.find(
+      (candidate) =>
+        candidate.tier === allocation.tier && candidate.runtimeId !== allocation.runtimeId,
     );
     if (tierOwner) {
       throw new Error(`Runtime tier ${allocation.tier} is already owned by ${tierOwner.root}.`);
     }
-    const rootOwner = allocations.find((candidate) =>
-      candidate.root === allocation.root && candidate.runtimeId !== allocation.runtimeId,
+    const rootOwner = allocations.find(
+      (candidate) =>
+        candidate.root === allocation.root && candidate.runtimeId !== allocation.runtimeId,
     );
     if (rootOwner) {
       throw new Error(`Runtime root is already owned by ${rootOwner.runtimeId}.`);
@@ -453,9 +477,11 @@ export async function deleteAllocation(context, runtimeId, options = {}) {
   return withRegistryLock(context, async () => {
     let allocation;
     try {
-      allocation = validateAllocation(JSON.parse(await readFile(allocationPath(context, runtimeId), 'utf8')));
+      allocation = validateAllocation(
+        JSON.parse(await readFile(allocationPath(context, runtimeId), "utf8")),
+      );
     } catch (error) {
-      if (error.code === 'ENOENT') {
+      if (error.code === "ENOENT") {
         return false;
       }
       throw error;
@@ -465,13 +491,13 @@ export async function deleteAllocation(context, runtimeId, options = {}) {
     }
     await rm(allocationPath(context, runtimeId), { force: true });
     await rm(rootIndexPath(context, allocation.rootHash), { force: true });
-    const activeRootPath = path.join(context.registryDir, 'active-root');
+    const activeRootPath = path.join(context.registryDir, "active-root");
     try {
-      if ((await readFile(activeRootPath, 'utf8')).trim() === allocation.root) {
+      if ((await readFile(activeRootPath, "utf8")).trim() === allocation.root) {
         await rm(activeRootPath, { force: true });
       }
     } catch (error) {
-      if (error.code !== 'ENOENT') {
+      if (error.code !== "ENOENT") {
         throw error;
       }
     }
@@ -480,13 +506,13 @@ export async function deleteAllocation(context, runtimeId, options = {}) {
 }
 
 async function rotateAuditIfNeeded(context) {
-  const current = path.join(context.registryDir, 'audit.ndjson');
+  const current = path.join(context.registryDir, "audit.ndjson");
   try {
     if ((await stat(current)).size < AUDIT_LIMIT_BYTES) {
       return;
     }
   } catch (error) {
-    if (error.code === 'ENOENT') {
+    if (error.code === "ENOENT") {
       return;
     }
     throw error;
@@ -496,7 +522,7 @@ async function rotateAuditIfNeeded(context) {
     try {
       await rename(`${current}.${index}`, `${current}.${index + 1}`);
     } catch (error) {
-      if (error.code !== 'ENOENT') {
+      if (error.code !== "ENOENT") {
         throw error;
       }
     }
@@ -516,27 +542,31 @@ export async function appendAuditEvent(context, event, options = {}) {
     state: event.state,
     ...(event.errorCode ? { errorCode: event.errorCode } : {}),
   };
-  await appendFile(path.join(context.registryDir, 'audit.ndjson'), `${JSON.stringify(safeEvent)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  await appendFile(
+    path.join(context.registryDir, "audit.ndjson"),
+    `${JSON.stringify(safeEvent)}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
 }
 
 async function registeredWorktreeRoots(context) {
-  const { stdout } = await execFile('git', [
-    '--git-dir',
+  const { stdout } = await execFile("git", [
+    "--git-dir",
     context.gitCommonDir,
-    'worktree',
-    'list',
-    '--porcelain',
-    '-z',
-    '--expire',
-    'now',
+    "worktree",
+    "list",
+    "--porcelain",
+    "-z",
+    "--expire",
+    "now",
   ]);
   const roots = new Set();
-  for (const field of String(stdout).split('\0')) {
-    if (field.startsWith('worktree ')) {
-      roots.add(field.slice('worktree '.length));
+  for (const field of String(stdout).split("\0")) {
+    if (field.startsWith("worktree ")) {
+      roots.add(field.slice("worktree ".length));
     }
   }
   return roots;
@@ -544,12 +574,12 @@ async function registeredWorktreeRoots(context) {
 
 export async function migrateLegacyTiers(context, options = {}) {
   return withRegistryLock(context, async () => {
-    const legacyDirectory = path.join(context.registryDir, 'tiers');
+    const legacyDirectory = path.join(context.registryDir, "tiers");
     let names;
     try {
       names = await readdir(legacyDirectory);
     } catch (error) {
-      if (error.code === 'ENOENT') {
+      if (error.code === "ENOENT") {
         return { imported: 0, stale: 0 };
       }
       throw error;
@@ -557,7 +587,7 @@ export async function migrateLegacyTiers(context, options = {}) {
     const allocations = await listAllocationsUnlocked(context);
     const occupiedTiers = new Set(allocations.map((allocation) => allocation.tier));
     const occupiedRoots = new Set(allocations.map((allocation) => allocation.root));
-    const registered = options.registeredRoots ?? await registeredWorktreeRoots(context);
+    const registered = options.registeredRoots ?? (await registeredWorktreeRoots(context));
     const candidates = [];
     let stale = 0;
 
@@ -566,12 +596,12 @@ export async function migrateLegacyTiers(context, options = {}) {
       if (!Number.isInteger(tier) || tier < MIN_TIER || tier > MAX_TIER) {
         continue;
       }
-      const rawRoot = (await readFile(path.join(legacyDirectory, name), 'utf8')).trim();
+      const rawRoot = (await readFile(path.join(legacyDirectory, name), "utf8")).trim();
       let root;
       try {
         root = await realpath(rawRoot);
       } catch (error) {
-        if (error.code === 'ENOENT') {
+        if (error.code === "ENOENT") {
           stale += 1;
           continue;
         }
@@ -581,9 +611,11 @@ export async function migrateLegacyTiers(context, options = {}) {
         stale += 1;
         continue;
       }
-      if (occupiedTiers.has(tier) || occupiedRoots.has(root) || candidates.some((candidate) =>
-        candidate.tier === tier || candidate.root === root,
-      )) {
+      if (
+        occupiedTiers.has(tier) ||
+        occupiedRoots.has(root) ||
+        candidates.some((candidate) => candidate.tier === tier || candidate.root === root)
+      ) {
         throw new Error(`Legacy runtime tier ${tier} conflicts with an existing allocation.`);
       }
       const candidateContext = await resolveRepositoryContext(root);
@@ -594,7 +626,7 @@ export async function migrateLegacyTiers(context, options = {}) {
       const allocation = createAllocation(candidate.context, candidate.tier, options);
       await writeAllocationUnlocked(context, allocation);
     }
-    await rename(legacyDirectory, path.join(context.registryDir, 'tiers.migrated'));
+    await rename(legacyDirectory, path.join(context.registryDir, "tiers.migrated"));
     return { imported: candidates.length, stale };
   });
 }

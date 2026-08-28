@@ -50,6 +50,10 @@ import {
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { loadFinanceAuthorization } from "../finance/context.js";
+import {
+  buildFinancePeriodReviewResult,
+  buildFinanceSnapshotResult,
+} from "../finance/presentation-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
@@ -192,6 +196,22 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/snapshot", async (context) => {
+    const userId = context.get("principal").userId;
+    const [status, budget] = await Promise.all([
+      financeStatus.getFinanceStatus(userId, { type: "all_outstanding" }),
+      finances.getFinanceBudget(userId),
+    ]);
+    return context.json(buildFinanceSnapshotResult(status, budget));
+  });
+  app.get("/v1/finances/period-reviews/:id/presentation", async (context) => {
+    if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
+    const review = await financePeriodReviews.getOwned(
+      context.get("principal").userId,
+      idSchema.parse(context.req.param("id")),
+    );
+    return context.json(buildFinancePeriodReviewResult(review));
+  });
   app.get("/v1/finances/period-reviews/:id", async (context) => {
     if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
     return context.json({

@@ -90,7 +90,7 @@ export function mailListScopeParams(scope: MailListScope) {
   return { unread: null, view: null };
 }
 
-function mailListScopeQuery(scope: MailListScope) {
+export function mailListScopeQuery(scope: MailListScope) {
   if (scope === "unread") return { unread: true };
   if (scope === "starred") return { starred: true };
   if (scope === "snoozed") return { snoozed: true };
@@ -178,7 +178,7 @@ function inboxUnreadCount(items: Mailbox[]) {
 export const relative = formatRelativeTime;
 const mailReaderLayoutStorageKey = "ilo.mail.reader-layout.v1";
 
-function storedMailReaderLayout() {
+export function storedMailReaderLayout() {
   try {
     if (typeof window === "undefined") return undefined;
     const value = JSON.parse(
@@ -197,7 +197,7 @@ function storedMailReaderLayout() {
   return undefined;
 }
 
-function persistMailReaderLayout(layout: Record<string, number>) {
+export function persistMailReaderLayout(layout: Record<string, number>) {
   try {
     window.localStorage.setItem(mailReaderLayoutStorageKey, JSON.stringify(layout));
   } catch {
@@ -280,7 +280,7 @@ function mailDate(value: string, timeZone: string) {
   }).format(new Date(value));
 }
 
-function downloadLegacyMailDraft(draft: LegacyMailDraft) {
+export function downloadLegacyMailDraft(draft: LegacyMailDraft) {
   const blob = new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" });
   const href = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -295,7 +295,7 @@ function downloadLegacyMailDraft(draft: LegacyMailDraft) {
   URL.revokeObjectURL(href);
 }
 
-function HistoricalMailDrafts({
+export function HistoricalMailDrafts({
   accounts,
   drafts,
   error,

@@ -39,6 +39,7 @@ import type {
 import { mailDispositionKindSchema, mailStatusSchema } from "@personal-os/domain";
 import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { assessMail, type MailAssessment, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
@@ -493,20 +494,24 @@ export function createMailStewardshipService({ db, now }: Options) {
             );
           }
         }
-        const [row] = await tx
-          .insert(mailObligations)
-          .values({
-            ...input,
-            createdAt: now(),
-            dueAt: input.dueAt ? new Date(input.dueAt) : null,
-            nextReviewAt: input.nextReviewAt ? new Date(input.nextReviewAt) : null,
-            sourceThreadRevision: new Date(input.sourceThreadRevision),
-            threadId: thread.id,
-            updatedAt: now(),
-            userId,
-          })
-          .returning();
-        if (!row) throw new AppError("internal_error", "The obligation could not be created.");
+        const row = requireDatabaseRecord(
+          (
+            await tx
+              .insert(mailObligations)
+              .values({
+                ...input,
+                createdAt: now(),
+                dueAt: input.dueAt ? new Date(input.dueAt) : null,
+                nextReviewAt: input.nextReviewAt ? new Date(input.nextReviewAt) : null,
+                sourceThreadRevision: new Date(input.sourceThreadRevision),
+                threadId: thread.id,
+                updatedAt: now(),
+                userId,
+              })
+              .returning()
+          )[0],
+          "The obligation could not be created.",
+        );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "mail_obligation.created",
@@ -542,20 +547,24 @@ export function createMailStewardshipService({ db, now }: Options) {
           });
         }
         const { dueAt, expectedVersion: _expectedVersion, nextReviewAt, ...changes } = input;
-        const [row] = await tx
-          .update(mailObligations)
-          .set({
-            ...changes,
-            ...(dueAt === undefined ? {} : { dueAt: dueAt ? new Date(dueAt) : null }),
-            ...(nextReviewAt === undefined
-              ? {}
-              : { nextReviewAt: nextReviewAt ? new Date(nextReviewAt) : null }),
-            updatedAt: now(),
-            version: before.version + 1,
-          })
-          .where(eq(mailObligations.id, before.id))
-          .returning();
-        if (!row) throw new AppError("internal_error", "The obligation could not be updated.");
+        const row = requireDatabaseRecord(
+          (
+            await tx
+              .update(mailObligations)
+              .set({
+                ...changes,
+                ...(dueAt === undefined ? {} : { dueAt: dueAt ? new Date(dueAt) : null }),
+                ...(nextReviewAt === undefined
+                  ? {}
+                  : { nextReviewAt: nextReviewAt ? new Date(nextReviewAt) : null }),
+                updatedAt: now(),
+                version: before.version + 1,
+              })
+              .where(eq(mailObligations.id, before.id))
+              .returning()
+          )[0],
+          "The obligation could not be updated.",
+        );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "mail_obligation.updated",
@@ -605,19 +614,23 @@ export function createMailStewardshipService({ db, now }: Options) {
             .set({ current: false })
             .where(eq(mailThreadDispositions.id, before.id));
         }
-        const [row] = await tx
-          .insert(mailThreadDispositions)
-          .values({
-            createdAt: now(),
-            disposition: input.disposition,
-            rationale: input.rationale,
-            sourceThreadRevision: new Date(input.expectedThreadUpdatedAt),
-            threadId: thread.id,
-            userId,
-            version: (before?.version ?? 0) + 1,
-          })
-          .returning();
-        if (!row) throw new AppError("internal_error", "The disposition could not be recorded.");
+        const row = requireDatabaseRecord(
+          (
+            await tx
+              .insert(mailThreadDispositions)
+              .values({
+                createdAt: now(),
+                disposition: input.disposition,
+                rationale: input.rationale,
+                sourceThreadRevision: new Date(input.expectedThreadUpdatedAt),
+                threadId: thread.id,
+                userId,
+                version: (before?.version ?? 0) + 1,
+              })
+              .returning()
+          )[0],
+          "The disposition could not be recorded.",
+        );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "mail_disposition.set",
@@ -673,18 +686,22 @@ export function createMailStewardshipService({ db, now }: Options) {
         if (before.status !== "open") {
           throw new AppError("conflict", "The Mail question has already been settled.");
         }
-        const [row] = await tx
-          .update(mailStewardshipQuestions)
-          .set({
-            answer: input.answer,
-            answeredAt: now(),
-            status: "answered",
-            updatedAt: now(),
-            version: before.version + 1,
-          })
-          .where(eq(mailStewardshipQuestions.id, before.id))
-          .returning();
-        if (!row) throw new AppError("internal_error", "The Mail question could not be answered.");
+        const row = requireDatabaseRecord(
+          (
+            await tx
+              .update(mailStewardshipQuestions)
+              .set({
+                answer: input.answer,
+                answeredAt: now(),
+                status: "answered",
+                updatedAt: now(),
+                version: before.version + 1,
+              })
+              .where(eq(mailStewardshipQuestions.id, before.id))
+              .returning()
+          )[0],
+          "The Mail question could not be answered.",
+        );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "mail_question.answered",
@@ -720,21 +737,23 @@ export function createMailStewardshipService({ db, now }: Options) {
               .set({ current: false })
               .where(eq(mailThreadDispositions.id, current.id));
           }
-          const [disposition] = await tx
-            .insert(mailThreadDispositions)
-            .values({
-              createdAt: now(),
-              disposition: selectedDisposition.data,
-              rationale: "Recorded from an explicit Mail stewardship answer.",
-              sourceThreadRevision: thread.updatedAt,
-              threadId: thread.id,
-              userId,
-              version: (current?.version ?? 0) + 1,
-            })
-            .returning();
-          if (!disposition) {
-            throw new AppError("internal_error", "The answered disposition could not be recorded.");
-          }
+          const disposition = requireDatabaseRecord(
+            (
+              await tx
+                .insert(mailThreadDispositions)
+                .values({
+                  createdAt: now(),
+                  disposition: selectedDisposition.data,
+                  rationale: "Recorded from an explicit Mail stewardship answer.",
+                  sourceThreadRevision: thread.updatedAt,
+                  threadId: thread.id,
+                  userId,
+                  version: (current?.version ?? 0) + 1,
+                })
+                .returning()
+            )[0],
+            "The answered disposition could not be recorded.",
+          );
           await tx.insert(auditEvents).values(
             auditValues({
               action: "mail_disposition.answered",
@@ -747,28 +766,30 @@ export function createMailStewardshipService({ db, now }: Options) {
           );
         }
         if (input.generalize) {
-          const [proposal] = await tx
-            .insert(mailRuleProposals)
-            .values({
-              counterexamples: [],
-              createdAt: now(),
-              examples: [`question:${before.id}`],
-              exceptions: [],
-              fingerprint: sha256(
-                JSON.stringify({
-                  answer: input.answer,
-                  questionId: before.id,
-                  version: row.version,
-                }),
-              ),
-              rationale: input.answer,
-              updatedAt: now(),
-              userId,
-            })
-            .returning();
-          if (!proposal) {
-            throw new AppError("internal_error", "The Mail rule proposal could not be created.");
-          }
+          const proposal = requireDatabaseRecord(
+            (
+              await tx
+                .insert(mailRuleProposals)
+                .values({
+                  counterexamples: [],
+                  createdAt: now(),
+                  examples: [`question:${before.id}`],
+                  exceptions: [],
+                  fingerprint: sha256(
+                    JSON.stringify({
+                      answer: input.answer,
+                      questionId: before.id,
+                      version: row.version,
+                    }),
+                  ),
+                  rationale: input.answer,
+                  updatedAt: now(),
+                  userId,
+                })
+                .returning()
+            )[0],
+            "The Mail rule proposal could not be created.",
+          );
           await tx.insert(auditEvents).values(
             auditValues({
               action: "mail_rule_proposal.created",
@@ -836,14 +857,16 @@ export function createMailStewardshipService({ db, now }: Options) {
           if (!target) throw new AppError("not_found", "The Mail feedback target was not found.");
           targetThreadId = target.threadId;
           if (input.kind === "incorrect") {
-            const [updated] = await tx
-              .update(mailObligations)
-              .set({ state: "open", updatedAt: now(), version: target.version + 1 })
-              .where(eq(mailObligations.id, input.targetId))
-              .returning();
-            if (!updated) {
-              throw new AppError("internal_error", "The Mail obligation could not be reopened.");
-            }
+            const updated = requireDatabaseRecord(
+              (
+                await tx
+                  .update(mailObligations)
+                  .set({ state: "open", updatedAt: now(), version: target.version + 1 })
+                  .where(eq(mailObligations.id, input.targetId))
+                  .returning()
+              )[0],
+              "The Mail obligation could not be reopened.",
+            );
             await tx.insert(auditEvents).values(
               auditValues({
                 action: "mail_obligation.reopened_from_feedback",
@@ -889,19 +912,21 @@ export function createMailStewardshipService({ db, now }: Options) {
             .for("update");
           if (!target) throw new AppError("not_found", "The Mail feedback target was not found.");
           if (input.kind === "exception") {
-            const [updated] = await tx
-              .update(mailRuleProposals)
-              .set({
-                counterexamples: [...target.counterexamples, input.comment],
-                exceptions: [...target.exceptions, input.comment],
-                updatedAt: now(),
-                version: target.version + 1,
-              })
-              .where(eq(mailRuleProposals.id, target.id))
-              .returning();
-            if (!updated) {
-              throw new AppError("internal_error", "The Mail rule proposal could not be updated.");
-            }
+            const updated = requireDatabaseRecord(
+              (
+                await tx
+                  .update(mailRuleProposals)
+                  .set({
+                    counterexamples: [...target.counterexamples, input.comment],
+                    exceptions: [...target.exceptions, input.comment],
+                    updatedAt: now(),
+                    version: target.version + 1,
+                  })
+                  .where(eq(mailRuleProposals.id, target.id))
+                  .returning()
+              )[0],
+              "The Mail rule proposal could not be updated.",
+            );
             await tx.insert(auditEvents).values(
               auditValues({
                 action: "mail_rule_proposal.exception_added",
@@ -985,11 +1010,15 @@ export function createMailStewardshipService({ db, now }: Options) {
             }
           }
         }
-        const [row] = await tx
-          .insert(mailStewardshipFeedback)
-          .values({ ...input, createdAt: now(), evidence, userId })
-          .returning();
-        if (!row) throw new AppError("internal_error", "Mail feedback could not be recorded.");
+        const row = requireDatabaseRecord(
+          (
+            await tx
+              .insert(mailStewardshipFeedback)
+              .values({ ...input, createdAt: now(), evidence, userId })
+              .returning()
+          )[0],
+          "Mail feedback could not be recorded.",
+        );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "mail_stewardship_feedback.created",
@@ -1046,19 +1075,21 @@ export function createMailStewardshipService({ db, now }: Options) {
               "A Mail obligation changed while maintenance was reconciling it.",
             );
           }
-          const [updated] = await tx
-            .update(mailObligations)
-            .set({
-              closureEvidence: transition.evidence,
-              state: transition.nextState,
-              updatedAt: now(),
-              version: before.version + 1,
-            })
-            .where(eq(mailObligations.id, before.id))
-            .returning();
-          if (!updated) {
-            throw new AppError("internal_error", "The Mail obligation could not be reconciled.");
-          }
+          const updated = requireDatabaseRecord(
+            (
+              await tx
+                .update(mailObligations)
+                .set({
+                  closureEvidence: transition.evidence,
+                  state: transition.nextState,
+                  updatedAt: now(),
+                  version: before.version + 1,
+                })
+                .where(eq(mailObligations.id, before.id))
+                .returning()
+            )[0],
+            "The Mail obligation could not be reconciled.",
+          );
           await tx.insert(auditEvents).values(
             auditValues({
               action: "mail_obligation.reconciled",
@@ -1099,21 +1130,23 @@ export function createMailStewardshipService({ db, now }: Options) {
               .set({ current: false })
               .where(eq(mailThreadDispositions.id, before.id));
           }
-          const [created] = await tx
-            .insert(mailThreadDispositions)
-            .values({
-              createdAt: now(),
-              disposition: transition.disposition,
-              rationale: "Derived from an active Ilo snooze.",
-              sourceThreadRevision: thread.updatedAt,
-              threadId: thread.id,
-              userId,
-              version: (before?.version ?? 0) + 1,
-            })
-            .returning();
-          if (!created) {
-            throw new AppError("internal_error", "The Mail disposition could not be reconciled.");
-          }
+          const created = requireDatabaseRecord(
+            (
+              await tx
+                .insert(mailThreadDispositions)
+                .values({
+                  createdAt: now(),
+                  disposition: transition.disposition,
+                  rationale: "Derived from an active Ilo snooze.",
+                  sourceThreadRevision: thread.updatedAt,
+                  threadId: thread.id,
+                  userId,
+                  version: (before?.version ?? 0) + 1,
+                })
+                .returning()
+            )[0],
+            "The Mail disposition could not be reconciled.",
+          );
           await tx.insert(auditEvents).values(
             auditValues({
               action: "mail_disposition.reconciled",

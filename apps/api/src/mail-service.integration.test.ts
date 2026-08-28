@@ -527,15 +527,122 @@ describe.sequential("mail service", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("validates and persists only explicit thread organization changes", async () => {
+    const observed = await service.getThread(userId, threadId);
+    gateway.update.mockClear();
+
+    await expect(
+      service.updateThread(
+        userId,
+        threadId,
+        { expectedUpdatedAt: "2026-01-01T00:00:00.000Z", starred: false },
+        { actorId: userId, actorType: "user" },
+        "stale-thread-update",
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.updateThread(
+        userId,
+        threadId,
+        { mailboxIds: [inboxId, inboxId] },
+        { actorId: userId, actorType: "user" },
+        "duplicate-thread-mailboxes",
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.updateThread(
+        userId,
+        threadId,
+        { mailboxIds: [disabledAccountId] },
+        { actorId: userId, actorType: "user" },
+        "foreign-thread-mailbox",
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.updateThread(
+        userId,
+        disabledAccountId,
+        { starred: true },
+        { actorId: userId, actorType: "user" },
+        "missing-thread-update",
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.snoozeThread(userId, disabledAccountId, new Date("2026-07-18T12:00:00.000Z")),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(gateway.update).not.toHaveBeenCalled();
+
+    const organized = await service.updateThread(
+      userId,
+      threadId,
+      {
+        expectedUpdatedAt: observed.updatedAt,
+        mailboxIds: [customLabelId],
+        starred: false,
+        unread: false,
+      },
+      { actorId: userId, actorType: "user" },
+      "organize-thread",
+    );
+    expect(organized).toMatchObject({
+      mailboxIds: [customLabelId],
+      starred: false,
+      unread: false,
+    });
+    expect(gateway.update).toHaveBeenLastCalledWith(userId, enabledAccountId, "thread-1", {
+      addMailboxIds: ["Label_Orders"],
+      removeMailboxIds: ["STARRED", "UNREAD", "INBOX"],
+    });
+
+    const restored = await service.updateThread(
+      userId,
+      threadId,
+      {
+        expectedUpdatedAt: organized.updatedAt,
+        mailboxIds: [inboxId],
+        starred: true,
+        unread: true,
+      },
+      { actorId: userId, actorType: "user" },
+      "restore-thread",
+    );
+    expect(restored).toMatchObject({ mailboxIds: [inboxId], starred: true, unread: true });
+    expect(gateway.update).toHaveBeenLastCalledWith(userId, enabledAccountId, "thread-1", {
+      addMailboxIds: ["STARRED", "UNREAD", "INBOX"],
+      removeMailboxIds: ["Label_Orders"],
+    });
+
+    await expect(
+      service.bulkUpdateThreads(
+        {
+          items: [{ expectedUpdatedAt: observed.updatedAt, id: disabledAccountId }],
+          unread: true,
+        },
+        mutationContext("bulk-missing-thread"),
+      ),
+    ).resolves.toMatchObject({
+      failedCount: 1,
+      failures: [{ error: { code: "not_found", details: null }, id: disabledAccountId }],
+      updatedCount: 0,
+      updatedIds: [],
+    });
+  });
+
   it("maps multi-inbox setup and serializes source-derived Mail attention", async () => {
+    await expect(service.listSetupContext(userId)).resolves.toMatchObject({
+      automation: { lastCompletedAt: null, oldestDueAt: null },
+      commitmentIntake: { previewOnlyCount: 0 },
+    });
     const [sparseICloudAccount] = await database.db
       .insert(calendarAccounts)
       .values({
         calendarEnabled: false,
         email: null,
         label: "iCloud Mail",
+        lastSyncAttemptAt: new Date("2026-07-16T09:55:00.000Z"),
         lastSyncedAt: new Date("2026-07-16T10:00:00.000Z"),
         mailEnabled: true,
+        nextSyncAt: new Date("2026-07-16T10:05:00.000Z"),
         provider: "icloud",
         providerAccountId: "icloud-mail-setup",
         userId,
@@ -734,8 +841,10 @@ describe.sequential("mail service", () => {
             reconciliationCount: 0,
           },
           automaticRuleExecution: false,
+          lastSyncAttemptAt: "2026-07-16T09:55:00.000Z",
           lastSyncedAt: "2026-07-16T10:00:00.000Z",
           mailboxes: [],
+          nextSyncAt: "2026-07-16T10:05:00.000Z",
           provider: "icloud",
         },
       ],
@@ -1256,6 +1365,40 @@ describe.sequential("mail service", () => {
       code: "conflict",
       details: expect.objectContaining({ currentVersion: 2 }),
     });
+
+    let partial = await service.updateRule(
+      rule.id,
+      { description: "Updated without changing matching behavior.", expectedVersion: 2 },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      {
+        condition: { field: "subject", operator: "contains", value: "Project" },
+        expectedVersion: partial.version,
+      },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      { confidenceThreshold: null, expectedVersion: partial.version },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      { expectedVersion: partial.version, profileId },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      { expectedVersion: partial.version, sourceIds: [enabledAccountId] },
+      context,
+    );
+    expect(partial).toMatchObject({
+      profileId,
+      sourceIds: [enabledAccountId],
+      version: 7,
+    });
   });
 
   it("fails closed across Mail rule activation safety boundaries", async () => {
@@ -1316,8 +1459,35 @@ describe.sequential("mail service", () => {
       context,
     );
     await expect(
+      service.activateRule(
+        noProfile.id,
+        {
+          ...(await activationInputFor(noProfile)),
+          expectedPreviewedAt: "2026-07-16T13:01:01.000Z",
+        },
+        context,
+      ),
+    ).rejects.toThrow("review expired");
+    await expect(
       service.activateRule(noProfile.id, await activationInputFor(noProfile), context),
     ).rejects.toThrow("Link an active Mail profile");
+
+    const ambiguousTrash = await service.createRule(
+      {
+        ...baseRule,
+        actions: [
+          { afterDays: 1, mailboxId: null, type: "trash" },
+          { afterDays: 0, mailboxId: null, type: "mark_read" },
+        ],
+        name: "Ambiguous Trash recovery",
+        profileId,
+        sourceIds: [enabledAccountId],
+      },
+      context,
+    );
+    await expect(
+      service.activateRule(ambiguousTrash.id, await activationInputFor(ambiguousTrash), context),
+    ).rejects.toThrow("Trash as its only action");
 
     const duplicateSources = await service.createRule(
       {

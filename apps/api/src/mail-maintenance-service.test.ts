@@ -1,4 +1,5 @@
 import type { MailReview, MaintenanceRun } from "@personal-os/domain";
+import { AppError } from "./errors.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
@@ -40,7 +41,19 @@ function run(overrides: Partial<MaintenanceRun> = {}): MaintenanceRun {
   } as unknown as MaintenanceRun;
 }
 
-function harness(snapshots: MailAssessmentSnapshot[], options?: { claim?: boolean }) {
+function harness(
+  snapshots: MailAssessmentSnapshot[],
+  options?: {
+    claim?: boolean;
+    records?: Array<{
+      idempotencyKey: string;
+      result: unknown;
+      status: "completed" | "failed_recoverable";
+      step: string;
+    }>;
+    refreshError?: unknown;
+  },
+) {
   const activeRun = run();
   let snapshotIndex = 0;
   const workspace = {
@@ -56,7 +69,7 @@ function harness(snapshots: MailAssessmentSnapshot[], options?: { claim?: boolea
     }),
     getOwnedRun: vi.fn().mockImplementation(async () => activeRun),
     listDueRunIds: vi.fn().mockResolvedValue([runId]),
-    listStepRecords: vi.fn().mockResolvedValue([]),
+    listStepRecords: vi.fn().mockResolvedValue(options?.records ?? []),
     renewClaim: vi.fn().mockResolvedValue(activeRun),
     settle: vi.fn().mockImplementation(async ({ status }: { status: MaintenanceRun["status"] }) => {
       activeRun.status = status;
@@ -97,7 +110,10 @@ function harness(snapshots: MailAssessmentSnapshot[], options?: { claim?: boolea
   const service = createMailMaintenanceService({
     dispatchApprovedRules: async () => ({ dispatched: 0 }),
     now: () => now,
-    refreshSources: async () => ({ enqueued: 0, readiness: "current" }),
+    refreshSources: async () => {
+      if (options?.refreshError) throw options.refreshError;
+      return { enqueued: 0, readiness: "current" as const };
+    },
     stewardship: stewardship as unknown as Parameters<
       typeof createMailMaintenanceService
     >[0]["stewardship"],
@@ -125,6 +141,18 @@ describe("Mail maintenance orchestration edges", () => {
     const { service } = harness([snapshot()], { claim: false });
     await expect(service.runDue(1)).resolves.toEqual([]);
     await expect(service.dispatchDue(1)).resolves.toEqual([]);
+  });
+
+  it("returns successfully settled due runs from both bounded dispatch entry points", async () => {
+    const first = harness([snapshot()]);
+    await expect(first.service.runDue(1)).resolves.toEqual([
+      expect.objectContaining({ run: expect.objectContaining({ status: "completed" }) }),
+    ]);
+
+    const second = harness([snapshot()]);
+    await expect(second.service.dispatchDue(1)).resolves.toEqual([
+      expect.objectContaining({ run: expect.objectContaining({ status: "completed" }) }),
+    ]);
   });
 
   it("fails recoverably while provider effects remain pending", async () => {
@@ -159,6 +187,87 @@ describe("Mail maintenance orchestration edges", () => {
     });
     expect(workspace.failStep).toHaveBeenCalledWith(
       expect.objectContaining({ code: "mail_snapshot_changed", recoverable: true }),
+    );
+  });
+
+  it("rebases a previously failed verification on current evidence", async () => {
+    const original = snapshot();
+    const changed = snapshot({ rulebookVersion: "rules-v2" });
+    const originalAssessment = assessMail(original, MAIL_PLAYBOOK);
+    const originalReview = {
+      createdAt: now.toISOString(),
+      effectCounts: original.effectCounts,
+      evidenceCutoff: original.now,
+      health: originalAssessment.health,
+      id: "30000000-0000-4000-8000-000000000001",
+      ledgerFingerprint: originalAssessment.ledgerFingerprint,
+      nextMaintenanceAt: now.toISOString(),
+      obligationCounts: originalAssessment.obligationCounts,
+      openQuestionCount: originalAssessment.openQuestionCount,
+      playbookVersion: MAIL_PLAYBOOK.version,
+      profileVersion: original.profileVersion,
+      rulebookVersion: original.rulebookVersion,
+      sourceFreshness: original.sourceFreshness,
+      state: originalAssessment.proposedSettlement,
+    } satisfies MailReview;
+    const completed = (step: string, result: unknown) => ({
+      idempotencyKey: `mail:${step}:v1`,
+      result,
+      status: "completed" as const,
+      step,
+    });
+    const { service, stewardship, workspace } = harness([changed, changed, changed], {
+      records: [
+        completed("refresh_sources", { enqueued: 0, readiness: "current" }),
+        completed("snapshot", { snapshot: original }),
+        completed("assess", { assessment: originalAssessment }),
+        completed("reconcile_ledger", { dispositions: 0, obligations: 0, questions: 0 }),
+        completed("dispatch_approved_rules", { dispatched: 0 }),
+        completed("publish_review", {
+          assessment: originalAssessment,
+          review: originalReview,
+          snapshot: original,
+        }),
+        {
+          idempotencyKey: "mail:verify:v1",
+          result: null,
+          status: "failed_recoverable",
+          step: "verify",
+        },
+      ],
+    });
+
+    await expect(
+      service.maintain(userId, { scope: { type: "all_outstanding" } }),
+    ).resolves.toMatchObject({ run: { status: "completed" }, verification: { status: "passed" } });
+    expect(stewardship.reconcileAssessment).toHaveBeenCalledWith(
+      userId,
+      changed,
+      expect.objectContaining({ ledgerFingerprint: expect.any(String) }),
+    );
+    expect(workspace.completeStep).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      new AppError("invalid_request", "Unsafe request."),
+      "invalid_request",
+      false,
+      "Unsafe request.",
+    ],
+    [
+      new Error("private failure"),
+      "mail_maintenance_temporary_failure",
+      true,
+      "Mail maintenance encountered a temporary internal failure.",
+    ],
+  ])("classifies maintenance failures without leaking internals", async (error, code, recoverable, summary) => {
+    const { service, workspace } = harness([snapshot()], { refreshError: error });
+    await expect(
+      service.maintain(userId, { scope: { type: "all_outstanding" } }),
+    ).resolves.toMatchObject({ summary });
+    expect(workspace.failStep).toHaveBeenCalledWith(
+      expect.objectContaining({ code, recoverable, safeMessage: summary, step: "refresh_sources" }),
     );
   });
 });

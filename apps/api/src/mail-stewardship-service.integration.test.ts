@@ -4,6 +4,8 @@ import {
   calendarAccounts,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfileApprovals,
+  domainProfiles,
   mailDrafts,
   mailMessages,
   mailObligations,
@@ -167,6 +169,62 @@ describe.sequential("Mail stewardship service", () => {
     expect(audit?.after).toEqual({ id: obligation.id, threadId, version: 1 });
     expect(JSON.stringify(audit)).not.toContain("Private rationale");
     expect(JSON.stringify(audit)).not.toContain("Private mail body");
+  });
+
+  it("projects an explicit approved objective and unavailable empty sources", async () => {
+    const [profile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep contractual mail obligations current.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "Approved Mail objective.",
+        userId: principal.userId,
+      })
+      .returning();
+    if (!profile) throw new Error("Mail profile fixture was not created.");
+    await database.db.insert(domainProfileApprovals).values({
+      approvedAt: now,
+      approvedByUserId: principal.userId,
+      domain: "mail",
+      profile: {
+        categories: profile.categories,
+        createdAt: profile.createdAt.toISOString(),
+        domain: profile.domain,
+        id: profile.id,
+        instructions: profile.instructions,
+        objective: profile.objective,
+        preferences: profile.preferences,
+        sourceContexts: profile.sourceContexts,
+        status: profile.status,
+        summary: profile.summary,
+        updatedAt: profile.updatedAt.toISOString(),
+        version: profile.version,
+      },
+      profileId: profile.id,
+      profileVersion: profile.version,
+      userId: principal.userId,
+    });
+
+    await expect(
+      service.snapshot(principal.userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ profileId: profile.id, profileVersion: profile.version });
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      details: {
+        objective: {
+          mode: "approved_profile",
+          profileId: profile.id,
+          profileVersion: profile.version,
+        },
+      },
+    });
+    await expect(
+      service.snapshot(otherPrincipal.userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ profileId: null, sourceFreshness: "unavailable", threads: [] });
   });
 
   it("rejects stale thread evidence and stale obligation versions", async () => {

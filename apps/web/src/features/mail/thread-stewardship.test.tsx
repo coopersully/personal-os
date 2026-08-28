@@ -95,7 +95,11 @@ describe("exact-thread Mail stewardship", () => {
     });
     mocks.getMailThreadStewardship.mockResolvedValue(stewardship);
     mocks.answerMailQuestion.mockResolvedValue(stewardship.questions[0]);
+    mocks.createMailObligation.mockResolvedValue({});
+    mocks.createMailStewardshipFeedback.mockResolvedValue({});
     mocks.previewMailResponseBrief.mockResolvedValue(brief);
+    mocks.setMailDisposition.mockResolvedValue(stewardship.disposition);
+    mocks.updateMailObligation.mockResolvedValue({});
   });
 
   it("answers only the exact question without implicit generalization", async () => {
@@ -133,5 +137,91 @@ describe("exact-thread Mail stewardship", () => {
     await waitFor(() =>
       expect(mocks.getMailThreadStewardship.mock.calls.length).toBeGreaterThan(1),
     );
+  });
+
+  it("creates and updates explicit obligations while keeping empty controls honest", async () => {
+    const obligation = {
+      closureEvidence: [],
+      confidence: "explicit" as const,
+      createdAt: now,
+      dueAt: null,
+      goalIds: [],
+      id: "55555555-5555-4555-8555-555555555555",
+      kind: "follow_up" as const,
+      nextReviewAt: null,
+      owner: { kind: "user" as const },
+      rationale: "Confirm the external follow-up.",
+      sourceMessageId: null,
+      sourceThreadRevision: now,
+      state: "open" as const,
+      threadId,
+      updatedAt: now,
+      version: 2,
+    };
+    mocks.getMailThreadStewardship.mockResolvedValue({
+      disposition: null,
+      obligations: [obligation],
+      questions: [],
+      threadId,
+      threadUpdatedAt: now,
+    } satisfies MailThreadStewardship);
+    const user = userEvent.setup();
+    renderThread();
+
+    await user.selectOptions(await screen.findByLabelText("Disposition"), "waiting");
+    await user.click(screen.getByRole("button", { name: "Save disposition" }));
+    expect(mocks.setMailDisposition).toHaveBeenCalledWith(threadId, {
+      disposition: "waiting",
+      expectedThreadUpdatedAt: now,
+      rationale: "User confirmed this thread disposition.",
+    });
+    await user.selectOptions(screen.getByLabelText(/State for Follow/i), "resolved");
+    expect(mocks.updateMailObligation).toHaveBeenCalledWith(obligation.id, {
+      expectedVersion: 2,
+      state: "resolved",
+    });
+    await user.selectOptions(screen.getByLabelText("New obligation"), "record");
+    await user.type(screen.getByLabelText("Why this is explicit"), "Record the decision");
+    await user.click(screen.getByRole("button", { name: "Record obligation" }));
+    expect(mocks.createMailObligation).toHaveBeenCalledWith(threadId, {
+      dueAt: null,
+      goalIds: [],
+      kind: "record",
+      nextReviewAt: null,
+      owner: { kind: "user" },
+      rationale: "Record the decision",
+      sourceMessageId: null,
+      sourceThreadRevision: now,
+    });
+    expect(screen.getByText("No open questions.")).toBeVisible();
+    expect(screen.queryByText("Teach through review")).not.toBeInTheDocument();
+  });
+
+  it("generalizes only explicitly and records selected feedback", async () => {
+    const user = userEvent.setup();
+    renderThread();
+    await user.click(await screen.findByLabelText("Propose this answer as a reusable rule"));
+    await user.click(screen.getByRole("button", { name: "Reference only" }));
+    expect(mocks.answerMailQuestion).toHaveBeenCalledWith(stewardship.questions[0]?.id, {
+      answer: "reference",
+      expectedVersion: 3,
+      generalize: true,
+    });
+
+    await user.selectOptions(screen.getByLabelText("Feedback"), "exception");
+    await user.type(screen.getByLabelText("Comment"), "Except when a decision is requested");
+    await user.click(screen.getByRole("button", { name: "Record feedback" }));
+    expect(mocks.createMailStewardshipFeedback).toHaveBeenCalledWith({
+      comment: "Except when a decision is requested",
+      kind: "exception",
+      targetId: stewardship.disposition?.id,
+      targetType: "disposition",
+    });
+  });
+
+  it("shows a safe error when thread stewardship cannot load", async () => {
+    mocks.getMailThreadStewardship.mockRejectedValueOnce(new Error("Thread unavailable"));
+    renderThread();
+    expect(await screen.findByText("Thread unavailable")).toBeVisible();
   });
 });

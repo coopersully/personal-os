@@ -9,6 +9,7 @@ import {
   mailObligations,
   mailReviews,
   mailRuleProposals,
+  mailSnoozes,
   mailStewardshipFeedback,
   mailStewardshipQuestions,
   mailThreadDispositions,
@@ -744,7 +745,138 @@ describe.sequential("Mail stewardship service", () => {
     ]);
   });
 
+  it("routes question and review feedback while rejecting every missing target type", async () => {
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId,
+        evidence: [],
+        fingerprint: "1".repeat(64),
+        kind: "needs_owner",
+        reason: "Confirm the owner.",
+        threadId,
+        userId: principal.userId,
+      })
+      .returning();
+    const [review] = await database.db
+      .insert(mailReviews)
+      .values({
+        effectCounts: { failed: 0, pending: 0, reconcile: 0 },
+        evidenceCutoff: now,
+        health: [],
+        ledgerFingerprint: "2".repeat(64),
+        nextMaintenanceAt: new Date(now.getTime() + 86_400_000),
+        obligationCounts: { deferred: 0, dismissed: 0, open: 0, resolved: 0, waiting: 0 },
+        openQuestionCount: 1,
+        playbookVersion: "1.0.0",
+        profileVersion: null,
+        rulebookVersion: "initial",
+        sourceFreshness: "current",
+        state: "maintained_with_questions",
+        userId: principal.userId,
+      })
+      .returning();
+    if (!question || !review) throw new Error("Feedback fixtures were not created.");
+
+    await expect(
+      service.createFeedback(
+        principal.userId,
+        {
+          comment: "The ownership evidence is outdated.",
+          kind: "outdated",
+          targetId: question.id,
+          targetType: "question",
+        },
+        { principal, requestId: "question-feedback" },
+      ),
+    ).resolves.toMatchObject({
+      evidence: [expect.objectContaining({ sourceType: "mail_thread" })],
+    });
+    await expect(
+      service.createFeedback(
+        principal.userId,
+        {
+          comment: "The review is accurate.",
+          kind: "correct",
+          targetId: review.id,
+          targetType: "review",
+        },
+        { principal, requestId: "review-feedback" },
+      ),
+    ).resolves.toMatchObject({ evidence: [] });
+    await expect(
+      database.db
+        .select()
+        .from(mailStewardshipQuestions)
+        .where(eq(mailStewardshipQuestions.userId, principal.userId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: question.id, kind: "needs_owner" }),
+        expect.objectContaining({ kind: "needs_disposition", status: "open" }),
+      ]),
+    );
+
+    const missingId = "00000000-0000-4000-8000-000000000005";
+    for (const targetType of [
+      "obligation",
+      "disposition",
+      "question",
+      "rule_proposal",
+      "review",
+    ] as const) {
+      await expect(
+        service.createFeedback(
+          principal.userId,
+          { comment: "Missing target.", kind: "correct", targetId: missingId, targetType },
+          { principal, requestId: `missing-${targetType}` },
+        ),
+      ).rejects.toMatchObject({ code: "not_found" });
+    }
+  });
+
   it("scopes snapshots and reports partial, stale, and unavailable evidence honestly", async () => {
+    await database.db.insert(mailMessages).values([
+      {
+        bodyText: "Inbound private content.",
+        from: { address: "sender@example.com", name: "Sender" },
+        providerMailboxIds: ["INBOX"],
+        providerRevision: "inbound-v1",
+        receivedAt: now,
+        remoteMessageId: "snapshot-inbound",
+        threadId,
+        to: [],
+      },
+      {
+        bodyText: "Outbound private content.",
+        from: { address: "owner@example.com", name: "Owner" },
+        providerMailboxIds: ["SENT"],
+        providerRevision: "outbound-v1",
+        receivedAt: now,
+        remoteMessageId: "snapshot-outbound",
+        threadId,
+        to: [],
+      },
+    ]);
+    await database.db.insert(mailSnoozes).values({
+      threadId,
+      until: new Date(now.getTime() + 86_400_000),
+      userId: principal.userId,
+    });
+    await service.createObligation(
+      principal.userId,
+      threadId,
+      {
+        dueAt: null,
+        goalIds: ["goal-linked"],
+        kind: "record",
+        nextReviewAt: null,
+        owner: { kind: "user" },
+        rationale: "Record the linked decision.",
+        sourceMessageId: null,
+        sourceThreadRevision: threadUpdatedAt,
+      },
+      { principal, requestId: "snapshot-obligation" },
+    );
     await expect(
       service.snapshot(principal.userId, {
         entityType: "task",
@@ -759,6 +891,25 @@ describe.sequential("Mail stewardship service", () => {
         type: "window",
       }),
     ).resolves.toMatchObject({ sourceFreshness: "current", threads: [] });
+
+    await expect(
+      service.snapshot(principal.userId, {
+        entityType: "mail_thread",
+        id: threadId,
+        type: "target",
+      }),
+    ).resolves.toMatchObject({
+      threads: [
+        expect.objectContaining({
+          goalLinked: true,
+          messages: [
+            expect.objectContaining({ direction: "inbound", revision: "inbound-v1" }),
+            expect.objectContaining({ direction: "outbound", revision: "outbound-v1" }),
+          ],
+          snoozedUntil: "2026-08-26T15:00:00.000Z",
+        }),
+      ],
+    });
 
     await database.db.insert(calendarAccounts).values({
       label: "Unsynced Mail account",

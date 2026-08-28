@@ -187,4 +187,87 @@ describe("Mail workspace stewardship", () => {
     expect(await screen.findByText("mail-rules-v1")).toBeVisible();
     expect(screen.getByText("Published evidence is never rewritten in place.")).toBeVisible();
   });
+
+  it("renders blocked evidence, an active turn, an approved profile, and no review honestly", async () => {
+    mocks.getMailStatus.mockResolvedValue({
+      ...status,
+      activeRun: {
+        domain: "mail",
+        id: "55555555-5555-4555-8555-555555555555",
+        rulebookVersion: "mail-rules-v1",
+        scope: { type: "all_outstanding" },
+        status: "running",
+        updatedAt: now,
+      },
+      details: {
+        ...status.details,
+        health: [
+          {
+            dimension: "source_trust",
+            evidenceIds: [],
+            signal: "healthy",
+            summary: "Sources are current.",
+          },
+          {
+            dimension: "rule_quality",
+            evidenceIds: [],
+            signal: "unknown",
+            summary: "No rule evidence yet.",
+          },
+        ],
+        latestReview: status.details.latestReview,
+        objective: {
+          mode: "approved_profile",
+          profileId: "66666666-6666-4666-8666-666666666666",
+          profileVersion: 4,
+          summary: "Protect explicit obligations.",
+        },
+        openQuestionCount: 0,
+        openQuestions: [],
+      },
+      freshness: {
+        blockers: [
+          {
+            code: "source_evidence_stale",
+            message: "Mail evidence is stale.",
+            recovery: "Refresh Mail sources.",
+          },
+        ],
+        observedAt: now,
+        state: "stale",
+      },
+      state: "blocked",
+    } satisfies MailStatus);
+    mocks.getMailReview.mockResolvedValue(null);
+
+    renderPage("/mail/review");
+    expect(await screen.findByRole("heading", { name: "Blocked" })).toBeVisible();
+    expect(screen.getByText("Version 4")).toBeVisible();
+    expect(screen.getByText("Running")).toBeVisible();
+    expect(screen.getByText("Mail evidence is stale. Refresh Mail sources.")).toBeVisible();
+    expect(screen.getByText("No unanswered questions.")).toBeVisible();
+    expect(await screen.findByText("No review has been published yet.")).toBeVisible();
+    expect(screen.getByText("Healthy")).toBeVisible();
+    expect(screen.getByText("Unknown")).toBeVisible();
+    expect(mocks.getMailReview).toHaveBeenCalled();
+  });
+
+  it("keeps status and maintenance failures visible", async () => {
+    mocks.getMailStatus.mockRejectedValueOnce(new Error("Status unavailable"));
+    const first = renderPage("/mail/review");
+    expect(await screen.findByText("Status unavailable")).toBeVisible();
+    first.unmount();
+
+    mocks.getMailStatus.mockResolvedValue({
+      ...status,
+      details: { ...status.details, openQuestionCount: 0, openQuestions: [] },
+      state: "clean",
+    } satisfies MailStatus);
+    mocks.maintainMail.mockRejectedValueOnce(new Error("Maintenance unavailable"));
+    const user = userEvent.setup();
+    renderPage("/mail/review");
+    await user.click(await screen.findByRole("button", { name: "Maintain Mail" }));
+    expect(await screen.findByText("Maintenance unavailable")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Clean" })).toBeVisible();
+  });
 });

@@ -436,6 +436,20 @@ vi.mock("./api.js", () => ({
   isUnauthorized: (error: unknown) => error instanceof Error && error.message === "unauthorized",
 }));
 
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() {
+      return values.size;
+    },
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, String(value)),
+  };
+}
+
 function setup(path = "/today") {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
@@ -1195,6 +1209,7 @@ beforeEach(() => {
     }
   }
   vi.stubGlobal("Date", TestDate);
+  vi.stubGlobal("localStorage", memoryStorage());
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
@@ -2920,7 +2935,8 @@ describe("ilo web app", () => {
     const view = setup("/mail");
     const browser = userEvent.setup();
 
-    await browser.click(await screen.findByRole("button", { name: "Account menu" }));
+    (await screen.findByRole("button", { name: "Account menu" })).focus();
+    await browser.keyboard("{Enter}");
     await browser.click(await screen.findByRole("menuitem", { name: "Settings" }));
 
     const sidebar = await screen.findByRole("complementary", {
@@ -3843,7 +3859,7 @@ describe("ilo web app", () => {
   it("keeps Mail and Finances workspace controls on child routes", async () => {
     const mail = setup("/mail/thread/example");
     const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
-    expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
+    expect(within(mailAppBar).queryByRole("searchbox", { name: "Search mail" })).toBeNull();
     expect(
       within(mailAppBar).getByRole("button", { name: "Sync all mail accounts" }),
     ).toBeInTheDocument();
@@ -5413,15 +5429,28 @@ describe("ilo web app", () => {
     expect(
       within(topNavigation).queryByRole("button", { name: /compose|send/i }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
+    const conversationList = await screen.findByRole("region", { name: "Conversations" });
+    expect(within(topNavigation).queryByLabelText("Search mail")).not.toBeInTheDocument();
+    expect(within(conversationList).getByLabelText("Search mail")).toBeInTheDocument();
+    const navigationResizeHandle = screen.getByRole("separator", {
+      name: "Resize mail navigation",
+    });
+    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "256");
+    navigationResizeHandle.focus();
+    await browser.keyboard("{ArrowRight}");
+    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "272");
+    expect(window.localStorage.getItem("ilo.mail.sidebar-width.v1")).toBe("272");
+    await browser.dblClick(navigationResizeHandle);
+    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "256");
+    expect(window.localStorage.getItem("ilo.mail.sidebar-width.v1")).toBe("256");
+    expect(screen.getByRole("separator", { name: "Resize conversation list" })).toBeInTheDocument();
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    expect(await screen.findByRole("navigation", { name: "Conversation actions" })).toHaveAttribute(
-      "data-slot",
-      "workspace-secondary-app-bar",
-    );
-    expect(within(topNavigation).getByLabelText("Search mail")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Back to Unified inbox" })).not.toBeInTheDocument();
+    const reader = screen.getByRole("region", { name: "Message reader" });
+    expect(
+      within(reader).getByRole("navigation", { name: "Conversation actions" }),
+    ).toHaveAttribute("data-slot", "workspace-secondary-app-bar");
+    expect(within(reader).getByRole("button", { name: "Back to inbox" })).toBeInTheDocument();
     expect(
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
@@ -5454,8 +5483,10 @@ describe("ilo web app", () => {
     expect(
       await screen.findByText("This message has no plain-text body.", {}, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    await browser.type(screen.getByLabelText("Search mail"), "Project");
-    await browser.keyboard("{Enter}");
+    const mailSearch = screen.getByLabelText("Search mail");
+    fireEvent.change(mailSearch, { target: { value: "Project" } });
+    expect(screen.getByLabelText("Search mail")).toHaveValue("Project");
+    fireEvent.submit(mailSearch.closest("form") as HTMLFormElement);
     await waitFor(() =>
       expect(mocks.listMailThreads).toHaveBeenCalledWith(
         expect.objectContaining({ query: "Project" }),
@@ -5508,7 +5539,15 @@ describe("ilo web app", () => {
     setup("/mail?compose=1");
     const browser = userEvent.setup();
 
-    expect(await screen.findByText("Historical drafts (1)")).toBeVisible();
+    const historicalDrafts = await screen.findByRole("button", {
+      name: "Historical drafts (1)",
+    });
+    expect(
+      screen.queryByText(
+        "Ilo never sends email. These historical records can only be exported to this device or permanently deleted.",
+      ),
+    ).not.toBeInTheDocument();
+    await browser.click(historicalDrafts);
     expect(
       screen.getByText(
         "Ilo never sends email. These historical records can only be exported to this device or permanently deleted.",
@@ -5540,7 +5579,8 @@ describe("ilo web app", () => {
     setup("/mail");
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    await browser.click(screen.getByRole("button", { name: "More conversation actions" }));
+    screen.getByRole("button", { name: "More conversation actions" }).focus();
+    await browser.keyboard("{Enter}");
     await browser.click(await screen.findByRole("menuitem", { name: "Delete conversation" }));
     await waitFor(() =>
       expect(mocks.updateMailThread).toHaveBeenCalledWith(mailThread.id, {

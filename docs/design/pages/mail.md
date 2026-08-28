@@ -109,12 +109,20 @@ a bounded question when explicit evidence is absent. Ilo never sends email.
 - Unified inbox is a disclosure category in the contextual sidebar. Its All
   mail, Unread, Starred, and Snoozed children govern the cross-account
   conversation list; account headers use the same category pattern.
-- Mail keeps the global app bar for its identity, search, and Sync.
-  It composes the same shared secondary app bar as Calendar only for a selected
-  conversation: Archive retains its label; Snooze, Star, and read state
+- Mail keeps the global app bar for workspace identity and Sync. Search belongs
+  to the conversation-list pane so its scope remains clear while a message is
+  open.
+- On desktop, the contextual Mail navigation and the conversation-list/reader
+  boundary are independently resizable by pointer or keyboard. Both choices
+  persist on the current device. The navigation rail stays within useful
+  minimum and maximum widths; double-clicking its boundary restores the default.
+- Conversation actions live at the top of the reader pane instead of spanning
+  the entire workspace: Archive retains its label; Snooze, Star, and read state
   are icon controls; Delete stays in the More menu. The bar uses the shared
-  neutral surface rather than a Mail-specific color. At narrow widths, the
-  compact controls move into More rather than overflowing horizontally.
+  neutral surface rather than a Mail-specific color.
+- At narrow widths, Mail presents one focused surface at a time. Selecting a
+  conversation opens the reader, Back to inbox restores the list, and compact
+  actions move into More rather than overflowing horizontally.
 - Unified and account mailbox navigation remains usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.

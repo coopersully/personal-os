@@ -312,7 +312,6 @@ import { FinanceSettings } from "./features/finances/settings.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
-  MailTopbarSearch,
 } from "./features/mail/mail.js";
 import { MailStewardshipPage } from "./features/mail/stewardship-page.js";
 import {
@@ -945,6 +944,89 @@ function useAccountReturnPath(workspacePath: string | null): string {
   return remembered.current;
 }
 
+const mailSidebarWidthStorageKey = "ilo.mail.sidebar-width.v1";
+const defaultMailSidebarWidth = 256;
+const minimumMailSidebarWidth = 208;
+const maximumMailSidebarWidth = 360;
+
+function clampMailSidebarWidth(width: number) {
+  return Math.min(maximumMailSidebarWidth, Math.max(minimumMailSidebarWidth, width));
+}
+
+function storedMailSidebarWidth() {
+  try {
+    if (typeof window === "undefined") return defaultMailSidebarWidth;
+    const stored = Number(window.localStorage.getItem(mailSidebarWidthStorageKey));
+    return Number.isFinite(stored) && stored > 0
+      ? clampMailSidebarWidth(stored)
+      : defaultMailSidebarWidth;
+  } catch {
+    return defaultMailSidebarWidth;
+  }
+}
+
+function persistMailSidebarWidth(width: number) {
+  try {
+    window.localStorage.setItem(mailSidebarWidthStorageKey, String(width));
+  } catch {
+    // A browser storage restriction must not prevent layout resizing.
+  }
+}
+
+function MailNavigationResizeHandle({
+  onResize,
+  width,
+}: {
+  onResize: (width: number, persist: boolean) => void;
+  width: number;
+}) {
+  const resizeFromKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const next =
+      event.key === "Home"
+        ? minimumMailSidebarWidth
+        : event.key === "End"
+          ? maximumMailSidebarWidth
+          : event.key === "ArrowLeft"
+            ? width - 16
+            : event.key === "ArrowRight"
+              ? width + 16
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    onResize(clampMailSidebarWidth(next), true);
+  };
+
+  return (
+    <hr
+      aria-label="Resize mail navigation"
+      aria-orientation="vertical"
+      aria-valuemax={maximumMailSidebarWidth}
+      aria-valuemin={minimumMailSidebarWidth}
+      aria-valuenow={width}
+      className="mail-sidebar-resize-handle"
+      onDoubleClick={() => onResize(defaultMailSidebarWidth, true)}
+      onKeyDown={resizeFromKeyboard}
+      onPointerDown={(event) => {
+        const startX = event.clientX;
+        const startWidth = width;
+        let finalWidth = width;
+        const move = (moveEvent: PointerEvent) => {
+          finalWidth = clampMailSidebarWidth(startWidth + moveEvent.clientX - startX);
+          onResize(finalWidth, false);
+        };
+        const finish = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", finish);
+          onResize(finalWidth, true);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", finish, { once: true });
+      }}
+      tabIndex={0}
+    />
+  );
+}
+
 function AuthenticatedApp({ user }: { user: User }) {
   const [editor, setEditor] = useState<Editor>(null);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
@@ -952,6 +1034,7 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [pinned, setPinned] = useState(false);
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
   const [workspacePreview, setWorkspacePreview] = useState<WorkspacePreview | null>(null);
+  const [mailSidebarWidth, setMailSidebarWidth] = useState(storedMailSidebarWidth);
   const location = useLocation();
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
@@ -1059,7 +1142,14 @@ function AuthenticatedApp({ user }: { user: User }) {
 
   return (
     <>
-      <div className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : ""}`}>
+      <div
+        className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}`}
+        style={
+          sidebarMode === "mail"
+            ? ({ "--mail-sidebar-width": `${mailSidebarWidth}px` } as CSSProperties)
+            : undefined
+        }
+      >
         <PinterestWallpaperScheduler />
         <a className="skip-link" href="#main-content">
           Skip to main content
@@ -1149,6 +1239,15 @@ function AuthenticatedApp({ user }: { user: User }) {
               <AccountMenu onNavigate={closeMobileMenu} user={user} />
             </ShadcnSidebarFooter>
           </aside>
+        ) : null}
+        {!isMobileWorkspaceDock && sidebarMode === "mail" ? (
+          <MailNavigationResizeHandle
+            onResize={(width, persist) => {
+              setMailSidebarWidth(width);
+              if (persist) persistMailSidebarWidth(width);
+            }}
+            width={mailSidebarWidth}
+          />
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
@@ -1510,8 +1609,6 @@ function WorkspaceAppBarForRoute({
   );
   const context = isSpatialCalendar ? (
     <CalendarAppBarControls onToday={onCalendarToday} user={user} />
-  ) : workspace === "mail" ? (
-    <MailTopbarSearch />
   ) : pathname === "/today" ? (
     <TodayWeatherTopbar user={user} weather={weather} />
   ) : pathname === "/activity" ? (

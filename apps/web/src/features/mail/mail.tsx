@@ -2,10 +2,11 @@ import type { CalendarAccount } from "@personal-os/api-client";
 import type { LegacyMailDraft, Mailbox, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
+  ArrowLeftIcon,
   ChevronDownIcon,
   ClockIcon,
   DownloadIcon,
@@ -18,6 +19,7 @@ import {
   StarIcon,
   TrashIcon,
 } from "@/components/icons";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
 import {
@@ -40,7 +42,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group.js";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "../../components/ui/input-group.js";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -55,6 +62,7 @@ import {
 import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
+  WorkspaceSecondaryAppBarLeading,
 } from "../../components/workspace-secondary-app-bar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
@@ -168,6 +176,35 @@ function inboxUnreadCount(items: Mailbox[]) {
     .reduce((sum, mailbox) => sum + mailbox.unreadCount, 0);
 }
 export const relative = formatRelativeTime;
+const mailReaderLayoutStorageKey = "ilo.mail.reader-layout.v1";
+
+function storedMailReaderLayout() {
+  try {
+    if (typeof window === "undefined") return undefined;
+    const value = JSON.parse(
+      window.localStorage.getItem(mailReaderLayoutStorageKey) ?? "null",
+    ) as unknown;
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof (value as Record<string, unknown>)["mail-list"] === "number" &&
+      typeof (value as Record<string, unknown>)["mail-reader"] === "number"
+    )
+      return value as Record<string, number>;
+  } catch {
+    // A damaged preference should never prevent Mail from opening.
+  }
+  return undefined;
+}
+
+function persistMailReaderLayout(layout: Record<string, number>) {
+  try {
+    window.localStorage.setItem(mailReaderLayoutStorageKey, JSON.stringify(layout));
+  } catch {
+    // A browser storage restriction must not prevent panel resizing.
+  }
+}
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -178,26 +215,34 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-export function MailTopbarSearch() {
-  const [params, setParams] = useSearchParams();
-  const search = params.get("q")?.trim() ?? "";
-  const [searchDraft, setSearchDraft] = useState(search);
-
-  useEffect(() => setSearchDraft(search), [search]);
+export function MailTopbarSearch({
+  onSearch,
+  search,
+}: {
+  onSearch: (query: string) => void;
+  search: string;
+}) {
+  const [draft, setDraft] = useState(search);
+  const pendingSearch = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitSearch = (query: string) => {
+    if (pendingSearch.current) clearTimeout(pendingSearch.current);
+    pendingSearch.current = null;
+    onSearch(query.trim());
+  };
+  useEffect(() => setDraft(search), [search]);
+  useEffect(
+    () => () => {
+      if (pendingSearch.current) clearTimeout(pendingSearch.current);
+    },
+    [],
+  );
 
   return (
     <form
       className="mail-topbar__search"
       onSubmit={(event) => {
         event.preventDefault();
-        setParams((current) => {
-          const next = new URLSearchParams(current);
-          const query = searchDraft.trim();
-          if (query) next.set("q", query);
-          else next.delete("q");
-          next.delete("thread");
-          return next;
-        });
+        commitSearch(draft);
       }}
     >
       <InputGroup>
@@ -206,11 +251,22 @@ export function MailTopbarSearch() {
         </InputGroupAddon>
         <InputGroupInput
           aria-label="Search mail"
-          onChange={(event) => setSearchDraft(event.currentTarget.value)}
+          name="query"
+          onChange={(event) => {
+            const query = event.currentTarget.value;
+            setDraft(query);
+            if (pendingSearch.current) clearTimeout(pendingSearch.current);
+            pendingSearch.current = setTimeout(() => commitSearch(query), 250);
+          }}
           placeholder="Search mail"
           type="search"
-          value={searchDraft}
+          value={draft}
         />
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton aria-label="Search messages" size="icon-xs" type="submit">
+            <SearchIcon aria-hidden="true" />
+          </InputGroupButton>
+        </InputGroupAddon>
       </InputGroup>
     </form>
   );
@@ -262,7 +318,7 @@ function HistoricalMailDrafts({
   if (drafts.length === 0) return null;
   return (
     <>
-      <Collapsible className="mail-legacy-drafts" defaultOpen>
+      <Collapsible className="mail-legacy-drafts">
         <CollapsibleTrigger asChild>
           <Button tone="ghost" type="button">
             <ChevronDownIcon aria-hidden="true" data-icon="inline-start" />
@@ -494,6 +550,7 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-thread", selectedId],
   });
   const selected = listed ?? loaded.data;
+  const readerLayout = useMemo(storedMailReaderLayout, []);
   const messages = useQuery({
     enabled: Boolean(selected),
     queryFn: () => api.listMailMessages(selected?.id as string),
@@ -553,79 +610,102 @@ export function MailPage({ user }: { user: User }) {
     <div className="mail-page">
       {historicalDrafts}
       <ConnectionRecoveryAlert accounts={enabled} />
-      {selected ? (
-        <MailSecondaryNavigation
-          archive={() =>
-            updateThread.mutate({
-              id: selected.id,
-              mailboxIds: selected.mailboxIds.filter(
-                (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
-              ),
-            })
-          }
-          pending={updateThread.isPending}
-          selected={selected}
-          snooze={() => snoozeThread.mutate(selected.id)}
-          toggleStar={() => updateThread.mutate({ id: selected.id, starred: !selected.starred })}
-          toggleUnread={() => updateThread.mutate({ id: selected.id, unread: !selected.unread })}
-          trash={() => {
-            const trash = mailboxes.data.find(
-              (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
-            );
-            if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
-          }}
-        />
-      ) : null}
-      <div className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}>
-        <section aria-label="Conversations" className="mail-thread-list">
-          {threads.isError ? (
-            <InlineError error={threads.error} />
-          ) : threads.data.length === 0 ? (
-            <EmptyState icon={<MailIcon />} title="Nothing here">
-              Try another mailbox or a broader search.
-            </EmptyState>
-          ) : (
-            <>
+      <ResizablePanelGroup
+        className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
+        defaultLayout={readerLayout}
+        id="mail-reader-layout"
+        onLayoutChanged={(layout, metadata) => {
+          if (metadata.isUserInteraction) persistMailReaderLayout(layout);
+        }}
+        orientation="horizontal"
+      >
+        <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
+          <section aria-label="Conversations" className="mail-thread-list">
+            <div className="mail-thread-list__toolbar">
+              <MailTopbarSearch
+                onSearch={(query) => update({ q: query || null, thread: null })}
+                search={search}
+              />
               <div className="mail-thread-list__summary">
-                <span>{threads.data.length} conversations</span>
+                <span>{threads.data?.length ?? 0} conversations</span>
                 {listScope === "all" ? null : <Badge>{listScope}</Badge>}
               </div>
-              {threads.data.map((thread) => (
+            </div>
+            {threads.isError ? (
+              <InlineError error={threads.error} />
+            ) : threads.data.length === 0 ? (
+              <EmptyState icon={<MailIcon />} title="Nothing here">
+                Try another mailbox or a broader search.
+              </EmptyState>
+            ) : (
+              threads.data.map((thread) => (
                 <ThreadRow
                   active={selected?.id === thread.id}
                   key={thread.id}
                   select={() => update({ thread: thread.id })}
                   thread={thread}
                 />
-              ))}
-            </>
-          )}
-        </section>
-        <section aria-label="Message reader" className="mail-reader">
-          {selected ? (
-            <>
-              <Reader
-                messages={messages.data ?? []}
-                thread={selected}
-                timeZone={user.planningTimezone}
-              />
-              <ThreadStewardship threadId={selected.id} />
-            </>
-          ) : selectedId && loaded.isPending ? (
-            <PageLoading />
-          ) : (
-            <EmptyState icon={<MailIcon />} title="Select a conversation">
-              Open a conversation to read every synced message and manage it.
-            </EmptyState>
-          )}
-        </section>
-      </div>
+              ))
+            )}
+          </section>
+        </ResizablePanel>
+        <ResizableHandle aria-label="Resize conversation list" withHandle />
+        <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
+          <section aria-label="Message reader" className="mail-reader">
+            {selected ? (
+              <>
+                <MailSecondaryNavigation
+                  archive={() =>
+                    updateThread.mutate({
+                      id: selected.id,
+                      mailboxIds: selected.mailboxIds.filter(
+                        (id) =>
+                          mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
+                      ),
+                    })
+                  }
+                  back={() => update({ thread: null })}
+                  pending={updateThread.isPending}
+                  selected={selected}
+                  snooze={() => snoozeThread.mutate(selected.id)}
+                  toggleStar={() =>
+                    updateThread.mutate({ id: selected.id, starred: !selected.starred })
+                  }
+                  toggleUnread={() =>
+                    updateThread.mutate({ id: selected.id, unread: !selected.unread })
+                  }
+                  trash={() => {
+                    const trash = mailboxes.data.find(
+                      (mailbox) =>
+                        mailbox.accountId === selected.accountId && mailbox.role === "trash",
+                    );
+                    if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
+                  }}
+                />
+                <Reader
+                  messages={messages.data ?? []}
+                  thread={selected}
+                  timeZone={user.planningTimezone}
+                />
+                <ThreadStewardship threadId={selected.id} />
+              </>
+            ) : selectedId && loaded.isPending ? (
+              <PageLoading />
+            ) : (
+              <EmptyState icon={<MailIcon />} title="Select a conversation">
+                Open a conversation to read every synced message and manage it.
+              </EmptyState>
+            )}
+          </section>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
 
 function MailSecondaryNavigation({
   archive,
+  back,
   pending,
   selected,
   snooze,
@@ -634,6 +714,7 @@ function MailSecondaryNavigation({
   trash,
 }: {
   archive: () => void;
+  back: () => void;
   pending: boolean;
   selected: MailThread;
   snooze: () => void;
@@ -643,6 +724,12 @@ function MailSecondaryNavigation({
 }) {
   return (
     <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+      <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
+        <Button aria-label="Back to inbox" onClick={back} tone="ghost" type="button">
+          <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+          <span>Inbox</span>
+        </Button>
+      </WorkspaceSecondaryAppBarLeading>
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
           <ArchiveIcon aria-hidden="true" className="size-4" />

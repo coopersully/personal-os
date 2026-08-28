@@ -128,6 +128,42 @@ describe("Finance presentation builders", () => {
     });
   });
 
+  it("names every close-readiness gap and preserves an active budget and pending input", () => {
+    const status = statusFixture();
+    status.details.closeReadiness.missingProvenance = 1;
+    status.details.closeReadiness.possibleDuplicates = 2;
+    status.details.closeReadiness.unmatchedTransfers = 3;
+    status.details.closeReadiness.uncategorized = 4;
+    status.details.wealth.debt = null;
+    status.freshness.blockers = [
+      { code: "source_stale", message: "A source is stale.", recovery: null },
+    ];
+    status.recommendedNextOperation = null;
+    status.work.awaitingInput = 2;
+
+    const built = buildFinanceSnapshotResult(
+      status,
+      result<FinanceBudgetVersion | null>(budgetFixture({ status: "active" })),
+    );
+
+    expect(built.data.budget.activeVersionId).toBe(id);
+    expect(built.outcome).toBe("user_input_required");
+    expect(built.presentation).toMatchObject({
+      destination: { href: "/finances" },
+      trust: {
+        gaps: [
+          "A source is stale.",
+          "1 ledger item(s) are missing provenance.",
+          "2 possible duplicate(s) remain.",
+          "3 transfer(s) remain unmatched.",
+          "4 transaction(s) remain uncategorized.",
+          "Debt position is unavailable.",
+        ],
+        trustworthy: false,
+      },
+    });
+  });
+
   it("uses the budget values already accepted by the API", () => {
     const input = result<FinanceBudgetVersion | null>(budgetFixture());
     expect(withFinanceBudgetPresentation(input).presentation).toMatchObject({
@@ -162,6 +198,24 @@ describe("Finance presentation builders", () => {
     });
   });
 
+  it("does not present an Inbox question that has no matching owned case", () => {
+    const input = {
+      ...result([inboxCase()]),
+      communication: {
+        headline: "A review needs input.",
+        nextQuestion: {
+          answerType: "text",
+          id: "44444444-4444-4444-8444-444444444444",
+          prompt: "What was this?",
+        },
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+    } satisfies FinanceToolResult<FinanceInboxCase[]>;
+
+    expect(withFinanceInboxPresentation(input)).not.toHaveProperty("presentation");
+  });
+
   it("copies period verification counts and recommendations", () => {
     const review = {
       cutoff: now,
@@ -187,6 +241,24 @@ describe("Finance presentation builders", () => {
       ],
       status: "completed_with_questions",
       work: review.work,
+    });
+  });
+
+  it("reports a completed period with no remaining work", () => {
+    const review = {
+      cutoff: now,
+      monitoring: { href: `/finances/reviews/${id}`, responsibility: "Review changes." },
+      period: { end: "2026-08-28", start: "2026-08-01" },
+      recommendations: [],
+      status: "completed",
+      work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 1 },
+    } as unknown as FinancePeriodReview;
+
+    expect(buildFinancePeriodReviewResult(review)).toMatchObject({
+      communication: { requiredDisclosures: [] },
+      outcome: "completed",
+      presentation: { disclosures: [], status: "completed" },
+      remainingWork: { categories: [], count: 0 },
     });
   });
 });

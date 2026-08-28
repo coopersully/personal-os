@@ -1406,6 +1406,35 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it("reads authoritative Finance presentation results from exact endpoints", async () => {
+    const requests: string[] = [];
+    const snapshot = {
+      data: { asOf: now },
+      presentation: { kind: "finance_snapshot" },
+    };
+    const period = {
+      data: { id },
+      presentation: { kind: "finance_period_verification" },
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        requests.push(url.pathname);
+        if (url.pathname === "/v1/finances/snapshot") return json(snapshot);
+        if (url.pathname === `/v1/finances/period-reviews/${id}/presentation`) return json(period);
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.getFinanceSnapshot()).resolves.toMatchObject(snapshot);
+    await expect(api.getFinancePeriodReviewPresentation(id)).resolves.toMatchObject(period);
+    expect(requests).toEqual([
+      "/v1/finances/snapshot",
+      `/v1/finances/period-reviews/${id}/presentation`,
+    ]);
+  });
+
   it("serializes Finance scenario comparisons and budget plans", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const scenarioInput = {

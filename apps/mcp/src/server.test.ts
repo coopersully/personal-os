@@ -1793,6 +1793,14 @@ describe("ilo MCP server", () => {
       mimeType: "text/html;profile=mcp-app",
       uri: "ui://ilo/finances/snapshot",
     });
+    const snapshotContent = snapshotPresentation.contents[0];
+    const snapshotHtml = String(
+      snapshotContent && "text" in snapshotContent ? snapshotContent.text : "",
+    );
+    expect(snapshotHtml).toContain("ui/initialize");
+    expect(snapshotHtml).toContain("ui/notifications/tool-result");
+    expect(snapshotHtml).not.toContain("<pre");
+    expect(snapshotHtml).not.toContain("JSON.stringify(data.result");
     const agenda = await client.readResource({ uri: "personal-os://agenda/today" });
     const agendaContent = agenda.contents[0];
     expect(agendaContent && "text" in agendaContent).toBe(true);

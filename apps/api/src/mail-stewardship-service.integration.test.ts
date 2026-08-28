@@ -5,6 +5,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   mailDrafts,
+  mailMessages,
   mailObligations,
   mailReviews,
   mailRuleProposals,
@@ -215,6 +216,90 @@ describe.sequential("Mail stewardship service", () => {
         { principal, requestId: "stale-update" },
       ),
     ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("fences mutations to the owner and validates obligation evidence", async () => {
+    const input = {
+      dueAt: "2026-08-27T12:00:00.000Z",
+      goalIds: ["goal-1"],
+      kind: "follow_up" as const,
+      nextReviewAt: "2026-08-26T12:00:00.000Z",
+      owner: { kind: "user" as const },
+      rationale: "Follow up outside Mail.",
+      sourceMessageId: null,
+      sourceThreadRevision: threadUpdatedAt,
+    };
+
+    await expect(
+      service.createObligation(principal.userId, threadId, input, {
+        principal: otherPrincipal,
+        requestId: "foreign-create",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.createObligation(
+        principal.userId,
+        threadId,
+        { ...input, sourceMessageId: "00000000-0000-4000-8000-000000000001" },
+        { principal, requestId: "invalid-message" },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const [message] = await database.db
+      .insert(mailMessages)
+      .values({
+        bodyText: "Private source message.",
+        from: { address: "sender@example.com", name: "Sender" },
+        receivedAt: now,
+        remoteMessageId: "stewardship-message",
+        threadId,
+        to: [],
+      })
+      .returning();
+    if (!message) throw new Error("Message fixture was not created.");
+
+    const created = await service.createObligation(
+      principal.userId,
+      threadId,
+      { ...input, sourceMessageId: message.id },
+      { principal, requestId: "dated-obligation" },
+    );
+    expect(created).toMatchObject({
+      dueAt: input.dueAt,
+      nextReviewAt: input.nextReviewAt,
+      sourceMessageId: message.id,
+    });
+
+    const cleared = await service.updateObligation(
+      principal.userId,
+      created.id,
+      { dueAt: null, expectedVersion: 1, nextReviewAt: null },
+      { principal, requestId: "clear-schedule" },
+    );
+    expect(cleared).toMatchObject({ dueAt: null, nextReviewAt: null, version: 2 });
+    const rescheduled = await service.updateObligation(
+      principal.userId,
+      created.id,
+      {
+        dueAt: "2026-08-29T12:00:00.000Z",
+        expectedVersion: 2,
+        nextReviewAt: "2026-08-28T12:00:00.000Z",
+      },
+      { principal, requestId: "restore-schedule" },
+    );
+    expect(rescheduled).toMatchObject({
+      dueAt: "2026-08-29T12:00:00.000Z",
+      nextReviewAt: "2026-08-28T12:00:00.000Z",
+      version: 3,
+    });
+    await expect(
+      service.updateObligation(
+        principal.userId,
+        "00000000-0000-4000-8000-000000000002",
+        { expectedVersion: 1, state: "resolved" },
+        { principal, requestId: "missing-obligation" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("keeps disposition history while allowing exactly one current disposition", async () => {
@@ -472,6 +557,69 @@ describe.sequential("Mail stewardship service", () => {
     });
   });
 
+  it("replaces an existing disposition once and rejects settled or stale answers", async () => {
+    await service.setDisposition(
+      principal.userId,
+      threadId,
+      {
+        disposition: "active",
+        expectedThreadUpdatedAt: threadUpdatedAt,
+        rationale: "Initially active.",
+      },
+      { principal, requestId: "initial-answer-disposition" },
+    );
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId,
+        evidence: [],
+        fingerprint: "e".repeat(64),
+        kind: "needs_disposition",
+        reason: "Choose the current disposition.",
+        threadId,
+        userId: principal.userId,
+      })
+      .returning();
+    if (!question) throw new Error("Question fixture was not created.");
+
+    await expect(
+      service.answerQuestion(
+        principal.userId,
+        question.id,
+        { answer: "resolved", expectedVersion: 1, generalize: false },
+        { principal, requestId: "replace-answer-disposition" },
+      ),
+    ).resolves.toMatchObject({ status: "answered", version: 2 });
+    await expect(service.listDispositionHistory(principal.userId, threadId)).resolves.toEqual([
+      expect.objectContaining({ current: true, disposition: "resolved", version: 2 }),
+      expect.objectContaining({ current: false, disposition: "active", version: 1 }),
+    ]);
+    await expect(
+      service.answerQuestion(
+        principal.userId,
+        question.id,
+        { answer: "reference", expectedVersion: 1, generalize: false },
+        { principal, requestId: "stale-question-answer" },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.answerQuestion(
+        principal.userId,
+        question.id,
+        { answer: "reference", expectedVersion: 2, generalize: false },
+        { principal, requestId: "settled-question-answer" },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.answerQuestion(
+        principal.userId,
+        "00000000-0000-4000-8000-000000000003",
+        { answer: "reference", expectedVersion: 1, generalize: false },
+        { principal, requestId: "missing-question-answer" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
   it("returns a non-transmittable response brief without persisting correspondence", async () => {
     const beforeDrafts = await database.db.select({ id: mailDrafts.id }).from(mailDrafts);
     const brief = await service.previewResponseBrief(principal.userId, threadId, {
@@ -526,6 +674,124 @@ describe.sequential("Mail stewardship service", () => {
     expect(questions).toEqual([
       expect.objectContaining({ kind: "needs_correction", status: "open", threadId }),
     ]);
+  });
+
+  it("reopens incorrect obligations and records proposal exceptions without approving rules", async () => {
+    const obligation = await service.createObligation(
+      principal.userId,
+      threadId,
+      {
+        dueAt: null,
+        goalIds: [],
+        kind: "decide",
+        nextReviewAt: null,
+        owner: { kind: "user" },
+        rationale: "Decision was believed complete.",
+        sourceMessageId: null,
+        sourceThreadRevision: threadUpdatedAt,
+      },
+      { principal, requestId: "feedback-obligation" },
+    );
+    await service.updateObligation(
+      principal.userId,
+      obligation.id,
+      { expectedVersion: 1, state: "resolved" },
+      { principal, requestId: "feedback-resolve" },
+    );
+    await service.createFeedback(
+      principal.userId,
+      {
+        comment: "The obligation is still open.",
+        kind: "incorrect",
+        targetId: obligation.id,
+        targetType: "obligation",
+      },
+      { principal, requestId: "feedback-reopen" },
+    );
+    await expect(service.getThreadStewardship(principal.userId, threadId)).resolves.toMatchObject({
+      obligations: [expect.objectContaining({ id: obligation.id, state: "open", version: 3 })],
+    });
+
+    const [proposal] = await database.db
+      .insert(mailRuleProposals)
+      .values({
+        examples: ["question:example"],
+        fingerprint: "f".repeat(64),
+        rationale: "Treat matching mail as reference.",
+        userId: principal.userId,
+      })
+      .returning();
+    if (!proposal) throw new Error("Rule proposal fixture was not created.");
+    const feedback = await service.createFeedback(
+      principal.userId,
+      {
+        comment: "Except when the sender asks for a decision.",
+        kind: "exception",
+        targetId: proposal.id,
+        targetType: "rule_proposal",
+      },
+      { principal, requestId: "proposal-exception" },
+    );
+    expect(feedback).toMatchObject({ evidence: [], kind: "exception" });
+    await expect(service.listRuleProposals(principal.userId)).resolves.toEqual([
+      expect.objectContaining({
+        approvedRuleId: null,
+        counterexamples: ["Except when the sender asks for a decision."],
+        exceptions: ["Except when the sender asks for a decision."],
+        status: "proposed",
+        version: 2,
+      }),
+    ]);
+  });
+
+  it("scopes snapshots and reports partial, stale, and unavailable evidence honestly", async () => {
+    await expect(
+      service.snapshot(principal.userId, {
+        entityType: "task",
+        id: threadId,
+        type: "target",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.snapshot(principal.userId, {
+        end: "2026-08-24",
+        start: "2026-08-24",
+        type: "window",
+      }),
+    ).resolves.toMatchObject({ sourceFreshness: "current", threads: [] });
+
+    await database.db.insert(calendarAccounts).values({
+      label: "Unsynced Mail account",
+      lastSyncedAt: null,
+      mailEnabled: true,
+      provider: "icloud",
+      providerAccountId: "mail-stewardship-unsynced",
+      syncStatus: "idle",
+      userId: principal.userId,
+    });
+    await expect(
+      service.snapshot(principal.userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ sourceFreshness: "partial" });
+
+    await database.db
+      .update(calendarAccounts)
+      .set({ lastSyncedAt: new Date(now.getTime() - 86_400_000) })
+      .where(eq(calendarAccounts.id, accountId));
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      freshness: { state: "stale" },
+      state: "blocked",
+    });
+
+    await database.db
+      .update(calendarAccounts)
+      .set({ lastSyncedAt: null })
+      .where(eq(calendarAccounts.userId, principal.userId));
+    await expect(
+      service.snapshot(principal.userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ sourceFreshness: "unavailable" });
+    await expect(
+      service.getReview(principal.userId, "00000000-0000-4000-8000-000000000004"),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("publishes an immutable review and honest status from a content-free snapshot", async () => {

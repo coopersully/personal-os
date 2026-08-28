@@ -44,7 +44,7 @@ function financeResult<T>(value: FinanceToolResult<T>) {
   };
 }
 
-async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+export async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
   try {
     return financeResult(await operation());
   } catch (error) {
@@ -324,7 +324,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     [
       "get_finance_snapshot",
       "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
-      () => api.getFinanceOverview(),
+      () => api.getFinanceSnapshot(),
     ],
     [
       "get_finance_wealth_summary",

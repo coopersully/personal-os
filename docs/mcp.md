@@ -78,7 +78,7 @@ Every tool result keeps its feature payload under `result` (or its structured `e
 and adds `_ilo` with the domain, stage, policy, read-only state, and first-party links. Text content
 remains available for clients that do not consume structured output.
 
-## Resources, prompts, and visual work surface
+## Resources, prompts, and selective visual presentations
 
 The primary resource namespace is `ilo://`:
 
@@ -86,9 +86,25 @@ The primary resource namespace is `ilo://`:
 - `ilo://setup/{domain}/{step}` provides one server-owned setup step.
 - `ilo://guidance/{domain}` provides active or draft domain guidance. Drafts are explicitly
   non-operative.
-- `ui://ilo/work-surface` is a self-contained `text/html;profile=mcp-app` view for context,
-  previews, approvals, and verification results. Selected entry tools link to it through standard
-  `_meta.ui.resourceUri` metadata; all tools retain text and structured fallbacks.
+- `ui://ilo/finances/snapshot` presents the current financial position and evidence gaps.
+- `ui://ilo/finances/budget` presents expected resources, allocations, balance, assumptions, and
+  approval state.
+- `ui://ilo/finances/review` presents the one Finance Inbox decision currently requested.
+- `ui://ilo/finances/period-verification` presents one immutable period-verification result.
+
+Only `get_finance_snapshot`, `get_finance_budget`, `get_finance_inbox`, and
+`get_finance_period_review` advertise standard `_meta.ui.resourceUri` metadata. The resources are
+registered only for a connection with `finances:read`. Context, setup, ordinary reads, and
+uncurated Calendar, Mail, Reminder, and Finance previews do not advertise a visual and therefore
+remain in chat. Every tool retains useful text and structured output for hosts without MCP Apps.
+An already-open view that receives a missing, malformed, oversized, or mismatched presentation
+shows only “This result is available in chat.” It does not fall back to raw JSON or disclose
+financial values.
+
+The Finance API owns the typed values, evidence state, disclosures, and destination identity. The
+self-contained MCP Apps format that bounded contract, use the host theme and sizing lifecycle, and
+mediate an optional same-origin HTTPS destination through `ui/open-link`; they do not calculate
+financial meaning or grant mutation authority.
 
 `personal-os://agenda/today` and `personal-os://brief/daily` remain readable compatibility
 resources. New clients should begin with `get_ilo_context` or `ilo://context/self`.

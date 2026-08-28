@@ -23,6 +23,7 @@ import { assessMail } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
 import type { Principal } from "./types.js";
+import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 
 const initialNow = new Date("2026-08-25T15:00:00.000Z");
 
@@ -851,7 +852,7 @@ describe.sequential("Mail stewardship service", () => {
         from: { address: "owner@example.com", name: "Owner" },
         providerMailboxIds: ["SENT"],
         providerRevision: "outbound-v1",
-        receivedAt: now,
+        receivedAt: new Date(now.getTime() + 60_000),
         remoteMessageId: "snapshot-outbound",
         threadId,
         to: [],
@@ -868,10 +869,10 @@ describe.sequential("Mail stewardship service", () => {
       {
         dueAt: null,
         goalIds: ["goal-linked"],
-        kind: "record",
+        kind: "reply",
         nextReviewAt: null,
         owner: { kind: "user" },
-        rationale: "Record the linked decision.",
+        rationale: "Reply outside Ilo and record the linked decision.",
         sourceMessageId: null,
         sourceThreadRevision: threadUpdatedAt,
       },
@@ -892,13 +893,12 @@ describe.sequential("Mail stewardship service", () => {
       }),
     ).resolves.toMatchObject({ sourceFreshness: "current", threads: [] });
 
-    await expect(
-      service.snapshot(principal.userId, {
-        entityType: "mail_thread",
-        id: threadId,
-        type: "target",
-      }),
-    ).resolves.toMatchObject({
+    const targetSnapshot = await service.snapshot(principal.userId, {
+      entityType: "mail_thread",
+      id: threadId,
+      type: "target",
+    });
+    expect(targetSnapshot).toMatchObject({
       threads: [
         expect.objectContaining({
           goalLinked: true,
@@ -910,6 +910,41 @@ describe.sequential("Mail stewardship service", () => {
         }),
       ],
     });
+    const targetAssessment = assessMail(targetSnapshot, MAIL_PLAYBOOK);
+    expect(targetAssessment).toMatchObject({
+      dispositionTransitions: [expect.objectContaining({ disposition: "deferred" })],
+      obligationTransitions: [expect.objectContaining({ nextState: "resolved" })],
+    });
+    await expect(
+      service.reconcileAssessment(principal.userId, targetSnapshot, targetAssessment),
+    ).resolves.toMatchObject({ dispositions: 1, obligations: 1, questions: 1 });
+    await expect(
+      service.reconcileAssessment(principal.userId, targetSnapshot, {
+        ...targetAssessment,
+        obligationTransitions: [],
+      }),
+    ).resolves.toMatchObject({ dispositions: 0, obligations: 0, questions: 0 });
+    await expect(
+      service.reconcileAssessment(principal.userId, targetSnapshot, {
+        ...targetAssessment,
+        ledgerFingerprint: "0".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    const firstReview = await service.createReview(
+      principal.userId,
+      targetSnapshot,
+      targetAssessment,
+    );
+    await expect(
+      service.createReview(principal.userId, targetSnapshot, targetAssessment),
+    ).resolves.toEqual(firstReview);
+    await expect(
+      service.createReview(principal.userId, targetSnapshot, {
+        ...targetAssessment,
+        ledgerFingerprint: "3".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
 
     await database.db.insert(calendarAccounts).values({
       label: "Unsynced Mail account",
@@ -978,6 +1013,41 @@ describe.sequential("Mail stewardship service", () => {
       },
       domain: "mail",
       state: "needs_input",
+    });
+  });
+
+  it("distinguishes needs-work and clean status while projecting an active durable turn", async () => {
+    await service.setDisposition(
+      principal.userId,
+      threadId,
+      {
+        disposition: "reference",
+        expectedThreadUpdatedAt: threadUpdatedAt,
+        rationale: "This is durable reference material.",
+      },
+      { principal, requestId: "status-disposition" },
+    );
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      activeRun: null,
+      details: { latestReview: null },
+      state: "needs_work",
+    });
+
+    const sourceSnapshot = await service.snapshot(principal.userId, { type: "all_outstanding" });
+    const assessment = assessMail(sourceSnapshot, MAIL_PLAYBOOK);
+    await service.createReview(principal.userId, sourceSnapshot, assessment);
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({ state: "clean" });
+
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const run = await workspace.createOrResume(
+      principal.userId,
+      "mail",
+      { type: "all_outstanding" },
+      "mail-maintenance-v1:1.0.0",
+    );
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      activeRun: { id: run.id, status: "queued" },
+      state: "clean",
     });
   });
 });

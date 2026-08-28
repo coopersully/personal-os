@@ -165,4 +165,47 @@ describe("Mail stewardship assessment", () => {
     expect(after.openQuestionCount).toBe(1);
     expect(after.ledgerFingerprint).toBe(before.ledgerFingerprint);
   });
+
+  it("reports rule intentions and every degraded provider-evidence state", () => {
+    const matched = assessMail(
+      snapshot([
+        thread({
+          approvedRuleMatches: [{ ruleId: "rule-1", ruleVersion: 3 }],
+        }),
+      ]),
+      MAIL_PLAYBOOK,
+    );
+    expect(matched.questions).toEqual([expect.objectContaining({ kind: "needs_disposition" })]);
+    expect(matched.ruleWorkIntentions).toEqual([
+      expect.objectContaining({ ruleId: "rule-1", ruleVersion: 3 }),
+    ]);
+
+    const failed = assessMail(
+      snapshot([], {
+        effectCounts: { failed: 1, pending: 0, reconcile: 1 },
+        sourceFreshness: "unavailable",
+      }),
+      MAIL_PLAYBOOK,
+    );
+    expect(failed.blockers).toEqual([
+      "source_evidence_unavailable",
+      "provider_effect_failed",
+      "provider_effect_reconcile",
+    ]);
+    expect(failed.health).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dimension: "source_trust", signal: "unknown" }),
+        expect.objectContaining({ dimension: "provider_effects", signal: "strained" }),
+      ]),
+    );
+
+    const pending = assessMail(
+      snapshot([], { effectCounts: { failed: 0, pending: 1, reconcile: 0 } }),
+      MAIL_PLAYBOOK,
+    );
+    expect(pending.proposedSettlement).toBe("maintained_with_questions");
+    expect(pending.health).toContainEqual(
+      expect.objectContaining({ dimension: "provider_effects", signal: "attention" }),
+    );
+  });
 });

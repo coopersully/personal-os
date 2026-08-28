@@ -190,6 +190,6 @@ Never invent an artifact URL. If a PR cannot be resolved, state that clearly in
 - **Lint and format**, **Quality and browser acceptance**, **Desktop (macos-14)**, and
   **Desktop (windows-latest)**;
 - no force pushes or deletion; and
-- enforcement for administrators.
+- enforcement for non-administrators. Repository administrators may bypass merge requirements.
 
 Treat the live branch-protection response as authoritative if it later differs from this snapshot.

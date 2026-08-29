@@ -420,5 +420,11 @@ Grant only the scopes the host needs:
 - `bookmarks:read`
 - `audit:read`
 - `finances:read`, `finances:write`, `finances:maintain`
+- `texting:read`, `texting:write` (`texting:write` requires read access)
+
+Texting exposes `read_text_conversation` and `send_text_message`. Sending needs
+a fresh receipt from a preceding read, so the agent sees the current thread and
+timestamps first. It defaults to one concise bubble; only structured or
+explicitly requested large content should use a 2–3 message series.
 
 Only a token hash is stored. Revoke a host without ending human sessions or affecting another host. Connector and account administration remain human-only.

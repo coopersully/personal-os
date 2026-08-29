@@ -16,6 +16,8 @@ email_from        = "ilo <noreply@example.com>"
 plaid_enabled     = false
 plaid_environment = "production"
 x_enabled         = false
+texting_enabled   = false
+twilio_phone_number = ""
 
 # Keep low-latency modes disabled until the production evidence checklist is complete.
 google_gmail_push_enabled          = false

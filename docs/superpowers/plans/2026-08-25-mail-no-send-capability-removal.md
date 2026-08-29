@@ -336,9 +336,23 @@ it("renders no compose, reply, forward, or send affordance", async () => {
 });
 
 it("exports and deletes a historical draft without editing it", async () => {
+  vi.useFakeTimers();
+  const createObjectURL = vi.fn(() => "blob:mail-draft");
+  const revokeObjectURL = vi.fn();
+  Object.defineProperties(URL, {
+    createObjectURL: { configurable: true, value: createObjectURL },
+    revokeObjectURL: { configurable: true, value: revokeObjectURL },
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   renderMail({ legacyDrafts: [legacyDraft] });
   await user.click(await screen.findByRole("button", { name: "Export historical draft" }));
-  expect(downloadJson).toHaveBeenCalledWith("ilo-mail-draft-historical-draft.json", legacyDraft);
+  expect(createObjectURL).toHaveBeenCalledOnce();
+  expect(click).toHaveBeenCalledOnce();
+  expect(document.querySelector("a[download]")).toBeInTheDocument();
+  expect(revokeObjectURL).not.toHaveBeenCalled();
+  vi.runAllTimers();
+  expect(document.querySelector("a[download]")).not.toBeInTheDocument();
+  expect(revokeObjectURL).toHaveBeenCalledWith("blob:mail-draft");
   await user.click(screen.getByRole("button", { name: "Delete historical draft" }));
   expect(api.deleteLegacyMailDraft).toHaveBeenCalledWith(legacyDraft.id);
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

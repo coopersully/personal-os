@@ -5,8 +5,8 @@
 Read and act on one unified mailbox while retaining clear source-account and provider authority.
 
 Ilo never sends email. It has no compose, reply, forward, draft-creation, provider-delivery, or MCP
-send capability. Historical Ilo draft records may only be exported locally or permanently deleted
-by their owner.
+send capability. Historical Ilo draft records may only be listed by their owner, exported locally,
+or permanently deleted by their owner.
 
 ## Connection health
 

@@ -574,7 +574,17 @@ const MAIL_MAINTENANCE_STEPS = [
 
 - [ ] **Step 4: Implement honest settlement**
 
-Settle:
+The three status layers use this canonical mapping:
+
+| Mail settlement | Durable run status | Workspace display status |
+| --- | --- | --- |
+| `maintained` | `completed` | `clean`, only with current evidence, a matching review fingerprint, and no unresolved work or effects |
+| `maintained_with_questions` | `completed_with_questions` | `needs_input` |
+| `blocked` | `blocked` | `blocked` |
+| `failed` | `failed_recoverable` or `failed_terminal` | no positive review settlement; `needs_work` only while current evidence remains trustworthy, otherwise `blocked`, with the active or latest error carrying recovery detail |
+
+The durable run status is the mechanical execution substrate, the Mail settlement is the immutable
+domain review result, and the workspace status is the four-state display projection. Settle:
 
 - `completed` only with current evidence, stable fingerprint, no open material questions, and no pending/reconcile/failed effects;
 - `completed_with_questions` when maintenance is otherwise sound but explicit questions remain;
@@ -587,6 +597,16 @@ Never map an unavailable count to zero. Publish the review before verify, then v
 - [ ] **Step 5: Attach the shared due-run dispatcher**
 
 Implement `mailMaintenance.dispatchDue(limit)` with `workspaceMaintenance.listDueRunIds("mail", limit)`. Expose `dispatchDueMailMaintenance()` from `apps/api/src/app.ts` beside `dispatchDueFinanceMaintenance()` and invoke it from the existing bounded internal pass in `apps/api/src/main.ts`. Do not add a cron, external automation, or MCP polling loop.
+
+Before attaching or enabling this scheduled handoff, read
+`docs/engineering/external-boundary-reliability.md` and
+`docs/engineering/connector-reliability.md`. Inventory its scheduler, connector, network, lifecycle,
+recovery, and observation dependencies. Run `node scripts/check-provider-network-contract.mjs`, the
+focused maintenance/connector tests, `terraform fmt -check`, `terraform init -backend=false`, and
+`terraform validate`. In an authorized infrastructure environment, inspect and retain a Terraform
+plan or deployed effective-policy proof that permits only the documented provider paths. Record
+what still requires a post-deploy scheduled-handoff smoke and freshness observation; a present
+secret, green mock, or valid plan is not proof that the handoff works in production.
 
 - [ ] **Step 6: Prove crash, retry, effect ambiguity, and settlement paths**
 

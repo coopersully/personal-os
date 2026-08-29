@@ -551,7 +551,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: {
           deprecated: true,
           security,
-          responses: { 410: { description: "Mail sending is permanently unavailable" } },
+          responses: {
+            410: { description: "The email_transmission capability is permanently unavailable" },
+          },
         },
       },
       "/v1/mail/drafts/{id}": {
@@ -561,14 +563,18 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: {
           deprecated: true,
           security,
-          responses: { 410: { description: "Mail sending is permanently unavailable" } },
+          responses: {
+            410: { description: "The email_transmission capability is permanently unavailable" },
+          },
         },
       },
       "/v1/mail/send": {
         post: {
           deprecated: true,
           security,
-          responses: { 410: { description: "Mail sending is permanently unavailable" } },
+          responses: {
+            410: { description: "The email_transmission capability is permanently unavailable" },
+          },
         },
       },
       "/v1/mail/threads": {

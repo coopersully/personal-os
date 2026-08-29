@@ -179,7 +179,7 @@ it.each(["/v1/mail/drafts", "/v1/mail/drafts/id/reconcile", "/v1/mail/send"])(
     const response = await request(path, { method: "POST", body: "{}" });
     expect(response.status).toBe(410);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "feature_unavailable", details: { capability: "mail_send", permanent: true } },
+      error: { code: "feature_unavailable", details: { capability: "email_transmission", permanent: true } },
     });
   },
 );
@@ -218,7 +218,7 @@ Delete `createDraft`, `send`, `reconcileDraft`, their helpers, and all gateway s
 ```ts
 function mailSendingUnavailable(): never {
   throw new AppError("feature_unavailable", "Ilo does not send email.", {
-    capability: "mail_send",
+    capability: "email_transmission",
     permanent: true,
   });
 }
@@ -357,7 +357,7 @@ Delete `MailComposeButton`, compose query parsing, form refs/state, create/send/
 
 - [ ] **Step 4: Add a bounded historical draft panel**
 
-The panel is collapsed unless rows exist. Show account, subject, recipients, updated time, delivery uncertainty, Export, and Delete. Export uses an object URL created from `JSON.stringify(draft, null, 2)`, clicks a temporary download anchor, and immediately revokes the URL. Delete requires the existing confirmation primitive and invalidates only the legacy-draft query. Do not provide copy-to-compose or mailto actions.
+The panel is collapsed unless rows exist. Show account, subject, recipients, updated time in the user's planning timezone, delivery uncertainty, Export, and Delete. Export uses an object URL created from `JSON.stringify(draft, null, 2)`, attaches and clicks a temporary download anchor, then removes the anchor and revokes the URL on the next task so the browser can begin the download. Delete requires the existing confirmation primitive and invalidates only the legacy-draft query. Do not provide copy-to-compose or mailto actions.
 
 - [ ] **Step 5: Re-run UI tests**
 
@@ -420,7 +420,20 @@ Expected: FAIL on the still-present SMTP egress/documentation until the Terrafor
 
 - [ ] **Step 3: Remove SMTP egress and update authoritative docs**
 
-Delete only the iCloud Mail TCP/587 egress rule after `rg -n "587|smtp\.mail\.me\.com" infra apps packages` confirms its targets. Update the reliability/deployment documents to describe iCloud Mail as inbound projection plus supported provider mutations, not delivery. State plainly in the Mail page: “Ilo never sends email.” Record the shipped contraction in the implementation log without claiming stewardship is complete.
+Before changing this external boundary, read `docs/engineering/external-boundary-reliability.md`
+and `docs/engineering/connector-reliability.md`. Inventory every TCP/587 and SMTP dependency with
+`rg -n "587|smtp\.mail\.me\.com" infra apps packages`, then delete only the iCloud Mail TCP/587
+egress rule. Update the reliability/deployment documents to describe iCloud Mail as inbound
+projection plus supported provider mutations, not delivery. State plainly in the Mail page: “Ilo
+never sends email.” Record the shipped contraction in the implementation log without claiming
+stewardship is complete.
+
+Prove the effective-policy change before approval: run
+`node scripts/check-provider-network-contract.mjs`, `terraform fmt -check`,
+`terraform init -backend=false`, and `terraform validate`. In an authorized infrastructure
+environment, inspect and retain a `terraform plan` showing only the intended TCP/587 removal. A
+static check or plan is not production reachability evidence; record the remaining post-deploy
+provider smoke and observation requirement.
 
 - [ ] **Step 4: Run the complete static and behavioral proof**
 

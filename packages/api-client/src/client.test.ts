@@ -1801,11 +1801,13 @@ describe("ilo API client", () => {
     const input = { accountId, body: "", cc: [], subject: "", to: [] };
 
     await expect(api.createMailDraft(input)).resolves.toEqual(draft);
-    await expect(
-      api.updateMailDraft(id, { ...input, expectedUpdatedAt: now }),
-    ).resolves.toEqual(draft);
+    await expect(api.updateMailDraft(id, { ...input, expectedUpdatedAt: now })).resolves.toEqual(
+      draft,
+    );
     await expect(api.listMailDrafts()).resolves.toEqual([draft]);
-    await expect(api.sendMailDraft({ confirmedUpdatedAt: now, draftId: id })).resolves.toBeUndefined();
+    await expect(
+      api.sendMailDraft({ confirmedUpdatedAt: now, draftId: id }),
+    ).resolves.toBeUndefined();
     await expect(api.reconcileMailDraft(id, { outcome: "sent" })).resolves.toEqual(draft);
     await expect(api.deleteMailDraft(id)).resolves.toBeUndefined();
 

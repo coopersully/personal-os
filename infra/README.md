@@ -88,7 +88,12 @@ Parameter Store in that mode. Plaid-enabled production stacks must use
 `plaid_environment = "production"` with production credentials and endpoints;
 they must never use sandbox credentials or endpoints. When `x_enabled = true`,
 add `X_CLIENT_ID` and `X_CLIENT_SECRET`. Disabled connectors inject no connector
-credentials.
+credentials. When `texting_enabled = true`, add `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERVICE_SID`, and
+`TWILIO_VERIFY_SERVICE_SID`, then configure `twilio_phone_number`. Keep texting
+disabled until the shared sender is registered and a production-safe test proves
+verification, outbound delivery, signed inbound/status webhooks, STOP, START,
+and provider error 21610 synchronization without recording message bodies or phone numbers.
 
 ### Live Plaid verification before enabling the rollout
 

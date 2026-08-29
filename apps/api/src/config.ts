@@ -52,6 +52,12 @@ const configSchema = z
     SESSION_COOKIE_NAME: z.string().min(1).default("personal_os_session"),
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
     TRUST_PROXY: z.enum(["true", "false"]).default("false"),
+    TEXTING_ENABLED: z.enum(["true", "false"]).default("false"),
+    TWILIO_ACCOUNT_SID: z.string().default(""),
+    TWILIO_AUTH_TOKEN: z.string().default(""),
+    TWILIO_MESSAGING_SERVICE_SID: z.string().default(""),
+    TWILIO_VERIFY_SERVICE_SID: z.string().default(""),
+    TWILIO_PHONE_NUMBER: z.string().default(""),
     X_CLIENT_ID: z.string().default(""),
     X_CLIENT_SECRET: z.string().default(""),
     X_REDIRECT_URI: z.url(),
@@ -124,6 +130,23 @@ const configSchema = z
             "GOOGLE_CALENDAR_WEBHOOK_URL must be the exact HTTPS Calendar notification route on API_BASE_URL.",
           path: ["GOOGLE_CALENDAR_WEBHOOK_URL"],
         });
+      }
+    }
+    if (value.TEXTING_ENABLED === "true") {
+      for (const name of [
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN",
+        "TWILIO_MESSAGING_SERVICE_SID",
+        "TWILIO_VERIFY_SERVICE_SID",
+        "TWILIO_PHONE_NUMBER",
+      ] as const) {
+        if (!value[name].trim()) {
+          context.addIssue({
+            code: "custom",
+            message: `${name} is required when texting is enabled.`,
+            path: [name],
+          });
+        }
       }
     }
     if (value.NODE_ENV !== "production") return;
@@ -223,6 +246,14 @@ export type AppConfig = {
   sessionCookieName: string;
   sessionTtlDays: number;
   trustProxy?: boolean;
+  texting?: {
+    accountSid: string;
+    authToken: string;
+    enabled: boolean;
+    messagingServiceSid: string;
+    senderPhoneNumber: string;
+    verifyServiceSid: string;
+  };
   xClientId: string;
   xClientSecret: string;
   xRedirectUri: string;
@@ -280,6 +311,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     sessionCookieName: value.SESSION_COOKIE_NAME,
     sessionTtlDays: value.SESSION_TTL_DAYS,
     trustProxy: value.TRUST_PROXY === "true",
+    texting: {
+      accountSid: value.TWILIO_ACCOUNT_SID,
+      authToken: value.TWILIO_AUTH_TOKEN,
+      enabled: value.TEXTING_ENABLED === "true",
+      messagingServiceSid: value.TWILIO_MESSAGING_SERVICE_SID,
+      senderPhoneNumber: value.TWILIO_PHONE_NUMBER,
+      verifyServiceSid: value.TWILIO_VERIFY_SERVICE_SID,
+    },
     xClientId: value.X_CLIENT_ID,
     xClientSecret: value.X_CLIENT_SECRET,
     xRedirectUri: value.X_REDIRECT_URI,

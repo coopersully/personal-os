@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   attentionItems,
   auditEvents,
@@ -19,9 +19,11 @@ import type {
   AttentionItem,
   BulkUpdateMailInput,
   BulkUpdateMailResult,
+  CreateMailDraftInput,
   CreateMailRuleInput,
   LegacyMailDraft,
   Mailbox,
+  MailDraft,
   MailListQuery,
   MailMessage,
   MailRule,
@@ -29,6 +31,8 @@ import type {
   MailSetupContext,
   MailThread,
   PreviewMailRuleInput,
+  SendMailDraftInput,
+  UpdateMailDraftInput,
   UpdateMailRuleInput,
   UpdateMailThreadInput,
   UpsertMailAttentionItemInput,
@@ -43,7 +47,11 @@ import {
 } from "@personal-os/domain";
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
-import { type ConnectedMailGateway, mailProviderPartialEffectError } from "./connector-service.js";
+import {
+  type ConnectedMailGateway,
+  MailProviderRejectedError,
+  mailProviderPartialEffectError,
+} from "./connector-service.js";
 import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -63,6 +71,7 @@ type MailRuleUpdateRequest = Omit<UpdateMailRuleInput, "enabled" | "policy"> & {
   enabled?: boolean | undefined;
   policy?: MailRule["policy"] | undefined;
 };
+const MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS = 2 * 60 * 1_000;
 
 export function createMailService({
   db,
@@ -434,6 +443,324 @@ export function createMailService({
       sourceIds: string[],
     ): Promise<void> {
       await validateMailSourceIds(userId, sourceIds, transaction, true);
+    },
+
+    async createDraft(userId: string, input: CreateMailDraftInput): Promise<MailDraft> {
+      const created = await db.transaction(async (transaction) => {
+        const [account] = await transaction
+          .select({ id: calendarAccounts.id })
+          .from(calendarAccounts)
+          .where(
+            and(
+              eq(calendarAccounts.id, input.accountId),
+              eq(calendarAccounts.userId, userId),
+              eq(calendarAccounts.mailEnabled, true),
+            ),
+          )
+          .limit(1);
+        if (!account) {
+          throw new AppError("invalid_request", "Select one of your connected Mail accounts.");
+        }
+        if (input.threadId) {
+          const [thread] = await transaction
+            .select({ id: mailThreads.id })
+            .from(mailThreads)
+            .where(
+              and(
+                eq(mailThreads.id, input.threadId),
+                eq(mailThreads.userId, userId),
+                eq(mailThreads.accountId, input.accountId),
+                isNull(mailThreads.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (!thread) {
+            throw new AppError(
+              "invalid_request",
+              "The draft conversation must belong to the selected Mail account.",
+            );
+          }
+        }
+        return requireDatabaseRecord(
+          (
+            await transaction
+              .insert(mailDrafts)
+              .values({ ...input, threadId: input.threadId ?? null, userId })
+              .returning()
+          )[0],
+          "The Mail draft could not be created.",
+        );
+      });
+      return serializeMailDraft(created, now());
+    },
+
+    async updateDraft(userId: string, id: string, input: UpdateMailDraftInput): Promise<MailDraft> {
+      const [before] = await db
+        .select()
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.id, id), eq(mailDrafts.userId, userId)))
+        .limit(1);
+      if (!before) throw new AppError("not_found", "The Mail draft was not found.");
+      if (before.sendStatus !== "draft" || before.sentAt) {
+        throw new AppError("conflict", "This Mail draft is no longer editable.");
+      }
+      if (before.updatedAt.toISOString() !== input.expectedUpdatedAt) {
+        throw new AppError(
+          "conflict",
+          "This draft changed or is no longer editable. Reload it before continuing.",
+        );
+      }
+      const updatedAt = new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1));
+      const [updated] = await db
+        .update(mailDrafts)
+        .set({
+          accountId: input.accountId,
+          body: input.body,
+          cc: input.cc,
+          subject: input.subject,
+          threadId: input.threadId ?? null,
+          to: input.to,
+          updatedAt,
+        })
+        .where(
+          and(
+            eq(mailDrafts.id, id),
+            eq(mailDrafts.userId, userId),
+            eq(mailDrafts.sendStatus, "draft"),
+            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${before.updatedAt}`,
+            isNull(mailDrafts.sentAt),
+          ),
+        )
+        .returning();
+      if (!updated) {
+        throw new AppError(
+          "conflict",
+          "This draft changed or is no longer editable. Reload it before continuing.",
+        );
+      }
+      return serializeMailDraft(updated, now());
+    },
+
+    async listDrafts(userId: string): Promise<MailDraft[]> {
+      const listedAt = now();
+      const drafts = await db
+        .select()
+        .from(mailDrafts)
+        .where(eq(mailDrafts.userId, userId))
+        .orderBy(desc(mailDrafts.updatedAt));
+      return drafts.map((draft) => serializeMailDraft(draft, listedAt));
+    },
+
+    async deleteDraft(userId: string, id: string): Promise<void> {
+      const [deleted] = await db
+        .delete(mailDrafts)
+        .where(
+          and(
+            eq(mailDrafts.id, id),
+            eq(mailDrafts.userId, userId),
+            eq(mailDrafts.sendStatus, "draft"),
+          ),
+        )
+        .returning({ id: mailDrafts.id });
+      if (!deleted) throw new AppError("not_found", "The editable Mail draft was not found.");
+    },
+
+    async sendDraft(
+      userId: string,
+      input: SendMailDraftInput,
+      context: MutationContext,
+    ): Promise<void> {
+      const [draft] = await db
+        .select()
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+        .limit(1);
+      if (!draft) throw new AppError("not_found", "The Mail draft was not found.");
+      if (draft.sendStatus !== "draft" || draft.sentAt) {
+        throw new AppError("conflict", "This draft is already sending, uncertain, or sent.");
+      }
+      if (draft.updatedAt.toISOString() !== input.confirmedUpdatedAt) {
+        throw new AppError("conflict", "This draft changed after confirmation. Review it again.");
+      }
+      if (draft.to.length === 0 || (!draft.subject.trim() && !draft.body.trim())) {
+        throw new AppError(
+          "invalid_request",
+          "Add a recipient and a subject or message before sending.",
+        );
+      }
+      const remoteThreadId = draft.threadId
+        ? (
+            await db
+              .select({ remoteThreadId: mailThreads.remoteThreadId })
+              .from(mailThreads)
+              .where(
+                and(
+                  eq(mailThreads.id, draft.threadId),
+                  eq(mailThreads.userId, userId),
+                  eq(mailThreads.accountId, draft.accountId),
+                  isNull(mailThreads.deletedAt),
+                ),
+              )
+              .limit(1)
+          )[0]?.remoteThreadId
+        : undefined;
+      if (draft.threadId && !remoteThreadId) {
+        throw new AppError("not_found", "The Mail conversation was not found.");
+      }
+      const claimId = randomUUID();
+      const claimedAt = now();
+      const [claimed] = await db
+        .update(mailDrafts)
+        .set({
+          sendClaimedAt: claimedAt,
+          sendClaimId: claimId,
+          sendStatus: "sending",
+          updatedAt: claimedAt,
+        })
+        .where(
+          and(
+            eq(mailDrafts.id, input.draftId),
+            eq(mailDrafts.userId, userId),
+            eq(mailDrafts.sendStatus, "draft"),
+            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
+            isNull(mailDrafts.sentAt),
+          ),
+        )
+        .returning({ id: mailDrafts.id });
+      if (!claimed) {
+        throw new AppError("conflict", "This draft is already being sent or changed.");
+      }
+      try {
+        await gateway.send(userId, draft.accountId, {
+          body: draft.body,
+          cc: draft.cc,
+          subject: draft.subject,
+          ...(remoteThreadId ? { threadId: remoteThreadId } : {}),
+          to: draft.to,
+        });
+      } catch (error) {
+        if (error instanceof MailProviderRejectedError) {
+          await transitionOwnedDraftClaim(db, draft.id, userId, claimId, now(), "draft");
+          throw new AppError(
+            "service_unavailable",
+            "The provider rejected the message before accepting it. The draft is safe to retry.",
+            { partialEffect: false, providerAcceptance: "rejected", retrySafe: true },
+          );
+        }
+        const transition = await transitionOwnedDraftClaim(
+          db,
+          draft.id,
+          userId,
+          claimId,
+          now(),
+          "reconcile",
+        );
+        const partialEffect = mailProviderPartialEffectError({
+          accountId: draft.accountId,
+          cause: error,
+          credentialsPersisted: true,
+          draftId: draft.id,
+          operation: "send",
+          ...(remoteThreadId ? { remoteThreadId } : {}),
+          ...(draft.threadId ? { threadId: draft.threadId } : {}),
+        });
+        throw new AppError(partialEffect.code, partialEffect.message, {
+          ...(partialEffect.details as Record<string, unknown>),
+          reconciliationPersisted: transition === "updated",
+        });
+      }
+      await db.transaction(async (transaction) => {
+        const [sent] = await transaction
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: null,
+            sendClaimId: null,
+            sendStatus: "sent",
+            sentAt: now(),
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(mailDrafts.id, draft.id),
+              eq(mailDrafts.userId, userId),
+              eq(mailDrafts.sendClaimId, claimId),
+              eq(mailDrafts.sendStatus, "sending"),
+            ),
+          )
+          .returning({ id: mailDrafts.id });
+        if (!sent)
+          throw new AppError(
+            "conflict",
+            "The provider sent this draft, but its Ilo claim changed.",
+          );
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.sent",
+            after: {
+              accountId: draft.accountId,
+              ccCount: draft.cc.length,
+              draftId: draft.id,
+              hasThread: draft.threadId !== null,
+              recipientCount: draft.to.length,
+              threadId: draft.threadId,
+            },
+            before: null,
+            entityId: draft.id,
+            entityType: "mail_send",
+            principal: { ...context.principal, userId },
+            requestId: context.requestId,
+          }),
+        );
+      });
+    },
+
+    async reconcileDraft(
+      userId: string,
+      id: string,
+      outcome: "not_sent" | "sent",
+      context: MutationContext,
+    ): Promise<MailDraft> {
+      return db.transaction(async (transaction) => {
+        const [draft] = await transaction
+          .select()
+          .from(mailDrafts)
+          .where(and(eq(mailDrafts.id, id), eq(mailDrafts.userId, userId)))
+          .for("update")
+          .limit(1);
+        if (!draft) throw new AppError("not_found", "The Mail draft was not found.");
+        const staleSending =
+          draft.sendStatus === "sending" &&
+          draft.sendClaimedAt !== null &&
+          draft.sendClaimedAt.getTime() <= now().getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
+        if (draft.sendStatus !== "reconcile" && !staleSending) {
+          throw new AppError("conflict", "This draft has no uncertain delivery to reconcile.");
+        }
+        const reconciledAt = now();
+        const [reconciled] = await transaction
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: null,
+            sendClaimId: null,
+            sendStatus: outcome === "sent" ? "sent" : "draft",
+            sentAt: outcome === "sent" ? reconciledAt : null,
+            updatedAt: reconciledAt,
+          })
+          .where(eq(mailDrafts.id, id))
+          .returning();
+        const saved = requireDatabaseRecord(reconciled, "The Mail draft could not be reconciled.");
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.send_reconciled",
+            after: { draftId: id, outcome },
+            before: { sendStatus: draft.sendStatus },
+            entityId: id,
+            entityType: "mail_send",
+            principal: { ...context.principal, userId },
+            requestId: context.requestId,
+          }),
+        );
+        return serializeMailDraft(saved, reconciledAt);
+      });
     },
 
     async deleteLegacyDraft(userId: string, id: string): Promise<void> {
@@ -1418,6 +1745,65 @@ export function createMailService({
     ): Promise<MailThread> {
       return applyThreadUpdate(userId, id, input, principal, requestId);
     },
+  };
+}
+
+async function transitionOwnedDraftClaim(
+  db: Database,
+  draftId: string,
+  userId: string,
+  claimId: string,
+  updatedAt: Date,
+  status: "draft" | "reconcile",
+): Promise<"failed" | "lost" | "updated"> {
+  try {
+    const [transitioned] = await db
+      .update(mailDrafts)
+      .set({
+        ...(status === "draft" ? { sendClaimedAt: null, sendClaimId: null } : {}),
+        sendStatus: status,
+        updatedAt,
+      })
+      .where(
+        and(
+          eq(mailDrafts.id, draftId),
+          eq(mailDrafts.userId, userId),
+          eq(mailDrafts.sendClaimId, claimId),
+          eq(mailDrafts.sendStatus, "sending"),
+          isNull(mailDrafts.sentAt),
+        ),
+      )
+      .returning({ id: mailDrafts.id });
+    return transitioned ? "updated" : "lost";
+  } catch {
+    return "failed";
+  }
+}
+
+function serializeMailDraft(row: typeof mailDrafts.$inferSelect, listedAt: Date): MailDraft {
+  const staleSending =
+    row.sendStatus === "sending" &&
+    row.sendClaimedAt !== null &&
+    row.sendClaimedAt.getTime() <= listedAt.getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
+  return {
+    accountId: row.accountId,
+    body: row.body,
+    cc: row.cc,
+    createdAt: row.createdAt.toISOString(),
+    id: row.id,
+    reconciliationState:
+      row.sendStatus === "reconcile" || staleSending
+        ? "sent_mail_review_required"
+        : row.sendStatus === "sending"
+          ? "in_progress"
+          : "none",
+    sendClaimedAt: row.sendClaimedAt?.toISOString() ?? null,
+    sendStatus: row.sendStatus,
+    sentAt: row.sentAt?.toISOString() ?? null,
+    subject: row.subject,
+    threadId: row.threadId,
+    to: row.to,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 

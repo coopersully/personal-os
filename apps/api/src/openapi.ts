@@ -547,34 +547,26 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Source-aware Mail setup context" } } },
       },
       "/v1/mail/drafts": {
-        get: { security, responses: { 200: { description: "Historical Mail drafts" } } },
+        get: { security, responses: { 200: { description: "Owned Mail drafts and send state" } } },
         post: {
-          deprecated: true,
           security,
-          responses: {
-            410: { description: "The email_transmission capability is permanently unavailable" },
-          },
+          responses: { 201: { description: "Durable Mail draft created" } },
         },
       },
       "/v1/mail/drafts/{id}": {
-        delete: { security, responses: { 204: { description: "Historical Mail draft deleted" } } },
+        delete: { security, responses: { 204: { description: "Editable Mail draft deleted" } } },
+        patch: { security, responses: { 200: { description: "Mail draft updated" } } },
       },
       "/v1/mail/drafts/{id}/reconcile": {
         post: {
-          deprecated: true,
           security,
-          responses: {
-            410: { description: "The email_transmission capability is permanently unavailable" },
-          },
+          responses: { 200: { description: "Uncertain Mail delivery reconciled by a human" } },
         },
       },
       "/v1/mail/send": {
         post: {
-          deprecated: true,
           security,
-          responses: {
-            410: { description: "The email_transmission capability is permanently unavailable" },
-          },
+          responses: { 204: { description: "Exact confirmed draft submitted once" } },
         },
       },
       "/v1/mail/threads": {

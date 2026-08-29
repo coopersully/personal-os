@@ -20,7 +20,7 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import type { ConnectedMailGateway } from "./connector-service.js";
+import { type ConnectedMailGateway, MailProviderRejectedError } from "./connector-service.js";
 import { errorResponse } from "./errors.js";
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
@@ -45,6 +45,7 @@ describe.sequential("mail service", () => {
   let temporaryMigrationsFolder: string | null = null;
   let setupMigrationsFolder: string | null = null;
   const gateway = {
+    send: vi.fn(async () => undefined),
     update: vi.fn<ConnectedMailGateway["update"]>(async () => undefined),
   };
   const mutationContext = (requestId: string) => ({
@@ -497,6 +498,167 @@ describe.sequential("mail service", () => {
     await database.db.delete(mailDrafts).where(eq(mailDrafts.userId, otherUser.id));
     await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, otherAccount.id));
     await database.db.delete(users).where(eq(users.id, otherUser.id));
+  });
+
+  it("sends one exact saved draft revision and rejects stale or duplicate confirmation", async () => {
+    gateway.send.mockClear();
+    const created = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "",
+      cc: [],
+      subject: "",
+      to: [],
+    });
+    expect(created).toMatchObject({ sendStatus: "draft", to: [] });
+    const [persistedBeforeUpdate] = await database.db
+      .select({ sendStatus: mailDrafts.sendStatus, updatedAt: mailDrafts.updatedAt })
+      .from(mailDrafts)
+      .where(eq(mailDrafts.id, created.id));
+    expect(persistedBeforeUpdate).toEqual({
+      sendStatus: "draft",
+      updatedAt: new Date(created.updatedAt),
+    });
+
+    const updated = await service.updateDraft(userId, created.id, {
+      accountId: enabledAccountId,
+      body: "Prepared response",
+      cc: [],
+      expectedUpdatedAt: created.updatedAt,
+      subject: "Follow up",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await expect(
+      service.updateDraft(userId, created.id, {
+        accountId: enabledAccountId,
+        body: "Stale overwrite",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: updated.updatedAt, draftId: updated.id },
+        mutationContext("send-draft-request"),
+      ),
+    ).resolves.toBeUndefined();
+    expect(gateway.send).toHaveBeenCalledOnce();
+    expect(gateway.send).toHaveBeenCalledWith(userId, enabledAccountId, {
+      body: "Prepared response",
+      cc: [],
+      subject: "Follow up",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: updated.updatedAt, draftId: updated.id },
+        mutationContext("duplicate-send-request"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(gateway.send).toHaveBeenCalledOnce();
+
+    const [audit] = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "send-draft-request"));
+    expect(audit).toMatchObject({ action: "mail.sent", entityId: updated.id });
+    expect(JSON.stringify(audit)).not.toContain("person@example.com");
+    expect(JSON.stringify(audit)).not.toContain("Prepared response");
+
+    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, created.id));
+  });
+
+  it("releases proven rejection but blocks retries after ambiguous provider acceptance", async () => {
+    const prepare = async (subject: string) => {
+      const created = await service.createDraft(userId, {
+        accountId: enabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        subject,
+        to: [{ address: "person@example.com", name: null }],
+      });
+      return service.updateDraft(userId, created.id, {
+        accountId: enabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject,
+        to: [{ address: "person@example.com", name: null }],
+      });
+    };
+
+    const rejected = await prepare("Rejected");
+    gateway.send.mockRejectedValueOnce(
+      new MailProviderRejectedError("Rejected before acceptance", new Error("safe canary")),
+    );
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: rejected.updatedAt, draftId: rejected.id },
+        mutationContext("rejected-send-request"),
+      ),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: { partialEffect: false, retrySafe: true },
+    });
+    await expect(service.listDrafts(userId)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: rejected.id, sendStatus: "draft" })]),
+    );
+
+    const uncertain = await prepare("Uncertain");
+    gateway.send.mockRejectedValueOnce(new Error("ambiguous private provider canary"));
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: uncertain.updatedAt, draftId: uncertain.id },
+        mutationContext("uncertain-send-request"),
+      ),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: { partialEffect: true, reconciliationPersisted: true },
+    });
+    const [uncertainState] = (await service.listDrafts(userId)).filter(
+      (draft) => draft.id === uncertain.id,
+    );
+    expect(uncertainState).toMatchObject({
+      reconciliationState: "sent_mail_review_required",
+      sendStatus: "reconcile",
+    });
+    const sendCallsAfterAmbiguity = gateway.send.mock.calls.length;
+    await expect(
+      service.sendDraft(
+        userId,
+        {
+          confirmedUpdatedAt: uncertainState?.updatedAt ?? uncertain.updatedAt,
+          draftId: uncertain.id,
+        },
+        mutationContext("unsafe-retry-request"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(gateway.send).toHaveBeenCalledTimes(sendCallsAfterAmbiguity);
+
+    await expect(
+      service.reconcileDraft(
+        userId,
+        uncertain.id,
+        "not_sent",
+        mutationContext("reconcile-not-sent-request"),
+      ),
+    ).resolves.toMatchObject({ sendStatus: "draft" });
+    const [reconcileAudit] = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "reconcile-not-sent-request"));
+    expect(reconcileAudit).toMatchObject({ action: "mail.send_reconciled" });
+    expect(JSON.stringify(reconcileAudit)).not.toContain("person@example.com");
+    expect(JSON.stringify(reconcileAudit)).not.toContain("Prepared response");
+
+    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, rejected.id));
+    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, uncertain.id));
   });
 
   it("filters conversations by account, unread state, mailbox, and search fields", async () => {

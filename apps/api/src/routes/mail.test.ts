@@ -26,14 +26,36 @@ const thread = {
 };
 
 describe("Mail routes", () => {
-  it("keeps legacy drafts readable/deletable and permanently rejects former send mutations", async () => {
+  it("routes durable drafts and requires a human for send and reconciliation", async () => {
     const app = new Hono<AppEnv>();
-    const deleteLegacyDraft = vi.fn(async () => undefined);
-    const listLegacyDrafts = vi.fn(async () => []);
+    let actorType: "agent" | "user" = "user";
+    const draft = {
+      accountId,
+      body: "Prepared response",
+      cc: [],
+      createdAt: thread.updatedAt,
+      id,
+      reconciliationState: "none" as const,
+      sendClaimedAt: null,
+      sendStatus: "draft" as const,
+      sentAt: null,
+      subject: "Follow up",
+      threadId: null,
+      to: [{ address: "person@example.com", name: null }],
+      updatedAt: thread.updatedAt,
+    };
+    const mail = {
+      createDraft: vi.fn(async () => draft),
+      deleteDraft: vi.fn(async () => undefined),
+      listDrafts: vi.fn(async () => [draft]),
+      reconcileDraft: vi.fn(async () => draft),
+      sendDraft: vi.fn(async () => undefined),
+      updateDraft: vi.fn(async () => draft),
+    };
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
-        actorType: "user",
+        actorType,
         scopes: new Set<AccessScope>(["mail:read", "mail:write"]),
         userId: id,
       });
@@ -43,9 +65,7 @@ describe("Mail routes", () => {
     app.onError(errorResponse);
     registerMailRoutes({
       app,
-      mail: { deleteLegacyDraft, listLegacyDrafts } as unknown as ReturnType<
-        typeof createMailService
-      >,
+      mail: mail as unknown as ReturnType<typeof createMailService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -55,19 +75,56 @@ describe("Mail routes", () => {
       app.request(path, { headers: { "content-type": "application/json" }, ...init });
 
     expect((await request("/v1/mail/drafts")).status).toBe(200);
+    expect(
+      (
+        await request("/v1/mail/drafts", {
+          body: JSON.stringify({ accountId, body: "", cc: [], subject: "", to: [] }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await request(`/v1/mail/drafts/${id}`, {
+          body: JSON.stringify({
+            accountId,
+            body: "Prepared response",
+            cc: [],
+            expectedUpdatedAt: thread.updatedAt,
+            subject: "Follow up",
+            to: [{ address: "person@example.com", name: null }],
+          }),
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(200);
     expect((await request(`/v1/mail/drafts/${id}`, { method: "DELETE" })).status).toBe(204);
-    expect(deleteLegacyDraft).toHaveBeenCalledWith(id, id);
-
-    for (const path of ["/v1/mail/drafts", `/v1/mail/drafts/${id}/reconcile`, "/v1/mail/send"]) {
-      const response = await request(path, { body: "{}", method: "POST" });
-      expect(response.status).toBe(410);
-      await expect(response.json()).resolves.toMatchObject({
-        error: {
-          code: "feature_unavailable",
-          details: { capability: "email_transmission", permanent: true },
-        },
-      });
-    }
+    expect(
+      (
+        await request("/v1/mail/send", {
+          body: JSON.stringify({ confirmedUpdatedAt: thread.updatedAt, draftId: id }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await request(`/v1/mail/drafts/${id}/reconcile`, {
+          body: JSON.stringify({ outcome: "sent" }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(200);
+    actorType = "agent";
+    expect(
+      (
+        await request("/v1/mail/send", {
+          body: JSON.stringify({ confirmedUpdatedAt: thread.updatedAt, draftId: id }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
+    expect(mail.sendDraft).toHaveBeenCalledOnce();
   });
 
   it("routes the complete read and write surface through the Mail service", async () => {
@@ -82,10 +139,14 @@ describe("Mail routes", () => {
         updatedCount: 1,
         updatedIds: [id],
       })),
-      deleteLegacyDraft: vi.fn(async () => undefined),
+      createDraft: vi.fn(async () => ({ id })),
+      deleteDraft: vi.fn(async () => undefined),
       createRule: vi.fn(async () => ({ id })),
       getThread: vi.fn(async () => thread),
-      listLegacyDrafts: vi.fn(async () => [{ body: "Body", id, subject: "Subject" }]),
+      listDrafts: vi.fn(async () => [{ body: "Body", id, subject: "Subject" }]),
+      reconcileDraft: vi.fn(async () => ({ id })),
+      sendDraft: vi.fn(async () => undefined),
+      updateDraft: vi.fn(async () => ({ id })),
       listMailboxes: vi.fn(async () => []),
       listMessages: vi.fn(async () => []),
       listRules: vi.fn(async () => []),

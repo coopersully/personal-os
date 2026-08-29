@@ -1,16 +1,19 @@
 import {
   activateMailRuleInputSchema,
   bulkUpdateMailInputSchema,
+  createMailDraftInputSchema,
   createMailRuleInputSchema,
   mailListQuerySchema,
   mailSnoozeInputSchema,
   previewMailRuleInputSchema,
+  reconcileMailDraftInputSchema,
+  sendMailDraftInputSchema,
+  updateMailDraftInputSchema,
   updateMailRuleInputSchema,
   updateMailThreadInputSchema,
   upsertMailAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
-import { AppError } from "../errors.js";
 import type { createMailService } from "../mail-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
@@ -23,13 +26,6 @@ type MailRouteOptions = {
   mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
-function mailSendingUnavailable(): never {
-  throw new AppError("feature_unavailable", "Ilo does not send email.", {
-    capability: "email_transmission",
-    permanent: true,
-  });
-}
-
 /** Register the Mail-owned HTTP surface. */
 export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOptions) {
   app.use("/v1/mailboxes", requireScope("mail:read"));
@@ -41,6 +37,8 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
       : mailFeatureAccess(context, next),
   );
   app.use("/v1/mail/rules/:id/activate", requireHuman);
+  app.use("/v1/mail/send", requireHuman);
+  app.use("/v1/mail/drafts/:id/reconcile", requireHuman);
   app.get("/v1/mailboxes", async (context) =>
     context.json({ mailboxes: await mail.listMailboxes(context.get("principal").userId) }),
   );
@@ -48,12 +46,50 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
     context.json({ setup: await mail.listSetupContext(context.get("principal").userId) }),
   );
   app.get("/v1/mail/drafts", async (context) =>
-    context.json({ drafts: await mail.listLegacyDrafts(context.get("principal").userId) }),
+    context.json({ drafts: await mail.listDrafts(context.get("principal").userId) }),
+  );
+  app.post("/v1/mail/drafts", async (context) =>
+    context.json(
+      {
+        draft: await mail.createDraft(
+          context.get("principal").userId,
+          await parseBody(context, createMailDraftInputSchema),
+        ),
+      },
+      201,
+    ),
+  );
+  app.patch("/v1/mail/drafts/:id", async (context) =>
+    context.json({
+      draft: await mail.updateDraft(
+        context.get("principal").userId,
+        context.req.param("id"),
+        await parseBody(context, updateMailDraftInputSchema),
+      ),
+    }),
   );
   app.delete("/v1/mail/drafts/:id", async (context) => {
-    await mail.deleteLegacyDraft(context.get("principal").userId, context.req.param("id"));
+    await mail.deleteDraft(context.get("principal").userId, context.req.param("id"));
     return context.body(null, 204);
   });
+  app.post("/v1/mail/send", async (context) => {
+    await mail.sendDraft(
+      context.get("principal").userId,
+      await parseBody(context, sendMailDraftInputSchema),
+      mutationContext(context),
+    );
+    return context.body(null, 204);
+  });
+  app.post("/v1/mail/drafts/:id/reconcile", async (context) =>
+    context.json({
+      draft: await mail.reconcileDraft(
+        context.get("principal").userId,
+        context.req.param("id"),
+        (await parseBody(context, reconcileMailDraftInputSchema)).outcome,
+        mutationContext(context),
+      ),
+    }),
+  );
   app.get("/v1/mail/rules", async (context) =>
     context.json({ rules: await mail.listRules(context.get("principal").userId) }),
   );
@@ -102,9 +138,6 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
       ),
     }),
   );
-  app.post("/v1/mail/drafts", mailSendingUnavailable);
-  app.post("/v1/mail/drafts/:id/reconcile", mailSendingUnavailable);
-  app.post("/v1/mail/send", mailSendingUnavailable);
   app.post("/v1/mail/threads/bulk", async (context) =>
     context.json({
       result: await mail.bulkUpdateThreads(

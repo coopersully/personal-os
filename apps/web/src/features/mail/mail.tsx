@@ -224,12 +224,22 @@ export function MailTopbarSearch({
 }) {
   const [draft, setDraft] = useState(search);
   const pendingSearch = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCommittedSearch = useRef<string | null>(null);
   const commitSearch = (query: string) => {
     if (pendingSearch.current) clearTimeout(pendingSearch.current);
     pendingSearch.current = null;
-    onSearch(query.trim());
+    const committed = query.trim();
+    lastCommittedSearch.current = committed === search ? null : committed;
+    onSearch(committed);
   };
-  useEffect(() => setDraft(search), [search]);
+  useEffect(() => {
+    if (lastCommittedSearch.current === search) {
+      lastCommittedSearch.current = null;
+      return;
+    }
+    lastCommittedSearch.current = null;
+    setDraft(search);
+  }, [search]);
   useEffect(
     () => () => {
       if (pendingSearch.current) clearTimeout(pendingSearch.current);
@@ -291,8 +301,12 @@ export function downloadLegacyMailDraft(draft: LegacyMailDraft) {
     .slice(0, 80);
   link.href = href;
   link.download = `ilo-mail-draft-${filename || "historical-draft"}.json`;
+  document.body.append(link);
   link.click();
-  URL.revokeObjectURL(href);
+  setTimeout(() => {
+    link.remove();
+    URL.revokeObjectURL(href);
+  }, 0);
 }
 
 export function HistoricalMailDrafts({
@@ -303,6 +317,7 @@ export function HistoricalMailDrafts({
   mutationError,
   mutationPending,
   remove,
+  timeZone,
 }: {
   accounts: CalendarAccount[];
   drafts: LegacyMailDraft[];
@@ -311,6 +326,7 @@ export function HistoricalMailDrafts({
   mutationError: Error | null;
   mutationPending: boolean;
   remove: (id: string) => void;
+  timeZone: string;
 }) {
   const [pendingDelete, setPendingDelete] = useState<LegacyMailDraft | null>(null);
   if (isPending) return null;
@@ -337,7 +353,7 @@ export function HistoricalMailDrafts({
                   <strong>{draft.subject || "(No subject)"}</strong>
                   <span>{accounts.find((account) => account.id === draft.accountId)?.label}</span>
                   <span>To: {draft.to.join(", ") || "No recipients"}</span>
-                  <span>Updated {mailDate(draft.updatedAt, "UTC")}</span>
+                  <span>Updated {mailDate(draft.updatedAt, timeZone)}</span>
                   <Badge>{draft.deliveryState.replaceAll("_", " ")}</Badge>
                 </div>
                 <div className="mail-legacy-drafts__actions">
@@ -586,6 +602,7 @@ export function MailPage({ user }: { user: User }) {
       mutationError={deleteLegacyDraft.error}
       mutationPending={deleteLegacyDraft.isPending}
       remove={(id) => deleteLegacyDraft.mutate(id)}
+      timeZone={user.planningTimezone}
     />
   );
   if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;

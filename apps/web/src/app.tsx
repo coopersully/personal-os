@@ -1017,10 +1017,12 @@ function MailNavigationResizeHandle({
         const finish = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", finish);
+          window.removeEventListener("pointercancel", finish);
           onResize(finalWidth, true);
         };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", finish, { once: true });
+        window.addEventListener("pointercancel", finish, { once: true });
       }}
       tabIndex={0}
     />

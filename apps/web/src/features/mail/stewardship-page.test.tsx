@@ -252,6 +252,18 @@ describe("Mail workspace stewardship", () => {
     expect(mocks.getMailReview).toHaveBeenCalled();
   });
 
+  it("renders the no-review state when the review query is disabled", async () => {
+    mocks.getMailStatus.mockResolvedValue({
+      ...status,
+      details: { ...status.details, latestReview: null },
+    } satisfies MailStatus);
+
+    renderPage("/mail/review");
+
+    expect(await screen.findByText("No review has been published yet.")).toBeVisible();
+    expect(mocks.getMailReview).not.toHaveBeenCalled();
+  });
+
   it("keeps status and maintenance failures visible", async () => {
     mocks.getMailStatus.mockRejectedValueOnce(new Error("Status unavailable"));
     const first = renderPage("/mail/review");

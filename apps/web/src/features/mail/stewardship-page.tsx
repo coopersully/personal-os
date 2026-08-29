@@ -261,7 +261,7 @@ export function MailStewardshipPage() {
       </section>
 
       <HealthPanel status={value} />
-      <ReviewPanel review={review.data ?? null} pending={review.isPending} />
+      <ReviewPanel review={review.data ?? null} pending={review.isLoading} />
       <AuthorityPanel status={value} />
     </div>
   );

@@ -23,6 +23,9 @@ with the existing email-oriented Mail domain.
   fingerprint. There is no user-entered routing code.
 - Every agent authorized for an account shares the same immutable conversation
   history and ilo sender identity.
+- Before every outbound message, the sending agent must read a fresh,
+  unfiltered view of the latest conversation. A send cannot race past a newer
+  inbound or outbound message.
 - Agents may send only to the account's active verified number. There is no
   recipient argument or arbitrary-number API.
 - Version 1 supports plain SMS text only. It excludes MMS, attachments, group
@@ -92,19 +95,27 @@ Twilio and carriers continue to handle their required keyword response.
 
 ### Outbound data flow
 
-1. An authenticated agent calls the public API through MCP with
-   `texting:write`.
-2. The service resolves the account's active connection and checks effective
-   consent, provider readiness, per-account rate limits, the global circuit
-   breaker, and the request idempotency key.
-3. The API applies any required ilo identity and opt-out envelope, validates the
-   final provider body, estimates and reserves its SMS segments, and inserts an
-   audited pending message transactionally.
-4. The Twilio connector creates the Message through the configured Messaging
+1. An authenticated agent calls `read_text_conversation` and receives the
+   latest conversation context, explicit current time, and a short-lived opaque
+   conversation receipt bound to that access token and exact conversation
+   revision.
+2. The agent considers the participants, chronology, current local date/time,
+   and relevant earlier history before composing a reply.
+3. The agent calls the public API through MCP with `texting:write`, the message
+   body, and that conversation receipt.
+4. The service resolves the account's active connection and atomically checks
+   the receipt, current conversation revision, consent, provider readiness,
+   per-account rate limits, the global circuit breaker, and the request
+   idempotency key.
+5. The API applies any required ilo identity and opt-out envelope, validates the
+   final provider body, estimates and reserves its SMS segments, increments the
+   conversation revision, and inserts an audited pending message
+   transactionally.
+6. The Twilio connector creates the Message through the configured Messaging
    Service. There is no caller-controlled `From` or `To`.
-5. The returned Twilio `MessageSid` and initial status are attached to the
+7. The returned Twilio `MessageSid` and initial status are attached to the
    durable message.
-6. Signed Twilio status callbacks advance the message through the supported
+8. Signed Twilio status callbacks advance the message through the supported
    delivery state machine.
 
 The public API, rather than MCP, remains the authorization and policy boundary.
@@ -194,11 +205,16 @@ independent responsibilities:
 `texting_connections` has one current row per user. It holds the encrypted
 active number, keyed fingerprint, masked display data, country, verification
 timestamps, monotonically increasing consent epoch, provider synchronization
-state, administrative suspension, and lifecycle timestamps. Its effective state
-is one of `active`, `opted_out`, `sync_error`, `suspended`, or `disconnected`.
-A partial unique constraint permits only one non-disconnected connection per
-fingerprint. Disconnecting ends the routing association without deleting
-conversation history.
+state, monotonically increasing conversation revision, administrative
+suspension, and lifecycle timestamps. Its effective state is one of `active`,
+`opted_out`, `sync_error`, `suspended`, or `disconnected`. A partial unique
+constraint permits only one non-disconnected connection per fingerprint.
+Disconnecting ends the routing association without deleting conversation
+history. Every newly stored inbound or outbound conversation message advances
+the revision atomically; conversation deletion also advances it. Number changes,
+disconnects, and START create or end an epoch and therefore invalidate every
+older receipt. Compliance-only provider events do not advance the conversation
+revision, although a STOP transition independently blocks sending.
 
 ### Verification challenges
 
@@ -221,8 +237,10 @@ Each `text_messages` row stores:
 - provider `MessageSid` when known, uniquely indexed;
 - accepted, queued, sending, sent, delivered, undelivered, failed, or unknown
   status;
-- Twilio-safe error code, predicted and actual segment counts, and provider
-  timestamps;
+- canonical `occurredAt`, its provider-or-ilo timestamp source, and outbound
+  `sentAt` and `deliveredAt` lifecycle timestamps when known;
+- Twilio-safe error code, predicted and actual segment counts, and other
+  provider timestamps;
 - outbound actor type and access-token ID;
 - API idempotency subject/key and request correlation ID;
 - created and updated timestamps.
@@ -259,33 +277,74 @@ The domain adds `texting:read` and `texting:write` to `AccessScope`, the Texting
 feature manifest, OAuth scope handling, token presets, authorization docs, and
 feature access policy. Texting write is an `approved_rule`: the explicit token
 grant plus the user's active SMS consent authorizes only the bounded active
-number.
+number. A token cannot receive `texting:write` without `texting:read`, because a
+fresh read receipt is mandatory for every send.
 
 Human-only HTTP behavior covers connection state, start/check verification,
 change number, disconnect, and conversation deletion. Scoped behavior covers
-message listing and sending. Provider ingress is isolated under dedicated
+conversation reading and sending. Provider ingress is isolated under dedicated
 Twilio webhook endpoints and never accepts ilo session or agent credentials as
 a substitute for a valid Twilio signature.
 
-### `list_text_messages`
+### `read_text_conversation`
 
 This MCP tool requires `texting:read`, is annotated read-only, and accepts:
 
 - `afterCursor` or `beforeCursor`, but not both;
-- `limit` from 1 through 100;
-- optional `direction`.
+- `limit` from 1 through 100, defaulting to the newest 100 messages.
 
-It returns a stable ordered page, opaque next cursor, and masked connection
-context. Reading does not consume, claim, acknowledge, or hide a message. A
-cursor orders by a stable `(created_at, id)` tuple rather than an editable
-provider status.
+It returns a stable ordered page, opaque earlier/newer cursors, masked connection
+context, and temporal context with:
+
+- `asOf`: the API's current ISO 8601 instant;
+- `timeZone`: the effective IANA time zone from the authenticated MCP request,
+  falling back to the account planning time zone;
+- `currentLocalDateTime`: the full localized weekday, date, time, UTC offset,
+  and time-zone abbreviation;
+- every message's canonical ISO 8601 `occurredAt` and full localized
+  `localDateTime` in that same zone;
+- outbound `sentAt` and `deliveredAt` lifecycle timestamps when known;
+- `hasEarlierMessages` so an agent knows when relevant history is paginated;
+- a short-lived `conversationReceipt` only when neither cursor is supplied and
+  the response therefore contains the newest page.
+
+Inbound `occurredAt` uses Twilio's authenticated provider time when available
+and otherwise ilo's durable receipt time. Outbound `occurredAt` is the durable
+API submission time. The structured result labels this source rather than
+presenting inferred precision. Full dates, offsets, and zones prevent midnight,
+daylight-saving, and relative-time ambiguity.
+
+The conversation receipt is signed by the API, expires after five minutes, and
+is bound to the user, access-token ID, connection/consent epoch, effective time
+zone, and exact conversation revision returned in the read. It does not mark
+messages read, consume them, claim them, or hide them from another agent.
+Cursor-based older or incremental reads do not qualify a send because they do
+not show the complete latest context window.
+
+A cursor orders by a stable `(occurred_at, id)` tuple rather than an editable
+provider status. The tool description requires the agent to inspect relevant
+earlier pages when `hasEarlierMessages` is true and the recent page does not
+provide enough context. The API can enforce that the latest state was delivered
+to the agent; it cannot truthfully prove subjective comprehension, so the MCP
+contract states that limitation rather than claiming otherwise.
 
 ### `send_text_message`
 
-This MCP tool requires `texting:write` and accepts only a non-empty `body`.
-There is no recipient, sender, schedule, media, or provider argument. It is an
-external-world mutation and is not marked read-only or idempotent at the MCP
-semantic level.
+This MCP tool requires `texting:write` and accepts a non-empty `body` plus the
+opaque `conversationReceipt` returned by the immediately preceding qualifying
+read. There is no recipient, sender, schedule, media, or provider argument. It
+is an external-world mutation and is not marked read-only or idempotent at the
+MCP semantic level.
+
+The API rejects an absent, expired, wrong-token, wrong-time-zone, or stale
+receipt with `conversation_read_required`. If any inbound or outbound message
+was stored after the read, the API returns `conversation_changed` and the agent
+must read again before sending. The receipt check and pending-message insert use
+one locked transaction, so concurrent sends cannot both use the same revision.
+The successful send itself advances the revision, making one qualifying read
+authorize at most one new message. Idempotent transport replay of that same
+logical send returns its existing message before receipt freshness is
+re-evaluated.
 
 The API accepts at most 1,600 characters from the agent, then constructs the
 provider body. The final provider body, including required compliance copy,
@@ -301,7 +360,9 @@ conversation.
 
 The result is the durable ilo message, its current delivery state, predicted
 segment count, actual count when already known, and a masked provider-safe
-failure. Accepted or queued is not represented as delivered.
+failure. It repeats the message's canonical and localized timestamps so the
+agent does not lose temporal context. Accepted or queued is not represented as
+delivered.
 
 ## Limits and cost controls
 
@@ -413,8 +474,9 @@ configuration includes a Twilio Account SID, restricted API key and secret for
 outbound/Verify operations, the Twilio Auth Token required for request signature
 validation, Verify Service SID, Messaging Service SID, verified toll-free
 number, Event Streams sink credentials, a dedicated phone-fingerprint HMAC key,
-and the exact public webhook URLs. Secrets remain outside the repository and are
-never exposed to clients.
+a dedicated short-lived conversation-receipt signing key, and the exact public
+webhook URLs. Secrets remain outside the repository and are never exposed to
+clients.
 
 Before enabling the feature, operations must:
 
@@ -444,12 +506,15 @@ Automated coverage includes:
   cascading account deletion, preserved history on disconnect/change,
   destructive history deletion, deduplication, and quota reservations.
 - API integration tests for human-only setup, scope isolation, arbitrary-number
-  rejection, idempotency conflicts/replay, rate limits, circuit breaking,
+  rejection, mandatory read scope, signed conversation receipts, receipt expiry,
+  wrong-token and stale-revision rejection, inbound/read/send races, concurrent
+  one-receipt sends, idempotency conflicts/replay, rate limits, circuit breaking,
   callback ordering, `21610`, invalid signatures, unknown send outcomes, and
   fail-closed provider state.
 - MCP contract tests proving the server calls only the typed API, offers no
-  recipient argument, annotates reads/mutations accurately, and preserves
-  structured authorization/provider errors.
+  recipient argument, cannot send without a qualifying read, includes explicit
+  current/message timestamps, annotates reads/mutations accurately, and
+  preserves structured authorization/provider errors.
 - Testing Library coverage for every Settings state, OTP flow, opt-out
   guidance, destructive confirmation, keyboard operation, and status messages.
 - End-to-end tests with a deterministic fake Twilio adapter for setup, polling,

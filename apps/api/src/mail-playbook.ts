@@ -34,7 +34,7 @@ export const MAIL_PLAYBOOK = Object.freeze({
       id: "cisa-phishing",
       reviewEveryDays: 180,
       reviewedAt: "2026-08-15",
-      url: "https://www.cisa.gov/sites/default/files/2023-09/CISA_Web-Page-Animation_Phishing_Audio-Description.pdf",
+      url: "https://www.cisa.gov/secure-our-world/recognize-and-report-phishing",
     },
     {
       id: "gmail-labels",

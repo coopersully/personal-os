@@ -1320,7 +1320,8 @@ export function createMailStewardshipService({ db, now }: Options) {
             eq(mailStewardshipQuestions.status, "open"),
           ),
         )
-        .orderBy(asc(mailStewardshipQuestions.createdAt));
+        .orderBy(asc(mailStewardshipQuestions.createdAt))
+        .limit(100);
       const unresolvedObligations =
         assessment.obligationCounts.open +
         assessment.obligationCounts.waiting +

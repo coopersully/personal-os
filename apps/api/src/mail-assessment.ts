@@ -109,6 +109,10 @@ function zeroRecord<Key extends string>(keys: Key[]): Record<Key, number> {
   return Object.fromEntries(keys.map((key) => [key, 0])) as Record<Key, number>;
 }
 
+function boundedEvidenceIds(ids: string[]) {
+  return ids.slice(0, 100);
+}
+
 function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -181,7 +185,12 @@ export function assessMail(
     }
     for (const obligation of thread.obligations) {
       obligationCounts[obligation.state] += 1;
-      if (obligation.kind !== "reply" || obligation.state === "resolved") continue;
+      if (
+        obligation.kind !== "reply" ||
+        obligation.state === "resolved" ||
+        obligation.state === "dismissed"
+      )
+        continue;
       const newerOutbound = thread.messages.some(
         (message) =>
           message.authority === "provider_projected" &&
@@ -275,7 +284,7 @@ export function assessMail(
   const health: MailHealthDimension[] = [
     {
       dimension: "source_trust",
-      evidenceIds: snapshot.threads.map((thread) => thread.id),
+      evidenceIds: boundedEvidenceIds(snapshot.threads.map((thread) => thread.id)),
       signal: sourceSignal,
       summary:
         snapshot.sourceFreshness === "current"
@@ -284,20 +293,20 @@ export function assessMail(
     },
     {
       dimension: "obligation_integrity",
-      evidenceIds: snapshot.threads.flatMap((thread) =>
-        thread.obligations.map((obligation) => obligation.id),
+      evidenceIds: boundedEvidenceIds(
+        snapshot.threads.flatMap((thread) => thread.obligations.map((obligation) => obligation.id)),
       ),
       signal: "healthy",
       summary: "Only explicit, previously recorded obligations were evaluated.",
     },
     {
       dimension: "ambiguity",
-      evidenceIds: [
+      evidenceIds: boundedEvidenceIds([
         ...snapshot.threads.flatMap((thread) =>
           thread.openQuestions.map((question) => question.id),
         ),
         ...questions.map((question) => question.threadId),
-      ],
+      ]),
       signal: openQuestionCount > 0 ? "attention" : "healthy",
       summary:
         openQuestionCount > 0
@@ -317,7 +326,7 @@ export function assessMail(
     },
     {
       dimension: "rule_quality",
-      evidenceIds: ruleWorkIntentions.map((intention) => intention.ruleId),
+      evidenceIds: boundedEvidenceIds(ruleWorkIntentions.map((intention) => intention.ruleId)),
       signal: "healthy",
       summary: "Only exact enabled rule matches were emitted as work intentions.",
     },

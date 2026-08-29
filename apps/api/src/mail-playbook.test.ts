@@ -31,6 +31,9 @@ describe("Mail stewardship playbook", () => {
   });
 
   it("makes research review timing explicit and conservative", () => {
+    expect(MAIL_PLAYBOOK.research.find(({ id }) => id === "cisa-phishing")?.url).toBe(
+      "https://www.cisa.gov/secure-our-world/recognize-and-report-phishing",
+    );
     expect(mailPlaybookNeedsResearchReview(new Date("2026-08-25T00:00:00.000Z"))).toEqual([]);
     expect(mailPlaybookNeedsResearchReview(new Date("2027-02-12T00:00:00.000Z"))).toEqual(
       expect.arrayContaining(["nist-sp-800-177-r1", "cisa-phishing", "gmail-labels"]),

@@ -248,6 +248,59 @@ describe("Mail maintenance orchestration edges", () => {
     expect(workspace.completeStep).toHaveBeenCalledTimes(1);
   });
 
+  it("settles a resumed run from its persisted completed verification", async () => {
+    const source = snapshot();
+    const assessment = assessMail(source, MAIL_PLAYBOOK);
+    const review = {
+      createdAt: now.toISOString(),
+      effectCounts: source.effectCounts,
+      evidenceCutoff: source.now,
+      health: assessment.health,
+      id: "30000000-0000-4000-8000-000000000001",
+      ledgerFingerprint: assessment.ledgerFingerprint,
+      nextMaintenanceAt: now.toISOString(),
+      obligationCounts: assessment.obligationCounts,
+      openQuestionCount: assessment.openQuestionCount,
+      playbookVersion: MAIL_PLAYBOOK.version,
+      profileVersion: source.profileVersion,
+      rulebookVersion: source.rulebookVersion,
+      sourceFreshness: source.sourceFreshness,
+      state: assessment.proposedSettlement,
+    } satisfies MailReview;
+    const completed = (step: string, result: unknown) => ({
+      idempotencyKey: `mail:${step}:v1`,
+      result,
+      status: "completed" as const,
+      step,
+    });
+    const verification = {
+      blockers: [],
+      checkedAt: now.toISOString(),
+      status: "passed" as const,
+    };
+    const { service, workspace } = harness([source], {
+      records: [
+        completed("refresh_sources", { enqueued: 0, readiness: "current" }),
+        completed("snapshot", { snapshot: source }),
+        completed("assess", { assessment }),
+        completed("reconcile_ledger", { dispositions: 0, obligations: 0, questions: 0 }),
+        completed("dispatch_approved_rules", { dispatched: 0 }),
+        completed("publish_review", { assessment, review, snapshot: source }),
+        completed("verify", {
+          ledgerFingerprint: assessment.ledgerFingerprint,
+          reviewId: review.id,
+          verification,
+        }),
+      ],
+    });
+
+    await expect(
+      service.maintain(userId, { scope: { type: "all_outstanding" } }),
+    ).resolves.toMatchObject({ run: { status: "completed" }, verification });
+    expect(workspace.completeStep).not.toHaveBeenCalled();
+    expect(workspace.failStep).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       new AppError("invalid_request", "Unsafe request."),

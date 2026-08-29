@@ -49,6 +49,11 @@ type ReviewStepResult = {
   review: MailReview;
   snapshot: MailAssessmentSnapshot;
 };
+type VerificationStepResult = {
+  ledgerFingerprint: string;
+  reviewId: string;
+  verification: MaintenanceVerification;
+};
 
 const maintenanceRulebookVersion = `mail-maintenance-v1:${MAIL_PLAYBOOK.version}`;
 
@@ -115,6 +120,37 @@ export function createMailMaintenanceService({
     async function complete(step: string, idempotencyKey: string, result: unknown) {
       await workspace.completeStep({ claimId, idempotencyKey, result, runId, step });
       records.set(step, { idempotencyKey, result, status: "completed", step });
+    }
+
+    async function settleVerifiedRun(
+      verificationResult: VerificationStepResult,
+    ): Promise<MailMaintenanceDispatchResult> {
+      const settlement =
+        verificationResult.verification.status === "blocked"
+          ? "blocked"
+          : verificationResult.verification.status === "questions"
+            ? "completed_with_questions"
+            : "completed";
+      const reviewResult = completedResult<ReviewStepResult>(records, "publish_review");
+      if (!reviewResult) throw new AppError("internal_error", "Mail review evidence is missing.");
+      const questionCount = reviewResult.assessment.openQuestionCount;
+      const summary =
+        settlement === "completed"
+          ? "Mail maintenance completed with current evidence and no outstanding questions or effects."
+          : settlement === "completed_with_questions"
+            ? `Mail maintenance completed with ${questionCount} question${questionCount === 1 ? "" : "s"} for the user.`
+            : "Mail maintenance is blocked by source or provider-effect evidence.";
+      const run = await workspace.settle({
+        claimId,
+        result: {
+          reviewId: verificationResult.reviewId,
+          summary,
+          verification: verificationResult.verification,
+        },
+        runId,
+        status: settlement,
+      });
+      return { run, summary, verification: verificationResult.verification };
     }
 
     try {
@@ -234,32 +270,16 @@ export function createMailMaintenanceService({
           const run = await workspace.getOwnedRun(userId, runId);
           return resultForRun(run, "Mail maintenance is waiting for provider effects to settle.");
         }
-        await complete(step, idempotencyKey, {
+        const verificationResult: VerificationStepResult = {
           ledgerFingerprint: verificationAssessment.ledgerFingerprint,
           reviewId: review.id,
           verification,
-        });
-        const settlement =
-          verification.status === "blocked"
-            ? "blocked"
-            : verification.status === "questions"
-              ? "completed_with_questions"
-              : "completed";
-        const questionCount = verificationAssessment.openQuestionCount;
-        const summary =
-          settlement === "completed"
-            ? "Mail maintenance completed with current evidence and no outstanding questions or effects."
-            : settlement === "completed_with_questions"
-              ? `Mail maintenance completed with ${questionCount} question${questionCount === 1 ? "" : "s"} for the user.`
-              : "Mail maintenance is blocked by source or provider-effect evidence.";
-        const run = await workspace.settle({
-          claimId,
-          result: { reviewId: review.id, summary, verification },
-          runId,
-          status: settlement,
-        });
-        return { run, summary, verification };
+        };
+        await complete(step, idempotencyKey, verificationResult);
+        return settleVerifiedRun(verificationResult);
       }
+      const verificationResult = completedResult<VerificationStepResult>(records, "verify");
+      if (verificationResult) return settleVerifiedRun(verificationResult);
       throw new AppError("internal_error", "Mail maintenance ended without verification.");
     } catch (error) {
       const failure = safeError(error);
@@ -274,6 +294,16 @@ export function createMailMaintenanceService({
       const run = await workspace.getOwnedRun(userId, runId);
       return resultForRun(run, failure.safeMessage);
     }
+  }
+
+  async function executeDue(limit: number): Promise<MailMaintenanceDispatchResult[]> {
+    const runIds = await workspace.listDueRunIds("mail", limit);
+    const results: MailMaintenanceDispatchResult[] = [];
+    for (const runId of runIds) {
+      const result = await execute(runId);
+      if (result) results.push(result);
+    }
+    return results;
   }
 
   return {
@@ -299,23 +329,11 @@ export function createMailMaintenanceService({
     },
 
     async runDue(limit: number): Promise<MailMaintenanceDispatchResult[]> {
-      const runIds = await workspace.listDueRunIds("mail", limit);
-      const results: MailMaintenanceDispatchResult[] = [];
-      for (const runId of runIds) {
-        const result = await execute(runId);
-        if (result) results.push(result);
-      }
-      return results;
+      return executeDue(limit);
     },
 
     async dispatchDue(limit: number): Promise<MailMaintenanceDispatchResult[]> {
-      const runIds = await workspace.listDueRunIds("mail", limit);
-      const results: MailMaintenanceDispatchResult[] = [];
-      for (const runId of runIds) {
-        const result = await execute(runId);
-        if (result) results.push(result);
-      }
-      return results;
+      return executeDue(limit);
     },
   };
 }

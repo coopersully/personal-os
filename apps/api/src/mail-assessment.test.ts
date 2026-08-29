@@ -102,6 +102,38 @@ describe("Mail stewardship assessment", () => {
     );
   });
 
+  it("preserves a dismissed reply obligation when newer outbound evidence exists", () => {
+    const result = assessMail(
+      snapshot([
+        thread({
+          messages: [
+            {
+              authority: "provider_projected",
+              direction: "outbound",
+              id: "30000000-0000-4000-8000-000000000001",
+              observedAt: "2026-08-25T14:30:00.000Z",
+              revision: "message-v2",
+            },
+          ],
+          obligations: [
+            {
+              id: "40000000-0000-4000-8000-000000000001",
+              kind: "reply",
+              sourceThreadRevision: "2026-08-25T14:00:00.000Z",
+              state: "dismissed",
+              version: 1,
+            },
+          ],
+        }),
+      ]),
+      MAIL_PLAYBOOK,
+    );
+
+    expect(result.obligationTransitions).toEqual([]);
+    expect(result.obligationCounts.dismissed).toBe(1);
+    expect(result.obligationCounts.resolved).toBe(0);
+  });
+
   it("derives deferral from an active Ilo snooze without guessing a deadline", () => {
     const result = assessMail(
       snapshot([
@@ -207,5 +239,44 @@ describe("Mail stewardship assessment", () => {
     expect(pending.health).toContainEqual(
       expect.objectContaining({ dimension: "provider_effects", signal: "attention" }),
     );
+  });
+
+  it("bounds every health evidence projection without changing aggregate counts", () => {
+    const crowded = Array.from({ length: 101 }, (_, index) => {
+      const suffix = index.toString(16).padStart(12, "0");
+      const threadId = `20000000-0000-4000-8000-${suffix}`;
+      return thread({
+        approvedRuleMatches: [{ ruleId: `50000000-0000-4000-8000-${suffix}`, ruleVersion: 1 }],
+        id: threadId,
+        obligations: [
+          {
+            id: `40000000-0000-4000-8000-${suffix}`,
+            kind: "follow_up",
+            sourceThreadRevision: "2026-08-25T14:00:00.000Z",
+            state: "open",
+            version: 1,
+          },
+        ],
+        openQuestions: [
+          {
+            fingerprint: index.toString(16).padStart(64, "0"),
+            id: `30000000-0000-4000-8000-${suffix}`,
+            version: 1,
+          },
+        ],
+        source: {
+          accountId: "10000000-0000-4000-8000-000000000001",
+          provider: "google",
+          remoteId: `remote-${index}`,
+          revision: "thread-v1",
+          sourceType: "mail_thread",
+        },
+      });
+    });
+
+    const result = assessMail(snapshot(crowded), MAIL_PLAYBOOK);
+
+    expect(result.openQuestionCount).toBe(101);
+    expect(result.health.every(({ evidenceIds }) => evidenceIds.length <= 100)).toBe(true);
   });
 });

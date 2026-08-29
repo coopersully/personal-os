@@ -1108,4 +1108,36 @@ describe.sequential("Mail stewardship service", () => {
       state: "clean",
     });
   });
+
+  it("caps projected open questions without hiding the total count", async () => {
+    await database.db.insert(mailStewardshipQuestions).values(
+      Array.from({ length: 101 }, (_, index) => ({
+        accountId,
+        evidence: [
+          {
+            accountId,
+            provider: "google" as const,
+            remoteId: "stewardship-thread",
+            revision: threadUpdatedAt,
+            sourceType: "mail_thread" as const,
+          },
+        ],
+        fingerprint: index.toString(16).padStart(64, "0"),
+        kind: "needs_disposition" as const,
+        reason: `Choose disposition ${index + 1}.`,
+        threadId,
+        userId: principal.userId,
+      })),
+    );
+
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      details: {
+        openQuestionCount: 101,
+        openQuestions: expect.arrayContaining([expect.objectContaining({ version: 1 })]),
+      },
+      state: "needs_input",
+    });
+    const result = await service.getStatus(principal.userId);
+    expect(result.details.openQuestions).toHaveLength(100);
+  });
 });

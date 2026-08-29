@@ -1,6 +1,6 @@
 # Agent texting design
 
-- Status: Approved in chat; awaiting written-spec review
+- Status: Approved
 - Date: 2026-08-28
 
 ## Purpose

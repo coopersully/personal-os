@@ -15,7 +15,9 @@ system for the web app, desktop app, product copy, documentation, and future UI
 work. The system keeps shadcn/ui's neutral, component-led grammar and removes
 decorative borders, shadows, gradients, blur, and glass. The experience gains
 identity through proportion, whitespace, typography, tonal grouping, concise
-language, and a small set of flat pastel colors with explicit semantic jobs.
+language, and a balanced material palette whose colors appear only when the
+person's data or a semantic state gives them a job. nohmi itself owns no accent
+color.
 
 The intended feeling is effortless, soft, inviting, and deeply calm. Workspaces
 should feel comfortable enough to inhabit for long periods while retaining the
@@ -29,8 +31,9 @@ precision required for calendars, money, mail, and agent-visible state.
    infrastructure, and compatibility-sensitive identifiers.
 4. The visual direction is a flattened shadcn neutral theme: no decorative
    borders, shadows, gradients, backdrop blur, or glass.
-5. Flat pastel color communicates a domain, relationship, selection, or state.
-   It never decorates an arbitrary container.
+5. Product chrome and hierarchy are grayscale. Color belongs to material,
+   relationships, people, categories, and semantic states; no hue is the brand
+   default or carries more visual authority than another.
 6. Geist is the product typeface. Lucide remains the interface icon library.
 7. shadcn/ui primitives and their documented composition are the component
    grammar. Product code composes them instead of creating parallel primitives.
@@ -74,8 +77,9 @@ than anthropomorphic copy.
    grammar, not identical layouts.
 4. **Make care visible through restraint.** Alignment, copy, states, and
    responsive behavior receive more attention than decoration.
-5. **Color always has a job.** Pastels show domain, relationship, selection, or
-   semantic state. Neutral surfaces carry ordinary work.
+5. **Neutral in posture, open to color.** Grayscale establishes hierarchy.
+   Color comes from material, relationship, source, personal choice, or
+   semantic state, and every available hue enters at comparable visual weight.
 6. **Make the system feel inevitable.** Common actions use familiar shadcn
    composition and platform conventions so the interface does not require
    explanation.
@@ -178,10 +182,8 @@ with **nohmi** as the approved working brand.
 - The compact app mark is a lowercase `n` on a flat ink tile with the shared
   control radius. It is used only where the full wordmark cannot fit: app icon,
   favicon, compact sidebar, and small loading surfaces.
-- A single periwinkle signal point accompanies the wordmark on authentication,
-  onboarding, and other brand-led surfaces. The product shell uses the plain
-  wordmark. The point represents present attention; it is never repeated as
-  confetti or used as a bullet throughout the product.
+- The wordmark and compact mark are always neutral ink and canvas. nohmi has no
+  permanent colored signal point, signature pastel, or branded hue.
 - The mark has no gradient, shadow, outline, glass, or pseudo-3D treatment.
 - Clear space is at least the height of the `n` around the wordmark and one
   quarter of the tile width around the compact mark.
@@ -224,23 +226,28 @@ Light mode is a warm near-white canvas with soft neutral groups and ink primary
 content. Dark mode uses the same role ladder with flat charcoal tones. Neither
 mode uses a simulated elevation gradient.
 
-#### Domain signals
+#### Material color
 
-| Family | Meaning | Typical use |
-| --- | --- | --- |
-| Periwinkle | Present attention and current calendar context | Active icon, calendar relationship, current moment tag |
-| Mint | Routine, completed-positive, or restorative context | Routine marker, positive progress relationship |
-| Peach | Commitment or task attention | Task marker, due-soon relationship without warning semantics |
-| Sky | Information, mail, or connected context | Mail/source marker, informational relationship |
+nohmi provides a balanced spectrum rather than a brand palette. Rose, coral,
+amber, green, teal, blue, indigo, and violet are available at comparable
+lightness, saturation, area, and contrast. None is the default, none represents
+nohmi, and none establishes interface hierarchy.
 
-These colors are saturated pastels with paired foreground roles for light and
-dark themes. A domain signal may fill a small badge, marker, icon background, or
-bounded preview. It does not become the page background, primary text color, or
-the fill of several adjacent controls.
+Material may supply a color when it identifies a calendar, label, person,
+provider relationship, user category, or other meaningful source attribute. A
+material color may fill a small marker, badge, icon background, or bounded data
+preview. It does not become product chrome, active navigation, a global focus
+ring, the default primary action, a page background, or the fill of several
+adjacent controls.
 
-Status danger, warning, success, and info remain separate semantic families.
-Domain colors never replace status semantics. Color is never the only carrier
-of meaning.
+The system never hard-codes a hue to a product domain merely to make that domain
+look distinctive. Preserve a provider or user-selected color when one exists;
+otherwise use a neutral treatment. When the product must offer choices, present
+the whole balanced spectrum without a pre-emphasized swatch.
+
+Status danger, warning, success, and info remain separate conventional semantic
+families. Material colors never replace status semantics. Color is never the
+only carrier of meaning.
 
 ### Shape
 
@@ -291,7 +298,7 @@ working sequence, detail, and history. Apply these refinements:
 ### Shell
 
 - The sidebar is a flat `surface-subtle` plane without a dividing border.
-- Active navigation uses `surface-strong`; its icon may carry one domain signal.
+- Active navigation uses `surface-strong` and a neutral icon treatment.
 - The top navigation shares the canvas and is separated by spacing, not a line
   or glass material.
 - The main workspace uses the widest practical area while keeping the immediate
@@ -323,7 +330,7 @@ recognizable and updatable.
   registry before introducing a new primitive.
 - Use semantic theme utilities such as `bg-background`, `bg-muted`,
   `text-foreground`, and `text-muted-foreground`; feature code never uses raw
-  brand colors.
+  material colors.
 - `className` in product code handles layout and responsive placement, not
   primitive color or typography overrides.
 - Preserve `data-slot` attributes and upstream component anatomy.
@@ -348,7 +355,7 @@ recognizable and updatable.
 ### Component-specific standards
 
 - **Button:** neutral ink primary, filled neutral secondary, transparent ghost,
-  semantic destructive. Do not use a pastel as the global primary action.
+  semantic destructive. Do not use a material hue as the global primary action.
 - **Card:** use only for bounded material or state. Never add a border or shadow
   to make a generic section visible.
 - **Item:** related items live in `ItemGroup`; row actions remain at the inline
@@ -403,15 +410,15 @@ recognizable and updatable.
 
 ### Token layers
 
-1. **Foundation:** neutral and pastel values defined only in the light and dark
-   theme blocks.
-2. **Semantic:** canvas, surface, content, action, domain, and status roles.
+1. **Foundation:** neutral and balanced-spectrum values defined only in the
+   light and dark theme blocks.
+2. **Semantic:** canvas, surface, content, action, material, and status roles.
 3. **Component:** shadcn tokens such as `background`, `card`, `popover`,
    `primary`, `secondary`, `muted`, `accent`, `border`, `input`, `ring`, and
    sidebar roles mapped to the semantic layer.
 
 Components consume layer three. Feature composition may consume documented
-semantic domain and status utilities. Feature code never consumes foundation
+semantic material and status utilities. Feature code never consumes foundation
 values directly.
 
 ### Enforcement
@@ -450,8 +457,8 @@ states.
 ### Automated
 
 - Unit-test the brand constants and public-name contract.
-- Extend the theme-token contract to validate light/dark contrast and domain
-  foreground/surface pairs.
+- Extend the theme-token contract to validate light/dark contrast, equivalent
+  neutral hierarchy, and material foreground/surface pairs.
 - Add a style-contract check for forbidden shadows, gradients, blur, glass, raw
   feature colors, and unapproved public **ilo** copy.
 - Add focused Testing Library coverage for the branded shell, authentication,
@@ -468,7 +475,8 @@ states.
   Finance data.
 - Confirm that removing borders and shadows does not erase control boundaries or
   reading order.
-- Confirm that each pastel instance communicates a documented role.
+- Confirm that every colored instance comes from material or a documented
+  semantic state and that no hue has become product chrome.
 - Confirm that the app still feels precise under dense professional work.
 
 ### Acceptance criteria
@@ -482,7 +490,8 @@ The brand implementation is ready when:
 3. Today, Settings, authentication, and the shell demonstrate the approved flat
    direction in light and dark mode.
 4. Core component families use documented shadcn composition and semantic tokens.
-5. Domain pastels have consistent meanings and passing foreground contrast.
+5. Material colors have equivalent visual weight, come from meaningful data or
+   choice, and pass foreground contrast where they carry text.
 6. Loading, empty, error, offline, stale, and success states remain clear.
 7. Keyboard, focus, 200% text scaling, 320 px layout, and reduced motion pass.
 8. Deterministic checks prevent raw colors, forbidden effects, parallel
@@ -526,6 +535,7 @@ The system adapts principles rather than copying another product's appearance:
   identifiers.
 - A marketing website, launch campaign, social templates, or merch system.
 - Claims of legal clearance or trademark availability.
-- A second component library, theme builder, runtime user accent picker, or
-  feature-specific visual language.
+- A second component library, theme builder, global user accent picker, or
+  feature-specific visual language. User- and provider-owned material colors
+  remain allowed because they do not recolor product chrome.
 - Glass, depth effects, ornamental illustration, or animated brand mascots.

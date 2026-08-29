@@ -710,6 +710,7 @@ export function createMailService({
           lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
           mailboxes: mailboxesByAccount.get(account.id) ?? [],
           provider: account.provider as "google" | "icloud",
+          sendCapability: "unavailable",
           nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
           syncError: account.syncError,
           syncStatus: account.syncStatus,

@@ -3,8 +3,10 @@ import type {
   AttentionItem,
   BulkUpdateMailInput,
   BulkUpdateMailResult,
+  CreateMailDraftInput,
   CreateMailRuleInput,
   LegacyMailDraft,
+  MailDraft,
   Mailbox,
   MailListQuery,
   MailMessage,
@@ -13,6 +15,9 @@ import type {
   MailSetupContext,
   MailThread,
   PreviewMailRuleInput,
+  ReconcileMailDraftInput,
+  SendMailDraftInput,
+  UpdateMailDraftInput,
   UpdateMailRuleInput,
   UpdateMailThreadInput,
   UpsertMailAttentionItemInput,
@@ -24,11 +29,14 @@ export type MailApiClient = {
     input: ActivateMailRuleInput,
   ): Promise<{ preview: MailRulePreview; rule: MailRule }>;
   bulkUpdateMail(input: BulkUpdateMailInput): Promise<BulkUpdateMailResult>;
+  createMailDraft(input: CreateMailDraftInput): Promise<MailDraft>;
   createMailRule(input: CreateMailRuleInput): Promise<MailRule>;
+  deleteMailDraft(id: string): Promise<void>;
   deleteLegacyMailDraft(id: string): Promise<void>;
   getMailThread(id: string): Promise<MailThread>;
   listMailMessages(threadId: string): Promise<MailMessage[]>;
   listLegacyMailDrafts(): Promise<LegacyMailDraft[]>;
+  listMailDrafts(): Promise<MailDraft[]>;
   listMailRules(): Promise<MailRule[]>;
   getMailSetupContext(): Promise<MailSetupContext>;
   listMailboxes(): Promise<Mailbox[]>;
@@ -36,6 +44,9 @@ export type MailApiClient = {
   snoozeMailThread(id: string, until: string): Promise<void>;
   previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
   previewSavedMailRule(id: string): Promise<MailRulePreview>;
+  reconcileMailDraft(id: string, input: ReconcileMailDraftInput): Promise<MailDraft>;
+  sendMailDraft(input: SendMailDraftInput): Promise<void>;
+  updateMailDraft(id: string, input: UpdateMailDraftInput): Promise<MailDraft>;
   updateMailRule(id: string, input: UpdateMailRuleInput): Promise<MailRule>;
   updateMailThread(id: string, input: UpdateMailThreadInput): Promise<MailThread>;
   upsertMailAttentionItem(
@@ -65,6 +76,13 @@ export function createMailApiClient(
       });
       return response.result;
     },
+    async createMailDraft(input) {
+      const response = await request<{ draft: MailDraft }>("/v1/mail/drafts", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.draft;
+    },
     async createMailRule(input) {
       const response = await request<{ rule: MailRule }>("/v1/mail/rules", {
         body: JSON.stringify(input),
@@ -73,6 +91,9 @@ export function createMailApiClient(
       return response.rule;
     },
     async deleteLegacyMailDraft(id) {
+      await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
+    },
+    async deleteMailDraft(id) {
       await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
     },
     async getMailThread(id) {
@@ -97,6 +118,10 @@ export function createMailApiClient(
       const response = await request<{ drafts: LegacyMailDraft[] }>("/v1/mail/drafts");
       return response.drafts;
     },
+    async listMailDrafts() {
+      const response = await request<{ drafts: MailDraft[] }>("/v1/mail/drafts");
+      return response.drafts;
+    },
     async listMailRules() {
       const response = await request<{ rules: MailRule[] }>("/v1/mail/rules");
       return response.rules;
@@ -112,6 +137,19 @@ export function createMailApiClient(
       const response = await request<{ preview: MailRulePreview }>(`/v1/mail/rules/${id}/preview`);
       return response.preview;
     },
+    async reconcileMailDraft(id, input) {
+      const response = await request<{ draft: MailDraft }>(`/v1/mail/drafts/${id}/reconcile`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.draft;
+    },
+    async sendMailDraft(input) {
+      await request<void>("/v1/mail/send", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
     async listMailThreads(query = {}) {
       const response = await request<{ threads: MailThread[] }>(
         `/v1/mail/threads?${toQuery(query)}`,
@@ -124,6 +162,13 @@ export function createMailApiClient(
         method: "PATCH",
       });
       return response.thread;
+    },
+    async updateMailDraft(id, input) {
+      const response = await request<{ draft: MailDraft }>(`/v1/mail/drafts/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+      return response.draft;
     },
     async updateMailRule(id, input) {
       const response = await request<{ rule: MailRule }>(`/v1/mail/rules/${id}`, {

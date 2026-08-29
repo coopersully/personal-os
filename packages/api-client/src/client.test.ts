@@ -1764,6 +1764,73 @@ describe("ilo API client", () => {
     expect(api).not.toHaveProperty("sendMail");
   });
 
+  it("uses durable Mail draft routes and sends only a confirmed saved revision", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const draft = {
+      accountId,
+      body: "Prepared response",
+      cc: [],
+      createdAt: now,
+      id,
+      reconciliationState: "none" as const,
+      sendClaimedAt: null,
+      sendStatus: "draft" as const,
+      sentAt: null,
+      subject: "Follow up",
+      threadId: null,
+      to: [{ address: "person@example.com", name: null }],
+      updatedAt: now,
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path,
+        });
+        if (path === "/v1/mail/send") return new Response(null, { status: 204 });
+        if (path.endsWith("/reconcile")) return json({ draft });
+        if (path === `/v1/mail/drafts/${id}` && init?.method === "DELETE")
+          return new Response(null, { status: 204 });
+        if (path === "/v1/mail/drafts" && !init?.method) return json({ drafts: [draft] });
+        return json({ draft }, init?.method === "POST" ? 201 : 200);
+      },
+    });
+    const input = { accountId, body: "", cc: [], subject: "", to: [] };
+
+    await expect(api.createMailDraft(input)).resolves.toEqual(draft);
+    await expect(
+      api.updateMailDraft(id, { ...input, expectedUpdatedAt: now }),
+    ).resolves.toEqual(draft);
+    await expect(api.listMailDrafts()).resolves.toEqual([draft]);
+    await expect(api.sendMailDraft({ confirmedUpdatedAt: now, draftId: id })).resolves.toBeUndefined();
+    await expect(api.reconcileMailDraft(id, { outcome: "sent" })).resolves.toEqual(draft);
+    await expect(api.deleteMailDraft(id)).resolves.toBeUndefined();
+
+    expect(requests).toEqual([
+      { body: JSON.stringify(input), method: "POST", path: "/v1/mail/drafts" },
+      {
+        body: JSON.stringify({ ...input, expectedUpdatedAt: now }),
+        method: "PATCH",
+        path: `/v1/mail/drafts/${id}`,
+      },
+      { body: null, method: "GET", path: "/v1/mail/drafts" },
+      {
+        body: JSON.stringify({ confirmedUpdatedAt: now, draftId: id }),
+        method: "POST",
+        path: "/v1/mail/send",
+      },
+      {
+        body: JSON.stringify({ outcome: "sent" }),
+        method: "POST",
+        path: `/v1/mail/drafts/${id}/reconcile`,
+      },
+      { body: null, method: "DELETE", path: `/v1/mail/drafts/${id}` },
+    ]);
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({
@@ -1774,8 +1841,6 @@ describe("ilo API client", () => {
     });
     expect(api).not.toHaveProperty("listAutomations");
     expect(api).not.toHaveProperty("runAutomation");
-    expect(api).not.toHaveProperty("createMailDraft");
-    expect(api).not.toHaveProperty("reconcileMailDraft");
     expect(api).not.toHaveProperty("sendMail");
     await expect(api.getMe()).resolves.toEqual(user);
     await expect(api.listGoals()).resolves.toEqual([goal]);

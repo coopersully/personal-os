@@ -1,5 +1,9 @@
 # Mail No-Send Capability Removal Implementation Plan
 
+> **Superseded:** The 2026-08-28 unified Inbox and compose plan restores durable,
+> human-confirmed sending. This document remains historical evidence for the earlier contraction;
+> its MCP and autonomous no-send boundary still applies.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Permanently remove Ilo's ability to compose, draft, reply to, forward, or send user email while preserving a bounded read-only path for people to export or delete historical Ilo drafts.

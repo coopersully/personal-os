@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../../api.js";
+import { SidebarProvider } from "../../components/ui/sidebar.js";
 import {
-  downloadLegacyMailDraft,
-  HistoricalMailDrafts,
   isMailListScope,
+  MailSidebar,
   MailTopbarSearch,
   mailListScopeFromSearch,
   mailListScopeParams,
@@ -44,19 +47,90 @@ describe("Mail workspace helpers", () => {
     expect(isMailListScope("outbox")).toBe(false);
     expect(mailListScopeFromSearch(new URLSearchParams("view=starred"))).toBe("starred");
     expect(mailListScopeFromSearch(new URLSearchParams("view=snoozed"))).toBe("snoozed");
+    expect(mailListScopeFromSearch(new URLSearchParams("view=sent"))).toBe("sent");
+    expect(mailListScopeFromSearch(new URLSearchParams("view=drafts"))).toBe("drafts");
     expect(mailListScopeFromSearch(new URLSearchParams("unread=1"))).toBe("unread");
     expect(mailListScopeFromSearch(new URLSearchParams())).toBe("all");
     expect(
-      ["all", "unread", "starred", "snoozed"].map((scope) => mailListScopeParams(scope as never)),
+      ["all", "unread", "starred", "snoozed", "sent", "drafts"].map((scope) =>
+        mailListScopeParams(scope as never),
+      ),
     ).toEqual([
       { unread: null, view: null },
       { unread: "1", view: null },
       { unread: null, view: "starred" },
       { unread: null, view: "snoozed" },
+      { unread: null, view: "sent" },
+      { unread: null, view: "drafts" },
     ]);
     expect(
-      ["all", "unread", "starred", "snoozed"].map((scope) => mailListScopeQuery(scope as never)),
-    ).toEqual([{}, { unread: true }, { starred: true }, { snoozed: true }]);
+      ["all", "unread", "starred", "snoozed", "sent", "drafts"].map((scope) =>
+        mailListScopeQuery(scope as never),
+      ),
+    ).toEqual([
+      {},
+      { unread: true },
+      { starred: true },
+      { snoozed: true },
+      { mailboxRole: "sent" },
+      {},
+    ]);
+  });
+
+  it("makes the combined Inbox primary and keeps account navigation collapsed", async () => {
+    vi.spyOn(api, "listConnectors").mockResolvedValue([
+      {
+        calendarEnabled: false,
+        email: "person@example.com",
+        health: {
+          message: null,
+          nextSyncAt: "2026-08-28T12:05:00.000Z",
+          recovery: null,
+          state: "ready",
+        },
+        id: "22222222-2222-4222-8222-222222222222",
+        label: "Personal Google",
+        lastSyncAttemptAt: "2026-08-28T12:00:00.000Z",
+        lastSyncedAt: "2026-08-28T12:00:00.000Z",
+        mailEnabled: true,
+        nextSyncAt: "2026-08-28T12:05:00.000Z",
+        provider: "google",
+        syncError: null,
+        syncStatus: "idle",
+      },
+    ]);
+    vi.spyOn(api, "listMailboxes").mockResolvedValue([
+      {
+        accountId: "22222222-2222-4222-8222-222222222222",
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "INBOX",
+        provider: "google",
+        role: "inbox",
+        totalCount: 12,
+        unreadCount: 2,
+      },
+    ]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/mail"]}>
+          <SidebarProvider>
+            <MailSidebar onNavigate={vi.fn()} />
+          </SidebarProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("link", { name: /Inbox/ })).toHaveAttribute("href", "/mail");
+    expect(screen.getByRole("link", { name: "Unread" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Starred" })).toBeVisible();
+    expect(screen.queryByText("Unified inbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stewardship review")).not.toBeInTheDocument();
+    expect(screen.queryByText("Personal Google")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Accounts" }));
+    expect(screen.getByText("Personal Google")).toBeVisible();
   });
 
   it("accepts only a complete numeric reader layout and tolerates unavailable storage", () => {
@@ -107,88 +181,5 @@ describe("Mail workspace helpers", () => {
     view.rerender(<MailTopbarSearch onSearch={onSearch} search="project" />);
 
     expect(input).toHaveValue("project update");
-  });
-
-  it("exports blank historical subjects under a safe local filename", () => {
-    vi.useFakeTimers();
-    const createObjectURL = vi.fn(() => "blob:mail-draft");
-    const revokeObjectURL = vi.fn();
-    Object.defineProperties(URL, {
-      createObjectURL: { configurable: true, value: createObjectURL },
-      revokeObjectURL: { configurable: true, value: revokeObjectURL },
-    });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
-    downloadLegacyMailDraft({ subject: "---" } as never);
-    downloadLegacyMailDraft({ subject: "" } as never);
-
-    expect(createObjectURL).toHaveBeenCalledTimes(2);
-    expect(click).toHaveBeenCalledTimes(2);
-    expect(document.querySelectorAll("a[download]")).toHaveLength(2);
-    expect(revokeObjectURL).not.toHaveBeenCalled();
-    vi.runAllTimers();
-    expect(document.querySelectorAll("a[download]")).toHaveLength(0);
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mail-draft");
-  });
-
-  it("keeps historical draft loading, failure, empty, and sparse states honest", async () => {
-    const props = {
-      accounts: [],
-      drafts: [],
-      error: null,
-      isPending: false,
-      mutationError: null,
-      mutationPending: false,
-      remove: vi.fn(),
-      timeZone: "America/New_York",
-    };
-    const view = render(<HistoricalMailDrafts {...props} isPending />);
-    expect(view.container).toBeEmptyDOMElement();
-    view.rerender(<HistoricalMailDrafts {...props} error={new Error("Drafts unavailable")} />);
-    expect(screen.getByText("Drafts unavailable")).toBeVisible();
-    view.rerender(<HistoricalMailDrafts {...props} />);
-    expect(view.container).toBeEmptyDOMElement();
-
-    view.rerender(
-      <HistoricalMailDrafts
-        {...props}
-        drafts={[
-          {
-            accountId: "missing-account",
-            deliveryState: "unsent",
-            id: "draft-1",
-            subject: "",
-            to: [],
-            updatedAt: "2026-08-25T12:00:00.000Z",
-          } as never,
-        ]}
-        mutationError={new Error("Delete unavailable")}
-      />,
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Historical drafts (1)" }));
-    expect(screen.getByText("(No subject)")).toBeVisible();
-    expect(screen.getByText("To: No recipients")).toBeVisible();
-    expect(screen.getByText("Updated Aug 25, 2026, 8:00 AM")).toBeVisible();
-    expect(screen.getByText("Delete unavailable")).toBeVisible();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Delete historical draft: No subject" }),
-    );
-    view.rerender(
-      <HistoricalMailDrafts
-        {...props}
-        drafts={[
-          {
-            accountId: "missing-account",
-            deliveryState: "unsent",
-            id: "draft-1",
-            subject: "",
-            to: [],
-            updatedAt: "2026-08-25T12:00:00.000Z",
-          } as never,
-        ]}
-        mutationPending
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
   });
 });

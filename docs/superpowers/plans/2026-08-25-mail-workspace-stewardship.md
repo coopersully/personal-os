@@ -1,5 +1,9 @@
 # Mail Workspace Stewardship Implementation Plan
 
+> **Superseded transmission constraint:** The 2026-08-28 unified Inbox and compose plan restores
+> sending only to the signed-in human Mail surface. MCP and stewardship automation remain unable to
+> send.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Mail a persistent expert steward that keeps a user-defined obligation ledger trustworthy, performs durable bounded maintenance, asks only material questions, learns through explicit review, and publishes an evidence-backed review artifact without ever sending email.

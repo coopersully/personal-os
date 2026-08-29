@@ -895,6 +895,14 @@ export function googleGrantedServices(
   ];
 }
 
+export function googleMailSendGranted(credentials: GoogleCredentials): boolean {
+  const scopes = new Set(credentials.scope.split(/\s+/).filter(Boolean));
+  return (
+    scopes.has("https://mail.google.com/") ||
+    scopes.has("https://www.googleapis.com/auth/gmail.send")
+  );
+}
+
 function mailboxRole(id: string): RemoteMailbox["role"] {
   const roles: Record<string, RemoteMailbox["role"]> = {
     DRAFT: "drafts",

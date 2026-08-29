@@ -1,5 +1,9 @@
 # Mail workspace Ilo stewardship design
 
+> **Superseded transmission boundary:** The signed-in human Mail experience gained durable,
+> explicitly confirmed sending in the 2026-08-28 unified Inbox and compose design. The stewardship
+> and MCP boundaries in this document remain non-transmitting.
+
 **Date:** 2026-08-15
 **Status:** Approved in conversation
 **Workspace:** Mail

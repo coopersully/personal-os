@@ -215,6 +215,7 @@ export const mailListQuerySchema = z.object({
     .pipe(z.array(idSchema))
     .optional(),
   mailboxId: idSchema.optional(),
+  mailboxRole: mailboxRoleSchema.optional(),
   query: z.string().trim().min(1).max(200).optional(),
   snoozed: z
     .enum(["true", "false"])
@@ -331,20 +332,6 @@ export const mailDraftSchema = z.object(mailDraftFields).extend({
   updatedAt: isoDateTimeSchema,
 });
 export type MailDraft = z.infer<typeof mailDraftSchema>;
-
-export const legacyMailDraftSchema = z.object({
-  accountId: idSchema,
-  body: z.string(),
-  cc: z.array(z.email()),
-  createdAt: isoDateTimeSchema,
-  deliveryState: z.enum(["unsent", "sent", "delivery_unknown"]),
-  id: idSchema,
-  subject: z.string(),
-  threadId: idSchema.nullable(),
-  to: z.array(z.email()),
-  updatedAt: isoDateTimeSchema,
-});
-export type LegacyMailDraft = z.infer<typeof legacyMailDraftSchema>;
 
 export const mailSnoozeInputSchema = z.object({ until: isoDateTimeSchema });
 export type MailSnoozeInput = z.infer<typeof mailSnoozeInputSchema>;

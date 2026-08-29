@@ -561,6 +561,86 @@ describe.sequential("connector service", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("projects provider send capability without widening account authority", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Google account fixture is missing.");
+
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "unavailable",
+    );
+    google.sendMail = vi.fn(async (value) => value);
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        email: "person@example.com",
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+        mailEnabled: true,
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "reconnect",
+    );
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          {
+            ...credentials,
+            scope: `${googleCalendarAndMailScope} https://www.googleapis.com/auth/gmail.send`,
+          },
+          encryptionKey,
+        ),
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "available",
+    );
+
+    await database.db
+      .update(calendarAccounts)
+      .set({ email: null })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "unavailable",
+    );
+    await database.db
+      .update(calendarAccounts)
+      .set({ email: "person@example.com", mailEnabled: false })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "unavailable",
+    );
+    await expect(service.mailGateway.sendCapability?.(userId, crypto.randomUUID())).resolves.toBe(
+      "unavailable",
+    );
+
+    const connected = await service.connectICloud(userId, {
+      appSpecificPassword: "send-capability-password",
+      calendar: false,
+      email: "sender@icloud.com",
+      mail: true,
+    });
+    await expect(service.mailGateway.sendCapability?.(userId, connected.accountId)).resolves.toBe(
+      "unavailable",
+    );
+    icloud.sendMail = vi.fn(async () => undefined);
+    await expect(service.mailGateway.sendCapability?.(userId, connected.accountId)).resolves.toBe(
+      "available",
+    );
+
+    await database.db
+      .update(calendarAccounts)
+      .set({ email: "person@example.com", mailEnabled: true })
+      .where(eq(calendarAccounts.id, account.id));
+  });
+
   it("advances Gmail history and applies only explicit deletions under the sync claim", async () => {
     const [account] = await database.db
       .select()

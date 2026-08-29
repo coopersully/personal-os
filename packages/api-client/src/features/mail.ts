@@ -5,7 +5,6 @@ import type {
   BulkUpdateMailResult,
   CreateMailDraftInput,
   CreateMailRuleInput,
-  LegacyMailDraft,
   Mailbox,
   MailDraft,
   MailListQuery,
@@ -32,10 +31,8 @@ export type MailApiClient = {
   createMailDraft(input: CreateMailDraftInput): Promise<MailDraft>;
   createMailRule(input: CreateMailRuleInput): Promise<MailRule>;
   deleteMailDraft(id: string): Promise<void>;
-  deleteLegacyMailDraft(id: string): Promise<void>;
   getMailThread(id: string): Promise<MailThread>;
   listMailMessages(threadId: string): Promise<MailMessage[]>;
-  listLegacyMailDrafts(): Promise<LegacyMailDraft[]>;
   listMailDrafts(): Promise<MailDraft[]>;
   listMailRules(): Promise<MailRule[]>;
   getMailSetupContext(): Promise<MailSetupContext>;
@@ -90,9 +87,6 @@ export function createMailApiClient(
       });
       return response.rule;
     },
-    async deleteLegacyMailDraft(id) {
-      await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
-    },
     async deleteMailDraft(id) {
       await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
     },
@@ -113,10 +107,6 @@ export function createMailApiClient(
     async listMailboxes() {
       const response = await request<{ mailboxes: Mailbox[] }>("/v1/mailboxes");
       return response.mailboxes;
-    },
-    async listLegacyMailDrafts() {
-      const response = await request<{ drafts: LegacyMailDraft[] }>("/v1/mail/drafts");
-      return response.drafts;
     },
     async listMailDrafts() {
       const response = await request<{ drafts: MailDraft[] }>("/v1/mail/drafts");

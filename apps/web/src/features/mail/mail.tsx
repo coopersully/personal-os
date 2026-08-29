@@ -1,5 +1,5 @@
 import type { CalendarAccount } from "@personal-os/api-client";
-import type { LegacyMailDraft, Mailbox, MailMessage, MailThread, User } from "@personal-os/domain";
+import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -9,12 +9,13 @@ import {
   ArrowLeftIcon,
   ChevronDownIcon,
   ClockIcon,
-  DownloadIcon,
   EyeIcon,
   EyeOffIcon,
+  ForwardIcon,
   InboxIcon,
   MailIcon,
   MoreHorizontalIcon,
+  ReplyIcon,
   SearchIcon,
   StarIcon,
   TrashIcon,
@@ -27,14 +28,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,10 +60,11 @@ import {
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
+import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
 import { ThreadStewardship } from "./thread-stewardship.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
-export const mailListScopes = ["all", "unread", "starred", "snoozed"] as const;
+export const mailListScopes = ["all", "unread", "starred", "snoozed", "sent", "drafts"] as const;
 export type MailListScope = (typeof mailListScopes)[number];
 
 export function isMailListScope(value: string): value is MailListScope {
@@ -79,7 +73,7 @@ export function isMailListScope(value: string): value is MailListScope {
 
 export function mailListScopeFromSearch(params: URLSearchParams): MailListScope {
   const view = params.get("view");
-  if (view === "starred" || view === "snoozed") return view;
+  if (view === "starred" || view === "snoozed" || view === "sent" || view === "drafts") return view;
   return params.get("unread") === "1" ? "unread" : "all";
 }
 
@@ -87,6 +81,8 @@ export function mailListScopeParams(scope: MailListScope) {
   if (scope === "unread") return { unread: "1", view: null };
   if (scope === "starred") return { unread: null, view: "starred" };
   if (scope === "snoozed") return { unread: null, view: "snoozed" };
+  if (scope === "sent") return { unread: null, view: "sent" };
+  if (scope === "drafts") return { unread: null, view: "drafts" };
   return { unread: null, view: null };
 }
 
@@ -94,6 +90,7 @@ export function mailListScopeQuery(scope: MailListScope) {
   if (scope === "unread") return { unread: true };
   if (scope === "starred") return { starred: true };
   if (scope === "snoozed") return { snoozed: true };
+  if (scope === "sent") return { mailboxRole: "sent" as const };
   return {};
 }
 
@@ -290,131 +287,6 @@ function mailDate(value: string, timeZone: string) {
   }).format(new Date(value));
 }
 
-export function downloadLegacyMailDraft(draft: LegacyMailDraft) {
-  const blob = new Blob([JSON.stringify(draft, null, 2)], { type: "application/json" });
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const filename = (draft.subject || "historical-draft")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 80);
-  link.href = href;
-  link.download = `ilo-mail-draft-${filename || "historical-draft"}.json`;
-  document.body.append(link);
-  link.click();
-  setTimeout(() => {
-    link.remove();
-    URL.revokeObjectURL(href);
-  }, 0);
-}
-
-export function HistoricalMailDrafts({
-  accounts,
-  drafts,
-  error,
-  isPending,
-  mutationError,
-  mutationPending,
-  remove,
-  timeZone,
-}: {
-  accounts: CalendarAccount[];
-  drafts: LegacyMailDraft[];
-  error: Error | null;
-  isPending: boolean;
-  mutationError: Error | null;
-  mutationPending: boolean;
-  remove: (id: string) => void;
-  timeZone: string;
-}) {
-  const [pendingDelete, setPendingDelete] = useState<LegacyMailDraft | null>(null);
-  if (isPending) return null;
-  if (error) return <InlineError error={error} />;
-  if (drafts.length === 0) return null;
-  return (
-    <>
-      <Collapsible className="mail-legacy-drafts">
-        <CollapsibleTrigger asChild>
-          <Button tone="ghost" type="button">
-            <ChevronDownIcon aria-hidden="true" data-icon="inline-start" />
-            Historical drafts ({drafts.length})
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mail-legacy-drafts__content">
-          <p>
-            Ilo never sends email. These historical records can only be exported to this device or
-            permanently deleted.
-          </p>
-          <div className="mail-legacy-drafts__items">
-            {drafts.map((draft) => (
-              <article className="mail-legacy-drafts__item" key={draft.id}>
-                <div>
-                  <strong>{draft.subject || "(No subject)"}</strong>
-                  <span>{accounts.find((account) => account.id === draft.accountId)?.label}</span>
-                  <span>To: {draft.to.join(", ") || "No recipients"}</span>
-                  <span>Updated {mailDate(draft.updatedAt, timeZone)}</span>
-                  <Badge>{draft.deliveryState.replaceAll("_", " ")}</Badge>
-                </div>
-                <div className="mail-legacy-drafts__actions">
-                  <Button
-                    aria-label={`Export historical draft: ${draft.subject || "No subject"}`}
-                    onClick={() => downloadLegacyMailDraft(draft)}
-                    tone="ghost"
-                    type="button"
-                  >
-                    <DownloadIcon aria-hidden="true" data-icon="inline-start" />
-                    Export
-                  </Button>
-                  <Button
-                    aria-label={`Delete historical draft: ${draft.subject || "No subject"}`}
-                    disabled={mutationPending}
-                    onClick={() => setPendingDelete(draft)}
-                    tone="ghost"
-                    type="button"
-                  >
-                    <TrashIcon aria-hidden="true" data-icon="inline-start" />
-                    Delete
-                  </Button>
-                </div>
-              </article>
-            ))}
-          </div>
-          {mutationError ? <InlineError error={mutationError} /> : null}
-        </CollapsibleContent>
-      </Collapsible>
-      <Dialog
-        onOpenChange={(open) => (open ? undefined : setPendingDelete(null))}
-        open={Boolean(pendingDelete)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete historical draft?</DialogTitle>
-            <DialogDescription>
-              This permanently removes the draft from Ilo. Export it first if you need a copy.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={() => setPendingDelete(null)} tone="ghost" type="button">
-              Cancel
-            </Button>
-            <Button
-              disabled={mutationPending}
-              onClick={() => {
-                if (pendingDelete) remove(pendingDelete.id);
-                setPendingDelete(null);
-              }}
-              type="button"
-            >
-              {mutationPending ? "Deleting…" : "Delete historical draft"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const [params, setParams] = useSearchParams();
   const accounts = useQuery({
@@ -437,12 +309,15 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const activeAccountId = selectedMailbox?.accountId ?? accountId;
   const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [unifiedExpanded, setUnifiedExpanded] = useState(true);
+  const [accountsExpanded, setAccountsExpanded] = useState(Boolean(activeAccountId));
   const listScope = mailListScopeFromSearch(params);
   useEffect(() => {
-    const first = activeAccountId ?? enabled[0]?.id;
-    if (first) setExpanded((current) => (current.includes(first) ? current : [...current, first]));
-  }, [activeAccountId, enabled]);
+    if (!activeAccountId) return;
+    setAccountsExpanded(true);
+    setExpanded((current) =>
+      current.includes(activeAccountId) ? current : [...current, activeAccountId],
+    );
+  }, [activeAccountId]);
   const select = (updates: Record<string, string | null>) => {
     setParams((current) => {
       const next = new URLSearchParams(current);
@@ -462,16 +337,6 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
       <SidebarGroupLabel>Mailboxes</SidebarGroupLabel>
       <SidebarGroupContent>
         <nav aria-label="Mailboxes">
-          <SidebarMenu className="mail-sidebar__menu">
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link onClick={onNavigate} to="/mail/review">
-                  <EyeIcon aria-hidden="true" />
-                  <span>Stewardship review</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
           {accounts.isPending || mailboxes.isPending ? (
             <p className="context-sidebar__empty">Loading mailboxes…</p>
           ) : accounts.isError || mailboxes.isError ? (
@@ -480,32 +345,48 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
           ) : (
             <SidebarMenu className="mail-sidebar__menu">
-              <UnifiedInboxNavigation
-                expanded={unifiedExpanded}
+              <UnifiedMailDestinations
+                activeAccountId={activeAccountId}
                 listScope={listScope}
-                selectScope={(scope) => select(mailListScopeParams(scope))}
-                toggle={() => setUnifiedExpanded((current) => !current)}
+                onNavigate={onNavigate}
                 unreadCount={totalInboxUnread}
               />
-              {enabled.map((account) => (
-                <MailboxAccount
-                  account={account}
-                  activeAccountId={activeAccountId}
-                  activeMailboxId={mailboxId}
-                  expanded={expanded.includes(account.id)}
-                  key={account.id}
-                  mailboxes={mailboxes.data.filter((mailbox) => mailbox.accountId === account.id)}
-                  selectAccount={() => select({ account: account.id })}
-                  selectMailbox={(id) => select({ mailbox: id })}
-                  toggle={() =>
-                    setExpanded((current) =>
-                      current.includes(account.id)
-                        ? current.filter((id) => id !== account.id)
-                        : [...current, account.id],
-                    )
-                  }
-                />
-              ))}
+              <Collapsible asChild onOpenChange={setAccountsExpanded} open={accountsExpanded}>
+                <SidebarMenuItem className="mail-sidebar__accounts">
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton aria-label="Accounts">
+                      <MailIcon aria-hidden="true" />
+                      <span>Accounts</span>
+                      <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenu>
+                      {enabled.map((account) => (
+                        <MailboxAccount
+                          account={account}
+                          activeAccountId={activeAccountId}
+                          activeMailboxId={mailboxId}
+                          expanded={expanded.includes(account.id)}
+                          key={account.id}
+                          mailboxes={mailboxes.data.filter(
+                            (mailbox) => mailbox.accountId === account.id,
+                          )}
+                          selectAccount={() => select({ account: account.id })}
+                          selectMailbox={(id) => select({ mailbox: id })}
+                          toggle={() =>
+                            setExpanded((current) =>
+                              current.includes(account.id)
+                                ? current.filter((id) => id !== account.id)
+                                : [...current, account.id],
+                            )
+                          }
+                        />
+                      ))}
+                    </SidebarMenu>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
             </SidebarMenu>
           )}
         </nav>
@@ -533,6 +414,7 @@ export function MailPage({ user }: { user: User }) {
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
   const listScope = mailListScopeFromSearch(params);
+  const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -545,6 +427,7 @@ export function MailPage({ user }: { user: User }) {
       return next;
     });
   const threads = useQuery({
+    enabled: listScope !== "drafts",
     queryFn: () =>
       api.listMailThreads({
         ...(accountId && !mailboxId ? { accountIds: [accountId] } : {}),
@@ -555,9 +438,24 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-threads", accountId, mailboxId, search, listScope],
     refetchInterval: 60_000,
   });
-  const legacyDrafts = useQuery({
-    queryFn: api.listLegacyMailDrafts,
-    queryKey: ["mail-legacy-drafts"],
+  const setup = useQuery({
+    queryFn: api.getMailSetupContext,
+    queryKey: ["mail-setup-context"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
+  const drafts = useQuery({
+    enabled: listScope === "drafts",
+    queryFn: api.listMailDrafts,
+    queryKey: ["mail-drafts"],
+  });
+  const deleteDraft = useMutation({
+    mutationFn: api.deleteMailDraft,
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
+  });
+  const reconcileDraft = useMutation({
+    mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
+      api.reconcileMailDraft(id, { outcome }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
   });
   const listed = threads.data?.find((thread) => thread.id === selectedId);
   const loaded = useQuery({
@@ -589,32 +487,13 @@ export function MailPage({ user }: { user: User }) {
       api.snoozeMailThread(id, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
-  const deleteLegacyDraft = useMutation({
-    mutationFn: (id: string) => api.deleteLegacyMailDraft(id),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-legacy-drafts"] }),
-  });
-  const historicalDrafts = (
-    <HistoricalMailDrafts
-      accounts={enabled}
-      drafts={legacyDrafts.data ?? []}
-      error={legacyDrafts.error}
-      isPending={legacyDrafts.isPending}
-      mutationError={deleteLegacyDraft.error}
-      mutationPending={deleteLegacyDraft.isPending}
-      remove={(id) => deleteLegacyDraft.mutate(id)}
-      timeZone={user.planningTimezone}
-    />
-  );
   if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
   if (accounts.isError) return <InlineError error={accounts.error} />;
   if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
   if (!enabled.length)
     return (
       <div className="mail-page">
-        {historicalDrafts}
-        <ConnectionRecoveryAlert accounts={enabled} />
         <div className="narrow-page">
-          <p className="eyebrow">Mail for people and agents</p>
           <h1>Inbox</h1>
           <EmptyState icon={<InboxIcon />} title="Connect a mailbox">
             Enable Mail on a connected Google account or add iCloud from Settings.
@@ -622,11 +501,9 @@ export function MailPage({ user }: { user: User }) {
         </div>
       </div>
     );
-  if (threads.isPending) return <WorkspaceSkeleton kind="mail" />;
+  if (listScope !== "drafts" && threads.isPending) return <WorkspaceSkeleton kind="mail" />;
   return (
     <div className="mail-page">
-      {historicalDrafts}
-      <ConnectionRecoveryAlert accounts={enabled} />
       <ResizablePanelGroup
         className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
         defaultLayout={readerLayout}
@@ -638,24 +515,42 @@ export function MailPage({ user }: { user: User }) {
       >
         <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
           <section aria-label="Conversations" className="mail-thread-list">
+            <ConnectionRecoveryAlert accounts={enabled} />
             <div className="mail-thread-list__toolbar">
               <MailTopbarSearch
                 onSearch={(query) => update({ q: query || null, thread: null })}
                 search={search}
               />
               <div className="mail-thread-list__summary">
-                <span>{threads.data?.length ?? 0} conversations</span>
+                <span>
+                  {listScope === "drafts"
+                    ? `${drafts.data?.length ?? 0} drafts`
+                    : `${threads.data?.length ?? 0} conversations`}
+                </span>
                 {listScope === "all" ? null : <Badge>{listScope}</Badge>}
               </div>
             </div>
-            {threads.isError ? (
+            {listScope === "drafts" ? (
+              drafts.isPending ? (
+                <PageLoading />
+              ) : drafts.isError ? (
+                <InlineError error={drafts.error} />
+              ) : (
+                <MailDraftList
+                  drafts={(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent")}
+                  openDraft={setComposeIntent}
+                  reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
+                  remove={(id) => deleteDraft.mutate(id)}
+                />
+              )
+            ) : threads.isError ? (
               <InlineError error={threads.error} />
-            ) : threads.data.length === 0 ? (
+            ) : threads.data?.length === 0 ? (
               <EmptyState icon={<MailIcon />} title="Nothing here">
                 Try another mailbox or a broader search.
               </EmptyState>
             ) : (
-              threads.data.map((thread) => (
+              threads.data?.map((thread) => (
                 <ThreadRow
                   active={selected?.id === thread.id}
                   key={thread.id}
@@ -683,6 +578,25 @@ export function MailPage({ user }: { user: User }) {
                   }
                   back={() => update({ thread: null })}
                   pending={updateThread.isPending}
+                  forward={() =>
+                    setComposeIntent({
+                      accountId: selected.accountId,
+                      body: `\n\n---------- Forwarded message ----------\nFrom: ${selected.from.name || selected.from.address} <${selected.from.address}>\nSubject: ${selected.subject}\n\n${selected.bodyText}`,
+                      subject: selected.subject.startsWith("Fwd:")
+                        ? selected.subject
+                        : `Fwd: ${selected.subject}`,
+                    })
+                  }
+                  reply={() =>
+                    setComposeIntent({
+                      accountId: selected.accountId,
+                      subject: selected.subject.startsWith("Re:")
+                        ? selected.subject
+                        : `Re: ${selected.subject}`,
+                      threadId: selected.id,
+                      to: selected.from.address,
+                    })
+                  }
                   selected={selected}
                   snooze={() => snoozeThread.mutate(selected.id)}
                   toggleStar={() =>
@@ -716,14 +630,70 @@ export function MailPage({ user }: { user: User }) {
           </section>
         </ResizablePanel>
       </ResizablePanelGroup>
+      {setup.data ? (
+        <FloatingMailComposer
+          accounts={setup.data.accounts}
+          intent={composeIntent}
+          onIntentHandled={() => setComposeIntent(null)}
+        />
+      ) : null}
     </div>
   );
+}
+
+function MailDraftList({
+  drafts,
+  openDraft,
+  reconcile,
+  remove,
+}: {
+  drafts: MailDraft[];
+  openDraft: (intent: ComposeIntent) => void;
+  reconcile: (id: string, outcome: "not_sent" | "sent") => void;
+  remove: (id: string) => void;
+}) {
+  if (!drafts.length)
+    return (
+      <EmptyState icon={<MailIcon />} title="No drafts">
+        Messages you start will be saved here automatically.
+      </EmptyState>
+    );
+  return drafts.map((draft) => (
+    <article className="mail-draft-row" key={draft.id}>
+      <button className="mail-thread-row" onClick={() => openDraft({ draft })} type="button">
+        <span className="mail-thread-row__sender">
+          {draft.to.map((recipient) => recipient.address).join(", ") || "No recipients"}
+        </span>
+        <time>{draft.sendStatus === "reconcile" ? "Needs review" : "Draft"}</time>
+        <strong>{draft.subject || "(No subject)"}</strong>
+        <span className="mail-thread-row__snippet">{draft.body || "Empty message"}</span>
+      </button>
+      <div className="mail-draft-row__actions">
+        {draft.sendStatus === "reconcile" ? (
+          <>
+            <Button onClick={() => reconcile(draft.id, "sent")} tone="ghost">
+              Mark sent
+            </Button>
+            <Button onClick={() => reconcile(draft.id, "not_sent")} tone="ghost">
+              Not sent
+            </Button>
+          </>
+        ) : (
+          <Button onClick={() => remove(draft.id)} tone="ghost">
+            Discard
+          </Button>
+        )}
+      </div>
+    </article>
+  ));
 }
 
 function MailSecondaryNavigation({
   archive,
   back,
   pending,
+  forward,
+  reply,
   selected,
   snooze,
   toggleStar,
@@ -733,6 +703,8 @@ function MailSecondaryNavigation({
   archive: () => void;
   back: () => void;
   pending: boolean;
+  forward: () => void;
+  reply: () => void;
   selected: MailThread;
   snooze: () => void;
   toggleStar: () => void;
@@ -748,6 +720,14 @@ function MailSecondaryNavigation({
         </Button>
       </WorkspaceSecondaryAppBarLeading>
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
+        <Button aria-label="Reply" onClick={reply} tone="ghost">
+          <ReplyIcon aria-hidden="true" className="size-4" />
+          <span>Reply</span>
+        </Button>
+        <Button aria-label="Forward" onClick={forward} tone="ghost">
+          <ForwardIcon aria-hidden="true" className="size-4" />
+          <span>Forward</span>
+        </Button>
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
           <ArchiveIcon aria-hidden="true" className="size-4" />
           <span>Archive</span>
@@ -820,71 +800,47 @@ function MailSecondaryNavigation({
   );
 }
 
-function UnifiedInboxNavigation({
-  expanded,
+function UnifiedMailDestinations({
+  activeAccountId,
   listScope,
-  selectScope,
-  toggle,
+  onNavigate,
   unreadCount,
 }: {
-  expanded: boolean;
+  activeAccountId: string | null | undefined;
   listScope: MailListScope;
-  selectScope: (scope: MailListScope) => void;
-  toggle: () => void;
+  onNavigate: () => void;
   unreadCount: number;
 }) {
-  const panelId = "unified-mailbox-navigation";
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
-    { icon: MailIcon, label: "All mail", value: "all" },
+    { icon: InboxIcon, label: "Inbox", value: "all" },
     { icon: EyeIcon, label: "Unread", value: "unread" },
     { icon: StarIcon, label: "Starred", value: "starred" },
     { icon: ClockIcon, label: "Snoozed", value: "snoozed" },
+    { icon: MailIcon, label: "Sent", value: "sent" },
+    { icon: MailIcon, label: "Drafts", value: "drafts" },
   ];
 
   return (
-    <Collapsible asChild onOpenChange={toggle} open={expanded}>
-      <SidebarMenuItem className="mail-sidebar__account mail-sidebar__unified">
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton
-            aria-controls={panelId}
-            aria-label="Toggle Unified inbox mailboxes"
-            className="mail-sidebar__account-trigger"
-            size="lg"
-          >
-            <span className="mail-sidebar__unified-icon">
-              <InboxIcon aria-hidden="true" />
-            </span>
-            <span className="mail-sidebar__account-copy">
-              <span className="mail-sidebar__account-name">Unified inbox</span>
-              <span className="mail-sidebar__account-email">All connected mail</span>
-            </span>
-            {unreadCount > 0 ? (
-              <span className="mail-sidebar__account-count">{unreadCount}</span>
-            ) : null}
-            <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent id={panelId}>
-          <SidebarMenuSub className="mail-sidebar__account-body">
-            {scopes.map(({ icon: Icon, label, value }) => (
-              <SidebarMenuSubItem key={value}>
-                <SidebarMenuSubButton asChild isActive={listScope === value}>
-                  <button
-                    aria-pressed={listScope === value}
-                    className="mail-sidebar__mailbox-link"
-                    onClick={() => selectScope(value)}
-                    type="button"
-                  >
-                    <Icon aria-hidden="true" />
-                    <span>{label}</span>
-                  </button>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </SidebarMenuItem>
-    </Collapsible>
+    <>
+      {scopes.map(({ icon: Icon, label, value }) => {
+        const query = new URLSearchParams();
+        const params = mailListScopeParams(value);
+        if (params.unread) query.set("unread", params.unread);
+        if (params.view) query.set("view", params.view);
+        const suffix = query.size ? `?${query.toString()}` : "";
+        return (
+          <SidebarMenuItem key={value}>
+            <SidebarMenuButton asChild isActive={!activeAccountId && listScope === value}>
+              <Link onClick={onNavigate} to={`/mail${suffix}`}>
+                <Icon aria-hidden="true" />
+                <span>{label}</span>
+                {value === "all" && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        );
+      })}
+    </>
   );
 }
 

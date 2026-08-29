@@ -18,7 +18,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { type ConnectedMailGateway, MailProviderRejectedError } from "./connector-service.js";
 import { errorResponse } from "./errors.js";
@@ -45,6 +45,9 @@ describe.sequential("mail service", () => {
   let temporaryMigrationsFolder: string | null = null;
   let setupMigrationsFolder: string | null = null;
   const gateway = {
+    sendCapability: vi.fn<NonNullable<ConnectedMailGateway["sendCapability"]>>(
+      async () => "available",
+    ),
     send: vi.fn(async () => undefined),
     update: vi.fn<ConnectedMailGateway["update"]>(async () => undefined),
   };
@@ -207,7 +210,7 @@ describe.sequential("mail service", () => {
     if (!enabled || !disabled) throw new Error("Fixture accounts were not created.");
     enabledAccountId = enabled.id;
     disabledAccountId = disabled.id;
-    const [inbox, customLabel] = await database.db
+    const [inbox, sent, customLabel] = await database.db
       .insert(mailboxes)
       .values([
         {
@@ -222,6 +225,16 @@ describe.sequential("mail service", () => {
         },
         {
           accountId: enabled.id,
+          name: "Sent",
+          provider: "google",
+          remoteMailboxId: "SENT",
+          role: "sent",
+          totalCount: 1,
+          unreadCount: 0,
+          userId,
+        },
+        {
+          accountId: enabled.id,
           name: "Orders",
           provider: "google",
           remoteMailboxId: "Label_Orders",
@@ -232,7 +245,7 @@ describe.sequential("mail service", () => {
         },
       ])
       .returning();
-    if (!inbox || !customLabel) throw new Error("Fixture mailboxes were not created.");
+    if (!inbox || !sent || !customLabel) throw new Error("Fixture mailboxes were not created.");
     inboxId = inbox.id;
     customLabelId = customLabel.id;
     const [profile] = await database.db
@@ -288,7 +301,7 @@ describe.sequential("mail service", () => {
         from: { address: "other@example.com", name: "Other" },
         provider: "google",
         receivedAt: new Date("2026-07-15T12:00:00.000Z"),
-        remoteMailboxIds: [],
+        remoteMailboxIds: ["SENT"],
         remoteThreadId: "thread-2",
         snippet: "Different preview",
         starred: false,
@@ -407,99 +420,6 @@ describe.sequential("mail service", () => {
     });
   });
 
-  it("projects and owner-deletes historical drafts without exposing delivery claims", async () => {
-    const [otherUser] = await database.db
-      .insert(users)
-      .values({
-        displayName: "Other Mail User",
-        email: "other-mail@example.com",
-        passwordHash: "unused",
-        planningTimezone: "UTC",
-      })
-      .returning();
-    if (!otherUser) throw new Error("Other user fixture was not created.");
-    const [otherAccount] = await database.db
-      .insert(calendarAccounts)
-      .values({ label: "Other", provider: "google", userId: otherUser.id })
-      .returning();
-    if (!otherAccount) throw new Error("Other account fixture was not created.");
-    const [unsent, uncertain, sent, otherDraft] = await database.db
-      .insert(mailDrafts)
-      .values([
-        {
-          accountId: enabledAccountId,
-          body: "Unsent body",
-          cc: [{ address: "copy@example.com", name: "Copy" }],
-          sendStatus: "draft" as const,
-          subject: "Unsent historical draft",
-          to: [{ address: "to@example.com", name: null }],
-          userId,
-        },
-        {
-          accountId: enabledAccountId,
-          body: "Uncertain body",
-          cc: [],
-          sendClaimedAt: new Date("2026-07-15T11:00:00.000Z"),
-          sendClaimId: "33333333-3333-4333-8333-333333333333",
-          sendStatus: "reconcile" as const,
-          subject: "Uncertain historical draft",
-          to: [{ address: "to@example.com", name: null }],
-          userId,
-        },
-        {
-          accountId: enabledAccountId,
-          body: "Sent body",
-          cc: [],
-          sendStatus: "sent" as const,
-          sentAt: new Date("2026-07-15T12:00:00.000Z"),
-          subject: "Sent historical draft",
-          to: [{ address: "to@example.com", name: null }],
-          userId,
-        },
-        {
-          accountId: otherAccount.id,
-          body: "Private other body",
-          cc: [],
-          sendStatus: "draft" as const,
-          subject: "Other user's draft",
-          to: [{ address: "other@example.com", name: null }],
-          userId: otherUser.id,
-        },
-      ])
-      .returning();
-    if (!unsent || !uncertain || !sent || !otherDraft) {
-      throw new Error("Historical draft fixtures were not created.");
-    }
-
-    await expect(service.listLegacyDrafts(userId)).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          cc: ["copy@example.com"],
-          deliveryState: "unsent",
-          id: unsent.id,
-          to: ["to@example.com"],
-        }),
-        expect.objectContaining({ deliveryState: "delivery_unknown", id: uncertain.id }),
-        expect.objectContaining({ deliveryState: "sent", id: sent.id }),
-      ]),
-    );
-    expect(await service.listLegacyDrafts(userId)).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: otherDraft.id })]),
-    );
-    await expect(service.deleteLegacyDraft(userId, otherDraft.id)).rejects.toMatchObject({
-      code: "not_found",
-    });
-    await expect(service.deleteLegacyDraft(userId, unsent.id)).resolves.toBeUndefined();
-    await expect(service.listLegacyDrafts(userId)).resolves.not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: unsent.id })]),
-    );
-
-    await database.db.delete(mailDrafts).where(eq(mailDrafts.userId, userId));
-    await database.db.delete(mailDrafts).where(eq(mailDrafts.userId, otherUser.id));
-    await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, otherAccount.id));
-    await database.db.delete(users).where(eq(users.id, otherUser.id));
-  });
-
   it("sends one exact saved draft revision and rejects stale or duplicate confirmation", async () => {
     gateway.send.mockClear();
     const created = await service.createDraft(userId, {
@@ -519,12 +439,36 @@ describe.sequential("mail service", () => {
       updatedAt: new Date(created.updatedAt),
     });
 
+    await expect(
+      service.updateDraft(userId, created.id, {
+        accountId: disabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    await expect(
+      service.updateDraft(userId, created.id, {
+        accountId: enabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject: "Follow up",
+        threadId: disabledAccountId,
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
     const updated = await service.updateDraft(userId, created.id, {
       accountId: enabledAccountId,
       body: "Prepared response",
       cc: [],
       expectedUpdatedAt: created.updatedAt,
       subject: "Follow up",
+      threadId,
       to: [{ address: "person@example.com", name: null }],
     });
     await expect(
@@ -550,6 +494,7 @@ describe.sequential("mail service", () => {
       body: "Prepared response",
       cc: [],
       subject: "Follow up",
+      threadId: "thread-1",
       to: [{ address: "person@example.com", name: null }],
     });
     await expect(
@@ -570,6 +515,131 @@ describe.sequential("mail service", () => {
     expect(JSON.stringify(audit)).not.toContain("Prepared response");
 
     await database.db.delete(mailDrafts).where(eq(mailDrafts.id, created.id));
+  });
+
+  it("fails closed for incomplete drafts and reconciles only explicit uncertain delivery", async () => {
+    const missingId = "99999999-9999-4999-8999-999999999999";
+    const expectedUpdatedAt = "2026-07-16T12:00:00.000Z";
+    await expect(
+      service.updateDraft(userId, missingId, {
+        accountId: enabledAccountId,
+        body: "Missing",
+        cc: [],
+        expectedUpdatedAt,
+        subject: "Missing",
+        to: [],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: expectedUpdatedAt, draftId: missingId },
+        mutationContext("send-missing-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.reconcileDraft(
+        userId,
+        missingId,
+        "not_sent",
+        mutationContext("reconcile-missing-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    const noRecipient = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Prepared body",
+      cc: [],
+      subject: "Prepared subject",
+      to: [],
+    });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: noRecipient.updatedAt, draftId: noRecipient.id },
+        mutationContext("send-without-recipient"),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const noContent = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "",
+      cc: [],
+      subject: "",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: noContent.updatedAt, draftId: noContent.id },
+        mutationContext("send-without-content"),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.sendDraft(
+        userId,
+        {
+          confirmedUpdatedAt: new Date(Date.parse(noContent.updatedAt) + 1).toISOString(),
+          draftId: noContent.id,
+        },
+        mutationContext("send-stale-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.reconcileDraft(
+        userId,
+        noContent.id,
+        "not_sent",
+        mutationContext("reconcile-certain-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    const uncertain = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Potentially delivered",
+      cc: [],
+      subject: "Uncertain",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await database.db
+      .update(mailDrafts)
+      .set({
+        sendClaimedAt: new Date("2026-07-16T11:55:00.000Z"),
+        sendClaimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sendStatus: "reconcile",
+      })
+      .where(eq(mailDrafts.id, uncertain.id));
+    await expect(
+      service.reconcileDraft(userId, uncertain.id, "sent", mutationContext("reconcile-sent-draft")),
+    ).resolves.toMatchObject({ sendStatus: "sent", sentAt: expectedUpdatedAt });
+
+    const staleSending = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Claimed before interruption",
+      cc: [],
+      subject: "Stale claim",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await database.db
+      .update(mailDrafts)
+      .set({
+        sendClaimedAt: new Date("2026-07-16T10:00:00.000Z"),
+        sendClaimId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        sendStatus: "sending",
+      })
+      .where(eq(mailDrafts.id, staleSending.id));
+    await expect(
+      service.reconcileDraft(
+        userId,
+        staleSending.id,
+        "not_sent",
+        mutationContext("reconcile-stale-send-claim"),
+      ),
+    ).resolves.toMatchObject({ sendStatus: "draft", sentAt: null });
+
+    await database.db
+      .delete(mailDrafts)
+      .where(inArray(mailDrafts.id, [noRecipient.id, noContent.id, uncertain.id, staleSending.id]));
   });
 
   it("releases proven rejection but blocks retries after ambiguous provider acceptance", async () => {
@@ -680,6 +750,9 @@ describe.sequential("mail service", () => {
     await expect(service.listThreads(userId, { limit: 100, starred: true })).resolves.toEqual([
       expect.objectContaining({ id: threadId }),
     ]);
+    await expect(service.listThreads(userId, { limit: 100, mailboxRole: "sent" })).resolves.toEqual(
+      [expect.objectContaining({ id: secondThreadId })],
+    );
     await service.snoozeThread(userId, threadId, new Date("2026-07-18T12:00:00.000Z"));
     await expect(service.listThreads(userId, { limit: 100, snoozed: true })).resolves.toEqual([
       expect.objectContaining({ id: threadId }),
@@ -792,9 +865,46 @@ describe.sequential("mail service", () => {
 
   it("maps multi-inbox setup and serializes source-derived Mail attention", async () => {
     await expect(service.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "available" })],
       automation: { lastCompletedAt: null, oldestDueAt: null },
       commitmentIntake: { previewOnlyCount: 0 },
     });
+    const serviceWithoutCapability = createMailService({
+      db: database.db,
+      gateway: { send: gateway.send, update: gateway.update },
+      now: () => new Date("2026-07-16T12:00:00.000Z"),
+      reviewSigningKey: "mail-review-signing-key-for-tests",
+    });
+    await expect(serviceWithoutCapability.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "unavailable" })],
+    });
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: "Reconnect required.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "authorization_revoked",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+      })
+      .where(eq(calendarAccounts.id, enabledAccountId));
+    gateway.sendCapability.mockClear();
+    await expect(service.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "reconnect" })],
+    });
+    expect(gateway.sendCapability).not.toHaveBeenCalled();
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+        syncStatus: "idle",
+      })
+      .where(eq(calendarAccounts.id, enabledAccountId));
     const [sparseICloudAccount] = await database.db
       .insert(calendarAccounts)
       .values({

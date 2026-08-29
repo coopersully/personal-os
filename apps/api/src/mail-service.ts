@@ -21,7 +21,6 @@ import type {
   BulkUpdateMailResult,
   CreateMailDraftInput,
   CreateMailRuleInput,
-  LegacyMailDraft,
   Mailbox,
   MailDraft,
   MailListQuery,
@@ -510,6 +509,40 @@ export function createMailService({
           "This draft changed or is no longer editable. Reload it before continuing.",
         );
       }
+      const [account] = await db
+        .select({ id: calendarAccounts.id })
+        .from(calendarAccounts)
+        .where(
+          and(
+            eq(calendarAccounts.id, input.accountId),
+            eq(calendarAccounts.userId, userId),
+            eq(calendarAccounts.mailEnabled, true),
+          ),
+        )
+        .limit(1);
+      if (!account) {
+        throw new AppError("invalid_request", "Select one of your connected Mail accounts.");
+      }
+      if (input.threadId) {
+        const [thread] = await db
+          .select({ id: mailThreads.id })
+          .from(mailThreads)
+          .where(
+            and(
+              eq(mailThreads.id, input.threadId),
+              eq(mailThreads.userId, userId),
+              eq(mailThreads.accountId, input.accountId),
+              isNull(mailThreads.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!thread) {
+          throw new AppError(
+            "invalid_request",
+            "The draft conversation must belong to the selected Mail account.",
+          );
+        }
+      }
       const updatedAt = new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1));
       const [updated] = await db
         .update(mailDrafts)
@@ -763,25 +796,6 @@ export function createMailService({
       });
     },
 
-    async deleteLegacyDraft(userId: string, id: string): Promise<void> {
-      const [deleted] = await db
-        .delete(mailDrafts)
-        .where(and(eq(mailDrafts.id, id), eq(mailDrafts.userId, userId)))
-        .returning({ id: mailDrafts.id });
-      if (deleted === undefined) {
-        throw new AppError("not_found", "The historical Mail draft was not found.");
-      }
-    },
-
-    async listLegacyDrafts(userId: string): Promise<LegacyMailDraft[]> {
-      const drafts = await db
-        .select()
-        .from(mailDrafts)
-        .where(eq(mailDrafts.userId, userId))
-        .orderBy(desc(mailDrafts.updatedAt));
-      return drafts.map(serializeLegacyMailDraft);
-    },
-
     async snoozeThread(userId: string, threadId: string, until: Date) {
       const [thread] = await db
         .select({ id: mailThreads.id })
@@ -1019,6 +1033,18 @@ export function createMailService({
         }
         automationByAccount.set(summary.accountId, current);
       }
+      const sendCapabilities = new Map(
+        await Promise.all(
+          accounts.map(async (account) => {
+            const health = connectionHealthForAccount(account);
+            const capability =
+              health.state === "reconnect"
+                ? "reconnect"
+                : ((await gateway.sendCapability?.(userId, account.id)) ?? "unavailable");
+            return [account.id, capability] as const;
+          }),
+        ),
+      );
       return {
         accounts: accounts.map((account) => ({
           accountId: account.id,
@@ -1037,7 +1063,7 @@ export function createMailService({
           lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
           mailboxes: mailboxesByAccount.get(account.id) ?? [],
           provider: account.provider as "google" | "icloud",
-          sendCapability: "unavailable",
+          sendCapability: sendCapabilities.get(account.id) ?? "unavailable",
           nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
           syncError: account.syncError,
           syncStatus: account.syncStatus,
@@ -1658,6 +1684,19 @@ export function createMailService({
           sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
         );
       }
+      if (query.mailboxRole) {
+        conditions.push(sql`exists (
+          select 1 from ${mailboxes}
+          inner join ${calendarAccounts}
+            on ${calendarAccounts.id} = ${mailboxes.accountId}
+           and ${calendarAccounts.mailEnabled} = true
+          where ${mailboxes.userId} = ${userId}
+            and ${mailboxes.accountId} = ${mailThreads.accountId}
+            and ${mailboxes.role} = ${query.mailboxRole}
+            and ${mailboxes.deletedAt} is null
+            and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
+        )`);
+      }
       const records = await db
         .select()
         .from(mailThreads)
@@ -1831,26 +1870,6 @@ function serializeMailRule(row: typeof mailRules.$inferSelect): MailRule {
     sourceIds: row.sourceAccountIds,
     updatedAt: row.updatedAt.toISOString(),
     version: row.version,
-  };
-}
-
-function serializeLegacyMailDraft(row: typeof mailDrafts.$inferSelect): LegacyMailDraft {
-  return {
-    accountId: row.accountId,
-    body: row.body,
-    cc: row.cc.map((recipient) => recipient.address),
-    createdAt: row.createdAt.toISOString(),
-    deliveryState:
-      row.sentAt !== null || row.sendStatus === "sent"
-        ? "sent"
-        : row.sendStatus === "draft"
-          ? "unsent"
-          : "delivery_unknown",
-    id: row.id,
-    subject: row.subject,
-    threadId: row.threadId,
-    to: row.to.map((recipient) => recipient.address),
-    updatedAt: row.updatedAt.toISOString(),
   };
 }
 

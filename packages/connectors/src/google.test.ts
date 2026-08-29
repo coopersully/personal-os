@@ -1,5 +1,10 @@
 import { ConnectorError } from "./failures.js";
-import { createGoogleConnector, googleGrantedServices, projectGmailAttachments } from "./google.js";
+import {
+  createGoogleConnector,
+  googleGrantedServices,
+  googleMailSendGranted,
+  projectGmailAttachments,
+} from "./google.js";
 import {
   calendarAttachmentProjectionOverflow,
   MAX_MAIL_ATTACHMENT_METADATA_LENGTH,
@@ -206,6 +211,13 @@ describe("Google Calendar connector", () => {
     expect(
       googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
     ).toEqual([]);
+    expect(
+      googleMailSendGranted(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
+    ).toBe(true);
+    expect(
+      googleMailSendGranted(credentialsWith("https://www.googleapis.com/auth/gmail.modify")),
+    ).toBe(false);
+    expect(googleMailSendGranted(credentialsWith("https://mail.google.com/"))).toBe(true);
     expect(
       googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/calendar")),
     ).toEqual(["calendar"]);

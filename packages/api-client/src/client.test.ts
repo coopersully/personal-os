@@ -2442,10 +2442,6 @@ describe("ilo API client", () => {
         to: [],
       },
     ]);
-    await expect(api.listLegacyMailDrafts()).resolves.toEqual([
-      expect.objectContaining({ body: "Draft", deliveryState: "unsent", id }),
-    ]);
-    await expect(api.deleteLegacyMailDraft(id)).resolves.toBeUndefined();
     await expect(
       api.createMailRule({
         actions: mailRule.actions,

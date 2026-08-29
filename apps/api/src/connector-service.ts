@@ -15,6 +15,7 @@ import {
   ConnectorError,
   createICloudConnector,
   googleGrantedServices,
+  googleMailSendGranted,
   MailSendPreAcceptanceError,
 } from "@personal-os/connectors";
 import {
@@ -205,6 +206,10 @@ export type ConnectedEventGateway = {
 };
 
 export type ConnectedMailGateway = {
+  sendCapability?: (
+    userId: string,
+    accountId: string,
+  ) => Promise<"available" | "reconnect" | "unavailable">;
   send: (
     userId: string,
     accountId: string,
@@ -627,6 +632,19 @@ export function createConnectorService({
   };
 
   const mailGateway: ConnectedMailGateway = {
+    async sendCapability(userId, accountId) {
+      try {
+        const account = await getAccount(userId, accountId);
+        if (!account.mailEnabled || !account.email) return "unavailable";
+        if (account.provider === "icloud") return icloud.sendMail ? "available" : "unavailable";
+        if (account.provider !== "google" || !google.sendMail) return "unavailable";
+        return googleMailSendGranted(credentials<GoogleCredentials>(account))
+          ? "available"
+          : "reconnect";
+      } catch {
+        return "unavailable";
+      }
+    },
     async send(userId, accountId, input) {
       const account = await getAccount(userId, accountId);
       if (!account.mailEnabled) {

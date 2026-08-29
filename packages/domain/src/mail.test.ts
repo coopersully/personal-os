@@ -1,6 +1,5 @@
 import {
   createMailDraftInputSchema,
-  legacyMailDraftSchema,
   mailDraftSchema,
   mailSetupAccountSchema,
   sendMailDraftInputSchema,
@@ -11,29 +10,6 @@ const draftId = "11111111-1111-4111-8111-111111111111";
 const now = "2026-08-28T12:00:00.000Z";
 
 describe("Mail domain", () => {
-  it("projects historical drafts without recovery or provider authority", () => {
-    const draft = legacyMailDraftSchema.parse({
-      accountId: "22222222-2222-4222-8222-222222222222",
-      body: "Unsent body",
-      cc: [],
-      createdAt: "2026-08-25T12:00:00.000Z",
-      deliveryState: "delivery_unknown",
-      id: "11111111-1111-4111-8111-111111111111",
-      providerId: "provider-draft-1",
-      sendClaimToken: "claim-1",
-      sendClaimedAt: "2026-08-25T12:00:00.000Z",
-      subject: "Historical draft",
-      threadId: null,
-      to: ["person@example.com"],
-      updatedAt: "2026-08-25T12:00:00.000Z",
-    });
-
-    expect(draft).not.toHaveProperty("sendClaimToken");
-    expect(draft).not.toHaveProperty("sendClaimedAt");
-    expect(draft).not.toHaveProperty("providerId");
-    expect(draft.to).toEqual(["person@example.com"]);
-  });
-
   it("accepts incomplete durable drafts without inventing unsupported fields", () => {
     const input = createMailDraftInputSchema.parse({
       accountId,

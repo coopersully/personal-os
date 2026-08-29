@@ -5,14 +5,17 @@
 > trademark terms are available in [COMMERCIAL.md](COMMERCIAL.md) and
 > [TRADEMARKS.md](TRADEMARKS.md).
 
-ilo is a transparent coordination layer shared by people and agents. It combines reminders, calendars, and read-only mail in one directly editable surface and exposes the same material through HTTP and MCP.
+ilo is a transparent coordination layer shared by people and agents. It combines reminders,
+calendars, and unified mail in one directly editable surface and exposes the same material through
+HTTP and MCP.
 
 The first slice is complete enough to run end to end:
 
 - responsive installable React PWA;
 - compact Tauri overlay for macOS and Windows with always-on-top mode;
 - reminder, local-calendar, and event workflows;
-- unified read-only Google and iCloud mailboxes with search and conversation reading;
+- unified Google and iCloud mailboxes with search, conversation reading, durable drafts, and
+  human-confirmed plain-text sending;
 - multi-account Google Calendar/Gmail OAuth, discovery, synchronization, and calendar write-through CRUD;
 - one iCloud app-specific-password connection for IMAP Mail, CalDAV Calendar, or both;
 - opaque human sessions and separately scoped, revocable agent tokens;

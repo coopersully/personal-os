@@ -1650,10 +1650,11 @@ describe("domain schemas", () => {
         accountIds: `${accountId},`,
         limit: "25",
         mailboxId: id,
+        mailboxRole: "sent",
         query: "sender",
         unread: "true",
       }),
-    ).toMatchObject({ accountIds: [accountId], limit: 25, unread: true });
+    ).toMatchObject({ accountIds: [accountId], limit: 25, mailboxRole: "sent", unread: true });
     expect(mailListQuerySchema.parse({ unread: "false" }).unread).toBe(false);
     expect(mailListQuerySchema.parse({ snoozed: "true", starred: "true" })).toMatchObject({
       snoozed: true,

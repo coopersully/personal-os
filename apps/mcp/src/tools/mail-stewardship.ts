@@ -16,7 +16,7 @@ export function registerMailStewardshipTools(server: McpServer, api: PersonalOsA
         readOnlyHint: true,
       },
       description:
-        "Read the API-owned Mail workspace status, including objective, freshness, obligations, questions, effects, maintenance lifecycle, authority boundaries, and latest immutable review. Ilo never sends email.",
+        "Read the API-owned Mail workspace status, including objective, freshness, obligations, questions, effects, maintenance lifecycle, authority boundaries, and latest immutable review. This MCP tool cannot send email.",
       inputSchema: z.object({}),
       title: "Get Mail workspace status",
     },

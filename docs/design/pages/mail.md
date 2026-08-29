@@ -4,9 +4,13 @@
 
 Read and act on one unified mailbox while retaining clear source-account and provider authority.
 
-Ilo never sends email. It has no compose, reply, forward, draft-creation, provider-delivery, or MCP
-send capability. Historical Ilo draft records may only be listed by their owner, exported locally,
-or permanently deleted by their owner.
+The combined Inbox is the default and visually primary destination. Individual provider accounts
+remain available under a collapsed Accounts disclosure for troubleshooting and deliberate
+single-source review, not as the normal way to use Mail.
+
+Signed-in people may compose, reply, forward, and send plain-text messages. Every message is an
+Ilo-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
+stewardship have no send capability.
 
 ## Connection health
 
@@ -69,7 +73,8 @@ poll, sequence steps, retry effects, or decide completion.
 | Automatic | Inspect; refresh/snapshot; reconcile Ilo-owned state; deduplicate questions; calculate status; publish reviews |
 | Approved rule | Mark read/unread, star/unstar, archive, or move only through an active exact rule |
 | Individual approval | Trash and rule activation |
-| Unavailable | Compose, draft, reply, forward, and send email |
+| Signed-in person | Compose, edit drafts, reply, forward, explicitly confirm send, and reconcile uncertain delivery |
+| Unavailable | Autonomous or MCP-originated email transmission |
 
 One-off question answers resolve only the exact record. Reusable learning requires an explicit
 generalization proposal with examples, counterexamples, and exceptions, followed by separate rule
@@ -96,19 +101,17 @@ approval, learning, status inference, or completion decision. Existing surgical 
 approved-rule preview tools remain typed API adapters.
 
 In v1, Ilo does not infer intent from prose and does not use model judgment for assessment. It asks
-a bounded question when explicit evidence is absent. Ilo never sends email.
+a bounded question when explicit evidence is absent. Only the signed-in human Mail surface can
+initiate delivery.
 
 ## Acceptance
 
 - Mail uses the full workspace body: the conversation list and reader fill the
   available shell height like Calendar, rather than sitting in a capped card or
   narrow page column.
-- Connected-account headers are disclosure categories, not mailbox selections:
-  they stay visually flat while their indented child destinations carry the
-  active state.
-- Unified inbox is a disclosure category in the contextual sidebar. Its All
-  mail, Unread, Starred, and Snoozed children govern the cross-account
-  conversation list; account headers use the same category pattern.
+- Inbox, Unread, Starred, Snoozed, Sent, and Drafts are direct unified destinations.
+- Accounts is collapsed by default. Opening an account is a secondary choice and never changes the
+  combined Inbox default.
 - Mail keeps the global app bar for workspace identity and Sync. Search belongs
   to the conversation-list pane so its scope remains clear while a message is
   open.
@@ -125,9 +128,14 @@ a bounded question when explicit evidence is absent. Ilo never sends email.
   actions move into More rather than overflowing horizontally.
 - Unified and account mailbox navigation remains usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
+- The reconnect warning sits above the conversation list so cached mail stays visible and useful.
+- The end-justified floating plus opens a plain-text composer with From, To, optional Cc, Subject,
+  and Message. Drafts autosave, Escape restores focus, and the final send confirmation names the
+  sender and recipients.
+- Reply and Forward live with the reader controls. Drafts exposes editable drafts and explicit
+  reconciliation for delivery whose provider acceptance is uncertain.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.
 - No provider response body, token-shaped value, socket message, or exception reaches the Mail UI.
 - The exact-thread stewardship panel exposes disposition, obligation state, question answers,
   explicit feedback, Calendar evidence handoff, and a private non-transmittable response brief.
-- No Mail surface renders recipient/body composition, copy-to-send, `mailto:`, reply, forward, or
-  send actions.
+- No MCP or autonomous Mail surface renders a send action or obtains provider delivery authority.

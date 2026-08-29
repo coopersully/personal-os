@@ -2,6 +2,17 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-29 — Unified Mail and human-confirmed compose
+
+- Made the combined Inbox the direct default, added unified Unread, Starred, Snoozed, Sent, and
+  Drafts destinations, and moved individual provider mailboxes behind a collapsed Accounts control.
+- Kept cached conversations usable while placing reconnect state directly above the message list.
+- Added an end-justified floating plain-text composer, Reply and Forward entry points, durable
+  autosave, exact-revision confirmation, and a Drafts recovery surface for uncertain delivery.
+- Restored explicit Google `gmail.send` and bounded iCloud STARTTLS SMTP delivery with matching
+  production egress. Provider ambiguity is never automatically retried.
+- Kept delivery human-only: no MCP or autonomous stewardship send capability was added.
+
 ## 2026-08-25 — Mail workspace stewardship
 
 - Added the owner-scoped Mail stewardship ledger for obligations, versioned dispositions,
@@ -24,12 +35,14 @@ This log records delivered vertical slices against the master plan. It does not 
 - Shared Integration changes were kept separate: owner-fenced connector rule-work dispatch,
   application route/navigation composition, deterministic QA states, and redacted Mail
   question/blocker projection into Today-owned Reviews. Shared Reviews never owns Mail mutation.
-- Ilo never sends email.
+- At the time of this slice, Mail transmission was unavailable. This boundary was superseded by
+  the 2026-08-29 human-confirmed compose slice; autonomous and MCP transmission remain unavailable.
 
 ## 2026-08-25 — Mail no-send boundary
 
 - Removed Gmail send authority, iCloud SMTP delivery, application TCP 587 egress, and every typed
-  client, MCP, and web compose/send affordance. Ilo never sends user email.
+  client, MCP, and web compose/send affordance. This historical contraction was superseded for the
+  signed-in human Mail surface on 2026-08-29; the MCP boundary remains in force.
 - Retained an authenticated compatibility window for historical Ilo drafts: owners can list,
   export locally, or permanently delete them, while former mutation endpoints return a permanent
   `410 feature_unavailable` response.

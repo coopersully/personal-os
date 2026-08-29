@@ -429,6 +429,7 @@ The application security group must allow the transports used by enabled connect
 | --- | ---: |
 | HTTPS APIs, OAuth, CalDAV, and Resend | TCP 443 |
 | iCloud Mail IMAP over TLS | TCP 993 |
+| iCloud Mail SMTP submission with STARTTLS | TCP 587 |
 
 `pnpm lint` checks this timeout and network contract against the Terraform and connector defaults.
 
@@ -498,11 +499,11 @@ remain disabled.
 ### Apple iCloud
 
 iCloud uses the person's Apple Account email and an app-specific password. Calendar traffic uses
-CalDAV over HTTPS; Mail reads and inbound projection use IMAP over TLS on port 993. Ilo never sends
-user email and has no SMTP transport. The connect response confirms that the encrypted account was
-saved, then Calendar discovery and Mail sync run asynchronously. Invalid credentials or unavailable
-Apple services leave the account visible with an error so the person can retry or reconnect without
-holding the original request open.
+CalDAV over HTTPS; Mail reads and inbound projection use IMAP over TLS on port 993. Human-confirmed
+plain-text Mail delivery uses authenticated SMTP submission with STARTTLS on port 587. The connect
+response confirms that the encrypted account was saved, then Calendar discovery and Mail sync run
+asynchronously. Invalid credentials or unavailable Apple services leave the account visible with an
+error so the person can retry or reconnect without holding the original request open.
 
 When `icloud_mail_idle_enabled` is true, each claimed account receives a bounded 25-minute IMAP IDLE
 session subject to the configured per-task concurrency. IDLE events only enqueue durable work;

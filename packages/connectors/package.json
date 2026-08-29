@@ -17,10 +17,12 @@
     "ical.js": "^2.2.1",
     "imapflow": "^1.7.0",
     "mailparser": "^3.9.14",
+    "nodemailer": "^7.0.10",
     "tsdav": "^2.3.1",
     "zod": "^4.0.5"
   },
   "devDependencies": {
-    "@types/mailparser": "^3.4.6"
+    "@types/mailparser": "^3.4.6",
+    "@types/nodemailer": "^7.0.4"
   }
 }

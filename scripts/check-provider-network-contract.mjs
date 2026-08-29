@@ -87,14 +87,17 @@ if (!/host:\s*"imap\.mail\.me\.com"[\s\S]*?port:\s*993/.test(icloud)) {
 }
 
 requireApplicationEgress(993, "iCloud Mail IMAP over TLS");
-rejectContract(google, /gmail\.send/, "Gmail send authority");
-rejectContract(icloud, /smtp\.mail\.me\.com|nodemailer|createTransport/, "iCloud SMTP delivery");
+if (!/gmail\.send/.test(google)) {
+  throw new Error("Google Mail delivery must request explicit Gmail send authority.");
+}
+if (!/host:\s*"smtp\.mail\.me\.com"[\s\S]*?port:\s*587[\s\S]*?secure:\s*false/.test(icloud)) {
+  throw new Error("iCloud Mail delivery must declare STARTTLS SMTP submission on port 587.");
+}
+if (!/connectionTimeout:\s*PROVIDER_REQUEST_TIMEOUT_MS/.test(icloud)) {
+  throw new Error("iCloud SMTP must use the shared provider connection timeout.");
+}
+requireApplicationEgress(587, "iCloud Mail SMTP submission");
 rejectContract(mailMcp, /["'](?:create_mail_draft|send_mail)["']/, "Mail delivery MCP tools");
-rejectContract(
-  network,
-  /description\s*=\s*"iCloud Mail SMTP submission"[\s\S]*?from_port\s*=\s*587/,
-  "Mail SMTP egress",
-);
 requireSsmRuntimeKey("GOOGLE_CLIENT_ID");
 requireSsmRuntimeKey("GOOGLE_CLIENT_SECRET");
 if (/name\s*=\s*"GOOGLE_CLIENT_ID"\s*,\s*value\s*=/.test(compute)) {

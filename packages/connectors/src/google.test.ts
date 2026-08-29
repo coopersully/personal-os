@@ -124,7 +124,7 @@ describe("Google Calendar connector", () => {
     expect(url.searchParams.get("state")).toBe("state-value");
     expect(url.searchParams.get("scope")).toContain("calendar.events");
     expect(url.searchParams.get("scope")).toContain("gmail.modify");
-    expect(url.searchParams.get("scope")).not.toContain("gmail.send");
+    expect(url.searchParams.get("scope")).toContain("gmail.send");
     expect(url.searchParams.get("login_hint")).toBe("test@example.com");
     expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
@@ -168,7 +168,7 @@ describe("Google Calendar connector", () => {
     expect(calendarScopes).toContain("calendar.events");
     expect(calendarScopes).not.toContain("gmail.modify");
     expect(mailScopes).toContain("gmail.modify");
-    expect(mailScopes).not.toContain("gmail.send");
+    expect(mailScopes).toContain("gmail.send");
     expect(mailScopes).not.toContain("calendar.events");
   });
 
@@ -220,8 +220,56 @@ describe("Google Calendar connector", () => {
     expect(googleGrantedServices(credentialsWith(""))).toEqual([]);
   });
 
-  it("does not expose user mail delivery", () => {
-    expect("sendMail" in connector(queued())).toBe(false);
+  it("submits a plain-text message once with the confirmed provider thread", async () => {
+    const fetch = queued(response({ id: "message-1", threadId: "thread-1" }));
+    const google = connector(fetch);
+    if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
+
+    await expect(
+      google.sendMail(
+        {
+          ...fresh,
+          scope:
+            "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+        },
+        {
+          body: "Prepared response",
+          cc: [{ address: "copy@example.com", name: null }],
+          from: "sender@example.com",
+          subject: "Follow up",
+          threadId: "thread-1",
+          to: [{ address: "person@example.com", name: "Person" }],
+        },
+      ),
+    ).resolves.toMatchObject({ accessToken: "access" });
+
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    );
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as {
+      raw: string;
+      threadId: string;
+    };
+    expect(body.threadId).toBe("thread-1");
+    expect(Buffer.from(body.raw, "base64url").toString()).toContain("person@example.com");
+  });
+
+  it("classifies credential failure before provider submission as known non-acceptance", async () => {
+    const fetch = queued(response({ error: "invalid_grant" }, 400));
+    const google = connector(fetch);
+    if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
+
+    await expect(
+      google.sendMail(expired, {
+        body: "Prepared response",
+        cc: [],
+        from: "sender@example.com",
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ name: "MailSendPreAcceptanceError" });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/token");
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("refreshes credentials and reads a paginated profile and calendar list", async () => {

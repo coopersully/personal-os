@@ -85,8 +85,32 @@ function connector(client = davClient(), imap?: Record<string, unknown>) {
 }
 
 describe("iCloud connector", () => {
-  it("does not expose user mail delivery", () => {
-    expect("sendMail" in connector().value).toBe(false);
+  it("submits a plain-text message once and closes the SMTP transport", async () => {
+    const close = vi.fn();
+    const sendMail = vi.fn(async () => ({ accepted: ["person@example.com"] }));
+    const value = createICloudConnector({
+      createSmtpTransport: vi.fn(() => ({ close, sendMail })),
+    } as never);
+    if (!value.sendMail) throw new Error("iCloud Mail delivery capability is missing.");
+
+    await expect(
+      value.sendMail(credentials, {
+        body: "Prepared response",
+        cc: [{ address: "copy@example.com", name: null }],
+        from: credentials.email,
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: "Person" }],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendMail).toHaveBeenCalledWith({
+      cc: [{ address: "copy@example.com" }],
+      from: credentials.email,
+      subject: "Follow up",
+      text: "Prepared response",
+      to: [{ address: "person@example.com", name: "Person" }],
+    });
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("uses a bounded abortable IMAP IDLE session only as a change signal", async () => {

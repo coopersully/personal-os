@@ -26,6 +26,9 @@ with the existing email-oriented Mail domain.
 - Before every outbound message, the sending agent must read a fresh,
   unfiltered view of the latest conversation. A send cannot race past a newer
   inbound or outbound message.
+- An ordinary agent response is exactly one outbound SMS message/bubble. A
+  multi-bubble series is reserved for structured data or user-requested large
+  content that cannot remain usable in one message.
 - Agents may send only to the account's active verified number. There is no
   recipient argument or arbitrary-number API.
 - Version 1 supports plain SMS text only. It excludes MMS, attachments, group
@@ -242,6 +245,7 @@ Each `text_messages` row stores:
 - Twilio-safe error code, predicted and actual segment counts, and other
   provider timestamps;
 - outbound actor type and access-token ID;
+- agent content kind and optional server-issued series ID, part, and total;
 - API idempotency subject/key and request correlation ID;
 - created and updated timestamps.
 
@@ -330,11 +334,22 @@ contract states that limitation rather than claiming otherwise.
 
 ### `send_text_message`
 
-This MCP tool requires `texting:write` and accepts a non-empty `body` plus the
-opaque `conversationReceipt` returned by the immediately preceding qualifying
-read. There is no recipient, sender, schedule, media, or provider argument. It
-is an external-world mutation and is not marked read-only or idempotent at the
-MCP semantic level.
+This MCP tool requires `texting:write` and accepts a non-empty `body`, the opaque
+`conversationReceipt` returned by the immediately preceding qualifying read,
+and these constrained controls when applicable:
+
+- `contentKind`: `concise` by default, or `essential_context`,
+  `structured_data`, `requested_large_content`, or `safety_critical`;
+- a server-issued length-review or exceptional-confirmation token when the
+  graduated length gates require one;
+- `seriesTotal` from two through three only when opening an eligible structured
+  series;
+- a server-issued series ID and exact next part for an already opened
+  structured series.
+
+There is no recipient, sender, schedule, media, arbitrary bubble count, or
+provider argument. It is an external-world mutation and is not marked read-only
+or idempotent at the MCP semantic level.
 
 The API rejects an absent, expired, wrong-token, wrong-time-zone, or stale
 receipt with `conversation_read_required`. If any inbound or outbound message
@@ -346,11 +361,14 @@ authorize at most one new message. Idempotent transport replay of that same
 logical send returns its existing message before receipt freshness is
 re-evaluated.
 
-The API accepts at most 1,600 characters from the agent, then constructs the
-provider body. The final provider body, including required compliance copy,
-must fit Twilio's 1,600-character limit. Therefore the first outbound message
-of a consent epoch may accept fewer agent characters; validation returns the
-exact allowed size before making a provider call.
+The API constructs the complete provider body before evaluating length. The
+count includes API-owned sender/opt-out copy and any series label. It applies
+Twilio Smart Encoding's documented substitutions, detects GSM-7 versus UCS-2,
+and uses the 160 GSM-7 or 70 UCS-2 single-segment limits, followed by the
+US/Canada toll-free concatenation budgets of 152 GSM-7 or 66 UCS-2 characters
+per segment. The final body may not exceed ten predicted segments or Twilio's
+provider maximum. Consequently the exact agent-body budget is dynamic;
+validation reports it before making a provider call.
 
 The first outbound message of every new verification or START consent epoch
 identifies ilo and includes the required `Reply STOP to unsubscribe` language.
@@ -364,6 +382,98 @@ failure. It repeats the message's canonical and localized timestamps so the
 agent does not lose temporal context. Accepted or queued is not represented as
 delivered.
 
+## SMS agent-writing standard
+
+The SMS tool optimizes for useful information per unit of human attention, not
+for raw character compression. Concision must reduce reading effort without
+using unexplained abbreviations, text-speak, or ambiguity.
+
+For an ordinary response the agent must:
+
+1. Send exactly one bubble.
+2. Lead with the answer, result, decision, or required action.
+3. Convey one main idea and include only details that change understanding or
+   action.
+4. Prefer exact names, quantities, dates, deadlines, and next steps over vague
+   references.
+5. Remove greetings, sign-offs, filler acknowledgements, repeated prompt
+   context, and narration about what the agent is doing.
+6. End with no more than one clear question or requested action.
+
+The plain-text format contract is:
+
+- no Markdown headings, emphasis markers, tables, or code fences;
+- at most three short paragraphs for an ordinary message;
+- short numbered list lines such as `1)` when sequence matters, normally no
+  more than five items;
+- no decorative line art or repeated punctuation;
+- no emoji unless it materially carries meaning and matches the user's
+  established style;
+- ordinary English punctuation should remain GSM-7 where possible, while
+  intentional non-English language and accessibility characters are preserved;
+- relevant times use the conversation's explicit local date/time context and
+  include a date or time-zone abbreviation whenever relative wording could be
+  ambiguous;
+- links use a full trusted or ilo-branded domain, never a shared public
+  shortener or an obfuscated redirect;
+- no OTPs, access tokens, secrets, full financial account numbers, or other
+  unnecessary sensitive identifiers.
+
+The agent should combine acknowledgement with substance: `Done - ...` is useful
+when it reports a real result; a standalone `Sure`, `Got it`, or `Happy to help`
+is not. If a complete answer cannot fit the normal budget, the agent first
+sends the most decision-relevant summary and asks whether the user wants the
+detail unless the user already requested it or delay would create a safety
+risk.
+
+### One-bubble rule and structured series
+
+One Programmable Messaging create call is one ilo message and is intended to
+appear as one handset bubble even when carriers transport it as multiple
+billable segments. Reassembly is not universal, which is another reason to keep
+segment counts low. Concatenation is not treated as permission to send a
+sequence of separate messages.
+
+A second outbound message within the same five-minute response window is
+rejected with `single_bubble_response_required` unless the first message opened
+a server-tracked series with `contentKind` equal to `structured_data` or
+`requested_large_content`. The first series send declares the total, from two
+through three. The API issues the series ID and prepends an immutable sequence
+label such as `(1/3)`. Each following part requires another fresh conversation
+read, the exact next part, and the same access token. An intervening inbound
+message cancels the series so the agent must address the new context rather than
+blindly continue.
+
+The agent must use the fewest series parts that preserve comprehension. Content
+requiring more than three bubbles is summarized first; the agent asks whether
+to continue rather than opening a longer automatic sequence.
+
+### Graduated segment gates
+
+The gates apply to the final encoded body of each bubble:
+
+- **One or two segments:** normal send. One segment is preferred when it can
+  remain clear and complete.
+- **Three segments:** allowed without a stop, but classified as the upper end of
+  normal and measured separately.
+- **Four through six segments:** the first attempt returns
+  `long_message_review_required`, the encoding/count, a two-segment compression
+  target, and a signed review token. Resubmission requires a non-`concise`
+  content kind and a short necessity explanation bound to the unchanged body.
+- **Seven through ten segments:** after the normal length review, the API returns
+  a second `exceptional_length_confirmation_required` stop. The final send is
+  allowed only for `structured_data`, `requested_large_content`, or
+  `safety_critical`, with a signed exceptional token bound to the unchanged body
+  and justification.
+- **More than ten segments:** rejected with no override.
+
+Review and confirmation tokens are short-lived and bound to the access token,
+body hash, and conversation receipt. A stop does not send or persist a message,
+advance the conversation revision, consume the read receipt or idempotency key,
+or reserve quota. Changing the body recomputes its segment class and invalidates
+every earlier length token. The API audits the category and gate outcome but
+never the free-text necessity explanation.
+
 ## Limits and cost controls
 
 Before calling Twilio, the service uses GSM-7/UCS-2-aware estimation against the
@@ -372,6 +482,8 @@ reconciles the reservation with Twilio's actual segment count when available.
 
 - Maximum 5 outbound messages per account in a rolling minute.
 - Maximum 100 outbound SMS segments per account in a rolling 24 hours.
+- Maximum 3 bubbles in a server-tracked structured series and 10 predicted
+  segments in any bubble.
 - Verification endpoints have separate per-account, per-fingerprint, and
   trusted-client-IP abuse limits and rely on Twilio Verify's protection as an
   additional layer.
@@ -459,7 +571,11 @@ not bodies or full numbers. They cover:
 - webhook/Event Streams duplicates, age, and processing failures;
 - consent transitions and `21610` reconciliation;
 - accepted, delivered, undelivered, failed, and unknown sends;
-- predicted versus actual segments, account throttles, and circuit-breaker use;
+- predicted versus actual segments and the distribution across one-to-two,
+  three, four-to-six, and seven-to-ten segment classes;
+- length-gate stops and overrides, plus series starts, completed parts, and
+  inbound cancellations, without message bodies or necessity explanations;
+- account throttles and circuit-breaker use;
 - callback lag and provider synchronization health.
 
 Alerts fire for sustained invalid signatures, webhook sink failure, consent
@@ -484,21 +600,24 @@ Before enabling the feature, operations must:
 2. Complete the Twilio Customer Profile and toll-free messaging verification
    for the documented ilo conversational-agent use case.
 3. Configure the number in the Messaging Service sender pool.
-4. Configure signed inbound and delivery-status callback URLs.
-5. Provision the authenticated Event Streams webhook Sink and subscribe to the
+4. Enable Smart Encoding on the Messaging Service and prove the connector's
+   estimator matches its documented substitutions and toll-free segment counts.
+5. Configure signed inbound and delivery-status callback URLs.
+6. Provision the authenticated Event Streams webhook Sink and subscribe to the
    selected inbound-message schema version with `optOutType`.
-6. Create the Verify Service and apply supported fraud protections.
-7. Publish matching consent, privacy, support, and opt-out language.
-8. Prove STOP, blocked send, START, and resumed send on real US and Canadian
+7. Create the Verify Service and apply supported fraud protections.
+8. Publish matching consent, privacy, support, and opt-out language.
+9. Prove STOP, blocked send, START, and resumed send on real US and Canadian
    handsets before production access is exposed.
 
 ## Verification strategy
 
 Automated coverage includes:
 
-- Domain tests for phone normalization constraints, cursor contracts, segment
-  limits, and every consent/state transition including equal and out-of-order
-  STOP/START.
+- Domain tests for phone normalization constraints, cursor contracts, Smart
+  Encoding/GSM-7/UCS-2 and toll-free segment estimation, all graduated length
+  gates, series constraints, and every consent/state transition including equal
+  and out-of-order STOP/START.
 - Connector tests using official-shaped Twilio fixtures for Verify, Message
   creation, webhook signatures, status normalization, Event Streams parsing,
   additive fields, and provider errors.
@@ -508,12 +627,14 @@ Automated coverage includes:
 - API integration tests for human-only setup, scope isolation, arbitrary-number
   rejection, mandatory read scope, signed conversation receipts, receipt expiry,
   wrong-token and stale-revision rejection, inbound/read/send races, concurrent
-  one-receipt sends, idempotency conflicts/replay, rate limits, circuit breaking,
-  callback ordering, `21610`, invalid signatures, unknown send outcomes, and
-  fail-closed provider state.
+  one-receipt sends, one-bubble enforcement, series creation/order/cancellation,
+  length-token body binding and expiry, idempotency conflicts/replay, rate
+  limits, circuit breaking, callback ordering, `21610`, invalid signatures,
+  unknown send outcomes, and fail-closed provider state.
 - MCP contract tests proving the server calls only the typed API, offers no
   recipient argument, cannot send without a qualifying read, includes explicit
-  current/message timestamps, annotates reads/mutations accurately, and
+  current/message timestamps, describes and exposes the SMS writing contract,
+  preserves every graduated stop, annotates reads/mutations accurately, and
   preserves structured authorization/provider errors.
 - Testing Library coverage for every Settings state, OTP flow, opt-out
   guidance, destructive confirmation, keyboard operation, and status messages.
@@ -558,3 +679,9 @@ in a coordinated shutdown.
 - [Event Streams delivery](https://www.twilio.com/docs/events)
 - [Event Streams webhook security](https://www.twilio.com/docs/events/webhook-quickstart)
 - [Twilio Messaging Policy](https://www.twilio.com/en-us/legal/messaging-policy)
+- [SMS character and segment limits](https://www.twilio.com/docs/glossary/what-sms-character-limit)
+- [Messaging Services and Smart Encoding](https://www.twilio.com/docs/messaging/services)
+
+## Writing reference
+
+- [GOV.UK guidance for writing text messages](https://www.gov.uk/service-manual/design/sending-emails-and-text-messages)

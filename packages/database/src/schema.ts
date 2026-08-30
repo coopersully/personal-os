@@ -46,6 +46,12 @@ import type {
   MaintenanceRunStatus,
   MaintenanceScope,
   MaterialSourceReference,
+  TextContentKind,
+  TextingConnectionState,
+  TextingCountry,
+  TextMessageDirection,
+  TextMessageStatus,
+  TextOccurredAtSource,
   Theme,
   TransactionDirection,
 } from "@personal-os/domain";
@@ -2930,6 +2936,112 @@ export const financeAlerts = pgTable(
       table.status,
     ),
   ],
+);
+
+export const textingConnections = pgTable(
+  "texting_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhoneNumber: jsonb("encrypted_phone_number").$type<EncryptedCredentials>().notNull(),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    country: text("country").$type<TextingCountry>().notNull(),
+    state: text("state").$type<TextingConnectionState>().notNull().default("active"),
+    consentVersion: text("consent_version").notNull(),
+    consentEpoch: integer("consent_epoch").notNull().default(1),
+    conversationRevision: integer("conversation_revision").notNull().default(0),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    optedOutAt: timestamp("opted_out_at", { withTimezone: true }),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("texting_connections_user_idx").on(table.userId),
+    uniqueIndex("texting_connections_active_phone_idx")
+      .on(table.phoneFingerprint)
+      .where(sql`${table.state} <> 'disconnected'`),
+  ],
+);
+
+export const textingVerificationChallenges = pgTable(
+  "texting_verification_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhoneNumber: jsonb("encrypted_phone_number").$type<EncryptedCredentials>().notNull(),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    country: text("country").$type<TextingCountry>().notNull(),
+    providerVerificationSid: text("provider_verification_sid").notNull(),
+    consentVersion: text("consent_version").notNull(),
+    status: text("status")
+      .$type<"pending" | "approved" | "expired" | "failed" | "cancelled">()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("texting_verification_user_idx").on(table.userId, table.createdAt)],
+);
+
+export const textMessages = pgTable(
+  "text_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => textingConnections.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerMessageSid: text("provider_message_sid"),
+    direction: text("direction").$type<TextMessageDirection>().notNull(),
+    status: text("status").$type<TextMessageStatus>().notNull(),
+    body: text("body").notNull(),
+    contentKind: text("content_kind").$type<TextContentKind>(),
+    predictedSegments: integer("predicted_segments"),
+    actualSegments: integer("actual_segments"),
+    seriesId: uuid("series_id"),
+    seriesPart: integer("series_part"),
+    seriesTotal: integer("series_total"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    occurredAtSource: text("occurred_at_source").$type<TextOccurredAtSource>().notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
+    index("text_messages_conversation_idx").on(table.connectionId, table.occurredAt, table.id),
+    index("text_messages_user_outbound_idx").on(table.userId, table.direction, table.createdAt),
+  ],
+);
+
+export const textingConsentEvents = pgTable(
+  "texting_consent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id").references(() => textingConnections.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    kind: text("kind")
+      .$type<
+        "verified_opt_in" | "provider_stop" | "provider_start" | "provider_block" | "disconnected"
+      >()
+      .notNull(),
+    source: text("source").$type<"ilo" | "twilio">().notNull(),
+    providerEventId: text("provider_event_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("texting_consent_phone_idx").on(table.phoneFingerprint, table.occurredAt)],
 );
 
 export const auditEvents = pgTable(

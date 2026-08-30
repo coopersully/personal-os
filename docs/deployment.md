@@ -515,6 +515,18 @@ Mail change, and scheduled fallback before enabling this gate in production.
 
 Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set its client ID (plus client secret for a confidential client). The connector requests only `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`. After connecting in **Settings → Connections**, select one bookmark folder. ilo stores the OAuth refresh token encrypted, projects only that folder's posts, and exposes the projection to agents through the `bookmarks:read` scope and the `list_x_bookmarks` MCP tool. It never writes to X.
 
+## Twilio texting configuration
+
+Create one toll-free Messaging Service sender and one Verify Service. Point the
+Messaging Service inbound webhook to
+`https://api.<domain>/v1/webhooks/twilio/inbound`; status callbacks are supplied
+per message. Configure the five `TWILIO_*` values and enable
+`TEXTING_ENABLED` only after toll-free verification is ready. Keep Twilio's
+provider opt-out filtering enabled. ilo mirrors STOP/START locally, accepts
+Twilio Advanced Opt-Out classifications when configured, and treats provider
+error 21610 as authoritative. Follow the production-evidence checklist in
+[`texting-operations.md`](product/texting-operations.md) before rollout.
+
 ## Backups and rollback
 
 RDS retains seven days of automated backups and AWS Backup creates a weekly

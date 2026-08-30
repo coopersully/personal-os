@@ -191,6 +191,10 @@ resource "aws_ecs_task_definition" "api" {
         { name = "ICLOUD_MAIL_IDLE_ENABLED", value = "true" },
         { name = "ICLOUD_MAIL_IDLE_CONCURRENCY", value = tostring(var.icloud_mail_idle_concurrency) },
       ] : [],
+      var.texting_enabled ? [
+        { name = "TEXTING_ENABLED", value = "true" },
+        { name = "TWILIO_PHONE_NUMBER", value = var.twilio_phone_number },
+      ] : [],
     )
     secrets = concat(
       [
@@ -208,6 +212,12 @@ resource "aws_ecs_task_definition" "api" {
       var.x_enabled ? [
         { name = "X_CLIENT_ID", valueFrom = local.runtime_parameter_arns.X_CLIENT_ID },
         { name = "X_CLIENT_SECRET", valueFrom = local.runtime_parameter_arns.X_CLIENT_SECRET },
+      ] : [],
+      var.texting_enabled ? [
+        { name = "TWILIO_ACCOUNT_SID", valueFrom = local.runtime_parameter_arns.TWILIO_ACCOUNT_SID },
+        { name = "TWILIO_AUTH_TOKEN", valueFrom = local.runtime_parameter_arns.TWILIO_AUTH_TOKEN },
+        { name = "TWILIO_MESSAGING_SERVICE_SID", valueFrom = local.runtime_parameter_arns.TWILIO_MESSAGING_SERVICE_SID },
+        { name = "TWILIO_VERIFY_SERVICE_SID", valueFrom = local.runtime_parameter_arns.TWILIO_VERIFY_SERVICE_SID },
       ] : [],
     )
     logConfiguration = {

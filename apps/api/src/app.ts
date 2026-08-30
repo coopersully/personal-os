@@ -3,6 +3,7 @@ import {
   createGoogleConnector,
   createICloudConnector,
   createPlaidConnector,
+  createTwilioConnector,
   createXConnector,
 } from "@personal-os/connectors";
 import {
@@ -72,7 +73,9 @@ import {
   requireScope,
 } from "./routes/support.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
+import { registerTextingRoutes } from "./routes/texting.js";
 import { createTaskService } from "./task-service.js";
+import { createTextingService } from "./texting-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -206,6 +209,14 @@ const agentDomainSupport = {
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
+  const textingConfig = dependencies.config.texting ?? {
+    accountSid: "",
+    authToken: "",
+    enabled: false,
+    messagingServiceSid: "",
+    senderPhoneNumber: "",
+    verifyServiceSid: "",
+  };
   const observeRejectedNotification = (
     requestId: string,
     status: number,
@@ -510,6 +521,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     status: financeStatus,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
+  const twilio =
+    dependencies.twilio ??
+    (textingConfig.accountSid && textingConfig.authToken
+      ? createTwilioConnector({
+          accountSid: textingConfig.accountSid,
+          authToken: textingConfig.authToken,
+          messagingServiceSid: textingConfig.messagingServiceSid,
+          verifyServiceSid: textingConfig.verifyServiceSid,
+        })
+      : undefined);
+  const texting = createTextingService({
+    apiBaseUrl: dependencies.config.apiBaseUrl,
+    db: dependencies.db,
+    enabled: textingConfig.enabled,
+    encryptionKey: dependencies.config.encryptionKey,
+    senderPhoneNumber: textingConfig.senderPhoneNumber,
+    ...(twilio ? { twilio } : {}),
+    now,
+  });
 
   app.use("*", async (context, next) => {
     const requestId = context.req.header("x-request-id") ?? randomUUID();
@@ -872,6 +902,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/reminders", authenticate);
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
+  app.use("/v1/texting/*", authenticate);
+  app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
   app.use("/v1/calendars", authenticate);
   app.use("/v1/events/*", authenticate);
@@ -1161,6 +1193,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     calendar,
     mutationContext,
     stewardship: calendarStewardship,
+  });
+
+  registerTextingRoutes({
+    app,
+    texting,
+    ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
 
   app.get("/v1/audit", async (context) => {

@@ -25,6 +25,7 @@ locals {
     ]),
     var.plaid_enabled ? toset(["PLAID_CLIENT_ID", "PLAID_SECRET"]) : toset([]),
     var.x_enabled ? toset(["X_CLIENT_ID", "X_CLIENT_SECRET"]) : toset([]),
+    var.texting_enabled ? toset(["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID", "TWILIO_VERIFY_SERVICE_SID"]) : toset([]),
   )
 
   runtime_parameter_arns = {

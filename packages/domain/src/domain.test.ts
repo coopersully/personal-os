@@ -709,6 +709,7 @@ describe("domain schemas", () => {
       "reminders",
       "settings",
       "tasks",
+      "texting",
     ]);
     expect(agentMutationPolicies).toEqual([
       "read_only",

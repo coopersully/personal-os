@@ -20,7 +20,7 @@ import {
   type TextingConnection,
   textingConsentVersion,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import { decryptJson, encryptJson } from "./security.js";
@@ -40,6 +40,7 @@ type Options = {
 
 type EncryptedPhone = { e164: string };
 
+/** Own verified-number lifecycle, consent ordering, conversation reads, and durable SMS sends. */
 export function createTextingService(options: Options) {
   const now = options.now ?? (() => new Date());
   const fingerprint = (phone: string) =>
@@ -73,32 +74,71 @@ export function createTextingService(options: Options) {
   async function startVerification(userId: string, input: StartTextingVerificationInput) {
     const twilio = requireProvider();
     const phone = normalizeTextingPhoneNumber(input);
-    const verification = await twilio.startVerification(phone.e164);
     const expiresAt = new Date(now().getTime() + 10 * 60_000);
-    const [createdChallenge] = await options.db
-      .insert(textingVerificationChallenges)
-      .values({
-        consentVersion: textingConsentVersion,
-        country: phone.country,
-        encryptedPhoneNumber: encryptJson({ e164: phone.e164 }, options.encryptionKey),
-        expiresAt,
-        phoneFingerprint: fingerprint(phone.e164),
-        phoneLastFour: phone.lastFour,
-        providerVerificationSid: verification.sid,
-        status: "pending",
-        userId,
-      })
-      .returning();
+    const [createdChallenge] = await options.db.transaction(async (tx) => {
+      await tx
+        .update(textingVerificationChallenges)
+        .set({ status: "cancelled" })
+        .where(
+          and(
+            eq(textingVerificationChallenges.userId, userId),
+            inArray(textingVerificationChallenges.status, ["starting", "pending", "uncertain"]),
+          ),
+        );
+      return tx
+        .insert(textingVerificationChallenges)
+        .values({
+          consentVersion: textingConsentVersion,
+          country: phone.country,
+          encryptedPhoneNumber: encryptJson({ e164: phone.e164 }, options.encryptionKey),
+          expiresAt,
+          phoneFingerprint: fingerprint(phone.e164),
+          phoneLastFour: phone.lastFour,
+          providerVerificationSid: null,
+          status: "starting",
+          userId,
+        })
+        .returning();
+    });
     const challenge = requireDatabaseRecord(
       createdChallenge,
       "Could not create a verification challenge.",
     );
-    return {
-      expiresAt: expiresAt.toISOString(),
-      id: challenge.id,
-      maskedPhoneNumber: `••• ••• ${phone.lastFour}`,
-      status: challenge.status,
-    };
+    try {
+      const verification = await twilio.startVerification(phone.e164);
+      const [pending] = await options.db
+        .update(textingVerificationChallenges)
+        .set({ providerVerificationSid: verification.sid, status: "pending" })
+        .where(
+          and(
+            eq(textingVerificationChallenges.id, challenge.id),
+            eq(textingVerificationChallenges.status, "starting"),
+          ),
+        )
+        .returning();
+      const ready = requireDatabaseRecord(
+        pending,
+        "Could not finalize the verification challenge.",
+      );
+      return {
+        expiresAt: expiresAt.toISOString(),
+        id: ready.id,
+        maskedPhoneNumber: `••• ••• ${phone.lastFour}`,
+        status: "pending" as const,
+      };
+    } catch (error) {
+      await options.db
+        .update(textingVerificationChallenges)
+        .set({ status: "uncertain" })
+        .where(
+          and(
+            eq(textingVerificationChallenges.id, challenge.id),
+            eq(textingVerificationChallenges.status, "starting"),
+          ),
+        )
+        .catch(() => undefined);
+      throw error;
+    }
   }
 
   async function checkVerification(userId: string, challengeId: string, code: string) {
@@ -109,7 +149,7 @@ export function createTextingService(options: Options) {
         eq(textingVerificationChallenges.userId, userId),
       ),
     });
-    if (challenge?.status !== "pending")
+    if (challenge?.status !== "pending" || !challenge.providerVerificationSid)
       throw new AppError("not_found", "Verification challenge not found.");
     if (challenge.expiresAt <= now())
       throw new AppError("invalid_request", "The verification code expired. Request a new one.");
@@ -127,6 +167,9 @@ export function createTextingService(options: Options) {
         const blocked = await tx.query.textingConsentEvents.findFirst({
           orderBy: [
             desc(textingConsentEvents.occurredAt),
+            desc(
+              sql<number>`CASE WHEN ${textingConsentEvents.kind} IN ('provider_stop', 'provider_block') THEN 1 ELSE 0 END`,
+            ),
             desc(textingConsentEvents.createdAt),
             desc(textingConsentEvents.id),
           ],
@@ -245,31 +288,70 @@ export function createTextingService(options: Options) {
         newerCursor: null,
         timeZone,
       };
-    const messages = await options.db
-      .select()
-      .from(textMessages)
-      .where(eq(textMessages.connectionId, row.id))
-      .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
-      .limit(query.limit + 1);
-    const visible = messages.slice(0, query.limit).reverse();
-    const receipt = issueConversationReceipt(
-      {
-        actorId: principal.actorId,
-        exp: current.getTime() + 5 * 60_000,
-        revision: row.conversationRevision,
-        timeZone,
-        userId: principal.userId,
-      },
-      options.encryptionKey,
+    const cursorId = query.beforeCursor ?? query.afterCursor;
+    const cursor = cursorId
+      ? await options.db.query.textMessages.findFirst({
+          where: and(eq(textMessages.connectionId, row.id), eq(textMessages.id, cursorId)),
+        })
+      : undefined;
+    if (cursorId && !cursor)
+      throw new AppError("invalid_request", "Conversation cursor not found.");
+    const beforeCondition = cursor
+      ? or(
+          lt(textMessages.occurredAt, cursor.occurredAt),
+          and(eq(textMessages.occurredAt, cursor.occurredAt), lt(textMessages.id, cursor.id)),
+        )
+      : undefined;
+    const afterCondition = cursor
+      ? or(
+          gt(textMessages.occurredAt, cursor.occurredAt),
+          and(eq(textMessages.occurredAt, cursor.occurredAt), gt(textMessages.id, cursor.id)),
+        )
+      : undefined;
+    const conditions = and(
+      eq(textMessages.connectionId, row.id),
+      query.beforeCursor ? beforeCondition : query.afterCursor ? afterCondition : undefined,
     );
+    const messages = query.afterCursor
+      ? await options.db
+          .select()
+          .from(textMessages)
+          .where(conditions)
+          .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
+          .limit(query.limit + 1)
+      : await options.db
+          .select()
+          .from(textMessages)
+          .where(conditions)
+          .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
+          .limit(query.limit + 1);
+    const selected = messages.slice(0, query.limit);
+    const visible = query.afterCursor ? selected : selected.reverse();
+    const firstVisible = visible[0];
+    const lastVisible = visible.at(-1);
+    const hasExtra = messages.length > query.limit;
+    const receipt = cursorId
+      ? null
+      : issueConversationReceipt(
+          {
+            actorId: principal.actorId,
+            connectionId: row.id,
+            consentEpoch: row.consentEpoch,
+            exp: current.getTime() + 5 * 60_000,
+            revision: row.conversationRevision,
+            timeZone,
+            userId: principal.userId,
+          },
+          options.encryptionKey,
+        );
     return {
       asOf: current.toISOString(),
       connection: publicConnection(row),
       conversationReceipt: receipt,
       currentLocalDateTime: formatTextLocalTime(current, timeZone),
-      /* v8 ignore next -- the true branch guarantees at least one visible row because limit is positive */
-      earlierCursor: messages.length > query.limit ? (visible[0]?.id ?? null) : null,
-      hasEarlierMessages: messages.length > query.limit,
+      earlierCursor:
+        (query.afterCursor && firstVisible) || hasExtra ? (firstVisible?.id ?? null) : null,
+      hasEarlierMessages: Boolean((query.afterCursor && firstVisible) || hasExtra),
       messages: visible.map((message) => ({
         actualSegments: message.actualSegments,
         contentKind: message.contentKind,
@@ -287,7 +369,10 @@ export function createTextingService(options: Options) {
         status: message.status,
         text: message.body,
       })),
-      newerCursor: null,
+      newerCursor:
+        (query.beforeCursor && lastVisible) || (query.afterCursor && hasExtra)
+          ? (lastVisible?.id ?? null)
+          : null,
       timeZone,
     };
   }
@@ -310,6 +395,8 @@ export function createTextingService(options: Options) {
       input.conversationReceipt,
       {
         actorId: principal.actorId,
+        connectionId: row.id,
+        consentEpoch: row.consentEpoch,
         revision: row.conversationRevision,
         timeZone,
         userId: principal.userId,
@@ -389,13 +476,36 @@ export function createTextingService(options: Options) {
         100
     )
       throw new AppError("rate_limited", "Texting quota reached. Try again later.");
-    const phone = decryptJson<EncryptedPhone>(row.encryptedPhoneNumber, options.encryptionKey).e164;
-    const [createdMessage] = await options.db.transaction(async (tx) => {
-      const created = await tx
+    const { createdMessage, phone } = await options.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(textingConnections)
+        .where(eq(textingConnections.userId, principal.userId))
+        .for("update")
+        .limit(1);
+      if (locked?.state !== "active")
+        throw new AppError(
+          "forbidden",
+          "Texting is not active. The user may need to reply START or reconnect.",
+        );
+      verifyConversationReceipt(
+        input.conversationReceipt,
+        {
+          actorId: principal.actorId,
+          connectionId: locked.id,
+          consentEpoch: locked.consentEpoch,
+          revision: locked.conversationRevision,
+          timeZone,
+          userId: principal.userId,
+        },
+        options.encryptionKey,
+        now(),
+      );
+      const [created] = await tx
         .insert(textMessages)
         .values({
           body,
-          connectionId: row.id,
+          connectionId: locked.id,
           contentKind: input.contentKind,
           direction: "outbound",
           occurredAt: now(),
@@ -410,9 +520,12 @@ export function createTextingService(options: Options) {
         .returning();
       await tx
         .update(textingConnections)
-        .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })
-        .where(eq(textingConnections.id, row.id));
-      return created;
+        .set({ conversationRevision: locked.conversationRevision + 1, updatedAt: now() })
+        .where(eq(textingConnections.id, locked.id));
+      return {
+        createdMessage: created,
+        phone: decryptJson<EncryptedPhone>(locked.encryptedPhoneNumber, options.encryptionKey).e164,
+      };
     });
     const pendingMessage = requireDatabaseRecord(
       createdMessage,
@@ -426,23 +539,40 @@ export function createTextingService(options: Options) {
         to: phone,
       });
     } catch (error) {
-      await options.db
-        .update(textMessages)
-        .set({ status: "failed", updatedAt: now() })
-        .where(eq(textMessages.id, pendingMessage.id));
       if (typeof error === "object" && error && "code" in error && error.code === 21610) {
+        await options.db
+          .update(textMessages)
+          .set({ status: "failed", updatedAt: now() })
+          .where(eq(textMessages.id, pendingMessage.id));
         await options.db.transaction(async (tx) => {
-          await tx
-            .update(textingConnections)
-            .set({ optedOutAt: now(), state: "opted_out", updatedAt: now() })
-            .where(eq(textingConnections.id, row.id));
+          const [currentConnection] = await tx
+            .select()
+            .from(textingConnections)
+            .where(
+              and(
+                eq(textingConnections.phoneFingerprint, row.phoneFingerprint),
+                ne(textingConnections.state, "disconnected"),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (currentConnection)
+            await tx
+              .update(textingConnections)
+              .set({
+                consentEpoch: currentConnection.consentEpoch + 1,
+                optedOutAt: now(),
+                state: "opted_out",
+                updatedAt: now(),
+              })
+              .where(eq(textingConnections.id, currentConnection.id));
           await tx.insert(textingConsentEvents).values({
-            connectionId: row.id,
+            connectionId: currentConnection?.id,
             kind: "provider_block",
             occurredAt: now(),
             phoneFingerprint: row.phoneFingerprint,
             source: "twilio",
-            userId: row.userId,
+            userId: currentConnection?.userId,
           });
         });
         throw new AppError(
@@ -450,6 +580,19 @@ export function createTextingService(options: Options) {
           "Twilio reports this recipient has opted out. They must reply START before ilo can text again.",
         );
       }
+      const status =
+        typeof error === "object" &&
+        error &&
+        "status" in error &&
+        typeof error.status === "number" &&
+        error.status >= 400 &&
+        error.status < 500
+          ? "failed"
+          : "unknown";
+      await options.db
+        .update(textMessages)
+        .set({ status, updatedAt: now() })
+        .where(eq(textMessages.id, pendingMessage.id));
       throw error;
     }
     const [message] = await options.db
@@ -468,16 +611,87 @@ export function createTextingService(options: Options) {
     const from = parameters.From;
     const sid = parameters.MessageSid;
     if (!from || !sid) throw new AppError("invalid_request", "Missing Twilio message fields.");
-    const row = await options.db.query.textingConnections.findFirst({
-      where: eq(textingConnections.phoneFingerprint, fingerprint(from)),
+    if (!options.twilio)
+      throw new AppError("service_unavailable", "Texting webhooks are not currently available.");
+    const routed = await options.db.query.textingConnections.findFirst({
+      where: and(
+        eq(textingConnections.phoneFingerprint, fingerprint(from)),
+        ne(textingConnections.state, "disconnected"),
+      ),
     });
-    if (!row) return;
+    if (!routed) return;
+    const occurredAt = await options.twilio.getMessageOccurredAt(sid);
     const body = parameters.Body ?? "";
     // Advanced Opt-Out supplies OptOutType even when the configured keyword is not literally
     // STOP/START. Treat Twilio's classification as authoritative and retain Body as the fallback.
     const keyword = (parameters.OptOutType ?? body).trim().toUpperCase();
-    const state = keyword === "STOP" ? "opted_out" : keyword === "START" ? "active" : row.state;
     await options.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(textingConnections)
+        .where(
+          and(
+            eq(textingConnections.phoneFingerprint, fingerprint(from)),
+            ne(textingConnections.state, "disconnected"),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!row) return;
+      if (keyword === "STOP" || keyword === "START") {
+        const [latest] = await tx
+          .select()
+          .from(textingConsentEvents)
+          .where(
+            and(
+              eq(textingConsentEvents.phoneFingerprint, row.phoneFingerprint),
+              inArray(textingConsentEvents.kind, [
+                "provider_stop",
+                "provider_start",
+                "provider_block",
+              ]),
+            ),
+          )
+          .orderBy(
+            desc(textingConsentEvents.occurredAt),
+            desc(
+              sql<number>`CASE WHEN ${textingConsentEvents.kind} IN ('provider_stop', 'provider_block') THEN 1 ELSE 0 END`,
+            ),
+            desc(textingConsentEvents.createdAt),
+            desc(textingConsentEvents.id),
+          )
+          .limit(1);
+        const [inserted] = await tx
+          .insert(textingConsentEvents)
+          .values({
+            connectionId: row.id,
+            kind: keyword === "STOP" ? "provider_stop" : "provider_start",
+            occurredAt,
+            phoneFingerprint: row.phoneFingerprint,
+            providerEventId: sid,
+            source: "twilio",
+            userId: row.userId,
+          })
+          .onConflictDoNothing()
+          .returning({ id: textingConsentEvents.id });
+        if (!inserted) return;
+        const isNewer = !latest || occurredAt.getTime() > latest.occurredAt.getTime();
+        const stopWinsTie =
+          keyword === "STOP" &&
+          latest?.kind === "provider_start" &&
+          occurredAt.getTime() === latest.occurredAt.getTime();
+        if (isNewer || stopWinsTie)
+          await tx
+            .update(textingConnections)
+            .set({
+              consentEpoch: row.consentEpoch + 1,
+              optedOutAt: keyword === "STOP" ? occurredAt : null,
+              state: keyword === "STOP" ? "opted_out" : "active",
+              updatedAt: now(),
+            })
+            .where(eq(textingConnections.id, row.id));
+        return;
+      }
       const [inserted] = await tx
         .insert(textMessages)
         .values({
@@ -485,7 +699,7 @@ export function createTextingService(options: Options) {
           body,
           connectionId: row.id,
           direction: "inbound",
-          occurredAt: now(),
+          occurredAt,
           occurredAtSource: "provider",
           providerMessageSid: sid,
           status: "delivered",
@@ -496,22 +710,8 @@ export function createTextingService(options: Options) {
       if (!inserted) return;
       await tx
         .update(textingConnections)
-        .set({
-          conversationRevision: row.conversationRevision + 1,
-          optedOutAt: state === "opted_out" ? now() : null,
-          state,
-          updatedAt: now(),
-        })
+        .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })
         .where(eq(textingConnections.id, row.id));
-      if (keyword === "STOP" || keyword === "START")
-        await tx.insert(textingConsentEvents).values({
-          connectionId: row.id,
-          kind: keyword === "STOP" ? "provider_stop" : "provider_start",
-          occurredAt: now(),
-          phoneFingerprint: row.phoneFingerprint,
-          source: "twilio",
-          userId: row.userId,
-        });
     });
   }
 
@@ -527,7 +727,22 @@ export function createTextingService(options: Options) {
       "undelivered",
       "failed",
     ] as const;
-    const normalized = allowed.find((value) => value === status) ?? "unknown";
+    const normalized = allowed.find((value) => value === status);
+    if (!normalized) return;
+    const message = await options.db.query.textMessages.findFirst({
+      where: eq(textMessages.providerMessageSid, parameters.MessageSid),
+    });
+    if (!message) return;
+    const transitions: Record<string, ReadonlySet<string>> = {
+      accepted: new Set(["sending", "sent", "delivered", "undelivered", "failed"]),
+      queued: new Set(["accepted", "sending", "sent", "delivered", "undelivered", "failed"]),
+      sending: new Set(["sent", "delivered", "undelivered", "failed"]),
+      sent: new Set(["delivered", "undelivered"]),
+      unknown: new Set(allowed),
+    };
+    const canAdvance =
+      message.status === normalized || Boolean(transitions[message.status]?.has(normalized));
+    if (!canAdvance) return;
     await options.db
       .update(textMessages)
       .set({

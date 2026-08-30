@@ -3,13 +3,15 @@ import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@persona
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
+  ArrowLeftIcon,
   ChevronDownIcon,
   ClockIcon,
   EyeIcon,
   EyeOffIcon,
+  ForwardIcon,
   InboxIcon,
   MailIcon,
   MoreHorizontalIcon,
@@ -18,6 +20,7 @@ import {
   StarIcon,
   TrashIcon,
 } from "@/components/icons";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
 import {
@@ -32,7 +35,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group.js";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "../../components/ui/input-group.js";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -47,13 +55,16 @@ import {
 import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
+  WorkspaceSecondaryAppBarLeading,
 } from "../../components/workspace-secondary-app-bar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
+import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
+import { ThreadStewardship } from "./thread-stewardship.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
-export const mailListScopes = ["all", "unread", "starred", "snoozed"] as const;
+export const mailListScopes = ["all", "unread", "starred", "snoozed", "sent", "drafts"] as const;
 export type MailListScope = (typeof mailListScopes)[number];
 
 export function isMailListScope(value: string): value is MailListScope {
@@ -62,7 +73,7 @@ export function isMailListScope(value: string): value is MailListScope {
 
 export function mailListScopeFromSearch(params: URLSearchParams): MailListScope {
   const view = params.get("view");
-  if (view === "starred" || view === "snoozed") return view;
+  if (view === "starred" || view === "snoozed" || view === "sent" || view === "drafts") return view;
   return params.get("unread") === "1" ? "unread" : "all";
 }
 
@@ -70,13 +81,16 @@ export function mailListScopeParams(scope: MailListScope) {
   if (scope === "unread") return { unread: "1", view: null };
   if (scope === "starred") return { unread: null, view: "starred" };
   if (scope === "snoozed") return { unread: null, view: "snoozed" };
+  if (scope === "sent") return { unread: null, view: "sent" };
+  if (scope === "drafts") return { unread: null, view: "drafts" };
   return { unread: null, view: null };
 }
 
-function mailListScopeQuery(scope: MailListScope) {
+export function mailListScopeQuery(scope: MailListScope) {
   if (scope === "unread") return { unread: true };
   if (scope === "starred") return { starred: true };
   if (scope === "snoozed") return { snoozed: true };
+  if (scope === "sent") return { mailboxRole: "sent" as const };
   return {};
 }
 
@@ -159,6 +173,35 @@ function inboxUnreadCount(items: Mailbox[]) {
     .reduce((sum, mailbox) => sum + mailbox.unreadCount, 0);
 }
 export const relative = formatRelativeTime;
+const mailReaderLayoutStorageKey = "ilo.mail.reader-layout.v1";
+
+export function storedMailReaderLayout() {
+  try {
+    if (typeof window === "undefined") return undefined;
+    const value = JSON.parse(
+      window.localStorage.getItem(mailReaderLayoutStorageKey) ?? "null",
+    ) as unknown;
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof (value as Record<string, unknown>)["mail-list"] === "number" &&
+      typeof (value as Record<string, unknown>)["mail-reader"] === "number"
+    )
+      return value as Record<string, number>;
+  } catch {
+    // A damaged preference should never prevent Mail from opening.
+  }
+  return undefined;
+}
+
+export function persistMailReaderLayout(layout: Record<string, number>) {
+  try {
+    window.localStorage.setItem(mailReaderLayoutStorageKey, JSON.stringify(layout));
+  } catch {
+    // A browser storage restriction must not prevent panel resizing.
+  }
+}
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -169,26 +212,44 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-export function MailTopbarSearch() {
-  const [params, setParams] = useSearchParams();
-  const search = params.get("q")?.trim() ?? "";
-  const [searchDraft, setSearchDraft] = useState(search);
-
-  useEffect(() => setSearchDraft(search), [search]);
+export function MailTopbarSearch({
+  onSearch,
+  search,
+}: {
+  onSearch: (query: string) => void;
+  search: string;
+}) {
+  const [draft, setDraft] = useState(search);
+  const pendingSearch = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCommittedSearch = useRef<string | null>(null);
+  const commitSearch = (query: string) => {
+    if (pendingSearch.current) clearTimeout(pendingSearch.current);
+    pendingSearch.current = null;
+    const committed = query.trim();
+    lastCommittedSearch.current = committed === search ? null : committed;
+    onSearch(committed);
+  };
+  useEffect(() => {
+    if (lastCommittedSearch.current === search) {
+      lastCommittedSearch.current = null;
+      return;
+    }
+    lastCommittedSearch.current = null;
+    setDraft(search);
+  }, [search]);
+  useEffect(
+    () => () => {
+      if (pendingSearch.current) clearTimeout(pendingSearch.current);
+    },
+    [],
+  );
 
   return (
     <form
       className="mail-topbar__search"
       onSubmit={(event) => {
         event.preventDefault();
-        setParams((current) => {
-          const next = new URLSearchParams(current);
-          const query = searchDraft.trim();
-          if (query) next.set("q", query);
-          else next.delete("q");
-          next.delete("thread");
-          return next;
-        });
+        commitSearch(draft);
       }}
     >
       <InputGroup>
@@ -197,11 +258,22 @@ export function MailTopbarSearch() {
         </InputGroupAddon>
         <InputGroupInput
           aria-label="Search mail"
-          onChange={(event) => setSearchDraft(event.currentTarget.value)}
+          name="query"
+          onChange={(event) => {
+            const query = event.currentTarget.value;
+            setDraft(query);
+            if (pendingSearch.current) clearTimeout(pendingSearch.current);
+            pendingSearch.current = setTimeout(() => commitSearch(query), 250);
+          }}
           placeholder="Search mail"
           type="search"
-          value={searchDraft}
+          value={draft}
         />
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton aria-label="Search messages" size="icon-xs" type="submit">
+            <SearchIcon aria-hidden="true" />
+          </InputGroupButton>
+        </InputGroupAddon>
       </InputGroup>
     </form>
   );
@@ -213,81 +285,6 @@ function mailDate(value: string, timeZone: string) {
     timeStyle: "short",
     timeZone,
   }).format(new Date(value));
-}
-
-function MailSendRecovery({
-  drafts,
-  error,
-  isPending,
-  mutationError,
-  mutationPending,
-  reconcile,
-}: {
-  drafts: MailDraft[];
-  error: Error | null;
-  isPending: boolean;
-  mutationError: Error | null;
-  mutationPending: boolean;
-  reconcile: (id: string, outcome: "not_sent" | "sent") => void;
-}) {
-  if (isPending)
-    return (
-      <p aria-live="polite" className="mail-send-recovery__loading">
-        Checking uncertain sends…
-      </p>
-    );
-  if (error) return <InlineError error={error} />;
-  if (drafts.length === 0) return null;
-  return (
-    <section aria-labelledby="mail-send-recovery-title" className="mail-send-recovery">
-      <div>
-        <p className="eyebrow">Send safety</p>
-        <h2 id="mail-send-recovery-title">Resolve an uncertain send</h2>
-        <p>
-          First inspect this account’s provider Sent Mail. Never resend until you confirm whether
-          the message is there.
-        </p>
-      </div>
-      <div className="mail-send-recovery__items">
-        {drafts.map((draft) => (
-          <article className="mail-send-recovery__item" key={draft.id}>
-            <div>
-              <strong>{draft.subject || "(No subject)"}</strong>
-              <span>
-                {draft.reconciliationState === "in_progress"
-                  ? "This send is still in progress. Ilo will refresh its state automatically."
-                  : "Ilo could not confirm the provider result."}
-              </span>
-            </div>
-            {draft.reconciliationState === "sent_mail_review_required" ? (
-              <div className="mail-send-recovery__actions">
-                <Button
-                  aria-label={`I found it in Sent Mail: ${draft.subject || "this message"}`}
-                  disabled={mutationPending}
-                  onClick={() => reconcile(draft.id, "sent")}
-                  type="button"
-                >
-                  I found it in Sent Mail
-                </Button>
-                <Button
-                  aria-label={`It was not sent: ${draft.subject || "this message"}`}
-                  disabled={mutationPending}
-                  onClick={() => reconcile(draft.id, "not_sent")}
-                  tone="ghost"
-                  type="button"
-                >
-                  It was not sent
-                </Button>
-              </div>
-            ) : (
-              <span aria-live="polite">Waiting for the provider result…</span>
-            )}
-          </article>
-        ))}
-      </div>
-      {mutationError ? <InlineError error={mutationError} /> : null}
-    </section>
-  );
 }
 
 export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
@@ -312,12 +309,15 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const activeAccountId = selectedMailbox?.accountId ?? accountId;
   const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [unifiedExpanded, setUnifiedExpanded] = useState(true);
+  const [accountsExpanded, setAccountsExpanded] = useState(Boolean(activeAccountId));
   const listScope = mailListScopeFromSearch(params);
   useEffect(() => {
-    const first = activeAccountId ?? enabled[0]?.id;
-    if (first) setExpanded((current) => (current.includes(first) ? current : [...current, first]));
-  }, [activeAccountId, enabled]);
+    if (!activeAccountId) return;
+    setAccountsExpanded(true);
+    setExpanded((current) =>
+      current.includes(activeAccountId) ? current : [...current, activeAccountId],
+    );
+  }, [activeAccountId]);
   const select = (updates: Record<string, string | null>) => {
     setParams((current) => {
       const next = new URLSearchParams(current);
@@ -345,32 +345,48 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
           ) : (
             <SidebarMenu className="mail-sidebar__menu">
-              <UnifiedInboxNavigation
-                expanded={unifiedExpanded}
+              <UnifiedMailDestinations
+                activeAccountId={activeAccountId}
                 listScope={listScope}
-                selectScope={(scope) => select(mailListScopeParams(scope))}
-                toggle={() => setUnifiedExpanded((current) => !current)}
+                onNavigate={onNavigate}
                 unreadCount={totalInboxUnread}
               />
-              {enabled.map((account) => (
-                <MailboxAccount
-                  account={account}
-                  activeAccountId={activeAccountId}
-                  activeMailboxId={mailboxId}
-                  expanded={expanded.includes(account.id)}
-                  key={account.id}
-                  mailboxes={mailboxes.data.filter((mailbox) => mailbox.accountId === account.id)}
-                  selectAccount={() => select({ account: account.id })}
-                  selectMailbox={(id) => select({ mailbox: id })}
-                  toggle={() =>
-                    setExpanded((current) =>
-                      current.includes(account.id)
-                        ? current.filter((id) => id !== account.id)
-                        : [...current, account.id],
-                    )
-                  }
-                />
-              ))}
+              <Collapsible asChild onOpenChange={setAccountsExpanded} open={accountsExpanded}>
+                <SidebarMenuItem className="mail-sidebar__accounts">
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton aria-label="Accounts">
+                      <MailIcon aria-hidden="true" />
+                      <span>Accounts</span>
+                      <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <SidebarMenu>
+                      {enabled.map((account) => (
+                        <MailboxAccount
+                          account={account}
+                          activeAccountId={activeAccountId}
+                          activeMailboxId={mailboxId}
+                          expanded={expanded.includes(account.id)}
+                          key={account.id}
+                          mailboxes={mailboxes.data.filter(
+                            (mailbox) => mailbox.accountId === account.id,
+                          )}
+                          selectAccount={() => select({ account: account.id })}
+                          selectMailbox={(id) => select({ mailbox: id })}
+                          toggle={() =>
+                            setExpanded((current) =>
+                              current.includes(account.id)
+                                ? current.filter((id) => id !== account.id)
+                                : [...current, account.id],
+                            )
+                          }
+                        />
+                      ))}
+                    </SidebarMenu>
+                  </CollapsibleContent>
+                </SidebarMenuItem>
+              </Collapsible>
             </SidebarMenu>
           )}
         </nav>
@@ -398,9 +414,7 @@ export function MailPage({ user }: { user: User }) {
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
   const listScope = mailListScopeFromSearch(params);
-  const composing = params.get("compose") === "1";
-  const [composeThread, setComposeThread] = useState<MailThread | null>(null);
-  const composeFormRef = useRef<HTMLFormElement>(null);
+  const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -413,6 +427,7 @@ export function MailPage({ user }: { user: User }) {
       return next;
     });
   const threads = useQuery({
+    enabled: listScope !== "drafts",
     queryFn: () =>
       api.listMailThreads({
         ...(accountId && !mailboxId ? { accountIds: [accountId] } : {}),
@@ -423,13 +438,25 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-threads", accountId, mailboxId, search, listScope],
     refetchInterval: 60_000,
   });
+  const setup = useQuery({
+    queryFn: api.getMailSetupContext,
+    queryKey: ["mail-setup-context"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
   const drafts = useQuery({
+    enabled: listScope === "drafts",
     queryFn: api.listMailDrafts,
     queryKey: ["mail-drafts"],
-    refetchInterval: 15_000,
   });
-  const uncertainDrafts =
-    drafts.data?.filter((draft) => draft.reconciliationState !== "none") ?? [];
+  const deleteDraft = useMutation({
+    mutationFn: api.deleteMailDraft,
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
+  });
+  const reconcileDraft = useMutation({
+    mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
+      api.reconcileMailDraft(id, { outcome }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
+  });
   const listed = threads.data?.find((thread) => thread.id === selectedId);
   const loaded = useQuery({
     enabled: Boolean(selectedId && threads.data && !listed),
@@ -437,6 +464,7 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-thread", selectedId],
   });
   const selected = listed ?? loaded.data;
+  const readerLayout = useMemo(storedMailReaderLayout, []);
   const messages = useQuery({
     enabled: Boolean(selected),
     queryFn: () => api.listMailMessages(selected?.id as string),
@@ -459,75 +487,13 @@ export function MailPage({ user }: { user: User }) {
       api.snoozeMailThread(id, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
-  const send = useMutation({
-    mutationFn: (form: FormData) => {
-      const threadId = String(form.get("threadId") ?? "");
-      return api.sendMail({
-        accountId: String(form.get("accountId")),
-        body: String(form.get("body")),
-        cc: [],
-        subject: String(form.get("subject")),
-        ...(threadId ? { threadId } : {}),
-        to: String(form.get("to"))
-          .split(",")
-          .map((address) => address.trim())
-          .filter(Boolean)
-          .map((address) => ({ address, name: null })),
-      });
-    },
-    onSuccess: () => {
-      update({ compose: null });
-      setComposeThread(null);
-      return client.invalidateQueries({ queryKey: ["mail-threads"] });
-    },
-  });
-  const saveDraft = useMutation({
-    mutationFn: (form: FormData) => {
-      const threadId = String(form.get("threadId") ?? "");
-      return api.createMailDraft({
-        accountId: String(form.get("accountId")),
-        body: String(form.get("body")),
-        cc: [],
-        subject: String(form.get("subject")),
-        ...(threadId ? { threadId } : {}),
-        to: String(form.get("to"))
-          .split(",")
-          .map((address) => address.trim())
-          .filter(Boolean)
-          .map((address) => ({ address, name: null })),
-      });
-    },
-    onSuccess: () => {
-      update({ compose: null });
-      setComposeThread(null);
-      return client.invalidateQueries({ queryKey: ["mail-drafts"] });
-    },
-  });
-  const reconcileDraft = useMutation({
-    mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
-      api.reconcileMailDraft(id, { outcome }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
-  });
-  const sendRecovery = (
-    <MailSendRecovery
-      drafts={uncertainDrafts}
-      error={drafts.error}
-      isPending={drafts.isPending}
-      mutationError={reconcileDraft.error}
-      mutationPending={reconcileDraft.isPending}
-      reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
-    />
-  );
   if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
   if (accounts.isError) return <InlineError error={accounts.error} />;
   if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
   if (!enabled.length)
     return (
       <div className="mail-page">
-        {sendRecovery}
-        <ConnectionRecoveryAlert accounts={enabled} />
         <div className="narrow-page">
-          <p className="eyebrow">Mail for people and agents</p>
           <h1>Inbox</h1>
           <EmptyState icon={<InboxIcon />} title="Connect a mailbox">
             Enable Mail on a connected Google account or add iCloud from Settings.
@@ -535,154 +501,198 @@ export function MailPage({ user }: { user: User }) {
         </div>
       </div>
     );
-  if (threads.isPending) return <WorkspaceSkeleton kind="mail" />;
+  if (listScope !== "drafts" && threads.isPending) return <WorkspaceSkeleton kind="mail" />;
   return (
     <div className="mail-page">
-      {sendRecovery}
-      <ConnectionRecoveryAlert accounts={enabled} />
-      {composing ? (
-        <form
-          className="mail-compose"
-          onSubmit={(event) => {
-            event.preventDefault();
-            send.mutate(new FormData(event.currentTarget));
-          }}
-          ref={composeFormRef}
-        >
-          <input name="accountId" type="hidden" value={enabled[0]?.id ?? ""} />
-          <input name="threadId" type="hidden" value={composeThread?.id ?? ""} />
-          <label>
-            To
-            <input
-              aria-label="To"
-              defaultValue={composeThread?.from.address ?? ""}
-              name="to"
-              required
-              type="email"
-            />
-          </label>
-          <label>
-            Subject
-            <input
-              aria-label="Subject"
-              defaultValue={
-                composeThread
-                  ? composeThread.subject.toLowerCase().startsWith("re:")
-                    ? composeThread.subject
-                    : `Re: ${composeThread.subject}`
-                  : ""
-              }
-              name="subject"
-            />
-          </label>
-          <label>
-            Message
-            <textarea aria-label="Message" name="body" required />
-          </label>
-          {send.isError ? <InlineError error={send.error} /> : null}
-          {saveDraft.isError ? <InlineError error={saveDraft.error} /> : null}
-          <div>
-            <Button
-              onClick={() => {
-                update({ compose: null });
-                setComposeThread(null);
-              }}
-              tone="ghost"
-              type="button"
-            >
-              Discard
-            </Button>
-            <Button
-              disabled={saveDraft.isPending}
-              onClick={() => {
-                if (composeFormRef.current) saveDraft.mutate(new FormData(composeFormRef.current));
-              }}
-              tone="ghost"
-              type="button"
-            >
-              {saveDraft.isPending ? "Saving…" : "Save draft"}
-            </Button>
-            <Button disabled={send.isPending} type="submit">
-              {send.isPending ? "Sending…" : "Send"}
-            </Button>
-          </div>
-        </form>
-      ) : null}
-      {selected ? (
-        <MailSecondaryNavigation
-          archive={() =>
-            updateThread.mutate({
-              id: selected.id,
-              mailboxIds: selected.mailboxIds.filter(
-                (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
-              ),
-            })
-          }
-          pending={updateThread.isPending}
-          reply={() => {
-            setComposeThread(selected);
-            update({ compose: "1" });
-          }}
-          selected={selected}
-          snooze={() => snoozeThread.mutate(selected.id)}
-          toggleStar={() => updateThread.mutate({ id: selected.id, starred: !selected.starred })}
-          toggleUnread={() => updateThread.mutate({ id: selected.id, unread: !selected.unread })}
-          trash={() => {
-            const trash = mailboxes.data.find(
-              (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
-            );
-            if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
-          }}
-        />
-      ) : null}
-      <div className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}>
-        <section aria-label="Conversations" className="mail-thread-list">
-          {threads.isError ? (
-            <InlineError error={threads.error} />
-          ) : threads.data.length === 0 ? (
-            <EmptyState icon={<MailIcon />} title="Nothing here">
-              Try another mailbox or a broader search.
-            </EmptyState>
-          ) : (
-            <>
+      <ResizablePanelGroup
+        className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
+        defaultLayout={readerLayout}
+        id="mail-reader-layout"
+        onLayoutChanged={(layout, metadata) => {
+          if (metadata.isUserInteraction) persistMailReaderLayout(layout);
+        }}
+        orientation="horizontal"
+      >
+        <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
+          <section aria-label="Conversations" className="mail-thread-list">
+            <ConnectionRecoveryAlert accounts={enabled} />
+            <div className="mail-thread-list__toolbar">
+              <MailTopbarSearch
+                onSearch={(query) => update({ q: query || null, thread: null })}
+                search={search}
+              />
               <div className="mail-thread-list__summary">
-                <span>{threads.data.length} conversations</span>
+                <span>
+                  {listScope === "drafts"
+                    ? `${drafts.data?.length ?? 0} drafts`
+                    : `${threads.data?.length ?? 0} conversations`}
+                </span>
                 {listScope === "all" ? null : <Badge>{listScope}</Badge>}
               </div>
-              {threads.data.map((thread) => (
+            </div>
+            {listScope === "drafts" ? (
+              drafts.isPending ? (
+                <PageLoading />
+              ) : drafts.isError ? (
+                <InlineError error={drafts.error} />
+              ) : (
+                <MailDraftList
+                  drafts={(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent")}
+                  openDraft={setComposeIntent}
+                  reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
+                  remove={(id) => deleteDraft.mutate(id)}
+                />
+              )
+            ) : threads.isError ? (
+              <InlineError error={threads.error} />
+            ) : threads.data?.length === 0 ? (
+              <EmptyState icon={<MailIcon />} title="Nothing here">
+                Try another mailbox or a broader search.
+              </EmptyState>
+            ) : (
+              threads.data?.map((thread) => (
                 <ThreadRow
                   active={selected?.id === thread.id}
                   key={thread.id}
                   select={() => update({ thread: thread.id })}
                   thread={thread}
                 />
-              ))}
-            </>
-          )}
-        </section>
-        <section aria-label="Message reader" className="mail-reader">
-          {selected ? (
-            <Reader
-              messages={messages.data ?? []}
-              thread={selected}
-              timeZone={user.planningTimezone}
-            />
-          ) : selectedId && loaded.isPending ? (
-            <PageLoading />
-          ) : (
-            <EmptyState icon={<MailIcon />} title="Select a conversation">
-              Open a conversation to read every synced message and manage it.
-            </EmptyState>
-          )}
-        </section>
-      </div>
+              ))
+            )}
+          </section>
+        </ResizablePanel>
+        <ResizableHandle aria-label="Resize conversation list" withHandle />
+        <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
+          <section aria-label="Message reader" className="mail-reader">
+            {selected ? (
+              <>
+                <MailSecondaryNavigation
+                  archive={() =>
+                    updateThread.mutate({
+                      id: selected.id,
+                      mailboxIds: selected.mailboxIds.filter(
+                        (id) =>
+                          mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
+                      ),
+                    })
+                  }
+                  back={() => update({ thread: null })}
+                  pending={updateThread.isPending}
+                  forward={() =>
+                    setComposeIntent({
+                      accountId: selected.accountId,
+                      body: `\n\n---------- Forwarded message ----------\nFrom: ${selected.from.name || selected.from.address} <${selected.from.address}>\nSubject: ${selected.subject}\n\n${selected.bodyText}`,
+                      subject: selected.subject.startsWith("Fwd:")
+                        ? selected.subject
+                        : `Fwd: ${selected.subject}`,
+                    })
+                  }
+                  reply={() =>
+                    setComposeIntent({
+                      accountId: selected.accountId,
+                      subject: selected.subject.startsWith("Re:")
+                        ? selected.subject
+                        : `Re: ${selected.subject}`,
+                      threadId: selected.id,
+                      to: selected.from.address,
+                    })
+                  }
+                  selected={selected}
+                  snooze={() => snoozeThread.mutate(selected.id)}
+                  toggleStar={() =>
+                    updateThread.mutate({ id: selected.id, starred: !selected.starred })
+                  }
+                  toggleUnread={() =>
+                    updateThread.mutate({ id: selected.id, unread: !selected.unread })
+                  }
+                  trash={() => {
+                    const trash = mailboxes.data.find(
+                      (mailbox) =>
+                        mailbox.accountId === selected.accountId && mailbox.role === "trash",
+                    );
+                    if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
+                  }}
+                />
+                <Reader
+                  messages={messages.data ?? []}
+                  thread={selected}
+                  timeZone={user.planningTimezone}
+                />
+                <ThreadStewardship threadId={selected.id} />
+              </>
+            ) : selectedId && loaded.isPending ? (
+              <PageLoading />
+            ) : (
+              <EmptyState icon={<MailIcon />} title="Select a conversation">
+                Open a conversation to read every synced message and manage it.
+              </EmptyState>
+            )}
+          </section>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      {setup.data ? (
+        <FloatingMailComposer
+          accounts={setup.data.accounts}
+          intent={composeIntent}
+          onIntentHandled={() => setComposeIntent(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
+function MailDraftList({
+  drafts,
+  openDraft,
+  reconcile,
+  remove,
+}: {
+  drafts: MailDraft[];
+  openDraft: (intent: ComposeIntent) => void;
+  reconcile: (id: string, outcome: "not_sent" | "sent") => void;
+  remove: (id: string) => void;
+}) {
+  if (!drafts.length)
+    return (
+      <EmptyState icon={<MailIcon />} title="No drafts">
+        Messages you start will be saved here automatically.
+      </EmptyState>
+    );
+  return drafts.map((draft) => (
+    <article className="mail-draft-row" key={draft.id}>
+      <button className="mail-thread-row" onClick={() => openDraft({ draft })} type="button">
+        <span className="mail-thread-row__sender">
+          {draft.to.map((recipient) => recipient.address).join(", ") || "No recipients"}
+        </span>
+        <time>{draft.sendStatus === "reconcile" ? "Needs review" : "Draft"}</time>
+        <strong>{draft.subject || "(No subject)"}</strong>
+        <span className="mail-thread-row__snippet">{draft.body || "Empty message"}</span>
+      </button>
+      <div className="mail-draft-row__actions">
+        {draft.sendStatus === "reconcile" ? (
+          <>
+            <Button onClick={() => reconcile(draft.id, "sent")} tone="ghost">
+              Mark sent
+            </Button>
+            <Button onClick={() => reconcile(draft.id, "not_sent")} tone="ghost">
+              Not sent
+            </Button>
+          </>
+        ) : (
+          <Button onClick={() => remove(draft.id)} tone="ghost">
+            Discard
+          </Button>
+        )}
+      </div>
+    </article>
+  ));
+}
+
 function MailSecondaryNavigation({
   archive,
+  back,
   pending,
+  forward,
   reply,
   selected,
   snooze,
@@ -691,7 +701,9 @@ function MailSecondaryNavigation({
   trash,
 }: {
   archive: () => void;
+  back: () => void;
   pending: boolean;
+  forward: () => void;
   reply: () => void;
   selected: MailThread;
   snooze: () => void;
@@ -701,10 +713,20 @@ function MailSecondaryNavigation({
 }) {
   return (
     <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+      <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
+        <Button aria-label="Back to inbox" onClick={back} tone="ghost" type="button">
+          <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+          <span>Inbox</span>
+        </Button>
+      </WorkspaceSecondaryAppBarLeading>
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
-        <Button onClick={reply} tone="ghost">
+        <Button aria-label="Reply" onClick={reply} tone="ghost">
           <ReplyIcon aria-hidden="true" className="size-4" />
           <span>Reply</span>
+        </Button>
+        <Button aria-label="Forward" onClick={forward} tone="ghost">
+          <ForwardIcon aria-hidden="true" className="size-4" />
+          <span>Forward</span>
         </Button>
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
           <ArchiveIcon aria-hidden="true" className="size-4" />
@@ -778,71 +800,47 @@ function MailSecondaryNavigation({
   );
 }
 
-function UnifiedInboxNavigation({
-  expanded,
+function UnifiedMailDestinations({
+  activeAccountId,
   listScope,
-  selectScope,
-  toggle,
+  onNavigate,
   unreadCount,
 }: {
-  expanded: boolean;
+  activeAccountId: string | null | undefined;
   listScope: MailListScope;
-  selectScope: (scope: MailListScope) => void;
-  toggle: () => void;
+  onNavigate: () => void;
   unreadCount: number;
 }) {
-  const panelId = "unified-mailbox-navigation";
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
-    { icon: MailIcon, label: "All mail", value: "all" },
+    { icon: InboxIcon, label: "Inbox", value: "all" },
     { icon: EyeIcon, label: "Unread", value: "unread" },
     { icon: StarIcon, label: "Starred", value: "starred" },
     { icon: ClockIcon, label: "Snoozed", value: "snoozed" },
+    { icon: MailIcon, label: "Sent", value: "sent" },
+    { icon: MailIcon, label: "Drafts", value: "drafts" },
   ];
 
   return (
-    <Collapsible asChild onOpenChange={toggle} open={expanded}>
-      <SidebarMenuItem className="mail-sidebar__account mail-sidebar__unified">
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton
-            aria-controls={panelId}
-            aria-label="Toggle Unified inbox mailboxes"
-            className="mail-sidebar__account-trigger"
-            size="lg"
-          >
-            <span className="mail-sidebar__unified-icon">
-              <InboxIcon aria-hidden="true" />
-            </span>
-            <span className="mail-sidebar__account-copy">
-              <span className="mail-sidebar__account-name">Unified inbox</span>
-              <span className="mail-sidebar__account-email">All connected mail</span>
-            </span>
-            {unreadCount > 0 ? (
-              <span className="mail-sidebar__account-count">{unreadCount}</span>
-            ) : null}
-            <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent id={panelId}>
-          <SidebarMenuSub className="mail-sidebar__account-body">
-            {scopes.map(({ icon: Icon, label, value }) => (
-              <SidebarMenuSubItem key={value}>
-                <SidebarMenuSubButton asChild isActive={listScope === value}>
-                  <button
-                    aria-pressed={listScope === value}
-                    className="mail-sidebar__mailbox-link"
-                    onClick={() => selectScope(value)}
-                    type="button"
-                  >
-                    <Icon aria-hidden="true" />
-                    <span>{label}</span>
-                  </button>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </SidebarMenuItem>
-    </Collapsible>
+    <>
+      {scopes.map(({ icon: Icon, label, value }) => {
+        const query = new URLSearchParams();
+        const params = mailListScopeParams(value);
+        if (params.unread) query.set("unread", params.unread);
+        if (params.view) query.set("view", params.view);
+        const suffix = query.size ? `?${query.toString()}` : "";
+        return (
+          <SidebarMenuItem key={value}>
+            <SidebarMenuButton asChild isActive={!activeAccountId && listScope === value}>
+              <Link onClick={onNavigate} to={`/mail${suffix}`}>
+                <Icon aria-hidden="true" />
+                <span>{label}</span>
+                {value === "all" && unreadCount > 0 ? <b>{unreadCount}</b> : null}
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        );
+      })}
+    </>
   );
 }
 

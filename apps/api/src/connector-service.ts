@@ -8,12 +8,14 @@ import type {
   NormalizedRemoteEvent,
   ProviderOperationOptions,
   RemoteMailThreadState,
+  SendRemoteMailInput,
   SyncResult,
 } from "@personal-os/connectors";
 import {
   ConnectorError,
   createICloudConnector,
   googleGrantedServices,
+  googleMailSendGranted,
   MailSendPreAcceptanceError,
 } from "@personal-os/connectors";
 import {
@@ -204,16 +206,14 @@ export type ConnectedEventGateway = {
 };
 
 export type ConnectedMailGateway = {
+  sendCapability?: (
+    userId: string,
+    accountId: string,
+  ) => Promise<"available" | "reconnect" | "unavailable">;
   send: (
     userId: string,
     accountId: string,
-    input: {
-      body: string;
-      cc: Array<{ address: string; name: string | null }>;
-      subject: string;
-      threadId?: string;
-      to: Array<{ address: string; name: string | null }>;
-    },
+    input: Omit<SendRemoteMailInput, "from">,
   ) => Promise<void>;
   update: (
     userId: string,
@@ -254,18 +254,15 @@ export function mailProviderPartialEffectError({
     return cause;
   }
   const sentMessageNeedsReconciliation = operation === "send";
-  const sentDraftNeedsReconciliation = sentMessageNeedsReconciliation && draftId !== undefined;
   const repairAction = !credentialsPersisted
     ? "reconnect_then_sync_mail_account"
-    : sentDraftNeedsReconciliation
+    : sentMessageNeedsReconciliation
       ? "verify_sent_mail_then_reconcile_draft"
-      : sentMessageNeedsReconciliation
-        ? "verify_sent_mail_never_retry"
-        : "sync_mail_account";
+      : "sync_mail_account";
   const userAction = !credentialsPersisted
     ? "Open Settings → Connections, reconnect this Mail account, then open Mail and choose Sync."
     : sentMessageNeedsReconciliation
-      ? "Inspect the provider's Sent Mail before any retry. If the message exists, do not resend it; return to Ilo to reconcile the local state."
+      ? "Inspect the provider's Sent Mail before any retry, then reconcile the draft in Ilo Mail."
       : "Open Mail and choose Sync before retrying this action.";
   const userActionDestination = !credentialsPersisted
     ? "Settings → Connections → reconnect; Mail → Sync"
@@ -274,18 +271,16 @@ export function mailProviderPartialEffectError({
       : "Mail → Sync";
   const message = !credentialsPersisted
     ? "The provider Mail mutation may have committed, but Ilo could not persist rotated provider credentials. Reconnect this Mail account, then sync it to reconcile provider state before retrying."
-    : sentDraftNeedsReconciliation
-      ? "The provider may have sent this message, but Ilo could not mark its draft as sent. Verify Sent Mail before retrying, then reconcile or remove the local draft."
-      : sentMessageNeedsReconciliation
-        ? "The provider may have sent this message, but this draftless send has no durable Ilo recovery object. Inspect Sent Mail and never automatically retry this request."
-        : "The provider Mail mutation may have committed, but Ilo could not persist its local projection and audit. Sync this Mail account to reconcile provider state before retrying.";
+    : sentMessageNeedsReconciliation
+      ? "The provider may have accepted this message, but Ilo could not confirm local completion. Inspect Sent Mail before any retry."
+      : "The provider Mail mutation may have committed, but Ilo could not persist its local projection and audit. Sync this Mail account to reconcile provider state before retrying.";
   return new AppError("service_unavailable", message, {
     accountId,
     ...(cause instanceof AppError ? { causeCode: cause.code } : {}),
     credentialPersistenceMayHaveFailed: !credentialsPersisted,
-    ...(draftId ? { draftId } : {}),
     operation,
     partialEffect: true,
+    ...(draftId ? { draftId } : {}),
     repairAction,
     userAction,
     userActionDestination,
@@ -296,12 +291,7 @@ export function mailProviderPartialEffectError({
   });
 }
 
-/**
- * A provider response that proves a send was rejected before acceptance.
- *
- * Transport failures are deliberately not classified this way: a connection can
- * fail after the provider accepted the message, so callers must reconcile those.
- */
+/** A provider failure proven to occur before the message could be accepted. */
 export class MailProviderRejectedError extends Error {
   public override readonly cause: unknown;
 
@@ -642,6 +632,19 @@ export function createConnectorService({
   };
 
   const mailGateway: ConnectedMailGateway = {
+    async sendCapability(userId, accountId) {
+      try {
+        const account = await getAccount(userId, accountId);
+        if (!account.mailEnabled || !account.email) return "unavailable";
+        if (account.provider === "icloud") return icloud.sendMail ? "available" : "unavailable";
+        if (account.provider !== "google" || !google.sendMail) return "unavailable";
+        return googleMailSendGranted(credentials<GoogleCredentials>(account))
+          ? "available"
+          : "reconnect";
+      } catch {
+        return "unavailable";
+      }
+    },
     async send(userId, accountId, input) {
       const account = await getAccount(userId, accountId);
       if (!account.mailEnabled) {
@@ -656,10 +659,7 @@ export function createConnectorService({
         return;
       }
       if (account.provider !== "google" || !google.sendMail) {
-        throw new AppError(
-          "service_unavailable",
-          "This mail provider does not yet support sending mail.",
-        );
+        throw new AppError("service_unavailable", "This mail provider cannot send messages.");
       }
       let updatedCredentials: GoogleCredentials;
       try {
@@ -1990,7 +1990,7 @@ export function createConnectorService({
     shutdown.signal.throwIfAborted();
   }
 
-  async function claimDueMailRuleWork(): Promise<{
+  async function claimDueMailRuleWork(userId?: string): Promise<{
     claimed: MailRuleWorkRow[];
     maintenanceFailed: number;
     touchedAccountIds: string[];
@@ -2027,6 +2027,7 @@ export function createConnectorService({
             eq(mailRuleWorkItems.status, "claimed"),
             lt(mailRuleWorkItems.claimedAt, staleBefore),
             sql`${mailRuleWorkItems.attemptCount} >= ${MAIL_RULE_WORK_MAX_ATTEMPTS}`,
+            userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2056,6 +2057,7 @@ export function createConnectorService({
             eq(mailRuleWorkItems.status, "claimed"),
             lt(mailRuleWorkItems.claimedAt, staleBefore),
             lt(mailRuleWorkItems.attemptCount, MAIL_RULE_WORK_MAX_ATTEMPTS),
+            userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2076,6 +2078,7 @@ export function createConnectorService({
           and(
             inArray(mailRuleWorkItems.status, ["pending", "reconcile"]),
             isNull(mailRuleWorkItems.threadId),
+            userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2091,6 +2094,7 @@ export function createConnectorService({
             min(work.due_at) AS next_due
           FROM mail_rule_work_items work
           WHERE work.thread_id IS NOT NULL
+            AND (${userId ?? null}::uuid IS NULL OR work.user_id = ${userId ?? null}::uuid)
             AND work.status IN ('pending', 'reconcile')
             AND work.due_at <= ${current}
             AND work.next_attempt_at <= ${current}
@@ -2122,6 +2126,7 @@ export function createConnectorService({
             WHERE active.thread_id = threads.id
               AND active.status = 'claimed'
           )
+            AND (${userId ?? null}::uuid IS NULL OR threads.user_id = ${userId ?? null}::uuid)
           ORDER BY due.next_due, threads.id
           FOR UPDATE OF threads, accounts SKIP LOCKED
           LIMIT ${MAIL_RULE_EXECUTION_LIMIT_PER_RUN}
@@ -2165,6 +2170,7 @@ export function createConnectorService({
       .where(
         and(
           inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+          userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
           notExists(
             db
               .select({ id: attentionItems.id })
@@ -2198,6 +2204,7 @@ export function createConnectorService({
           eq(attentionItems.status, "open"),
           eq(attentionItems.relatedEntityType, "mail_account"),
           isNotNull(attentionItems.relatedEntityId),
+          userId ? eq(attentionItems.userId, userId) : undefined,
         ),
       )
       .groupBy(attentionItems.relatedEntityId)
@@ -3060,14 +3067,14 @@ export function createConnectorService({
     if (firstError) throw firstError;
   }
 
-  async function dispatchDueMailRuleWork(): Promise<{
+  async function dispatchDueMailRuleWork(userId?: string): Promise<{
     claimed: number;
     failed: number;
     pending: number;
     reconciliation: number;
     succeeded: number;
   }> {
-    const claim = await claimDueMailRuleWork();
+    const claim = await claimDueMailRuleWork(userId);
     const { claimed } = claim;
     const groups = new Map<string, MailRuleWorkRow[]>();
     for (const work of claimed) {

@@ -7,6 +7,8 @@ import {
   domainProfiles,
   financeReviewCases,
   mailRules,
+  mailStewardshipQuestions,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   type AgentAccessDomain,
@@ -29,7 +31,11 @@ type SourceReaders = {
   accounts: (input: SourceInput) => Promise<Array<typeof calendarAccounts.$inferSelect>>;
   attention: (input: SourceInput) => Promise<Array<typeof attentionItems.$inferSelect>>;
   financeReviews: (input: SourceInput) => Promise<Array<typeof financeReviewCases.$inferSelect>>;
+  mailQuestions: (
+    input: SourceInput,
+  ) => Promise<Array<typeof mailStewardshipQuestions.$inferSelect>>;
   mailRules: (input: SourceInput) => Promise<Array<typeof mailRules.$inferSelect>>;
+  mailRuns: (input: SourceInput) => Promise<Array<typeof workspaceMaintenanceRuns.$inferSelect>>;
   profiles: (input: SourceInput) => Promise<Array<typeof domainProfiles.$inferSelect>>;
 };
 
@@ -38,7 +44,9 @@ type SourceResult = {
   accounts: Awaited<ReturnType<SourceReaders["accounts"]>>;
   attention: Awaited<ReturnType<SourceReaders["attention"]>>;
   financeReviews: Awaited<ReturnType<SourceReaders["financeReviews"]>>;
+  mailQuestions: Awaited<ReturnType<SourceReaders["mailQuestions"]>>;
   mailRules: Awaited<ReturnType<SourceReaders["mailRules"]>>;
+  mailRuns: Awaited<ReturnType<SourceReaders["mailRuns"]>>;
   profiles: Awaited<ReturnType<SourceReaders["profiles"]>>;
 };
 
@@ -73,7 +81,9 @@ const sourceImpact: Record<
     kinds: ["attention"],
   },
   financeReviews: { domains: ["finances"], kinds: ["review"] },
+  mailQuestions: { domains: ["mail"], kinds: ["review"] },
   mailRules: { domains: ["mail"], kinds: ["review"] },
+  mailRuns: { domains: ["mail"], kinds: ["review"] },
   profiles: {
     domains: [...agentAccessDomains],
     kinds: ["review"],
@@ -141,6 +151,32 @@ export function createAgentAccessWorkItemService({
             eq(mailRules.userId, userId),
             eq(mailRules.enabled, false),
             lte(mailRules.updatedAt, snapshotAt),
+          ),
+        ),
+    mailQuestions: async ({ snapshotAt, userId }) =>
+      db
+        .select()
+        .from(mailStewardshipQuestions)
+        .where(
+          and(
+            eq(mailStewardshipQuestions.userId, userId),
+            eq(mailStewardshipQuestions.status, "open"),
+            lte(mailStewardshipQuestions.updatedAt, snapshotAt),
+          ),
+        ),
+    mailRuns: async ({ snapshotAt, userId }) =>
+      db
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.userId, userId),
+            eq(workspaceMaintenanceRuns.domain, "mail"),
+            or(
+              eq(workspaceMaintenanceRuns.status, "blocked"),
+              eq(workspaceMaintenanceRuns.status, "completed_with_questions"),
+            ),
+            lte(workspaceMaintenanceRuns.updatedAt, snapshotAt),
           ),
         ),
     profiles: async ({ snapshotAt, userId }) =>
@@ -349,6 +385,41 @@ function projectItems({
   }
 
   if (accessibleDomains.has("mail")) {
+    const representedRun = (results.mailRuns ?? []).toSorted(
+      (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
+    )[0];
+    if (representedRun) {
+      const blocked = representedRun.status === "blocked";
+      items.push({
+        action: { label: "Review Mail", to: "/mail/review" },
+        actionAt: null,
+        domain: "mail",
+        id: `mail-run:${representedRun.id}`,
+        kind: "review",
+        priority: blocked ? "blocked" : "person_review",
+        source: null,
+        summary: blocked
+          ? "A Mail maintenance turn is blocked and needs signed-in review."
+          : "A Mail maintenance turn settled with questions that need signed-in judgment.",
+        title: blocked ? "Mail maintenance is blocked" : "Mail needs your input",
+        updatedAt: representedRun.updatedAt.toISOString(),
+      });
+    } else {
+      for (const question of results.mailQuestions ?? []) {
+        items.push({
+          action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
+          actionAt: null,
+          domain: "mail",
+          id: `mail-question:${question.id}`,
+          kind: "review",
+          priority: "person_review",
+          source: null,
+          summary: `${question.reason} Question type: ${question.kind}. Account ${question.accountId}; thread ${question.threadId}. Open since ${question.createdAt.toISOString()}.`,
+          title: "Answer a Mail stewardship question",
+          updatedAt: question.updatedAt.toISOString(),
+        });
+      }
+    }
     for (const rule of results.mailRules ?? []) {
       items.push({
         action: {

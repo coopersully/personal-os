@@ -1195,10 +1195,8 @@ function apiFetch() {
     if (url.pathname === "/v1/assistant/attention" && method === "POST")
       return json({ item: attentionItem }, 201);
     if (url.pathname === "/v1/assistant/attention") return json({ items: [attentionItem] });
-    if (url.pathname === "/v1/mail/drafts" && method === "POST")
-      return json({ draft: { id } }, 201);
-    if (url.pathname === `/v1/mail/drafts/${id}/reconcile`)
-      return json({ draft: { id, sendStatus: "draft" } });
+    if (url.pathname === `/v1/mail/drafts/${id}` && method === "DELETE")
+      return new Response(null, { status: 204 });
     if (url.pathname === "/v1/mail/drafts")
       return json({
         drafts: [
@@ -1208,13 +1206,10 @@ function apiFetch() {
             cc: [],
             createdAt: now,
             id,
-            reconciliationState: "none",
-            sendClaimedAt: null,
-            sendStatus: "draft",
-            sentAt: null,
+            deliveryState: "unsent",
             subject: "Subject",
             threadId: null,
-            to: [{ address: "to@example.com", name: null }],
+            to: ["to@example.com"],
             updatedAt: now,
           },
         ],
@@ -1684,6 +1679,160 @@ describe("ilo API client", () => {
     });
   });
 
+  it("keeps Mail stewardship calls surgical and leaves sequencing to the API", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path,
+        });
+        if (path === "/v1/mail/status") return json({ status: { domain: "mail" } });
+        if (path === "/v1/mail/maintenance")
+          return json({ run: { domain: "mail", id }, summary: "Maintained", verification: null });
+        if (path === `/v1/mail/maintenance/${id}`) return json({ run: { id } });
+        if (path === `/v1/mail/reviews/${id}`) return json({ review: { id } });
+        if (path.endsWith("/stewardship")) return json({ stewardship: { threadId: id } });
+        if (path.endsWith("/response-brief/preview"))
+          return json({ brief: { transmittable: false } });
+        if (path.endsWith("/disposition")) return json({ disposition: { id } });
+        if (path.endsWith("/obligations")) return json({ obligation: { id } });
+        if (path === `/v1/mail/obligations/${id}`) return json({ obligation: { id } });
+        if (path.endsWith("/answer")) return json({ question: { id } });
+        return json({ feedback: { id } });
+      },
+    });
+    const revision = "2026-08-25T16:00:00.000Z";
+
+    await api.getMailStatus();
+    await api.maintainMail({ scope: { type: "all_outstanding" } });
+    await api.getMailMaintenanceRun(id);
+    await api.getMailReview(id);
+    await api.getMailThreadStewardship(id);
+    await api.previewMailResponseBrief(id, {
+      expectedThreadUpdatedAt: revision,
+      factsToAddress: [],
+      materialsNeeded: [],
+      openQuestions: [],
+      purpose: "Prepare privately.",
+      toneConsiderations: [],
+    });
+    await api.setMailDisposition(id, {
+      disposition: "reference",
+      expectedThreadUpdatedAt: revision,
+      rationale: "Reference only.",
+    });
+    await api.createMailObligation(id, {
+      dueAt: null,
+      goalIds: [],
+      kind: "decide",
+      nextReviewAt: null,
+      owner: { kind: "user" },
+      rationale: "A decision remains.",
+      sourceMessageId: null,
+      sourceThreadRevision: revision,
+    });
+    await api.updateMailObligation(id, { expectedVersion: 1, state: "resolved" });
+    await api.answerMailQuestion(id, {
+      answer: "reference",
+      expectedVersion: 1,
+      generalize: false,
+    });
+    await api.createMailStewardshipFeedback({
+      comment: "Correct.",
+      kind: "correct",
+      targetId: id,
+      targetType: "review",
+    });
+
+    expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "GET /v1/mail/status",
+      "POST /v1/mail/maintenance",
+      `GET /v1/mail/maintenance/${id}`,
+      `GET /v1/mail/reviews/${id}`,
+      `GET /v1/mail/threads/${id}/stewardship`,
+      `POST /v1/mail/threads/${id}/response-brief/preview`,
+      `PUT /v1/mail/threads/${id}/disposition`,
+      `POST /v1/mail/threads/${id}/obligations`,
+      `PATCH /v1/mail/obligations/${id}`,
+      `POST /v1/mail/questions/${id}/answer`,
+      "POST /v1/mail/feedback",
+    ]);
+    expect(api).not.toHaveProperty("sendMail");
+  });
+
+  it("uses durable Mail draft routes and sends only a confirmed saved revision", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const draft = {
+      accountId,
+      body: "Prepared response",
+      cc: [],
+      createdAt: now,
+      id,
+      reconciliationState: "none" as const,
+      sendClaimedAt: null,
+      sendStatus: "draft" as const,
+      sentAt: null,
+      subject: "Follow up",
+      threadId: null,
+      to: [{ address: "person@example.com", name: null }],
+      updatedAt: now,
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path,
+        });
+        if (path === "/v1/mail/send") return new Response(null, { status: 204 });
+        if (path.endsWith("/reconcile")) return json({ draft });
+        if (path === `/v1/mail/drafts/${id}` && init?.method === "DELETE")
+          return new Response(null, { status: 204 });
+        if (path === "/v1/mail/drafts" && !init?.method) return json({ drafts: [draft] });
+        return json({ draft }, init?.method === "POST" ? 201 : 200);
+      },
+    });
+    const input = { accountId, body: "", cc: [], subject: "", to: [] };
+
+    await expect(api.createMailDraft(input)).resolves.toEqual(draft);
+    await expect(api.updateMailDraft(id, { ...input, expectedUpdatedAt: now })).resolves.toEqual(
+      draft,
+    );
+    await expect(api.listMailDrafts()).resolves.toEqual([draft]);
+    await expect(
+      api.sendMailDraft({ confirmedUpdatedAt: now, draftId: id }),
+    ).resolves.toBeUndefined();
+    await expect(api.reconcileMailDraft(id, { outcome: "sent" })).resolves.toEqual(draft);
+    await expect(api.deleteMailDraft(id)).resolves.toBeUndefined();
+
+    expect(requests).toEqual([
+      { body: JSON.stringify(input), method: "POST", path: "/v1/mail/drafts" },
+      {
+        body: JSON.stringify({ ...input, expectedUpdatedAt: now }),
+        method: "PATCH",
+        path: `/v1/mail/drafts/${id}`,
+      },
+      { body: null, method: "GET", path: "/v1/mail/drafts" },
+      {
+        body: JSON.stringify({ confirmedUpdatedAt: now, draftId: id }),
+        method: "POST",
+        path: "/v1/mail/send",
+      },
+      {
+        body: JSON.stringify({ outcome: "sent" }),
+        method: "POST",
+        path: `/v1/mail/drafts/${id}/reconcile`,
+      },
+      { body: null, method: "DELETE", path: `/v1/mail/drafts/${id}` },
+    ]);
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({
@@ -1694,6 +1843,7 @@ describe("ilo API client", () => {
     });
     expect(api).not.toHaveProperty("listAutomations");
     expect(api).not.toHaveProperty("runAutomation");
+    expect(api).not.toHaveProperty("sendMail");
     await expect(api.getMe()).resolves.toEqual(user);
     await expect(api.listGoals()).resolves.toEqual([goal]);
     await expect(
@@ -2293,22 +2443,6 @@ describe("ilo API client", () => {
       },
     ]);
     await expect(
-      api.createMailDraft({
-        accountId,
-        body: "Draft",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).resolves.toEqual({ id });
-    await expect(api.listMailDrafts()).resolves.toEqual([
-      expect.objectContaining({ body: "Draft", id, reconciliationState: "none" }),
-    ]);
-    await expect(api.reconcileMailDraft(id, { outcome: "not_sent" })).resolves.toEqual({
-      id,
-      sendStatus: "draft",
-    });
-    await expect(
       api.createMailRule({
         actions: mailRule.actions,
         condition: mailRule.condition,
@@ -2373,13 +2507,6 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
-    await api.sendMail({
-      accountId,
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
     await expect(api.syncConnector(id)).resolves.toBe(3);
     await api.deleteConnector(id);
     await expect(api.listAccessTokens()).resolves.toHaveLength(1);

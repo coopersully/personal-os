@@ -39,6 +39,7 @@ const scheduler = setInterval(() => {
       throw error;
     });
   });
+  runtimeLifecycle.startBackgroundTask("scheduled-mail-maintenance", dispatchMailMaintenance);
   runtimeLifecycle.startBackgroundTask("scheduled-finance-sync", dispatchFinanceSync);
   runtimeLifecycle.startBackgroundTask("scheduled-finance-maintenance", dispatchFinanceMaintenance);
   runtimeLifecycle.startBackgroundTask("scheduled-finance-backfill", dispatchFinanceBackfill);
@@ -62,6 +63,7 @@ runtimeLifecycle.startBackgroundTask("startup-mail-rule-dispatch", async () => {
     throw error;
   });
 });
+runtimeLifecycle.startBackgroundTask("startup-mail-maintenance", dispatchMailMaintenance);
 runtimeLifecycle.startBackgroundTask("startup-finance-sync", dispatchFinanceSync);
 runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFinanceMaintenance);
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
@@ -96,6 +98,10 @@ async function dispatchFinanceSync(): Promise<void> {
 
 async function dispatchFinanceMaintenance(): Promise<void> {
   await app.dispatchDueFinanceMaintenance();
+}
+
+async function dispatchMailMaintenance(): Promise<void> {
+  await app.dispatchDueMailMaintenance();
 }
 
 async function dispatchFinanceBackfill(): Promise<void> {

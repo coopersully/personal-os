@@ -4,9 +4,7 @@ import {
   createMailRuleInputSchema,
   idSchema,
   isoDateTimeSchema,
-  mailDraftInputSchema,
   mailRuleSchema,
-  sendMailInputSchema,
   upsertMailAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -174,45 +172,6 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
       apiResult(async () => {
         await api.snoozeMailThread(threadId, until);
         return { snoozed: true };
-      }),
-  );
-  server.registerTool(
-    "create_mail_draft",
-    {
-      annotations: {
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-        readOnlyHint: false,
-      },
-      description:
-        "Save a durable Ilo Mail draft after verifying the account, recipients, subject, and body from the user's instruction. This does not contact the provider. Use the returned draft ID and exact same fields with send_mail.",
-      inputSchema: mailDraftInputSchema,
-      title: "Create mail draft",
-    },
-    async (input) => apiResult(() => api.createMailDraft(input)),
-  );
-  server.registerTool(
-    "send_mail",
-    {
-      annotations: {
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: true,
-        readOnlyHint: false,
-      },
-      description:
-        "Send a previously saved durable Ilo Mail draft through its connected provider. draftId is required and every account, thread, recipient, subject, and body field must exactly match create_mail_draft. This creates an open-world external side effect; never retry an uncertain result until the person inspects provider Sent Mail and reconciles the draft in Ilo.",
-      inputSchema: z.object({
-        ...sendMailInputSchema.shape,
-        draftId: id.describe("Required durable draft ID returned by create_mail_draft"),
-      }),
-      title: "Send mail",
-    },
-    async (input) =>
-      apiResult(async () => {
-        await api.sendMail(input);
-        return { sent: true };
       }),
   );
   server.registerTool(

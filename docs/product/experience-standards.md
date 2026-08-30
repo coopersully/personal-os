@@ -79,17 +79,25 @@ linked provider records as one material action.
 
 ## Mail standard
 
-Mail is a read-only synchronized surface in the first release. Top navigation
-owns search, unread filtering, and explicit sync. The left rail places a
-**Unified inbox** group before provider-account **Mailboxes**. The center column
-selects a conversation, and the reader preserves subject, sender, recipients,
-time, and plain-text body without exposing mutation controls.
+Mail defaults to one synchronized **Inbox** across every connected provider. The
+left rail gives direct access to Inbox, Unread, Starred, Snoozed, Sent, and
+Drafts; provider-account mailboxes remain available in a collapsed secondary
+group. Search stays with the conversation list, reader actions stay at the top
+of the reader, and every desktop pane remains resizable.
 
-Account identity remains visible whenever mailboxes from multiple providers are
-combined. An empty, loading, stale, or failed provider state stays localized and
-actionable. Message bodies are treated as private material: the UI renders text,
-never remote scripts, and agent tools separate list/search summaries from full
-conversation reads.
+An end-justified floating plus opens the human Mail composer. Compose, Reply,
+and Forward create a durable plain-text draft with From, To, optional Cc,
+Subject, and Message fields. Sending requires an explicit review of one exact
+saved revision. Attachments, Bcc, autonomous transmission, and MCP transmission
+are unavailable. Ambiguous provider acceptance is never retried automatically;
+the Drafts view keeps it visible for human reconciliation.
+
+Account identity remains visible on each conversation whenever multiple
+providers are combined. A disconnected provider is surfaced prominently without
+hiding cached mail, and individual-inbox navigation remains possible without
+displacing the unified default. Message bodies are private material: the UI
+renders text, never remote scripts, and agent tools separate list/search
+summaries from full conversation reads.
 
 ## Finance ledger standard
 

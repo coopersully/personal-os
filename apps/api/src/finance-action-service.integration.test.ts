@@ -1814,46 +1814,48 @@ describe.sequential("finance action service", () => {
         requestId: "refresh-audit-approve",
       }),
     ).resolves.toMatchObject({ result: { refreshed: true }, status: "applied" });
-    await expect(
-      database.db
-        .select({
-          action: auditEvents.action,
-          actorId: auditEvents.actorId,
-          actorType: auditEvents.actorType,
-          after: auditEvents.after,
-          before: auditEvents.before,
-          entityId: auditEvents.entityId,
-          entityType: auditEvents.entityType,
-          requestId: auditEvents.requestId,
-        })
-        .from(auditEvents)
-        .where(eq(auditEvents.requestId, "refresh-audit-approve")),
-    ).resolves.toEqual([
-      {
-        action: "finance.insights_refreshed",
-        actorId: userId,
-        actorType: "user",
-        after: { refreshed: true },
-        before: null,
-        entityId: userId,
-        entityType: "finance_alert",
-        requestId: "refresh-audit-approve",
-      },
-      {
-        action: "finance.action_review_approved",
-        actorId: userId,
-        actorType: "user",
-        after: {
-          actionKind: "alert",
-          fingerprint: queued.review.fingerprint,
-          reviewId: queued.review.id,
+    const refreshAuditEvents = await database.db
+      .select({
+        action: auditEvents.action,
+        actorId: auditEvents.actorId,
+        actorType: auditEvents.actorType,
+        after: auditEvents.after,
+        before: auditEvents.before,
+        entityId: auditEvents.entityId,
+        entityType: auditEvents.entityType,
+        requestId: auditEvents.requestId,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "refresh-audit-approve"));
+    expect(refreshAuditEvents).toHaveLength(2);
+    expect(refreshAuditEvents).toEqual(
+      expect.arrayContaining([
+        {
+          action: "finance.insights_refreshed",
+          actorId: userId,
+          actorType: "user",
+          after: { refreshed: true },
+          before: null,
+          entityId: userId,
+          entityType: "finance_alert",
+          requestId: "refresh-audit-approve",
         },
-        before: null,
-        entityId: queued.review.id,
-        entityType: "finance_agent_action_review",
-        requestId: "refresh-audit-approve",
-      },
-    ]);
+        {
+          action: "finance.action_review_approved",
+          actorId: userId,
+          actorType: "user",
+          after: {
+            actionKind: "alert",
+            fingerprint: queued.review.fingerprint,
+            reviewId: queued.review.id,
+          },
+          before: null,
+          entityId: queued.review.id,
+          entityType: "finance_agent_action_review",
+          requestId: "refresh-audit-approve",
+        },
+      ]),
+    );
 
     const queuedForRollback = await service.performDirect(
       "alert",

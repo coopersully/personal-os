@@ -95,7 +95,6 @@ import {
   reminderTimeZoneSchema,
   resolveStoredMailRule,
   semanticVersionSchema,
-  sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
@@ -1055,17 +1054,6 @@ describe("domain schemas", () => {
       }).success,
     ).toBe(false);
     expect(
-      sendMailInputSchema.parse({
-        accountId: "00000000-0000-4000-8000-000000000001",
-        body: "No subject",
-        subject: "   ",
-        to: [{ address: "To@Example.COM", name: null }],
-      }),
-    ).toMatchObject({
-      subject: "",
-      to: [{ address: "To@Example.COM", name: null }],
-    });
-    expect(
       createMailRuleInputSchema.safeParse({
         actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
         condition: { field: "sender", operator: "contains", value: "news" },
@@ -1663,10 +1651,11 @@ describe("domain schemas", () => {
         accountIds: `${accountId},`,
         limit: "25",
         mailboxId: id,
+        mailboxRole: "sent",
         query: "sender",
         unread: "true",
       }),
-    ).toMatchObject({ accountIds: [accountId], limit: 25, unread: true });
+    ).toMatchObject({ accountIds: [accountId], limit: 25, mailboxRole: "sent", unread: true });
     expect(mailListQuerySchema.parse({ unread: "false" }).unread).toBe(false);
     expect(mailListQuerySchema.parse({ snoozed: "true", starred: "true" })).toMatchObject({
       snoozed: true,

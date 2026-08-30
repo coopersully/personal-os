@@ -16,6 +16,10 @@ import {
   type DatabaseClient,
   domainProfiles,
   financeTransactions,
+  mailReviews,
+  mailRuleWorkItems,
+  mailStewardshipQuestions,
+  mailThreadDispositions,
   mailThreads,
   migrateDatabase,
   reminders,
@@ -817,6 +821,7 @@ describe.sequential("ilo API", () => {
       .where(inArray(users.email, fixtureEmails));
     expect(fixtureUsers).toHaveLength(qaFixtureAccounts.length);
     const demo = fixtureUsers.find((record) => record.email === "demo+full@ilo.test");
+    const loaded = fixtureUsers.find((record) => record.email === "qa+loaded@ilo.test");
     const onboarding = fixtureUsers.find((record) => record.email === "qa+onboarding-new@ilo.test");
     const resumed = fixtureUsers.find((record) => record.email === "qa+onboarding-google@ilo.test");
     const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@ilo.test");
@@ -839,33 +844,59 @@ describe.sequential("ilo API", () => {
     expect(degraded).toBeDefined();
     expect(await verifyPassword(DEMO_QA_PASSWORD, demo?.passwordHash ?? "")).toBe(true);
 
-    const [events, messages, transactions, profiles, emptyTasks, degradedAccounts] =
-      await Promise.all([
-        database.db
-          .select()
-          .from(calendarEvents)
-          .where(eq(calendarEvents.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(mailThreads)
-          .where(eq(mailThreads.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(financeTransactions)
-          .where(eq(financeTransactions.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(domainProfiles)
-          .where(eq(domainProfiles.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(reminders)
-          .where(eq(reminders.userId, empty?.id ?? "")),
-        database.db
-          .select()
-          .from(calendarAccounts)
-          .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
-      ]);
+    const [
+      events,
+      messages,
+      transactions,
+      profiles,
+      emptyTasks,
+      degradedAccounts,
+      demoReviews,
+      demoDispositions,
+      loadedQuestions,
+      degradedRuleWork,
+    ] = await Promise.all([
+      database.db
+        .select()
+        .from(calendarEvents)
+        .where(eq(calendarEvents.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailThreads)
+        .where(eq(mailThreads.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(domainProfiles)
+        .where(eq(domainProfiles.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(reminders)
+        .where(eq(reminders.userId, empty?.id ?? "")),
+      database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
+      database.db
+        .select()
+        .from(mailReviews)
+        .where(eq(mailReviews.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailThreadDispositions)
+        .where(eq(mailThreadDispositions.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailStewardshipQuestions)
+        .where(eq(mailStewardshipQuestions.userId, loaded?.id ?? "")),
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.userId, degraded?.id ?? "")),
+    ]);
     expect(events).toHaveLength(9);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
@@ -873,6 +904,16 @@ describe.sequential("ilo API", () => {
     expect(emptyTasks).toEqual([]);
     expect(degradedAccounts).toContainEqual(
       expect.objectContaining({ provider: "google", syncStatus: "error" }),
+    );
+    expect(demoReviews).toContainEqual(
+      expect.objectContaining({ sourceFreshness: "current", state: "maintained" }),
+    );
+    expect(demoDispositions).toHaveLength(5);
+    expect(loadedQuestions).toContainEqual(
+      expect.objectContaining({ kind: "needs_disposition", status: "open" }),
+    );
+    expect(degradedRuleWork).toContainEqual(
+      expect.objectContaining({ providerEffect: "indeterminate", status: "reconcile" }),
     );
 
     await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });

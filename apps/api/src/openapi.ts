@@ -306,6 +306,58 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           security,
         },
       },
+      "/v1/mail/status": {
+        get: {
+          security,
+          responses: { 200: { description: "Authoritative Mail stewardship status" } },
+        },
+      },
+      "/v1/mail/maintenance": {
+        post: {
+          security,
+          responses: {
+            200: { description: "Durable Mail maintenance result with honest settlement" },
+            403: { description: "The caller lacks mail:write" },
+            409: { description: "A conflicting Mail maintenance run is active" },
+          },
+        },
+      },
+      "/v1/mail/maintenance/{id}": {
+        get: {
+          security,
+          responses: { 200: { description: "Owned Mail maintenance run" } },
+        },
+      },
+      "/v1/mail/reviews/{id}": {
+        get: { security, responses: { 200: { description: "Immutable Mail review artifact" } } },
+      },
+      "/v1/mail/threads/{id}/stewardship": {
+        get: { security, responses: { 200: { description: "Exact-thread stewardship ledger" } } },
+      },
+      "/v1/mail/threads/{id}/disposition": {
+        put: { security, responses: { 200: { description: "Revision-checked disposition" } } },
+      },
+      "/v1/mail/threads/{id}/obligations": {
+        post: { security, responses: { 201: { description: "Revision-bound Mail obligation" } } },
+      },
+      "/v1/mail/threads/{id}/response-brief/preview": {
+        post: {
+          security,
+          responses: { 200: { description: "Private non-transmittable response checklist" } },
+        },
+      },
+      "/v1/mail/obligations/{id}": {
+        patch: { security, responses: { 200: { description: "Version-checked obligation" } } },
+      },
+      "/v1/mail/questions/{id}/answer": {
+        post: { security, responses: { 200: { description: "Version-checked Mail answer" } } },
+      },
+      "/v1/mail/feedback": {
+        post: {
+          security,
+          responses: { 201: { description: "Immutable Mail stewardship feedback" } },
+        },
+      },
       "/v1/reminders": {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },
@@ -495,17 +547,27 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Source-aware Mail setup context" } } },
       },
       "/v1/mail/drafts": {
-        get: { security, responses: { 200: { description: "Mail drafts" } } },
-        post: { security, responses: { 201: { description: "Mail draft created" } } },
+        get: { security, responses: { 200: { description: "Owned Mail drafts and send state" } } },
+        post: {
+          security,
+          responses: { 201: { description: "Durable Mail draft created" } },
+        },
+      },
+      "/v1/mail/drafts/{id}": {
+        delete: { security, responses: { 204: { description: "Editable Mail draft deleted" } } },
+        patch: { security, responses: { 200: { description: "Mail draft updated" } } },
       },
       "/v1/mail/drafts/{id}/reconcile": {
         post: {
           security,
-          responses: { 200: { description: "Uncertain Mail draft reconciled by its owner" } },
+          responses: { 200: { description: "Uncertain Mail delivery reconciled by a human" } },
         },
       },
       "/v1/mail/send": {
-        post: { security, responses: { 202: { description: "Mail send accepted" } } },
+        post: {
+          security,
+          responses: { 204: { description: "Exact confirmed draft submitted once" } },
+        },
       },
       "/v1/mail/threads": {
         get: { security, responses: { 200: { description: "Unified mail conversations" } } },

@@ -55,6 +55,7 @@ export const mailSetupAccountSchema = z.object({
   lastSyncedAt: isoDateTimeSchema.nullable(),
   mailboxes: z.array(mailboxSchema),
   provider: mailProviderSchema,
+  sendCapability: z.enum(["available", "reconnect", "unavailable"]),
   nextSyncAt: isoDateTimeSchema.nullable(),
   syncError: z.string().nullable(),
   syncStatus: connectorSyncStatusSchema,
@@ -214,6 +215,7 @@ export const mailListQuerySchema = z.object({
     .pipe(z.array(idSchema))
     .optional(),
   mailboxId: idSchema.optional(),
+  mailboxRole: mailboxRoleSchema.optional(),
   query: z.string().trim().min(1).max(200).optional(),
   snoozed: z
     .enum(["true", "false"])
@@ -291,30 +293,40 @@ export const bulkUpdateMailResultSchema = z.object({
 });
 export type BulkUpdateMailResult = z.infer<typeof bulkUpdateMailResultSchema>;
 
-export const mailDraftInputSchema = z.object({
+const mailDraftFields = {
   accountId: idSchema,
   body: z.string().max(100_000),
   cc: z.array(mailRecipientInputSchema).max(100).default([]),
   subject: mailHeaderTextSchema(998, true),
-  threadId: idSchema.optional(),
-  to: z.array(mailRecipientInputSchema).min(1).max(100),
-});
-export type MailDraftInput = z.infer<typeof mailDraftInputSchema>;
+  threadId: idSchema.nullable().optional(),
+  to: z.array(mailRecipientInputSchema).max(100).default([]),
+};
 
-export const sendMailInputSchema = mailDraftInputSchema.extend({ draftId: idSchema.optional() });
-export type SendMailInput = z.infer<typeof sendMailInputSchema>;
+export const createMailDraftInputSchema = z.object(mailDraftFields);
+export type CreateMailDraftInput = z.infer<typeof createMailDraftInputSchema>;
+
+export const updateMailDraftInputSchema = z.object(mailDraftFields).extend({
+  expectedUpdatedAt: isoDateTimeSchema,
+});
+export type UpdateMailDraftInput = z.infer<typeof updateMailDraftInputSchema>;
+
+export const sendMailDraftInputSchema = z.object({
+  confirmedUpdatedAt: isoDateTimeSchema,
+  draftId: idSchema,
+});
+export type SendMailDraftInput = z.infer<typeof sendMailDraftInputSchema>;
 
 export const reconcileMailDraftInputSchema = z.object({
   outcome: z.enum(["not_sent", "sent"]),
 });
 export type ReconcileMailDraftInput = z.infer<typeof reconcileMailDraftInputSchema>;
 
-export const mailDraftSchema = mailDraftInputSchema.extend({
+export const mailDraftSchema = z.object(mailDraftFields).extend({
   createdAt: isoDateTimeSchema,
   id: idSchema,
   reconciliationState: z.enum(["in_progress", "none", "sent_mail_review_required"]),
   sendClaimedAt: isoDateTimeSchema.nullable(),
-  sendStatus: z.enum(["draft", "sending", "sent", "reconcile"]),
+  sendStatus: z.enum(["draft", "sending", "reconcile", "sent"]),
   sentAt: isoDateTimeSchema.nullable(),
   threadId: idSchema.nullable(),
   updatedAt: isoDateTimeSchema,

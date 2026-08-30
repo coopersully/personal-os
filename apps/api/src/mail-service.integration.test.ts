@@ -13,15 +13,13 @@ import {
   mailMessages,
   mailRules,
   mailRuleWorkItems,
-  mailSnoozes,
   mailThreads,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
-import { createAuditService } from "./audit.js";
 import { type ConnectedMailGateway, MailProviderRejectedError } from "./connector-service.js";
 import { errorResponse } from "./errors.js";
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
@@ -47,7 +45,10 @@ describe.sequential("mail service", () => {
   let temporaryMigrationsFolder: string | null = null;
   let setupMigrationsFolder: string | null = null;
   const gateway = {
-    send: vi.fn<ConnectedMailGateway["send"]>(async () => undefined),
+    sendCapability: vi.fn<NonNullable<ConnectedMailGateway["sendCapability"]>>(
+      async () => "available",
+    ),
+    send: vi.fn(async () => undefined),
     update: vi.fn<ConnectedMailGateway["update"]>(async () => undefined),
   };
   const mutationContext = (requestId: string) => ({
@@ -59,61 +60,6 @@ describe.sequential("mail service", () => {
     },
     requestId,
   });
-
-  async function expectDraftClaimReleaseInterference(mode: "failed" | "lost"): Promise<void> {
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Original body",
-      cc: [],
-      subject: "Original subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    gateway.send.mockClear();
-    const releaseAction =
-      mode === "failed" ? "RAISE EXCEPTION 'forced claim release failure';" : "RETURN NULL;";
-    await database.pool.query(`
-      CREATE OR REPLACE FUNCTION interfere_with_mail_draft_claim_for_test() RETURNS trigger AS $$
-      BEGIN
-        IF OLD.send_status = 'draft' AND NEW.send_status = 'sending' THEN
-          NEW.subject = NEW.subject || ' changed';
-        ELSIF OLD.send_status = 'sending' AND NEW.send_status = 'draft' THEN
-          ${releaseAction}
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-      CREATE TRIGGER interfere_with_mail_draft_claim_for_test
-      BEFORE UPDATE ON mail_drafts
-      FOR EACH ROW EXECUTE FUNCTION interfere_with_mail_draft_claim_for_test();
-    `);
-    try {
-      await expect(
-        service.send(
-          userId,
-          {
-            accountId: enabledAccountId,
-            body: draft.body,
-            cc: draft.cc,
-            draftId: draft.id,
-            subject: draft.subject,
-            to: draft.to,
-          },
-          mutationContext(`draft-claim-release-${mode}`),
-        ),
-      ).rejects.toMatchObject({
-        code: mode === "failed" ? "service_unavailable" : "conflict",
-        message: expect.stringContaining(
-          mode === "failed" ? "could not safely release" : "no longer owns the draft claim",
-        ),
-      });
-      expect(gateway.send).not.toHaveBeenCalled();
-    } finally {
-      await database.pool.query(`
-        DROP TRIGGER IF EXISTS interfere_with_mail_draft_claim_for_test ON mail_drafts;
-        DROP FUNCTION IF EXISTS interfere_with_mail_draft_claim_for_test();
-      `);
-    }
-  }
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
@@ -159,6 +105,7 @@ describe.sequential("mail service", () => {
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
       "0072_texting",
+      "0073_mail_workspace_stewardship",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -216,6 +163,7 @@ describe.sequential("mail service", () => {
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
       "0072_texting",
+      "0073_mail_workspace_stewardship",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -264,7 +212,7 @@ describe.sequential("mail service", () => {
     if (!enabled || !disabled) throw new Error("Fixture accounts were not created.");
     enabledAccountId = enabled.id;
     disabledAccountId = disabled.id;
-    const [inbox, customLabel] = await database.db
+    const [inbox, sent, customLabel] = await database.db
       .insert(mailboxes)
       .values([
         {
@@ -279,6 +227,16 @@ describe.sequential("mail service", () => {
         },
         {
           accountId: enabled.id,
+          name: "Sent",
+          provider: "google",
+          remoteMailboxId: "SENT",
+          role: "sent",
+          totalCount: 1,
+          unreadCount: 0,
+          userId,
+        },
+        {
+          accountId: enabled.id,
           name: "Orders",
           provider: "google",
           remoteMailboxId: "Label_Orders",
@@ -289,7 +247,7 @@ describe.sequential("mail service", () => {
         },
       ])
       .returning();
-    if (!inbox || !customLabel) throw new Error("Fixture mailboxes were not created.");
+    if (!inbox || !sent || !customLabel) throw new Error("Fixture mailboxes were not created.");
     inboxId = inbox.id;
     customLabelId = customLabel.id;
     const [profile] = await database.db
@@ -345,7 +303,7 @@ describe.sequential("mail service", () => {
         from: { address: "other@example.com", name: "Other" },
         provider: "google",
         receivedAt: new Date("2026-07-15T12:00:00.000Z"),
-        remoteMailboxIds: [],
+        remoteMailboxIds: ["SENT"],
         remoteThreadId: "thread-2",
         snippet: "Different preview",
         starred: false,
@@ -429,30 +387,6 @@ describe.sequential("mail service", () => {
     });
   });
 
-  it("enforces coherent Mail draft send states in PostgreSQL", async () => {
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "State invariant",
-      cc: [],
-      subject: "State invariant",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    for (const statement of [
-      `UPDATE mail_drafts SET send_status = 'unknown' WHERE id = $1`,
-      `UPDATE mail_drafts SET send_status = 'sending' WHERE id = $1`,
-      `UPDATE mail_drafts SET send_status = 'sent' WHERE id = $1`,
-      `UPDATE mail_drafts
-       SET send_status = 'draft', send_claimed_at = now()
-       WHERE id = $1`,
-    ]) {
-      await expect(database.pool.query(statement, [draft.id])).rejects.toMatchObject({
-        code: "23514",
-        constraint: "mail_drafts_send_state_check",
-      });
-    }
-    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, draft.id));
-  });
-
   it("lists enabled mailboxes and serializes mailbox membership", async () => {
     await database.db.insert(mailMessages).values({
       attachments: [
@@ -488,6 +422,317 @@ describe.sequential("mail service", () => {
     });
   });
 
+  it("sends one exact saved draft revision and rejects stale or duplicate confirmation", async () => {
+    gateway.send.mockClear();
+    const created = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "",
+      cc: [],
+      subject: "",
+      to: [],
+    });
+    expect(created).toMatchObject({ sendStatus: "draft", to: [] });
+    const [persistedBeforeUpdate] = await database.db
+      .select({ sendStatus: mailDrafts.sendStatus, updatedAt: mailDrafts.updatedAt })
+      .from(mailDrafts)
+      .where(eq(mailDrafts.id, created.id));
+    expect(persistedBeforeUpdate).toEqual({
+      sendStatus: "draft",
+      updatedAt: new Date(created.updatedAt),
+    });
+
+    await expect(
+      service.updateDraft(userId, created.id, {
+        accountId: disabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    await expect(
+      service.updateDraft(userId, created.id, {
+        accountId: enabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject: "Follow up",
+        threadId: disabledAccountId,
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const updated = await service.updateDraft(userId, created.id, {
+      accountId: enabledAccountId,
+      body: "Prepared response",
+      cc: [],
+      expectedUpdatedAt: created.updatedAt,
+      subject: "Follow up",
+      threadId,
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await expect(
+      service.updateDraft(userId, created.id, {
+        accountId: enabledAccountId,
+        body: "Stale overwrite",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: updated.updatedAt, draftId: updated.id },
+        mutationContext("send-draft-request"),
+      ),
+    ).resolves.toBeUndefined();
+    expect(gateway.send).toHaveBeenCalledOnce();
+    expect(gateway.send).toHaveBeenCalledWith(userId, enabledAccountId, {
+      body: "Prepared response",
+      cc: [],
+      subject: "Follow up",
+      threadId: "thread-1",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: updated.updatedAt, draftId: updated.id },
+        mutationContext("duplicate-send-request"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(gateway.send).toHaveBeenCalledOnce();
+
+    const [audit] = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "send-draft-request"));
+    expect(audit).toMatchObject({ action: "mail.sent", entityId: updated.id });
+    expect(JSON.stringify(audit)).not.toContain("person@example.com");
+    expect(JSON.stringify(audit)).not.toContain("Prepared response");
+
+    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, created.id));
+  });
+
+  it("fails closed for incomplete drafts and reconciles only explicit uncertain delivery", async () => {
+    const missingId = "99999999-9999-4999-8999-999999999999";
+    const expectedUpdatedAt = "2026-07-16T12:00:00.000Z";
+    await expect(
+      service.updateDraft(userId, missingId, {
+        accountId: enabledAccountId,
+        body: "Missing",
+        cc: [],
+        expectedUpdatedAt,
+        subject: "Missing",
+        to: [],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: expectedUpdatedAt, draftId: missingId },
+        mutationContext("send-missing-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.reconcileDraft(
+        userId,
+        missingId,
+        "not_sent",
+        mutationContext("reconcile-missing-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    const noRecipient = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Prepared body",
+      cc: [],
+      subject: "Prepared subject",
+      to: [],
+    });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: noRecipient.updatedAt, draftId: noRecipient.id },
+        mutationContext("send-without-recipient"),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const noContent = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "",
+      cc: [],
+      subject: "",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: noContent.updatedAt, draftId: noContent.id },
+        mutationContext("send-without-content"),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.sendDraft(
+        userId,
+        {
+          confirmedUpdatedAt: new Date(Date.parse(noContent.updatedAt) + 1).toISOString(),
+          draftId: noContent.id,
+        },
+        mutationContext("send-stale-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.reconcileDraft(
+        userId,
+        noContent.id,
+        "not_sent",
+        mutationContext("reconcile-certain-draft"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    const uncertain = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Potentially delivered",
+      cc: [],
+      subject: "Uncertain",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await database.db
+      .update(mailDrafts)
+      .set({
+        sendClaimedAt: new Date("2026-07-16T11:55:00.000Z"),
+        sendClaimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sendStatus: "reconcile",
+      })
+      .where(eq(mailDrafts.id, uncertain.id));
+    await expect(
+      service.reconcileDraft(userId, uncertain.id, "sent", mutationContext("reconcile-sent-draft")),
+    ).resolves.toMatchObject({ sendStatus: "sent", sentAt: expectedUpdatedAt });
+
+    const staleSending = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Claimed before interruption",
+      cc: [],
+      subject: "Stale claim",
+      to: [{ address: "person@example.com", name: null }],
+    });
+    await database.db
+      .update(mailDrafts)
+      .set({
+        sendClaimedAt: new Date("2026-07-16T10:00:00.000Z"),
+        sendClaimId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        sendStatus: "sending",
+      })
+      .where(eq(mailDrafts.id, staleSending.id));
+    await expect(
+      service.reconcileDraft(
+        userId,
+        staleSending.id,
+        "not_sent",
+        mutationContext("reconcile-stale-send-claim"),
+      ),
+    ).resolves.toMatchObject({ sendStatus: "draft", sentAt: null });
+
+    await database.db
+      .delete(mailDrafts)
+      .where(inArray(mailDrafts.id, [noRecipient.id, noContent.id, uncertain.id, staleSending.id]));
+  });
+
+  it("releases proven rejection but blocks retries after ambiguous provider acceptance", async () => {
+    const prepare = async (subject: string) => {
+      const created = await service.createDraft(userId, {
+        accountId: enabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        subject,
+        to: [{ address: "person@example.com", name: null }],
+      });
+      return service.updateDraft(userId, created.id, {
+        accountId: enabledAccountId,
+        body: "Prepared response",
+        cc: [],
+        expectedUpdatedAt: created.updatedAt,
+        subject,
+        to: [{ address: "person@example.com", name: null }],
+      });
+    };
+
+    const rejected = await prepare("Rejected");
+    gateway.send.mockRejectedValueOnce(
+      new MailProviderRejectedError("Rejected before acceptance", new Error("safe canary")),
+    );
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: rejected.updatedAt, draftId: rejected.id },
+        mutationContext("rejected-send-request"),
+      ),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: { partialEffect: false, retrySafe: true },
+    });
+    await expect(service.listDrafts(userId)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: rejected.id, sendStatus: "draft" })]),
+    );
+
+    const uncertain = await prepare("Uncertain");
+    gateway.send.mockRejectedValueOnce(new Error("ambiguous private provider canary"));
+    await expect(
+      service.sendDraft(
+        userId,
+        { confirmedUpdatedAt: uncertain.updatedAt, draftId: uncertain.id },
+        mutationContext("uncertain-send-request"),
+      ),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: { partialEffect: true, reconciliationPersisted: true },
+    });
+    const [uncertainState] = (await service.listDrafts(userId)).filter(
+      (draft) => draft.id === uncertain.id,
+    );
+    expect(uncertainState).toMatchObject({
+      reconciliationState: "sent_mail_review_required",
+      sendStatus: "reconcile",
+    });
+    const sendCallsAfterAmbiguity = gateway.send.mock.calls.length;
+    await expect(
+      service.sendDraft(
+        userId,
+        {
+          confirmedUpdatedAt: uncertainState?.updatedAt ?? uncertain.updatedAt,
+          draftId: uncertain.id,
+        },
+        mutationContext("unsafe-retry-request"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(gateway.send).toHaveBeenCalledTimes(sendCallsAfterAmbiguity);
+
+    await expect(
+      service.reconcileDraft(
+        userId,
+        uncertain.id,
+        "not_sent",
+        mutationContext("reconcile-not-sent-request"),
+      ),
+    ).resolves.toMatchObject({ sendStatus: "draft" });
+    const [reconcileAudit] = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "reconcile-not-sent-request"));
+    expect(reconcileAudit).toMatchObject({ action: "mail.send_reconciled" });
+    expect(JSON.stringify(reconcileAudit)).not.toContain("person@example.com");
+    expect(JSON.stringify(reconcileAudit)).not.toContain("Prepared response");
+
+    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, rejected.id));
+    await database.db.delete(mailDrafts).where(eq(mailDrafts.id, uncertain.id));
+  });
+
   it("filters conversations by account, unread state, mailbox, and search fields", async () => {
     await expect(service.listThreads(userId, { limit: 100 })).resolves.toHaveLength(2);
     await expect(
@@ -507,6 +752,9 @@ describe.sequential("mail service", () => {
     await expect(service.listThreads(userId, { limit: 100, starred: true })).resolves.toEqual([
       expect.objectContaining({ id: threadId }),
     ]);
+    await expect(service.listThreads(userId, { limit: 100, mailboxRole: "sent" })).resolves.toEqual(
+      [expect.objectContaining({ id: secondThreadId })],
+    );
     await service.snoozeThread(userId, threadId, new Date("2026-07-18T12:00:00.000Z"));
     await expect(service.listThreads(userId, { limit: 100, snoozed: true })).resolves.toEqual([
       expect.objectContaining({ id: threadId }),
@@ -516,1073 +764,15 @@ describe.sequential("mail service", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("writes through mutations and persists drafts and snoozes", async () => {
-    const updated = await service.updateThread(
-      userId,
-      threadId,
-      { mailboxIds: [inboxId], starred: false, unread: false },
-      { actorId: userId, actorType: "user" },
-      "request-1",
-    );
-    expect(updated).toMatchObject({ starred: false, unread: false });
-    expect(gateway.update).toHaveBeenCalledWith(userId, enabledAccountId, "thread-1", {
-      addMailboxIds: [],
-      removeMailboxIds: ["STARRED", "UNREAD"],
-    });
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "ada@example.com", name: "Ada" }],
-    });
-    if (!draft) throw new Error("Draft was not created.");
-    await expect(service.listDrafts(userId)).resolves.toEqual([
-      expect.objectContaining({ id: draft.id }),
-    ]);
-    await service.send(
-      userId,
-      {
-        accountId: enabledAccountId,
-        body: "Hello",
-        cc: [],
-        draftId: draft.id,
-        subject: "Subject",
-        to: [{ address: "ada@example.com", name: "Ada" }],
-      },
-      mutationContext("send-draft"),
-    );
-    expect(gateway.send).toHaveBeenCalledWith(userId, enabledAccountId, {
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "ada@example.com", name: "Ada" }],
-    });
-    await service.send(
-      userId,
-      {
-        accountId: enabledAccountId,
-        body: "Reply",
-        cc: [],
-        subject: "Re: Project update",
-        threadId,
-        to: [{ address: "ada@example.com", name: "Ada" }],
-      },
-      mutationContext("send-reply"),
-    );
-    expect(gateway.send).toHaveBeenLastCalledWith(userId, enabledAccountId, {
-      body: "Reply",
-      cc: [],
-      subject: "Re: Project update",
-      threadId: "thread-1",
-      to: [{ address: "ada@example.com", name: "Ada" }],
-    });
-    await expect(database.db.select().from(mailDrafts)).resolves.toEqual([
-      expect.objectContaining({ sentAt: expect.any(Date) }),
-    ]);
-    await service.snoozeThread(userId, threadId, new Date("2026-07-18T12:00:00.000Z"));
-    await expect(database.db.select().from(mailSnoozes)).resolves.toEqual([
-      expect.objectContaining({ threadId }),
-    ]);
-    await expect(service.listThreads(userId, { limit: 100 })).resolves.toEqual([
-      expect.objectContaining({ subject: "Another note" }),
-    ]);
-    await database.db
-      .update(domainProfiles)
-      .set({
-        preferences: {
-          importantEmailHandling: "inbox_and_attention",
-          inboxStyle: "conservative",
-          noiseDisposition: "review_only",
-        },
-        sourceContexts: [],
-        status: "active",
-      })
-      .where(eq(domainProfiles.id, profileId));
-    const rule = await service.createRule(
-      {
-        actions: [{ afterDays: 1, mailboxId: null, type: "trash" }],
-        condition: { field: "subject", operator: "contains", value: "Project" },
-        confidenceThreshold: null,
-        description: "Archive old project updates.",
-        enabled: false,
-        name: "Archive newsletters",
-        policy: "preview",
-        profileId,
-        sourceIds: [enabledAccountId],
-      },
-      {
-        principal: {
-          actorId: userId,
-          actorType: "user",
-          scopes: new Set(["mail:read", "mail:write"]),
-          userId,
-        },
-        requestId: "request-rule",
-      },
-    );
-    const ruleAudit = await database.db
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.requestId, "request-rule"));
-    expect(ruleAudit).toEqual([
-      expect.objectContaining({
-        action: "mail.rule.created",
-        after: expect.objectContaining({
-          actionTypes: ["trash"],
-          conditionField: "subject",
-          conditionOperator: "contains",
-          sourceCount: 1,
-        }),
-      }),
-    ]);
-    expect(JSON.stringify(ruleAudit)).not.toMatch(
-      /Project|Archive old|Archive newsletters|enabled@example|thread-1/,
-    );
-    await expect(
-      service.previewRule(userId, {
-        actions: rule.actions,
-        condition: rule.condition,
-        confidenceThreshold: null,
-        description: rule.description,
-        sourceIds: rule.sourceIds,
-      }),
-    ).resolves.toMatchObject({
-      candidates: [expect.objectContaining({ id: threadId })],
-      matchedCount: 1,
-      window: {
-        limit: 200,
-        newestReceivedAt: "2026-07-15T13:00:00.000Z",
-        oldestReceivedAt: "2026-07-15T12:00:00.000Z",
-        truncated: false,
-      },
-    });
-    const reviewed = await service.previewSavedRule(userId, rule.id);
-    const activationInput = {
-      expectedCandidateIds: reviewed.candidates.map((candidate) => candidate.id),
-      expectedPreviewFingerprint: reviewed.fingerprint,
-      expectedPreviewedAt: reviewed.previewedAt,
-      expectedVersion: rule.version,
-    };
-    await expect(
-      service.activateRule(rule.id, activationInput, {
-        principal: {
-          actorId: userId,
-          actorType: "agent",
-          scopes: new Set(["mail:read", "mail:write"]),
-          userId,
-        },
-        requestId: "request-rule-agent-activation",
-      }),
-    ).rejects.toMatchObject({ code: "forbidden" });
-    await expect(
-      service.activateRule(
-        rule.id,
-        { ...activationInput, expectedPreviewedAt: "2026-07-16T11:00:00.000Z" },
-        {
-          principal: {
-            actorId: userId,
-            actorType: "user",
-            scopes: new Set(["mail:read", "mail:write"]),
-            userId,
-          },
-          requestId: "request-rule-expired-review",
-        },
-      ),
-    ).rejects.toThrow("review expired");
-    await expect(
-      service.activateRule(rule.id, activationInput, {
-        principal: {
-          actorId: userId,
-          actorType: "user",
-          scopes: new Set(["mail:read", "mail:write"]),
-          userId,
-        },
-        requestId: "request-rule-missing-profile-source",
-      }),
-    ).rejects.toThrow("Every rule source must have an explicit meaning");
-    await database.db
-      .update(domainProfiles)
-      .set({
-        sourceContexts: [
-          {
-            notes: null,
-            purpose: "Primary inbox",
-            sourceId: enabledAccountId,
-            sourceLabel: "Enabled",
-          },
-        ],
-      })
-      .where(eq(domainProfiles.id, profileId));
-    await expect(
-      service.activateRule(rule.id, activationInput, {
-        principal: {
-          actorId: userId,
-          actorType: "user",
-          scopes: new Set(["mail:read", "mail:write"]),
-          userId,
-        },
-        requestId: "request-rule-review-only",
-      }),
-    ).rejects.toThrow("does not authorize this retention action and timing");
-    await database.db
-      .update(domainProfiles)
-      .set({
-        preferences: {
-          importantEmailHandling: "inbox_and_attention",
-          inboxStyle: "conservative",
-          noiseDisposition: "trash_after_days",
-          noiseRetentionDays: 1,
-        },
-      })
-      .where(eq(domainProfiles.id, profileId));
-    const oneDayTrashRule = await service.createRule(
-      {
-        actions: rule.actions,
-        condition: rule.condition,
-        confidenceThreshold: null,
-        description: rule.description,
-        enabled: false,
-        name: "Discard routine project notices after one day",
-        policy: "preview",
-        profileId,
-        sourceIds: [enabledAccountId],
-      },
-      mutationContext("request-one-day-trash-rule"),
-    );
-    const oneDayTrashPreview = await service.previewSavedRule(userId, oneDayTrashRule.id);
-    await expect(
-      service.activateRule(
-        oneDayTrashRule.id,
-        {
-          expectedCandidateIds: oneDayTrashPreview.candidates.map((candidate) => candidate.id),
-          expectedPreviewFingerprint: oneDayTrashPreview.fingerprint,
-          expectedPreviewedAt: oneDayTrashPreview.previewedAt,
-          expectedVersion: oneDayTrashRule.version,
-        },
-        mutationContext("request-one-day-trash-activation"),
-      ),
-    ).resolves.toMatchObject({
-      rule: { enabled: true, policy: "approved_rule", version: 2 },
-    });
-    await expect(
-      database.db
-        .select()
-        .from(mailRuleWorkItems)
-        .where(eq(mailRuleWorkItems.ruleId, oneDayTrashRule.id)),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        action: { afterDays: 1, mailboxId: null, type: "trash" },
-        dueAt: new Date("2026-07-16T13:00:00.000Z"),
-        status: "pending",
-      }),
-    ]);
-    await service.updateRule(
-      oneDayTrashRule.id,
-      { enabled: false, expectedVersion: 2 },
-      mutationContext("request-one-day-trash-pause"),
-    );
-    const immediateTrashRule = await service.createRule(
-      {
-        actions: [{ afterDays: 0, mailboxId: null, type: "trash" }],
-        condition: rule.condition,
-        confidenceThreshold: null,
-        description: rule.description,
-        enabled: false,
-        name: "Immediate Trash is never inferred from retention preferences",
-        policy: "preview",
-        profileId,
-        sourceIds: [enabledAccountId],
-      },
-      mutationContext("request-immediate-trash-rule"),
-    );
-    const immediateTrashPreview = await service.previewSavedRule(userId, immediateTrashRule.id);
-    await expect(
-      service.activateRule(
-        immediateTrashRule.id,
-        {
-          expectedCandidateIds: immediateTrashPreview.candidates.map((candidate) => candidate.id),
-          expectedPreviewFingerprint: immediateTrashPreview.fingerprint,
-          expectedPreviewedAt: immediateTrashPreview.previewedAt,
-          expectedVersion: immediateTrashRule.version,
-        },
-        mutationContext("request-immediate-trash-activation"),
-      ),
-    ).rejects.toThrow("does not authorize this retention action and timing");
-    const nonRetentionRule = await service.updateRule(
-      rule.id,
-      {
-        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
-        expectedVersion: rule.version,
-      },
-      {
-        principal: {
-          actorId: userId,
-          actorType: "user",
-          scopes: new Set(["mail:read", "mail:write"]),
-          userId,
-        },
-        requestId: "request-rule-non-retention",
-      },
-    );
-    const nonRetentionPreview = await service.previewSavedRule(userId, rule.id);
-    await expect(
-      service.activateRule(
-        rule.id,
-        {
-          expectedCandidateIds: nonRetentionPreview.candidates.map((candidate) => candidate.id),
-          expectedPreviewFingerprint: nonRetentionPreview.fingerprint,
-          expectedPreviewedAt: nonRetentionPreview.previewedAt,
-          expectedVersion: nonRetentionRule.version,
-        },
-        {
-          principal: {
-            actorId: userId,
-            actorType: "user",
-            scopes: new Set(["mail:read", "mail:write"]),
-            userId,
-          },
-          requestId: "request-rule-update",
-        },
-      ),
-    ).resolves.toMatchObject({
-      rule: { enabled: true, policy: "approved_rule", version: 3 },
-    });
-    await expect(
-      service.updateRule(
-        rule.id,
-        {
-          condition: { field: "sender", operator: "contains", value: "changed" },
-          expectedVersion: 3,
-        },
-        {
-          principal: {
-            actorId: userId,
-            actorType: "user",
-            scopes: new Set(["mail:read", "mail:write"]),
-            userId,
-          },
-          requestId: "request-rule-active-edit",
-        },
-      ),
-    ).rejects.toMatchObject({ code: "invalid_request" });
-    const pausedRule = await service.updateRule(
-      rule.id,
-      { enabled: false, expectedVersion: 3 },
-      mutationContext("request-rule-pause"),
-    );
-    expect(pausedRule).toMatchObject({ enabled: false, policy: "preview", version: 4 });
-    const changedPausedRule = await service.updateRule(
-      rule.id,
-      {
-        condition: { field: "sender", operator: "ends_with", value: "@example.com" },
-        expectedVersion: pausedRule.version,
-      },
-      mutationContext("request-rule-paused-edit"),
-    );
-    expect(changedPausedRule).toMatchObject({
-      enabled: false,
-      policy: "preview",
-      version: 5,
-    });
-    const reactivationPreview = await service.previewSavedRule(userId, rule.id);
-    await expect(
-      service.activateRule(
-        rule.id,
-        {
-          expectedCandidateIds: reactivationPreview.candidates.map((candidate) => candidate.id),
-          expectedPreviewFingerprint: reactivationPreview.fingerprint,
-          expectedPreviewedAt: reactivationPreview.previewedAt,
-          expectedVersion: changedPausedRule.version,
-        },
-        mutationContext("request-rule-reactivate"),
-      ),
-    ).resolves.toMatchObject({
-      rule: { enabled: true, policy: "approved_rule", version: 6 },
-    });
-    await expect(service.listRules(userId)).resolves.toEqual(
-      expect.arrayContaining([expect.objectContaining({ enabled: true, id: rule.id, version: 6 })]),
-    );
-    await expect(database.db.select().from(mailRules)).resolves.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: rule.id })]),
-    );
-    await database.db
-      .update(domainProfiles)
-      .set({ preferences: {}, sourceContexts: [], status: "draft" })
-      .where(eq(domainProfiles.id, profileId));
-  });
-
-  it("durably audits successful sends without exposing message content to audit readers", async () => {
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Private draft body",
-      cc: [{ address: "private-copy@example.com", name: null }],
-      subject: "Private draft subject",
-      to: [{ address: "private-to@example.com", name: null }],
-    });
-    if (!draft) throw new Error("Draft fixture was not created.");
-    await service.send(
-      userId,
-      {
-        accountId: enabledAccountId,
-        body: draft.body,
-        cc: draft.cc,
-        draftId: draft.id,
-        subject: draft.subject,
-        to: draft.to,
-      },
-      mutationContext("redacted-send-draft"),
-    );
-    await service.send(
-      userId,
-      {
-        accountId: enabledAccountId,
-        body: "Private reply body",
-        cc: [],
-        subject: "Private reply subject",
-        threadId,
-        to: [{ address: "private-reply@example.com", name: null }],
-      },
-      mutationContext("redacted-send-reply"),
-    );
-
-    const sentAudits = (await createAuditService(database.db).list(userId, 100)).filter((event) =>
-      ["redacted-send-draft", "redacted-send-reply"].includes(event.requestId),
-    );
-    expect(sentAudits).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          actorId: userId,
-          action: "mail.sent",
-          after: {
-            accountId: enabledAccountId,
-            ccCount: 1,
-            draftId: draft.id,
-            hasDraft: true,
-            hasThread: false,
-            recipientCount: 1,
-            threadId: null,
-          },
-          requestId: "redacted-send-draft",
-        }),
-        expect.objectContaining({
-          actorId: userId,
-          action: "mail.sent",
-          after: {
-            accountId: enabledAccountId,
-            ccCount: 0,
-            draftId: null,
-            hasDraft: false,
-            hasThread: true,
-            recipientCount: 1,
-            threadId,
-          },
-          requestId: "redacted-send-reply",
-        }),
-      ]),
-    );
-    const serializedSentAudits = JSON.stringify(sentAudits);
-    for (const privateContent of [
-      "private-copy@example.com",
-      "private-to@example.com",
-      "private-reply@example.com",
-      "Private draft body",
-      "Private draft subject",
-      "Private reply body",
-      "Private reply subject",
-    ]) {
-      expect(serializedSentAudits).not.toContain(privateContent);
-    }
-  });
-
-  it("rolls back draft sent state and reports a possible send when its audit fails", async () => {
-    gateway.send.mockClear();
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Send once",
-      cc: [],
-      subject: "Provider partial send",
-      to: [{ address: "ada@example.com", name: "Ada" }],
-    });
-    if (!draft) throw new Error("Draft fixture was not created.");
-    await database.pool.query(`
-      CREATE OR REPLACE FUNCTION fail_mail_sent_audit_for_test() RETURNS trigger AS $$
-      BEGIN
-        IF NEW.action = 'mail.sent' THEN
-          RAISE EXCEPTION 'forced mail sent audit failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-      CREATE TRIGGER fail_mail_sent_audit_for_test
-      BEFORE INSERT ON audit_events
-      FOR EACH ROW EXECUTE FUNCTION fail_mail_sent_audit_for_test();
-    `);
-    try {
-      await expect(
-        service.send(
-          userId,
-          {
-            accountId: enabledAccountId,
-            body: draft.body,
-            cc: draft.cc,
-            draftId: draft.id,
-            subject: draft.subject,
-            to: draft.to,
-          },
-          mutationContext("send-draft-audit-failure"),
-        ),
-      ).rejects.toMatchObject({
-        code: "service_unavailable",
-        details: {
-          accountId: enabledAccountId,
-          credentialPersistenceMayHaveFailed: false,
-          draftId: draft.id,
-          operation: "send",
-          partialEffect: true,
-          repairAction: "verify_sent_mail_then_reconcile_draft",
-        },
-      });
-      expect(gateway.send).toHaveBeenCalledOnce();
-      const [unsentDraft] = await database.db
-        .select()
-        .from(mailDrafts)
-        .where(eq(mailDrafts.id, draft.id));
-      expect(unsentDraft).toMatchObject({ sendStatus: "reconcile", sentAt: null });
-      await expect(
-        service.send(
-          userId,
-          {
-            accountId: enabledAccountId,
-            body: draft.body,
-            cc: draft.cc,
-            draftId: draft.id,
-            subject: draft.subject,
-            to: draft.to,
-          },
-          mutationContext("send-draft-after-partial"),
-        ),
-      ).rejects.toMatchObject({
-        code: "conflict",
-        details: expect.objectContaining({
-          repairAction: "verify_sent_mail_then_reconcile_draft",
-        }),
-      });
-      expect(gateway.send).toHaveBeenCalledOnce();
-      await expect(
-        database.db
-          .select()
-          .from(auditEvents)
-          .where(eq(auditEvents.requestId, "send-draft-audit-failure")),
-      ).resolves.toEqual([]);
-    } finally {
-      await database.pool.query(`
-        DROP TRIGGER IF EXISTS fail_mail_sent_audit_for_test ON audit_events;
-        DROP FUNCTION IF EXISTS fail_mail_sent_audit_for_test();
-      `);
-    }
-  });
-
-  it("claims a draft durably so concurrent sends call the provider exactly once", async () => {
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Concurrent body",
-      cc: [],
-      subject: "Concurrent send",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    let releaseProvider: (() => void) | undefined;
-    gateway.send.mockClear();
-    gateway.send.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolveProvider) => {
-          releaseProvider = resolveProvider;
-        }),
-    );
-    const input = {
-      accountId: enabledAccountId,
-      body: draft.body,
-      cc: draft.cc,
-      draftId: draft.id,
-      subject: draft.subject,
-      to: draft.to,
-    };
-    const first = service.send(userId, input, mutationContext("concurrent-draft-first"));
-    await vi.waitFor(() => expect(gateway.send).toHaveBeenCalledOnce());
-    await expect(service.listDrafts(userId)).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: draft.id,
-          reconciliationState: "in_progress",
-          sendStatus: "sending",
-        }),
-      ]),
-    );
-    await expect(
-      service.send(userId, input, mutationContext("concurrent-draft-second")),
-    ).rejects.toMatchObject({
-      code: "conflict",
-      details: expect.objectContaining({ sendStatus: "sending" }),
-    });
-    expect(gateway.send).toHaveBeenCalledOnce();
-    releaseProvider?.();
-    await expect(first).resolves.toBeUndefined();
-    await expect(
-      database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
-    ).resolves.toEqual([expect.objectContaining({ sendStatus: "sent" })]);
-  });
-
-  it("revalidates the saved draft after acquiring its send claim", async () => {
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Original body",
-      cc: [],
-      subject: "Original subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    gateway.send.mockClear();
-    await database.pool.query(`
-      CREATE OR REPLACE FUNCTION change_claimed_mail_draft_for_test() RETURNS trigger AS $$
-      BEGIN
-        IF OLD.send_status = 'draft' AND NEW.send_status = 'sending' THEN
-          NEW.subject = NEW.subject || ' changed';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-      CREATE TRIGGER change_claimed_mail_draft_for_test
-      BEFORE UPDATE ON mail_drafts
-      FOR EACH ROW EXECUTE FUNCTION change_claimed_mail_draft_for_test();
-    `);
-    try {
-      await expect(
-        service.send(
-          userId,
-          {
-            accountId: enabledAccountId,
-            body: draft.body,
-            cc: draft.cc,
-            draftId: draft.id,
-            subject: draft.subject,
-            to: draft.to,
-          },
-          mutationContext("changed-during-draft-claim"),
-        ),
-      ).rejects.toMatchObject({
-        code: "invalid_request",
-        message: expect.stringContaining("changed before its send claim"),
-      });
-      expect(gateway.send).not.toHaveBeenCalled();
-      await expect(
-        database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
-      ).resolves.toEqual([
-        expect.objectContaining({
-          sendClaimId: null,
-          sendStatus: "draft",
-          subject: "Original subject changed",
-        }),
-      ]);
-    } finally {
-      await database.pool.query(`
-        DROP TRIGGER IF EXISTS change_claimed_mail_draft_for_test ON mail_drafts;
-        DROP FUNCTION IF EXISTS change_claimed_mail_draft_for_test();
-      `);
-    }
-  });
-
-  it.each([
-    "failed",
-    "lost",
-  ] as const)("reports a %s draft-claim release after post-claim validation", async (mode) => {
-    await expectDraftClaimReleaseInterference(mode);
-  });
-
-  it("releases only proven provider rejections and reconciles ambiguous or stale claims", async () => {
-    const rejectedDraft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Rejected body",
-      cc: [],
-      subject: "Rejected send",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    const rejectedInput = {
-      accountId: enabledAccountId,
-      body: rejectedDraft.body,
-      cc: rejectedDraft.cc,
-      draftId: rejectedDraft.id,
-      subject: rejectedDraft.subject,
-      to: rejectedDraft.to,
-    };
-    gateway.send.mockClear();
-    gateway.send.mockRejectedValueOnce(
-      new MailProviderRejectedError("Provider rejected", new Error("HTTP 400")),
-    );
-    await expect(
-      service.send(userId, rejectedInput, mutationContext("known-provider-rejection")),
-    ).rejects.toMatchObject({
-      code: "service_unavailable",
-      details: {
-        draftId: rejectedDraft.id,
-        partialEffect: false,
-        providerAcceptance: "rejected",
-        retrySafe: true,
-      },
-    });
-    await expect(
-      database.db.select().from(mailDrafts).where(eq(mailDrafts.id, rejectedDraft.id)),
-    ).resolves.toEqual([
-      expect.objectContaining({ sendClaimedAt: null, sendStatus: "draft", sentAt: null }),
-    ]);
-
-    const ambiguousDraft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Ambiguous body",
-      cc: [],
-      subject: "Ambiguous send",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    const ambiguousInput = {
-      accountId: enabledAccountId,
-      body: ambiguousDraft.body,
-      cc: ambiguousDraft.cc,
-      draftId: ambiguousDraft.id,
-      subject: ambiguousDraft.subject,
-      to: ambiguousDraft.to,
-    };
-    gateway.send.mockRejectedValueOnce(new Error("connection closed after request write"));
-    await expect(
-      service.send(userId, ambiguousInput, mutationContext("ambiguous-provider-send")),
-    ).rejects.toMatchObject({
-      code: "service_unavailable",
-      details: expect.objectContaining({
-        partialEffect: true,
-        repairAction: "verify_sent_mail_then_reconcile_draft",
-      }),
-    });
-    await expect(
-      service.send(userId, ambiguousInput, mutationContext("ambiguous-provider-retry")),
-    ).rejects.toMatchObject({ code: "conflict" });
-    expect(gateway.send).toHaveBeenCalledTimes(2);
-    await service.reconcileDraft(
-      userId,
-      ambiguousDraft.id,
-      "not_sent",
-      mutationContext("ambiguous-draft-reconciled"),
-    );
-    gateway.send.mockResolvedValueOnce(undefined);
-    await expect(
-      service.send(userId, ambiguousInput, mutationContext("reconciled-provider-retry")),
-    ).resolves.toBeUndefined();
-    expect(gateway.send).toHaveBeenCalledTimes(3);
-
-    const staleDraft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Stale body",
-      cc: [],
-      subject: "Stale send",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    await database.db
-      .update(mailDrafts)
-      .set({
-        sendClaimedAt: new Date("2026-07-16T11:55:00.000Z"),
-        sendClaimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        sendStatus: "sending",
-      })
-      .where(eq(mailDrafts.id, staleDraft.id));
-    await expect(service.listDrafts(userId)).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: staleDraft.id,
-          reconciliationState: "sent_mail_review_required",
-        }),
-      ]),
-    );
-    const callsBeforeStale = gateway.send.mock.calls.length;
-    await expect(
-      service.send(
-        userId,
-        {
-          accountId: enabledAccountId,
-          body: staleDraft.body,
-          cc: staleDraft.cc,
-          draftId: staleDraft.id,
-          subject: staleDraft.subject,
-          to: staleDraft.to,
-        },
-        mutationContext("stale-draft-send"),
-      ),
-    ).rejects.toMatchObject({
-      code: "conflict",
-      details: expect.objectContaining({
-        reason: "stale_claim",
-        repairAction: "verify_sent_mail_then_reconcile_draft",
-      }),
-    });
-    expect(gateway.send).toHaveBeenCalledTimes(callsBeforeStale);
-    await expect(
-      database.db.select().from(mailDrafts).where(eq(mailDrafts.id, staleDraft.id)),
-    ).resolves.toEqual([expect.objectContaining({ sendStatus: "reconcile" })]);
-  });
-
-  it("does not let an expired send owner overwrite a newer draft claim", async () => {
-    const clock = new Date("2026-07-16T12:00:00.000Z");
-    let rejectOldProvider: ((error: Error) => void) | undefined;
-    let resolveNewProvider: (() => void) | undefined;
-    let acceptedCount = 0;
-    const racingGateway: ConnectedMailGateway = {
-      send: vi
-        .fn<ConnectedMailGateway["send"]>()
-        .mockImplementationOnce(
-          () =>
-            new Promise<void>((_resolve, reject) => {
-              rejectOldProvider = reject;
-            }),
-        )
-        .mockImplementationOnce(
-          () =>
-            new Promise<void>((resolve) => {
-              resolveNewProvider = () => {
-                acceptedCount += 1;
-                resolve();
-              };
-            }),
-        ),
-      update: gateway.update,
-    };
-    const racingService = createMailService({
-      db: database.db,
-      gateway: racingGateway,
-      now: () => clock,
-      reviewSigningKey: "mail-review-signing-key-for-race-tests",
-    });
-    const draft = await racingService.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Ownership body",
-      cc: [],
-      subject: "Ownership race",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    const input = {
-      accountId: enabledAccountId,
-      body: draft.body,
-      cc: draft.cc,
-      draftId: draft.id,
-      subject: draft.subject,
-      to: draft.to,
-    };
-    const oldSend = racingService.send(userId, input, mutationContext("old-draft-owner"));
-    await vi.waitFor(() => expect(racingGateway.send).toHaveBeenCalledTimes(1));
-    await database.db
-      .update(mailDrafts)
-      .set({ sendClaimedAt: new Date("2026-07-16T11:55:00.000Z") })
-      .where(eq(mailDrafts.id, draft.id));
-    await expect(
-      racingService.send(userId, input, mutationContext("expire-old-draft-owner")),
-    ).rejects.toMatchObject({
-      details: expect.objectContaining({ reason: "stale_claim" }),
-    });
-    await racingService.reconcileDraft(
-      userId,
-      draft.id,
-      "not_sent",
-      mutationContext("reconcile-old-draft-owner"),
-    );
-    const newSend = racingService.send(userId, input, mutationContext("new-draft-owner"));
-    await vi.waitFor(() => expect(racingGateway.send).toHaveBeenCalledTimes(2));
-    rejectOldProvider?.(
-      new MailProviderRejectedError("Old provider request rejected", new Error("HTTP 400")),
-    );
-    await expect(oldSend).rejects.toMatchObject({
-      code: "conflict",
-      details: expect.objectContaining({
-        claimOwnershipLost: true,
-        partialEffect: false,
-      }),
-    });
-    await expect(
-      database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        sendClaimedAt: clock,
-        sendStatus: "sending",
-        sentAt: null,
-      }),
-    ]);
-    resolveNewProvider?.();
-    await expect(newSend).resolves.toBeUndefined();
-    expect(acceptedCount).toBe(1);
-    await expect(
-      database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
-    ).resolves.toEqual([expect.objectContaining({ sendStatus: "sent" })]);
-  });
-
-  it("preserves structured draft recovery when claim state persistence fails", async () => {
-    const installFailure = async (transition: "draft" | "reconcile" | "sent") => {
-      await database.pool.query(`
-        CREATE OR REPLACE FUNCTION fail_mail_draft_transition_for_test() RETURNS trigger AS $$
-        BEGIN
-          IF OLD.send_status = 'sending' AND NEW.send_status = '${transition}' THEN
-            RAISE EXCEPTION 'forced Mail draft ${transition} transition failure';
-          END IF;
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-        CREATE TRIGGER fail_mail_draft_transition_for_test
-        BEFORE UPDATE ON mail_drafts
-        FOR EACH ROW EXECUTE FUNCTION fail_mail_draft_transition_for_test();
-      `);
-    };
-    const removeFailure = async () => {
-      await database.pool.query(`
-        DROP TRIGGER IF EXISTS fail_mail_draft_transition_for_test ON mail_drafts;
-        DROP FUNCTION IF EXISTS fail_mail_draft_transition_for_test();
-      `);
-    };
-    const createInput = async (subject: string) => {
-      const draft = await service.createDraft(userId, {
-        accountId: enabledAccountId,
-        body: subject,
-        cc: [],
-        subject,
-        to: [{ address: "to@example.com", name: null }],
-      });
-      return {
-        draft,
-        input: {
-          accountId: enabledAccountId,
-          body: draft.body,
-          cc: draft.cc,
-          draftId: draft.id,
-          subject: draft.subject,
-          to: draft.to,
-        },
-      };
-    };
-
-    const ambiguous = await createInput("Ambiguous state persistence");
-    await installFailure("reconcile");
-    gateway.send.mockRejectedValueOnce(new Error("ambiguous provider transport"));
-    await expect(
-      service.send(userId, ambiguous.input, mutationContext("ambiguous-state-write-failure")),
-    ).rejects.toMatchObject({
-      code: "service_unavailable",
-      details: expect.objectContaining({
-        draftReconciliationStatePersisted: false,
-        repairAction: "verify_sent_mail_then_reconcile_draft",
-        userActionRequired: true,
-      }),
-    });
-    await removeFailure();
-
-    const rejected = await createInput("Rejected state persistence");
-    await installFailure("draft");
-    gateway.send.mockRejectedValueOnce(
-      new MailProviderRejectedError("Rejected before acceptance", new Error("HTTP 400")),
-    );
-    await expect(
-      service.send(userId, rejected.input, mutationContext("release-state-write-failure")),
-    ).rejects.toMatchObject({
-      code: "service_unavailable",
-      details: expect.objectContaining({
-        draftClaimReleasePersisted: false,
-        partialEffect: false,
-        repairAction: "review_current_draft_state",
-        userActionRequired: true,
-      }),
-    });
-    await removeFailure();
-
-    const finalized = await createInput("Final state persistence");
-    await database.pool.query(`
-      CREATE OR REPLACE FUNCTION fail_mail_draft_transition_for_test() RETURNS trigger AS $$
-      BEGIN
-        IF OLD.send_status = 'sending' AND NEW.send_status IN ('sent', 'reconcile') THEN
-          RAISE EXCEPTION 'forced Mail draft terminal transition failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-      CREATE TRIGGER fail_mail_draft_transition_for_test
-      BEFORE UPDATE ON mail_drafts
-      FOR EACH ROW EXECUTE FUNCTION fail_mail_draft_transition_for_test();
-    `);
-    gateway.send.mockResolvedValueOnce(undefined);
-    await expect(
-      service.send(userId, finalized.input, mutationContext("final-state-write-failure")),
-    ).rejects.toMatchObject({
-      code: "service_unavailable",
-      details: expect.objectContaining({
-        draftReconciliationStatePersisted: false,
-        partialEffect: true,
-        repairAction: "verify_sent_mail_then_reconcile_draft",
-        userActionRequired: true,
-      }),
-    });
-    await removeFailure();
-  });
-
-  it("reports a possible draftless send when its durable audit finalization fails", async () => {
-    gateway.send.mockClear();
-    await database.pool.query(`
-      CREATE OR REPLACE FUNCTION fail_mail_sent_audit_for_test() RETURNS trigger AS $$
-      BEGIN
-        IF NEW.action = 'mail.sent' THEN
-          RAISE EXCEPTION 'forced mail sent audit failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-      CREATE TRIGGER fail_mail_sent_audit_for_test
-      BEFORE INSERT ON audit_events
-      FOR EACH ROW EXECUTE FUNCTION fail_mail_sent_audit_for_test();
-    `);
-    try {
-      await expect(
-        service.send(
-          userId,
-          {
-            accountId: enabledAccountId,
-            body: "Send once",
-            cc: [{ address: "copy@example.com", name: null }],
-            subject: "Draftless provider partial send",
-            to: [{ address: "ada@example.com", name: "Ada" }],
-          },
-          mutationContext("send-draftless-audit-failure"),
-        ),
-      ).rejects.toMatchObject({
-        code: "service_unavailable",
-        details: {
-          accountId: enabledAccountId,
-          credentialPersistenceMayHaveFailed: false,
-          operation: "send",
-          partialEffect: true,
-          repairAction: "verify_sent_mail_never_retry",
-        },
-      });
-      expect(gateway.send).toHaveBeenCalledOnce();
-      await expect(
-        database.db
-          .select()
-          .from(auditEvents)
-          .where(eq(auditEvents.requestId, "send-draftless-audit-failure")),
-      ).resolves.toEqual([]);
-    } finally {
-      await database.pool.query(`
-        DROP TRIGGER IF EXISTS fail_mail_sent_audit_for_test ON audit_events;
-        DROP FUNCTION IF EXISTS fail_mail_sent_audit_for_test();
-      `);
-    }
-  });
-
-  it("rejects missing messages, drafts, and mailbox memberships", async () => {
+  it("validates and persists only explicit thread organization changes", async () => {
     const observed = await service.getThread(userId, threadId);
     gateway.update.mockClear();
+
     await expect(
       service.updateThread(
         userId,
         threadId,
-        { expectedUpdatedAt: "2026-01-01T00:00:00.000Z", starred: !observed.starred },
+        { expectedUpdatedAt: "2026-01-01T00:00:00.000Z", starred: false },
         { actorId: userId, actorType: "user" },
         "stale-thread-update",
       ),
@@ -1596,45 +786,13 @@ describe.sequential("mail service", () => {
         "duplicate-thread-mailboxes",
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
-    expect(gateway.update).not.toHaveBeenCalled();
-    await expect(
-      service.send(
-        userId,
-        {
-          accountId: enabledAccountId,
-          body: "Body",
-          cc: [],
-          draftId: disabledAccountId,
-          subject: "Subject",
-          to: [{ address: "to@example.com", name: null }],
-        },
-        mutationContext("send-missing-draft"),
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-    await expect(
-      service.send(
-        userId,
-        {
-          accountId: enabledAccountId,
-          body: "Body",
-          cc: [],
-          subject: "Subject",
-          threadId: disabledAccountId,
-          to: [{ address: "to@example.com", name: null }],
-        },
-        mutationContext("send-missing-thread"),
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-    await expect(
-      service.snoozeThread(userId, disabledAccountId, new Date("2026-07-18T12:00:00.000Z")),
-    ).rejects.toMatchObject({ code: "not_found" });
     await expect(
       service.updateThread(
         userId,
         threadId,
-        { mailboxIds: [disabledAccountId], starred: true, unread: true },
+        { mailboxIds: [disabledAccountId] },
         { actorId: userId, actorType: "user" },
-        "request-2",
+        "foreign-thread-mailbox",
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
@@ -1643,27 +801,54 @@ describe.sequential("mail service", () => {
         disabledAccountId,
         { starred: true },
         { actorId: userId, actorType: "user" },
-        "request-3",
+        "missing-thread-update",
       ),
     ).rejects.toMatchObject({ code: "not_found" });
     await expect(
-      service.updateThread(
-        userId,
-        threadId,
-        { starred: true, unread: true },
-        { actorId: userId, actorType: "user" },
-        "request-4",
-      ),
-    ).resolves.toMatchObject({ starred: true, unread: true });
-    await expect(
-      service.updateThread(
-        userId,
-        threadId,
-        { unread: false },
-        { actorId: userId, actorType: "user" },
-        "request-5",
-      ),
-    ).resolves.toMatchObject({ unread: false });
+      service.snoozeThread(userId, disabledAccountId, new Date("2026-07-18T12:00:00.000Z")),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(gateway.update).not.toHaveBeenCalled();
+
+    const organized = await service.updateThread(
+      userId,
+      threadId,
+      {
+        expectedUpdatedAt: observed.updatedAt,
+        mailboxIds: [customLabelId],
+        starred: false,
+        unread: false,
+      },
+      { actorId: userId, actorType: "user" },
+      "organize-thread",
+    );
+    expect(organized).toMatchObject({
+      mailboxIds: [customLabelId],
+      starred: false,
+      unread: false,
+    });
+    expect(gateway.update).toHaveBeenLastCalledWith(userId, enabledAccountId, "thread-1", {
+      addMailboxIds: ["Label_Orders"],
+      removeMailboxIds: ["STARRED", "UNREAD", "INBOX"],
+    });
+
+    const restored = await service.updateThread(
+      userId,
+      threadId,
+      {
+        expectedUpdatedAt: organized.updatedAt,
+        mailboxIds: [inboxId],
+        starred: true,
+        unread: true,
+      },
+      { actorId: userId, actorType: "user" },
+      "restore-thread",
+    );
+    expect(restored).toMatchObject({ mailboxIds: [inboxId], starred: true, unread: true });
+    expect(gateway.update).toHaveBeenLastCalledWith(userId, enabledAccountId, "thread-1", {
+      addMailboxIds: ["STARRED", "UNREAD", "INBOX"],
+      removeMailboxIds: ["Label_Orders"],
+    });
+
     await expect(
       service.bulkUpdateThreads(
         {
@@ -1674,107 +859,64 @@ describe.sequential("mail service", () => {
       ),
     ).resolves.toMatchObject({
       failedCount: 1,
-      failures: [
-        {
-          error: { code: "not_found", details: null },
-          id: disabledAccountId,
-        },
-      ],
+      failures: [{ error: { code: "not_found", details: null }, id: disabledAccountId }],
+      updatedCount: 0,
+      updatedIds: [],
     });
-  });
-
-  it("keeps every draft reconciliation state explicit and human-controlled", async () => {
-    await expect(
-      service.reconcileDraft(
-        userId,
-        disabledAccountId,
-        "not_sent",
-        mutationContext("reconcile-missing"),
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-
-    const untouched = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Untouched",
-      cc: [],
-      subject: "Untouched draft",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    await expect(
-      service.reconcileDraft(
-        userId,
-        untouched.id,
-        "not_sent",
-        mutationContext("reconcile-untouched"),
-      ),
-    ).rejects.toMatchObject({ code: "conflict" });
-
-    const inProgress = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "In progress",
-      cc: [],
-      subject: "In-progress draft",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    await database.db
-      .update(mailDrafts)
-      .set({
-        sendClaimedAt: new Date("2026-07-16T11:59:00.000Z"),
-        sendClaimId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        sendStatus: "sending",
-      })
-      .where(eq(mailDrafts.id, inProgress.id));
-    await expect(
-      service.reconcileDraft(
-        userId,
-        inProgress.id,
-        "not_sent",
-        mutationContext("reconcile-in-progress"),
-      ),
-    ).rejects.toMatchObject({ code: "conflict" });
-
-    const confirmedSent = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Confirmed sent",
-      cc: [],
-      subject: "Confirmed sent draft",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    await database.db
-      .update(mailDrafts)
-      .set({
-        sendClaimedAt: new Date("2026-07-16T11:55:00.000Z"),
-        sendClaimId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-        sendStatus: "reconcile",
-      })
-      .where(eq(mailDrafts.id, confirmedSent.id));
-    await expect(
-      service.reconcileDraft(
-        userId,
-        confirmedSent.id,
-        "sent",
-        mutationContext("reconcile-confirmed-sent"),
-      ),
-    ).resolves.toMatchObject({ sendStatus: "sent", sentAt: expect.any(Date) });
-    await expect(
-      service.reconcileDraft(
-        userId,
-        confirmedSent.id,
-        "not_sent",
-        mutationContext("reconcile-already-sent"),
-      ),
-    ).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("maps multi-inbox setup and serializes source-derived Mail attention", async () => {
+    await expect(service.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "available" })],
+      automation: { lastCompletedAt: null, oldestDueAt: null },
+      commitmentIntake: { previewOnlyCount: 0 },
+    });
+    const serviceWithoutCapability = createMailService({
+      db: database.db,
+      gateway: { send: gateway.send, update: gateway.update },
+      now: () => new Date("2026-07-16T12:00:00.000Z"),
+      reviewSigningKey: "mail-review-signing-key-for-tests",
+    });
+    await expect(serviceWithoutCapability.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "unavailable" })],
+    });
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: "Reconnect required.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "authorization_revoked",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+      })
+      .where(eq(calendarAccounts.id, enabledAccountId));
+    gateway.sendCapability.mockClear();
+    await expect(service.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "reconnect" })],
+    });
+    expect(gateway.sendCapability).not.toHaveBeenCalled();
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+        syncStatus: "idle",
+      })
+      .where(eq(calendarAccounts.id, enabledAccountId));
     const [sparseICloudAccount] = await database.db
       .insert(calendarAccounts)
       .values({
         calendarEnabled: false,
         email: null,
         label: "iCloud Mail",
+        lastSyncAttemptAt: new Date("2026-07-16T09:55:00.000Z"),
         lastSyncedAt: new Date("2026-07-16T10:00:00.000Z"),
         mailEnabled: true,
+        nextSyncAt: new Date("2026-07-16T10:05:00.000Z"),
         provider: "icloud",
         providerAccountId: "icloud-mail-setup",
         userId,
@@ -1973,8 +1115,10 @@ describe.sequential("mail service", () => {
             reconciliationCount: 0,
           },
           automaticRuleExecution: false,
+          lastSyncAttemptAt: "2026-07-16T09:55:00.000Z",
           lastSyncedAt: "2026-07-16T10:00:00.000Z",
           mailboxes: [],
+          nextSyncAt: "2026-07-16T10:05:00.000Z",
           provider: "icloud",
         },
       ],
@@ -2322,148 +1466,6 @@ describe.sequential("mail service", () => {
     gateway.update.mockResolvedValue(undefined);
   });
 
-  it("rejects cross-account Mail references and replayed or mismatched drafts", async () => {
-    const [otherAccount] = await database.db
-      .insert(calendarAccounts)
-      .values({
-        calendarEnabled: false,
-        email: "other@example.com",
-        label: "Other Mail",
-        mailEnabled: true,
-        provider: "google",
-        providerAccountId: "other-mail",
-        userId,
-      })
-      .returning();
-    if (!otherAccount) throw new Error("Other Mail account fixture was not created.");
-    const [otherMailbox] = await database.db
-      .insert(mailboxes)
-      .values({
-        accountId: otherAccount.id,
-        name: "Other label",
-        provider: "google",
-        remoteMailboxId: "Label_Other",
-        role: "custom",
-        userId,
-      })
-      .returning();
-    if (!otherMailbox) throw new Error("Other mailbox fixture was not created.");
-
-    gateway.update.mockClear();
-    await expect(
-      service.updateThread(
-        userId,
-        threadId,
-        { mailboxIds: [otherMailbox.id] },
-        { actorId: userId, actorType: "user" },
-        "cross-account-mailbox",
-      ),
-    ).rejects.toThrow("do not belong");
-    expect(gateway.update).not.toHaveBeenCalled();
-    await expect(
-      service.createDraft(userId, {
-        accountId: disabledAccountId,
-        body: "Disabled",
-        cc: [],
-        subject: "Disabled",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toThrow("Mail enabled");
-    const [otherUser] = await database.db
-      .insert(users)
-      .values({
-        displayName: "Other User",
-        email: "other-user@example.com",
-        passwordHash: "unused",
-        planningTimezone: "UTC",
-      })
-      .returning();
-    if (!otherUser) throw new Error("Other user fixture was not created.");
-    const [foreignAccount] = await database.db
-      .insert(calendarAccounts)
-      .values({
-        calendarEnabled: false,
-        email: "foreign@example.com",
-        label: "Foreign Mail",
-        mailEnabled: true,
-        provider: "google",
-        providerAccountId: "foreign-mail",
-        userId: otherUser.id,
-      })
-      .returning();
-    if (!foreignAccount) throw new Error("Foreign account fixture was not created.");
-    await expect(
-      service.createDraft(userId, {
-        accountId: foreignAccount.id,
-        body: "Foreign",
-        cc: [],
-        subject: "Foreign",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toThrow("owned connected account");
-    await expect(
-      service.createDraft(userId, {
-        accountId: otherAccount.id,
-        body: "Cross account",
-        cc: [],
-        subject: "Cross account",
-        threadId,
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toThrow("must belong");
-    await expect(
-      service.send(
-        userId,
-        {
-          accountId: otherAccount.id,
-          body: "Cross account",
-          cc: [],
-          subject: "Cross account",
-          threadId,
-          to: [{ address: "to@example.com", name: null }],
-        },
-        mutationContext("cross-account-send"),
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-
-    const draft = await service.createDraft(userId, {
-      accountId: enabledAccountId,
-      body: "Exact body",
-      cc: [],
-      subject: "Exact subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
-    gateway.send.mockClear();
-    await expect(
-      service.send(
-        userId,
-        {
-          accountId: enabledAccountId,
-          body: "Exact body",
-          cc: [],
-          draftId: draft.id,
-          subject: "Changed subject",
-          to: [{ address: "to@example.com", name: null }],
-        },
-        mutationContext("draft-mismatch"),
-      ),
-    ).rejects.toThrow("exact saved");
-    expect(gateway.send).not.toHaveBeenCalled();
-    const exactSend = {
-      accountId: enabledAccountId,
-      body: "Exact body",
-      cc: [],
-      draftId: draft.id,
-      subject: "Exact subject",
-      to: [{ address: "to@example.com", name: null }],
-    };
-    await service.send(userId, exactSend, mutationContext("draft-exact"));
-    await expect(service.send(userId, exactSend, mutationContext("draft-replay"))).rejects.toThrow(
-      "already sent",
-    );
-    expect(gateway.send).toHaveBeenCalledTimes(1);
-  });
-
   it("validates rule references and preserves explicit partial updates", async () => {
     const context = {
       principal: {
@@ -2523,10 +1525,22 @@ describe.sequential("mail service", () => {
         context,
       ),
     ).rejects.toThrow("ordinary user label");
+    const [foreignAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({ label: "Foreign", provider: "google", userId })
+      .returning();
+    if (!foreignAccount) throw new Error("Foreign account fixture is missing.");
     const [foreignLabel] = await database.db
-      .select()
-      .from(mailboxes)
-      .where(eq(mailboxes.remoteMailboxId, "Label_Other"));
+      .insert(mailboxes)
+      .values({
+        accountId: foreignAccount.id,
+        name: "Other label",
+        provider: "google",
+        remoteMailboxId: "Label_Other",
+        role: "custom",
+        userId,
+      })
+      .returning();
     if (!foreignLabel) throw new Error("Foreign label fixture is missing.");
     await expect(
       service.createRule(
@@ -2625,6 +1639,40 @@ describe.sequential("mail service", () => {
       code: "conflict",
       details: expect.objectContaining({ currentVersion: 2 }),
     });
+
+    let partial = await service.updateRule(
+      rule.id,
+      { description: "Updated without changing matching behavior.", expectedVersion: 2 },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      {
+        condition: { field: "subject", operator: "contains", value: "Project" },
+        expectedVersion: partial.version,
+      },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      { confidenceThreshold: null, expectedVersion: partial.version },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      { expectedVersion: partial.version, profileId },
+      context,
+    );
+    partial = await service.updateRule(
+      rule.id,
+      { expectedVersion: partial.version, sourceIds: [enabledAccountId] },
+      context,
+    );
+    expect(partial).toMatchObject({
+      profileId,
+      sourceIds: [enabledAccountId],
+      version: 7,
+    });
   });
 
   it("fails closed across Mail rule activation safety boundaries", async () => {
@@ -2685,8 +1733,35 @@ describe.sequential("mail service", () => {
       context,
     );
     await expect(
+      service.activateRule(
+        noProfile.id,
+        {
+          ...(await activationInputFor(noProfile)),
+          expectedPreviewedAt: "2026-07-16T13:01:01.000Z",
+        },
+        context,
+      ),
+    ).rejects.toThrow("review expired");
+    await expect(
       service.activateRule(noProfile.id, await activationInputFor(noProfile), context),
     ).rejects.toThrow("Link an active Mail profile");
+
+    const ambiguousTrash = await service.createRule(
+      {
+        ...baseRule,
+        actions: [
+          { afterDays: 1, mailboxId: null, type: "trash" },
+          { afterDays: 0, mailboxId: null, type: "mark_read" },
+        ],
+        name: "Ambiguous Trash recovery",
+        profileId,
+        sourceIds: [enabledAccountId],
+      },
+      context,
+    );
+    await expect(
+      service.activateRule(ambiguousTrash.id, await activationInputFor(ambiguousTrash), context),
+    ).rejects.toThrow("Trash as its only action");
 
     const duplicateSources = await service.createRule(
       {

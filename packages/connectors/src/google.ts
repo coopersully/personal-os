@@ -824,8 +824,6 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           error,
         );
       }
-      const headers = new Headers({ authorization: `Bearer ${currentCredentials.accessToken}` });
-      headers.set("content-type", "application/json");
       const response = await providerFetch(
         request,
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
@@ -834,11 +832,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
             raw: raw.toString("base64url"),
             ...(input.threadId ? { threadId: input.threadId } : {}),
           }),
-          headers,
+          headers: {
+            authorization: `Bearer ${currentCredentials.accessToken}`,
+            "content-type": "application/json",
+          },
           method: "POST",
         },
       );
-      // Once the send request begins, every response/transport failure is ambiguous.
       await parseResponse(response);
       return currentCredentials;
     },
@@ -889,11 +889,18 @@ export function googleGrantedServices(
     fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
   const fullMail = scopes.has("https://mail.google.com/");
   const mailManage = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
-  const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
   return [
     ...(calendarList && calendarEvents ? (["calendar"] as const) : []),
-    ...(mailManage && mailSend ? (["mail"] as const) : []),
+    ...(mailManage ? (["mail"] as const) : []),
   ];
+}
+
+export function googleMailSendGranted(credentials: GoogleCredentials): boolean {
+  const scopes = new Set(credentials.scope.split(/\s+/).filter(Boolean));
+  return (
+    scopes.has("https://mail.google.com/") ||
+    scopes.has("https://www.googleapis.com/auth/gmail.send")
+  );
 }
 
 function mailboxRole(id: string): RemoteMailbox["role"] {

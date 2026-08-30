@@ -53,7 +53,9 @@ import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
+import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
+import { createMailStewardshipService } from "./mail-stewardship-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
@@ -64,6 +66,7 @@ import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
+import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
 import {
   requestMetadata as metadata,
@@ -107,6 +110,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
     userRowsScanned: number;
   }>;
   dispatchDueMailRuleWork: () => Promise<void>;
+  dispatchDueMailMaintenance: () => Promise<void>;
   dispatchDueFinanceMaintenance: () => Promise<void>;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
@@ -398,6 +402,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     reviewSigningKey: dependencies.config.encryptionKey,
   });
+  const mailStewardship = createMailStewardshipService({ db: dependencies.db, now });
   const plaid =
     dependencies.plaid ??
     (dependencies.config.plaidClientId && dependencies.config.plaidSecret
@@ -492,6 +497,32 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
+  const mailMaintenance = createMailMaintenanceService({
+    dispatchApprovedRules: async (userId) => {
+      const result = await connectors.dispatchDueMailRuleWork(userId);
+      return {
+        dispatched: result.claimed,
+        failed: result.failed,
+        pending: result.pending,
+        reconcile: result.reconciliation,
+      };
+    },
+    now,
+    refreshSources: async (userId) => {
+      const accounts = (await connectors.listAccounts(userId)).filter(
+        (account) => account.mailEnabled,
+      );
+      for (const account of accounts) {
+        await connectors.enqueueSyncTrigger(account.id, "reconciliation");
+      }
+      return {
+        enqueued: accounts.length,
+        readiness: accounts.length === 0 ? ("unavailable" as const) : ("pending" as const),
+      };
+    },
+    stewardship: mailStewardship,
+    workspace: maintenance,
+  });
   const financeStatus = createFinanceStatusService({
     assistant,
     db: dependencies.db,
@@ -1161,6 +1192,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
 
   registerMailRoutes({ app, mail, mutationContext });
+  registerMailStewardshipRoutes({
+    app,
+    maintenance: mailMaintenance,
+    mutationContext,
+    stewardship: mailStewardship,
+  });
 
   registerAssistantRoutes({
     workItems: agentAccessWorkItems,
@@ -1256,6 +1293,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         });
         throw error;
       });
+    },
+    async dispatchDueMailMaintenance() {
+      await mailMaintenance.dispatchDue(5);
     },
     async syncDueConnectors() {
       const observeFreshness = async () => {

@@ -95,7 +95,12 @@ change signals only; they never replace the authoritative five-minute reconcilia
 | OAuth and provider APIs | Google, X, Plaid, Pinterest, weather, Resend | HTTPS | TCP 443 |
 | iCloud Calendar | `caldav.icloud.com` | HTTPS/CalDAV | TCP 443 |
 | iCloud Mail read and projection | `imap.mail.me.com` | IMAP over TLS | TCP 993 |
-| iCloud Mail send | `smtp.mail.me.com` | SMTP submission | TCP 587 |
+| iCloud Mail human-confirmed delivery | `smtp.mail.me.com` | SMTP submission with STARTTLS | TCP 587 |
+
+The signed-in Mail workspace may submit a durable, human-confirmed plain-text draft. Google uses
+Gmail HTTPS with explicit `gmail.send`; iCloud uses bounded authenticated SMTP submission. MCP and
+autonomous maintenance cannot invoke either delivery path. An ambiguous provider result is never
+automatically retried and must become a visible human reconciliation state.
 
 Adding or changing a non-HTTPS transport requires the infrastructure change in the same pull
 request. `scripts/check-provider-network-contract.mjs`, run by `pnpm lint`, checks that connector

@@ -515,7 +515,6 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     /* v8 ignore stop */
     /* v8 ignore start -- SMTP formatting variants are covered by connector contract tests */
     async sendMail(credentials, input) {
-      /* v8 ignore start -- the default SMTP factory is exercised only against Apple's live service */
       const transport = (
         options.createSmtpTransport ??
         ((smtpCredentials: ICloudCredentials) =>
@@ -526,20 +525,11 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
             host: "smtp.mail.me.com",
             port: 587,
             secure: false,
-            socketTimeout: 60_000,
+            socketTimeout: 45_000,
           }))
       )(credentials);
-      /* v8 ignore stop */
-      /* v8 ignore start -- SMTP response handling is exercised by the transport contract test */
       try {
         await transport.sendMail({
-          from: credentials.email,
-          text: input.body,
-          subject: input.subject,
-          to: input.to.map((address) => ({
-            address: address.address,
-            ...(address.name ? { name: address.name } : {}),
-          })),
           ...(input.cc.length
             ? {
                 cc: input.cc.map((address) => ({
@@ -548,6 +538,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
                 })),
               }
             : {}),
+          from: credentials.email,
+          subject: input.subject,
+          text: input.body,
+          to: input.to.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
         });
       } catch (error) {
         throw providerError("mail", error);

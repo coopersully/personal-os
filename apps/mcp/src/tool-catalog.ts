@@ -159,6 +159,7 @@ export const iloToolCatalog = {
   restore_reminder: write("reminders", ["reminders:write"]),
 
   get_finance_guided_setup: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_playbook: read("finances", ["finances:read"], "context"),
   get_finance_automation_settings: read("finances", ["finances:read"]),
   get_finance_status: {
     ...read("finances", ["finances:read"]),

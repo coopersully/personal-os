@@ -55,6 +55,7 @@ import type { createFinanceActionService, SupportedActionKind } from "../finance
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
+import type { createFinancePlaybookService } from "../finance-playbook-service.js";
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
@@ -79,6 +80,7 @@ type FinanceRouteOptions = {
   financeChallenges?: FinanceChallengeService;
   financeMaintenance: FinanceMaintenanceService;
   financePeriodReviews?: FinancePeriodReviewService;
+  financePlaybook?: ReturnType<typeof createFinancePlaybookService>;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -92,6 +94,7 @@ export function registerFinanceRoutes({
   financeChallenges,
   financeMaintenance,
   financePeriodReviews,
+  financePlaybook,
   financeStatus,
   finances,
   mutationContext,
@@ -234,6 +237,9 @@ export function registerFinanceRoutes({
   );
   app.get("/v1/finances/wealth", async (context) =>
     context.json({ wealth: await finances.getWealthSummary(context.get("principal").userId) }),
+  );
+  app.get("/v1/finances/playbook", async (context) =>
+    context.json(await financePlaybook?.get(context.get("principal").userId)),
   );
   app.get("/v1/finances/profile/current", async (context) =>
     context.json(await finances.getFinancialProfile(context.get("principal").userId)),

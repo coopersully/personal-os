@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForAccounts: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
+  getFinancePlaybook: vi.fn(),
   getFinanceReviewQueue: vi.fn(),
   getFinanceStatus: vi.fn(),
   getFinanceWealthSummary: vi.fn(),
@@ -61,6 +62,10 @@ beforeEach(() => {
   api.getFinanceOverview.mockResolvedValue(overview);
   api.getFinanceOverviewForMonth.mockResolvedValue(overview);
   api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
+  api.getFinancePlaybook.mockResolvedValue({
+    assessment: { blockers: [], nextActions: [], readiness: "on_track", uncertainty: [] },
+    playbook: { steps: [], version: "1.0.0" },
+  });
   api.getPlaidStatus.mockResolvedValue({ available: false, items: [] });
   api.getFinanceWealthSummary.mockResolvedValue({
     annualIncome: 0,

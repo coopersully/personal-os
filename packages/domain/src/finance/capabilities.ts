@@ -1,5 +1,12 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinancePlaybook",
+    capability: "policy.playbook",
+    mcpTool: "get_finance_playbook",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "setupFinances",
     capability: "workflow.setup",
     mcpTool: "setup_finances",

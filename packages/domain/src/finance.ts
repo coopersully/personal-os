@@ -1308,5 +1308,6 @@ export * from "./finance/common.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";
+export * from "./finance/playbook.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";

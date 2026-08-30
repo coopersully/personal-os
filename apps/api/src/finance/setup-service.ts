@@ -7,6 +7,7 @@ import type {
   FinanceToolResult,
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
+import { ILO_FINANCE_PLAYBOOK } from "@personal-os/domain";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
@@ -98,6 +99,7 @@ export function setupResult(input: {
   headline: string;
   maintenanceRunId?: string | null;
   nextAction?: FinanceToolResult<unknown>["nextAction"];
+  optionalDetails?: string[];
   question?: FinanceInteractionQuestion | null;
   sessionId: string;
   stage: FinanceSetupPayload["stage"];
@@ -116,7 +118,10 @@ export function setupResult(input: {
     communication: {
       headline: input.headline,
       ...(input.question ? { nextQuestion: input.question } : {}),
-      optionalDetails: [],
+      optionalDetails: [
+        `Priorities follow approved Ilo Finance playbook ${ILO_FINANCE_PLAYBOOK.version}: cash-flow stability, resilience, risk protection, costly debt, retirement, diversified investing, and a sustainable good life.`,
+        ...(input.optionalDetails ?? []),
+      ],
       requiredDisclosures: input.disclosures ?? [],
     },
     data: payload,

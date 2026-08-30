@@ -44,6 +44,7 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinancePeriodReview,
+  FinancePlaybookResponse,
   FinanceProfile,
   FinanceProfileVersion,
   FinanceQuestion,
@@ -359,6 +360,9 @@ export function createFinanceApi(request: FinanceRequest) {
     async getFinanceWealthSummary(): Promise<FinanceWealthSummary> {
       const response = await request<{ wealth: FinanceWealthSummary }>("/v1/finances/wealth");
       return response.wealth;
+    },
+    async getFinancePlaybook(): Promise<FinancePlaybookResponse> {
+      return request("/v1/finances/playbook");
     },
     async getFinanceProfile(): Promise<FinanceProfile | null> {
       const response = await request<{ profile: FinanceProfile | null }>("/v1/finances/profile");

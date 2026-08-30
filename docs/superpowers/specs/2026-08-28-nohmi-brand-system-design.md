@@ -1,6 +1,6 @@
 # nohmi brand system design
 
-**Status:** Approved direction; implementation pending
+**Status:** Approved direction; shared-component migration approved 2026-08-30
 
 **Date:** 2026-08-28
 
@@ -34,7 +34,7 @@ precision required for calendars, money, mail, and agent-visible state.
 5. Product chrome and hierarchy are grayscale. Color belongs to material,
    relationships, people, categories, and semantic states; no hue is the brand
    default or carries more visual authority than another.
-6. Geist is the product typeface. Lucide remains the interface icon library.
+6. Geist is the product typeface. Reicon remains the interface icon library.
 7. shadcn/ui primitives and their documented composition are the component
    grammar. Product code composes them instead of creating parallel primitives.
 
@@ -277,6 +277,28 @@ The system has hierarchy without simulated depth.
 - Print, table, and calendar grid rules require an explicit functional need and
   use the quietest contrast that remains legible.
 
+#### Border exception model
+
+Background tone is the default separator. A visible border is an exception that
+must communicate interaction, state, or data structure rather than decorate a
+surface.
+
+| Surface | Resting treatment | Allowed visible border |
+| --- | --- | --- |
+| Cards, items, panels, sidebars, app bars | Opaque tonal fill or open canvas | None |
+| Inputs, textareas, selects, input groups | Filled neutral control surface | Focus, invalid, or increased-contrast state only |
+| Primary, secondary, ghost, and legacy `outline` buttons | Filled or transparent tonal state | Focus, invalid, or increased-contrast state only |
+| Menus, popovers, dialogs, sheets, and drawers | Opaque tonal overlay over a flat scrim | Only when adjacent tones cannot preserve a 3:1 control boundary |
+| Badges and alerts | Neutral or semantic fill | Only when required by increased contrast or a semantic state contract |
+| Tables, calendar grids, charts, and ordered separators | Open or tonal data surface | Functional rules that encode row, time, or data relationships |
+
+Components reserve stable border geometry when focus or validation requires it,
+so state changes never move content. A transparent resting border is an
+implementation detail, not a visible separator. Hover, pressed, expanded,
+selected, and disabled states change semantic tone first. Focus remains a
+two-pixel-equivalent high-contrast indicator; the flat treatment never weakens
+keyboard orientation.
+
 ## Layout and workspace comfort
 
 ### Page structure
@@ -369,7 +391,7 @@ recognizable and updatable.
   as affected surfaces are migrated.
 - **Overlays:** Dialog, Sheet, and Drawer always have accessible titles. Popover
   and menu items remain grouped using their documented group components.
-- **Icons:** use Lucide objects, `data-icon` inside buttons, and accessible names
+- **Icons:** use reicon objects from the shared registry, `data-icon` inside buttons, and accessible names
   for icon-only actions. Components own icon sizing.
 
 ## Accessibility
@@ -407,6 +429,23 @@ recognizable and updatable.
 - `apps/web/src/components/ui` owns customized shadcn primitives.
 - A small shared web brand module owns public name and promise constants used by
   runtime composition.
+
+### Migration sequence
+
+1. Align the semantic neutral ladder and shadcn token aliases so canvas,
+   ordinary surface, passive control, and selected surface remain distinct in
+   both themes.
+2. Update shared primitives before feature composition: Button, Card, Item,
+   Input, Textarea, NativeSelect, InputGroup, Toggle, Tabs, Badge, Alert,
+   Popover, Dialog, Sheet, ContextMenu, and Sidebar.
+3. Audit feature CSS for visible borders that bypass primitives. Remove
+   decorative lines and retain only documented control, state, grid, or data
+   boundaries.
+4. Verify Today and Settings as calm reference surfaces, then Calendar, Mail,
+   Tasks, and Finances as dense stress tests. Correct shared ownership before
+   adding a feature-level exception.
+5. Extend deterministic checks and tests so later component updates cannot
+   silently restore decorative borders, shadows, gradients, or glass.
 
 ### Token layers
 

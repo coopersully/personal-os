@@ -1384,6 +1384,44 @@ function apiFetch() {
 }
 
 describe("ilo API client", () => {
+  it("serializes budget bucket routes with and without a month", async () => {
+    const requests: string[] = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        requests.push(url.pathname + url.search);
+        return json({ taxonomy: { buckets: [] } });
+      },
+    });
+
+    await expect(api.listFinanceBudgetBuckets()).resolves.toEqual({ taxonomy: { buckets: [] } });
+    await expect(api.listFinanceBudgetBuckets("2026-08")).resolves.toEqual({
+      taxonomy: { buckets: [] },
+    });
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create",
+        name: "Care",
+      }),
+    ).resolves.toEqual({ taxonomy: { buckets: [] } });
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        description: null,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update",
+      }),
+    ).resolves.toEqual({ taxonomy: { buckets: [] } });
+    expect(requests).toEqual([
+      "/v1/finances/budget-buckets",
+      "/v1/finances/budget-buckets?month=2026-08",
+      "/v1/finances/budget-buckets",
+      "/v1/finances/budget-buckets/bucket-1",
+    ]);
+  });
+
   it("uses typed Finance status and durable-maintenance routes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const api = createApiClient({

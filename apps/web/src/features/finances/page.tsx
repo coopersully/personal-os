@@ -1161,7 +1161,7 @@ export function FinancesPage() {
   );
 }
 
-function FinanceBudgetBucketManager({
+export function FinanceBudgetBucketManager({
   categories,
   month,
 }: {

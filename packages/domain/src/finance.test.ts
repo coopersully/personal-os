@@ -2,12 +2,14 @@ import {
   financeAccountQuerySchema,
   financeAccountSchema,
   financeBudgetAllocationSchema,
+  financeBudgetBucketSchema,
   financeBudgetVersionSchema,
   financeCapabilityManifest,
   financeInboxCaseSchema,
   financeMaintenanceInputSchema,
   financeProviderAccountTypeSchema,
   financeToolResultSchema,
+  manageFinanceBudgetBucketInputSchema,
   manageFinanceRuleInputSchema,
 } from "./finance.js";
 
@@ -243,5 +245,31 @@ describe("canonical Finance contracts", () => {
     expect(() => manageFinanceRuleInputSchema.parse(mutation)).toThrow(
       "Provide a category or merchant to update",
     );
+  });
+
+  it("keeps bucket descriptions and exclusive-membership inputs explicit", () => {
+    expect(
+      financeBudgetBucketSchema.parse({
+        categories: [id, relatedId],
+        createdAt: now,
+        description: "Needs and recurring commitments",
+        id,
+        name: "Essentials",
+        position: 0,
+        updatedAt: now,
+        version: 1,
+      }).description,
+    ).toBe("Needs and recurring commitments");
+    expect(
+      manageFinanceBudgetBucketInputSchema.parse({
+        categoryIds: [id, relatedId],
+        description: null,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update",
+        name: "Essentials",
+        operation: "update",
+        bucketId: id,
+      }),
+    ).toMatchObject({ categoryIds: [id, relatedId], operation: "update" });
   });
 });

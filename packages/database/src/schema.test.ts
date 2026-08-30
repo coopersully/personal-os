@@ -11,6 +11,10 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
+  financeBudgets,
+  financeBudgetTaxonomies,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
@@ -28,6 +32,29 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps budget buckets additive and category membership exclusive", async () => {
+    expect(
+      getTableConfig(financeBudgetTaxonomies).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_taxonomies_user_active_idx"]));
+    expect(getTableConfig(financeBudgetBuckets).columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["description", "version"]),
+    );
+    expect(
+      getTableConfig(financeBudgetBucketCategories).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_bucket_categories_taxonomy_category_idx"]));
+    expect(getTableConfig(financeBudgets).columns.map((column) => column.name)).toContain(
+      "bucket_id",
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0073_finance_budget_buckets.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ALTER TABLE "finance_budgets" ADD COLUMN "bucket_id"');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_budget_bucket_categories_taxonomy_category_idx"',
+    );
+  });
+
   it("keeps Calendar findings stable and reviews immutable", async () => {
     const findings = getTableConfig(calendarFindings);
     const reviews = getTableConfig(calendarReviews);
@@ -219,6 +246,7 @@ describe("database schema contracts", () => {
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
       "0072_finance_account_semantics",
+      "0073_finance_budget_buckets",
     ]);
   });
 

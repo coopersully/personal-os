@@ -219,6 +219,78 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "list_finance_budget_buckets",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the active Finance budget taxonomy, exclusive category membership, and monthly bucket rollups.",
+      inputSchema: {
+        month: z
+          .string()
+          .regex(/^\\d{4}-(0[1-9]|1[0-2])$/)
+          .optional(),
+      },
+      title: "List Finance budget buckets",
+    },
+    async ({ month }) =>
+      financeApiResult(async () =>
+        envelope(await api.listFinanceBudgetBuckets(month), "Loaded Finance budget buckets."),
+      ),
+  );
+
+  server.registerTool(
+    "manage_finance_budget_bucket",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
+      inputSchema: {
+        bucketId: id.optional(),
+        categoryIds: z.array(id).max(200).optional(),
+        description: z.string().max(240).nullable().optional(),
+        expectedVersion: z.number().int().positive().optional(),
+        idempotencyKey,
+        name: z.string().min(1).max(80),
+        operation: z.enum(["create", "update"]),
+        position: z.number().int().nonnegative().optional(),
+        taxonomyId: id.optional(),
+      },
+      title: "Manage Finance budget bucket",
+    },
+    async (input) => {
+      if (input.operation === "create")
+        return financeApiResult(async () =>
+          envelope(
+            await api.createFinanceBudgetBucket({
+              description: input.description ?? null,
+              idempotencyKey: input.idempotencyKey,
+              name: input.name,
+              taxonomyId: input.taxonomyId,
+            }),
+            "Finance budget bucket created.",
+          ),
+        );
+      const bucketId = input.bucketId;
+      const expectedVersion = input.expectedVersion;
+      if (!bucketId || expectedVersion === undefined)
+        throw new Error("Updating a budget bucket requires bucketId and expectedVersion.");
+      return financeApiResult(async () =>
+        envelope(
+          await api.updateFinanceBudgetBucket(bucketId, {
+            categoryIds: input.categoryIds,
+            description: input.description,
+            expectedVersion,
+            idempotencyKey: input.idempotencyKey,
+            name: input.name,
+            position: input.position,
+          }),
+          "Finance budget bucket updated.",
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
     "revise_finance_budget",
     {
       annotations: { idempotentHint: true, openWorldHint: false },

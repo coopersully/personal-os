@@ -11,6 +11,8 @@ import {
   financeAgentActionReviews,
   financeAlerts,
   financeAutomationSettings,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
@@ -101,6 +103,7 @@ import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import { createFinanceAccountService } from "./finance/account-service.js";
+import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
@@ -648,6 +651,7 @@ function transactionAllocation(
 }
 function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
   return {
+    bucketId: row.bucketId,
     category: row.category,
     createdAt: row.createdAt.toISOString(),
     id: row.id,
@@ -722,6 +726,7 @@ export function createFinanceService({
   providerItems: configuredProviderItems,
 }: Options) {
   const canonicalAccounts = createFinanceAccountService({ db, now });
+  const budgetBuckets = createFinanceBudgetBucketService({ db, now });
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
   const maintenance = createMaintenanceService({ db, inbox, now });
@@ -3853,6 +3858,8 @@ export function createFinanceService({
   return {
     getFinanceAccountConnection: canonicalAccounts.getConnection,
     listFinanceAccounts: canonicalAccounts.list,
+    listFinanceBudgetBuckets: budgetBuckets.list,
+    mutateFinanceBudgetBucket: budgetBuckets.mutate,
     updateFinanceAccount: canonicalAccounts.update,
     disconnectFinanceAccount: canonicalAccounts.disconnect,
     getFinanceTransaction: canonicalLedger.getTransaction,
@@ -7110,11 +7117,48 @@ export function createFinanceService({
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
         );
+        if (input.bucketId) {
+          const [bucket] = await tx
+            .select()
+            .from(financeBudgetBuckets)
+            .where(
+              and(
+                eq(financeBudgetBuckets.id, input.bucketId),
+                eq(financeBudgetBuckets.userId, context.principal.userId),
+              ),
+            )
+            .limit(1);
+          if (!bucket) throw new AppError("not_found", "The budget bucket was not found.");
+          const [category] = await tx
+            .select({ id: financeCategories.id })
+            .from(financeCategories)
+            .where(
+              and(
+                eq(financeCategories.userId, context.principal.userId),
+                eq(financeCategories.name, input.category),
+              ),
+            )
+            .limit(1);
+          if (!category) throw new AppError("not_found", "The budget category was not found.");
+          const [membership] = await tx
+            .select({ id: financeBudgetBucketCategories.id })
+            .from(financeBudgetBucketCategories)
+            .where(
+              and(
+                eq(financeBudgetBucketCategories.bucketId, bucket.id),
+                eq(financeBudgetBucketCategories.categoryId, category.id),
+              ),
+            )
+            .limit(1);
+          if (!membership)
+            throw new AppError("invalid_request", "The budget category is not in that bucket.");
+        }
         const created = requireDatabaseRecord(
           (
             await tx
               .insert(financeBudgets)
               .values({
+                bucketId: input.bucketId,
                 category: input.category,
                 limit: toCents(input.limit),
                 month: input.month,

@@ -1910,6 +1910,84 @@ export const financeCategories = pgTable(
   ],
 );
 
+/** User-owned reporting taxonomy; it never changes transaction categories. */
+export const financeBudgetTaxonomies = pgTable(
+  "finance_budget_taxonomies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_taxonomies_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.isActive} = true`),
+    index("finance_budget_taxonomies_user_idx").on(table.userId),
+    check("finance_budget_taxonomies_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const financeBudgetBuckets = pgTable(
+  "finance_budget_buckets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taxonomyId: uuid("taxonomy_id")
+      .notNull()
+      .references(() => financeBudgetTaxonomies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_buckets_taxonomy_name_idx").on(table.taxonomyId, table.name),
+    index("finance_budget_buckets_user_idx").on(table.userId, table.taxonomyId),
+    check("finance_budget_buckets_position_check", sql`${table.position} >= 0`),
+    check("finance_budget_buckets_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const financeBudgetBucketCategories = pgTable(
+  "finance_budget_bucket_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taxonomyId: uuid("taxonomy_id")
+      .notNull()
+      .references(() => financeBudgetTaxonomies.id, { onDelete: "cascade" }),
+    bucketId: uuid("bucket_id")
+      .notNull()
+      .references(() => financeBudgetBuckets.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => financeCategories.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_bucket_categories_taxonomy_category_idx").on(
+      table.taxonomyId,
+      table.categoryId,
+    ),
+    uniqueIndex("finance_budget_bucket_categories_bucket_category_idx").on(
+      table.bucketId,
+      table.categoryId,
+    ),
+    index("finance_budget_bucket_categories_bucket_idx").on(table.bucketId),
+  ],
+);
+
 export const financeMerchants = pgTable(
   "finance_merchants",
   {
@@ -2518,6 +2596,9 @@ export const financeBudgets = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    bucketId: uuid("bucket_id").references(() => financeBudgetBuckets.id, {
+      onDelete: "set null",
+    }),
     category: text("category").notNull(),
     month: text("month").notNull(),
     limit: integer("limit_cents").notNull(),

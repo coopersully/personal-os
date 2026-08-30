@@ -6,12 +6,14 @@ import {
   cancelFinanceReimbursementInputSchema,
   classifyFinanceTransactionsInputSchema,
   createFinanceAccountInputSchema,
+  createFinanceBudgetBucketInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceBudgetVersionInputSchema,
   createFinanceTransactionInputSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
   financeAccountQuerySchema,
+  financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
@@ -811,6 +813,56 @@ export function registerFinanceRoutes({
       context.json(
         { budget: await finances.createBudget(input, financeMutationContext(context)) },
         201,
+      ),
+    );
+  });
+  app.get("/v1/finances/budget-buckets", async (context) =>
+    context.json(
+      await finances.listFinanceBudgetBuckets(
+        context.get("principal").userId,
+        financeBudgetBucketQuerySchema.parse(context.req.query()),
+      ),
+    ),
+  );
+  app.post("/v1/finances/budget-buckets", async (context) => {
+    const input = await parseBody(context, createFinanceBudgetBucketInputSchema);
+    return act(context, "budget_plan", { ...input, operation: "create" }, async () =>
+      context.json(
+        await finances.mutateFinanceBudgetBucket(input, {
+          principal: {
+            actorId: (await financeContext(context)).actorId,
+            actorType: (await financeContext(context)).actorType,
+            userId: context.get("principal").userId,
+          },
+          requestId: context.get("requestId"),
+        }),
+        201,
+      ),
+    );
+  });
+  app.patch("/v1/finances/budget-buckets/:id", async (context) => {
+    const input = await parseBody(
+      context,
+      z.object({
+        categoryIds: z.array(idSchema).max(200).optional(),
+        description: z.string().trim().max(240).nullable().optional(),
+        expectedVersion: z.number().int().positive(),
+        idempotencyKey: z.string().min(1).max(200),
+        name: z.string().trim().min(1).max(80).optional(),
+        position: z.number().int().nonnegative().optional(),
+      }),
+    );
+    const fullInput = { ...input, bucketId: routeId(context), operation: "update" as const };
+    return act(context, "budget_plan", fullInput, async () =>
+      context.json(
+        await finances.mutateFinanceBudgetBucket(fullInput, {
+          principal: {
+            actorId: (await financeContext(context)).actorId,
+            actorType: (await financeContext(context)).actorType,
+            userId: context.get("principal").userId,
+          },
+          requestId: context.get("requestId"),
+        }),
       ),
     );
   });

@@ -5,6 +5,7 @@ import type {
   AttentionItem,
   ClassifyFinanceTransactionsInput,
   CreateFinanceAccountInput,
+  CreateFinanceBudgetBucketInput,
   CreateFinanceBudgetInput,
   CreateFinanceBudgetVersionInput,
   CreateFinanceTransactionInput,
@@ -19,6 +20,7 @@ import type {
   FinanceAlert,
   FinanceAutomationSettings,
   FinanceBudget,
+  FinanceBudgetBucketList,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
   FinanceBudgetPlan,
@@ -81,6 +83,7 @@ import type {
   SubmitFinanceLedgerChallengeInput,
   UpdateFinanceAccountInput,
   UpdateFinanceAutomationSettingsInput,
+  UpdateFinanceBudgetBucketInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
@@ -498,6 +501,27 @@ export function createFinanceApi(request: FinanceRequest) {
     async getFinanceCategories(): Promise<FinanceCategory[]> {
       const response = await request<{ categories: FinanceCategory[] }>("/v1/finances/categories");
       return response.categories;
+    },
+    async listFinanceBudgetBuckets(month?: string): Promise<FinanceBudgetBucketList> {
+      const query = month ? `?month=${encodeURIComponent(month)}` : "";
+      return request(`/v1/finances/budget-buckets${query}`);
+    },
+    async createFinanceBudgetBucket(
+      input: CreateFinanceBudgetBucketInput,
+    ): Promise<FinanceBudgetBucketList["taxonomy"]> {
+      return request(`/v1/finances/budget-buckets`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
+    async updateFinanceBudgetBucket(
+      id: string,
+      input: Omit<UpdateFinanceBudgetBucketInput, "bucketId">,
+    ): Promise<FinanceBudgetBucketList["taxonomy"]> {
+      return request(`/v1/finances/budget-buckets/${encodeURIComponent(id)}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
     },
     async getFinanceBudgetStatus(month?: string): Promise<FinanceBudgetStatus[]> {
       const response = await request<{ budgets: FinanceBudgetStatus[] }>(

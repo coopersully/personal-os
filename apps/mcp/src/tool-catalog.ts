@@ -217,6 +217,7 @@ export const iloToolCatalog = {
   update_finance_merchant: write("finances", ["finances:write"], { policy: "approved_rule" }),
   merge_finance_merchants: write("finances", ["finances:write"], { policy: "approved_rule" }),
   create_finance_budget: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  manage_finance_budget_bucket: write("finances", ["finances:write"], { policy: "approved_rule" }),
   update_finance_transaction: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),
@@ -258,6 +259,7 @@ export const iloToolCatalog = {
   get_finance_snapshot: read("finances", ["finances:read"], "context", { ui: true }),
   export_finance_data: read("finances", ["finances:read"]),
   list_finance_accounts: read("finances", ["finances:read"]),
+  list_finance_budget_buckets: read("finances", ["finances:read"]),
   start_finance_account_connection: write("finances", ["finances:write"], {
     idempotent: true,
     openWorld: true,

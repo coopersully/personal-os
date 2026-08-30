@@ -37,6 +37,7 @@ import { createMailApiClient } from "./features/mail.js";
 import { createMailStewardshipApiClient } from "./features/mail-stewardship.js";
 import { createReminderApiClient } from "./features/reminders.js";
 import { createTaskApiClient } from "./features/tasks.js";
+import { createTextingApiClient } from "./features/texting.js";
 
 export class ApiClientError extends Error {
   public readonly code: string;
@@ -198,6 +199,7 @@ export function createApiClient(options: ClientOptions) {
     ...createMailStewardshipApiClient(request),
     ...createReminderApiClient(request, toQuery),
     ...createTaskApiClient(request, toQuery),
+    ...createTextingApiClient(request, toQuery),
     async connectICloud(
       input: ConnectICloudInput,
     ): Promise<{ accountId: string; email: string | null }> {

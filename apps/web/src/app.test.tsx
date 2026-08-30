@@ -304,6 +304,7 @@ const mocks = vi.hoisted(() => ({
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
   deleteMailDraft: vi.fn(),
+  disconnectTexting: vi.fn(),
   getDailyBrief: vi.fn(),
   getCalendarStatus: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
@@ -317,6 +318,7 @@ const mocks = vi.hoisted(() => ({
   getXBookmarkAccount: vi.fn(),
   getXBookmarkAuthorizationUrl: vi.fn(),
   getPinterestWallpaperSettings: vi.fn(),
+  getTextingConnection: vi.fn(),
   getMailSetupContext: vi.fn(),
   getMailThread: vi.fn(),
   getMe: vi.fn(),
@@ -401,6 +403,7 @@ const mocks = vi.hoisted(() => ({
   syncXBookmarks: vi.fn(),
   selectXBookmarkFolder: vi.fn(),
   syncFinanceAccount: vi.fn(),
+  startTextingVerification: vi.fn(),
   updateCalendar: vi.fn(),
   updateMailThread: vi.fn(),
   updateMailDraft: vi.fn(),
@@ -412,6 +415,7 @@ const mocks = vi.hoisted(() => ({
   upsertDomainProfile: vi.fn(),
   updateUser: vi.fn(),
   validateInvitation: vi.fn(),
+  checkTextingVerification: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -797,6 +801,33 @@ function defaults() {
     },
   ]);
   mocks.getXBookmarkAccount.mockResolvedValue(null);
+  mocks.getTextingConnection.mockResolvedValue({
+    consentEpoch: 0,
+    country: null,
+    id: null,
+    maskedPhoneNumber: null,
+    providerReady: true,
+    senderPhoneNumber: "+18885550100",
+    state: null,
+    verifiedAt: null,
+  });
+  mocks.startTextingVerification.mockResolvedValue({
+    expiresAt: "2026-07-13T12:10:00.000Z",
+    id,
+    maskedPhoneNumber: "••• ••• 0123",
+    status: "pending",
+  });
+  mocks.checkTextingVerification.mockResolvedValue({
+    consentEpoch: 1,
+    country: "US",
+    id,
+    maskedPhoneNumber: "••• ••• 0123",
+    providerReady: true,
+    senderPhoneNumber: "+18885550100",
+    state: "active",
+    verifiedAt: now,
+  });
+  mocks.disconnectTexting.mockResolvedValue(undefined);
   mocks.getAgentConnectionGuide.mockResolvedValue({
     domains: [
       {
@@ -6860,4 +6891,41 @@ describe("ilo web app", () => {
       }),
     );
   }, 10_000);
+
+  it("verifies, displays, and disconnects agent texting", async () => {
+    mocks.getTextingConnection
+      .mockResolvedValueOnce({
+        consentEpoch: 0,
+        country: null,
+        id: null,
+        maskedPhoneNumber: null,
+        providerReady: true,
+        senderPhoneNumber: "+18885550100",
+        state: null,
+        verifiedAt: null,
+      })
+      .mockResolvedValue({
+        consentEpoch: 1,
+        country: "US",
+        id,
+        maskedPhoneNumber: "••• ••• 0123",
+        providerReady: true,
+        senderPhoneNumber: "+18885550100",
+        state: "active",
+        verifiedAt: now,
+      });
+    const browser = userEvent.setup();
+    setup("/settings?section=texting");
+    expect(await screen.findByRole("heading", { name: "Agent texting" })).toBeInTheDocument();
+    await browser.selectOptions(screen.getByLabelText("Country"), "US");
+    await browser.type(screen.getByLabelText("Mobile number"), "+1 212 555 0123");
+    await browser.click(screen.getByRole("checkbox", { name: /I agree to receive/ }));
+    await browser.click(screen.getByRole("button", { name: "Send verification code" }));
+    await browser.type(await screen.findByLabelText("Verification code"), "123456");
+    await browser.click(screen.getByRole("button", { name: "Verify and connect" }));
+    expect(await screen.findByText(/Ready/)).toBeInTheDocument();
+    expect(screen.getByText(/Reply STOP/)).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Disconnect number" }));
+    await waitFor(() => expect(mocks.disconnectTexting).toHaveBeenCalled());
+  });
 });

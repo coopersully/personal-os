@@ -27,7 +27,7 @@
 - Maintenance runs reuse `workspace_maintenance_runs` and `workspace_maintenance_steps`. Do not create Mail-specific run/step infrastructure.
 - MCP remains a stateless intent surface. `get_mail_status` and `maintain_mail` call the typed API once; no MCP sequencing, polling loop, judgment, retry, storage, prompt schedule, or external client automation.
 - Reviews contain bounded evidence references and counts, not credentials, raw provider payloads, full message bodies, private chain-of-thought, or copied sensitive content.
-- Existing migrations are immutable. Add one append-only `0072_mail_workspace_stewardship.sql` migration and one journal entry.
+- Existing migrations are immutable. Add one append-only `0073_mail_workspace_stewardship.sql` migration and one journal entry.
 - Use existing icons from `@/components/icons`, shared primitives, and current Mail layout tokens. No inline SVG or direct `reicon-react` import.
 
 ---
@@ -59,7 +59,7 @@
 ### Explicit Integration handoffs
 
 - `packages/database/src/schema.ts` and `packages/database/src/schema.test.ts` — declare six Mail ledger tables and verify constraints.
-- `packages/database/migrations/0072_mail_workspace_stewardship.sql` and `packages/database/migrations/meta/_journal.json` — append-only persistence expansion.
+- `packages/database/migrations/0073_mail_workspace_stewardship.sql` and `packages/database/migrations/meta/_journal.json` — append-only persistence expansion.
 - `packages/domain/src/index.ts` — export the Mail stewardship contract.
 - `apps/api/src/app.ts` — compose the stewardship and maintenance services and register routes.
 - `apps/api/src/openapi.ts` — publish the new HTTP contract.
@@ -254,7 +254,7 @@ git commit -m "Define mail stewardship contracts"
 **Files:**
 - Modify (Integration): `packages/database/src/schema.ts`
 - Modify (Integration): `packages/database/src/schema.test.ts`
-- Create (Integration): `packages/database/migrations/0072_mail_workspace_stewardship.sql`
+- Create (Integration): `packages/database/migrations/0073_mail_workspace_stewardship.sql`
 - Modify (Integration): `packages/database/migrations/meta/_journal.json`
 - Create: `apps/api/src/mail-stewardship-service.ts`
 - Create: `apps/api/src/mail-stewardship-service.integration.test.ts`

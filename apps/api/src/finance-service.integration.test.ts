@@ -393,7 +393,8 @@ describe.sequential("finance service", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
-      "0072_mail_workspace_stewardship",
+      "0072_texting",
+      "0073_mail_workspace_stewardship",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

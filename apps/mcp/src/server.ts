@@ -12,6 +12,7 @@ import { registerMailTools } from "./tools/mail.js";
 import { registerMailStewardshipTools } from "./tools/mail-stewardship.js";
 import { registerPlanningTools } from "./tools/planning.js";
 import { registerReminderTools } from "./tools/reminders.js";
+import { registerTextingTools } from "./tools/texting.js";
 import { registerXBookmarkTools } from "./tools/x-bookmarks.js";
 
 export type ServerOptions = {
@@ -69,6 +70,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   registerFinanceTools(tools, options.api);
   registerFinanceStewardshipTools(tools, options.api);
   registerXBookmarkTools(tools, options.api);
+  registerTextingTools(tools, options.api, options.timeZone);
   registerActivityTools(tools, options.api);
 
   registerCompatibilityResources(server, options, scopes);

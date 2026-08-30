@@ -31,6 +31,7 @@ describe.sequential("texting service", () => {
     checkVerification: vi.fn(async (_sid, code) =>
       code === "123456" ? "approved" : code === "000000" ? "failed" : "pending",
     ),
+    getMessageOccurredAt: vi.fn(async () => current),
     sendMessage: vi.fn(async () => ({ sid: `SM${crypto.randomUUID()}`, status: "queued" })),
     startVerification: vi.fn(async () => ({ sid: `VE${crypto.randomUUID()}`, status: "pending" })),
     validateWebhook: vi.fn(() => true),
@@ -63,6 +64,70 @@ describe.sequential("texting service", () => {
     await container.stop();
   });
 
+  it("persists verification before and after the provider handoff", async () => {
+    const service = createTextingService({
+      apiBaseUrl: "https://api.example.com",
+      db: database.db,
+      enabled: true,
+      encryptionKey,
+      now: () => current,
+      senderPhoneNumber: "+18885550100",
+      twilio,
+    });
+    let releaseProvider: ((value: { sid: string; status: string }) => void) | undefined;
+    let providerStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolveStarted) => {
+      providerStarted = resolveStarted;
+    });
+    vi.mocked(twilio.startVerification).mockImplementationOnce(
+      () =>
+        new Promise((resolveProvider) => {
+          releaseProvider = resolveProvider;
+          providerStarted?.();
+        }),
+    );
+    const request = service.startVerification("22222222-2222-4222-8222-222222222222", {
+      consentAccepted: true,
+      country: "US",
+      phoneNumber: "+12025550124",
+    });
+    await started;
+    const startingChallenge = await database.db.query.textingVerificationChallenges.findFirst({
+      orderBy: (challenge, { desc }) => [desc(challenge.createdAt), desc(challenge.id)],
+      where: eq(textingVerificationChallenges.userId, "22222222-2222-4222-8222-222222222222"),
+    });
+    expect(startingChallenge).toMatchObject({ providerVerificationSid: null, status: "starting" });
+    await expect(
+      service.startVerification("22222222-2222-4222-8222-222222222222", {
+        consentAccepted: true,
+        country: "US",
+        phoneNumber: "+12025550124",
+      }),
+    ).resolves.toMatchObject({ status: "pending" });
+    releaseProvider?.({ sid: "VEdurable", status: "pending" });
+    await expect(request).rejects.toBeInstanceOf(AppError);
+    expect(
+      await database.db.query.textingVerificationChallenges.findFirst({
+        where: eq(textingVerificationChallenges.id, startingChallenge?.id ?? crypto.randomUUID()),
+      }),
+    ).toMatchObject({ status: "cancelled" });
+
+    vi.mocked(twilio.startVerification).mockRejectedValueOnce(new Error("verify unavailable"));
+    await expect(
+      service.startVerification("22222222-2222-4222-8222-222222222222", {
+        consentAccepted: true,
+        country: "US",
+        phoneNumber: "+12025550124",
+      }),
+    ).rejects.toThrow("verify unavailable");
+    expect(
+      await database.db.query.textingVerificationChallenges.findFirst({
+        orderBy: (challenge, { desc }) => [desc(challenge.createdAt), desc(challenge.id)],
+        where: eq(textingVerificationChallenges.userId, "22222222-2222-4222-8222-222222222222"),
+      }),
+    ).toMatchObject({ status: "uncertain" });
+  }, 15_000);
+
   it("runs verification, conversation safety, sending, consent synchronization, and disconnect", async () => {
     const service = createTextingService({
       apiBaseUrl: "https://api.example.com",
@@ -92,10 +157,15 @@ describe.sequential("texting service", () => {
     await expect(
       service.checkVerification(userId, failedChallenge.id, "000000"),
     ).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(service.checkVerification(userId, challenge.id, "999999")).rejects.toMatchObject({
-      code: "invalid_request",
+    await expect(service.checkVerification(userId, challenge.id, "123456")).rejects.toMatchObject({
+      code: "not_found",
     });
-    const connection = await service.checkVerification(userId, challenge.id, "123456");
+    const approvedChallenge = await service.startVerification(userId, {
+      consentAccepted: true,
+      country: "US",
+      phoneNumber: "+12125550123",
+    });
+    const connection = await service.checkVerification(userId, approvedChallenge.id, "123456");
     expect(connection).toMatchObject({ state: "active", senderPhoneNumber: "+18885550100" });
 
     const empty = await service.conversation(principal, "America/New_York", { limit: 100 });
@@ -124,9 +194,24 @@ describe.sequential("texting service", () => {
     expect(read.messages.every((message) => message.localDateTime.includes("12:30:00 PM"))).toBe(
       true,
     );
-    expect((await service.conversation(principal, "UTC", { limit: 1 })).hasEarlierMessages).toBe(
+    expect(read.messages.every((message) => message.localDateTime.includes("GMT-04:00"))).toBe(
       true,
     );
+    const latestPage = await service.conversation(principal, "UTC", { limit: 1 });
+    expect(latestPage.hasEarlierMessages).toBe(true);
+    expect(latestPage.conversationReceipt).toBeTruthy();
+    const earlierPage = await service.conversation(principal, "UTC", {
+      beforeCursor: latestPage.earlierCursor ?? undefined,
+      limit: 1,
+    });
+    expect(earlierPage.conversationReceipt).toBeNull();
+    expect(earlierPage.messages).toHaveLength(1);
+    const newerPage = await service.conversation(principal, "UTC", {
+      afterCursor: earlierPage.newerCursor ?? earlierPage.messages[0]?.id,
+      limit: 1,
+    });
+    expect(newerPage.conversationReceipt).toBeNull();
+    expect(newerPage.messages).toHaveLength(1);
     await expect(
       service.send(principal, "America/New_York", {
         body: "series",
@@ -169,6 +254,10 @@ describe.sequential("texting service", () => {
         necessity: "The user explicitly requested the complete dataset.",
       }),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    const messageCountBeforeStop = (await service.conversation(principal, "UTC", { limit: 100 }))
+      .messages.length;
+    const stopOccurredAt = new Date(current.getTime() + 2_000);
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(stopOccurredAt);
     await service.inbound({
       Body: "UNSUBSCRIBE",
       From: "+12125550123",
@@ -177,6 +266,7 @@ describe.sequential("texting service", () => {
     });
     expect((await service.getConnection(userId)).state).toBe("opted_out");
     const stoppedConversation = await service.conversation(principal, "UTC", { limit: 100 });
+    expect(stoppedConversation.messages).toHaveLength(messageCountBeforeStop);
     await service.inbound({
       Body: "UNSUBSCRIBE",
       From: "+12125550123",
@@ -193,13 +283,34 @@ describe.sequential("texting service", () => {
         conversationReceipt: read.conversationReceipt ?? "",
       }),
     ).rejects.toMatchObject({ code: "forbidden" });
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(
+      new Date(stopOccurredAt.getTime() - 1_000),
+    );
+    await service.inbound({ Body: "START", From: "+12125550123", MessageSid: "SMstart-delayed" });
+    expect((await service.getConnection(userId)).state).toBe("opted_out");
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(
+      new Date(stopOccurredAt.getTime() + 1_000),
+    );
     await service.inbound({ Body: "START", From: "+12125550123", MessageSid: "SMstart" });
+    expect((await service.getConnection(userId)).state).toBe("active");
+    const tiedConsentTime = new Date(stopOccurredAt.getTime() + 1_000);
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(tiedConsentTime);
+    await service.inbound({ Body: "STOP", From: "+12125550123", MessageSid: "SMstop-tied" });
+    expect((await service.getConnection(userId)).state).toBe("opted_out");
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(
+      new Date(tiedConsentTime.getTime() + 1_000),
+    );
+    await service.inbound({ Body: "START", From: "+12125550123", MessageSid: "SMrestart" });
     expect((await service.getConnection(userId)).state).toBe("active");
 
     await service.updateStatus({
       MessageSid: sent.providerMessageSid ?? "",
       MessageStatus: "delivered",
       NumSegments: "2",
+    });
+    await service.updateStatus({
+      MessageSid: sent.providerMessageSid ?? "",
+      MessageStatus: "failed",
     });
     const stored = await database.db.query.textMessages.findFirst({
       where: eq(textMessages.id, sent.id),
@@ -217,7 +328,7 @@ describe.sequential("texting service", () => {
     });
     expect((await service.checkVerification(userId, reconnect.id, "123456")).state).toBe("active");
     await service.disconnect("22222222-2222-4222-8222-222222222222");
-  });
+  }, 15_000);
 
   it("fails closed when the provider is disabled and validates message stops", async () => {
     const disabled = createTextingService({
@@ -244,7 +355,7 @@ describe.sequential("texting service", () => {
         phoneNumber: "+12125550123",
       }),
     ).rejects.toBeInstanceOf(AppError);
-  });
+  }, 15_000);
 
   it("enforces graduated length reviews, series rules, quotas, and provider blocks", async () => {
     const service = createTextingService({
@@ -257,7 +368,6 @@ describe.sequential("texting service", () => {
       twilio,
     });
     await service.inbound({ Body: "START", From: "+12125550123", MessageSid: "SMstart2" });
-
     const sendWithFreshRead = async (input: {
       body: string;
       contentKind: "concise" | "essential_context" | "requested_large_content" | "structured_data";
@@ -346,6 +456,7 @@ describe.sequential("texting service", () => {
     expect((await service.checkVerification(userId, blockedReconnect.id, "123456")).state).toBe(
       "opted_out",
     );
+    current = new Date(current.getTime() + 1_000);
     await service.inbound({ Body: "START", From: "+12125550123", MessageSid: "SMstart3" });
     await service.disconnect(userId);
     const activeReconnect = await service.startVerification(userId, {
@@ -361,6 +472,20 @@ describe.sequential("texting service", () => {
     await expect(
       sendWithFreshRead({ body: "temporary failure", contentKind: "concise" }),
     ).rejects.toThrow("provider unavailable");
+    const uncertainMessage = await database.db.query.textMessages.findFirst({
+      orderBy: (message, { desc }) => [desc(message.createdAt), desc(message.id)],
+      where: eq(textMessages.body, "ilo: temporary failure"),
+    });
+    expect(uncertainMessage?.status).toBe("unknown");
+    vi.mocked(twilio.sendMessage).mockRejectedValueOnce({ status: 400 });
+    await expect(
+      sendWithFreshRead({ body: "definite rejection", contentKind: "concise" }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(
+      await database.db.query.textMessages.findFirst({
+        where: eq(textMessages.body, "ilo: definite rejection"),
+      }),
+    ).toMatchObject({ status: "failed" });
     vi.mocked(twilio.sendMessage).mockResolvedValueOnce({ sid: "SMaccepted", status: "sent" });
     await sendWithFreshRead({ body: "accepted status", contentKind: "concise" });
     await expect(service.inbound({ MessageSid: "SMmissing" })).rejects.toMatchObject({
@@ -371,6 +496,11 @@ describe.sequential("texting service", () => {
     await service.updateStatus({ MessageSid: "missing", MessageStatus: "mystery" });
     await service.updateStatus({ MessageSid: "SMaccepted", MessageStatus: "sent" });
     await service.updateStatus({ MessageSid: "SMaccepted", MessageStatus: "failed" });
+    expect(
+      await database.db.query.textMessages.findFirst({
+        where: eq(textMessages.providerMessageSid, "SMaccepted"),
+      }),
+    ).toMatchObject({ status: "sent" });
     const expired = await service.startVerification(userId, {
       consentAccepted: true,
       country: "US",
@@ -383,7 +513,7 @@ describe.sequential("texting service", () => {
     await expect(service.checkVerification(userId, expired.id, "123456")).rejects.toMatchObject({
       code: "invalid_request",
     });
-  });
+  }, 15_000);
 
   it("rejects phone reassignment and counts conservative fallback segments", async () => {
     const service = createTextingService({
@@ -426,5 +556,45 @@ describe.sequential("texting service", () => {
         conversationReceipt: read.conversationReceipt ?? "",
       }),
     ).resolves.toMatchObject({ status: "queued" });
+
+    await service.disconnect(userId);
+    const reassigned = await service.startVerification("22222222-2222-4222-8222-222222222222", {
+      consentAccepted: true,
+      country: "US",
+      phoneNumber: "+12125550123",
+    });
+    expect(
+      await service.checkVerification(
+        "22222222-2222-4222-8222-222222222222",
+        reassigned.id,
+        "123456",
+      ),
+    ).toMatchObject({ state: "active" });
+    await service.inbound({ Body: "New owner", From: "+12125550123", MessageSid: "SMreassigned" });
+    expect(
+      await database.db.query.textMessages.findFirst({
+        where: eq(textMessages.providerMessageSid, "SMreassigned"),
+      }),
+    ).toMatchObject({ userId: "22222222-2222-4222-8222-222222222222" });
+
+    const secondPrincipal = {
+      ...principal,
+      userId: "22222222-2222-4222-8222-222222222222",
+    };
+    const secondRead = await service.conversation(secondPrincipal, "UTC", { limit: 100 });
+    const concurrent = await Promise.allSettled([
+      service.send(secondPrincipal, "UTC", {
+        body: "Only once",
+        contentKind: "concise",
+        conversationReceipt: secondRead.conversationReceipt ?? "",
+      }),
+      service.send(secondPrincipal, "UTC", {
+        body: "Only once",
+        contentKind: "concise",
+        conversationReceipt: secondRead.conversationReceipt ?? "",
+      }),
+    ]);
+    expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 });

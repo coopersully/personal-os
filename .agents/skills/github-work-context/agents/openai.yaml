@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Work Context"
+  short_description: "Apply ilo GitHub work-tracking conventions."
+  default_prompt: "Use $github-work-context before reading or updating ilo GitHub issues, milestones, or PR links."

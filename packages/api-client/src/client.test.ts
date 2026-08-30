@@ -1,8 +1,9 @@
 import type {
-  AutomationRoutine,
-  AutomationRun,
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
+  CalendarReview,
+  CalendarStatus,
   DailyBrief,
   FinanceAccount,
   FinanceBudget,
@@ -10,21 +11,156 @@ import type {
   FinanceTransaction,
   Goal,
   Mailbox,
+  MailRule,
   MailThread,
   Motive,
   Reminder,
   Task,
   User,
 } from "@personal-os/domain";
+import {
+  type FinanceStatus,
+  financeStatusSchema,
+  type MaintenanceRun,
+  maintenanceRunSchema,
+} from "@personal-os/domain";
 import { ApiClientError, createApiClient } from "./client.js";
 
 const now = "2026-07-13T12:00:00.000Z";
 const id = "11111111-1111-4111-8111-111111111111";
 const accountId = "22222222-2222-4222-8222-222222222222";
+const financeStatus: FinanceStatus = financeStatusSchema.parse({
+  activeRun: null,
+  asOf: now,
+  details: {
+    accountRoles: { missingInputs: ["account_roles"], state: "unavailable" },
+    accounts: {
+      blocked: 0,
+      current: 0,
+      items: [],
+      providerItems: [],
+      retrying: 0,
+      stale: 0,
+      tracked: 0,
+    },
+    activeGoals: [],
+    activeMotives: [],
+    budget: { approved: false, month: "2026-07", total: null },
+    cashFlow: {
+      net: null,
+      projectedLowestBalance: null,
+      projectedLowestBalanceDate: null,
+      reserveRunwayMonths: null,
+    },
+    closeReadiness: {
+      missingProvenance: 0,
+      possibleDuplicates: 0,
+      ready: true,
+      reconciledThrough: null,
+      uncategorized: 0,
+      unansweredExceptions: 0,
+      unmatchedTransfers: 0,
+    },
+    evidence: { cutoff: null, current: false },
+    health: {
+      confidence: "insufficient",
+      confidenceEvidence: [],
+      dimensions: Object.fromEntries(
+        ["borrow", "goals", "invest", "plan", "save", "spend"].map((key) => [
+          key,
+          {
+            evidence: [],
+            missingInputs: [],
+            nextAction: null,
+            rating: "unknown",
+            trend: "unknown",
+          },
+        ]),
+      ),
+      missingInputs: [],
+      month: {
+        approvedBudget: null,
+        forecastSpending: null,
+        postedSpending: null,
+        rating: "unknown",
+      },
+    },
+    income: {
+      monthly: null,
+      observed: { asOf: null, basis: "missing", confidence: null, sourceRefs: [], value: null },
+      stated: { asOf: null, basis: "missing", confidence: null, sourceRefs: [], value: null },
+    },
+    interview: [],
+    ledger: {
+      candidateTransfers: 0,
+      missingProvenance: 0,
+      pendingTransactions: 0,
+      possibleDuplicates: 0,
+    },
+    month: { forecast: null, spending: null },
+    latestReview: null,
+    missingFacts: [],
+    plan: { budgetVariance: null, capacity: null, overAllocated: false },
+    prioritizedGoals: [],
+    proposals: [],
+    questions: [],
+    reimbursements: {
+      anomalies: 0,
+      expected: 0,
+      needsInput: 0,
+      open: 0,
+      outstanding: 0,
+      overdue: 0,
+      received: 0,
+      unresolved: 0,
+      unmatchedCredits: 0,
+    },
+    reviewMode: { reviewBypassEnabled: false },
+    review: { byReason: {}, total: 0 },
+    rulebookVersion: `sha256:${"a".repeat(64)}`,
+    wealth: { cash: null, debt: null, investments: null, netWorth: null },
+  },
+  domain: "finances",
+  freshness: { blockers: [], observedAt: now, state: "current" },
+  recommendedNextOperation: null,
+  state: "clean",
+  validNextOperations: [],
+  work: {
+    actionable: 0,
+    awaitingApproval: 0,
+    awaitingInput: 0,
+    blocked: 0,
+    oldestOutstandingAt: null,
+  },
+});
+const financeMaintenanceRun: MaintenanceRun = maintenanceRunSchema.parse({
+  checkpoint: null,
+  createdAt: now,
+  domain: "finances",
+  id,
+  lastSafeError: null,
+  leaseExpiresAt: null,
+  retryAt: null,
+  rulebookVersion: `sha256:${"a".repeat(64)}`,
+  scope: { type: "all_outstanding" },
+  settledResult: null,
+  sourceSnapshot: null,
+  status: "queued",
+  updatedAt: now,
+  userId: id,
+});
 const user: User = {
   accentColor: "#c7d23c",
   emailVerified: true,
   id,
+  setup: {
+    completedAt: now,
+    currentStep: "ready",
+    dismissedAt: null,
+    selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+    startedAt: now,
+    status: "complete",
+  },
   displayName: "Test",
   email: "test@example.com",
   theme: "system",
@@ -42,6 +178,13 @@ const reminder: Reminder = {
   dueAt: null,
   timezone: null,
   priority: "medium",
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: now,
+    sourceType: "reminder",
+  },
   completedAt: null,
   createdAt: now,
   updatedAt: now,
@@ -73,6 +216,49 @@ const calendar: Calendar = {
   isWritable: true,
   lastSyncedAt: null,
 };
+const calendarReview: CalendarReview = {
+  createdAt: now,
+  evidenceCutoff: now,
+  findings: [],
+  health: [],
+  id,
+  ledgerFingerprint: "a".repeat(64),
+  nextMaintenanceAt: "2026-07-13T12:15:00.000Z",
+  playbookVersion: "1.0.0",
+  profileVersion: null,
+  recommendations: [],
+  rulebookVersion: "calendar-defaults-v1",
+  scope: { type: "all_outstanding" },
+  scopeEnd: "2026-11-10T12:00:00.000Z",
+  scopeStart: "2026-06-13T12:00:00.000Z",
+  sourceFreshness: [],
+  state: "maintained",
+};
+const calendarStatus: CalendarStatus = {
+  asOf: now,
+  authority: {
+    approvedRule: [],
+    automatic: ["inspect", "assess"],
+    individualApproval: ["create_event", "move_event", "resize_event", "trash_event"],
+    unavailable: ["rsvp", "invite", "cancel_attended_event", "book_travel", "send_correspondence"],
+  },
+  backlog: {
+    actionable: 0,
+    ambiguousEffects: null,
+    awaitingApproval: null,
+    awaitingInput: 0,
+    blocked: 0,
+    failed: null,
+    openFindings: 0,
+  },
+  health: [],
+  latestReview: calendarReview,
+  lifecycle: "maintained",
+  readiness: "ready",
+  setupBlockers: [],
+  sources: [],
+  validNextOperations: ["assess_calendar"],
+};
 const event: CalendarEvent = {
   id,
   calendarId: id,
@@ -84,7 +270,9 @@ const event: CalendarEvent = {
   title: "Focus",
   notes: null,
   location: null,
+  conferenceStatus: null,
   conferenceUrl: null,
+  url: null,
   startsAt: now,
   endsAt: "2026-07-13T13:00:00.000Z",
   timezone: "UTC",
@@ -93,6 +281,46 @@ const event: CalendarEvent = {
   recurrence: [],
   createdAt: now,
   updatedAt: now,
+};
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: event.endsAt,
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
+const commitmentProposal: CalendarCommitmentProposal = {
+  authority: "caller_supplied_unverified",
+  candidate: commitmentCandidate,
+  destination: calendar,
+  possibleDuplicateEventId: null,
+  fingerprint: "a".repeat(64),
+  policy: {
+    canApply: false,
+    effectivePolicy: "preview",
+    reasons: ["Caller-supplied evidence is not authority."],
+    requestedPolicy: "approved_rule",
+    requiresInteractiveApproval: true,
+  },
+  providerEffect: "local_write",
+  warnings: [],
 };
 const mailbox: Mailbox = {
   accountId,
@@ -118,17 +346,54 @@ const mailThread: MailThread = {
   subject: "Test mail",
   to: [],
   unread: true,
-};
-const automation: AutomationRoutine = {
-  id,
-  template: "morning_brief",
-  title: "Morning brief",
-  schedule: "Weekdays at 8:00 AM",
-  timezone: "UTC",
-  enabled: true,
-  lastRunAt: null,
-  createdAt: now,
   updatedAt: now,
+};
+const mailRule: MailRule = {
+  actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+  condition: { field: "any", operator: "contains", value: "news" },
+  confidenceThreshold: null,
+  createdAt: now,
+  description: "Archive routine newsletters after one day.",
+  domain: "mail",
+  enabled: false,
+  id,
+  name: "Archive",
+  policy: "preview",
+  profileId: null,
+  sourceIds: [accountId],
+  updatedAt: now,
+  version: 1,
+};
+const domainProfile = {
+  categories: [],
+  createdAt: now,
+  domain: "mail" as const,
+  id,
+  instructions: ["Keep only high-signal mail visible."],
+  objective: "Keep a clean inbox.",
+  preferences: { inboxStyle: "signal_only" },
+  sourceContexts: [],
+  status: "draft" as const,
+  summary: "A high-signal inbox.",
+  updatedAt: now,
+  version: 1,
+};
+const attentionItem = {
+  createdAt: now,
+  domain: "mail" as const,
+  expiresAt: null,
+  id,
+  importance: "normal" as const,
+  kind: "important" as const,
+  occursAt: null,
+  relatedEntityId: null,
+  relatedEntityType: null,
+  source: null,
+  status: "open" as const,
+  summary: "Important mail.",
+  title: "Important",
+  updatedAt: now,
+  version: 1,
 };
 const brief: DailyBrief = {
   allDay: [],
@@ -154,18 +419,10 @@ const brief: DailyBrief = {
   today: [],
   tomorrow: [],
 };
-const automationRun: AutomationRun = {
-  id: accountId,
-  routineId: id,
-  status: "completed",
-  summary: "Morning brief completed.",
-  brief,
-  startedAt: now,
-  completedAt: now,
-};
 const financeAccount: FinanceAccount = {
   balance: 1200,
   createdAt: now,
+  currencyCode: null,
   id,
   institution: "Test bank",
   kind: "cash",
@@ -173,6 +430,16 @@ const financeAccount: FinanceAccount = {
   name: "Checking",
   provider: "manual",
   status: "manual",
+  synchronization: {
+    failureCode: null,
+    failureCount: 0,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    message: null,
+    nextRetryAt: null,
+    recovery: null,
+    state: "current",
+  },
   updatedAt: now,
 };
 const financeTransaction: FinanceTransaction = {
@@ -181,6 +448,7 @@ const financeTransaction: FinanceTransaction = {
   category: null,
   categoryConfidence: null,
   createdAt: now,
+  currencyCode: null,
   date: "2026-07-13",
   direction: "expense",
   id: accountId,
@@ -197,8 +465,33 @@ const financeBudget: FinanceBudget = {
   month: "2026-07",
   updatedAt: now,
 };
+const canonicalFinanceBudget = {
+  allocatedTotal: 8000,
+  allocations: [{ amount: 8000, key: "buffer", kind: "buffer" as const }],
+  approvedAt: null,
+  assumptions: [],
+  balanceDelta: 0,
+  createdAt: now,
+  effectiveFrom: "2026-09",
+  expectedResources: 8000,
+  id: accountId,
+  planId: id,
+  rationale: "Balanced fixture",
+  resources: [{ amount: 8000, key: "income", kind: "income" as const }],
+  status: "proposed" as const,
+  version: 1,
+};
+const financeEnvelope = (data: unknown) => ({
+  changes: [],
+  communication: { headline: "Done", optionalDetails: [], requiredDisclosures: [] },
+  data,
+  outcome: "completed",
+  remainingWork: { categories: [], count: 0 },
+  schemaVersion: 1,
+});
 const financeMerchant: FinanceMerchant = {
   aliases: ["CORNER STORE #102"],
+  behavior: "unknown",
   displayName: "Corner Store",
   id,
   isUserConfirmed: false,
@@ -233,6 +526,7 @@ function apiFetch() {
     if (method === "DELETE" && url.pathname.includes("/blocks/")) return json({ event });
     if (method === "DELETE" || url.pathname === "/v1/auth/logout")
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/auth/invitations/validate") return json({ valid: true });
     if (url.pathname === "/v1/auth/login" || url.pathname === "/v1/auth/register")
       return json(
         { sessionToken: "sess_new", user },
@@ -245,6 +539,17 @@ function apiFetch() {
       url.pathname === "/v1/auth/email-verification"
     )
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/setup" && method === "PATCH")
+      return json({
+        user: {
+          ...user,
+          setup: {
+            ...user.setup,
+            ...JSON.parse(String(init?.body)),
+            status: "in_progress",
+          },
+        },
+      });
     if (url.pathname === "/v1/me" && method === "PATCH")
       return json({ user: { ...user, ...JSON.parse(String(init?.body)) } });
     if (url.pathname === "/v1/me") return json({ user });
@@ -372,15 +677,20 @@ function apiFetch() {
     if (url.pathname === "/v1/motives") return json({ motives: [motive] });
     if (url.pathname === `/v1/goals/${id}`) return json({ goal });
     if (url.pathname === `/v1/motives/${id}`) return json({ motive });
-    if (url.pathname === "/v1/automations" && method === "POST")
-      return json({ routine: automation }, 201);
-    if (url.pathname === `/v1/automations/${id}` && method === "PATCH")
-      return json({ routine: automation });
-    if (url.pathname === "/v1/automations") return json({ routines: [automation] });
-    if (url.pathname === "/v1/automations/runs") return json({ runs: [automationRun] });
-    if (url.pathname.endsWith("/runs")) return json({ run: automationRun }, 201);
     if (url.pathname === "/v1/connectors/google/start")
       return json({ url: "https://accounts.google.com/o/oauth2/v2/auth" });
+    if (url.pathname === `/v1/connectors/authorization-attempts/${id}`)
+      return json({
+        attempt: {
+          accountId,
+          code: "RAW_CODE_CANARY",
+          provider: "google",
+          providerMessage: "RAW_PROVIDER_CANARY",
+          retryable: false,
+          scope: "RAW_SCOPE_CANARY",
+          status: "connected",
+        },
+      });
     if (url.pathname === "/v1/x-bookmarks/connect/start")
       return json({ url: "https://x.com/i/oauth2/authorize" });
     if (url.pathname === "/v1/x-bookmarks/account" && method === "GET")
@@ -483,10 +793,20 @@ function apiFetch() {
       return json({
         accounts: [
           {
+            calendarEnabled: true,
+            health: {
+              message: null,
+              nextSyncAt: "2026-07-13T12:05:00.000Z",
+              recovery: null,
+              state: "ready",
+            },
             id,
             provider: "google",
             label: "Google",
             email: "test@example.com",
+            lastSyncAttemptAt: "2026-07-13T12:00:00.000Z",
+            mailEnabled: true,
+            nextSyncAt: "2026-07-13T12:05:00.000Z",
             syncStatus: "idle",
             syncError: null,
             lastSyncedAt: null,
@@ -494,6 +814,85 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/setup")
+      return json(
+        financeEnvelope({
+          budgetVersionId: null,
+          maintenanceRunId: null,
+          question: null,
+          sessionId: id,
+          stage: "collecting_profile",
+          version: 1,
+        }),
+      );
+    if (url.pathname === "/v1/finances/profile/current") return json(financeEnvelope(null));
+    if (url.pathname === "/v1/finances/profile" && method === "PATCH")
+      return json(
+        financeEnvelope({
+          createdAt: now,
+          debts: [],
+          dependents: 0,
+          expectedMonthlyTakeHome: 8000,
+          householdSize: 1,
+          id,
+          incomeStability: "stable",
+          insurance: [],
+          jurisdiction: null,
+          liquidReserves: null,
+          preferences: {
+            bufferTarget: null,
+            debtPriority: null,
+            emergencyReserveMonths: null,
+            notes: [],
+          },
+          provenance: {},
+          userId: id,
+          version: 1,
+        }),
+      );
+    if (url.pathname === "/v1/finances/automation-settings")
+      return json({
+        settings: { reviewBypassEnabled: method === "PATCH" },
+      });
+    if (url.pathname === "/v1/finances/guided-setup")
+      return json({
+        setup: {
+          accountSources: [financeAccount],
+          alertSummary: { open: 0, warnings: 0 },
+          asOf: now,
+          budgetSummary: { count: 1, month: "2026-07", planned: 250 },
+          cashflowSummary: {
+            financialProfileConfigured: true,
+            incomeStreams: 0,
+            recurringNeedsReview: 0,
+            recurringObligations: 0,
+          },
+          humanOnlyActions: ["manage_financial_profile", "create_merchant_rule"],
+          ledgerHealth: {
+            asOf: now,
+            balanceOnlyAccounts: 0,
+            candidateTransfers: 0,
+            missingProvenance: 0,
+            pendingTransactions: 0,
+            possibleDuplicates: 0,
+            staleAccounts: 0,
+            unresolvedReviews: 0,
+          },
+          reviewSummary: {
+            count: 0,
+            reasons: {
+              ambiguous_merchant: 0,
+              low_confidence: 0,
+              one_time: 0,
+              possible_duplicate: 0,
+              possible_transfer: 0,
+              refund_or_reversal: 0,
+              unknown_merchant: 0,
+            },
+          },
+          suggestedWorkflows: [],
+        },
+      });
     if (url.pathname === "/v1/finances/profile")
       return json({
         profile: {
@@ -570,6 +969,28 @@ function apiFetch() {
       });
     if (url.pathname === "/v1/finances/plaid/link-token") return json({ linkToken: "link-token" });
     if (url.pathname === "/v1/finances/plaid/exchange") return json({ accounts: [financeAccount] });
+    if (url.pathname === "/v1/finances/account-connections")
+      return json(financeEnvelope({ connectionId: id, status: "pending" }));
+    if (url.pathname === `/v1/finances/account-connections/${id}`)
+      return json(financeEnvelope({ id, status: "connected" }));
+    if (url.pathname === `/v1/finances/accounts/${id}` && method === "PATCH")
+      return json(financeEnvelope(financeAccount));
+    if (url.pathname === `/v1/finances/accounts/${id}/disconnect`)
+      return json(financeEnvelope(financeAccount));
+    if (url.pathname === `/v1/finances/transactions/${id}` && method === "GET")
+      return json(financeEnvelope(financeTransaction));
+    if (url.pathname === `/v1/finances/transactions/${id}/remove`)
+      return json(financeEnvelope({ id, removed: true }));
+    if (url.pathname === "/v1/finances/transactions/split")
+      return json(financeEnvelope([financeTransaction]));
+    if (url.pathname === "/v1/finances/transactions/classify")
+      return json(financeEnvelope([financeTransaction]));
+    if (url.pathname === "/v1/finances/transactions/link")
+      return json(financeEnvelope({ relationship: "transfer" }));
+    if (url.pathname === "/v1/finances/rules")
+      return json(financeEnvelope(method === "GET" ? [] : { id }));
+    if (url.pathname === "/v1/finances/recurring-items")
+      return json(financeEnvelope(method === "GET" ? { income: [], obligations: [] } : { id }));
     if (url.pathname === "/v1/finances/categories")
       return json({
         categories: [
@@ -578,18 +999,65 @@ function apiFetch() {
       });
     if (url.pathname === "/v1/finances/budgets/status")
       return json({ budgets: [{ budget: financeBudget, remaining: 231.5, spent: 18.5 }] });
+    if (url.pathname === "/v1/finances/budget-plans")
+      return json(financeEnvelope(canonicalFinanceBudget), method === "POST" ? 201 : 200);
+    if (url.pathname === `/v1/finances/budget-plans/${id}/revisions`)
+      return json(financeEnvelope({ ...canonicalFinanceBudget, version: 2 }), 201);
+    if (url.pathname === `/v1/finances/budget-versions/${accountId}/approve`)
+      return json(financeEnvelope({ ...canonicalFinanceBudget, status: "active" }));
+    if (url.pathname === "/v1/finances/budget-status")
+      return json(financeEnvelope({ ...canonicalFinanceBudget, status: "active" }));
+    if (url.pathname === "/v1/finances/goals")
+      return json(
+        financeEnvelope(
+          method === "GET"
+            ? []
+            : {
+                createdAt: now,
+                currentAmount: 0,
+                deadline: null,
+                id,
+                name: "Reserve",
+                priority: "high",
+                status: "active",
+                targetAmount: 12000,
+                updatedAt: now,
+                version: 1,
+              },
+        ),
+        method === "POST" ? 201 : 200,
+      );
     if (url.pathname === "/v1/finances/merchants" && method === "GET")
       return json({ merchants: [financeMerchant] });
     if (url.pathname === "/v1/finances/merchants/merge" && method === "POST")
       return json({ merchant: financeMerchant });
+    if (url.pathname === "/v1/finances/merchants/merge/canonical" && method === "POST")
+      return json(financeEnvelope(financeMerchant));
     if (url.pathname === `/v1/finances/merchants/${id}` && method === "PATCH")
       return json({ merchant: { ...financeMerchant, isUserConfirmed: true } });
+    if (url.pathname === `/v1/finances/merchants/${id}/canonical` && method === "PATCH")
+      return json(financeEnvelope({ ...financeMerchant, isUserConfirmed: true }));
     if (url.pathname === "/v1/finances/review") return json({ reviews: [] });
-    if (url.pathname === "/v1/finances/categorizations/propose") return json({ proposals: [] });
+    if (url.pathname === "/v1/finances/inbox") return json(financeEnvelope([]));
+    if (url.pathname === `/v1/finances/inbox/${id}/answer`) return json(financeEnvelope([]));
+    if (url.pathname === "/v1/finances/categorizations/propose")
+      return json({ nextCursor: "next-review-page", proposals: [] });
     if (url.pathname === "/v1/finances/categorizations/apply")
       return json({
-        results: [{ applied: true, threshold: 0.985, transaction: financeTransaction }],
+        results: [
+          {
+            applied: true,
+            error: null,
+            replayed: false,
+            status: "applied",
+            threshold: 0.985,
+            transaction: financeTransaction,
+            transactionId: financeTransaction.id,
+          },
+        ],
       });
+    if (url.pathname === `/v1/finances/transactions/${accountId}/attention`)
+      return json({ item: attentionItem });
     if (url.pathname === `/v1/finances/review/${id}`)
       return json({ result: { applied: true, threshold: 0.985, transaction: financeTransaction } });
     if (url.pathname === "/v1/finances/transactions" && method === "GET")
@@ -604,10 +1072,16 @@ function apiFetch() {
       return json({
         transaction: { ...financeTransaction, category: "Dining", needsReview: false },
       });
+    if (url.pathname === `/v1/finances/transactions/${accountId}/canonical` && method === "PATCH")
+      return json(
+        financeEnvelope({ ...financeTransaction, category: "Dining", needsReview: false }),
+      );
     if (url.pathname === `/v1/finances/accounts/${id}/sync`)
       return json({ result: { changed: 2 } });
     if (url.pathname === `/v1/finances/accounts/${id}/import`)
       return json({ result: { imported: 2, skipped: 1 } }, 201);
+    if (url.pathname === `/v1/finances/accounts/${id}/import/canonical`)
+      return json(financeEnvelope({ imported: 2, skipped: 1 }), 201);
     if (url.pathname === "/v1/finances")
       return json({
         overview: {
@@ -619,17 +1093,210 @@ function apiFetch() {
         },
       });
     if (url.pathname.endsWith("/sync")) return json({ result: { changed: 3 } });
+    if (url.pathname === "/v1/assistant/setup-plan")
+      return json({
+        plan: {
+          access: { canRead: true, canWrite: true },
+          connection: { lastObservedAt: now, observed: true },
+          currentStepId: "learn_preferences",
+          domain: "mail",
+          nextAction: "Inspect Mail and save a draft.",
+          profile: {
+            approvedStatus: null,
+            approvedVersion: null,
+            pendingDraftVersion: null,
+            status: null,
+            version: null,
+          },
+          progress: { completed: 1, total: 4 },
+          protocolVersion: "1.0",
+          selectedStepId: url.searchParams.get("stepId") ?? "learn_preferences",
+          status: "in_progress",
+          steps: [],
+        },
+      });
+    if (url.pathname === "/v1/assistant/work-items") {
+      expect(url.searchParams.get("cursor")).toBe("opaque-next");
+      expect(url.searchParams.get("kind")).toBe("review");
+      return json({
+        filteredTotal: 0,
+        items: [],
+        nextCursor: null,
+        snapshotAt: now,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
+          byKind: { attention: 0, review: 0 },
+          total: 0,
+        },
+        unavailableDomains: [],
+      });
+    }
+    if (url.pathname === "/v1/assistant/context")
+      return json({
+        context: {
+          access: { grantedScopes: ["mail:read", "mail:write"] },
+          generatedAt: now,
+          identity: { actorType: "agent", displayName: "Test", userId: id },
+          links: {
+            activity: "https://app.example.com/activity",
+            agentAccess: "https://app.example.com/settings?section=workspace-access",
+            approvals: "https://app.example.com/reviews",
+            recovery: "https://app.example.com/settings?section=connections",
+            today: "https://app.example.com/today",
+          },
+          readiness: { domains: [] },
+          time: { timestamp: now, timezone: "UTC" },
+        },
+      });
+    if (url.pathname === "/v1/assistant/setup-status")
+      return json({
+        setup: {
+          domains: [
+            {
+              approvedProfileStatus: null,
+              approvedProfileVersion: null,
+              canRead: true,
+              canWrite: true,
+              domain: "mail",
+              pendingDraftVersion: null,
+              profileStatus: "draft",
+              profileVersion: 1,
+            },
+          ],
+        },
+      });
+    if (url.pathname === "/v1/assistant/connection-guide")
+      return json({
+        guide: {
+          domains: [
+            {
+              domain: "mail",
+              readScope: "mail:read",
+              support: "executable_rules",
+              writeScope: "mail:write",
+            },
+          ],
+          mcpUrl: "https://mcp.example.com/mcp",
+          skill: {
+            displayName: "Ilo Guided Setup",
+            installPrompt: "Install the Ilo skill.",
+            invocation: "$ilo-setup",
+            name: "ilo-setup",
+            revision: "release-0.1.0",
+            setupPrompt: "Set up Ilo.",
+            sourceUrl: "https://example.com/ilo-setup",
+            version: "0.1.0",
+          },
+        },
+      });
+    if (url.pathname === "/v1/assistant/profiles/mail") return json({ profile: domainProfile });
+    if (url.pathname === `/v1/assistant/attention/mail/${id}`)
+      return json({ item: { ...attentionItem, status: "resolved" } });
+    if (url.pathname === "/v1/assistant/attention" && method === "POST")
+      return json({ item: attentionItem }, 201);
+    if (url.pathname === "/v1/assistant/attention") return json({ items: [attentionItem] });
     if (url.pathname === "/v1/mail/drafts" && method === "POST")
       return json({ draft: { id } }, 201);
+    if (url.pathname === `/v1/mail/drafts/${id}/reconcile`)
+      return json({ draft: { id, sendStatus: "draft" } });
     if (url.pathname === "/v1/mail/drafts")
-      return json({ drafts: [{ body: "Draft", id, subject: "Subject" }] });
-    if (url.pathname === "/v1/mail/rules" && method === "POST") return json({ rule: { id } }, 201);
-    if (url.pathname === "/v1/mail/rules")
       return json({
-        rules: [{ action: "archive", enabled: true, id, name: "Archive", query: "news" }],
+        drafts: [
+          {
+            accountId,
+            body: "Draft",
+            cc: [],
+            createdAt: now,
+            id,
+            reconciliationState: "none",
+            sendClaimedAt: null,
+            sendStatus: "draft",
+            sentAt: null,
+            subject: "Subject",
+            threadId: null,
+            to: [{ address: "to@example.com", name: null }],
+            updatedAt: now,
+          },
+        ],
       });
-    if (url.pathname === "/v1/mail/send" || url.pathname.endsWith("/snooze"))
-      return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/mail/setup-context")
+      return json({
+        setup: {
+          accounts: [],
+          automation: {
+            executionLimitPerRun: 6,
+            failedCount: 0,
+            inProgressCount: 0,
+            lastCompletedAt: null,
+            oldestDueAt: null,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
+          safety: {
+            delayedRetentionAutomation: true,
+            permanentDeletion: false,
+            providerFilterCreation: false,
+            spamClassification: false,
+            unsubscribeAutomation: false,
+          },
+        },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}/activate`)
+      return json({
+        preview: {
+          candidates: [],
+          matchedCount: 0,
+          previewedAt: now,
+          ruleId: id,
+          ruleVersion: 1,
+          scannedCount: 1,
+          window: {
+            limit: 200,
+            newestReceivedAt: now,
+            oldestReceivedAt: now,
+            truncated: false,
+          },
+        },
+        rule: { ...mailRule, enabled: true, policy: "approved_rule", version: 2 },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}/preview`)
+      return json({
+        preview: {
+          candidates: [],
+          matchedCount: 0,
+          previewedAt: now,
+          ruleId: id,
+          ruleVersion: 1,
+          scannedCount: 1,
+          window: {
+            limit: 200,
+            newestReceivedAt: now,
+            oldestReceivedAt: now,
+            truncated: false,
+          },
+        },
+      });
+    if (url.pathname === "/v1/mail/rules/preview")
+      return json({
+        preview: { candidates: [], matchedCount: 0, scannedCount: 1 },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}` && method === "PATCH")
+      return json({ rule: { ...mailRule, enabled: false, version: 2 } });
+    if (url.pathname === "/v1/mail/rules" && method === "POST")
+      return json({ rule: mailRule }, 201);
+    if (url.pathname === "/v1/mail/rules") return json({ rules: [mailRule] });
+    if (url.pathname === "/v1/mail/send") return new Response(null, { status: 202 });
+    if (url.pathname.endsWith("/snooze")) return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/mail/threads/bulk")
+      return json({
+        result: {
+          failedCount: 0,
+          failures: [],
+          updatedCount: 1,
+          updatedIds: [id],
+        },
+      });
+    if (url.pathname === `/v1/mail/threads/${id}/attention`) return json({ item: attentionItem });
     if (url.pathname === `/v1/mail/threads/${id}/messages`)
       return json({
         messages: [
@@ -650,12 +1317,47 @@ function apiFetch() {
     if (url.pathname === "/v1/mailboxes") return json({ mailboxes: [mailbox] });
     if (url.pathname === "/v1/calendars" && method === "POST") return json({ calendar }, 201);
     if (url.pathname === "/v1/calendars") return json({ calendars: [calendar] });
+    if (url.pathname === "/v1/calendars/status") return json({ status: calendarStatus });
+    if (url.pathname === "/v1/calendars/reviews" && method === "POST")
+      return json({ review: calendarReview }, 201);
+    if (url.pathname === "/v1/calendars/commitments/preview")
+      return json({ proposal: commitmentProposal });
     if (url.pathname.includes("/calendars/")) return json({ calendar });
     if (url.pathname === "/v1/events" && method === "POST") return json({ event }, 201);
     if (url.pathname === "/v1/events") return json({ events: [event] });
+    if (url.pathname.includes("/blocks/") && url.pathname.endsWith("/trash"))
+      return json({ event });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/trash"))
+      return json({ reminder });
+    if (url.pathname.endsWith("/trash"))
+      return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
+    if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/events/")) return json({ event });
+    if (url.pathname === "/v1/reminders/overdue-deferral-preview")
+      return json({
+        preview: {
+          candidates: [
+            {
+              dueAt: "2026-07-13T10:00:00.000Z",
+              id,
+              priority: reminder.priority,
+              proposedDueAt: "2026-07-14T13:00:00.000Z",
+              proposedTimezone: "America/New_York",
+              source: reminder.source,
+              title: reminder.title,
+              updatedAt: reminder.updatedAt,
+            },
+          ],
+          matchedCount: 1,
+          policy: "preview",
+          previewedAt: now,
+        },
+      });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);
     if (url.pathname === "/v1/reminders") return json({ items: [reminder], nextCursor: null });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/attention"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/reminders/")) return json({ reminder });
     if (url.pathname === "/v1/tasks" && method === "POST") return json({ task }, 201);
     if (url.pathname === "/v1/tasks") return json({ items: [task], nextCursor: null });
@@ -665,6 +1367,323 @@ function apiFetch() {
 }
 
 describe("ilo API client", () => {
+  it("uses typed Finance status and durable-maintenance routes", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname === "/v1/finances/status") return json({ status: financeStatus });
+        if (url.pathname === "/v1/finances/maintenance" && init?.method === "POST")
+          return json({ run: financeMaintenanceRun }, 202);
+        if (url.pathname === `/v1/finances/maintenance/${id}`)
+          return json({ run: financeMaintenanceRun });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.getFinanceStatus()).resolves.toEqual(financeStatus);
+    await expect(
+      api.startFinanceMaintenance({ type: "window", start: "2026-08-01", end: "2026-08-16" }),
+    ).resolves.toEqual(financeMaintenanceRun);
+    await expect(api.getWorkspaceFinanceMaintenanceRun(id)).resolves.toEqual(financeMaintenanceRun);
+
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/status" },
+      {
+        body: JSON.stringify({
+          scope: { type: "window", start: "2026-08-01", end: "2026-08-16" },
+        }),
+        method: "POST",
+        path: "/v1/finances/maintenance",
+      },
+      { body: null, method: "GET", path: `/v1/finances/maintenance/${id}` },
+    ]);
+  });
+
+  it("serializes Finance scenario comparisons and budget plans", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const scenarioInput = {
+      alternatives: [],
+      asOf: "2026-08-01",
+      baseline: {
+        assumptions: [],
+        budgetAllocations: [],
+        label: "Baseline",
+        monthlyDebtPayment: 0,
+        monthlyHousingCost: 0,
+        monthlyIncome: 3000,
+        monthlyReserveContribution: 250,
+        startingCash: 1000,
+      },
+      horizonMonths: 3,
+    };
+    const scenario = {
+      alternatives: [],
+      asOf: "2026-08-01",
+      assumptions: [],
+      baseline: {
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Baseline",
+        monthlyCashFlow: 2750,
+        projectedLowestBalance: 1000,
+        reserveRunwayMonths: 4,
+      },
+      fingerprint: "scenario-fingerprint",
+      goalConflicts: [],
+      missingInputs: [],
+      sensitivityWarnings: [],
+    };
+    const budgetPlan = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: id, limit: 250 }],
+      assumptions: ["Income remains stable."],
+      goalIds: [],
+      month: "2026-08",
+      rationale: "Allocate within reliable monthly capacity.",
+      replace: true,
+      scenarioFingerprint: "scenario-fingerprint",
+    };
+    const breakdown = {
+      allocations: [{ amount: 12, categoryId: id, rationale: "Receipt." }],
+      expectedTransactionUpdatedAt: now,
+      rationale: "One-off receipt breakdown.",
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname === "/v1/finances/scenarios/compare") return json({ scenario });
+        if (url.pathname === "/v1/finances/budget-plan") return json({ plan: budgetPlan });
+        if (url.pathname === `/v1/finances/transactions/${id}/breakdown`)
+          return json({ transaction: { allocations: [], id } });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.compareFinanceScenarios(scenarioInput)).resolves.toEqual(scenario);
+    await expect(api.setFinanceBudgetPlan(budgetPlan)).resolves.toEqual(budgetPlan);
+    await expect(api.setFinanceTransactionBreakdown(id, breakdown)).resolves.toEqual({
+      allocations: [],
+      id,
+    });
+
+    expect(requests).toEqual([
+      {
+        body: JSON.stringify(scenarioInput),
+        method: "POST",
+        path: "/v1/finances/scenarios/compare",
+      },
+      {
+        body: JSON.stringify(budgetPlan),
+        method: "PUT",
+        path: "/v1/finances/budget-plan",
+      },
+      {
+        body: JSON.stringify(breakdown),
+        method: "PUT",
+        path: `/v1/finances/transactions/${id}/breakdown`,
+      },
+    ]);
+  });
+
+  it("forwards an agent Finance disposition instead of reading a human-only result field", async () => {
+    // Returning response.plan here would turn a valid pending review into undefined.
+    const pending = { status: "pending_review", review: { id, status: "pending" } };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(pending),
+    });
+
+    await expect(
+      api.setFinanceBudgetPlan({
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: id, limit: 250 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "Allocate within reliable monthly capacity.",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+    ).resolves.toEqual(pending);
+  });
+
+  it("preserves root Finance dispositions for budget, profile, and recurring mutations", async () => {
+    const applied = { result: { month: "2026-08" }, status: "applied" };
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose status." }, status: "needs_input" };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const path = new URL(String(input)).pathname;
+        return json(
+          path === "/v1/finances/budget-plan"
+            ? applied
+            : path === "/v1/finances/profile"
+              ? pending
+              : needsInput,
+        );
+      },
+    });
+    await expect(
+      api.setFinanceBudgetPlan({
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: id, limit: 1 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "Test",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+    ).resolves.toEqual(applied);
+    await expect(
+      api.updateFinanceProfile({
+        effectiveDate: "2026-08-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      }),
+    ).resolves.toEqual(pending);
+    await expect(api.updateFinanceRecurringObligation(id, { status: "active" })).resolves.toEqual(
+      needsInput,
+    );
+  });
+
+  it("uses exact action-review transport paths and result envelopes", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const review = { id, status: "dismissed" };
+    const outcome = { result: { id }, status: "applied" };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        return json(
+          url.pathname.endsWith("/approve")
+            ? { outcome }
+            : url.pathname.endsWith("/dismiss")
+              ? { review }
+              : { reviews: [review] },
+        );
+      },
+    });
+    await expect(api.listFinanceActionReviews(7)).resolves.toEqual([review]);
+    await expect(api.approveFinanceActionReview(id)).resolves.toEqual(outcome);
+    await expect(api.dismissFinanceActionReview(id)).resolves.toEqual(review);
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/action-reviews?limit=7" },
+      { body: null, method: "POST", path: `/v1/finances/action-reviews/${id}/approve` },
+      { body: null, method: "POST", path: `/v1/finances/action-reviews/${id}/dismiss` },
+    ]);
+  });
+
+  it.each([
+    { result: { refreshed: true }, status: "applied" },
+    { review: { id, status: "pending" }, status: "pending_review" },
+    { question: { id, prompt: "Need evidence." }, status: "needs_input" },
+  ])("preserves refresh Finance action disposition $status", async (outcome) => {
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(outcome),
+    });
+    await expect(api.refreshFinanceInsights()).resolves.toEqual(outcome);
+  });
+
+  it("lists public Finance questions through the dedicated recovery endpoint", async () => {
+    const question = {
+      id,
+      prompt: "Choose a replacement account.",
+      why: "The account is unavailable.",
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        expect(`${url.pathname}${url.search}`).toBe("/v1/finances/questions?limit=3");
+        return json({ questions: [question] });
+      },
+    });
+    await expect(api.listFinanceQuestions(3)).resolves.toEqual([question]);
+  });
+
+  it("forwards typed reimbursement answers through the bounded question envelope", async () => {
+    let body: string | null = null;
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (_input, init) => {
+        body = String(init?.body ?? null);
+        return json({ outcome: { result: { reimbursementId: id }, status: "applied" } });
+      },
+    });
+    await expect(
+      api.answerFinanceQuestion(id, {
+        amount: 220,
+        dueDate: null,
+        kind: "reimbursable",
+        payer: "Alex",
+        rationale: "Alex owes their share.",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(JSON.parse(body ?? "{}")).toEqual({
+      answer: JSON.stringify({
+        answer: {
+          amount: 220,
+          dueDate: null,
+          kind: "reimbursable",
+          payer: "Alex",
+          rationale: "Alex owes their share.",
+        },
+      }),
+    });
+  });
+
+  it("preserves Finance maintenance API errors with their request IDs", async () => {
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () =>
+        json(
+          {
+            error: {
+              code: "conflict",
+              details: { activeRunId: id },
+              message: "A Finance maintenance run is already active.",
+              requestId: "finance-maintenance-request-123",
+            },
+          },
+          409,
+        ),
+    });
+
+    await expect(api.startFinanceMaintenance()).rejects.toMatchObject({
+      code: "conflict",
+      details: { activeRunId: id },
+      requestId: "finance-maintenance-request-123",
+      status: 409,
+    });
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({
@@ -673,6 +1692,8 @@ describe("ilo API client", () => {
       headers: { "x-ilo-client": "web" },
       token: "pos_token",
     });
+    expect(api).not.toHaveProperty("listAutomations");
+    expect(api).not.toHaveProperty("runAutomation");
     await expect(api.getMe()).resolves.toEqual(user);
     await expect(api.listGoals()).resolves.toEqual([goal]);
     await expect(
@@ -687,12 +1708,27 @@ describe("ilo API client", () => {
     await expect(api.updateMotive(id, { isActive: false })).resolves.toEqual(motive);
     await api.deleteMotive(id);
     await expect(api.listCalendars()).resolves.toEqual([calendar]);
+    await expect(api.getCalendarStatus()).resolves.toEqual(calendarStatus);
+    await expect(api.createCalendarReview()).resolves.toEqual(calendarReview);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.example.com/v1/calendars/reviews",
+      expect.objectContaining({
+        body: JSON.stringify({ scope: { type: "all_outstanding" } }),
+        method: "POST",
+      }),
+    );
     await expect(
       api.createCalendar({ name: "Personal", color: null, timezone: "UTC" }),
     ).resolves.toEqual(calendar);
     await expect(api.updateCalendar(id, { name: "Home" })).resolves.toEqual(calendar);
     await expect(api.setCalendarSelected(id, false)).resolves.toEqual(calendar);
     await api.deleteCalendar(id);
+    await expect(
+      api.previewCalendarCommitment({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    ).resolves.toEqual(commitmentProposal);
     await expect(
       api.listEvents({ from: now, to: event.endsAt, calendarIds: [id], query: "" }),
     ).resolves.toEqual([event]);
@@ -708,14 +1744,35 @@ describe("ilo API client", () => {
         location: null,
       }),
     ).resolves.toEqual(event);
+    await expect(api.getEvent(id)).resolves.toEqual(event);
     await expect(api.updateEvent(id, { title: "Deep focus" })).resolves.toEqual(event);
     await expect(api.createEventBlock(id, { calendarId: id, mode: "busy" })).resolves.toEqual(
       event,
     );
     await expect(api.updateEventBlock(id, id, { mode: "details" })).resolves.toEqual(event);
     await expect(api.deleteEventBlock(id, id)).resolves.toEqual(event);
+    await expect(
+      api.deleteEventBlock(id, id, {
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+      }),
+    ).resolves.toEqual(event);
     await expect(api.restoreEvent(id)).resolves.toEqual(event);
+    await expect(
+      api.trashEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now }),
+    ).resolves.toEqual({ blockUpdatedAtById: {}, eventId: id, updatedAt: now });
+    await expect(
+      api.upsertCalendarAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: now,
+        summary: "Prepare.",
+        title: "Upcoming event",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteEvent(id);
+    await api.deleteEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now });
     await expect(api.listReminders({ completed: false, query: "", limit: 10 })).resolves.toEqual({
       items: [reminder],
       nextCursor: null,
@@ -729,9 +1786,29 @@ describe("ilo API client", () => {
         priority: "medium",
       }),
     ).resolves.toEqual(reminder);
+    await expect(api.getReminder(id)).resolves.toEqual(reminder);
+    await expect(
+      api.previewOverdueReminderDeferral({
+        limit: 25,
+        overdueBefore: now,
+        proposedDueAt: "2026-07-14T13:00:00.000Z",
+        timezone: "America/New_York",
+      }),
+    ).resolves.toMatchObject({ matchedCount: 1, policy: "preview" });
     await expect(api.updateReminder(id, { title: "Changed" })).resolves.toEqual(reminder);
     await expect(api.completeReminder(id, true)).resolves.toEqual(reminder);
     await expect(api.restoreReminder(id)).resolves.toEqual(reminder);
+    await expect(api.trashReminder(id, now)).resolves.toEqual(reminder);
+    await expect(
+      api.upsertReminderAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "follow_up",
+        occursAt: now,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteReminder(id);
     await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
       items: [task],
@@ -784,6 +1861,9 @@ describe("ilo API client", () => {
         provider: "manual",
       }),
     ).resolves.toEqual(financeAccount);
+    await expect(api.setupFinances({ operation: "start" })).resolves.toMatchObject({
+      data: { sessionId: id },
+    });
     await expect(
       api.createFinanceTransaction({
         accountId: id,
@@ -799,6 +1879,42 @@ describe("ilo API client", () => {
     await expect(
       api.createFinanceBudget({ category: "Dining", limit: 250, month: "2026-07" }),
     ).resolves.toEqual(financeBudget);
+    await expect(
+      api.createFinanceBudget({
+        allocations: [{ amount: 8000, key: "buffer", kind: "buffer" }],
+        assumptions: [],
+        effectiveFrom: "2026-09",
+        idempotencyKey: "budget-1",
+        name: "Monthly plan",
+        rationale: "Balanced fixture",
+        resources: [{ amount: 8000, key: "income", kind: "income" }],
+      }),
+    ).resolves.toMatchObject({ data: { balanceDelta: 0, planId: id } });
+    await expect(api.getFinanceBudget()).resolves.toMatchObject({ data: { planId: id } });
+    await expect(
+      api.reviseFinanceBudget({
+        allocations: [{ amount: 8000, key: "buffer", kind: "buffer" }],
+        assumptions: [],
+        effectiveFrom: "2026-09",
+        expectedVersion: 1,
+        idempotencyKey: "budget-2",
+        name: "Monthly plan",
+        planId: id,
+        rationale: "Balanced fixture",
+        resources: [{ amount: 8000, key: "income", kind: "income" }],
+      }),
+    ).resolves.toMatchObject({ data: { version: 2 } });
+    await expect(
+      api.approveFinanceBudget({
+        approvalSource: "user_instruction",
+        budgetVersionId: accountId,
+        expectedVersion: 1,
+        idempotencyKey: "approve-1",
+      }),
+    ).resolves.toMatchObject({ data: { status: "active" } });
+    await expect(api.getCanonicalFinanceBudgetStatus()).resolves.toMatchObject({
+      data: { status: "active" },
+    });
     await expect(api.getFinanceOverview()).resolves.toMatchObject({ reviewCount: 1 });
     await expect(api.getFinanceOverviewForMonth("2026-07")).resolves.toMatchObject({
       reviewCount: 1,
@@ -810,7 +1926,36 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
+    await expect(api.getFinanceAutomationSettings()).resolves.toEqual({
+      reviewBypassEnabled: false,
+    });
+    await expect(
+      api.updateFinanceAutomationSettings({ reviewBypassEnabled: true }),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
+    await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
+      accountSources: [financeAccount],
+      humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),
+    });
     await expect(api.getFinanceProfile()).resolves.toMatchObject({ employer: "Acme" });
+    await expect(api.getFinancialProfile()).resolves.toMatchObject({ data: null });
+    await expect(
+      api.updateFinancialProfile({
+        changes: { expectedMonthlyTakeHome: 8000 },
+        expectedVersion: 0,
+        idempotencyKey: "profile-1",
+      }),
+    ).resolves.toMatchObject({ data: { version: 1 } });
+    await expect(api.listFinanceGoals()).resolves.toMatchObject({ data: [] });
+    await expect(
+      api.manageFinanceGoal({
+        deadline: null,
+        idempotencyKey: "goal-1",
+        name: "Reserve",
+        operation: "create",
+        priority: "high",
+        targetAmount: 12000,
+      }),
+    ).resolves.toMatchObject({ data: { name: "Reserve" } });
     await expect(
       api.updateFinanceProfile({
         effectiveDate: "2026-07-01",
@@ -856,19 +2001,59 @@ describe("ilo API client", () => {
       api.updateFinanceMerchant(id, { displayName: "Corner Store" }),
     ).resolves.toMatchObject({ isUserConfirmed: true });
     await expect(
-      api.mergeFinanceMerchants({ sourceMerchantId: accountId, targetMerchantId: id }),
+      api.updateFinanceMerchantCanonical(id, {
+        displayName: "Corner Store",
+        idempotencyKey: "merchant-update-1",
+      }),
+    ).resolves.toMatchObject({ data: { isUserConfirmed: true } });
+    await expect(
+      api.mergeFinanceMerchants({
+        rationale: "Confirmed duplicate aliases.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      }),
     ).resolves.toEqual(financeMerchant);
+    await expect(
+      api.mergeFinanceMerchantsCanonical({
+        idempotencyKey: "merchant-merge-1",
+        rationale: "Confirmed duplicate aliases.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      }),
+    ).resolves.toMatchObject({ data: financeMerchant });
     await expect(api.getFinanceReviewQueue()).resolves.toEqual([]);
+    await expect(api.getFinanceInbox()).resolves.toMatchObject({ data: [] });
+    await expect(
+      api.answerFinanceReview(id, {
+        answer: "Legitimate",
+        idempotencyKey: "review-1",
+        resolution: { rationale: "Confirmed", type: "dismiss" },
+      }),
+    ).resolves.toMatchObject({ data: [] });
     await expect(api.listFinanceTransactions({ review: "needs_review" })).resolves.toMatchObject({
       nextCursor: null,
     });
-    await expect(api.proposeFinanceCategorizations()).resolves.toEqual([]);
+    await expect(api.proposeFinanceCategorizations()).resolves.toEqual({
+      items: [],
+      nextCursor: "next-review-page",
+    });
+    await expect(
+      api.upsertFinanceAttentionItem(accountId, {
+        expiresAt: null,
+        importance: "high",
+        kind: "important",
+        occursAt: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
     await expect(
       api.applyFinanceCategorizations({
         decisions: [
           {
             categoryId: id,
             confidence: 0.99,
+            expectedTransactionUpdatedAt: now,
             learnMerchant: "suggest",
             rationale: "Known merchant history.",
             transactionId: accountId,
@@ -879,12 +2064,25 @@ describe("ilo API client", () => {
     await expect(
       api.resolveFinanceReview(id, {
         action: "approve",
+        expectedTransactionUpdatedAt: now,
         learnMerchant: "never",
         rationale: null,
       }),
     ).resolves.toMatchObject({ applied: true });
     await expect(api.getPlaidStatus()).resolves.toEqual({ available: true });
     await expect(api.getPlaidLinkToken()).resolves.toBe("link-token");
+    await expect(
+      api.startFinanceAccountConnection({ idempotencyKey: "connect-1", provider: "plaid" }),
+    ).resolves.toMatchObject({ data: { connectionId: id } });
+    await expect(api.getFinanceAccountConnection(id)).resolves.toMatchObject({
+      data: { status: "connected" },
+    });
+    await expect(
+      api.updateFinanceAccount(id, { idempotencyKey: "account-1", name: "Primary" }),
+    ).resolves.toMatchObject({ data: financeAccount });
+    await expect(
+      api.disconnectFinanceAccount(id, { idempotencyKey: "disconnect-1" }),
+    ).resolves.toMatchObject({ data: financeAccount });
     await expect(
       api.exchangePlaidToken({ institution: "Test bank", publicToken: "public-token" }),
     ).resolves.toEqual([financeAccount]);
@@ -894,6 +2092,71 @@ describe("ilo API client", () => {
       category: "Dining",
       needsReview: false,
     });
+    await expect(
+      api.updateFinanceTransactionCanonical(accountId, {
+        category: "Dining",
+        idempotencyKey: "transaction-update-1",
+      }),
+    ).resolves.toMatchObject({ data: { category: "Dining" } });
+    await expect(api.getFinanceTransaction(id)).resolves.toMatchObject({
+      data: financeTransaction,
+    });
+    await expect(
+      api.removeFinanceTransaction(id, { idempotencyKey: "remove-1" }),
+    ).resolves.toMatchObject({ data: { removed: true } });
+    await expect(
+      api.splitFinanceTransaction({
+        expectedVersion: 1,
+        idempotencyKey: "split-1",
+        parts: [
+          { amount: 1, categoryId: id, meaning: "First", notes: null },
+          { amount: 1, categoryId: accountId, meaning: "Second", notes: null },
+        ],
+        transactionId: id,
+      }),
+    ).resolves.toMatchObject({ data: [financeTransaction] });
+    await expect(
+      api.classifyFinanceTransactions({
+        classifications: [
+          {
+            categoryId: id,
+            confidence: 0.9,
+            meaning: "Dining",
+            rationale: "Restaurant purchase",
+            transactionId: accountId,
+          },
+        ],
+        idempotencyKey: "classify-1",
+      }),
+    ).resolves.toMatchObject({ data: [financeTransaction] });
+    await expect(
+      api.linkFinanceTransactions({
+        idempotencyKey: "link-1",
+        rationale: "Matching transfer",
+        relationship: "transfer",
+        transactionIds: [id, accountId],
+      }),
+    ).resolves.toMatchObject({ data: { relationship: "transfer" } });
+    await expect(api.listFinanceRules()).resolves.toMatchObject({ data: [] });
+    await expect(
+      api.manageFinanceRule({
+        category: "Dining",
+        idempotencyKey: "rule-1",
+        merchant: "Cafe",
+        operation: "create",
+      }),
+    ).resolves.toMatchObject({ data: { id } });
+    await expect(api.listFinanceRecurringItems()).resolves.toMatchObject({
+      data: { income: [], obligations: [] },
+    });
+    await expect(
+      api.manageFinanceRecurringItem({
+        idempotencyKey: "recurring-1",
+        itemId: id,
+        itemType: "obligation",
+        operation: "pause",
+      }),
+    ).resolves.toMatchObject({ data: { id } });
     await expect(api.syncFinanceAccount(id)).resolves.toBe(2);
     await expect(
       api.importFinanceCsv({
@@ -902,19 +2165,39 @@ describe("ilo API client", () => {
         provider: "paypal",
       }),
     ).resolves.toEqual({ imported: 2, skipped: 1 });
-    await api.deleteFinanceAccount(id);
-    await expect(api.listAutomations()).resolves.toEqual([automation]);
     await expect(
-      api.createAutomation({ ...automation, schedule: automation.schedule }),
-    ).resolves.toEqual(automation);
-    await expect(api.updateAutomation(id, { enabled: false })).resolves.toEqual(automation);
-    await expect(api.listAutomationRuns(id)).resolves.toEqual([automationRun]);
-    await expect(api.runAutomation(id, true)).resolves.toEqual(automationRun);
-    await expect(api.listConnectors()).resolves.toHaveLength(1);
+      api.importFinanceTransactions({
+        accountId: id,
+        csv: "Date,Amount\n2026-07-13,10",
+        idempotencyKey: "import-1",
+        provider: "paypal",
+      }),
+    ).resolves.toMatchObject({ data: { imported: 2, skipped: 1 } });
+    await api.deleteFinanceAccount(id);
+    await expect(api.listConnectors()).resolves.toEqual([
+      expect.objectContaining({
+        health: {
+          message: null,
+          nextSyncAt: "2026-07-13T12:05:00.000Z",
+          recovery: null,
+          state: "ready",
+        },
+      }),
+    ]);
+    await expect(api.getConnectorAuthorizationAttempt(id)).resolves.toEqual({
+      accountId,
+      provider: "google",
+      retryable: false,
+      status: "connected",
+    });
     await expect(api.getGoogleAuthorizationUrl()).resolves.toContain("accounts.google.com");
-    await expect(api.getGoogleAuthorizationUrl(accountId)).resolves.toContain(
-      "accounts.google.com",
-    );
+    await expect(
+      api.getGoogleAuthorizationUrl({
+        accountId,
+        returnTo: "/setup",
+        services: ["mail"],
+      }),
+    ).resolves.toContain("accounts.google.com");
     await expect(api.getXBookmarkAuthorizationUrl()).resolves.toContain("x.com");
     await expect(api.getXBookmarkAccount()).resolves.toMatchObject({ username: "test" });
     await expect(api.listXBookmarkFolders()).resolves.toMatchObject([{ remoteFolderId: "folder" }]);
@@ -931,6 +2214,63 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ accountId, email: "test@icloud.com" });
     await expect(api.listMailboxes()).resolves.toEqual([mailbox]);
+    await expect(api.getMailSetupContext()).resolves.toMatchObject({ accounts: [] });
+    await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
+      domains: [expect.objectContaining({ domain: "mail" })],
+    });
+    await expect(api.getIloContext()).resolves.toMatchObject({
+      access: { grantedScopes: ["mail:read", "mail:write"] },
+      identity: { actorType: "agent", displayName: "Test" },
+      links: { today: "https://app.example.com/today" },
+      time: { timezone: "UTC" },
+    });
+    await expect(
+      api.getIloSetup({ domain: "mail", stepId: "learn_preferences" }),
+    ).resolves.toMatchObject({
+      currentStepId: "learn_preferences",
+      domain: "mail",
+      selectedStepId: "learn_preferences",
+    });
+    await expect(api.getAgentConnectionGuide()).resolves.toMatchObject({
+      mcpUrl: "https://mcp.example.com/mcp",
+      skill: { name: "ilo-setup" },
+    });
+    await expect(
+      api.listAgentAccessWorkItems({ cursor: "opaque-next", kind: "review", limit: 10 }),
+    ).resolves.toMatchObject({ items: [], nextCursor: null, summary: { total: 0 } });
+    await expect(api.getDomainProfile("mail")).resolves.toEqual(domainProfile);
+    await expect(
+      api.upsertDomainProfile({
+        categories: [],
+        domain: "mail",
+        instructions: domainProfile.instructions,
+        objective: domainProfile.objective,
+        preferences: domainProfile.preferences,
+        sourceContexts: [],
+        status: "draft",
+        summary: domainProfile.summary,
+      }),
+    ).resolves.toEqual(domainProfile);
+    await expect(
+      api.listAttentionItems({ domain: "mail", limit: 50, status: "open" }),
+    ).resolves.toEqual([attentionItem]);
+    await expect(
+      api.createAttentionItem({
+        domain: "mail",
+        expiresAt: null,
+        importance: "normal",
+        kind: "important",
+        occursAt: null,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
+    await expect(
+      api.updateAttentionItem("mail", id, { expectedVersion: 1, status: "resolved" }),
+    ).resolves.toMatchObject({ status: "resolved" });
     await expect(
       api.listMailThreads({
         accountIds: [accountId],
@@ -962,15 +2302,76 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ id });
     await expect(api.listMailDrafts()).resolves.toEqual([
-      { body: "Draft", id, subject: "Subject" },
+      expect.objectContaining({ body: "Draft", id, reconciliationState: "none" }),
     ]);
+    await expect(api.reconcileMailDraft(id, { outcome: "not_sent" })).resolves.toEqual({
+      id,
+      sendStatus: "draft",
+    });
     await expect(
-      api.createMailRule({ action: "archive", enabled: true, name: "Archive", query: "news" }),
-    ).resolves.toEqual({ id });
-    await expect(api.listMailRules()).resolves.toEqual([
-      { action: "archive", enabled: true, id, name: "Archive", query: "news" },
-    ]);
-    await expect(api.updateMailThread(id, { unread: false })).resolves.toEqual(mailThread);
+      api.createMailRule({
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        confidenceThreshold: null,
+        description: mailRule.description,
+        enabled: false,
+        name: mailRule.name,
+        policy: "preview",
+        profileId: null,
+        sourceIds: [accountId],
+      }),
+    ).resolves.toEqual(mailRule);
+    await expect(api.listMailRules()).resolves.toEqual([mailRule]);
+    await expect(
+      api.previewMailRule({
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        confidenceThreshold: null,
+        description: mailRule.description,
+        sourceIds: [accountId],
+      }),
+    ).resolves.toMatchObject({ matchedCount: 0 });
+    await expect(api.previewSavedMailRule(id)).resolves.toMatchObject({
+      ruleId: id,
+      ruleVersion: 1,
+    });
+    await expect(
+      api.activateMailRule(id, {
+        expectedCandidateIds: [],
+        expectedPreviewFingerprint: "a".repeat(64),
+        expectedPreviewedAt: now,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({
+      rule: { enabled: true, policy: "approved_rule", version: 2 },
+    });
+    await expect(
+      api.updateMailRule(id, { enabled: false, expectedVersion: 1 }),
+    ).resolves.toMatchObject({ enabled: false, version: 2 });
+    await expect(
+      api.updateMailThread(id, { expectedUpdatedAt: now, unread: false }),
+    ).resolves.toEqual(mailThread);
+    await expect(
+      api.bulkUpdateMail({
+        items: [{ expectedUpdatedAt: now, id }],
+        unread: false,
+      }),
+    ).resolves.toEqual({
+      failedCount: 0,
+      failures: [],
+      updatedCount: 1,
+      updatedIds: [id],
+    });
+    await expect(
+      api.upsertMailAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "important",
+        occursAt: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
     await api.sendMail({
       accountId,
@@ -1018,6 +2419,49 @@ describe("ilo API client", () => {
       "Bearer pos_token",
     );
     expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("x-ilo-client")).toBe("web");
+    const updateMailCall = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/mail/threads/${id}` && init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(updateMailCall?.[1]?.body))).toEqual({
+      expectedUpdatedAt: now,
+      unread: false,
+    });
+    const bulkUpdateMailCall = fetch.mock.calls.find(
+      ([url]) => new URL(String(url)).pathname === "/v1/mail/threads/bulk",
+    );
+    expect(JSON.parse(String(bulkUpdateMailCall?.[1]?.body))).toEqual({
+      items: [{ expectedUpdatedAt: now, id }],
+      unread: false,
+    });
+    const guardedEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/trash` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedEventDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    const legacyEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}` && init?.method === "DELETE",
+    );
+    expect(legacyEventDelete?.[1]?.body).toBeUndefined();
+    const guardedBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}/trash` &&
+        init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedBlockDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    const legacyBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}` &&
+        init?.method === "DELETE",
+    );
+    expect(legacyBlockDelete?.[1]?.body).toBeUndefined();
   });
 
   it("adopts, persists, uses, and clears a desktop session token", async () => {
@@ -1043,6 +2487,7 @@ describe("ilo API client", () => {
     );
     await api.logout();
     expect(onSessionToken).toHaveBeenLastCalledWith(null);
+    await expect(api.validateInvitation({ inviteCode: "ABCD2345" })).resolves.toBe(true);
     await expect(
       api.register({
         displayName: "Test",
@@ -1069,6 +2514,15 @@ describe("ilo API client", () => {
     );
     await expect(api.updateUser({ theme: "dark" })).resolves.toMatchObject({
       theme: "dark",
+    });
+    await expect(
+      api.updateAccountSetup({
+        action: "progress",
+        currentStep: "google",
+        selectedWorkspaces: ["calendar", "mail"],
+      }),
+    ).resolves.toMatchObject({
+      setup: { currentStep: "google", status: "in_progress" },
     });
   });
 

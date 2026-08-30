@@ -73,15 +73,20 @@ History (collapsed)
 ## Responsive contract
 
 - **Desktop:** moment and day flow occupy the primary column; decision queue is
-  a stable secondary rail. The queue has an independent visual boundary, not a
-  second page-sized card.
+  a stable secondary rail, distinguished through spacing and hierarchy rather
+  than a structural divider or second page-sized card.
 - **Narrow/mobile:** use one sequence: moment → day flow → decision queue →
   history. Do not move urgent material behind horizontal scrolling or a tab.
-- The app frame keeps date and capture available. Conditions may compress to
-  icon buttons with accessible labels and popovers.
+- The app frame keeps capture available. Conditions may compress to icon buttons
+  with accessible labels and popovers; narrow navigation is the shell-owned
+  bottom workspace dock and contextual Actions sheet.
 
 ## Interaction contract
 
+- The Today sidebar keeps Today, Goals, and Motives available. Calendar, Tasks,
+  Mail, and Finances are workspace destinations owned by the workspace switcher
+  and the shell's narrow workspace dock; do not duplicate them in this sidebar.
+  Reminders remains a Tasks destination rather than a separate workspace.
 - Opening an event, task, or reminder preserves the user’s place and opens the
   established inspector/dialog.
 - Completing a row updates the queue and moves the item into Done today without
@@ -96,8 +101,8 @@ History (collapsed)
 
 | System concept | Current implementation |
 | --- | --- |
-| `moment` | `TodayPage` + `.today-moment-block` |
-| `sequence` | `TodayPage` + `.today-sequence` and `EventCard` |
+| `moment` | `TodayPage` + `.today-moment-block` + shared compound `EventCard` |
+| `sequence` | `TodayPage` + `.today-sequence` + shared compound `EventCard` |
 | `queue` | `TodayPage` + `.today-queue` and the reminder/task groups |
 | `history` | `TodayPage` + `.today-history` using shadcn `Collapsible` |
 | orientation | `TodayNavigationTitle` and `TodayWeatherTopbar` |

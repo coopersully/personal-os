@@ -17,6 +17,7 @@ locals {
   runtime_parameter_names = setunion(
     toset([
       "APP_ENCRYPTION_KEY",
+      "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
       "MCP_INTERNAL_SECRET",
       "RESEND_API_KEY",
@@ -24,6 +25,7 @@ locals {
     ]),
     var.plaid_enabled ? toset(["PLAID_CLIENT_ID", "PLAID_SECRET"]) : toset([]),
     var.x_enabled ? toset(["X_CLIENT_ID", "X_CLIENT_SECRET"]) : toset([]),
+    var.texting_enabled ? toset(["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID", "TWILIO_VERIFY_SERVICE_SID"]) : toset([]),
   )
 
   runtime_parameter_arns = {

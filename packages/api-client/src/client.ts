@@ -1,11 +1,9 @@
 import type {
   AccessScope,
-  AutomationRoutine,
-  AutomationRun,
   ConfirmEmailVerificationInput,
   ConnectICloudInput,
+  ConnectorAuthorizationOutcome,
   CreateAccessTokenInput,
-  CreateAutomationRoutineInput,
   CreateInvitationInput,
   DailyBrief,
   Invitation,
@@ -15,20 +13,30 @@ import type {
   RegisterInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
-  UpdateAutomationRoutineInput,
+  StartGoogleAuthorizationInput,
+  UpdateAccountSetupInput,
   UpdatePinterestWallpaperSettingsInput,
   UpdateUserInput,
   User,
+  ValidateInvitationInput,
   WeatherCoordinates,
   WeatherLocationOption,
   WeatherSnapshot,
 } from "@personal-os/domain";
+import {
+  type ConnectedAccountHealth,
+  type ConnectorSyncStatus,
+  connectedAccountHealthSchema,
+  connectorAuthorizationOutcomeSchema,
+} from "@personal-os/domain";
+import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
 import { createReminderApiClient } from "./features/reminders.js";
 import { createTaskApiClient } from "./features/tasks.js";
+import { createTextingApiClient } from "./features/texting.js";
 
 export class ApiClientError extends Error {
   public readonly code: string;
@@ -78,13 +86,16 @@ export type CalendarAccount = {
   avatarUrl?: string | null;
   calendarEnabled: boolean;
   email: string | null;
+  health: ConnectedAccountHealth;
   id: string;
   label: string;
+  lastSyncAttemptAt: string | null;
   lastSyncedAt: string | null;
   mailEnabled: boolean;
   provider: string;
+  nextSyncAt: string | null;
   syncError: string | null;
-  syncStatus: string;
+  syncStatus: ConnectorSyncStatus;
 };
 
 export type XBookmarkAccount = {
@@ -173,16 +184,20 @@ export function createApiClient(options: ClientOptions) {
         status: response.status,
       });
     }
-    return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+    if (response.status === 204) return undefined as T;
+    const body = await response.text();
+    return body.length === 0 ? (undefined as T) : (JSON.parse(body) as T);
   }
 
   return {
+    ...createAssistantApiClient(request, toQuery),
     ...createFinanceApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createReminderApiClient(request, toQuery),
     ...createTaskApiClient(request, toQuery),
+    ...createTextingApiClient(request, toQuery),
     async connectICloud(
       input: ConnectICloudInput,
     ): Promise<{ accountId: string; email: string | null }> {
@@ -227,14 +242,6 @@ export function createApiClient(options: ClientOptions) {
       return response.invitation;
     },
 
-    async createAutomation(input: CreateAutomationRoutineInput): Promise<AutomationRoutine> {
-      const response = await request<{ routine: AutomationRoutine }>("/v1/automations", {
-        body: JSON.stringify(input),
-        method: "POST",
-      });
-      return response.routine;
-    },
-
     async deleteAccessToken(id: string): Promise<void> {
       await request<void>(`/v1/access-tokens/${id}`, { method: "DELETE" });
     },
@@ -251,12 +258,27 @@ export function createApiClient(options: ClientOptions) {
       await request<void>("/v1/x-bookmarks/account", { method: "DELETE" });
     },
 
-    async getGoogleAuthorizationUrl(accountId?: string): Promise<string> {
-      const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-      const response = await request<{ url: string }>(`/v1/connectors/google/start${query}`, {
-        method: "POST",
-      });
+    async getGoogleAuthorizationUrl(
+      input: Partial<StartGoogleAuthorizationInput> = {},
+    ): Promise<string> {
+      const query = new URLSearchParams();
+      if (input.accountId) query.set("accountId", input.accountId);
+      if (input.returnTo) query.set("returnTo", input.returnTo);
+      if (input.services) query.set("services", input.services.join(","));
+      const response = await request<{ url: string }>(
+        `/v1/connectors/google/start${query.size ? `?${query}` : ""}`,
+        {
+          method: "POST",
+        },
+      );
       return response.url;
+    },
+
+    async getConnectorAuthorizationAttempt(id: string): Promise<ConnectorAuthorizationOutcome> {
+      const response = await request<{ attempt: unknown }>(
+        `/v1/connectors/authorization-attempts/${encodeURIComponent(id)}`,
+      );
+      return connectorAuthorizationOutcomeSchema.parse(response.attempt);
     },
 
     async getXBookmarkAuthorizationUrl(): Promise<string> {
@@ -304,17 +326,6 @@ export function createApiClient(options: ClientOptions) {
       return response.events;
     },
 
-    async listAutomations(): Promise<AutomationRoutine[]> {
-      const response = await request<{ routines: AutomationRoutine[] }>("/v1/automations");
-      return response.routines;
-    },
-
-    async listAutomationRuns(routineId?: string): Promise<AutomationRun[]> {
-      const query = routineId ? `?routineId=${encodeURIComponent(routineId)}` : "";
-      const response = await request<{ runs: AutomationRun[] }>(`/v1/automations/runs${query}`);
-      return response.runs;
-    },
-
     async listInvitations(): Promise<Invitation[]> {
       const response = await request<{ invitations: Invitation[] }>("/v1/invitations");
       return response.invitations;
@@ -322,7 +333,10 @@ export function createApiClient(options: ClientOptions) {
 
     async listConnectors(): Promise<CalendarAccount[]> {
       const response = await request<{ accounts: CalendarAccount[] }>("/v1/connectors");
-      return response.accounts;
+      return response.accounts.map((account) => ({
+        ...account,
+        health: connectedAccountHealthSchema.parse(account.health),
+      }));
     },
 
     async listXBookmarkFolders(): Promise<XBookmarkFolder[]> {
@@ -397,6 +411,14 @@ export function createApiClient(options: ClientOptions) {
       return response.user;
     },
 
+    async validateInvitation(input: ValidateInvitationInput): Promise<boolean> {
+      const response = await request<{ valid: boolean }>("/v1/auth/invitations/validate", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.valid;
+    },
+
     async requestPasswordReset(input: RequestPasswordResetInput): Promise<void> {
       await request<void>("/v1/auth/recovery", {
         body: JSON.stringify(input),
@@ -413,14 +435,6 @@ export function createApiClient(options: ClientOptions) {
 
     async resendEmailVerification(): Promise<void> {
       await request<void>("/v1/auth/email-verification", { method: "POST" });
-    },
-
-    async runAutomation(id: string, dryRun = false): Promise<AutomationRun> {
-      const response = await request<{ run: AutomationRun }>(`/v1/automations/${id}/runs`, {
-        body: JSON.stringify({ dryRun }),
-        method: "POST",
-      });
-      return response.run;
     },
 
     async revokeSession(id: string): Promise<void> {
@@ -449,19 +463,16 @@ export function createApiClient(options: ClientOptions) {
       return response.result.changed;
     },
 
-    async updateAutomation(
-      id: string,
-      input: UpdateAutomationRoutineInput,
-    ): Promise<AutomationRoutine> {
-      const response = await request<{ routine: AutomationRoutine }>(`/v1/automations/${id}`, {
+    async updateUser(input: UpdateUserInput): Promise<User> {
+      const response = await request<{ user: User }>("/v1/me", {
         body: JSON.stringify(input),
         method: "PATCH",
       });
-      return response.routine;
+      return response.user;
     },
 
-    async updateUser(input: UpdateUserInput): Promise<User> {
-      const response = await request<{ user: User }>("/v1/me", {
+    async updateAccountSetup(input: UpdateAccountSetupInput): Promise<User> {
+      const response = await request<{ user: User }>("/v1/setup", {
         body: JSON.stringify(input),
         method: "PATCH",
       });

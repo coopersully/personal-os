@@ -158,7 +158,8 @@ describe.sequential("mail service", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
-      "0072_finance_account_semantics",
+      "0072_texting",
+      "0073_finance_account_semantics",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -215,7 +216,8 @@ describe.sequential("mail service", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
-      "0072_finance_account_semantics",
+      "0072_texting",
+      "0073_finance_account_semantics",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

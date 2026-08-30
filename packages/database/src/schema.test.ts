@@ -218,7 +218,8 @@ describe("database schema contracts", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
-      "0072_finance_account_semantics",
+      "0072_texting",
+      "0073_finance_account_semantics",
     ]);
   });
 
@@ -482,7 +483,7 @@ describe("database schema contracts", () => {
       ]),
     );
     const migrationSql = await readFile(
-      resolve(process.cwd(), "packages/database/migrations/0072_finance_account_semantics.sql"),
+      resolve(process.cwd(), "packages/database/migrations/0073_finance_account_semantics.sql"),
       "utf8",
     );
     expect(migrationSql).toContain("ADD COLUMN \"ownership_type\" text DEFAULT 'unknown' NOT NULL");

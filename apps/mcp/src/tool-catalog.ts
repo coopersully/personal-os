@@ -328,6 +328,12 @@ export const iloToolCatalog = {
 
   list_x_bookmarks: read("bookmarks", ["bookmarks:read"]),
   sync_x_bookmarks: write("bookmarks", ["bookmarks:read"], { openWorld: true }),
+
+  read_text_conversation: read("texting", ["texting:read"]),
+  send_text_message: write("texting", ["texting:write"], {
+    openWorld: true,
+    policy: "approved_rule",
+  }),
 } satisfies Record<string, IloToolDefinition>;
 
 export type IloToolName = keyof typeof iloToolCatalog;

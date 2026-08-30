@@ -26,6 +26,8 @@ const allScopes = new Set<AccessScope>([
   "finances:maintain",
   "reminders:read",
   "reminders:write",
+  "texting:read",
+  "texting:write",
   "tasks:read",
   "tasks:write",
 ]);

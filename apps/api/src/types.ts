@@ -2,6 +2,7 @@ import type {
   GoogleConnector,
   ICloudConnector,
   PlaidConnector,
+  TwilioConnector,
   XConnector,
 } from "@personal-os/connectors";
 import type { Database } from "@personal-os/database";
@@ -36,6 +37,7 @@ export type AppDependencies = {
   now?: () => Date;
   plaid?: PlaidConnector;
   runtimeLifecycle?: RuntimeLifecycle;
+  twilio?: TwilioConnector;
   verifyGooglePubSubToken?: (token: string) => Promise<{ subject: string | null }>;
   x?: XConnector;
 };

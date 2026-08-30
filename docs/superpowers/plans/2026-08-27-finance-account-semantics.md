@@ -121,7 +121,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `packages/database/src/schema.ts`
-- Create: `packages/database/migrations/0072_finance_account_semantics.sql`
+- Create: `packages/database/migrations/0073_finance_account_semantics.sql`
 - Modify: `packages/database/migrations/meta/_journal.json`
 - Test: `packages/database/src/finance-schema.integration.test.ts`
 

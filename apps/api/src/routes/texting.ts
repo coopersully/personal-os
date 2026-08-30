@@ -5,10 +5,14 @@ import {
   textConversationQuerySchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import { readBoundedRequestBody } from "../request-body.js";
 import type { createTextingService } from "../texting-service.js";
 import type { AppEnv } from "../types.js";
 import { parseBody, requireFeatureAccess, requireHuman } from "./support.js";
 
+const TWILIO_WEBHOOK_BODY_LIMIT_BYTES = 16_384;
+
+/** Register account texting and signed, payload-bounded Twilio webhook routes. */
 export function registerTextingRoutes(options: {
   app: Hono<AppEnv>;
   texting: ReturnType<typeof createTextingService>;
@@ -71,12 +75,9 @@ export function registerTextingRoutes(options: {
     context: Context<AppEnv>,
     handler: (parameters: Record<string, string>) => Promise<void>,
   ) {
-    const form = await context.req.formData();
-    const parameters = Object.fromEntries(
-      [...form.entries()].filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
+    const raw = await readBoundedRequestBody(context.req.raw, TWILIO_WEBHOOK_BODY_LIMIT_BYTES);
+    if (raw === null) return context.text("Payload too large", 413);
+    const parameters = Object.fromEntries(new URLSearchParams(raw));
     const signature = context.req.header("x-twilio-signature") ?? "";
     if (!options.validateWebhook?.(signature, context.req.url, parameters))
       return context.text("Invalid signature", 403);

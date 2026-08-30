@@ -59,6 +59,7 @@ import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
+import { readBoundedRequestBody } from "./request-body.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
@@ -152,28 +153,6 @@ const calendarNotificationHeadersSchema = z.object({
 });
 const GMAIL_PUSH_BODY_LIMIT_BYTES = 32_768;
 
-async function readBoundedRequestBody(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder();
-  let size = 0;
-  let value = "";
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      value += decoder.decode(chunk.value, { stream: true });
-    }
-    return value + decoder.decode();
-  } finally {
-    reader.releaseLock();
-  }
-}
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
   code_challenge: z.string().min(43).max(128),

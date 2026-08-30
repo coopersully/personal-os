@@ -4,6 +4,7 @@ import type {
   FinancePeriodReview,
   FinanceStatus,
   FinanceToolResult,
+  FinanceWealthSummary,
 } from "@personal-os/domain";
 import {
   buildFinancePeriodReviewResult,
@@ -94,6 +95,30 @@ function budgetFixture(changes: Partial<FinanceBudgetVersion> = {}): FinanceBudg
   };
 }
 
+function wealthFixture(changes: Partial<FinanceWealthSummary> = {}): FinanceWealthSummary {
+  return {
+    accountSemantics: {
+      excludedAccountIds: [],
+      possibleDuplicateGroups: [],
+      trustworthy: true,
+      unresolvedOwnershipAccountIds: [],
+    },
+    annualIncome: 60_000,
+    cash: 12_000,
+    debt: 2_000,
+    incomeBasis: "stated",
+    investments: 10_000,
+    monthlyIncome: 5_000,
+    monthlyPlanRemaining: 1_000,
+    netWorth: 20_000,
+    observedAnnualIncome: 60_000,
+    otherAssets: 0,
+    plannedThisMonth: 4_000,
+    statedAnnualIncome: 60_000,
+    ...changes,
+  };
+}
+
 function inboxCase(): FinanceInboxCase {
   return {
     economicEventId: "33333333-3333-4333-8333-333333333333",
@@ -119,6 +144,7 @@ describe("Finance presentation builders", () => {
         wealth: { cash: null, debt: 2_300, investments: null, netWorth: null },
       }),
       result<FinanceBudgetVersion | null>(null),
+      wealthFixture(),
     );
     expect(built.data).toMatchObject({ cash: null, investments: null, netWorth: null });
     expect(built.presentation).toMatchObject({
@@ -144,6 +170,7 @@ describe("Finance presentation builders", () => {
     const built = buildFinanceSnapshotResult(
       status,
       result<FinanceBudgetVersion | null>(budgetFixture({ status: "active" })),
+      wealthFixture(),
     );
 
     expect(built.data.budget.activeVersionId).toBe(id);
@@ -162,6 +189,42 @@ describe("Finance presentation builders", () => {
         trustworthy: false,
       },
     });
+  });
+
+  it("caps displayed gaps while preserving their full count and account trust state", () => {
+    const status = statusFixture();
+    status.freshness.blockers = Array.from({ length: 25 }, (_, index) => ({
+      code: `blocker_${index}`,
+      message: `Evidence gap ${index}.`,
+      recovery: null,
+    }));
+    const built = buildFinanceSnapshotResult(
+      status,
+      result<FinanceBudgetVersion | null>(null),
+      wealthFixture({
+        accountSemantics: {
+          excludedAccountIds: [],
+          possibleDuplicateGroups: [[id, "44444444-4444-4444-8444-444444444444"]],
+          trustworthy: false,
+          unresolvedOwnershipAccountIds: [id],
+        },
+        cash: 9_000,
+        investments: 11_000,
+        netWorth: 18_000,
+      }),
+    );
+
+    expect(built.data).toMatchObject({ cash: 9_000, investments: 11_000, netWorth: 18_000 });
+    expect(built.remainingWork.count).toBe(27);
+    expect(built.presentation).toMatchObject({
+      trust: { trustworthy: false },
+    });
+    expect(
+      built.presentation?.kind === "finance_snapshot" && built.presentation.trust.gaps,
+    ).toHaveLength(20);
+    expect(
+      built.presentation?.kind === "finance_snapshot" && built.presentation.trust.gaps.at(-1),
+    ).toContain("additional Finance evidence gap(s)");
   });
 
   it("uses the budget values already accepted by the API", () => {

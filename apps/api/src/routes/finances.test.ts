@@ -10,6 +10,51 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("parses account discovery filters and returns the structured account list", async () => {
+    const app = new Hono<AppEnv>();
+    const listFinanceAccounts = vi.fn(async () => ({
+      accounts: [],
+      accountSemantics: {
+        excludedAccountIds: [],
+        possibleDuplicateGroups: [],
+        trustworthy: true,
+        unresolvedOwnershipAccountIds: [],
+      },
+      totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+    }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      context.set("requestId", "request-accounts");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: { listFinanceAccounts } as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request(
+      "/v1/finances/accounts?kind=investment&query=%20IRA%20&includeExcluded=false",
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ totals: { netWorth: 0 } });
+    expect(listFinanceAccounts).toHaveBeenCalledWith(id, {
+      includeExcluded: false,
+      kind: "investment",
+      query: "IRA",
+    });
+  });
+
   it("returns read-only Finance status for a parsed maintenance scope", async () => {
     const app = new Hono<AppEnv>();
     const getFinanceStatus = vi.fn(async () => ({ domain: "finances" }));
@@ -538,6 +583,26 @@ describe("finance routes", () => {
       remainingWork: { categories: [], count: 0 },
       schemaVersion: 1,
     }));
+    const getWealthSummary = vi.fn(async () => ({
+      accountSemantics: {
+        excludedAccountIds: [],
+        possibleDuplicateGroups: [],
+        trustworthy: true,
+        unresolvedOwnershipAccountIds: [],
+      },
+      annualIncome: 60_000,
+      cash: 12_000,
+      debt: 2_000,
+      incomeBasis: "stated" as const,
+      investments: 10_000,
+      monthlyIncome: 5_000,
+      monthlyPlanRemaining: 1_000,
+      netWorth: 20_000,
+      observedAnnualIncome: 60_000,
+      otherAssets: 0,
+      plannedThisMonth: 4_000,
+      statedAnnualIncome: 60_000,
+    }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -552,7 +617,9 @@ describe("finance routes", () => {
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus } as unknown as FinanceStatusService,
-      finances: { getFinanceBudget } as unknown as ReturnType<typeof createFinanceService>,
+      finances: { getFinanceBudget, getWealthSummary } as unknown as ReturnType<
+        typeof createFinanceService
+      >,
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -568,6 +635,7 @@ describe("finance routes", () => {
     });
     expect(getFinanceStatus).toHaveBeenCalledWith(id, { type: "all_outstanding" });
     expect(getFinanceBudget).toHaveBeenCalledWith(id);
+    expect(getWealthSummary).toHaveBeenCalledWith(id);
   });
 
   it("keeps the raw period review while exposing its exact presentation route", async () => {

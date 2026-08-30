@@ -128,12 +128,16 @@ function plaidFetch(): typeof globalThis.fetch {
             balances: { current: 91.25, iso_currency_code: "USD" },
             name: "Checking",
             official_name: null,
+            subtype: "checking",
+            type: "depository",
           },
           {
             account_id: "plaid-account-2",
             balances: { current: null, iso_currency_code: "USD" },
             name: "Savings",
             official_name: "High Yield Savings",
+            subtype: "savings",
+            type: "depository",
           },
         ],
       });
@@ -393,6 +397,7 @@ describe.sequential("finance service", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
+      "0072_finance_account_semantics",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -3126,6 +3131,8 @@ describe.sequential("finance service", () => {
                   balances: { current: 42, iso_currency_code: "USD" },
                   name: "Atomic checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
               ],
             });
@@ -6155,6 +6162,8 @@ describe.sequential("finance service", () => {
               balances: { current: 100 },
               name: "Amount drift checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
           ],
         });
@@ -6466,12 +6475,16 @@ describe.sequential("finance service", () => {
               balances: { current: 250 },
               name: "Health checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
             {
               account_id: "health-sibling-account",
               balances: { current: 500 },
               name: "Health savings",
               official_name: null,
+              subtype: "savings",
+              type: "depository",
             },
           ],
         });
@@ -6990,6 +7003,8 @@ describe.sequential("finance service", () => {
               balances: { current: 100 },
               name: "Restart checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
           ],
         });
@@ -7154,6 +7169,8 @@ describe.sequential("finance service", () => {
                   balances: { current: 100 },
                   name: "Checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
               ],
             });
@@ -7307,12 +7324,16 @@ describe.sequential("finance service", () => {
                   balances: { current: 100, iso_currency_code: "USD" },
                   name: "Scope checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
                 {
                   account_id: "scope-account-two",
                   balances: { current: 200, iso_currency_code: "USD" },
                   name: "Unrelated savings",
                   official_name: null,
+                  subtype: "savings",
+                  type: "depository",
                 },
               ],
             });
@@ -7832,12 +7853,16 @@ describe.sequential("finance service", () => {
                 balances: { current: 100, iso_currency_code: "USD" },
                 name: "Canonical one",
                 official_name: null,
+                subtype: "checking",
+                type: "depository",
               },
               {
                 account_id: "canonical-account-two",
                 balances: { current: 200, iso_currency_code: "USD" },
                 name: "Canonical two",
                 official_name: null,
+                subtype: "savings",
+                type: "depository",
               },
             ],
           });
@@ -9566,6 +9591,27 @@ describe.sequential("finance service", () => {
       investments: 500,
       netWorth: 1325,
       otherAssets: 75,
+    });
+    const investmentAccount = accounts[2];
+    const otherAccount = accounts[3];
+    if (!investmentAccount || !otherAccount) throw new Error("Planning account fixtures missing.");
+    await database.db
+      .update(financeAccounts)
+      .set({ ownershipShareBps: 5_000, ownershipType: "joint" })
+      .where(eq(financeAccounts.id, investmentAccount.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ includeInPlanning: false })
+      .where(eq(financeAccounts.id, otherAccount.id));
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      accountSemantics: {
+        excludedAccountIds: [otherAccount.id],
+        trustworthy: true,
+        unresolvedOwnershipAccountIds: [],
+      },
+      investments: 250,
+      netWorth: 1000,
+      otherAssets: 0,
     });
     await expect(service.listMerchants(owner.id, 1)).resolves.toEqual([]);
     await service.createTransaction(

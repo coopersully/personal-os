@@ -11,6 +11,7 @@ import {
   createFinanceTransactionInputSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
+  financeAccountQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
@@ -198,11 +199,12 @@ export function registerFinanceRoutes({
   );
   app.get("/v1/finances/snapshot", async (context) => {
     const userId = context.get("principal").userId;
-    const [status, budget] = await Promise.all([
+    const [status, budget, wealth] = await Promise.all([
       financeStatus.getFinanceStatus(userId, { type: "all_outstanding" }),
       finances.getFinanceBudget(userId),
+      finances.getWealthSummary(userId),
     ]);
-    return context.json(buildFinanceSnapshotResult(status, budget));
+    return context.json(buildFinanceSnapshotResult(status, budget, wealth));
   });
   app.get("/v1/finances/period-reviews/:id/presentation", async (context) => {
     if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
@@ -638,6 +640,14 @@ export function registerFinanceRoutes({
         ),
       },
       201,
+    ),
+  );
+  app.get("/v1/finances/accounts", async (context) =>
+    context.json(
+      await finances.listFinanceAccounts(
+        context.get("principal").userId,
+        financeAccountQuerySchema.parse(context.req.query()),
+      ),
     ),
   );
   app.delete("/v1/finances/accounts/:id", requireHuman, async (context) => {

@@ -12,6 +12,8 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAccountConnection,
+  FinanceAccountList,
+  FinanceAccountQuery,
   FinanceActionOutcome,
   FinanceActionReview,
   FinanceAlert,
@@ -166,6 +168,15 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "POST",
       });
       return response.account;
+    },
+    async listFinanceAccounts(
+      query: Partial<FinanceAccountQuery> = {},
+    ): Promise<FinanceAccountList> {
+      const search = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) search.set(key, String(value));
+      }
+      return request(`/v1/finances/accounts${search.size ? `?${search}` : ""}`);
     },
     async approveFinanceBudget(
       input: ApproveFinanceBudgetInput,

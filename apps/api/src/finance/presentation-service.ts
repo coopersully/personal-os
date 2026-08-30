@@ -6,6 +6,7 @@ import type {
   FinanceSnapshot,
   FinanceStatus,
   FinanceToolResult,
+  FinanceWealthSummary,
 } from "@personal-os/domain";
 
 const reviewReasonLabels: Record<FinanceReviewReason, string> = {
@@ -30,9 +31,12 @@ function resultWithPresentation<T>(
   return { ...source, presentation };
 }
 
-function snapshotGaps(status: FinanceStatus): string[] {
+function snapshotGaps(
+  status: FinanceStatus,
+  wealth: FinanceWealthSummary,
+): { displayed: string[]; total: number } {
   const close = status.details.closeReadiness;
-  return [
+  const all = [
     ...status.freshness.blockers.map((blocker) => blocker.message),
     ...(close.missingProvenance > 0
       ? [`${close.missingProvenance} ledger item(s) are missing provenance.`]
@@ -50,16 +54,36 @@ function snapshotGaps(status: FinanceStatus): string[] {
     ...(status.details.wealth.debt === null ? ["Debt position is unavailable."] : []),
     ...(status.details.wealth.investments === null ? ["Investment position is unavailable."] : []),
     ...(status.details.wealth.netWorth === null ? ["Net worth is unavailable."] : []),
+    ...(wealth.accountSemantics.unresolvedOwnershipAccountIds.length > 0
+      ? [
+          `${wealth.accountSemantics.unresolvedOwnershipAccountIds.length} account(s) have unresolved ownership semantics.`,
+        ]
+      : []),
+    ...(wealth.accountSemantics.possibleDuplicateGroups.length > 0
+      ? [
+          `${wealth.accountSemantics.possibleDuplicateGroups.length} possible duplicate account group(s) remain.`,
+        ]
+      : []),
   ];
+  if (all.length <= 20) return { displayed: all, total: all.length };
+  return {
+    displayed: [
+      ...all.slice(0, 19),
+      `${all.length - 19} additional Finance evidence gap(s) remain.`,
+    ],
+    total: all.length,
+  };
 }
 
 export function buildFinanceSnapshotResult(
   status: FinanceStatus,
   budget: FinanceToolResult<FinanceBudgetVersion | null>,
+  wealth: FinanceWealthSummary,
 ): FinanceToolResult<FinanceSnapshot> {
   const close = status.details.closeReadiness;
-  const gaps = snapshotGaps(status);
-  const trustworthy = status.freshness.state === "current" && gaps.length === 0;
+  const gaps = snapshotGaps(status, wealth);
+  const trustworthy =
+    status.freshness.state === "current" && gaps.total === 0 && wealth.accountSemantics.trustworthy;
   const data = {
     accounts: {
       current: status.details.accounts.current,
@@ -75,15 +99,15 @@ export function buildFinanceSnapshotResult(
       remaining: status.details.plan.capacity,
       spent: status.details.month.spending,
     },
-    cash: status.details.wealth.cash,
+    cash: status.details.wealth.cash === null ? null : wealth.cash,
     debt: status.details.wealth.debt,
     inbox: {
       awaitingInput: status.work.awaitingInput,
       open: status.details.review.total,
     },
-    investments: status.details.wealth.investments,
+    investments: status.details.wealth.investments === null ? null : wealth.investments,
     ledger: { reconciledThrough: close.reconciledThrough, trustworthy },
-    netWorth: status.details.wealth.netWorth,
+    netWorth: status.details.wealth.netWorth === null ? null : wealth.netWorth,
   } satisfies FinanceSnapshot;
 
   return {
@@ -93,7 +117,7 @@ export function buildFinanceSnapshotResult(
         ? "Your financial snapshot is current."
         : "Your financial snapshot has unresolved evidence gaps.",
       optionalDetails: [],
-      requiredDisclosures: gaps.map((message) => ({ importance: "important", message })),
+      requiredDisclosures: gaps.displayed.map((message) => ({ importance: "important", message })),
     },
     data,
     outcome: status.work.awaitingInput > 0 ? "user_input_required" : "completed",
@@ -110,7 +134,7 @@ export function buildFinanceSnapshotResult(
         { label: "Accounts needing attention", value: data.accounts.needingAttention },
         { label: "Reconciled through", value: data.ledger.reconciledThrough },
       ],
-      disclosures: gaps.map((message) => ({ importance: "important", message })),
+      disclosures: gaps.displayed.map((message) => ({ importance: "important", message })),
       eyebrow: "Finance",
       kind: "finance_snapshot",
       position: {
@@ -123,11 +147,11 @@ export function buildFinanceSnapshotResult(
         ? "Connected financial evidence is current and the ledger has no unresolved close-readiness gaps."
         : "Some financial values or ledger assertions remain incomplete; unavailable values are not treated as zero.",
       title: "Financial snapshot",
-      trust: { gaps, state: status.freshness.state, trustworthy },
+      trust: { gaps: gaps.displayed, state: status.freshness.state, trustworthy },
     },
     remainingWork: {
-      categories: gaps.length > 0 ? ["finance_evidence"] : [],
-      count: gaps.length,
+      categories: gaps.total > 0 ? ["finance_evidence"] : [],
+      count: gaps.total,
     },
     schemaVersion: 1,
   };

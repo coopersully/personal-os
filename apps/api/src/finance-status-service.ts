@@ -160,11 +160,17 @@ function serializeAccount(
     createdAt: row.createdAt.toISOString(),
     currencyCode: row.currencyCode,
     id: row.id,
+    includeInPlanning: row.includeInPlanning,
     institution: row.institution,
     kind: row.kind,
+    kindSource: row.kindSource,
     lastSyncedAt: legacyPlaid ? null : iso(synchronizationSource.lastSyncedAt),
     name: row.name,
+    ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
+    ownershipType: row.ownershipType,
     provider: row.provider,
+    providerSubtype: row.providerSubtype,
+    providerType: row.providerType,
     status: row.status,
     synchronization: legacyPlaid
       ? migrationBlockedSynchronization

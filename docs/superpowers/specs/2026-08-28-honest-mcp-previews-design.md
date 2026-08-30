@@ -77,7 +77,7 @@ completed run from a maintained ledger.
 - disclosures grouped as important information or unresolved constraints;
 - an optional first-party destination supplied as an Ilo route identity rather than arbitrary
   HTML; and
-- an optional bounded raw-data disclosure payload.
+- bounded diagnostic facts for labelled detail disclosure.
 
 Finance API result builders create the appropriate presentation alongside the existing domain
 result. They reuse authoritative values and communication disclosures instead of recomputing
@@ -88,7 +88,7 @@ declaration. The declaration selects one registered `ui://` resource and must ag
 presentation kind returned by the tool. `apps/mcp` remains a stateless adapter and renderer.
 
 The MCP App resource is self-contained, uses host theme and size notifications, formats only the
-bounded presentation model, and offers a labelled raw-data disclosure when supplied. It does not
+bounded presentation model, and offers a labelled diagnostic-details disclosure when supplied. It does not
 contain Finance calculations, workflow sequencing, or authorization rules.
 
 ## Discovery changes
@@ -114,7 +114,7 @@ The visual uses a compact open hierarchy rather than a nested dashboard:
 - a short fact list or allocation list;
 - important disclosures before optional detail;
 - at most one next-action link; and
-- a closed raw-data disclosure at the end when provided.
+- a closed diagnostic-details disclosure at the end when provided.
 
 It must support narrow inline widths, light and dark host themes, 200% zoom, keyboard navigation,
 visible native focus, reduced motion, long institution/category text, negative values, and missing

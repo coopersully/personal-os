@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img">
+  <title>ilo</title>
+  <desc>The ilo mark inside the maskable safe zone on a full-bleed background.</desc>
+  <!--
+    Android crops a maskable icon to a circle, so the whole framed mark is scaled to 290px and
+    centred, keeping it inside the safe zone (a square inscribed in the 80% safe circle measures
+    512 * 0.8 / sqrt(2) ~= 290). The background bleeds to the edge so no crop shape shows corners.
+  -->
+  <rect width="512" height="512" fill="#000"/>
+  <g transform="translate(111 111) scale(0.56640625)">
+    <rect width="512" height="512" rx="116" fill="#000"/>
+    <rect x="28" y="28" width="456" height="456" rx="92" fill="#fff"/>
+    <g transform="translate(96 96) scale(13.333333)" fill="#000">
+      <path d="M 22.7999 12.4 l -1.8053 -2.408 c -0.096 -2.592 -1.296 -4.9987 -3.32 -6.6453 -2.116 -1.7187 -4.8867 -2.3773 -7.6013 -1.812 C 6.6733 2.2453 3.9133 5.004 3.2013 8.4026 c -0.7987 3.824 0.852 7.6 4.132 9.588 v 3.6747 c 0 0.552 0.448 1 1 1 h 6.6666 c 0.552 0 1 -0.448 1 -1 v -2.3333 h 1.1867 c 1.9133 0 3.52 -1.4947 3.656 -3.4013 l 0.104 -1.4333 1.424 -0.5693 c 0.2893 -0.1147 0.508 -0.3587 0.5907 -0.6587 0.084 -0.3 0.0253 -0.6213 -0.1627 -0.8707 Z m -6.1333 -1.7333 c -0.736 0 -1.3333 -0.5973 -1.3333 -1.3333 s 0.5973 -1.3333 1.3333 -1.3333 1.3333 0.5973 1.3333 1.3333 -0.5973 1.3333 -1.3333 1.3333 Z"/>
+    </g>
+  </g>
+</svg>

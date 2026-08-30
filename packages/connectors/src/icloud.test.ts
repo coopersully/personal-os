@@ -1,5 +1,10 @@
-import { ConnectorError } from "./google.js";
+import { ConnectorError } from "./failures.js";
 import { createICloudConnector } from "./icloud.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_SOURCE_BYTES,
+} from "./mail-attachments.js";
 
 const credentials = {
   appSpecificPassword: "xxxx-xxxx-xxxx-xxxx",
@@ -60,6 +65,8 @@ function davClient(overrides: Record<string, unknown> = {}) {
       calendar,
       { displayName: { value: "not projected" }, url: "https://example.com/other/" },
     ]),
+    supportedReportSet: vi.fn(async () => []),
+    syncCollection: vi.fn(async () => []),
     updateCalendarObject: vi.fn(async () => response(200, "etag-updated")),
     ...overrides,
   };
@@ -70,10 +77,12 @@ function connector(
   imap?: Record<string, unknown>,
   createSmtpTransport?: () => { close: () => void; sendMail: (input: unknown) => Promise<unknown> },
 ) {
+  const createDavClient = vi.fn(async () => client as never);
   return {
     client,
+    createDavClient,
     value: createICloudConnector({
-      createDavClient: vi.fn(async () => client as never),
+      createDavClient,
       ...(imap ? { createImapClient: vi.fn(() => imap as never) } : {}),
       ...(createSmtpTransport ? { createSmtpTransport } : {}),
     }),
@@ -81,6 +90,53 @@ function connector(
 }
 
 describe("iCloud connector", () => {
+  it("uses a bounded abortable IMAP IDLE session only as a change signal", async () => {
+    const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+    let finishIdle: (() => void) | undefined;
+    const idle = new Promise<void>((resolveIdle) => {
+      finishIdle = resolveIdle;
+    });
+    const imap = {
+      close: vi.fn(() => finishIdle?.()),
+      connect: vi.fn(async () => undefined),
+      idle: vi.fn(async () => idle),
+      logout: vi.fn(async () => undefined),
+      mailboxOpen: vi.fn(async () => ({ path: "INBOX" })),
+      on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        const registered = listeners.get(event) ?? new Set();
+        registered.add(listener);
+        listeners.set(event, registered);
+        return imap;
+      }),
+      removeListener: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        listeners.get(event)?.delete(listener);
+        return imap;
+      }),
+    };
+    const { value } = connector(davClient(), imap);
+    if (!value.listenForMailChanges) throw new Error("iCloud IDLE capability is missing.");
+    const controller = new AbortController();
+    const onChange = vi.fn(async () => undefined);
+    const listening = value.listenForMailChanges(credentials, onChange, {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(imap.idle).toHaveBeenCalledOnce());
+    listeners.get("exists")?.forEach((listener) => {
+      listener({ count: 2 });
+    });
+    listeners.get("expunge")?.forEach((listener) => {
+      listener({ seq: 1 });
+    });
+    listeners.get("flags")?.forEach((listener) => {
+      listener({ seq: 1 });
+    });
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(3));
+    controller.abort();
+    await expect(listening).resolves.toBeUndefined();
+    expect(imap.mailboxOpen).toHaveBeenCalledWith("INBOX");
+    expect(imap.close).toHaveBeenCalledOnce();
+    expect(imap.removeListener).toHaveBeenCalledTimes(5);
+  });
   it("extracts supported conference links from CalDAV event descriptions", async () => {
     const meetingIcs = timedIcs.replace(
       "DESCRIPTION:Notes",
@@ -180,6 +236,327 @@ describe("iCloud connector", () => {
     expect(client.deleteCalendarObject).toHaveBeenCalledOnce();
   });
 
+  it("uses WebDAV collection tokens for incremental iCloud Calendar changes", async () => {
+    const supportedReportSet = vi.fn(async () => ["syncCollection"]);
+    const syncCollection = vi.fn(async () => [
+      {
+        href: `${calendarId}event-1.ics`,
+        ok: true,
+        props: { getetag: "etag-2" },
+        raw: { multistatus: { syncToken: "opaque-sync-2" } },
+        status: 200,
+        statusText: "OK",
+      },
+      {
+        href: `${calendarId}event-2.ics`,
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+      },
+    ]);
+    const client = davClient({ supportedReportSet, syncCollection });
+    const { value } = connector(client);
+
+    await expect(
+      value.syncCalendar(credentials, calendarId, "opaque-sync-1"),
+    ).resolves.toMatchObject({
+      changes: [
+        { event: { remoteEventId: `${calendarId}event-1.ics` }, kind: "upsert" },
+        { kind: "delete", remoteEventId: `${calendarId}event-2.ics` },
+      ],
+      nextSyncToken: "opaque-sync-2",
+      reset: false,
+    });
+    expect(syncCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ syncLevel: 1, syncToken: "opaque-sync-1", url: calendarId }),
+    );
+    expect(client.fetchCalendarObjects).toHaveBeenCalledWith(
+      expect.objectContaining({ objectUrls: [`${calendarId}event-1.ics`] }),
+    );
+  });
+
+  it("starts an advertised WebDAV collection sync without inventing a provider token", async () => {
+    const syncCollection = vi.fn(async () => [
+      {
+        href: `${calendarId}event-1.ics`,
+        ok: true,
+        raw: { multistatus: { syncToken: "opaque-initial-token" } },
+        status: 200,
+        statusText: "OK",
+      },
+    ]);
+    const client = davClient({
+      supportedReportSet: vi.fn(async () => ["sync-collection"]),
+      syncCollection,
+    });
+
+    await expect(
+      connector(client).value.syncCalendar(credentials, calendarId, null),
+    ).resolves.toMatchObject({
+      nextSyncToken: "opaque-initial-token",
+      reset: true,
+    });
+    expect(syncCollection).toHaveBeenCalledWith(
+      expect.not.objectContaining({ syncToken: expect.anything() }),
+    );
+  });
+
+  it("continues a truncated WebDAV collection report from the returned opaque token", async () => {
+    const syncCollection = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          href: `${calendarId}event-1.ics`,
+          ok: true,
+          raw: { multistatus: { syncToken: "opaque-page-1" } },
+          status: 200,
+          statusText: "OK",
+        },
+        {
+          href: calendarId,
+          ok: false,
+          raw: { multistatus: { syncToken: "opaque-page-1" } },
+          status: 507,
+          statusText: "Insufficient Storage",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          href: `${calendarId}event-2.ics`,
+          ok: false,
+          raw: { multistatus: { syncToken: "opaque-page-2" } },
+          status: 404,
+          statusText: "Not Found",
+        },
+      ]);
+    const client = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection,
+    });
+
+    await expect(
+      connector(client).value.syncCalendar(credentials, calendarId, "opaque-start"),
+    ).resolves.toMatchObject({
+      changes: [
+        { event: { remoteEventId: `${calendarId}event-1.ics` }, kind: "upsert" },
+        { kind: "delete", remoteEventId: `${calendarId}event-2.ics` },
+      ],
+      nextSyncToken: "opaque-page-2",
+      reset: false,
+    });
+    expect(syncCollection).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ syncToken: "opaque-page-1" }),
+    );
+  });
+
+  it("restarts collection sync once when Apple invalidates its opaque token", async () => {
+    const syncCollection = vi
+      .fn()
+      .mockResolvedValueOnce([{ ok: false, status: 409, statusText: "Conflict" }])
+      .mockResolvedValueOnce([
+        {
+          href: `${calendarId}event-1.ics`,
+          ok: true,
+          raw: { multistatus: { syncToken: "opaque-recovered-token" } },
+          status: 200,
+          statusText: "OK",
+        },
+      ]);
+    const client = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection,
+    });
+    const { value } = connector(client);
+
+    await expect(
+      value.syncCalendar(credentials, calendarId, "expired-token"),
+    ).resolves.toMatchObject({
+      nextSyncToken: "opaque-recovered-token",
+      reset: true,
+    });
+    expect(syncCollection).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ syncToken: "expired-token" }),
+    );
+    expect(syncCollection).toHaveBeenNthCalledWith(
+      2,
+      expect.not.objectContaining({ syncToken: expect.anything() }),
+    );
+  });
+
+  it("fails closed or reconciles fully for malformed and incomplete collection reports", async () => {
+    const report = (
+      overrides: Record<string, unknown> = {},
+      token: string | null = "opaque-next",
+    ) => ({
+      href: `${calendarId}event-1.ics`,
+      ok: true,
+      ...(token ? { raw: { multistatus: { syncToken: token } } } : {}),
+      status: 200,
+      statusText: "OK",
+      ...overrides,
+    });
+    const expectFullReconciliation = async (client: ReturnType<typeof davClient>) => {
+      await expect(
+        connector(client).value.syncCalendar(credentials, calendarId, "opaque-current"),
+      ).resolves.toMatchObject({ nextSyncToken: "ctag-1", reset: true });
+      expect(client.fetchCalendarObjects).toHaveBeenCalledWith(
+        expect.not.objectContaining({ objectUrls: expect.anything() }),
+      );
+    };
+
+    const rejected = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [
+        report({ ok: false, status: 500, statusText: "provider body" }),
+      ]),
+    });
+    await expect(
+      connector(rejected).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).rejects.toMatchObject({
+      category: "temporary",
+      code: "icloud_calendar_sync_rejected",
+      disposition: "retry",
+      message: "iCloud Calendar could not synchronize this calendar.",
+    });
+
+    const missingHref = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [report({ href: undefined })]),
+    });
+    await expect(
+      connector(missingHref).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).resolves.toEqual({ changes: [], nextSyncToken: "opaque-next", reset: false });
+
+    await expectFullReconciliation(
+      davClient({
+        supportedReportSet: vi.fn(async () => ["syncCollection"]),
+        syncCollection: vi.fn(async () => [report({ href: "https://attacker.example/event.ics" })]),
+      }),
+    );
+    await expectFullReconciliation(
+      davClient({
+        supportedReportSet: vi.fn(async () => ["syncCollection"]),
+        syncCollection: vi.fn(async () => [report({}, null)]),
+      }),
+    );
+    await expectFullReconciliation(
+      davClient({
+        supportedReportSet: vi.fn(async () => ["SYNC-COLLECTION"]),
+        syncCollection: vi.fn(async () => [report({ ok: false, status: 507 }, "opaque-current")]),
+      }),
+    );
+
+    const unexpectedObject = davClient({
+      fetchCalendarObjects: vi.fn(async ({ objectUrls }: { objectUrls?: string[] }) =>
+        objectUrls
+          ? [{ data: timedIcs, url: "https://attacker.example/event.ics" }]
+          : [{ data: timedIcs, url: `${calendarId}event-1.ics` }],
+      ),
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [report()]),
+    });
+    await expectFullReconciliation(unexpectedObject);
+
+    const missingObject = davClient({
+      fetchCalendarObjects: vi.fn(async ({ objectUrls }: { objectUrls?: string[] }) =>
+        objectUrls ? [] : [{ data: timedIcs, url: `${calendarId}event-1.ics` }],
+      ),
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [report()]),
+    });
+    await expectFullReconciliation(missingObject);
+  });
+
+  it("bounds oversized and perpetually truncated collection reports", async () => {
+    const oversized = Array.from({ length: 501 }, (_, index) => ({
+      href: `${calendarId}event-${index}.ics`,
+      ok: true,
+      raw: { multistatus: { syncToken: "oversized-next" } },
+      status: 200,
+      statusText: "OK",
+    }));
+    const oversizedClient = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => oversized),
+    });
+    await expect(
+      connector(oversizedClient).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).resolves.toMatchObject({ reset: true });
+
+    let page = 0;
+    const truncatedClient = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => {
+        page += 1;
+        return [
+          {
+            ok: false,
+            raw: { multistatus: { syncToken: `page-${page}` } },
+            status: 507,
+            statusText: "Insufficient Storage",
+          },
+        ];
+      }),
+    });
+    await expect(
+      connector(truncatedClient).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).resolves.toMatchObject({ nextSyncToken: "ctag-1", reset: true });
+    expect(truncatedClient.syncCollection).toHaveBeenCalledTimes(10);
+  });
+
+  it("preserves an explicit cancellation reason during collection sync", async () => {
+    const controller = new AbortController();
+    const reason = new Error("scheduled shutdown");
+    const client = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => {
+        controller.abort(reason);
+        throw new Error("socket closed");
+      }),
+    });
+    await expect(
+      connector(client).value.syncCalendar(credentials, calendarId, "opaque-current", {
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(reason);
+  });
+
+  it("classifies WebDAV collection authorization failures without exposing provider details", async () => {
+    const client = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [
+        { ok: false, status: 403, statusText: "provider secret response" },
+      ]),
+    });
+
+    await expect(
+      connector(client).value.syncCalendar(credentials, calendarId, "opaque-token"),
+    ).rejects.toMatchObject({
+      category: "authorization",
+      code: "icloud_calendar_authorization_failed",
+      disposition: "reconnect",
+      message: "iCloud Calendar authorization is no longer valid.",
+    });
+
+    const unavailable = davClient({
+      supportedReportSet: vi.fn(async () => {
+        throw Object.assign(new Error("socket timeout with provider response"), {
+          code: "ETIMEDOUT",
+        });
+      }),
+    });
+    await expect(
+      connector(unavailable).value.syncCalendar(credentials, calendarId, "opaque-token"),
+    ).rejects.toMatchObject({
+      category: "transport",
+      code: "icloud_calendar_transport_failure",
+      disposition: "retry",
+      message: "iCloud Calendar is temporarily unavailable.",
+    });
+  });
+
   it("syncs IMAP mailboxes and recent plain-text messages", async () => {
     const release = vi.fn();
     const raw = Buffer.from(
@@ -194,6 +571,7 @@ describe("iCloud connector", () => {
         "Hello Example User.\n\nThis is a test.",
       ].join("\r\n"),
     );
+    let selectedPath = "INBOX";
     const imap = {
       connect: vi.fn(async () => undefined),
       fetch: vi.fn(async function* () {
@@ -212,13 +590,23 @@ describe("iCloud connector", () => {
           uid: 3,
         };
       }),
-      getMailboxLock: vi.fn(async () => ({ release })),
+      get mailbox() {
+        return {
+          exists: selectedPath === "INBOX" ? 3 : 0,
+          path: selectedPath,
+          uidValidity: 777n,
+        };
+      },
+      getMailboxLock: vi.fn(async (path: string) => {
+        selectedPath = path;
+        return { release };
+      }),
       list: vi.fn(async () => [
         {
           flags: new Set<string>(),
           name: "Inbox",
           path: "INBOX",
-          status: { messages: 3, unseen: 2 },
+          status: { messages: 3, uidValidity: 777n, unseen: 2 },
         },
         {
           flags: new Set<string>(),
@@ -247,7 +635,7 @@ describe("iCloud connector", () => {
       logout: vi.fn(async () => undefined),
     };
     const { value } = connector(davClient(), imap);
-    const result = await value.syncMail(credentials);
+    const result = await value.syncMail(credentials, null);
     expect(result.mailboxes.map((mailbox) => mailbox.role)).toEqual([
       "inbox",
       "sent",
@@ -261,19 +649,252 @@ describe("iCloud connector", () => {
     expect(result.threads[0]).toMatchObject({
       bodyText: "Hello Example User.\n\nThis is a test.",
       from: { address: "ada@example.com", name: "Ada" },
-      remoteThreadId: "INBOX:2",
+      messagesComplete: true,
+      remoteThreadId: "INBOX:777:2",
       starred: true,
       subject: "Hello from iCloud",
       to: [{ address: "user@example.com", name: "Example User" }],
       unread: true,
     });
+    expect(result.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "777:2",
+      remoteMessageId: "INBOX:777:2",
+    });
     expect(result.threads[1]).toMatchObject({
       from: { address: "", name: null },
-      remoteThreadId: "INBOX:3",
+      remoteThreadId: "INBOX:777:3",
       unread: false,
     });
-    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledTimes(7);
     expect(imap.logout).toHaveBeenCalledOnce();
+  });
+
+  it("changes iCloud source identity when UIDVALIDITY resets and a UID is reused", async () => {
+    let uidValidity = 100n;
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield {
+          source: Buffer.from(
+            "From: organizer@example.com\r\nSubject: Invite\r\nContent-Type: text/calendar\r\n\r\nBEGIN:VCALENDAR",
+          ),
+          uid: 7,
+        };
+      }),
+      mailbox: {
+        exists: 1,
+        path: "INBOX",
+        get uidValidity() {
+          return uidValidity;
+        },
+      },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const { value } = connector(davClient(), imap);
+    const first = await value.syncMail(credentials, null);
+    uidValidity = 101n;
+    const second = await value.syncMail(credentials, null);
+
+    expect(first.threads[0]?.remoteThreadId).toBe("INBOX:100:7");
+    expect(first.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "100:7",
+      remoteMessageId: "INBOX:100:7",
+    });
+    expect(second.threads[0]?.remoteThreadId).toBe("INBOX:101:7");
+    expect(second.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "101:7",
+      remoteMessageId: "INBOX:101:7",
+    });
+  });
+
+  it("collapses excessive iCloud calendar MIME parts to one provider-scoped marker", async () => {
+    const calendarParts = Array.from(
+      { length: MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE + 1 },
+      (_, index) =>
+        [
+          "--calendar-parts",
+          `Content-Type: text/calendar; name="invite-${String(index)}.ics"`,
+          `Content-Disposition: attachment; filename="invite-${String(index)}.ics"`,
+          "",
+          "BEGIN:VCALENDAR",
+          "END:VCALENDAR",
+        ].join("\r\n"),
+    ).join("\r\n");
+    const source = Buffer.from(
+      [
+        "From: organizer@example.com",
+        "Subject: Excessive invitations",
+        'Content-Type: multipart/mixed; boundary="calendar-parts"',
+        "",
+        calendarParts,
+        "--calendar-parts--",
+      ].join("\r\n"),
+    );
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield { source, uid: 9 };
+      }),
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 888n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 888n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const mail = await connector(davClient(), imap).value.syncMail(credentials, null);
+    expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
+      expect.objectContaining({
+        ...calendarAttachmentProjectionOverflow("ignored"),
+        id: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+        providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+      }),
+    ]);
+  });
+
+  it("bounds iCloud RFC822 retrieval before MIME parsing", async () => {
+    const fetch = vi.fn(async function* () {
+      yield {
+        envelope: {
+          date: new Date("2026-07-15T13:00:00.000Z"),
+          from: [{ address: "organizer@example.com", name: "Organizer" }],
+          subject: "Oversized source",
+          to: [{ address: "user@example.com", name: "User" }],
+        },
+        size: MAX_MAIL_SOURCE_BYTES + 1,
+        source: Buffer.from("truncated-untrusted-source"),
+        uid: 10,
+      };
+    });
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch,
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 889n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 889n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+
+    const mail = await connector(davClient(), imap).value.syncMail(credentials, null);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "1:*",
+      expect.objectContaining({
+        size: true,
+        source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 },
+      }),
+    );
+    expect(mail.threads[0]).toMatchObject({
+      bodyText: "",
+      from: { address: "organizer@example.com", name: "Organizer" },
+      subject: "Oversized source",
+      to: [{ address: "user@example.com", name: "User" }],
+    });
+    expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
+      expect.objectContaining({
+        projectionIssue: "calendar_attachment_projection_overflow",
+        providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+      }),
+    ]);
+  });
+
+  it("closes an in-flight multi-mailbox IMAP sync when quiescing", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("runtime quiescing");
+    let rejectFetch: (error: unknown) => void = () => {};
+    let markFetchStarted: () => void = () => {};
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const close = vi.fn(() => {
+      rejectFetch(new Error("socket closed"));
+      throw new Error("socket already destroyed");
+    });
+    const release = vi.fn();
+    const imap = {
+      close,
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        markFetchStarted();
+        await new Promise<void>((_resolve, reject) => {
+          rejectFetch = reject;
+        });
+        yield {};
+      }),
+      get mailbox() {
+        return { exists: 1, path: "INBOX", uidValidity: 777n };
+      },
+      getMailboxLock: vi.fn(async () => ({ release })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 777n, unseen: 1 },
+        },
+        {
+          flags: new Set<string>(),
+          name: "Archive",
+          path: "Archive",
+          status: { messages: 1, uidValidity: 778n, unseen: 0 },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const { value } = connector(davClient(), imap);
+    const sync = value.syncMail(credentials, null, {
+      deadlineMs: Date.now() + 105_000,
+      signal: controller.signal,
+    });
+    await fetchStarted;
+    expect(() => controller.abort(interrupted)).not.toThrow();
+
+    await expect(sync).rejects.toBe(interrupted);
+    expect(close).toHaveBeenCalled();
+    expect(imap.logout).not.toHaveBeenCalled();
+    expect(imap.fetch).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("passes the quiesce signal through CalDAV discovery and object fetches", async () => {
+    const controller = new AbortController();
+    const operation = {
+      deadlineMs: Date.now() + 105_000,
+      signal: controller.signal,
+    };
+    const { client, createDavClient, value } = connector();
+
+    await value.syncCalendar(credentials, calendarId, null, operation);
+
+    expect(createDavClient).toHaveBeenCalledWith(credentials, operation);
+    expect(client.fetchCalendars).toHaveBeenCalledWith({
+      fetchOptions: { signal: controller.signal },
+    });
+    expect(client.fetchCalendarObjects).toHaveBeenCalledWith({
+      calendar: expect.objectContaining({ url: calendarId }),
+      fetchOptions: { signal: controller.signal },
+    });
   });
 
   it("sends iCloud mail through the authenticated SMTP transport", async () => {
@@ -283,15 +904,16 @@ describe("iCloud connector", () => {
     await value.sendMail(credentials, {
       body: "Hello",
       cc: [{ address: "cc@example.com", name: "CC" }],
+      from: credentials.email,
       subject: "Subject",
       to: [{ address: "to@example.com", name: "To" }],
     });
     expect(transport.sendMail).toHaveBeenCalledWith({
-      cc: "CC <cc@example.com>",
+      cc: [{ address: "cc@example.com", name: "CC" }],
       from: credentials.email,
       subject: "Subject",
       text: "Hello",
-      to: "To <to@example.com>",
+      to: [{ address: "to@example.com", name: "To" }],
     });
     expect(transport.close).toHaveBeenCalledOnce();
 
@@ -307,17 +929,26 @@ describe("iCloud connector", () => {
       failing.sendMail(credentials, {
         body: "Hello",
         cc: [],
+        from: credentials.email,
         subject: "Subject",
         to: [{ address: "to@example.com", name: null }],
       }),
-    ).rejects.toMatchObject({ status: 401 });
+    ).rejects.toMatchObject({
+      category: "transport",
+      disposition: "retry",
+      status: null,
+    });
     expect(failingTransport.close).toHaveBeenCalledOnce();
   });
 
   it("writes iCloud flags and mailbox moves through IMAP", async () => {
     const release = vi.fn();
+    let selectedUidValidity = 777n;
     const imap = {
       connect: vi.fn(async () => undefined),
+      get mailbox() {
+        return { exists: 1, path: "INBOX", uidValidity: selectedUidValidity };
+      },
       getMailboxLock: vi.fn(async () => ({ release })),
       list: vi.fn(async () => [
         { name: "Inbox", path: "INBOX" },
@@ -331,7 +962,7 @@ describe("iCloud connector", () => {
     };
     const { value } = connector(davClient(), imap);
     if (!value.updateMailThread) throw new Error("Mail updates are unavailable.");
-    await value.updateMailThread(credentials, "INBOX:42", {
+    await value.updateMailThread(credentials, "INBOX:777:42", {
       addMailboxIds: ["Trash", "STARRED"],
       removeMailboxIds: ["INBOX", "UNREAD"],
     });
@@ -343,6 +974,11 @@ describe("iCloud connector", () => {
     await expect(value.updateMailThread(credentials, "not-a-message", {})).rejects.toMatchObject({
       status: 404,
     });
+    selectedUidValidity = 778n;
+    await expect(
+      value.updateMailThread(credentials, "INBOX:777:42", { addMailboxIds: ["STARRED"] }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it("normalizes sparse CalDAV and IMAP responses", async () => {
@@ -372,15 +1008,31 @@ describe("iCloud connector", () => {
       ].join("\r\n"),
     );
     const release = vi.fn();
+    let selectedSparsePath = "Empty";
     const sparseImap = {
       connect: vi.fn(async () => undefined),
       fetch: vi.fn(async function* () {
         yield { source: raw, uid: 9 };
       }),
-      getMailboxLock: vi.fn(async () => ({ release })),
+      get mailbox() {
+        return {
+          exists: selectedSparsePath === "INBOX" ? 1 : 0,
+          path: selectedSparsePath,
+          uidValidity: 888n,
+        };
+      },
+      getMailboxLock: vi.fn(async (path: string) => {
+        selectedSparsePath = path;
+        return { release };
+      }),
       list: vi.fn(async () => [
         { flags: new Set<string>(), name: "Empty", path: "Empty" },
-        { flags: new Set<string>(), name: "Inbox", path: "INBOX", status: { messages: 1 } },
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 888n },
+        },
       ]),
       logout: vi.fn(async () => undefined),
     };
@@ -407,7 +1059,7 @@ describe("iCloud connector", () => {
       }),
     ).resolves.toMatchObject({ etag: null, timezone: "UTC" });
 
-    const mail = await value.syncMail(credentials);
+    const mail = await value.syncMail(credentials, null);
     expect(mail.mailboxes).toEqual([
       expect.objectContaining({ totalCount: 0, unreadCount: 0 }),
       expect.objectContaining({ totalCount: 1, unreadCount: 0 }),
@@ -424,7 +1076,17 @@ describe("iCloud connector", () => {
       "first@example.com",
       "second@example.com",
     ]);
-    expect(release).toHaveBeenCalledOnce();
+    expect(mail.threads[0]?.messages?.[0]).toMatchObject({
+      attachments: [
+        expect.objectContaining({
+          id: "INBOX:888:9:0",
+          providerPartId: "INBOX:888:9:0",
+        }),
+      ],
+      providerRevision: "888:9",
+      remoteMessageId: "INBOX:888:9",
+    });
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a CalDAV object that mentions an event without containing one", async () => {
@@ -433,7 +1095,7 @@ describe("iCloud connector", () => {
         fetchCalendarObjects: vi.fn(async () => [
           {
             data: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-BAD:BEGIN:VEVENT\r\nEND:VCALENDAR\r\n",
-            url: "event",
+            url: "event.ics",
           },
         ]),
       }),
@@ -517,12 +1179,38 @@ describe("iCloud connector", () => {
       getMailboxLock: vi.fn(),
       list: vi.fn(),
       logout: vi.fn(),
+      mailbox: false,
     }).value;
-    await expect(connectFailure.syncMail(credentials)).rejects.toMatchObject({ status: 401 });
+    await expect(connectFailure.syncMail(credentials, null)).rejects.toMatchObject({
+      category: "transport",
+      disposition: "retry",
+      status: null,
+    });
+
+    const authorizationFailure = connector(davClient(), {
+      connect: vi.fn(async () => {
+        throw { authenticationFailed: true };
+      }),
+      fetch: vi.fn(),
+      getMailboxLock: vi.fn(),
+      list: vi.fn(),
+      logout: vi.fn(),
+      mailbox: false,
+    }).value;
+    await expect(authorizationFailure.syncMail(credentials, null)).rejects.toMatchObject({
+      category: "authorization",
+      disposition: "reconnect",
+    });
 
     const connectorFailure = createICloudConnector({
       createDavClient: vi.fn(async () => {
-        throw new ConnectorError("CalDAV unavailable", 503);
+        throw new ConnectorError({
+          category: "temporary",
+          code: "icloud_calendar_temporary_failure",
+          disposition: "retry",
+          message: "iCloud Calendar is temporarily unavailable.",
+          status: 503,
+        });
       }),
     });
     await expect(connectorFailure.listCalendars(credentials)).rejects.toMatchObject({

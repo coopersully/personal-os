@@ -67,15 +67,48 @@ variable "owner_emails" {
   sensitive   = true
 }
 
+variable "alert_email" {
+  description = "Email address for production health, security, backup, and cost alerts."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.alert_email))
+    error_message = "alert_email must be blank or a valid email address."
+  }
+}
+
+variable "monthly_budget_usd" {
+  description = "Account-wide monthly AWS cost budget in USD."
+  type        = number
+  default     = 50
+
+  validation {
+    condition     = var.monthly_budget_usd >= 10
+    error_message = "monthly_budget_usd must be at least 10."
+  }
+}
+
+variable "cost_anomaly_monitor_arn" {
+  description = "Existing account Cost Anomaly Detection monitor ARN to notify at ilo's lower threshold."
+  type        = string
+  default     = null
+}
+
+variable "cost_anomaly_threshold_usd" {
+  description = "Absolute unexpected-spend impact that triggers an immediate operations-topic alert."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.cost_anomaly_threshold_usd >= 1
+    error_message = "cost_anomaly_threshold_usd must be at least 1."
+  }
+}
+
 variable "email_from" {
   description = "Verified transactional sender, for example ilo <noreply@example.com>."
   type        = string
-}
-
-variable "google_client_id" {
-  description = "Production Google OAuth client ID. The secret remains in Parameter Store."
-  type        = string
-  default     = ""
 }
 
 variable "plaid_enabled" {
@@ -87,7 +120,7 @@ variable "plaid_enabled" {
 variable "plaid_environment" {
   description = "Plaid API environment used when plaid_enabled is true."
   type        = string
-  default     = "sandbox"
+  default     = "production"
 
   validation {
     condition     = contains(["sandbox", "development", "production"], var.plaid_environment)
@@ -99,6 +132,81 @@ variable "x_enabled" {
   description = "Inject the X OAuth client credentials when the production X bookmarks integration is enabled."
   type        = bool
   default     = false
+}
+
+variable "texting_enabled" {
+  description = "Enable Twilio texting only after sender registration, webhook delivery, and opt-out recovery have production evidence."
+  type        = bool
+  default     = false
+}
+
+variable "twilio_phone_number" {
+  description = "Shared Twilio sender in E.164 format."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.twilio_phone_number == "" || can(regex("^\\+[1-9][0-9]{7,14}$", var.twilio_phone_number))
+    error_message = "twilio_phone_number must be blank or a valid E.164 number."
+  }
+}
+
+variable "google_gmail_push_enabled" {
+  description = "Enable Gmail Pub/Sub push only after its external GCP authority and delivery path have production evidence."
+  type        = bool
+  default     = false
+}
+
+variable "google_gmail_pubsub_topic" {
+  description = "Fully qualified GCP Pub/Sub topic used by Gmail watch registration. This is a non-secret identifier."
+  type        = string
+  default     = ""
+}
+
+variable "google_gmail_pubsub_subscription" {
+  description = "Fully qualified GCP push subscription expected in authenticated Gmail envelopes. This is a non-secret identifier."
+  type        = string
+  default     = ""
+}
+
+variable "google_gmail_push_service_account" {
+  description = "Exact GCP service-account email allowed to sign Gmail Pub/Sub push requests. This is a non-secret identity."
+  type        = string
+  default     = ""
+}
+
+variable "google_calendar_push_enabled" {
+  description = "Enable Google Calendar push only after watch creation and public callback delivery have production evidence."
+  type        = bool
+  default     = false
+}
+
+variable "icloud_mail_idle_enabled" {
+  description = "Enable bounded iCloud IMAP IDLE listeners while retaining scheduled reconciliation."
+  type        = bool
+  default     = false
+}
+
+variable "icloud_mail_idle_concurrency" {
+  description = "Maximum concurrent iCloud IMAP IDLE sessions per API task."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.icloud_mail_idle_concurrency >= 1 && var.icloud_mail_idle_concurrency <= 25
+    error_message = "icloud_mail_idle_concurrency must be between 1 and 25."
+  }
+}
+
+check "gmail_push_configuration" {
+  assert {
+    condition = !var.google_gmail_push_enabled || (
+      can(regex("^projects/[^/]+/topics/[^/]+$", var.google_gmail_pubsub_topic)) &&
+      can(regex("^projects/[^/]+/subscriptions/[^/]+$", var.google_gmail_pubsub_subscription)) &&
+      can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.iam\\.gserviceaccount\\.com$", var.google_gmail_push_service_account))
+    )
+    error_message = "Gmail push requires a qualified topic, subscription, and exact GCP service-account identity."
+  }
 }
 
 variable "ssm_parameter_prefix" {
@@ -117,6 +225,23 @@ variable "mcp_desired_count" {
   description = "Initial MCP task count. Keep at 0 until the first GitHub deployment has pushed an image."
   type        = number
   default     = 0
+}
+
+variable "service_min_capacity" {
+  description = "Minimum running task count maintained by ECS service auto scaling."
+  type        = number
+  default     = 1
+}
+
+variable "service_max_capacity" {
+  description = "Maximum running task count allowed during load spikes."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.service_max_capacity >= var.service_min_capacity
+    error_message = "service_max_capacity must be greater than or equal to service_min_capacity."
+  }
 }
 
 variable "database_instance_class" {
@@ -141,4 +266,15 @@ variable "edge_rate_limit" {
   description = "Maximum requests per source IP in a five-minute WAF window."
   type        = number
   default     = 1000
+}
+
+variable "connector_webhook_rate_limit" {
+  description = "Maximum requests per source IP to exact authenticated connector webhook paths in a five-minute WAF window."
+  type        = number
+  default     = 10000
+
+  validation {
+    condition     = var.connector_webhook_rate_limit >= var.edge_rate_limit
+    error_message = "connector_webhook_rate_limit must be at least edge_rate_limit."
+  }
 }

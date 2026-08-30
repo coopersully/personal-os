@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./google": "./src/google.ts",
     "./icloud": "./src/icloud.ts",
+    "./twilio": "./src/twilio.ts",
     "./types": "./src/types.ts"
   },
   "scripts": {
@@ -15,10 +16,11 @@
   "dependencies": {
     "@personal-os/domain": "workspace:*",
     "ical.js": "^2.2.1",
-    "imapflow": "^1.4.7",
+    "imapflow": "^1.7.0",
     "mailparser": "^3.9.14",
     "nodemailer": "^9.0.3",
     "tsdav": "^2.3.1",
+    "twilio": "^6.1.0",
     "zod": "^4.0.5"
   },
   "devDependencies": {

@@ -1,14 +1,57 @@
 import type {
   AccessScope,
+  AccountSetupStatus,
+  AccountSetupStep,
+  AccountSetupWorkspace,
   ActorType,
-  AutomationRunStatus,
-  AutomationTemplate,
+  AgentAccessDomain,
+  AgentAccessWorkItem,
+  AgentAccessWorkItemKind,
+  AgentAccessWorkItemSummary,
+  AgentMutationPolicy,
+  AssistantDomain,
+  AttentionItemImportance,
+  AttentionItemKind,
+  AttentionItemStatus,
+  CalendarFinding,
+  CalendarFindingEvidence,
+  CalendarFindingKind,
+  CalendarFindingSeverity,
+  CalendarFindingStatus,
+  CalendarHealthAssessment,
+  CalendarMaintenanceScope,
   CalendarProvider,
+  CalendarRecommendation,
+  CalendarReviewState,
+  CalendarSourceFreshness,
+  ConnectorFailureCategory,
+  ConnectorSubscriptionKind,
+  ConnectorSubscriptionStatus,
+  ConnectorSyncRecovery,
+  ConnectorSyncStatus,
+  ConnectorSyncTriggerReason,
+  DomainProfile,
   FinanceProvider,
+  GoogleConnectionService,
   HomeLocation,
+  LegacyMailRuleAction,
   MailAddress,
+  MailAttachment,
   MailboxRole,
   MailProvider,
+  MailRuleAction,
+  MailRuleCondition,
+  MailRuleProviderEffect,
+  MailRuleWorkStatus,
+  MaintenanceRunStatus,
+  MaintenanceScope,
+  MaterialSourceReference,
+  TextContentKind,
+  TextingConnectionState,
+  TextingCountry,
+  TextMessageDirection,
+  TextMessageStatus,
+  TextOccurredAtSource,
   Theme,
   TransactionDirection,
 } from "@personal-os/domain";
@@ -16,6 +59,9 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
+  check,
+  date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -39,6 +85,18 @@ export const users = pgTable("users", {
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name").notNull(),
+  setupStatus: text("setup_status").$type<AccountSetupStatus>().notNull().default("dismissed"),
+  setupCurrentStep: text("setup_current_step")
+    .$type<AccountSetupStep>()
+    .notNull()
+    .default("welcome"),
+  setupSelectedWorkspaces: jsonb("setup_selected_workspaces")
+    .$type<AccountSetupWorkspace[]>()
+    .notNull()
+    .default(sql`'["calendar","tasks","mail","finances"]'::jsonb`),
+  setupStartedAt: timestamp("setup_started_at", { withTimezone: true }),
+  setupCompletedAt: timestamp("setup_completed_at", { withTimezone: true }),
+  setupDismissedAt: timestamp("setup_dismissed_at", { withTimezone: true }),
   planningTimezone: text("planning_timezone").notNull().default("UTC"),
   homeLocation: jsonb("home_location").$type<HomeLocation>(),
   workdayStartMinute: integer("workday_start_minute")
@@ -49,6 +107,326 @@ export const users = pgTable("users", {
     .default(17 * 60),
   ...timestamps,
 });
+
+type MaintenanceSafeError = { code: string; message: string };
+
+export const workspaceMaintenanceRuns = pgTable(
+  "workspace_maintenance_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    scope: jsonb("scope").$type<MaintenanceScope>().notNull(),
+    status: text("status").$type<MaintenanceRunStatus>().notNull().default("queued"),
+    rulebookVersion: text("rulebook_version").notNull(),
+    sourceSnapshot: jsonb("source_snapshot").$type<unknown>(),
+    checkpoint: jsonb("checkpoint").$type<unknown>(),
+    leaseClaimId: uuid("lease_claim_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    retryAt: timestamp("retry_at", { withTimezone: true }),
+    lastSafeError: jsonb("last_safe_error").$type<MaintenanceSafeError>(),
+    settledResult: jsonb("settled_result").$type<unknown>(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "workspace_maintenance_runs_status_check",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')`,
+    ),
+    check(
+      "workspace_maintenance_runs_lease_check",
+      sql`(
+        (${table.status} = 'running' AND ${table.leaseClaimId} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'running' AND ${table.leaseClaimId} IS NULL AND ${table.leaseExpiresAt} IS NULL)
+      )`,
+    ),
+    check(
+      "workspace_maintenance_runs_retry_check",
+      sql`(
+        (${table.status} = 'failed_recoverable' AND ${table.retryAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'failed_recoverable' AND ${table.retryAt} IS NULL)
+      )`,
+    ),
+    uniqueIndex("workspace_maintenance_runs_open_user_domain_idx")
+      .on(table.userId, table.domain)
+      .where(
+        sql`${table.status} IN ('queued', 'running', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
+      ),
+    uniqueIndex("workspace_maintenance_runs_id_user_id_unique").on(table.id, table.userId),
+    index("workspace_maintenance_runs_claimable_idx")
+      .on(table.status, table.retryAt, table.leaseExpiresAt, table.updatedAt)
+      .where(sql`${table.status} IN ('queued', 'running', 'failed_recoverable')`),
+    index("workspace_maintenance_runs_user_history_idx").on(
+      table.userId,
+      table.domain,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const workspaceMaintenanceSteps = pgTable(
+  "workspace_maintenance_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    stepName: text("step_name").notNull(),
+    status: text("status")
+      .$type<"completed" | "failed_recoverable" | "failed_terminal">()
+      .notNull(),
+    attemptCount: integer("attempt_count").notNull().default(1),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attemptClaimId: uuid("attempt_claim_id").notNull(),
+    safeResult: jsonb("safe_result").$type<unknown>(),
+    safeError: jsonb("safe_error").$type<MaintenanceSafeError>(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "workspace_maintenance_steps_status_check",
+      sql`${table.status} IN ('completed', 'failed_recoverable', 'failed_terminal')`,
+    ),
+    check("workspace_maintenance_steps_attempt_check", sql`${table.attemptCount} > 0`),
+    check(
+      "workspace_maintenance_steps_result_check",
+      sql`(
+        (${table.status} = 'completed' AND ${table.safeError} IS NULL)
+        OR
+        (${table.status} IN ('failed_recoverable', 'failed_terminal') AND ${table.safeResult} IS NULL AND ${table.safeError} IS NOT NULL)
+      )`,
+    ),
+    uniqueIndex("workspace_maintenance_steps_run_step_idx").on(table.runId, table.stepName),
+    uniqueIndex("workspace_maintenance_steps_run_idempotency_idx").on(
+      table.runId,
+      table.idempotencyKey,
+    ),
+  ],
+);
+
+/**
+ * The private candidate ledger for a single Finance maintenance run.  A
+ * superseded revision is retained for audit/recovery, while the partial index
+ * permits only one current candidate for that run.
+ */
+export const financeMaintenanceCandidates = pgTable(
+  "finance_maintenance_candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
+    state: text("state")
+      .$type<
+        | "preparing"
+        | "ready_for_challenge"
+        | "challenged"
+        | "awaiting_approval"
+        | "committing"
+        | "committed"
+        | "superseded"
+      >()
+      .notNull()
+      .default("preparing"),
+    revision: text("revision").notNull(),
+    projection: jsonb("projection").$type<Record<string, unknown>>().notNull().default({
+      budgetActual: null,
+      budgetTotal: null,
+      budgetVariance: null,
+      grossCashSpending: 0,
+      matchedReimbursementIncome: 0,
+      monthlyCapacity: null,
+      personalSpending: 0,
+      plannedIncome: 0,
+      profileExpectedNetIncome: null,
+      questions: 0,
+      recurringCommittedOutflow: 0,
+      reimbursementsOutstanding: 0,
+      workItems: 0,
+    }),
+    /** The next stable proposal cursor, visible only to the preparer. */
+    preparationCursor: text("preparation_cursor"),
+    nextOrdinal: integer("next_ordinal").notNull().default(0),
+    discoveryRevision: text("discovery_revision"),
+    preparationCheckpoint: jsonb("preparation_checkpoint")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "finance_maintenance_candidates_state_check",
+      sql`${table.state} IN ('preparing', 'ready_for_challenge', 'challenged', 'awaiting_approval', 'committing', 'committed', 'superseded')`,
+    ),
+    check("finance_maintenance_candidates_next_ordinal_check", sql`${table.nextOrdinal} >= 0`),
+    uniqueIndex("finance_maintenance_candidates_active_run_idx")
+      .on(table.runId)
+      .where(sql`${table.state} <> 'superseded'`),
+    index("finance_maintenance_candidates_user_state_idx").on(
+      table.userId,
+      table.state,
+      table.updatedAt,
+    ),
+    foreignKey({
+      columns: [table.runId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+      name: "finance_maintenance_candidates_run_user_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+/** Private prepared actions/questions; public views project only safeChanges. */
+export const financeMaintenanceCandidateItems = pgTable(
+  "finance_maintenance_candidate_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => financeMaintenanceCandidates.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    actionKind: text("action_kind").notNull(),
+    privatePayload: jsonb("private_payload").$type<Record<string, unknown>>().notNull(),
+    safeChanges: jsonb("safe_changes")
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    sourceRefs: jsonb("source_refs").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    expectedRevision: text("expected_revision"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    fingerprint: text("fingerprint").notNull(),
+    disposition: text("disposition")
+      .$type<"prepared" | "question" | "removed" | "committed">()
+      .notNull()
+      .default("prepared"),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_maintenance_candidate_items_ordinal_check", sql`${table.ordinal} >= 0`),
+    check(
+      "finance_maintenance_candidate_items_disposition_check",
+      sql`${table.disposition} IN ('prepared', 'question', 'removed', 'committed')`,
+    ),
+    uniqueIndex("finance_maintenance_candidate_items_candidate_ordinal_idx").on(
+      table.candidateId,
+      table.ordinal,
+    ),
+    uniqueIndex("finance_maintenance_candidate_items_candidate_fingerprint_idx").on(
+      table.candidateId,
+      table.fingerprint,
+    ),
+    index("finance_maintenance_candidate_items_candidate_disposition_idx").on(
+      table.candidateId,
+      table.disposition,
+      table.ordinal,
+    ),
+  ],
+);
+
+export const financeLedgerChallenges = pgTable(
+  "finance_ledger_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => financeMaintenanceCandidates.id, { onDelete: "cascade" }),
+    candidateRevision: text("candidate_revision").notNull(),
+    rubricVersion: text("rubric_version").notNull(),
+    cutoff: timestamp("cutoff", { withTimezone: true }).notNull(),
+    state: text("state")
+      .$type<"prepared" | "submitted" | "resolved">()
+      .notNull()
+      .default("prepared"),
+    coverage: jsonb("coverage").$type<Record<string, unknown>>().notNull().default({}),
+    submittingAgentId: text("submitting_agent_id"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "finance_ledger_challenges_state_check",
+      sql`${table.state} IN ('prepared', 'submitted', 'resolved')`,
+    ),
+    uniqueIndex("finance_ledger_challenges_run_candidate_idx").on(table.runId, table.candidateId),
+    index("finance_ledger_challenges_user_state_idx").on(
+      table.userId,
+      table.state,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const financeLedgerChallengeFindings = pgTable(
+  "finance_ledger_challenge_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    challengeId: uuid("challenge_id")
+      .notNull()
+      .references(() => financeLedgerChallenges.id, { onDelete: "cascade" }),
+    candidateItemId: uuid("candidate_item_id").references(
+      () => financeMaintenanceCandidateItems.id,
+      { onDelete: "set null" },
+    ),
+    kind: text("kind").notNull(),
+    severity: text("severity").notNull(),
+    sourceRefs: jsonb("source_refs").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    evidence: text("evidence").notNull(),
+    rationale: text("rationale").notNull(),
+    resolution: jsonb("resolution").$type<Record<string, unknown>>().notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "finance_ledger_challenge_findings_kind_check",
+      sql`${table.kind} IN ('correction', 'question', 'blocker', 'observation')`,
+    ),
+    check(
+      "finance_ledger_challenge_findings_severity_check",
+      sql`${table.severity} IN ('info', 'warning', 'blocker')`,
+    ),
+    index("finance_ledger_challenge_findings_challenge_idx").on(table.challengeId, table.createdAt),
+  ],
+);
+
+export const financePeriodReviews = pgTable(
+  "finance_period_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    cutoff: timestamp("cutoff", { withTimezone: true }).notNull(),
+    status: text("status").notNull(),
+    report: jsonb("report").$type<Record<string, unknown>>().notNull(),
+    sourceIds: jsonb("source_ids").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("finance_period_reviews_period_check", sql`${table.periodStart} <= ${table.periodEnd}`),
+    check(
+      "finance_period_reviews_status_check",
+      sql`${table.status} IN ('completed', 'completed_with_questions')`,
+    ),
+    uniqueIndex("finance_period_reviews_run_idx").on(table.runId),
+    index("finance_period_reviews_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
 
 export const accountActionTokens = pgTable(
   "account_action_tokens",
@@ -217,7 +595,7 @@ export const automationRoutines = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    template: text("template").$type<AutomationTemplate>().notNull(),
+    template: text("template").$type<"morning_brief" | "nightly_review">().notNull(),
     title: text("title").notNull(),
     schedule: text("schedule").notNull(),
     timezone: text("timezone").notNull(),
@@ -241,7 +619,7 @@ export const automationRuns = pgTable(
     routineId: uuid("routine_id")
       .notNull()
       .references(() => automationRoutines.id, { onDelete: "cascade" }),
-    status: text("status").$type<AutomationRunStatus>().notNull(),
+    status: text("status").$type<"completed" | "dry_run" | "failed">().notNull(),
     summary: text("summary").notNull(),
     brief: jsonb("brief").$type<StoredDailyBrief>(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
@@ -250,6 +628,153 @@ export const automationRuns = pgTable(
   (table) => [
     index("automation_runs_routine_time_idx").on(table.routineId, table.startedAt),
     index("automation_runs_user_time_idx").on(table.userId, table.startedAt),
+  ],
+);
+
+export const domainProfiles = pgTable(
+  "domain_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    objective: text("objective").notNull(),
+    summary: text("summary").notNull(),
+    instructions: jsonb("instructions").$type<string[]>().notNull().default([]),
+    sourceContexts: jsonb("source_contexts")
+      .$type<
+        Array<{
+          notes: string | null;
+          purpose: string;
+          sourceId: string;
+          sourceLabel: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
+    categories: jsonb("categories")
+      .$type<Array<{ description: string; examples: string[]; key: string; label: string }>>()
+      .notNull()
+      .default([]),
+    preferences: jsonb("preferences")
+      .$type<Record<string, boolean | null | number | string | string[]>>()
+      .notNull()
+      .default({}),
+    status: text("status").$type<"active" | "draft">().notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profiles_user_domain_idx").on(table.userId, table.domain),
+    uniqueIndex("domain_profiles_id_user_domain_idx").on(table.id, table.userId, table.domain),
+    index("domain_profiles_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const domainProfileApprovals = pgTable(
+  "domain_profile_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    profileId: uuid("profile_id").notNull(),
+    profileVersion: integer("profile_version").notNull(),
+    profile: jsonb("profile").$type<DomainProfile>().notNull(),
+    approvedByUserId: uuid("approved_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profile_approvals_user_domain_idx").on(table.userId, table.domain),
+    index("domain_profile_approvals_profile_idx").on(table.profileId),
+    foreignKey({
+      columns: [table.profileId, table.userId, table.domain],
+      foreignColumns: [domainProfiles.id, domainProfiles.userId, domainProfiles.domain],
+      name: "domain_profile_approvals_owned_profile_fk",
+    }).onDelete("cascade"),
+    check("domain_profile_approvals_owner_check", sql`${table.approvedByUserId} = ${table.userId}`),
+    check(
+      "domain_profile_approvals_snapshot_check",
+      sql`(${table.profile}->>'id' = ${table.profileId}::text
+        AND ${table.profile}->>'domain' = ${table.domain}
+        AND (${table.profile}->>'version')::integer = ${table.profileVersion}
+        AND ${table.profile}->>'status' = 'active') IS TRUE`,
+    ),
+  ],
+);
+
+export const financeSetupBackfillState = pgTable("finance_setup_backfill_state", {
+  allocationCursor: uuid("allocation_cursor"),
+  allocationsComplete: boolean("allocations_complete").notNull().default(false),
+  key: text("key").primaryKey(),
+  categoriesComplete: boolean("categories_complete").notNull().default(false),
+  profileCursor: uuid("profile_cursor"),
+  profilesComplete: boolean("profiles_complete").notNull().default(false),
+  userCursor: uuid("user_cursor"),
+  ...timestamps,
+});
+
+export const agentAccessWorkItemSnapshots = pgTable(
+  "agent_access_work_item_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").$type<Extract<ActorType, "agent" | "user">>().notNull(),
+    domain: text("domain").$type<AgentAccessDomain>(),
+    kind: text("kind").$type<AgentAccessWorkItemKind>(),
+    items: jsonb("items").$type<AgentAccessWorkItem[]>().notNull(),
+    filteredTotal: integer("filtered_total"),
+    summary: jsonb("summary").$type<AgentAccessWorkItemSummary>().notNull(),
+    unavailableDomains: jsonb("unavailable_domains")
+      .$type<AgentAccessDomain[]>()
+      .notNull()
+      .default([]),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_access_work_item_snapshots_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
+
+export const attentionItems = pgTable(
+  "attention_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    kind: text("kind").$type<AttentionItemKind>().notNull(),
+    importance: text("importance").$type<AttentionItemImportance>().notNull(),
+    status: text("status").$type<AttentionItemStatus>().notNull().default("open"),
+    version: integer("version").notNull().default(1),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    occursAt: timestamp("occurs_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    source: jsonb("source").$type<MaterialSourceReference>(),
+    relatedEntityType: text("related_entity_type"),
+    relatedEntityId: uuid("related_entity_id"),
+    ...timestamps,
+  },
+  (table) => [
+    index("attention_items_user_domain_status_idx").on(
+      table.userId,
+      table.domain,
+      table.status,
+      table.createdAt,
+    ),
+    index("attention_items_user_occurs_idx").on(table.userId, table.occursAt),
+    check("attention_items_version_check", sql`${table.version} > 0`),
   ],
 );
 
@@ -297,12 +822,46 @@ export const oauthStates = pgTable(
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    status: text("status")
+      .$type<
+        | "pending"
+        | "processing"
+        | "connected"
+        | "cancelled"
+        | "expired"
+        | "permission_incomplete"
+        | "failed"
+      >()
+      .notNull()
+      .default("pending"),
+    outcomeCode: text("outcome_code"),
+    connectedAccountId: uuid("connected_account_id"),
+    redirectUri: text("redirect_uri"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    requestId: text("request_id"),
     targetAccountId: uuid("target_account_id"),
+    requestedServices: jsonb("requested_services").$type<GoogleConnectionService[]>(),
+    returnPath: text("return_path"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("oauth_states_token_hash_idx").on(table.tokenHash),
     index("oauth_states_user_idx").on(table.userId),
+    index("oauth_states_status_expiry_idx").on(table.status, table.expiresAt),
+    index("oauth_states_expiry_idx").on(table.expiresAt),
+    index("oauth_states_user_created_idx").on(table.userId, table.createdAt),
+    check(
+      "oauth_states_status_check",
+      sql`${table.status} IN ('pending', 'processing', 'connected', 'cancelled', 'expired', 'permission_incomplete', 'failed')`,
+    ),
+    check(
+      "oauth_states_lifecycle_check",
+      sql`(
+        (${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} = 'processing' AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} IN ('connected', 'cancelled', 'expired', 'permission_incomplete', 'failed') AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL)
+      )`,
+    ),
   ],
 );
 
@@ -328,17 +887,43 @@ export const calendarAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     calendarEnabled: boolean("calendar_enabled").notNull().default(true),
     mailEnabled: boolean("mail_enabled").notNull().default(false),
-    syncStatus: text("sync_status").$type<"idle" | "syncing" | "error">().notNull().default("idle"),
+    mailSyncToken: text("mail_sync_token"),
+    syncStatus: text("sync_status").$type<ConnectorSyncStatus>().notNull().default("idle"),
+    syncGeneration: integer("sync_generation").notNull().default(0),
+    syncClaimId: uuid("sync_claim_id"),
     syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("calendar_accounts_user_idx").on(table.userId),
+    index("calendar_accounts_sync_due_idx").on(table.syncStatus, table.nextSyncAt),
     uniqueIndex("calendar_accounts_remote_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check("calendar_accounts_sync_generation_check", sql`${table.syncGeneration} >= 0`),
+    check("calendar_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "calendar_accounts_sync_claim_check",
+      sql`(${table.syncStatus} = 'syncing') = (${table.syncClaimId} IS NOT NULL)`,
+    ),
+    check(
+      "calendar_accounts_sync_recovery_check",
+      sql`(
+        ${table.provider} = 'local'
+        OR
+        (${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('automatic', 'operator', 'reconnect'))
+      )`,
     ),
   ],
 );
@@ -459,6 +1044,7 @@ export const mailboxes = pgTable(
     remoteMailboxId: text("remote_mailbox_id").notNull(),
     name: text("name").notNull(),
     role: text("role").$type<MailboxRole>().notNull().default("custom"),
+    providerRevision: text("provider_revision"),
     unreadCount: integer("unread_count").notNull().default(0),
     totalCount: integer("total_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
@@ -514,14 +1100,85 @@ export const mailMessages = pgTable(
     from: jsonb("from_address").$type<MailAddress>().notNull(),
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
-    attachments: jsonb("attachments")
-      .$type<Array<{ contentType: string; filename: string; id: string; size: number }>>()
-      .notNull()
-      .default([]),
+    attachments: jsonb("attachments").$type<MailAttachment[]>().notNull().default([]),
+    providerMailboxIds: jsonb("provider_mailbox_ids").$type<string[]>().notNull().default([]),
+    providerRevision: text("provider_revision"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("mail_messages_remote_idx").on(table.threadId, table.remoteMessageId)],
+);
+
+export const mailCalendarCommitmentIntakes = pgTable(
+  "mail_calendar_commitment_intakes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    sourceThreadId: uuid("source_thread_id").references(() => mailThreads.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageId: uuid("source_message_id").references(() => mailMessages.id, {
+      onDelete: "set null",
+    }),
+    remoteThreadId: text("remote_thread_id").notNull(),
+    remoteMessageId: text("remote_message_id").notNull(),
+    remotePartId: text("remote_part_id").notNull(),
+    sourceThreadRevision: timestamp("source_thread_revision", { withTimezone: true }).notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    sourceMessageMailboxIds: jsonb("source_message_mailbox_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    sourceMessageRevision: text("source_message_revision"),
+    providerAccountAddressHintHash: text("provider_account_address_hint_hash"),
+    attachmentFingerprint: text("attachment_fingerprint").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attachment: jsonb("attachment").$type<MailAttachment>().notNull(),
+    evidenceKind: text("evidence_kind").notNull(),
+    authority: text("authority")
+      .$type<"provider_projected_unverified" | "server_verified">()
+      .notNull()
+      .default("provider_projected_unverified"),
+    status: text("status")
+      .$type<"preview_only" | "pending" | "claimed" | "reconcile" | "succeeded" | "failed">()
+      .notNull()
+      .default("preview_only"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_calendar_commitment_intake_identity_idx").on(
+      table.accountId,
+      table.remoteMessageId,
+      table.remotePartId,
+    ),
+    uniqueIndex("mail_calendar_commitment_intake_idempotency_idx").on(table.idempotencyKey),
+    index("mail_calendar_commitment_intake_user_status_idx").on(table.userId, table.status),
+    check(
+      "mail_calendar_commitment_intake_source_fingerprint_check",
+      sql`${table.sourceFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.attachmentFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.idempotencyKey} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_account_address_hint_hash_check",
+      sql`${table.providerAccountAddressHintHash} IS NULL OR ${table.providerAccountAddressHintHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_check",
+      sql`${table.authority} IN ('provider_projected_unverified', 'server_verified')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_status_check",
+      sql`${table.status} IN ('preview_only', 'pending', 'claimed', 'reconcile', 'succeeded', 'failed')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_status_check",
+      sql`${table.authority} <> 'provider_projected_unverified' OR ${table.status} = 'preview_only'`,
+    ),
+  ],
 );
 
 export const mailDrafts = pgTable(
@@ -540,9 +1197,46 @@ export const mailDrafts = pgTable(
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    sendClaimId: uuid("send_claim_id"),
+    sendClaimedAt: timestamp("send_claimed_at", { withTimezone: true }),
+    sendStatus: text("send_status")
+      .$type<"draft" | "sending" | "sent" | "reconcile">()
+      .notNull()
+      .default("draft"),
     ...timestamps,
   },
-  (table) => [index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt)],
+  (table) => [
+    index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt),
+    check(
+      "mail_drafts_send_state_check",
+      sql`
+        (
+          ${table.sendStatus} = 'draft'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sending'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'reconcile'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sent'
+          AND ${table.sentAt} IS NOT NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+      `,
+    ),
+  ],
 );
 
 export const mailSnoozes = pgTable(
@@ -571,13 +1265,137 @@ export const mailRules = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").references(() => domainProfiles.id, { onDelete: "set null" }),
     name: text("name").notNull(),
-    query: text("query").notNull(),
-    action: text("action").$type<"archive" | "mark_read" | "star">().notNull(),
-    enabled: boolean("enabled").notNull().default(true),
+    legacyQuery: text("query").notNull().default("__ilo_rule_v2__"),
+    legacyAction: text("action").$type<LegacyMailRuleAction>().notNull().default("archive"),
+    description: text("description").notNull().default(""),
+    condition: jsonb("condition").$type<MailRuleCondition>(),
+    actions: jsonb("actions").$type<MailRuleAction[]>(),
+    sourceAccountIds: jsonb("source_account_ids").$type<string[]>().notNull().default([]),
+    confidenceThreshold: integer("confidence_threshold_basis_points"),
+    policy: text("policy").$type<AgentMutationPolicy>().notNull().default("preview"),
+    enabled: boolean("enabled").notNull().default(false),
+    version: integer("version").notNull().default(1),
     ...timestamps,
   },
-  (table) => [index("mail_rules_user_idx").on(table.userId)],
+  (table) => [
+    index("mail_rules_user_idx").on(table.userId),
+    index("mail_rules_user_enabled_idx").on(table.userId, table.enabled),
+    check(
+      "mail_rules_activation_state_check",
+      sql`
+        (${table.enabled} = false AND ${table.policy} = 'preview')
+        OR (${table.enabled} = true AND ${table.policy} = 'approved_rule')
+        OR (
+          ${table.enabled} = true
+          AND ${table.policy} = 'preview'
+          AND ${table.condition} IS NULL
+          AND ${table.actions} IS NULL
+        )
+      `,
+    ),
+    check("mail_rules_exact_match_confidence_check", sql`${table.confidenceThreshold} IS NULL`),
+  ],
+);
+
+export const mailRuleWorkItems = pgTable(
+  "mail_rule_work_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => mailRules.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").references(() => domainProfiles.id, { onDelete: "set null" }),
+    threadId: uuid("thread_id").references(() => mailThreads.id, { onDelete: "set null" }),
+    remoteThreadId: text("remote_thread_id").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    profileVersion: integer("profile_version").notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }).notNull(),
+    action: jsonb("action").$type<MailRuleAction>().notNull(),
+    actionFingerprint: text("action_fingerprint").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    status: text("status").$type<MailRuleWorkStatus>().notNull().default("pending"),
+    claimId: uuid("claim_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimMode: text("claim_mode").$type<"execute" | "reconcile">(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    providerEffect: text("provider_effect")
+      .$type<MailRuleProviderEffect>()
+      .notNull()
+      .default("none"),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_rule_work_identity_idx").on(
+      table.accountId,
+      table.remoteThreadId,
+      table.ruleId,
+      table.ruleVersion,
+      table.profileVersion,
+      table.actionFingerprint,
+    ),
+    index("mail_rule_work_due_idx").on(table.status, table.nextAttemptAt, table.dueAt),
+    index("mail_rule_work_account_idx").on(table.accountId, table.status),
+    index("mail_rule_work_thread_status_idx").on(table.threadId, table.status),
+    index("mail_rule_work_user_status_idx").on(table.userId, table.accountId, table.status),
+    check(
+      "mail_rule_work_revision_check",
+      sql`${table.ruleVersion} > 0 AND ${table.profileVersion} > 0`,
+    ),
+    check(
+      "mail_rule_work_action_fingerprint_check",
+      sql`${table.actionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_rule_work_attempt_count_check",
+      sql`${table.attemptCount} >= 0 AND ${table.attemptCount} <= 5`,
+    ),
+    check(
+      "mail_rule_work_provider_effect_check",
+      sql`${table.providerEffect} IN ('none', 'rejected', 'indeterminate', 'applied')`,
+    ),
+    check(
+      "mail_rule_work_claim_mode_check",
+      sql`${table.claimMode} IS NULL OR ${table.claimMode} IN ('execute', 'reconcile')`,
+    ),
+    check(
+      "mail_rule_work_claim_state_check",
+      sql`
+        (
+          ${table.status} = 'claimed'
+          AND ${table.claimId} IS NOT NULL
+          AND ${table.claimedAt} IS NOT NULL
+          AND ${table.claimMode} IS NOT NULL
+          AND ${table.completedAt} IS NULL
+        )
+        OR (
+          ${table.status} IN ('pending', 'reconcile')
+          AND ${table.claimId} IS NULL
+          AND ${table.claimedAt} IS NULL
+          AND ${table.claimMode} IS NULL
+          AND ${table.completedAt} IS NULL
+        )
+        OR (
+          ${table.status} IN ('succeeded', 'failed')
+          AND ${table.claimId} IS NULL
+          AND ${table.claimedAt} IS NULL
+          AND ${table.claimMode} IS NULL
+          AND ${table.completedAt} IS NOT NULL
+        )
+      `,
+    ),
+  ],
 );
 
 export const calendars = pgTable(
@@ -610,6 +1428,94 @@ export const calendars = pgTable(
   ],
 );
 
+export const connectorSubscriptions = pgTable(
+  "connector_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"google" | "icloud">().notNull(),
+    kind: text("kind").$type<ConnectorSubscriptionKind>().notNull(),
+    calendarId: uuid("calendar_id").references(() => calendars.id, { onDelete: "cascade" }),
+    channelId: text("channel_id"),
+    remoteResourceId: text("remote_resource_id"),
+    remoteIdentityHash: text("remote_identity_hash"),
+    verificationTokenHash: text("verification_token_hash"),
+    providerCursor: text("provider_cursor"),
+    status: text("status").$type<ConnectorSubscriptionStatus>().notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    renewAfter: timestamp("renew_after", { withTimezone: true }),
+    lastNotificationAt: timestamp("last_notification_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    failureCount: integer("failure_count").notNull().default(0),
+    safeFailureCode: text("safe_failure_code"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseClaimId: uuid("lease_claim_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("connector_subscriptions_identity_idx").on(
+      table.accountId,
+      table.kind,
+      sql`COALESCE(${table.calendarId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+    uniqueIndex("connector_subscriptions_channel_idx").on(table.channelId),
+    index("connector_subscriptions_due_idx").on(table.status, table.nextAttemptAt),
+    check("connector_subscriptions_provider_check", sql`${table.provider} IN ('google', 'icloud')`),
+    check(
+      "connector_subscriptions_kind_check",
+      sql`${table.kind} IN ('gmail_mailbox', 'google_calendar_list', 'google_calendar_events', 'icloud_mail_idle')`,
+    ),
+    check(
+      "connector_subscriptions_status_check",
+      sql`${table.status} IN ('pending', 'active', 'renewing', 'expired', 'failed', 'stopped')`,
+    ),
+    check("connector_subscriptions_failure_count_check", sql`${table.failureCount} >= 0`),
+    check(
+      "connector_subscriptions_lease_check",
+      sql`(${table.leaseClaimId} IS NULL) = (${table.leaseExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export const connectorSyncTriggers = pgTable(
+  "connector_sync_triggers",
+  {
+    accountId: uuid("account_id")
+      .primaryKey()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    reason: text("reason").$type<ConnectorSyncTriggerReason>().notNull(),
+    firstTriggeredAt: timestamp("first_triggered_at", { withTimezone: true }).notNull(),
+    lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }).notNull(),
+    notificationCount: integer("notification_count").notNull().default(1),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    claimId: uuid("claim_id"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("connector_sync_triggers_due_idx").on(table.availableAt),
+    check(
+      "connector_sync_triggers_reason_check",
+      sql`${table.reason} IN ('initial', 'notification', 'reconciliation', 'manual', 'retry', 'recovery')`,
+    ),
+    check(
+      "connector_sync_triggers_count_check",
+      sql`${table.notificationCount} BETWEEN 1 AND 1000000`,
+    ),
+    check(
+      "connector_sync_triggers_time_check",
+      sql`${table.firstTriggeredAt} <= ${table.lastTriggeredAt}`,
+    ),
+    check(
+      "connector_sync_triggers_claim_check",
+      sql`(${table.claimId} IS NULL) = (${table.claimExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
 export type RawCalendarEvent = Record<string, unknown>;
 
 export const calendarEvents = pgTable(
@@ -634,6 +1540,7 @@ export const calendarEvents = pgTable(
     notes: text("notes"),
     location: text("location"),
     conferenceUrl: text("conference_url"),
+    url: text("url"),
     startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
     endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
     timezone: text("timezone").notNull(),
@@ -680,6 +1587,80 @@ export const calendarEvents = pgTable(
   ],
 );
 
+export const calendarFindings = pgTable(
+  "calendar_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    kind: text("kind").$type<CalendarFindingKind>().notNull(),
+    severity: text("severity").$type<CalendarFindingSeverity>().notNull(),
+    status: text("status").$type<CalendarFindingStatus>().notNull().default("open"),
+    summary: text("summary").notNull(),
+    evidence: jsonb("evidence").$type<CalendarFindingEvidence>().notNull(),
+    sourceReferences: jsonb("source_references")
+      .$type<MaterialSourceReference[]>()
+      .notNull()
+      .default([]),
+    evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
+    playbookVersion: text("playbook_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("calendar_findings_identity_idx").on(table.userId, table.fingerprint),
+    index("calendar_findings_user_status_idx").on(table.userId, table.status, table.lastObservedAt),
+    check("calendar_findings_fingerprint_check", sql`${table.fingerprint} ~ '^[0-9a-f]{64}$'`),
+    check("calendar_findings_status_check", sql`${table.status} IN ('open', 'resolved')`),
+    check(
+      "calendar_findings_resolution_check",
+      sql`(${table.status} = 'resolved') = (${table.resolvedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const calendarReviews = pgTable(
+  "calendar_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: text("state").$type<CalendarReviewState>().notNull(),
+    scope: jsonb("scope").$type<CalendarMaintenanceScope>().notNull(),
+    scopeStart: timestamp("scope_start", { withTimezone: true }).notNull(),
+    scopeEnd: timestamp("scope_end", { withTimezone: true }).notNull(),
+    evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
+    nextMaintenanceAt: timestamp("next_maintenance_at", { withTimezone: true }).notNull(),
+    playbookVersion: text("playbook_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    profileVersion: integer("profile_version"),
+    ledgerFingerprint: text("ledger_fingerprint").notNull(),
+    sourceFreshness: jsonb("source_freshness").$type<CalendarSourceFreshness[]>().notNull(),
+    health: jsonb("health").$type<CalendarHealthAssessment[]>().notNull(),
+    findingSnapshots: jsonb("finding_snapshots").$type<CalendarFinding[]>().notNull(),
+    recommendations: jsonb("recommendations").$type<CalendarRecommendation[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("calendar_reviews_user_created_idx").on(table.userId, table.createdAt),
+    check("calendar_reviews_fingerprint_check", sql`${table.ledgerFingerprint} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "calendar_reviews_state_check",
+      sql`${table.state} IN ('maintained', 'maintained_with_questions', 'blocked')`,
+    ),
+    check(
+      "calendar_reviews_scope_check",
+      sql`${table.scopeStart} <= ${table.evidenceCutoff} AND ${table.evidenceCutoff} <= ${table.scopeEnd}`,
+    ),
+  ],
+);
+
 export const reminders = pgTable(
   "reminders",
   {
@@ -710,6 +1691,90 @@ export const reminders = pgTable(
   ],
 );
 
+export const financeProviderItems = pgTable(
+  "finance_provider_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"plaid">().notNull(),
+    providerItemId: text("provider_item_id"),
+    legacyGroupingKey: text("legacy_grouping_key"),
+    encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>().notNull(),
+    syncCursor: text("sync_cursor"),
+    syncState: text("sync_state")
+      .$type<"current" | "stale" | "retrying" | "blocked">()
+      .notNull()
+      .default("stale"),
+    syncClaimId: uuid("sync_claim_id"),
+    syncClaimOwner: text("sync_claim_owner"),
+    syncClaimGeneration: integer("sync_claim_generation"),
+    syncClaimStartedAt: timestamp("sync_claim_started_at", { withTimezone: true }),
+    syncClaimExpiresAt: timestamp("sync_claim_expires_at", { withTimezone: true }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_provider_items_user_idx").on(table.userId),
+    uniqueIndex("finance_provider_items_remote_identity_idx")
+      .on(table.userId, table.provider, table.providerItemId)
+      .where(sql`${table.providerItemId} IS NOT NULL`),
+    uniqueIndex("finance_provider_items_legacy_identity_idx")
+      .on(table.userId, table.provider, table.legacyGroupingKey)
+      .where(sql`${table.legacyGroupingKey} IS NOT NULL`),
+    index("finance_provider_items_sync_due_idx")
+      .on(table.nextSyncAt, table.updatedAt)
+      .where(sql`${table.nextSyncAt} IS NOT NULL`),
+    index("finance_provider_items_sync_claim_recovery_idx")
+      .on(table.syncClaimExpiresAt)
+      .where(sql`${table.syncClaimId} IS NOT NULL`),
+    check("finance_provider_items_provider_check", sql`${table.provider} = 'plaid'`),
+    check(
+      "finance_provider_items_identity_check",
+      sql`${table.providerItemId} IS NOT NULL OR ${table.legacyGroupingKey} IS NOT NULL`,
+    ),
+    check(
+      "finance_provider_items_sync_state_check",
+      sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_provider_items_sync_claim_check",
+      sql`num_nonnulls(${table.syncClaimId}, ${table.syncClaimOwner}, ${table.syncClaimGeneration}, ${table.syncClaimStartedAt}, ${table.syncClaimExpiresAt}) IN (0, 5)`,
+    ),
+    check(
+      "finance_provider_items_sync_claim_generation_check",
+      sql`${table.syncClaimGeneration} IS NULL OR ${table.syncClaimGeneration} >= 0`,
+    ),
+    check("finance_provider_items_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "finance_provider_items_sync_failure_check",
+      sql`(
+        (${table.syncState} IN ('current', 'stale') AND ${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncState} = 'retrying' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IS NOT NULL AND ${table.syncRecovery} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} = 'automatic')
+        OR
+        (${table.syncState} = 'blocked' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IS NOT NULL AND ${table.syncRecovery} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('operator', 'reconnect'))
+      )`,
+    ),
+  ],
+);
+
+export const financeAutomationSettings = pgTable("finance_automation_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+  ...timestamps,
+});
+
 export const financeAccounts = pgTable(
   "finance_accounts",
   {
@@ -722,6 +1787,7 @@ export const financeAccounts = pgTable(
     name: text("name").notNull(),
     kind: text("kind").$type<"cash" | "investment" | "debt" | "other">().notNull().default("cash"),
     balance: integer("balance_cents"),
+    currencyCode: text("currency_code"),
     status: text("status")
       .$type<"connected" | "needs_reauth" | "manual">()
       .notNull()
@@ -729,16 +1795,72 @@ export const financeAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     providerAccountId: text("provider_account_id"),
     providerItemId: text("provider_item_id"),
+    providerItemRecordId: uuid("provider_item_record_id").references(
+      () => financeProviderItems.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     syncCursor: text("sync_cursor"),
+    syncState: text("sync_state")
+      .$type<"current" | "stale" | "retrying" | "blocked">()
+      .notNull()
+      .default("stale"),
+    syncClaimId: uuid("sync_claim_id"),
+    syncClaimExpiresAt: timestamp("sync_claim_expires_at", { withTimezone: true }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("finance_accounts_user_idx").on(table.userId),
+    index("finance_accounts_provider_item_record_id_idx").on(table.providerItemRecordId),
+    index("finance_accounts_sync_claim_idx")
+      .on(table.syncClaimExpiresAt)
+      .where(sql`${table.syncClaimId} IS NOT NULL`),
+    index("finance_accounts_sync_due_idx")
+      .on(table.nextSyncAt, table.updatedAt)
+      .where(sql`${table.provider} = 'plaid' AND ${table.nextSyncAt} IS NOT NULL`),
+    index("finance_accounts_sync_initialization_idx")
+      .on(table.id)
+      .where(sql`(
+        (${table.provider} = 'manual' AND ${table.syncState} = 'stale' AND ${table.nextSyncAt} IS NULL)
+        OR
+        (${table.provider} = 'plaid' AND ${table.status} = 'connected' AND ${table.syncState} = 'stale' AND ${table.nextSyncAt} IS NULL)
+      )`),
     uniqueIndex("finance_accounts_provider_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check(
+      "finance_accounts_sync_state_check",
+      sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_accounts_currency_code_check",
+      sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
+    ),
+    check(
+      "finance_accounts_sync_claim_check",
+      sql`(${table.syncClaimId} IS NULL) = (${table.syncClaimExpiresAt} IS NULL)`,
+    ),
+    check("finance_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "finance_accounts_sync_failure_check",
+      sql`(
+        (${table.syncState} IN ('current', 'stale') AND ${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncState} = 'retrying' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} = 'automatic')
+        OR
+        (${table.syncState} = 'blocked' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('operator', 'reconnect'))
+      )`,
     ),
   ],
 );
@@ -758,6 +1880,7 @@ export const financeCategories = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_categories_id_user_id_unique").on(table.id, table.userId),
     index("finance_categories_user_idx").on(table.userId),
     uniqueIndex("finance_categories_user_slug_idx").on(table.userId, table.slug),
   ],
@@ -772,6 +1895,10 @@ export const financeMerchants = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     displayName: text("display_name").notNull(),
     normalizedName: text("normalized_name").notNull(),
+    behavior: text("behavior")
+      .$type<"unknown" | "consistent" | "mixed">()
+      .notNull()
+      .default("unknown"),
     isUserConfirmed: boolean("is_user_confirmed").notNull().default(false),
     ...timestamps,
   },
@@ -825,8 +1952,10 @@ export const financeTransactions = pgTable(
     providerCategory: text("provider_category"),
     providerCategoryDetailed: text("provider_category_detailed"),
     providerCategoryConfidence: text("provider_category_confidence"),
+    providerDirection: text("provider_direction").$type<"expense" | "income">(),
     merchant: text("merchant").notNull(),
     amount: integer("amount_cents").notNull(),
+    currencyCode: text("currency_code"),
     direction: text("direction").$type<TransactionDirection>().notNull(),
     transactionDate: text("transaction_date").notNull(),
     category: text("category"),
@@ -845,6 +1974,7 @@ export const financeTransactions = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_transactions_id_user_id_unique").on(table.id, table.userId),
     index("finance_transactions_user_date_idx").on(table.userId, table.transactionDate),
     index("finance_transactions_review_idx").on(table.userId, table.needsReview),
     index("finance_transactions_merchant_idx").on(table.userId, table.merchantId),
@@ -853,7 +1983,261 @@ export const financeTransactions = pgTable(
       table.accountId,
       table.providerTransactionId,
     ),
+    check(
+      "finance_transactions_provider_direction_check",
+      sql`${table.providerDirection} IS NULL OR ${table.providerDirection} IN ('expense', 'income')`,
+    ),
+    check(
+      "finance_transactions_currency_code_check",
+      sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
+    ),
   ],
+);
+
+export const financeTransactionAllocations = pgTable(
+  "finance_transaction_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => financeCategories.id, { onDelete: "restrict" }),
+    amount: integer("amount_cents").notNull(),
+    allocationOrder: integer("allocation_order").notNull(),
+    treatment: text("treatment").$type<"personal" | "reimbursable">().notNull().default("personal"),
+    rationale: text("rationale"),
+    revision: integer("revision").notNull().default(1),
+    state: text("state").$type<"active" | "invalidated">().notNull().default("active"),
+    invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_transaction_allocations_amount_check", sql`${table.amount} > 0`),
+    check("finance_transaction_allocations_order_check", sql`${table.allocationOrder} >= 0`),
+    check(
+      "finance_transaction_allocations_treatment_check",
+      sql`${table.treatment} IN ('personal', 'reimbursable')`,
+    ),
+    check(
+      "finance_transaction_allocations_state_check",
+      sql`${table.state} IN ('active', 'invalidated')`,
+    ),
+    index("finance_transaction_allocations_user_category_idx").on(table.userId, table.categoryId),
+    uniqueIndex("finance_transaction_allocations_id_user_id_unique").on(table.id, table.userId),
+    uniqueIndex("finance_transaction_allocations_transaction_order_idx")
+      .on(table.transactionId, table.allocationOrder)
+      .where(sql`${table.state} = 'active'`),
+    foreignKey({
+      columns: [table.transactionId, table.userId],
+      foreignColumns: [financeTransactions.id, financeTransactions.userId],
+      name: "finance_transaction_allocations_transaction_user_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.categoryId, table.userId],
+      foreignColumns: [financeCategories.id, financeCategories.userId],
+      name: "finance_transaction_allocations_category_user_fk",
+    }).onDelete("restrict"),
+  ],
+);
+
+/** Money owed for a reimbursable allocation; bank cash remains on its transaction. */
+export const financeReimbursements = pgTable(
+  "finance_reimbursements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    allocationId: uuid("allocation_id")
+      .notNull()
+      .references(() => financeTransactionAllocations.id, { onDelete: "restrict" }),
+    expectedAmount: integer("expected_amount_cents").notNull(),
+    receivedAmount: integer("received_amount_cents").notNull().default(0),
+    payer: text("payer"),
+    dueDate: text("due_date"),
+    evidence: jsonb("evidence").notNull().default({}),
+    rationale: text("rationale").notNull(),
+    status: text("status")
+      .$type<
+        "expected" | "partially_received" | "received" | "overdue" | "cancelled" | "needs_input"
+      >()
+      .notNull()
+      .default("expected"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledEvidence: jsonb("cancelled_evidence"),
+    cancelledRationale: text("cancelled_rationale"),
+    revision: integer("revision").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_reimbursements_expected_amount_check", sql`${table.expectedAmount} > 0`),
+    check(
+      "finance_reimbursements_received_amount_check",
+      sql`${table.receivedAmount} >= 0 AND ${table.receivedAmount} <= ${table.expectedAmount}`,
+    ),
+    check(
+      "finance_reimbursements_status_check",
+      sql`${table.status} IN ('expected', 'partially_received', 'received', 'overdue', 'cancelled', 'needs_input')`,
+    ),
+    foreignKey({
+      columns: [table.allocationId, table.userId],
+      foreignColumns: [financeTransactionAllocations.id, financeTransactionAllocations.userId],
+      name: "finance_reimbursements_allocation_user_fk",
+    }).onDelete("restrict"),
+    uniqueIndex("finance_reimbursements_id_user_id_unique").on(table.id, table.userId),
+    index("finance_reimbursements_user_status_due_idx").on(
+      table.userId,
+      table.status,
+      table.dueDate,
+    ),
+    index("finance_reimbursements_user_allocation_idx").on(table.userId, table.allocationId),
+  ],
+);
+
+/** A credit may settle several reimbursements and a reimbursement may receive several credits. */
+export const financeReimbursementMatches = pgTable(
+  "finance_reimbursement_matches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reimbursementId: uuid("reimbursement_id")
+      .notNull()
+      .references(() => financeReimbursements.id, { onDelete: "cascade" }),
+    creditTransactionId: uuid("credit_transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "restrict" }),
+    amount: integer("amount_cents").notNull(),
+    evidence: jsonb("evidence").notNull().default({}),
+    rationale: text("rationale").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_reimbursement_matches_amount_check", sql`${table.amount} > 0`),
+    foreignKey({
+      columns: [table.reimbursementId, table.userId],
+      foreignColumns: [financeReimbursements.id, financeReimbursements.userId],
+      name: "finance_reimbursement_matches_reimbursement_user_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.creditTransactionId, table.userId],
+      foreignColumns: [financeTransactions.id, financeTransactions.userId],
+      name: "finance_reimbursement_matches_credit_user_fk",
+    }).onDelete("restrict"),
+    uniqueIndex("finance_reimbursement_matches_reimbursement_credit_idx").on(
+      table.reimbursementId,
+      table.creditTransactionId,
+    ),
+    index("finance_reimbursement_matches_user_credit_idx").on(
+      table.userId,
+      table.creditTransactionId,
+    ),
+  ],
+);
+
+/** A real-world movement that can group transfers, refunds, reimbursements, and splits. */
+export const financeEconomicEvents = pgTable(
+  "finance_economic_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind")
+      .$type<
+        | "duplicate"
+        | "income"
+        | "other"
+        | "purchase"
+        | "refund"
+        | "reimbursement"
+        | "reversal"
+        | "split"
+        | "transfer"
+      >()
+      .notNull(),
+    stableKey: text("stable_key").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_economic_events_user_stable_key_idx").on(table.userId, table.stableKey),
+    index("finance_economic_events_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
+export const financeEventTransactions = pgTable(
+  "finance_event_transactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id")
+      .notNull()
+      .references(() => financeEconomicEvents.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_event_transactions_event_transaction_idx").on(
+      table.economicEventId,
+      table.transactionId,
+    ),
+    uniqueIndex("finance_event_transactions_transaction_idx").on(table.transactionId),
+  ],
+);
+
+export const financeTransactionRevisions = pgTable(
+  "finance_transaction_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    changes: jsonb("changes").$type<Record<string, unknown>>().notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_transaction_revisions_transaction_version_idx").on(
+      table.transactionId,
+      table.version,
+    ),
+    index("finance_transaction_revisions_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const financeTransactionRelationships = pgTable(
+  "finance_transaction_relationships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id")
+      .notNull()
+      .references(() => financeEconomicEvents.id, { onDelete: "cascade" }),
+    relationship: text("relationship")
+      .$type<"duplicate" | "refund" | "reimbursement" | "reversal" | "split" | "transfer">()
+      .notNull(),
+    transactionIds: jsonb("transaction_ids").$type<string[]>().notNull(),
+    rationale: text("rationale").notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("finance_transaction_relationships_event_idx").on(table.economicEventId)],
 );
 
 export const financeClassificationDecisions = pgTable(
@@ -893,29 +2277,195 @@ export const financeReviewCases = pgTable(
     transactionId: uuid("transaction_id")
       .notNull()
       .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id").references(() => financeEconomicEvents.id, {
+      onDelete: "set null",
+    }),
+    stableKey: text("stable_key").notNull().default(sql`'legacy:' || gen_random_uuid()::text`),
     status: text("status").$type<"deferred" | "open" | "resolved">().notNull().default("open"),
     reason: text("reason")
       .$type<
         | "ambiguous_merchant"
+        | "amount_changed"
         | "low_confidence"
         | "one_time"
         | "possible_duplicate"
+        | "possible_reimbursement"
         | "possible_transfer"
         | "refund_or_reversal"
         | "unknown_merchant"
       >()
-      .notNull(),
+      .notNull()
+      .default("low_confidence"),
+    reasonCode: text("reason_code")
+      .$type<
+        | "budget_variance"
+        | "category_ambiguity"
+        | "merchant_identity"
+        | "missing_provenance"
+        | "possible_duplicate"
+        | "possible_transfer"
+        | "profile_fact"
+        | "recurring_status"
+        | "refund_or_reversal"
+        | "reimbursement"
+        | "source_freshness"
+        | "unusual_amount"
+      >()
+      .notNull()
+      .default("missing_provenance"),
     suggestedCategoryId: uuid("suggested_category_id").references(() => financeCategories.id, {
       onDelete: "set null",
     }),
     rationale: text("rationale"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    proposedResolution: jsonb("proposed_resolution").$type<Record<string, unknown>>(),
+    impactAmount: integer("impact_amount_cents").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    reopenedFromId: uuid("reopened_from_id").references((): AnyPgColumn => financeReviewCases.id, {
+      onDelete: "set null",
+    }),
+    resolution: jsonb("resolution").$type<Record<string, unknown>>(),
+    resolvedByActorType: text("resolved_by_actor_type").$type<ActorType>(),
+    resolvedByActorId: text("resolved_by_actor_id"),
+    resolutionProvenance: jsonb("resolution_provenance").$type<Record<string, unknown>>(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("finance_review_cases_user_status_idx").on(table.userId, table.status),
-    uniqueIndex("finance_review_cases_open_transaction_idx").on(table.transactionId, table.status),
+    uniqueIndex("finance_review_cases_active_stable_key_unique")
+      .on(table.userId, table.stableKey)
+      .where(sql`${table.status} in ('open', 'deferred')`),
+    index("finance_review_cases_event_idx").on(table.economicEventId),
+    index("finance_review_cases_reopened_idx").on(table.reopenedFromId),
   ],
+);
+
+/** Synchronous, caller-resumable maintenance protocol state; never a background job queue. */
+export const financeMaintenanceRuns = pgTable(
+  "finance_maintenance_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    stage: text("stage")
+      .$type<
+        | "agent_audit"
+        | "agent_reasoning"
+        | "deterministic_processing"
+        | "failed"
+        | "reconciliation"
+        | "settled"
+      >()
+      .notNull()
+      .default("deterministic_processing"),
+    scope: jsonb("scope").$type<Record<string, unknown>>().notNull(),
+    version: integer("version").notNull().default(1),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [index("finance_maintenance_runs_user_stage_idx").on(table.userId, table.stage)],
+);
+
+export const financeMaintenanceJudgments = pgTable(
+  "finance_maintenance_judgments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => financeMaintenanceRuns.id, { onDelete: "cascade" }),
+    judgmentKey: text("judgment_key").notNull(),
+    type: text("type")
+      .$type<"classify_transaction" | "link_transactions" | "needs_user_review">()
+      .notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_maintenance_judgments_run_key_idx").on(table.runId, table.judgmentKey),
+  ],
+);
+
+export const financeAuditFindings = pgTable(
+  "finance_audit_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => financeMaintenanceRuns.id, { onDelete: "cascade" }),
+    economicEventId: uuid("economic_event_id")
+      .notNull()
+      .references(() => financeEconomicEvents.id, { onDelete: "cascade" }),
+    stableKey: text("stable_key").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull(),
+    impactAmount: integer("impact_amount_cents").notNull(),
+    rationale: text("rationale").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_audit_findings_run_stable_key_idx").on(table.runId, table.stableKey),
+  ],
+);
+
+export const financeMutationRecords = pgTable(
+  "finance_mutation_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    operation: text("operation").notNull(),
+    requestHash: text("request_hash").notNull(),
+    actorType: text("actor_type").$type<ActorType>().notNull(),
+    actorId: text("actor_id"),
+    status: text("status").$type<"completed" | "failed" | "started">().notNull(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    error: jsonb("error").$type<Record<string, unknown>>(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_mutation_records_user_key_idx").on(table.userId, table.idempotencyKey),
+    index("finance_mutation_records_user_operation_idx").on(table.userId, table.operation),
+    index("finance_mutation_records_started_lease_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.status} = 'started'`),
+  ],
+);
+
+export const financeAccountConnections = pgTable(
+  "finance_account_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    status: text("status")
+      .$type<"connected" | "disconnected" | "failed" | "needs_reauth" | "pending">()
+      .notNull()
+      .default("pending"),
+    accountIds: jsonb("account_ids").$type<string[]>().notNull().default([]),
+    externalHandoffUrl: text("external_handoff_url"),
+    externalHandoffExpiresAt: timestamp("external_handoff_expires_at", { withTimezone: true }),
+    lastError: jsonb("last_error").$type<Record<string, unknown>>(),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [index("finance_account_connections_user_status_idx").on(table.userId, table.status)],
 );
 
 export const financeCategoryRules = pgTable(
@@ -927,6 +2477,8 @@ export const financeCategoryRules = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     merchantNormalized: text("merchant_normalized").notNull(),
     category: text("category").notNull(),
+    rationale: text("rationale"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
     ...timestamps,
   },
   (table) => [
@@ -956,6 +2508,211 @@ export const financeBudgets = pgTable(
   ],
 );
 
+/** Per-user controls for agent-initiated Finance mutations. */
+export const financeAgentSettings = pgTable("finance_agent_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+  version: integer("version").notNull().default(1),
+  ...timestamps,
+});
+
+/** Immutable snapshots of the facts used to give financial guidance. */
+export const financeProfileVersions = pgTable(
+  "finance_profile_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    jurisdiction: text("jurisdiction"),
+    householdSize: integer("household_size"),
+    dependents: integer("dependents"),
+    expectedMonthlyTakeHome: integer("expected_monthly_take_home_cents"),
+    incomeStability: text("income_stability")
+      .$type<"seasonal" | "stable" | "unknown" | "variable">()
+      .notNull()
+      .default("unknown"),
+    liquidReserves: integer("liquid_reserves_cents"),
+    debts: jsonb("debts").$type<Record<string, unknown>[]>().notNull().default([]),
+    insurance: jsonb("insurance").$type<Record<string, unknown>[]>().notNull().default([]),
+    preferences: jsonb("preferences")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({ notes: [] }),
+    employment: jsonb("employment").$type<Record<string, unknown>>(),
+    provenance: jsonb("provenance").$type<Record<string, unknown>>().notNull().default({}),
+    sourceLegacyProfileId: uuid("source_legacy_profile_id").references(() => financeProfiles.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_profile_versions_user_version_idx").on(table.userId, table.version),
+    index("finance_profile_versions_user_created_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+/** Stable identity for a budget; revisions are stored in finance_budget_versions. */
+export const financeBudgetPlans = pgTable(
+  "finance_budget_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    month: text("month").notNull().default(sql`'canonical-' || gen_random_uuid()::text`),
+    goalIds: jsonb("goal_ids").$type<string[]>().notNull().default([]),
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull().default(""),
+    replace: boolean("replace_existing").notNull().default(true),
+    scenarioFingerprint: text("scenario_fingerprint"),
+    version: integer("version").notNull().default(1),
+    name: text("name").notNull().default("Monthly plan"),
+    status: text("status").$type<"active" | "archived">().notNull().default("active"),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_budget_plans_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_budget_plans_user_month_idx").on(table.userId, table.month),
+  ],
+);
+
+export const financeGoals = pgTable(
+  "finance_goals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    targetAmount: integer("target_amount_cents").notNull(),
+    currentAmount: integer("current_amount_cents").notNull().default(0),
+    deadline: text("deadline"),
+    priority: text("priority").$type<"high" | "low" | "medium">().notNull().default("medium"),
+    status: text("status")
+      .$type<"active" | "completed" | "paused" | "removed">()
+      .notNull()
+      .default("active"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [index("finance_goals_user_status_idx").on(table.userId, table.status)],
+);
+
+export const financeBudgetVersions = pgTable(
+  "finance_budget_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => financeBudgetPlans.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    status: text("status")
+      .$type<"active" | "incomplete" | "proposed" | "retired">()
+      .notNull()
+      .default("incomplete"),
+    effectiveFrom: text("effective_from").notNull(),
+    expectedResources: integer("expected_resources_cents").notNull(),
+    allocatedTotal: integer("allocated_total_cents").notNull(),
+    balanceDelta: integer("balance_delta_cents").notNull(),
+    resources: jsonb("resources").$type<Record<string, unknown>[]>().notNull().default([]),
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull(),
+    createdByActorType: text("created_by_actor_type").$type<ActorType>(),
+    createdByActorId: text("created_by_actor_id"),
+    approvedByActorType: text("approved_by_actor_type").$type<ActorType>(),
+    approvedByActorId: text("approved_by_actor_id"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
+    index("finance_budget_versions_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.effectiveFrom,
+    ),
+    uniqueIndex("finance_budget_versions_user_active_month_idx")
+      .on(table.userId, table.effectiveFrom)
+      .where(sql`${table.status} = 'active'`),
+  ],
+);
+
+export const financeBudgetAllocations = pgTable(
+  "finance_budget_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    budgetVersionId: uuid("budget_version_id")
+      .notNull()
+      .references(() => financeBudgetVersions.id, { onDelete: "cascade" }),
+    allocationKey: text("allocation_key").notNull(),
+    kind: text("kind").$type<"buffer" | "debt" | "goal" | "savings" | "spending">().notNull(),
+    amount: integer("amount_cents").notNull(),
+    description: text("description"),
+    categoryId: uuid("category_id").references(() => financeCategories.id, {
+      onDelete: "set null",
+    }),
+    accountId: uuid("account_id").references(() => financeAccounts.id, {
+      onDelete: "set null",
+    }),
+    goalId: uuid("goal_id").references(() => financeGoals.id, { onDelete: "set null" }),
+    legacyCategory: text("legacy_category"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_allocations_version_key_idx").on(
+      table.budgetVersionId,
+      table.allocationKey,
+    ),
+    index("finance_budget_allocations_user_idx").on(table.userId),
+  ],
+);
+
+/** Resumable chat setup state. It does not represent a scheduled or background job. */
+export const financeSetupSessions = pgTable(
+  "finance_setup_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status")
+      .$type<
+        | "budget_approval"
+        | "budget_proposal"
+        | "collecting_profile"
+        | "initial_maintenance"
+        | "settled"
+      >()
+      .notNull()
+      .default("collecting_profile"),
+    currentQuestionKey: text("current_question_key"),
+    budgetVersionId: uuid("budget_version_id").references(() => financeBudgetVersions.id, {
+      onDelete: "set null",
+    }),
+    maintenanceRunId: uuid("maintenance_run_id").references(() => financeMaintenanceRuns.id, {
+      onDelete: "set null",
+    }),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_setup_sessions_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_setup_sessions_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.status} <> 'settled'`),
+  ],
+);
+
 /** User-authored baseline for financial inference. Effective-dated rather than overwritten. */
 export const financeProfiles = pgTable(
   "finance_profiles",
@@ -979,11 +2736,65 @@ export const financeProfiles = pgTable(
       onDelete: "set null",
     }),
     effectiveDate: text("effective_date").notNull(),
+    householdSize: integer("household_size"),
+    dependents: integer("dependents"),
+    housingStatus: text("housing_status").$type<"owning" | "renting" | "shared" | "other">(),
+    monthlyHousingCost: integer("monthly_housing_cost_cents"),
+    reserveTargetMonths: integer("reserve_target_months"),
+    investmentRiskWillingness: text("investment_risk_willingness").$type<
+      "conservative" | "balanced" | "growth"
+    >(),
+    investmentRiskCapacity: text("investment_risk_capacity").$type<"low" | "moderate" | "high">(),
     ...timestamps,
   },
   (table) => [
     index("finance_profiles_user_effective_idx").on(table.userId, table.effectiveDate),
     uniqueIndex("finance_profiles_user_effective_idx_unique").on(table.userId, table.effectiveDate),
+  ],
+);
+
+/**
+ * Durable, user-owned approval records for prepared Finance actions. The
+ * private payload stays in this Finance-only record; review surfaces receive
+ * only the bounded `safeChanges` projection.
+ */
+export const financeAgentActionReviews = pgTable(
+  "finance_agent_action_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestingAgentId: text("requesting_agent_id").notNull(),
+    sourceRefs: jsonb("source_refs").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    actionKind: text("action_kind").notNull(),
+    privatePayload: jsonb("private_payload").$type<Record<string, unknown>>().notNull(),
+    safeChanges: jsonb("safe_changes")
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    semanticTargetKeys: jsonb("semantic_target_keys").$type<string[]>().notNull().default([]),
+    maintenanceRunId: uuid("maintenance_run_id").references(() => workspaceMaintenanceRuns.id, {
+      onDelete: "set null",
+    }),
+    expectedRevision: text("expected_revision"),
+    fingerprint: text("fingerprint").notNull(),
+    status: text("status")
+      .$type<"pending" | "applied" | "dismissed" | "superseded">()
+      .notNull()
+      .default("pending"),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_agent_action_reviews_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.createdAt,
+    ),
+    uniqueIndex("finance_agent_action_reviews_pending_fingerprint_idx")
+      .on(table.userId, table.fingerprint)
+      .where(sql`${table.status} = 'pending'`),
+    index("finance_agent_action_reviews_target_keys_idx").using("gin", table.semanticTargetKeys),
   ],
 );
 
@@ -1095,6 +2906,112 @@ export const financeAlerts = pgTable(
       table.status,
     ),
   ],
+);
+
+export const textingConnections = pgTable(
+  "texting_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhoneNumber: jsonb("encrypted_phone_number").$type<EncryptedCredentials>().notNull(),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    country: text("country").$type<TextingCountry>().notNull(),
+    state: text("state").$type<TextingConnectionState>().notNull().default("active"),
+    consentVersion: text("consent_version").notNull(),
+    consentEpoch: integer("consent_epoch").notNull().default(1),
+    conversationRevision: integer("conversation_revision").notNull().default(0),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    optedOutAt: timestamp("opted_out_at", { withTimezone: true }),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("texting_connections_user_idx").on(table.userId),
+    uniqueIndex("texting_connections_active_phone_idx")
+      .on(table.phoneFingerprint)
+      .where(sql`${table.state} <> 'disconnected'`),
+  ],
+);
+
+export const textingVerificationChallenges = pgTable(
+  "texting_verification_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhoneNumber: jsonb("encrypted_phone_number").$type<EncryptedCredentials>().notNull(),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    country: text("country").$type<TextingCountry>().notNull(),
+    providerVerificationSid: text("provider_verification_sid").notNull(),
+    consentVersion: text("consent_version").notNull(),
+    status: text("status")
+      .$type<"pending" | "approved" | "expired" | "failed" | "cancelled">()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("texting_verification_user_idx").on(table.userId, table.createdAt)],
+);
+
+export const textMessages = pgTable(
+  "text_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => textingConnections.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerMessageSid: text("provider_message_sid"),
+    direction: text("direction").$type<TextMessageDirection>().notNull(),
+    status: text("status").$type<TextMessageStatus>().notNull(),
+    body: text("body").notNull(),
+    contentKind: text("content_kind").$type<TextContentKind>(),
+    predictedSegments: integer("predicted_segments"),
+    actualSegments: integer("actual_segments"),
+    seriesId: uuid("series_id"),
+    seriesPart: integer("series_part"),
+    seriesTotal: integer("series_total"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    occurredAtSource: text("occurred_at_source").$type<TextOccurredAtSource>().notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
+    index("text_messages_conversation_idx").on(table.connectionId, table.occurredAt, table.id),
+    index("text_messages_user_outbound_idx").on(table.userId, table.direction, table.createdAt),
+  ],
+);
+
+export const textingConsentEvents = pgTable(
+  "texting_consent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id").references(() => textingConnections.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    kind: text("kind")
+      .$type<
+        "verified_opt_in" | "provider_stop" | "provider_start" | "provider_block" | "disconnected"
+      >()
+      .notNull(),
+    source: text("source").$type<"ilo" | "twilio">().notNull(),
+    providerEventId: text("provider_event_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("texting_consent_phone_idx").on(table.phoneFingerprint, table.occurredAt)],
 );
 
 export const auditEvents = pgTable(

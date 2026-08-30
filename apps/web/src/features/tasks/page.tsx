@@ -1,0 +1,326 @@
+import type { DailyBrief, Task } from "@personal-os/domain";
+import { EmptyState } from "@personal-os/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
+import {
+  CircleCheckIcon,
+  ClockIcon,
+  type Icon,
+  InboxIcon,
+  ListChecksIcon,
+  ListTodoIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+} from "@/components/icons";
+import {
+  TaskItem,
+  TaskItemActions,
+  TaskItemCompletion,
+  TaskItemContent,
+  TaskItemDescription,
+  TaskItemDue,
+  TaskItemMetadata,
+  TaskItemPrimaryAction,
+  TaskItemTags,
+  TaskItemTitle,
+} from "@/components/task-item";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ItemGroup } from "@/components/ui/item";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
+import { api, errorMessage } from "../../api.js";
+import { InlineError } from "../../components/async-state.js";
+import {
+  WorkspaceSearch,
+  workspaceSearchFromParams,
+  workspaceViewPath,
+} from "../../components/workspace-search.js";
+import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
+import { formatMaterialDateTime } from "../../lib/date-format.js";
+import { invalidateMaterial } from "../../lib/material-queries.js";
+import { RemindersSidebar } from "../reminders/page.js";
+
+type TaskView = "completed" | "inbox" | "next" | "scheduled";
+
+const taskViews: Array<{ icon: Icon; label: string; value: TaskView }> = [
+  { icon: InboxIcon, label: "Inbox", value: "inbox" },
+  { icon: ListChecksIcon, label: "Next", value: "next" },
+  { icon: ClockIcon, label: "Scheduled", value: "scheduled" },
+  { icon: CircleCheckIcon, label: "Completed", value: "completed" },
+];
+
+/**
+ * Tasks owns both commitment surfaces, so the sidebar names them as siblings.
+ * Keeping both visible marks which one is current without duplicating the
+ * other's view rows.
+ */
+const relatedCommitments: Array<{ icon: Icon; label: string; path: string }> = [
+  { icon: ListChecksIcon, label: "Tasks", path: "/tasks" },
+  { icon: ListTodoIcon, label: "Reminders", path: "/reminders" },
+];
+
+const taskEmptyCopy: Record<TaskView, string> = {
+  completed: "Completed tasks will collect here.",
+  inbox: "Capture the first task worth keeping.",
+  next: "Move a task here when it is ready for attention.",
+  scheduled: "Schedule a task when it needs a specific time block.",
+};
+
+export function TasksCreateButton({ onCreate }: { onCreate: () => void }) {
+  return (
+    <Button aria-label="New task" onClick={onCreate} size="sm">
+      <PlusIcon aria-hidden="true" data-icon="inline-start" />
+      <span>New task</span>
+    </Button>
+  );
+}
+
+export function TasksTopbarControls() {
+  return <WorkspaceSearch label="Search tasks" />;
+}
+
+export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const view = taskViewFromParams(searchParams);
+  const remindersActive = location.pathname === "/reminders";
+  // Tasks owns Reminders, so one sidebar serves both. The View group always
+  // describes the destination in front of the person: showing task views while
+  // reading reminders offered two different "Completed" rows and silently
+  // navigated away from Reminders.
+  return (
+    <>
+      {remindersActive ? (
+        <RemindersSidebar onNavigate={onNavigate} />
+      ) : (
+        <SidebarGroup>
+          <SidebarGroupLabel>View</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <nav aria-label="Task views">
+              <SidebarMenu>
+                {taskViews.map(({ icon: Icon, label, value }) => {
+                  const selected = view === value;
+                  return (
+                    <SidebarMenuItem key={value}>
+                      <SidebarMenuButton asChild isActive={selected}>
+                        <Link
+                          aria-current={selected ? "page" : undefined}
+                          onClick={onNavigate}
+                          to={workspaceViewPath(
+                            "/tasks",
+                            searchParams,
+                            value === "inbox" ? undefined : value,
+                          )}
+                        >
+                          <Icon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
+                          <span>{label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
+      <SidebarGroup>
+        <SidebarGroupLabel>Related</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <nav aria-label="Related commitments">
+            <SidebarMenu>
+              {relatedCommitments.map(({ icon: Icon, label, path }) => {
+                const selected = path === (remindersActive ? "/reminders" : "/tasks");
+                return (
+                  <SidebarMenuItem key={path}>
+                    <SidebarMenuButton asChild isActive={selected}>
+                      <Link
+                        aria-current={selected ? "page" : undefined}
+                        onClick={onNavigate}
+                        to={path}
+                      >
+                        <Icon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
+                        <span>{label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </nav>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </>
+  );
+}
+
+export function TasksPage({
+  onEdit,
+  timeZone,
+}: {
+  onEdit: (task: Task) => void;
+  timeZone: string;
+}) {
+  const [searchParams] = useSearchParams();
+  const view = taskViewFromParams(searchParams);
+  const search = workspaceSearchFromParams(searchParams).trim();
+  const tasks = useQuery({
+    queryFn: () =>
+      api.listTasks({
+        ...(view === "completed" ? { completed: true } : { completed: false, status: view }),
+        ...(search ? { query: search } : {}),
+      }),
+    queryKey: ["tasks", view, search],
+  });
+
+  if (tasks.isPending) return <WorkspaceSkeleton kind="tasks" />;
+  if (tasks.isError) return <InlineError error={tasks.error} />;
+
+  return (
+    <div className="narrow-page">
+      {tasks.data.items.length === 0 ? (
+        search ? (
+          <EmptyState icon={<SearchIcon />} title="No matching tasks">
+            Try another title or note.
+          </EmptyState>
+        ) : (
+          <EmptyState icon={<ListChecksIcon />} title="Nothing here yet">
+            {taskEmptyCopy[view]}
+          </EmptyState>
+        )
+      ) : (
+        <ItemGroup>
+          {tasks.data.items.map((task) => (
+            <TaskRow key={task.id} onEdit={() => onEdit(task)} task={task} timeZone={timeZone} />
+          ))}
+        </ItemGroup>
+      )}
+    </div>
+  );
+}
+
+export function TaskRow({
+  onEdit,
+  recommendation,
+  task,
+  timeZone,
+}: {
+  onEdit: () => void;
+  recommendation?: DailyBrief["recommendedTasks"][number];
+  task: Task;
+  timeZone: string;
+}) {
+  const queryClient = useQueryClient();
+  const complete = useMutation({
+    mutationFn: (completed: boolean) => api.completeTask(task.id, completed),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteTask(task.id),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const completeTask = task.completedAt !== null;
+  return (
+    <TaskItem data-completed={completeTask}>
+      <TaskItemCompletion>
+        <Checkbox
+          aria-label={`${completeTask ? "Reopen" : "Complete"} ${task.title}`}
+          checked={completeTask}
+          disabled={complete.isPending}
+          onCheckedChange={(checked) => complete.mutate(checked === true)}
+        />
+      </TaskItemCompletion>
+      <TaskItemPrimaryAction aria-label={`Open ${task.title}`} onClick={onEdit}>
+        <TaskItemContent>
+          <TaskItemTitle>{task.title}</TaskItemTitle>
+          {taskTiming(task, timeZone) ? (
+            <TaskItemDue>{taskTiming(task, timeZone)}</TaskItemDue>
+          ) : null}
+          {taskDescription(task) ? (
+            <TaskItemDescription>{taskDescription(task)}</TaskItemDescription>
+          ) : null}
+          {recommendation ? (
+            <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
+          ) : null}
+          {task.tags.length > 0 ? (
+            <TaskItemTags aria-label="Task tags" className="mt-1 pl-0">
+              {task.tags.map((tag) => (
+                <Badge asChild key={tag} variant="outline">
+                  <li>{tag}</li>
+                </Badge>
+              ))}
+            </TaskItemTags>
+          ) : null}
+        </TaskItemContent>
+      </TaskItemPrimaryAction>
+      <TaskItemMetadata>
+        <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+          {task.status}
+        </span>
+      </TaskItemMetadata>
+      <TaskItemActions>
+        <Button
+          aria-label={`Remove ${task.title}`}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate()}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <TrashIcon />
+        </Button>
+      </TaskItemActions>
+      {complete.isError || remove.isError ? (
+        <TaskItemDescription className="basis-full text-destructive" role="alert">
+          {errorMessage(complete.error ?? remove.error)}
+        </TaskItemDescription>
+      ) : null}
+    </TaskItem>
+  );
+}
+
+function taskViewFromParams(searchParams: URLSearchParams): TaskView {
+  const requestedView = searchParams.get("view");
+  return requestedView === "next" || requestedView === "scheduled" || requestedView === "completed"
+    ? requestedView
+    : "inbox";
+}
+
+function taskTiming(task: Task, timeZone: string): string | null {
+  const timing = [
+    task.scheduledAt ? `Reserved ${formatMaterialDateTime(task.scheduledAt, timeZone)}` : null,
+    task.dueAt ? `Due ${formatMaterialDateTime(task.dueAt, timeZone)}` : null,
+  ].filter((detail): detail is string => detail !== null);
+  return timing.length > 0 ? timing.join(" · ") : null;
+}
+
+function taskDescription(task: Task): string | null {
+  const details = [
+    task.estimateMinutes ? `${task.estimateMinutes} min` : null,
+    task.notes || null,
+  ].filter((detail): detail is string => detail !== null);
+  return details.length > 0 ? details.join(" · ") : null;
+}
+
+function recommendationCopy(recommendation: DailyBrief["recommendedTasks"][number]) {
+  const urgency = {
+    due_today: "Due today",
+    inbox: "Captured for later",
+    next: "Ready next",
+    overdue: "Overdue",
+  }[recommendation.urgency];
+  const capacity = {
+    does_not_fit: "does not fit in the remaining planning window",
+    fits_remaining_time: "fits in the remaining planning window",
+    needs_estimate: "needs an estimate before it can be planned",
+  }[recommendation.capacity];
+  return `${urgency} · ${capacity}`;
+}

@@ -183,6 +183,7 @@ describe("Pinterest wallpaper service", () => {
 
     expect(fetch).toHaveBeenCalledWith("https://www.pinterest.com/example/mindset/", {
       headers: { "user-agent": "ilo wallpaper/1.0" },
+      signal: expect.any(AbortSignal),
     });
     expect(pins).toHaveLength(12);
     expect(new Set(pins.map((pin) => pin.id)).size).toBe(12);

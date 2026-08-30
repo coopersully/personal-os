@@ -1,8 +1,4 @@
-import { CalendarDays } from "lucide-react";
+import { workspaceIdentities } from "@/components/workspace-identity";
 
 /** Calendar-owned navigation metadata. The shell decides placement. */
-export const calendarNavigationItem = {
-  icon: CalendarDays,
-  label: "Calendar",
-  path: "/calendar",
-};
+export const calendarNavigationItem = workspaceIdentities.calendar;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create PR"
+  short_description: "Prepare and publish review-ready pull requests."
+  default_prompt: "Use $create-pr to prepare, verify, and publish the current ilo changes as a pull request."

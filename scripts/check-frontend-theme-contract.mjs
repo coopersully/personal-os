@@ -26,6 +26,10 @@ const forbiddenPatterns = [
     name: "decorative elevation shadow",
     pattern: /\b(?:shadow|drop-shadow)-(?:sm|md|lg|xl|2xl|inner|none)[\w/[\]-]*/g,
   },
+  {
+    name: "ring treatment",
+    pattern: /\bring-(?:\[[^\]]+\]|[\w/.-]+)/g,
+  },
 ];
 
 async function sourceFiles(directory) {

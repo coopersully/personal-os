@@ -102,6 +102,8 @@ data "aws_iam_policy_document" "github_deploy" {
     actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:CompleteLayerUpload",
+      "ecr:DescribeImageScanFindings",
+      "ecr:DescribeImages",
       "ecr:InitiateLayerUpload",
       "ecr:PutImage",
       "ecr:UploadLayerPart",
@@ -125,6 +127,42 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
+    sid       = "ListTasksOnlyInProductionCluster"
+    actions   = ["ecs:ListTasks"]
+    resources = ["*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.main.arn]
+    }
+  }
+
+  statement {
+    sid       = "SuspendOnlyApiServiceScaling"
+    actions   = ["application-autoscaling:RegisterScalableTarget"]
+    resources = [aws_appautoscaling_target.ecs["api"].arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "application-autoscaling:service-namespace"
+      values   = ["ecs"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "application-autoscaling:scalable-dimension"
+      values   = ["ecs:service:DesiredCount"]
+    }
+  }
+
+  statement {
+    sid       = "ObserveScalingStateForDrainRestore"
+    actions   = ["application-autoscaling:DescribeScalableTargets"]
+    resources = ["*"]
+  }
+
+  statement {
     sid       = "PassOnlyPersonalOsTaskRoles"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.task_execution.arn, aws_iam_role.api_task.arn, aws_iam_role.mcp_task.arn]
@@ -138,8 +176,30 @@ data "aws_iam_policy_document" "github_deploy" {
 
   statement {
     sid       = "InvalidateWebCache"
-    actions   = ["cloudfront:CreateInvalidation"]
+    actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"]
     resources = [aws_cloudfront_distribution.web.arn]
+  }
+
+  statement {
+    sid = "ObserveProduction"
+    actions = [
+      "cloudwatch:DescribeAlarms",
+      "ecs:DescribeServices",
+      "rds:DescribeDBInstances",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "PublishDeploymentHeartbeat"
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["ilo/Deployments"]
+    }
   }
 }
 
@@ -147,4 +207,27 @@ resource "aws_iam_role_policy" "github_deploy" {
   name   = "${local.name}-deploy"
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
+}
+
+data "aws_iam_policy_document" "github_connector_observability" {
+  statement {
+    sid       = "ReadConnectorMetricFilters"
+    actions   = ["logs:DescribeMetricFilters"]
+    resources = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name}-api:*"]
+  }
+
+  statement {
+    sid = "ReadConnectorAlarmResources"
+    actions = [
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeTargetGroups",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_connector_observability" {
+  name   = "${local.name}-connector-observability-read"
+  role   = aws_iam_role.github_deploy.id
+  policy = data.aws_iam_policy_document.github_connector_observability.json
 }

@@ -1,10 +1,14 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { loadQaFixtures } from "../apps/api/src/qa-fixtures.js";
+import { createDatabaseClient } from "../packages/database/src/index.js";
 
 const root = resolve(import.meta.dirname, "..");
-const apiUrl = "http://127.0.0.1:8797";
-const webUrl = "http://127.0.0.1:5174";
+const apiPort = process.env.ILO_E2E_API_PORT ?? "8797";
+const webPort = process.env.ILO_E2E_WEB_PORT ?? "5174";
+const apiUrl = `http://127.0.0.1:${apiPort}`;
+const webUrl = `http://127.0.0.1:${webPort}`;
 let api: ChildProcess | undefined;
 let web: ChildProcess | undefined;
 let postgres: StartedPostgreSqlContainer | undefined;
@@ -69,10 +73,16 @@ try {
     X_REDIRECT_URI: `${apiUrl}/v1/x-bookmarks/callback`,
     MIGRATIONS_DIR: resolve(root, "packages/database/migrations"),
     NODE_ENV: "test",
-    PORT: "8797",
+    PORT: apiPort,
     REGISTRATION_MODE: "open",
   });
   await waitFor(`${apiUrl}/health/ready`);
+  const fixtureDatabase = createDatabaseClient(postgres.getConnectionUri());
+  try {
+    await loadQaFixtures(fixtureDatabase.db);
+  } finally {
+    await fixtureDatabase.close();
+  }
   web = start(
     "pnpm",
     [
@@ -83,7 +93,7 @@ try {
       "--host",
       "127.0.0.1",
       "--port",
-      "5174",
+      webPort,
       "--strictPort",
     ],
     { VITE_API_BASE_URL: "/", VITE_PROXY_API_TARGET: apiUrl },

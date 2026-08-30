@@ -15,6 +15,9 @@ required_files=(
   ".codex/scripts/runtime-supervisor.mjs"
   ".codex/scripts/runtime-manager.mjs"
   ".codex/scripts/runtime-reaper-install.mjs"
+  ".codex/scripts/production-runtime.mjs"
+  ".codex/scripts/production-runtime.test-helper.mjs"
+  ".codex/scripts/production-runtime.test.ts"
 )
 
 for file in "${required_files[@]}"; do

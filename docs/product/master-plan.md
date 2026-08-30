@@ -12,7 +12,7 @@
 3. Build reusable primitives/data contracts before individual screens. If a phase finds a missing shared concept, add it to the domain model rather than creating a page-only workaround.
 4. Preserve the existing MVP during migration. Feature flags and capability-gated routes keep partially delivered surfaces honest.
 5. Every agent mutation starts in Preview or Approve Each. Promotion to Rule-authorized requires an explicit user-created rule, sample-run review, and immediate revoke/undo path.
-6. A unified view is built with typed links and projections over native domain records, never by collapsing provider events, mail threads, finance transactions, local commitments, and journals into one generic mutable row.
+6. A unified view is built with typed links and projections over native domain records, never by collapsing provider events, mail threads, finance transactions, and local commitments into one generic mutable row.
 7. The repository coverage floor (95% statements/functions/lines and 94% branches) is a required signal, not a substitute for release evidence. High-risk work also requires contract, deterministic connector-simulator, migration/recovery, accessibility, visual, offline, and adversarial-policy tests.
 
 ## 2. Cross-cutting workstreams
@@ -21,7 +21,7 @@
 | --- | --- |
 | Domain/API | Schemas, policy evaluation, source links, audit, OpenAPI, idempotency, migrations. |
 | Connectors | Google, iCloud, Plaid capability contracts, write-through sync, reconciliation, conflict handling. |
-| Automation platform | Scheduler, queue, workers, run store, approvals, routine/skill registry, notifications. |
+| Agent controls | Workspace capability policy, review queues, daily-brief projection, and bounded domain-owned workers. |
 | Web/desktop/mobile | Shared shadcn blocks, responsive app, Tauri overlay, widgets, accessibility. |
 | Security/privacy | Credentials, encryption, consent, retention, export/delete, session/token lifecycle. |
 | Quality/operations | Test fixtures, deterministic environment actions, E2E, visual/accessibility checks, observability, recovery runbooks. |
@@ -35,22 +35,20 @@ flowchart TD
   C --> D[3. Task/commitment material]
   C --> E[4. Writable mail]
   C --> F[5. Calendar collaboration]
-  B --> G[6. Automation execution platform]
+  B --> G[6. Agent policy & review controls]
   D --> H[7. Capacity-aware Today]
   D --> I[8. Goals, motives, habits]
-  I --> J[9. Journal intelligence]
   C --> K[10. Plaid finance]
-  E --> L[11. Mail routines]
-  F --> M[12. Schedule routines]
+  E --> L[11. Mail rule work]
+  F --> M[12. Schedule assistance]
   G --> L
   G --> M
   H --> N[13. Overlay, widgets & notifications]
-  J --> O[14. Reflection routines]
-  K --> P[15. Finance routines]
+  K --> P[15. Finance review workflows]
   L --> Q[16. Full-product hardening & launch]
   M --> Q
   N --> Q
-  O --> Q
+  I --> Q
   P --> Q
 ```
 
@@ -81,7 +79,7 @@ flowchart TD
 - Build central policy engine with Allow/Preview/Approve Each/Approve Batch/Rule-authorized/Blocked evaluation, approval expiry, and emergency stop.
 - Treat externally sourced mail, calendar, attachment, web, and imported text as untrusted content; carry origin labels through agent context and enforce source-to-sink controls for external sharing, sensitive mutations, and cross-domain actions.
 - Make Streamable HTTP MCP a standards-compliant OAuth protected resource with resource metadata, audience binding, short-lived credentials, incremental step-up scopes, and server-side scope/policy enforcement. Keep local stdio credentials short-lived and independently revocable.
-- Add source selection filters to scopes: provider, account, mailbox, calendar, financial account, journal privacy tier, and date bounds where appropriate.
+- Add source selection filters to scopes: provider, account, mailbox, calendar, financial account, and date bounds where appropriate.
 - Extend immutable redacted audit records with policy decision, rule/run/token/connector revision, before/after references, undo/recovery result, and correlation IDs.
 - Add privacy center: agent context selection, notification preview policy, export, deletion, retention, sensitive-domain warnings, and consent records.
 
@@ -160,23 +158,22 @@ flowchart TD
 - No send/delete/spam/unsubscribe can occur through a missing confirmation/policy branch.
 - Bulk selections, wrong provider capability, lost connection, and stale revision produce stable, understandable outcomes.
 
-### Epic 6 — Automation runtime, skills, approvals, and operational controls
+### Epic 6 — Agent policy, reviews, and bounded execution
 
 **Implement**
 
-- Add durable scheduler, queue, worker leases, concurrency/rate/tool/time budgets, idempotency, cancellation, retry classification, dead letters, run state machine, and safe resumability.
-- Treat every runner as an adapter: a run has a stable input snapshot, scoped short-lived credential, expected structured result, timeout, cancellation path, and replay/duplicate-delivery behavior independent of the runner host.
-- Add routine/template/skill registry with repository-backed packages, semantic versions, source checksum, release notes, input schema, scopes, policy defaults, and compatibility checks.
-- Add manual, cron/timezone, new mail, event/calendar, finance transaction, deadline, journal completion, and notification-action triggers.
-- Build dry run, run preview, exact candidate set, approval inbox, approval expiry, batch homogeneity rules, emergency stop, pause/resume/edit/version/clone/revoke, and activity/run detail UI.
-- Expand MCP tools/resources to match all domain actions while making scope/policy/capability failures structured and comprehensible. Ensure MCP never owns business rules.
-- Build deterministic schedules for sync/notification/cleanup independent of the agent host; agents receive a bounded invocation payload and return structured plans/results. The ilo owns trigger evaluation, queueing, idempotency, approvals, run state, retries, recovery, and emergency stop. Codex and Claude adapters are optional, independently revocable runners—not the scheduler or policy authority.
+- Publish a Workspace access surface that names what agents may read, change, propose, and never do in every domain.
+- Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
+- Compose Review and Attention work into the Today-owned Reviews destination with workspace/type filters, honest partial availability, stable pagination, and deep links back to the owning domain.
+- Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
+- Give a durable scheduler or queue only to a domain workflow that needs it, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior.
+- Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.
 
 **Done when**
 
-- Each run is inspectable/replayable in a non-mutating mode and terminally accounted for.
-- A killed/revoked routine cannot make another provider mutation.
-- Skills can be installed into Claude/Codex with the same product token/policy boundary and version evidence.
+- Every connected agent and workspace capability is inspectable and immediately revocable.
+- Review work remains visible until its owning domain reports a terminal outcome.
+- Every durable domain worker is terminally accounted for and stops making provider mutations after authority is revoked.
 
 ### Epic 7 — Capacity-aware Today and daily planning
 
@@ -185,8 +182,8 @@ flowchart TD
 - Replace agenda-only Today with Now, Next, Remaining today, Needs triage, Tomorrow/upcoming, and collapsed Done blocks.
 - Add capacity engine: timezone, hard events, protected blocks, work/sleep hours, meals, travel, buffers, flexible task estimate/priority/deadline, habits, and selected calendar availability.
 - Add plan/repair workflow: choose focus, timebox, protect, defer/split/re-estimate, schedule later, remove, override; every recommendation explains capacity math, uncertainty, and source constraints. Use conservative defaults and opt-in estimate calibration; explicitly frame this as a planning accommodation rather than an ADHD treatment, score, or judgment.
-- Add completion and triage aggregation across tasks/reminders, mail, RSVP, approvals, finance review, habits, and journal—without turning Today into a noisy dashboard.
-- Add daily start/midday reset/night shutdown pathways, manual agent-preparation action, and context-aware journal prompt.
+- Add completion and triage aggregation across tasks/reminders, mail, RSVP, approvals, finance review, and habits—without turning Today into a noisy dashboard.
+- Add daily start/midday reset/night shutdown pathways and a manual agent-preparation action.
 
 **Done when**
 
@@ -194,21 +191,17 @@ flowchart TD
 - Today distinguishes completed, active, hard, flexible, and triage material clearly on desktop/mobile/overlay.
 - Capacity recommendations do not write events/tasks until the user/policy approves.
 
-### Epic 8 — Journal, notes, goals, motives, habits, memories, and reflection
+### Epic 8 — Goals, motives, habits, and reviews
 
 **Implement**
 
-- Build full journal editor/storage: templates, prompt packs, tags, mood/energy, media, activity context, privacy levels, search/filter, timeline/calendar/map, reminders/streaks/on-this-day, export/delete.
-- Build quick notes and safe promotion/linking into journal, task, event, goal, or source material.
 - Build goals/milestones/metrics/reviews and motives/rewards/constraints/identity/coaching-boundaries data/UI; build habits with frequency, flex windows, time defense, completion/skip and scheduling integration.
-- Build memory/insight pipeline with explicit journal/derived-insight consent, source citations, editable/expirable/deletable memories, safe prompting, and non-clinical copy safeguards.
 - Build daily/weekly/monthly reflection writeups and review UI with evidence, uncertainty, suggested actions, approval paths, and opt-in cross-domain correlation.
 
 **Done when**
 
-- The user can prove what source text produced every memory/insight and can delete it independently.
-- Journal access cannot leak through summaries, notifications, generic audit logs, or unauthorized agent scopes.
 - Goals/motives/habits change Today and planning only when the user enables the relationship.
+- Reviews cite the source material behind observations and do not expose a domain the user excluded.
 
 ### Epic 9 — Finance platform, Plaid, budgets, and review queue
 
@@ -243,37 +236,36 @@ flowchart TD
 - Offline local mutations reconcile visibly without overwriting newer provider data.
 - macOS, Windows, mobile PWA, and narrow browser tests pass for each shared daily workflow.
 
-### Epic 11 — Full routine catalog
+### Epic 11 — Domain-owned assisted workflows
 
-**Implement every template below as a versioned skill plus product routine:**
+**Implement these as domain features or generated views, never as a generic installable routine catalog:**
 
-| Routine | Inputs | Outputs/actions |
+| Workflow | Inputs | Outputs/actions |
 | --- | --- | --- |
-| Morning brief | schedule, selected sources, privacy | Now/Next/remaining/triage, schedule health, chosen priorities, journal prompt. |
+| Daily brief | schedule, selected sources, privacy | Now/Next/remaining/triage, schedule health, chosen priorities. |
 | Midday reset | capacity, focus state | re-plan remaining work, preserve hard commitments, low-friction reset. |
-| Nightly cleanup | completed/unfinished material | task deferral proposal, inbox cleanup preview, tomorrow prep, journal prompt. |
+| Nightly cleanup | completed/unfinished material | task deferral proposal, inbox cleanup preview, tomorrow prep. |
 | Daily mail triage | unread mail/rules | categories, digest, archive/label/unsubscribe/reply/task/event proposals. |
 | Calendar manager | events/invites/preferences | RSVP recommendation, conflict/buffer/meal analysis, scheduling proposals. |
 | Task planner | commitments/capacity | estimate, prioritize, split, timebox, defer proposals. |
-| Journal reflection | consented entries/goals | cited observations, memories, review questions, task/goal/event suggestions. |
 | Goals coach | goals/motives/habits | progress review, motivational framing, next actions, no clinical claims. |
 | Finance categorizer | new transactions/rules | high-confidence categories, uncertain-review queue, recurring/subscription changes. |
 | Weekly review | selected consented domains | completed work, time allocation, goals/habits, inbox/finance open loops, next-week plan. |
 | Monthly finance close | financial data/budget | uncategorized reconciliation, recurring changes, budget/cash-flow report, review queue. |
 
-**Done when** each routine has source/schema/policy docs, preview output snapshot tests, failure/retry behavior, product UI configuration, activity evidence, stop/revoke, and at least one end-to-end run against deterministic fixtures.
+**Done when** each workflow has an explicit domain owner, source/schema/policy docs, preview tests where it proposes mutations, failure/recovery behavior, activity evidence, and deterministic end-to-end coverage. A workflow that does not need durable execution remains an ordinary view or action.
 
 ### Epic 12 — Reliability, security, accessibility, and launch operations
 
 **Implement**
 
-- Threat model and security review for OAuth/app passwords/PATs, encrypted credentials, finance/journal classification, SSRF/webhook validation, rate limits, secret rotation, and audit integrity.
+- Threat model and security review for OAuth/app passwords/PATs, encrypted credentials, finance classification, SSRF/webhook validation, rate limits, secret rotation, and audit integrity.
 - Database migration/recovery/backup/restore/data-retention runbooks; provider outage/reconciliation/duplicate-write/emergency-stop runbooks.
 - Production observability: health/readiness, sync/job metrics, queue depth, policy denies, provider errors, notification delivery, alerting, redacted structured logs, traces/correlation IDs.
 - Complete contract, unit, integration, connector, migration, E2E, desktop/mobile, accessibility, visual regression, offline, load, chaos/failure, and security test suites. Accessibility acceptance explicitly covers WCAG 2.2 AA focus-not-obscured, target-size, accessible authentication, and keyboard alternatives to every drag interaction.
 - Add adversarial policy fixtures proving that untrusted email/event/attachment/web content cannot select a recipient, expand scope, create an authorization rule, or cause a cross-domain sensitive mutation. Add forced-reset, duplicate-webhook, runner-unavailable, approval-expiry, and offline-conflict recovery fixtures.
 - Expand deterministic `env:start`, `env:stop`, `env:status`, `env:logs`, `env:restart`, and `pnpm verify` actions to include workers, fixtures, connector simulators, E2E, and full product acceptance.
-- Write user documentation: setup, permissions, privacy, provider limitations, automation policies, routine templates, recovery, export/delete, and accessibility.
+- Write user documentation: setup, permissions, privacy, provider limitations, agent policy, domain workflows, recovery, export/delete, and accessibility.
 
 **Done when**
 
@@ -291,7 +283,6 @@ flowchart TD
 | Time blocks, meals, breaks, schedule realism, ADHD focus | 3, 4, 7 |
 | Minimal Today: next/done/remaining | 7 |
 | Reminders/tasks and agent CRUD | 3, 6 |
-| Journal every day, notes, memories, reflection | 8, 11 |
 | Goals, motives, habits, coaching boundaries | 8 |
 | Plaid, budget, categorization and uncertain queue | 9, 11 |
 | Scoped MCP tokens, Claude/Codex skills, scheduled agents | 1, 6, 11 |
@@ -325,4 +316,4 @@ At every stage, the UI shows only enabled, proven capability. A future routine, 
 
 ## 8. Definition of complete master product
 
-The program is complete only when a user can connect multiple Google and iCloud accounts plus selected Plaid accounts; safely manage mail, calendar, reminders/tasks, journal, goals/motives/habits, and finances; run visible and scoped agent routines; use Today, overlays, widgets, and notifications across supported devices; inspect/reverse/stop the relevant work; and pass all quality, privacy, accessibility, recovery, and verification gates above.
+The program is complete only when a user can connect multiple Google and iCloud accounts plus selected Plaid accounts; safely manage mail, calendar, reminders/tasks, goals/motives/habits, and finances; run visible and scoped agent routines; use Today, overlays, widgets, and notifications across supported devices; inspect/reverse/stop the relevant work; and pass all quality, privacy, accessibility, recovery, and verification gates above.

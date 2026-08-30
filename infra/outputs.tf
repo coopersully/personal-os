@@ -30,6 +30,27 @@ output "github_deploy_role_arn" {
   value = aws_iam_role.github_deploy.arn
 }
 
+output "operations_topic_arn" {
+  value = aws_sns_topic.operations.arn
+}
+
+output "operations_dashboard_name" {
+  value = aws_cloudwatch_dashboard.operations.dashboard_name
+}
+
+output "connector_notification_modes" {
+  description = "Declared low-latency connector gates. True is configuration intent, not provider-delivery evidence."
+  value = {
+    google_calendar_push = var.google_calendar_push_enabled
+    google_gmail_push    = var.google_gmail_push_enabled
+    icloud_mail_idle     = var.icloud_mail_idle_enabled
+  }
+}
+
+output "audit_bucket_name" {
+  value = aws_s3_bucket.audit.id
+}
+
 output "rds_endpoint" {
   value = aws_db_instance.postgres.address
 }
@@ -37,6 +58,16 @@ output "rds_endpoint" {
 output "rds_master_secret_arn" {
   value     = aws_db_instance.postgres.master_user_secret[0].secret_arn
   sensitive = true
+}
+
+output "local_production_runtime_role_arn" {
+  description = "Scoped role assumed by the explicitly acknowledged local production runtime."
+  value       = aws_iam_role.local_production_runtime.arn
+}
+
+output "local_production_tunnel_instance_id" {
+  description = "No-ingress Session Manager tunnel host used by local production runtime sessions."
+  value       = aws_instance.local_production_tunnel.id
 }
 
 output "app_url" {

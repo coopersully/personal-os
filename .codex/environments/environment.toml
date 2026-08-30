@@ -26,6 +26,16 @@ icon = "check"
 command = "bash ./.codex/scripts/environment.sh status"
 
 [[actions]]
+name = "Production Status"
+icon = "check"
+command = "bash ./.codex/scripts/environment.sh production-status"
+
+[[actions]]
+name = "Stop Production"
+icon = "run"
+command = "bash ./.codex/scripts/environment.sh production-stop"
+
+[[actions]]
 name = "Logs"
 icon = "check"
 command = "bash ./.codex/scripts/environment.sh logs"
@@ -59,6 +69,11 @@ command = "bash ./.codex/scripts/environment.sh reaper-disable"
 name = "Test"
 icon = "test"
 command = "bash ./.codex/scripts/environment.sh test"
+
+[[actions]]
+name = "Load QA Fixtures"
+icon = "run"
+command = "bash ./.codex/scripts/environment.sh fixtures"
 
 [[actions]]
 name = "E2E"

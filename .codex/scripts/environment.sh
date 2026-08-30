@@ -11,6 +11,8 @@ PRIMARY_ENV_FILE="$PRIMARY_ROOT/.env"
 ENV_FILE="$ROOT/.env"
 OVERLAY_FILE="$ROOT/.env.codex.local"
 MANAGER="$ROOT/.codex/scripts/runtime-manager.mjs"
+PRODUCTION_RUNTIME_HELPER="${ILO_PRODUCTION_RUNTIME_HELPER:-$ROOT/.codex/scripts/production-runtime.mjs}"
+AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/ilo-setup-release.json"
 mkdir -p "$LOG_DIR"
 
 log() { printf '[ilo] %s\n' "$*"; }
@@ -48,6 +50,11 @@ ensure_primary_env() {
     chmod 600 "$temporary"; mv "$temporary" "$PRIMARY_ENV_FILE"
     log "Created the primary checkout .env with generated local secrets."
   fi
+  if [[ -f "$ROOT/scripts/migrate-agent-skill-environment.mjs" && -f "$AGENT_SKILL_RELEASE_MANIFEST" ]]; then
+    node "$ROOT/scripts/migrate-agent-skill-environment.mjs" \
+      "$PRIMARY_ENV_FILE" \
+      "$AGENT_SKILL_RELEASE_MANIFEST"
+  fi
   if [[ "$ROOT" != "$PRIMARY_ROOT" ]]; then cp "$PRIMARY_ENV_FILE" "$ENV_FILE"; chmod 600 "$ENV_FILE"; fi
 }
 
@@ -76,6 +83,46 @@ command_setup() {
 command_start() { check_toolchain; load_env; require_docker; exec node "$MANAGER" start --root "$ROOT"; }
 command_stop() { node "$MANAGER" stop --root "$ROOT"; }
 
+run_production_runtime_helper() {
+  node "$PRODUCTION_RUNTIME_HELPER" "$1" --root "$ROOT" --run-dir "$RUN_DIR"
+}
+
+command_production_start() {
+  require_command git; require_command node; require_command pnpm; require_command curl
+  require_command lsof; require_command aws; require_command session-manager-plugin
+  node "$MANAGER" stop --root "$ROOT"
+  node "$MANAGER" acquire --root "$ROOT" --json >/dev/null
+  load_env
+  exec node "$PRODUCTION_RUNTIME_HELPER" start \
+    --root "$ROOT" \
+    --run-dir "$RUN_DIR" \
+    --web-port "$LOCAL_WEB_PORT" \
+    --api-port "$LOCAL_API_PORT" \
+    --mcp-port "$LOCAL_MCP_PORT" \
+    --database-port "$LOCAL_POSTGRES_PORT" \
+    --web-url "$APP_BASE_URL" \
+    --api-url "$API_BASE_URL" \
+    --mcp-url "$MCP_PUBLIC_URL"
+}
+
+command_fixtures() {
+  check_toolchain; require_docker
+  node "$MANAGER" acquire --root "$ROOT" --json >/dev/null
+  load_env
+  local compose_project="ilo-wt-$ILO_RUNTIME_ID"
+  docker compose -f "$ROOT/.codex/runtime/compose.yaml" -p "$compose_project" up -d postgres
+  for _ in {1..120}; do
+    if docker compose -f "$ROOT/.codex/runtime/compose.yaml" -p "$compose_project" \
+      exec -T postgres pg_isready -U personal_os -d personal_os >/dev/null 2>&1; then
+      DATABASE_URL="$DATABASE_URL" MIGRATIONS_DIR="$ROOT/packages/database/migrations" \
+        pnpm exec tsx scripts/qa-fixtures.ts load
+      return
+    fi
+    sleep 0.5
+  done
+  die "PostgreSQL did not become ready for fixture loading."
+}
+
 command_logs() {
   local requested="${1:-}" name file; local names=(api mcp web)
   if [[ -n "$requested" ]]; then case "$requested" in api | mcp | web) names=("$requested") ;; *) die "Unknown service '$requested'." ;; esac; fi
@@ -85,7 +132,7 @@ command_logs() {
   done
 }
 
-usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|list|doctor|gc|purge|activate|active-root|reaper-enable|reaper-disable|reaper-status|test|e2e|verify|build>'; }
+usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|list|doctor|gc|purge|activate|active-root|reaper-enable|reaper-disable|reaper-status|production-start|production-stop|production-status|fixtures|test|e2e|verify|build>'; }
 
 cd "$ROOT"
 case "${1:-}" in
@@ -93,9 +140,13 @@ case "${1:-}" in
   start) command_start ;;
   stop) command_stop ;;
   restart) command_stop; command_start ;;
+  production-start) command_production_start ;;
+  production-stop) run_production_runtime_helper stop ;;
+  production-status) run_production_runtime_helper status ;;
   status | config | list | doctor | gc | purge | activate | active-root | reaper-enable | reaper-disable | reaper-status)
     command_name="$1"; shift; node "$MANAGER" "$command_name" --root "$ROOT" "$@" ;;
   logs) command_logs "${2:-}" ;;
+  fixtures) command_fixtures ;;
   test) check_toolchain; require_docker; pnpm test:coverage ;;
   e2e) check_toolchain; require_docker; pnpm test:e2e ;;
   verify) check_toolchain; require_docker; pnpm check; pnpm test:e2e ;;

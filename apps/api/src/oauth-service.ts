@@ -14,22 +14,39 @@ import { generateToken, hashToken } from "./security.js";
 const allScopes = new Set<AccessScope>([
   "audit:read",
   "automations:read",
-  "automations:write",
+  "bookmarks:read",
   "calendar:read",
   "calendar:write",
   "mail:read",
+  "mail:write",
   "goals:read",
   "goals:write",
   "finances:read",
   "finances:write",
+  "finances:maintain",
   "reminders:read",
   "reminders:write",
+  "texting:read",
+  "texting:write",
   "tasks:read",
   "tasks:write",
 ]);
+const defaultScopes = new Set<AccessScope>(
+  [...allScopes].filter((scope) => scope !== "finances:maintain"),
+);
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {
   const { db, now, resource } = options;
+  const getAuthorizationClient = async (clientId: string, redirectUri: string) => {
+    const [client] = await db
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, clientId))
+      .limit(1);
+    if (!client?.redirectUris.includes(redirectUri))
+      throw new AppError("invalid_request", "The redirect URI is not registered for this client.");
+    return { id: client.id, name: client.name };
+  };
   const issue = async (userId: string, clientId: string, scopes: AccessScope[]) => {
     const token = generateToken("mcp");
     const refreshToken = generateToken("mcp_refresh");
@@ -64,32 +81,55 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
     };
   };
   return {
+    getAuthorizationClient,
     async listAuthorizedClients(userId: string) {
       const records = await db
-        .select({ client: oauthClients, token: accessTokens })
-        .from(accessTokens)
+        .select({ client: oauthClients, refresh: oauthRefreshTokens, token: accessTokens })
+        .from(oauthRefreshTokens)
+        .innerJoin(accessTokens, eq(oauthRefreshTokens.accessTokenId, accessTokens.id))
         .innerJoin(oauthClients, eq(accessTokens.clientId, oauthClients.id))
         .where(
           and(
-            eq(accessTokens.userId, userId),
+            eq(oauthRefreshTokens.userId, userId),
             eq(accessTokens.audience, resource),
             isNull(accessTokens.revokedAt),
+            isNull(oauthRefreshTokens.replacedAt),
+            gt(oauthRefreshTokens.expiresAt, now()),
           ),
         );
-      return [
-        ...new Map(
-          records.map(({ client, token }) => [
-            client.id,
-            {
-              id: client.id,
-              name: client.name,
-              redirectUris: client.redirectUris,
-              lastUsedAt: token.lastUsedAt?.toISOString() ?? null,
-              scopes: token.scopes,
-            },
-          ]),
-        ).values(),
-      ];
+      const activeRecords = records.filter(
+        (record) => record.refresh.replacedAt === null && record.refresh.expiresAt > now(),
+      );
+      activeRecords.sort(
+        (left, right) =>
+          (right.token.lastUsedAt?.getTime() ?? 0) - (left.token.lastUsedAt?.getTime() ?? 0) ||
+          right.refresh.expiresAt.getTime() - left.refresh.expiresAt.getTime(),
+      );
+      const clients = new Map<
+        string,
+        {
+          id: string;
+          lastUsedAt: string | null;
+          name: string;
+          redirectUris: string[];
+          scopes: AccessScope[];
+        }
+      >();
+      for (const { client, token } of activeRecords) {
+        const existing = clients.get(client.id);
+        if (existing) {
+          existing.scopes = [...new Set([...existing.scopes, ...token.scopes])];
+          continue;
+        }
+        clients.set(client.id, {
+          id: client.id,
+          lastUsedAt: token.lastUsedAt?.toISOString() ?? null,
+          name: client.name,
+          redirectUris: client.redirectUris,
+          scopes: token.scopes,
+        });
+      }
+      return [...clients.values()];
     },
     async revokeAuthorizedClient(userId: string, clientId: string) {
       const current = now();
@@ -130,16 +170,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       scopes: AccessScope[];
       userId: string;
     }) {
-      const [client] = await db
-        .select()
-        .from(oauthClients)
-        .where(eq(oauthClients.id, input.clientId))
-        .limit(1);
-      if (!client?.redirectUris.includes(input.redirectUri))
-        throw new AppError(
-          "invalid_request",
-          "The redirect URI is not registered for this client.",
-        );
+      await getAuthorizationClient(input.clientId, input.redirectUri);
       const code = generateToken("oauth_code");
       await db.insert(oauthAuthorizationCodes).values({
         clientId: input.clientId,
@@ -221,7 +252,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       return issue(record.userId, record.clientId, access.scopes);
     },
     parseScopes(value: string | undefined): AccessScope[] {
-      const scopes = value?.split(" ").filter(Boolean) ?? [...allScopes];
+      const scopes = value?.split(" ").filter(Boolean) ?? [...defaultScopes];
       if (!scopes.length || scopes.some((scope) => !allScopes.has(scope as AccessScope)))
         throw new AppError("invalid_request", "One or more requested scopes are not supported.");
       return [...new Set(scopes)] as AccessScope[];

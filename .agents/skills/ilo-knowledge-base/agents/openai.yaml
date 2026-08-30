@@ -1,0 +1,4 @@
+interface:
+  display_name: "ilo Knowledge Base"
+  short_description: "Keep ilo engineering docs current and authoritative."
+  default_prompt: "Use $ilo-knowledge-base to find and update the authoritative docs for this work."

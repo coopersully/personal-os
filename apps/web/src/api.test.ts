@@ -4,6 +4,14 @@ const user = {
   accentColor: "#c7d23c",
   emailVerified: true,
   id: "11111111-1111-4111-8111-111111111111",
+  setup: {
+    completedAt: "2026-07-13T12:00:00.000Z",
+    currentStep: "ready",
+    dismissedAt: null,
+    selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+    startedAt: "2026-07-13T12:00:00.000Z",
+    status: "complete",
+  },
   displayName: "Test User",
   email: "test@example.com",
   theme: "system",
@@ -61,7 +69,7 @@ describe("web API adapter", () => {
     ).toBe(false);
     expect(isUnauthorized(new Error("unauthorized"))).toBe(false);
     expect(apiBaseUrl(undefined, false)).toBe(window.location.origin);
-    expect(apiBaseUrl(undefined, true)).toBe("http://localhost:8787");
+    expect(apiBaseUrl(undefined, true)).toBe("http://localhost:8788");
     expect(apiBaseUrl("https://configured.test", false)).toBe("https://configured.test");
   });
 

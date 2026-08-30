@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Shepherd"
+  short_description: "Run one bounded ilo PR maintenance pass."
+  default_prompt: "Use $pr-shepherd to run one maintenance pass on this ilo pull request."

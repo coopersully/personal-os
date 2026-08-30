@@ -37,3 +37,11 @@ Create a token in the product settings. Grant only the scopes the host needs:
 - `finances:read`, `finances:write`
 
 Only a token hash is stored. Revoke a host without ending human sessions or affecting another host. Connector and account administration remain human-only.
+## Receipt-aware Finance review
+
+`review_finance_receipt` is a read-only, explicit opt-in lookup for one
+transaction. It may search only the connected Mail projection within a bounded
+date window and amount/merchant match. Results contain redacted source IDs,
+matched fields, dates, and confidence—not message bodies. A missing,
+conflicting, partial, disabled, or failed lookup asks the person what they
+bought or paid for; it never applies a category or creates a merchant rule.

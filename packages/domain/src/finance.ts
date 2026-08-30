@@ -191,6 +191,35 @@ export const financeTransactionSchema = z.object({
 });
 export type FinanceTransaction = z.infer<typeof financeTransactionSchema>;
 
+export const financeReceiptReviewInputSchema = z.object({
+  searchMail: z.boolean().default(false),
+  windowDays: z.number().int().min(1).max(30).default(7),
+});
+export type FinanceReceiptReviewInput = z.infer<typeof financeReceiptReviewInputSchema>;
+
+export const financeReceiptEvidenceSchema = z.object({
+  confidence: z.number().min(0).max(1),
+  matches: z
+    .array(
+      z.object({
+        date: z.iso.date(),
+        fields: z.array(z.enum(["merchant", "amount", "date"])).min(1),
+        sourceId: idSchema,
+      }),
+    )
+    .max(20),
+  nextAction: z.enum(["ask_person", "review_evidence", "safe_to_review"]),
+  status: z.enum(["conflicting", "mail_disabled", "not_requested", "no_match", "matched"]),
+  question: z.string().max(300),
+});
+export type FinanceReceiptEvidence = z.infer<typeof financeReceiptEvidenceSchema>;
+
+export const financeReceiptReviewSchema = z.object({
+  evidence: financeReceiptEvidenceSchema,
+  transaction: financeTransactionSchema,
+});
+export type FinanceReceiptReview = z.infer<typeof financeReceiptReviewSchema>;
+
 export const financeCategorySchema = z.object({
   color: z.string().nullable(),
   group: z.string().min(1).max(80),

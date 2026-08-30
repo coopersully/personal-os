@@ -114,6 +114,11 @@ and follows the repository-wide [database migration policy](../engineering/datab
 
 ## Consequences
 
+Receipt-aware review is transaction-specific and opt-in. Mixed retailers are
+never categorized from merchant identity alone; bounded Mail evidence is
+sanitized by the Mail owner and remains a review input, not a categorization or
+merchant rule mutation.
+
 - Totals can be traced to source transactions and reconciliation state rather
   than a UI-only calculation.
 - Users and agents can distinguish declared income from observed income.

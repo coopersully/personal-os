@@ -8,6 +8,7 @@ import {
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
   financeMerchantQuerySchema,
+  financeReceiptReviewInputSchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
   mergeFinanceMerchantsInputSchema,
@@ -174,6 +175,15 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       reviews: await finances.listReviewQueue(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+      ),
+    }),
+  );
+  app.post("/v1/finances/transactions/:id/receipt-review", async (context) =>
+    context.json({
+      review: await finances.reviewReceipt(
+        context.req.param("id"),
+        await parseBody(context, financeReceiptReviewInputSchema),
+        context.get("principal").userId,
       ),
     }),
   );

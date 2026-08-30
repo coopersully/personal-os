@@ -19,6 +19,8 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
+  FinanceReceiptReview,
+  FinanceReceiptReviewInput,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
@@ -39,6 +41,16 @@ export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>
 /** Typed Finance operations sharing the authenticated client transport. */
 export function createFinanceApi(request: FinanceRequest) {
   return {
+    async reviewFinanceReceipt(
+      id: string,
+      input: FinanceReceiptReviewInput,
+    ): Promise<FinanceReceiptReview> {
+      const response = await request<{ review: FinanceReceiptReview }>(
+        `/v1/finances/transactions/${id}/receipt-review`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.review;
+    },
     async applyFinanceCategorizations(
       input: ApplyFinanceCategorizationsInput,
     ): Promise<Array<{ applied: boolean; threshold: number; transaction: FinanceTransaction }>> {

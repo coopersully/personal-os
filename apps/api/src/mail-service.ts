@@ -19,7 +19,7 @@ import type {
   SendMailInput,
   UpdateMailThreadInput,
 } from "@personal-os/domain";
-import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import type { ConnectedMailGateway } from "./connector-service.js";
 import { AppError } from "./errors.js";
@@ -45,6 +45,59 @@ export function createMailService({
   }
 
   return {
+    async searchReceiptCandidates(
+      userId: string,
+      input: { amount: number; from: string; merchant: string; to: string },
+    ) {
+      const merchantPattern = `%${input.merchant.replace(/[\\%_]/g, "\\$&")}%`;
+      const amountText = input.amount.toFixed(2);
+      const records = await db
+        .select({
+          id: mailThreads.id,
+          receivedAt: mailThreads.receivedAt,
+          bodyText: mailThreads.bodyText,
+          snippet: mailThreads.snippet,
+        })
+        .from(mailThreads)
+        .innerJoin(
+          calendarAccounts,
+          and(
+            eq(calendarAccounts.id, mailThreads.accountId),
+            eq(calendarAccounts.mailEnabled, true),
+          ),
+        )
+        .where(
+          and(
+            eq(mailThreads.userId, userId),
+            isNull(mailThreads.deletedAt),
+            gte(mailThreads.receivedAt, new Date(`${input.from}T00:00:00.000Z`)),
+            lte(mailThreads.receivedAt, new Date(`${input.to}T23:59:59.999Z`)),
+            or(
+              ilike(mailThreads.bodyText, merchantPattern),
+              ilike(mailThreads.snippet, merchantPattern),
+            ),
+          ),
+        )
+        .orderBy(desc(mailThreads.receivedAt), desc(mailThreads.id))
+        .limit(20);
+      return records
+        .map((record) => {
+          const haystack = `${record.bodyText} ${record.snippet}`;
+          const amountMatch = new RegExp(
+            `(?:\\$|USD\\s*)${amountText.replace(".", "[.]?\\s*")}(?:\\b|$)|\\b${amountText}\\b`,
+            "i",
+          ).test(haystack);
+          const date = record.receivedAt.toISOString().slice(0, 10);
+          return {
+            date,
+            fields: ["merchant", ...(amountMatch ? ["amount"] : [])] as Array<
+              "merchant" | "amount" | "date"
+            >,
+            sourceId: record.id,
+          };
+        })
+        .filter((record) => record.fields.includes("amount"));
+    },
     async createDraft(userId: string, input: MailDraftInput) {
       const [draft] = await db
         .insert(mailDrafts)

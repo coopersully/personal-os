@@ -8,6 +8,23 @@ const id = z.string().uuid().describe("ilo object identifier");
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
   server.registerTool(
+    "review_finance_receipt",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Review one ambiguous transaction using bounded, opt-in Mail receipt evidence. It never categorizes or creates a merchant rule; ask the person what they bought when evidence is missing or conflicting.",
+      inputSchema: {
+        id,
+        searchMail: z.boolean().default(false),
+        windowDays: z.number().int().min(1).max(30).default(7),
+      },
+      title: "Review finance receipt evidence",
+    },
+    async ({ id: transactionId, searchMail, windowDays }) =>
+      result(await api.reviewFinanceReceipt(transactionId, { searchMail, windowDays })),
+  );
+
+  server.registerTool(
     "get_finance_wealth_summary",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },

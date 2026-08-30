@@ -24,6 +24,8 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeReceiptEvidenceSchema,
+  financeReceiptReviewInputSchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
@@ -72,6 +74,21 @@ const start = "2026-07-13T13:00:00.000Z";
 const end = "2026-07-13T14:00:00.000Z";
 
 describe("domain schemas", () => {
+  it("keeps receipt review opt-in and bounded", () => {
+    expect(financeReceiptReviewInputSchema.parse({})).toEqual({ searchMail: false, windowDays: 7 });
+    expect(() =>
+      financeReceiptReviewInputSchema.parse({ searchMail: true, windowDays: 31 }),
+    ).toThrow();
+    expect(
+      financeReceiptEvidenceSchema.parse({
+        confidence: 0,
+        matches: [],
+        nextAction: "ask_person",
+        question: "What did you buy?",
+        status: "no_match",
+      }).status,
+    ).toBe("no_match");
+  });
   it("exposes stable cross-feature connector and agent-action contracts", () => {
     expect(featureIds).toEqual([
       "automations",

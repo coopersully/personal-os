@@ -34,3 +34,7 @@ This log records delivered vertical slices against the master plan. It does not 
 - Enforced the same rule in the Daily Brief service: completed reminders cannot appear in `overdue`, `today`, or `anytime` automation output.
 - Added API integration coverage for the completion exclusion and UI coverage for expanding completed history/reopening an item.
 - Verified with the local runtime and the focused API/web regression suite. Generated shadcn primitives are excluded from product coverage; shared product compositions remain covered by the repository floor and focused behavior tests.
+- 2026-08-30: Added receipt-aware ambiguous-merchant review. Amazon, Walmart,
+  CVS, and other mixed retailers remain transaction-specific; optional bounded
+  Mail evidence is sanitized and review-only, with a person question when it
+  is absent or ambiguous.

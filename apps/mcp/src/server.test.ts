@@ -358,6 +358,7 @@ describe("ilo MCP server", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual([
+      "review_finance_receipt",
       "get_finance_wealth_summary",
       "get_finance_cashflow",
       "review_finance_recurring_payment",

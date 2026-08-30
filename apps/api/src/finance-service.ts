@@ -37,6 +37,8 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
+  FinanceReceiptReview,
+  FinanceReceiptReviewInput,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
@@ -73,7 +75,17 @@ type PlaidOptions = {
   fetch?: typeof globalThis.fetch;
   secret: string;
 };
-type Options = { db: Database; now: () => Date; plaid?: PlaidOptions };
+type Options = {
+  db: Database;
+  now: () => Date;
+  plaid?: PlaidOptions;
+  searchReceiptCandidates?: (
+    userId: string,
+    input: { amount: number; from: string; merchant: string; to: string },
+  ) => Promise<
+    Array<{ date: string; fields: Array<"merchant" | "amount" | "date">; sourceId: string }>
+  >;
+};
 type PlaidCredentials = { accessToken: string };
 type PlaidAccount = {
   account_id: string;
@@ -373,7 +385,7 @@ function merchant(
   };
 }
 
-export function createFinanceService({ db, now, plaid }: Options) {
+export function createFinanceService({ db, now, plaid, searchReceiptCandidates }: Options) {
   async function ensureCategories(userId: string) {
     await db
       .insert(financeCategories)
@@ -1237,6 +1249,75 @@ export function createFinanceService({ db, now, plaid }: Options) {
     }
   }
   return {
+    async reviewReceipt(
+      transactionId: string,
+      input: FinanceReceiptReviewInput,
+      userId: string,
+    ): Promise<FinanceReceiptReview> {
+      const row = await ownedTransaction(userId, transactionId);
+      const transaction = await enrichTransaction(row);
+      const question = `What did you buy or pay for at ${transaction.merchant}?`;
+      if (!input.searchMail)
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: "not_requested",
+          },
+          transaction,
+        };
+      if (!searchReceiptCandidates)
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: "mail_disabled",
+          },
+          transaction,
+        };
+      const start = new Date(`${transaction.date}T00:00:00.000Z`);
+      start.setUTCDate(start.getUTCDate() - input.windowDays);
+      let matches: Array<{
+        date: string;
+        fields: Array<"merchant" | "amount" | "date">;
+        sourceId: string;
+      }>;
+      try {
+        matches = await searchReceiptCandidates(userId, {
+          amount: transaction.amount,
+          from: start.toISOString().slice(0, 10),
+          merchant: transaction.merchant,
+          to: transaction.date,
+        });
+      } catch {
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: "mail_disabled",
+          },
+          transaction,
+        };
+      }
+      const exact = matches.filter((match) => match.fields.includes("amount"));
+      const status = exact.length === 1 ? "matched" : exact.length > 1 ? "conflicting" : "no_match";
+      return {
+        evidence: {
+          confidence: exact.length === 1 ? 0.92 : exact.length > 1 ? 0.55 : 0,
+          matches: exact,
+          nextAction: status === "matched" ? "review_evidence" : "ask_person",
+          question,
+          status,
+        },
+        transaction,
+      };
+    },
     plaidAvailable() {
       return Boolean(plaid?.clientId && plaid.secret);
     },

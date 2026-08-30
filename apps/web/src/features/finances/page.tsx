@@ -4,6 +4,7 @@ import type {
   FinanceBudgetStatus,
   FinanceForecast,
   FinanceLedgerHealth,
+  FinanceReceiptReview,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceTransaction,
@@ -218,6 +219,7 @@ export function FinancesPage() {
     category?: string;
     kind: "category" | "overages" | "planned" | "spent";
   } | null>(null);
+  const [receiptReview, setReceiptReview] = useState<FinanceReceiptReview | null>(null);
   const [showTransactionForm, setShowTransactionForm] = useState(false);
   const [scopeDialog, setScopeDialog] = useState<"spend" | "cash" | "investments" | null>(null);
   const [learnMerchant, setLearnMerchant] = useState(false);
@@ -260,6 +262,10 @@ export function FinancesPage() {
         sortDirection: transactionSort.sortDirection,
       }),
     queryKey: ["finance-transactions", transactionCursor, transactionSort],
+  });
+  const reviewReceipt = useMutation({
+    mutationFn: (id: string) => api.reviewFinanceReceipt(id, { searchMail: true, windowDays: 7 }),
+    onSuccess: setReceiptReview,
   });
   const addAccount = useMutation({
     mutationFn: () =>
@@ -623,6 +629,7 @@ export function FinancesPage() {
                       reviewId: review.id,
                     });
                   }}
+                  onReceiptReview={(review) => reviewReceipt.mutate(review.transaction.id)}
                   onDefer={(id) => resolveReview.mutate({ action: "defer", id })}
                 />
               ) : visibleTransactions.length === 0 ? (
@@ -1005,6 +1012,23 @@ export function FinancesPage() {
           </ShadcnCard>
         </div>
       </section>
+      {receiptReview ? (
+        <ShadcnCard aria-live="polite">
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>Receipt evidence</ShadcnCardTitle>
+            <ShadcnCardDescription>
+              {receiptReview.evidence.status === "matched"
+                ? "One matching receipt was found. Review it before deciding the category."
+                : receiptReview.evidence.question}
+            </ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            {receiptReview.evidence.matches.length > 0
+              ? `${receiptReview.evidence.matches.length} matching Mail source${receiptReview.evidence.matches.length === 1 ? "" : "s"} · confidence ${Math.round(receiptReview.evidence.confidence * 100)}%`
+              : "No receipt content was retained or shown. The transaction remains unresolved."}
+          </ShadcnCardContent>
+        </ShadcnCard>
+      ) : null}
       <ShadcnDialog
         open={categorizing !== null}
         onOpenChange={(open) => {
@@ -2678,12 +2702,14 @@ function FinanceReviewItems({
   onApprove,
   onCategorize,
   onDefer,
+  onReceiptReview,
 }: {
   cases: FinanceReviewCase[];
   isPending: boolean;
   onApprove: (id: string) => void;
   onCategorize: (review: FinanceReviewCase) => void;
   onDefer: (id: string) => void;
+  onReceiptReview: (review: FinanceReviewCase) => void;
 }) {
   if (cases.length === 0)
     return (
@@ -2715,6 +2741,14 @@ function FinanceReviewItems({
                   Approve
                 </ShadcnButton>
               ) : null}
+              <ShadcnButton
+                disabled={isPending}
+                onClick={() => onReceiptReview(review)}
+                size="sm"
+                variant="outline"
+              >
+                Check receipt
+              </ShadcnButton>
               <ShadcnButton
                 disabled={isPending}
                 onClick={() => onCategorize(review)}

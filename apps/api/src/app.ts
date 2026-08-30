@@ -182,6 +182,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const finances = createFinanceService({
     db: dependencies.db,
     now,
+    searchReceiptCandidates: mail.searchReceiptCandidates,
     plaid: {
       clientId: dependencies.config.plaidClientId,
       encryptionKey: dependencies.config.encryptionKey,

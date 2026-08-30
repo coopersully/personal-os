@@ -523,6 +523,13 @@
     {
       "idx": 73,
       "version": "7",
+      "when": 1788062400000,
+      "tag": "0073_texting_review_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
       "when": 1788115200000,
       "tag": "0073_finance_account_semantics_recovery",
       "breakpoints": true

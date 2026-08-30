@@ -160,6 +160,7 @@ describe.sequential("mail service", () => {
       "0071_calendar_event_links",
       "0072_finance_account_semantics",
       "0072_texting",
+      "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
@@ -219,6 +220,7 @@ describe.sequential("mail service", () => {
       "0071_calendar_event_links",
       "0072_finance_account_semantics",
       "0072_texting",
+      "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);

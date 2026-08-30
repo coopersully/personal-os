@@ -58,6 +58,7 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0071_calendar_event_links",
         "0072_finance_account_semantics",
         "0072_texting",
+        "0073_texting_review_hardening",
         "0073_finance_account_semantics_recovery",
       ],
     );

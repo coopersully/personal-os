@@ -120,5 +120,26 @@ describe("texting routes", () => {
         })
       ).status,
     ).toBe(403);
+
+    const validationCalls = validateWebhook.mock.calls.length;
+    expect(
+      (
+        await app.request("/v1/webhooks/twilio/inbound", {
+          body: "MessageSid=SM4",
+          headers: { ...formHeaders, "content-length": "20000" },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(413);
+    expect(
+      (
+        await app.request("/v1/webhooks/twilio/inbound", {
+          body: `Body=${"x".repeat(17_000)}`,
+          headers: formHeaders,
+          method: "POST",
+        })
+      ).status,
+    ).toBe(413);
+    expect(validateWebhook).toHaveBeenCalledTimes(validationCalls);
   });
 });

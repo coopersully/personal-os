@@ -211,15 +211,27 @@ export const accessScopeSchema = z.enum([
   "finances:write",
   "finances:maintain",
   "bookmarks:read",
+  "texting:read",
+  "texting:write",
 ]);
 export type AccessScope = z.infer<typeof accessScopeSchema>;
 
-export const createAccessTokenInputSchema = z.object({
-  name: z.string().trim().min(1).max(80),
-  scopes: z
-    .array(accessScopeSchema)
-    .min(1)
-    .transform((values) => [...new Set(values)]),
-  expiresAt: isoDateTimeSchema.optional(),
-});
+export const createAccessTokenInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    scopes: z
+      .array(accessScopeSchema)
+      .min(1)
+      .transform((values) => [...new Set(values)]),
+    expiresAt: isoDateTimeSchema.optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.scopes.includes("texting:write") && !input.scopes.includes("texting:read")) {
+      context.addIssue({
+        code: "custom",
+        message: "The texting:write scope requires texting:read.",
+        path: ["scopes"],
+      });
+    }
+  });
 export type CreateAccessTokenInput = z.infer<typeof createAccessTokenInputSchema>;

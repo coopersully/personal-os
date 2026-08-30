@@ -117,6 +117,8 @@ const scopeLabels: Record<AccessScope, string> = {
   "reminders:write": "Manage reminders",
   "tasks:read": "Read tasks",
   "tasks:write": "Manage tasks",
+  "texting:read": "Read text conversation",
+  "texting:write": "Send text messages",
 };
 
 const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
@@ -167,6 +169,8 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "automations:read",
       "audit:read",
       "bookmarks:read",
+      "texting:read",
+      "texting:write",
     ],
   },
 ];

@@ -4848,6 +4848,10 @@ describe.sequential("connector service", () => {
       title: "Provider create",
     });
     expect(gateway.create).toHaveBeenCalledTimes(2);
+    await database.db
+      .update(calendarEvents)
+      .set({ raw: { iCalUID: "shared-event@example.com" } })
+      .where(eq(calendarEvents.id, created.id));
 
     const [duplicateAccount] = await database.db
       .insert(calendarAccounts)
@@ -4908,6 +4912,7 @@ describe.sequential("connector service", () => {
         calendarId: mirroredCalendar.id,
         endsAt: new Date("2026-07-13T14:00:00.000Z"),
         provider: "google",
+        raw: { iCalUID: "separate-event@example.com" },
         remoteEtag: "mirrored-etag",
         remoteEventId: "mirrored-domain-created",
         startsAt: new Date("2026-07-13T13:00:00.000Z"),
@@ -4918,6 +4923,85 @@ describe.sequential("connector service", () => {
       .returning();
     if (!mirroredEvent) throw new Error("Mirrored event fixture is missing.");
 
+    const [icloudAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "iCloud account",
+        provider: "icloud",
+        providerAccountId: "icloud-person",
+        userId,
+      })
+      .returning();
+    if (!icloudAccount) throw new Error("iCloud account fixture is missing.");
+    const [icloudCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: icloudAccount.id,
+        isWritable: true,
+        name: "iCloud primary",
+        provider: "icloud",
+        remoteCalendarId: "icloud-domain-dedup-primary",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!icloudCalendar) throw new Error("iCloud calendar fixture is missing.");
+    const [icloudEvent] = await database.db
+      .insert(calendarEvents)
+      .values({
+        calendarId: icloudCalendar.id,
+        endsAt: new Date("2026-07-13T14:00:00.000Z"),
+        provider: "icloud",
+        raw: {
+          data: [
+            "BEGIN:VCALENDAR",
+            "BEGIN:VEVENT",
+            'UID;X-FOO="a\\"b:c":shared-event@example.com',
+            "END:VEVENT",
+            "END:VCALENDAR",
+          ].join("\r\n"),
+        },
+        remoteEtag: "icloud-etag",
+        remoteEventId: "icloud-domain-created",
+        startsAt: new Date("2026-07-13T13:00:00.000Z"),
+        timezone: "UTC",
+        title: "Provider create",
+        userId,
+      })
+      .returning();
+    if (!icloudEvent) throw new Error("iCloud event fixture is missing.");
+    const [icloudEventBlock] = await database.db
+      .insert(calendarEvents)
+      .values({
+        blockMode: "busy",
+        blockSourceEventId: icloudEvent.id,
+        calendarId: mirroredCalendar.id,
+        endsAt: icloudEvent.endsAt,
+        provider: "google",
+        remoteEventId: "icloud-event-block",
+        startsAt: icloudEvent.startsAt,
+        timezone: "UTC",
+        title: "Busy",
+        userId,
+      })
+      .returning();
+    if (!icloudEventBlock) throw new Error("iCloud event block fixture is missing.");
+    const [malformedIcloudEvent] = await database.db
+      .insert(calendarEvents)
+      .values({
+        calendarId: icloudCalendar.id,
+        endsAt: new Date("2026-07-13T16:00:00.000Z"),
+        provider: "icloud",
+        raw: { data: ["UID:", 'UID;X-FOO="unterminated'].join("\r\n") },
+        remoteEventId: "malformed-icloud-uid",
+        startsAt: new Date("2026-07-13T15:00:00.000Z"),
+        timezone: "UTC",
+        title: "Malformed iCloud UID",
+        userId,
+      })
+      .returning();
+    if (!malformedIcloudEvent) throw new Error("Malformed iCloud event fixture is missing.");
+
     const unifiedCalendars = await calendarService.list(userId);
     expect(unifiedCalendars.some((value) => value.id === primary.id)).toBe(true);
     expect(unifiedCalendars.some((value) => value.id === duplicateCalendar.id)).toBe(false);
@@ -4926,11 +5010,20 @@ describe.sequential("connector service", () => {
       to: "2026-07-14T00:00:00.000Z",
     });
     expect(unifiedEvents.filter((value) => value.remoteEventId === "domain-created")).toEqual([
-      expect.objectContaining({ calendarId: primary.id }),
+      expect.objectContaining({
+        blocks: [expect.objectContaining({ eventId: icloudEventBlock.id })],
+        calendarId: primary.id,
+      }),
     ]);
     expect(unifiedEvents.some((value) => value.remoteEventId === mirroredEvent.remoteEventId)).toBe(
       true,
     );
+    expect(unifiedEvents.some((value) => value.remoteEventId === icloudEvent.remoteEventId)).toBe(
+      false,
+    );
+    expect(
+      unifiedEvents.some((value) => value.remoteEventId === malformedIcloudEvent.remoteEventId),
+    ).toBe(true);
     await expect(
       calendarService.listEvents(userId, {
         calendarIds: [duplicateCalendar.id],
@@ -5335,12 +5428,13 @@ describe.sequential("connector service", () => {
           requestId: "activation-race",
         },
       );
+      const activationRejection = activation.catch((error: unknown) => error);
       await new Promise<void>((resolveTurn) => {
         setImmediate(resolveTurn);
       });
       await blocker.query("COMMIT");
       await expect(disconnect).resolves.toBeUndefined();
-      await expect(activation).rejects.toMatchObject({
+      await expect(activationRejection).resolves.toMatchObject({
         code: expect.stringMatching(/conflict|invalid_request/),
       });
     } finally {

@@ -3058,10 +3058,12 @@ export const textingVerificationChallenges = pgTable(
     phoneFingerprint: text("phone_fingerprint").notNull(),
     phoneLastFour: text("phone_last_four").notNull(),
     country: text("country").$type<TextingCountry>().notNull(),
-    providerVerificationSid: text("provider_verification_sid").notNull(),
+    providerVerificationSid: text("provider_verification_sid"),
     consentVersion: text("consent_version").notNull(),
     status: text("status")
-      .$type<"pending" | "approved" | "expired" | "failed" | "cancelled">()
+      .$type<
+        "starting" | "pending" | "approved" | "expired" | "failed" | "uncertain" | "cancelled"
+      >()
       .notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
@@ -3122,7 +3124,12 @@ export const textingConsentEvents = pgTable(
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("texting_consent_phone_idx").on(table.phoneFingerprint, table.occurredAt)],
+  (table) => [
+    index("texting_consent_phone_idx").on(table.phoneFingerprint, table.occurredAt),
+    uniqueIndex("texting_consent_provider_event_idx")
+      .on(table.providerEventId)
+      .where(sql`${table.providerEventId} IS NOT NULL`),
+  ],
 );
 
 export const auditEvents = pgTable(

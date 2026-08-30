@@ -1,17 +1,27 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { AppError } from "./errors.js";
 
-type Receipt = { actorId: string; exp: number; revision: number; timeZone: string; userId: string };
+type Receipt = {
+  actorId: string;
+  connectionId: string;
+  consentEpoch: number;
+  exp: number;
+  revision: number;
+  timeZone: string;
+  userId: string;
+};
 
 function signature(value: string, secret: string): string {
   return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
+/** Bind a short-lived send capability to the exact conversation state an agent read. */
 export function issueConversationReceipt(value: Receipt, secret: string): string {
   const payload = Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${payload}.${signature(payload, secret)}`;
 }
 
+/** Reject a send capability if its signature, actor, connection, consent, or revision changed. */
 export function verifyConversationReceipt(
   token: string,
   expected: Omit<Receipt, "exp">,
@@ -37,6 +47,8 @@ export function verifyConversationReceipt(
   if (
     value.exp < now.getTime() ||
     value.actorId !== expected.actorId ||
+    value.connectionId !== expected.connectionId ||
+    value.consentEpoch !== expected.consentEpoch ||
     value.userId !== expected.userId ||
     value.revision !== expected.revision ||
     value.timeZone !== expected.timeZone

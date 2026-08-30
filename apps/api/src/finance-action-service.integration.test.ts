@@ -3514,6 +3514,43 @@ describe.sequential("finance action service", () => {
     expect(rows.some((row) => row.status === "superseded")).toBe(true);
   });
 
+  it("prepares and applies a bucket mutation through the budget action family", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const mutateFinanceBudgetBucket = vi.fn(async (input: unknown) => ({ input }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mutateFinanceBudgetBucket } as never,
+      now: () => now,
+    });
+
+    await expect(
+      service.performDirect(
+        "budget_plan",
+        {
+          description: "Core spending",
+          idempotencyKey: "bucket-action-create",
+          name: "Core",
+          operation: "create",
+        },
+        { principal: agent(userId), requestId: "bucket-action-create" },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(mutateFinanceBudgetBucket).toHaveBeenCalledOnce();
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+  });
+
   it("supersedes a single-category budget review with a complete plan for the same month", async () => {
     const [category] = await database.db
       .insert(financeCategories)

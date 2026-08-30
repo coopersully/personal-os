@@ -160,6 +160,7 @@ describe.sequential("Finance maintenance service", () => {
       "0071_calendar_event_links",
       "0072_finance_account_semantics",
       "0072_texting",
+      "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
       "0074_finance_budget_buckets",
     ]);

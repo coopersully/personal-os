@@ -149,9 +149,22 @@ describe("Finance presentation builders", () => {
     expect(built.data).toMatchObject({ cash: null, investments: null, netWorth: null });
     expect(built.presentation).toMatchObject({
       kind: "finance_snapshot",
-      position: { cash: null, debt: 2_300, investments: null, netWorth: null },
+      position: { cash: null, debt: 2_000, investments: null, netWorth: null },
       trust: { state: "partial", trustworthy: false },
     });
+  });
+
+  it("uses the ownership-weighted debt from the authoritative wealth summary", () => {
+    const built = buildFinanceSnapshotResult(
+      statusFixture({
+        wealth: { cash: 12_000, debt: 2_300, investments: 10_000, netWorth: 19_700 },
+      }),
+      result<FinanceBudgetVersion | null>(null),
+      wealthFixture({ debt: 1_500, netWorth: 20_500 }),
+    );
+
+    expect(built.data.debt).toBe(1_500);
+    expect(built.presentation).toMatchObject({ position: { debt: 1_500 } });
   });
 
   it("names every close-readiness gap and preserves an active budget and pending input", () => {

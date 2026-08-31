@@ -100,7 +100,7 @@ export function buildFinanceSnapshotResult(
       spent: status.details.month.spending,
     },
     cash: status.details.wealth.cash === null ? null : wealth.cash,
-    debt: status.details.wealth.debt,
+    debt: status.details.wealth.debt === null ? null : wealth.debt,
     inbox: {
       awaitingInput: status.work.awaitingInput,
       open: status.details.review.total,

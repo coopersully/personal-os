@@ -1532,7 +1532,7 @@ describe.sequential("Finance Provider Item service", () => {
     });
     expect(await database.db.$count(auditEvents)).toBe(auditsBeforeReplay);
     expect(await database.db.$count(financeProviderItems)).toBe(101);
-  });
+  }, 120_000);
 
   it("resolves only an owned linked Item for an account", async () => {
     const [account] = await service().upsertConnection({

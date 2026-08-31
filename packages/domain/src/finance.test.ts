@@ -1,10 +1,13 @@
 import {
+  financeAccountQuerySchema,
+  financeAccountSchema,
   financeBudgetAllocationSchema,
   financeBudgetVersionSchema,
   financeCapabilityManifest,
   financeInboxCaseSchema,
   financeMaintenanceInputSchema,
   financePresentationSchema,
+  financeProviderAccountTypeSchema,
   financeToolResultSchema,
   manageFinanceRuleInputSchema,
 } from "./finance.js";
@@ -60,6 +63,102 @@ const validPresentations = [
 ] as const;
 
 describe("canonical Finance contracts", () => {
+  it("represents provider evidence and user-owned account planning semantics", () => {
+    expect(financeProviderAccountTypeSchema.parse("investment")).toBe("investment");
+    expect(() => financeProviderAccountTypeSchema.parse("wallet")).toThrow();
+
+    expect(
+      financeAccountSchema.parse({
+        balance: 12_000,
+        createdAt: now,
+        currencyCode: "USD",
+        id,
+        includeInPlanning: true,
+        institution: "Example Brokerage",
+        kind: "investment",
+        kindSource: "provider",
+        lastSyncedAt: now,
+        name: "IRA",
+        ownershipShare: 0.5,
+        ownershipType: "joint",
+        provider: "plaid",
+        providerSubtype: "ira",
+        providerType: "investment",
+        status: "connected",
+        synchronization: {
+          failureCode: null,
+          failureCount: 0,
+          lastAttemptAt: now,
+          lastSuccessAt: now,
+          message: null,
+          nextRetryAt: null,
+          recovery: null,
+          state: "current",
+        },
+        updatedAt: now,
+      }),
+    ).toMatchObject({ kind: "investment", ownershipShare: 0.5 });
+  });
+
+  it("normalizes account discovery filters and rejects contradictory ownership", () => {
+    expect(
+      financeAccountQuerySchema.parse({
+        includeExcluded: "false",
+        kind: "investment",
+        query: "  IRA  ",
+      }),
+    ).toEqual({ includeExcluded: false, kind: "investment", query: "IRA" });
+
+    const base = {
+      balance: 0,
+      createdAt: now,
+      currencyCode: "USD",
+      id,
+      includeInPlanning: true,
+      institution: "Manual",
+      kind: "cash" as const,
+      kindSource: "user" as const,
+      lastSyncedAt: null,
+      name: "Cash",
+      provider: "manual" as const,
+      providerSubtype: null,
+      providerType: null,
+      status: "manual" as const,
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "current" as const,
+      },
+      updatedAt: now,
+    };
+    expect(() =>
+      financeAccountSchema.parse({
+        ...base,
+        ownershipShare: 0.5,
+        ownershipType: "individual",
+      }),
+    ).toThrow("Individual accounts must use a 100% ownership share");
+    expect(() =>
+      financeAccountSchema.parse({
+        ...base,
+        ownershipShare: null,
+        ownershipType: "joint",
+      }),
+    ).toThrow("Joint accounts require an ownership share");
+    expect(() =>
+      financeAccountSchema.parse({
+        ...base,
+        ownershipShare: 1,
+        ownershipType: "unknown",
+      }),
+    ).toThrow("Unknown ownership cannot claim a known ownership share");
+  });
+
   it("maps every Finance capability to an unambiguous API operation and MCP tool", () => {
     expect(financeCapabilityManifest).toContainEqual({
       capability: "workflow.setup",

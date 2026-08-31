@@ -509,6 +509,13 @@
     {
       "idx": 72,
       "version": "7",
+      "when": 1787871600000,
+      "tag": "0072_finance_account_semantics",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
       "when": 1787975302325,
       "tag": "0072_texting",
       "breakpoints": true
@@ -521,10 +528,10 @@
       "breakpoints": true
     },
     {
-      "idx": 74,
+      "idx": 73,
       "version": "7",
-      "when": 1788062400001,
-      "tag": "0074_finance_account_semantics",
+      "when": 1788115200000,
+      "tag": "0073_finance_account_semantics_recovery",
       "breakpoints": true
     }
   ]

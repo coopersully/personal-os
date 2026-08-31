@@ -16,6 +16,8 @@
 - Provider synchronization may not overwrite a user-owned kind, ownership, or inclusion decision.
 - Existing provider account rows are corrected during bounded normal synchronization, not by an unbounded deploy-time backfill.
 - Existing migrations remain immutable; schema, migration `0072`, and journal entry ship together.
+  If another published migration occupies the same sequence before merge, preserve both published
+  entries and add an idempotent later recovery migration for already-advanced environments.
 - Every account mutation remains idempotent, ownership-scoped, and append-only audited.
 - Run focused tests while iterating and `pnpm verify` before handoff.
 
@@ -121,7 +123,8 @@ Expected: PASS.
 
 **Files:**
 - Modify: `packages/database/src/schema.ts`
-- Create: `packages/database/migrations/0074_finance_account_semantics.sql`
+- Create: `packages/database/migrations/0072_finance_account_semantics.sql`
+- Create during integration catch-up: `packages/database/migrations/0073_finance_account_semantics_recovery.sql`
 - Modify: `packages/database/migrations/meta/_journal.json`
 - Test: `packages/database/src/finance-schema.integration.test.ts`
 

@@ -206,6 +206,7 @@ describe.sequential("Finance status service", () => {
     const cashAccount = await account(userId, "current");
     const debtAccount = await account(userId, "current");
     const excludedInvestment = await account(userId, "current");
+    const otherAccount = await account(userId, "current");
 
     await database.db
       .update(financeAccounts)
@@ -213,7 +214,7 @@ describe.sequential("Finance status service", () => {
       .where(eq(financeAccounts.id, cashAccount.id));
     await database.db
       .update(financeAccounts)
-      .set({ kind: "debt", ownershipShareBps: 10000, ownershipType: "individual" })
+      .set({ kind: "debt", ownershipShareBps: 5000, ownershipType: "joint" })
       .where(eq(financeAccounts.id, debtAccount.id));
     await database.db
       .update(financeAccounts)
@@ -224,14 +225,45 @@ describe.sequential("Finance status service", () => {
         ownershipType: "individual",
       })
       .where(eq(financeAccounts.id, excludedInvestment.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ kind: "other", ownershipShareBps: 10000, ownershipType: "individual" })
+      .where(eq(financeAccounts.id, otherAccount.id));
 
     const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
 
     expect(status.details.wealth).toEqual({
       cash: 2_500,
-      debt: 5_000,
+      debt: 2_500,
       investments: 0,
-      netWorth: -2_500,
+      netWorth: 5_000,
+      otherAssets: 5_000,
+    });
+    expect(status.details.health.dimensions.borrow.evidence).toEqual([
+      { label: "Total debt", source: "accounts", value: 2_500 },
+    ]);
+  });
+
+  it("excludes non-planning debt from borrowing evidence and APR requirements", async () => {
+    const userId = await makeUser("Excluded planning debt");
+    await account(userId, "current");
+    const excludedDebt = await account(userId, "current");
+    await database.db
+      .update(financeAccounts)
+      .set({
+        includeInPlanning: false,
+        kind: "debt",
+        ownershipShareBps: 10000,
+        ownershipType: "individual",
+      })
+      .where(eq(financeAccounts.id, excludedDebt.id));
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.health.dimensions.borrow).toMatchObject({
+      evidence: [{ label: "Total debt", source: "accounts", value: 0 }],
+      missingInputs: ["account_roles"],
+      rating: "healthy",
     });
   });
 
@@ -728,6 +760,7 @@ describe.sequential("Finance status service", () => {
       debt: null,
       investments: null,
       netWorth: null,
+      otherAssets: null,
     });
     expect(status.details.health.confidence).toBe("provisional");
 

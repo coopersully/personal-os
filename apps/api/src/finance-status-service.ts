@@ -644,6 +644,9 @@ export function createFinanceStatusService({ db, now }: Options) {
           ),
         );
         const planningAccountTotals = summarizeFinanceAccounts(serializedAccounts).totals;
+        const planningDebtAccounts = serializedAccounts.filter(
+          (account) => account.includeInPlanning && account.kind === "debt",
+        );
         const sourceSynchronizations = [
           ...providerItems.map((item) => ({
             accountIds: accountIdsByItem.get(item.id) ?? [],
@@ -709,14 +712,12 @@ export function createFinanceStatusService({ db, now }: Options) {
               pending: row.pending,
             })),
             profile: profilePolicy,
-            totalDebt: accounts.some((row) => row.kind === "debt" && row.balance !== null)
-              ? accounts
-                  .filter((row) => row.kind === "debt")
-                  .reduce((sum, row) => sum + Math.abs(row.balance ?? 0), 0) / 100
-              : accounts.some((row) => row.kind === "debt")
+            totalDebt: planningDebtAccounts.some((account) => account.balance !== null)
+              ? planningAccountTotals.debt
+              : planningDebtAccounts.length > 0
                 ? null
                 : 0,
-            unknownDebtAprCount: accounts.filter((row) => row.kind === "debt").length,
+            unknownDebtAprCount: planningDebtAccounts.length,
           },
           asOfDate,
         );
@@ -1162,6 +1163,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                 cash === null || debt === null || investments === null
                   ? null
                   : planningAccountTotals.netWorth,
+              otherAssets: evidenceCurrent ? planningAccountTotals.otherAssets : null,
             },
           },
           domain: "finances",

@@ -118,7 +118,7 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
     reviewMode: { reviewBypassEnabled: false },
     review: { byReason: {}, total: 0 },
     rulebookVersion: `sha256:${"a".repeat(64)}`,
-    wealth: { cash: null, debt: null, investments: null, netWorth: null },
+    wealth: { cash: null, debt: null, investments: null, netWorth: null, otherAssets: null },
   },
   domain: "finances",
   freshness: { blockers: [], observedAt: now, state: "current" },

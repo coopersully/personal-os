@@ -44,7 +44,7 @@ function financeResult<T>(value: FinanceToolResult<T>) {
   };
 }
 
-async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+export async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
   try {
     return financeResult(await operation());
   } catch (error) {
@@ -320,12 +320,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
   );
 
+  server.registerTool(
+    "get_finance_snapshot",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
+      inputSchema: {},
+      title: "Get Finance snapshot",
+    },
+    async () => financeApiResult(() => api.getFinanceSnapshot()),
+  );
+
   const reads: Array<[string, string, () => Promise<unknown>]> = [
-    [
-      "get_finance_snapshot",
-      "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
-      () => api.getFinanceOverview(),
-    ],
     [
       "get_finance_wealth_summary",
       "Read net worth, cash, investments, debt, income basis, and plan capacity.",

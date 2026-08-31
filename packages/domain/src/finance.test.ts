@@ -6,6 +6,7 @@ import {
   financeCapabilityManifest,
   financeInboxCaseSchema,
   financeMaintenanceInputSchema,
+  financePresentationSchema,
   financeProviderAccountTypeSchema,
   financeToolResultSchema,
   manageFinanceRuleInputSchema,
@@ -14,6 +15,52 @@ import {
 const id = "11111111-1111-4111-8111-111111111111";
 const relatedId = "22222222-2222-4222-8222-222222222222";
 const now = "2026-08-23T16:00:00.000Z";
+
+const basePresentation = {
+  destination: null,
+  diagnosticFacts: [],
+  disclosures: [],
+  eyebrow: "Finance",
+  summary: "Grounded summary.",
+  title: "Finance result",
+};
+
+const validPresentations = [
+  {
+    ...basePresentation,
+    asOf: now,
+    kind: "finance_snapshot",
+    position: { cash: 100, debt: 20, investments: 50, netWorth: 130 },
+    trust: { gaps: [], state: "current", trustworthy: true },
+  },
+  {
+    ...basePresentation,
+    allocations: [],
+    assumptions: [],
+    balance: 0,
+    expectedResources: 100,
+    kind: "finance_budget",
+    status: "proposed",
+    totalAllocated: 100,
+  },
+  {
+    ...basePresentation,
+    evidenceCount: 1,
+    impactAmount: 12,
+    kind: "finance_review",
+    prompt: "What was this purchase?",
+    reason: "The merchant is ambiguous.",
+  },
+  {
+    ...basePresentation,
+    cutoff: now,
+    kind: "finance_period_verification",
+    period: { end: "2026-08-28", start: "2026-08-01" },
+    recommendations: [],
+    status: "completed",
+    work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 1 },
+  },
+] as const;
 
 describe("canonical Finance contracts", () => {
   it("represents provider evidence and user-owned account planning semantics", () => {
@@ -226,6 +273,45 @@ describe("canonical Finance contracts", () => {
     });
 
     expect(parsed.communication.nextQuestion?.id).toBe("profile:household_size");
+  });
+
+  it("parses the four bounded Finance presentation kinds", () => {
+    expect(validPresentations.map((value) => financePresentationSchema.parse(value).kind)).toEqual([
+      "finance_snapshot",
+      "finance_budget",
+      "finance_review",
+      "finance_period_verification",
+    ]);
+  });
+
+  it("rejects more than fifty diagnostic facts", () => {
+    expect(() =>
+      financePresentationSchema.parse({
+        ...validPresentations[0],
+        diagnosticFacts: Array.from({ length: 51 }, (_, index) => ({
+          label: `Fact ${index}`,
+          value: index,
+        })),
+      }),
+    ).toThrow();
+  });
+
+  it("accepts an optional presentation on a Finance tool result", () => {
+    expect(
+      financeToolResultSchema.parse({
+        changes: [],
+        communication: {
+          headline: "Snapshot ready.",
+          optionalDetails: [],
+          requiredDisclosures: [],
+        },
+        data: {},
+        outcome: "completed",
+        presentation: validPresentations[0],
+        remainingWork: { categories: [], count: 0 },
+        schemaVersion: 1,
+      }).presentation,
+    ).toMatchObject({ kind: "finance_snapshot" });
   });
 
   it("requires rule updates to change the category or merchant", () => {

@@ -4,12 +4,26 @@ This log records delivered vertical slices against the master plan. It does not 
 
 ## 2026-08-27 — Trustworthy Finance account semantics
 
-- Persisted Plaid account type and subtype separately from user-owned kind, planning inclusion,
-  and ownership decisions; provider refreshes preserve explicit kind overrides.
+- Persisted provider account evidence separately from user-owned kind, planning inclusion, and
+  ownership decisions, preserving explicit overrides across refreshes.
 - Added filtered account discovery with ownership-weighted totals, exclusion and unresolved-owner
   disclosures, and normalized possible-duplicate warnings through the API client and MCP.
-- Updated wealth reporting to subtract debt, apply confirmed joint shares, omit excluded accounts,
-  and report whether the account semantics are trustworthy.
+- Updated wealth reporting to apply those authoritative semantics and expose their trust state.
+
+## 2026-08-28 — Honest, selective MCP previews
+
+- Removed the generic Ilo MCP work surface and its scrollable JSON result panel from context,
+  setup, ordinary reads, and uncurated previews.
+- Added four typed, read-only Finance presentations for snapshot, budget, the current Inbox
+  decision, and immutable period verification. Each retains the normal text and structured result
+  for hosts that do not render MCP Apps.
+- Kept financial meaning in the Finance API, preserved unavailable values instead of converting
+  them to zero, bounded every rendered collection, and made malformed or mismatched results fail
+  closed without financial values.
+- Added light/dark host context, responsive semantic markup, keyboard-safe first-party links,
+  size reporting, teardown acknowledgement, and focused JSDOM plus MCP discovery coverage.
+- Interactive approval, universal dashboards, budget buckets, the opinionated Finance playbook,
+  and receipt lookup remain separate approved work and are not claimed by this slice.
 
 ## 2026-08-23 — Provider-aware event conferencing
 

@@ -149,6 +149,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       ),
   );
 
+  server.registerTool(
     "review_finance_receipt",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },

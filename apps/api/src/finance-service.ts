@@ -3902,6 +3902,14 @@ export function createFinanceService({
           transaction,
         };
       } catch {
+        log?.({
+          durationMs: 0,
+          event: "finance_receipt_mail_search_failed",
+          method: "INTERNAL",
+          path: "/v1/finances/transactions/receipt-review",
+          requestId: randomUUID(),
+          status: 503,
+        });
         return {
           evidence: {
             confidence: 0,

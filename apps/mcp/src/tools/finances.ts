@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  type FinanceReceiptReview,
   type FinanceToolResult,
   financeMaintenanceInputSchema,
   financeReceiptReviewInputSchema,
@@ -42,6 +43,26 @@ function financeResult<T>(value: FinanceToolResult<T>) {
       },
     ],
     structuredContent: value,
+  };
+}
+
+function receiptReviewResult(
+  review: FinanceReceiptReview,
+): FinanceToolResult<FinanceReceiptReview> {
+  const value = envelope(review, "Receipt evidence reviewed.");
+  if (review.evidence.nextAction !== "ask_person") return value;
+  return {
+    ...value,
+    communication: {
+      ...value.communication,
+      nextQuestion: {
+        answerType: "text",
+        id: `finance:receipt:${review.transaction.id}`,
+        prompt: review.evidence.question,
+      },
+    },
+    outcome: "user_input_required",
+    remainingWork: { categories: ["receipt_review"], count: 1 },
   };
 }
 
@@ -124,10 +145,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async ({ id: transactionId, ...input }) =>
       financeApiResult(async () =>
-        envelope(
-          await api.reviewFinanceReceipt(transactionId, input),
-          "Receipt evidence reviewed.",
-        ),
+        receiptReviewResult(await api.reviewFinanceReceipt(transactionId, input)),
       ),
   );
   server.registerTool(

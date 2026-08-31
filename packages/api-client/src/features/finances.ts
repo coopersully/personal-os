@@ -146,7 +146,7 @@ export function createFinanceApi(request: FinanceRequest) {
       input: FinanceReceiptReviewInput,
     ): Promise<FinanceReceiptReview> {
       const response = await request<{ review: FinanceReceiptReview }>(
-        `/v1/finances/transactions/${id}/receipt-review`,
+        `/v1/finances/transactions/${encodeURIComponent(id)}/receipt-review`,
         { body: JSON.stringify(input), method: "POST" },
       );
       return response.review;

@@ -2614,4 +2614,29 @@ describe("ilo API client", () => {
       requestId: null,
     });
   });
+
+  it("encodes transaction IDs for receipt review paths", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toContain(
+        "/v1/finances/transactions/11111111-1111-4111-8111-111111111111%2Fpart/receipt-review",
+      );
+      return json({
+        review: {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question: "What did you buy?",
+            status: "not_requested",
+          },
+          transaction: { id, merchant: "Amazon" },
+        },
+      });
+    });
+    const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
+
+    await expect(
+      api.reviewFinanceReceipt(`${id}/part`, { searchMail: false, windowDays: 7 }),
+    ).resolves.toMatchObject({ evidence: { status: "not_requested" } });
+  });
 });

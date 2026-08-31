@@ -454,5 +454,5 @@ Only a token hash is stored. Revoke a host without ending human sessions or affe
 transaction. It may search only the connected Mail projection within a bounded
 date window and amount/merchant match. Results contain redacted source IDs,
 matched fields, dates, and confidence—not message bodies. A missing,
-conflicting, partial, disabled, or failed lookup asks the person what they
+conflicting, disabled, or failed lookup asks the person what they
 bought or paid for; it never applies a category or creates a merchant rule.

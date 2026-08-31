@@ -503,6 +503,7 @@ export function FinancesPage() {
       {section === "overview" && financeStatus.data ? (
         <FinanceAtAGlance status={financeStatus.data} />
       ) : null}
+      {section === "overview" && playbook.isError ? <InlineError error={playbook.error} /> : null}
       {section === "overview" ? <FinancePlaybookCard data={playbook.data} /> : null}
       {section === "overview" ? (
         <BudgetPaceGraph

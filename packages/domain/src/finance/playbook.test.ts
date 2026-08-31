@@ -16,7 +16,6 @@ describe("Finance playbook", () => {
     const assessment = assessFinancePlaybook({
       now: "2026-08-30T12:00:00.000Z",
       profile: null,
-      wealth: null,
     });
     expect(assessment.readiness).toBe("not_ready");
     expect(assessment.blockers).toContain(
@@ -33,14 +32,36 @@ describe("Finance playbook", () => {
           { balance: 1_000, interestRate: 19 },
         ],
         expectedMonthlyTakeHome: 5_000,
+        incomeStability: "stable",
         insurance: [{ status: "active" }],
         jurisdiction: "US-NY",
         liquidReserves: 10_000,
+        reserveTargetMonths: 3,
       },
-      wealth: { debt: 3_000, investments: 20_000, netWorth: 27_000 },
     });
     expect(assessment.uncertainty).toHaveLength(1);
     expect(assessment.nextActions[0]).toContain("high-cost debt");
     expect(assessment.readiness).toBe("on_track");
+  });
+
+  it.each([
+    0, 10_000,
+  ])("does not mark reserves ready without an assessable target (%d)", (liquidReserves) => {
+    const assessment = assessFinancePlaybook({
+      now: "2026-08-30T12:00:00.000Z",
+      profile: {
+        debts: [],
+        expectedMonthlyTakeHome: 5_000,
+        insurance: [{ status: "active" }],
+        jurisdiction: "US-NY",
+        liquidReserves,
+        incomeStability: "stable",
+        reserveTargetMonths: null,
+      },
+    });
+    expect(assessment.readiness).toBe("incomplete");
+    expect(assessment.blockers).toContain(
+      "Establish a reserve target from essential outflows and income stability before assessing readiness.",
+    );
   });
 });

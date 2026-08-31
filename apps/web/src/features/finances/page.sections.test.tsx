@@ -125,6 +125,15 @@ beforeEach(() => {
 });
 
 describe("Finance section states", () => {
+  it("shows a playbook load failure without rendering an empty playbook", async () => {
+    api.getFinancePlaybook.mockRejectedValueOnce(new Error("Playbook unavailable"));
+
+    renderPage("/finances");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Playbook unavailable");
+    expect(screen.queryByText("Wealth-building priorities")).not.toBeInTheDocument();
+  });
+
   it("renders the empty but usable overview", async () => {
     renderPage("/finances");
     expect(await screen.findByText("Financial position")).toBeVisible();

@@ -11,15 +11,16 @@ export function createFinancePlaybookService({
 }) {
   return {
     async get(userId: string): Promise<FinancePlaybookResponse> {
-      const [profile, wealth] = await Promise.all([
-        finances.getFinancialProfile(userId),
-        finances.getWealthSummary(userId),
-      ]);
+      const profile = await finances.getFinancialProfile(userId);
       return {
         assessment: assessFinancePlaybook({
           now: now().toISOString(),
-          profile: profile.data,
-          wealth,
+          profile: profile.data
+            ? {
+                ...profile.data,
+                reserveTargetMonths: profile.data.preferences.emergencyReserveMonths,
+              }
+            : null,
         }),
         playbook: ILO_FINANCE_PLAYBOOK,
       };

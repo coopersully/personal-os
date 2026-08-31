@@ -191,11 +191,12 @@ export function assessFinancePlaybook(input: {
   profile: {
     expectedMonthlyTakeHome: number | null;
     liquidReserves: number | null;
+    incomeStability: "stable" | "variable" | "seasonal" | "unknown";
+    reserveTargetMonths: number | null;
     debts: Array<{ balance: number; interestRate: number | null }>;
     insurance: Array<{ status: string }>;
     jurisdiction: string | null;
   } | null;
-  wealth: { debt: number; investments: number; netWorth: number } | null;
 }): FinancePlaybookAssessment {
   const blockers: string[] = [];
   const uncertainty: string[] = [];
@@ -204,8 +205,15 @@ export function assessFinancePlaybook(input: {
     blockers.push("Complete the financial profile before relying on personalized priorities.");
   if (!input.profile?.expectedMonthlyTakeHome)
     blockers.push("Verify monthly take-home income and its stability.");
-  if (input.profile?.liquidReserves === null || input.profile?.liquidReserves === undefined)
-    blockers.push("Establish a reserve target from essential outflows and income stability.");
+  if (
+    input.profile?.liquidReserves === null ||
+    input.profile?.liquidReserves === undefined ||
+    input.profile.reserveTargetMonths === null ||
+    input.profile.incomeStability === "unknown"
+  )
+    blockers.push(
+      "Establish a reserve target from essential outflows and income stability before assessing readiness.",
+    );
   if (!input.profile?.jurisdiction)
     uncertainty.push(
       "Tax obligations and retirement rules cannot be assessed without jurisdiction.",

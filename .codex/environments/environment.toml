@@ -41,29 +41,14 @@ icon = "check"
 command = "bash ./.codex/scripts/environment.sh logs"
 
 [[actions]]
-name = "List Runtimes"
-icon = "check"
-command = "bash ./.codex/scripts/environment.sh list"
-
-[[actions]]
-name = "Doctor"
-icon = "check"
-command = "bash ./.codex/scripts/environment.sh doctor"
-
-[[actions]]
 name = "GC Dry Run"
 icon = "check"
 command = "bash ./.codex/scripts/environment.sh gc --dry-run"
 
 [[actions]]
-name = "Enable Automatic Cleanup"
+name = "Destroy Worktree Runtime"
 icon = "run"
-command = "bash ./.codex/scripts/environment.sh reaper-enable"
-
-[[actions]]
-name = "Disable Automatic Cleanup"
-icon = "run"
-command = "bash ./.codex/scripts/environment.sh reaper-disable"
+command = "bash ./.codex/scripts/environment.sh purge --acknowledge-data-loss"
 
 [[actions]]
 name = "Test"

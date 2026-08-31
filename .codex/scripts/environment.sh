@@ -10,7 +10,7 @@ LOG_DIR="$RUN_DIR/logs"
 PRIMARY_ENV_FILE="$PRIMARY_ROOT/.env"
 ENV_FILE="$ROOT/.env"
 OVERLAY_FILE="$ROOT/.env.codex.local"
-MANAGER="$ROOT/.codex/scripts/runtime-manager.mjs"
+COMPOSE_MANAGER="$ROOT/.codex/scripts/compose-runtime-manager.mjs"
 PRODUCTION_RUNTIME_HELPER="${ILO_PRODUCTION_RUNTIME_HELPER:-$ROOT/.codex/scripts/production-runtime.mjs}"
 AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/ilo-setup-release.json"
 mkdir -p "$LOG_DIR"
@@ -62,7 +62,6 @@ load_env() {
   ensure_primary_env
   set -a
   source "$ENV_FILE"
-  if [[ -f "$OVERLAY_FILE" ]]; then source "$OVERLAY_FILE"; fi
   set +a
   [[ -n "${APP_ENCRYPTION_KEY:-}" && "$APP_ENCRYPTION_KEY" != "replace-with-32-byte-base64-key" ]] || die "The primary .env needs a valid APP_ENCRYPTION_KEY."
   [[ -n "${MCP_INTERNAL_SECRET:-}" && "$MCP_INTERNAL_SECRET" != "replace-with-a-random-32-character-secret" ]] || die "The primary .env needs a valid MCP_INTERNAL_SECRET."
@@ -70,69 +69,51 @@ load_env() {
 
 require_docker() { docker info >/dev/null 2>&1 || die "Docker is not running. Start Docker Desktop, then try again."; }
 
+allocate_loopback_ports() {
+  node -e 'const net=require("node:net");const servers=Array.from({length:4},()=>net.createServer());Promise.all(servers.map(s=>new Promise((ok,fail)=>{s.once("error",fail);s.listen(0,"127.0.0.1",ok)}))).then(()=>{process.stdout.write(servers.map(s=>s.address().port).join(","));return Promise.all(servers.map(s=>new Promise(ok=>s.close(ok))))})'
+}
+
 command_setup() {
   check_toolchain; ensure_primary_env
-  node "$MANAGER" gc --root "$ROOT"
-  node "$MANAGER" reaper-status --root "$ROOT" || true
   log "Installing the locked workspace dependencies..."
   pnpm install --frozen-lockfile
   bash "$ROOT/.codex/scripts/check.sh"
-  log "Setup complete. Run Start to allocate and launch this checkout."
+  log "Setup complete. Run Start to build and launch this worktree's Compose project."
 }
 
-command_start() { check_toolchain; load_env; require_docker; exec node "$MANAGER" start --root "$ROOT"; }
-command_stop() { node "$MANAGER" stop --root "$ROOT"; }
+command_start() { check_toolchain; load_env; require_docker; exec node "$COMPOSE_MANAGER" start --root "$ROOT"; }
+command_stop() { node "$COMPOSE_MANAGER" stop --root "$ROOT"; }
 
 run_production_runtime_helper() {
   node "$PRODUCTION_RUNTIME_HELPER" "$1" --root "$ROOT" --run-dir "$RUN_DIR"
 }
 
 command_production_start() {
+  local allocated_ports web_port api_port mcp_port database_port
   require_command git; require_command node; require_command pnpm; require_command curl
   require_command lsof; require_command aws; require_command session-manager-plugin
-  node "$MANAGER" stop --root "$ROOT"
-  node "$MANAGER" acquire --root "$ROOT" --json >/dev/null
+  node "$COMPOSE_MANAGER" stop --root "$ROOT"
   load_env
+  allocated_ports="$(allocate_loopback_ports)"
+  IFS=',' read -r web_port api_port mcp_port database_port <<<"$allocated_ports"
   exec node "$PRODUCTION_RUNTIME_HELPER" start \
     --root "$ROOT" \
     --run-dir "$RUN_DIR" \
-    --web-port "$LOCAL_WEB_PORT" \
-    --api-port "$LOCAL_API_PORT" \
-    --mcp-port "$LOCAL_MCP_PORT" \
-    --database-port "$LOCAL_POSTGRES_PORT" \
-    --web-url "$APP_BASE_URL" \
-    --api-url "$API_BASE_URL" \
-    --mcp-url "$MCP_PUBLIC_URL"
+    --web-port "$web_port" \
+    --api-port "$api_port" \
+    --mcp-port "$mcp_port" \
+    --database-port "$database_port" \
+    --web-url "http://127.0.0.1:$web_port" \
+    --api-url "http://127.0.0.1:$api_port" \
+    --mcp-url "http://127.0.0.1:$mcp_port"
 }
 
 command_fixtures() {
-  check_toolchain; require_docker
-  node "$MANAGER" acquire --root "$ROOT" --json >/dev/null
-  load_env
-  local compose_project="ilo-wt-$ILO_RUNTIME_ID"
-  docker compose -f "$ROOT/.codex/runtime/compose.yaml" -p "$compose_project" up -d postgres
-  for _ in {1..120}; do
-    if docker compose -f "$ROOT/.codex/runtime/compose.yaml" -p "$compose_project" \
-      exec -T postgres pg_isready -U personal_os -d personal_os >/dev/null 2>&1; then
-      DATABASE_URL="$DATABASE_URL" MIGRATIONS_DIR="$ROOT/packages/database/migrations" \
-        pnpm exec tsx scripts/qa-fixtures.ts load
-      return
-    fi
-    sleep 0.5
-  done
-  die "PostgreSQL did not become ready for fixture loading."
+  check_toolchain; load_env; require_docker
+  node "$COMPOSE_MANAGER" fixtures --root "$ROOT"
 }
 
-command_logs() {
-  local requested="${1:-}" name file; local names=(api mcp web)
-  if [[ -n "$requested" ]]; then case "$requested" in api | mcp | web) names=("$requested") ;; *) die "Unknown service '$requested'." ;; esac; fi
-  for name in "${names[@]}"; do
-    file="$LOG_DIR/$name.log"; printf '\n===== %s =====\n' "$name"
-    if [[ -f "$file" ]]; then tail -n 160 "$file"; else printf 'No log file yet.\n'; fi
-  done
-}
-
-usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|list|doctor|gc|purge|activate|active-root|reaper-enable|reaper-disable|reaper-status|production-start|production-stop|production-status|fixtures|test|e2e|verify|build>'; }
+usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|gc|purge|production-start|production-stop|production-status|fixtures|test|e2e|verify|build>'; }
 
 cd "$ROOT"
 case "${1:-}" in
@@ -143,9 +124,9 @@ case "${1:-}" in
   production-start) command_production_start ;;
   production-stop) run_production_runtime_helper stop ;;
   production-status) run_production_runtime_helper status ;;
-  status | config | list | doctor | gc | purge | activate | active-root | reaper-enable | reaper-disable | reaper-status)
-    command_name="$1"; shift; node "$MANAGER" "$command_name" --root "$ROOT" "$@" ;;
-  logs) command_logs "${2:-}" ;;
+  status | config | gc | purge)
+    command_name="$1"; shift; node "$COMPOSE_MANAGER" "$command_name" --root "$ROOT" "$@" ;;
+  logs) node "$COMPOSE_MANAGER" logs --root "$ROOT" ;;
   fixtures) command_fixtures ;;
   test) check_toolchain; require_docker; pnpm test:coverage ;;
   e2e) check_toolchain; require_docker; pnpm test:e2e ;;

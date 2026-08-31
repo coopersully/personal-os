@@ -1,3 +1,41 @@
+x-app-common: &app-common
+  image: ilo-${ILO_RUNTIME_ID:?}-dev
+  build:
+    context: ../..
+    dockerfile: .codex/runtime/Dockerfile.dev
+    target: development
+  env_file:
+    - ../../.env
+    - ../../.env.codex.local
+  labels: &runtime-labels
+    app.ilo.runtime.id: ${ILO_RUNTIME_ID:?}
+    app.ilo.runtime.repository: ${ILO_REPOSITORY_ID:?}
+    app.ilo.runtime.root: ${ILO_RUNTIME_ROOT:?}
+  develop: &app-develop
+    watch:
+      - action: sync
+        path: ../..
+        target: /workspace
+        ignore:
+          - .env
+          - .env.codex.local
+          - .git/
+          - .codex/run/
+          - '**/coverage/'
+          - '**/dist/'
+          - '**/node_modules/'
+          - '**/playwright-report/'
+          - '**/test-results/'
+          - package.json
+          - pnpm-lock.yaml
+          - pnpm-workspace.yaml
+      - action: rebuild
+        path: ../../package.json
+      - action: rebuild
+        path: ../../pnpm-lock.yaml
+      - action: rebuild
+        path: ../../pnpm-workspace.yaml
+
 services:
   postgres:
     image: postgres:17.5-alpine
@@ -10,14 +48,58 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
-    labels: &runtime-labels
-      app.ilo.runtime.id: ${ILO_RUNTIME_ID:?}
-      app.ilo.runtime.repository: ${ILO_REPOSITORY_ID:?}
-      app.ilo.runtime.root: ${ILO_ROOT_HASH:?}
-    ports:
-      - 127.0.0.1:${LOCAL_POSTGRES_PORT:?}:5432
+    labels: *runtime-labels
     volumes:
       - postgres-data:/var/lib/postgresql/data
+
+  api:
+    <<: *app-common
+    command: pnpm --filter @personal-os/api run dev:container
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://personal_os:personal_os@postgres:5432/personal_os
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+
+  mcp:
+    <<: *app-common
+    command: pnpm --filter @personal-os/mcp run dev:container
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      HOST: 0.0.0.0
+      PERSONAL_OS_API_URL: http://api:8787
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8788/health/live').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+
+  web:
+    <<: *app-common
+    command: pnpm --filter @personal-os/web run dev:container
+    depends_on:
+      api:
+        condition: service_started
+      mcp:
+        condition: service_started
+    environment:
+      VITE_API_BASE_URL: ""
+      VITE_PROXY_API_TARGET: http://api:8787
+      VITE_PROXY_MCP_TARGET: http://mcp:8788
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:5173/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+    ports:
+      - 127.0.0.1:${LOCAL_WEB_PORT:?}:5173
 
 networks:
   default:

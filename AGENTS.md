@@ -13,21 +13,14 @@ This repository is the ilo monorepo and also stores personal agent skills and ro
 ## Local Runtime
 
 - Use the checked-in lifecycle actions instead of inventing ad hoc background commands.
-- `pnpm env:start` runs the current source and remains attached so failures are visible.
+- `pnpm env:start` runs the current source in a worktree-owned Docker Compose project and remains attached so failures are visible.
 - Use `pnpm env:status`, `pnpm env:logs`, `pnpm env:restart`, and `pnpm env:stop` to operate it.
-- Each checkout keeps a stable allocation until Purge or confirmed orphan cleanup. The primary checkout owns tier 1 with web `8081`, API `8788`, MCP `8789`, and PostgreSQL `55433`.
-- Runtime tiers are persistent assignments, not positions in `git worktree list`. Tier 2 uses web
-  `8086`, API `8793`, MCP `8794`, and PostgreSQL `55438`; adding or removing another worktree must
-  not change an assigned checkout's ports.
-- `environment.sh activate <tier>` registers the current checkout as the active runtime in the
-  repository's shared Git directory. Personal launchers may use `active-root` to route a saved
-  primary-checkout action to that worktree without hard-coding its temporary path.
+- Compose project names are derived from the repository and canonical worktree path. Docker labels are the runtime registry; there is no shared port-allocation file.
+- Each worktree exposes one kernel-selected loopback port. Its browser app, API routes, OAuth callbacks, and MCP endpoint share that origin; PostgreSQL is available only on the project network.
 - The primary checkout's ignored `.env` is authoritative. Setup and start synchronize it into Codex worktrees before loading configuration.
-- A linked worktree receives an ignored `.env.codex.local` containing a deterministic whole-set port shift and an isolated Compose project name.
-- Runtime PID and log files live under ignored `.codex/run/`.
-- Allocations are shared under `<git-common-dir>/ilo-runtime`; checkout-local logs and generated runtime configuration remain ignored.
-- Run `pnpm env:doctor` for ownership, port, Git, callback, and cleanup diagnostics.
-- Automatic orphan cleanup is an explicit macOS opt-in through the Enable/Disable Automatic Cleanup actions. Setup never installs it silently.
+- A worktree's ignored `.env.codex.local` stores only its non-secret Compose identity and public origin.
+- Start removes projects whose ownership labels belong to this repository but whose roots are no longer in `git worktree list`. `pnpm env:gc` previews that cleanup.
+- Stop preserves containers and PostgreSQL data. Purge, or the **Destroy Worktree Runtime** action, deletes the current project's containers, network, and volumes.
 
 ## Validation
 

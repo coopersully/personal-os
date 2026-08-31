@@ -1,48 +1,41 @@
 # Local development runtimes
 
-Every ilo checkout can run concurrently. `pnpm env:start` acquires a stable repository-wide tier for the current checkout, starts its labeled PostgreSQL project, and runs its API, MCP, and web source on loopback. Start remains attached; use another terminal or Codex action for Status, Logs, or Stop.
+Each Git worktree runs as a separate Docker Compose project. The project name is a stable hash of
+the repository and canonical worktree path, so worktrees do not share containers, networks, or
+PostgreSQL volumes. Docker resource labels are the runtime registry; no repository-wide port lease
+file is used.
 
-Stop preserves the allocation and database. Restart reuses them. Purge is the explicit destructive operation and requires `pnpm env:purge`. Registry records live under `<git-common-dir>/ilo-runtime`; checkout logs live under ignored `.codex/run/logs/`, and generated non-secret values live in ignored `.env.codex.local`.
+`pnpm env:start` selects one available loopback port and prints the worktree URL. The web app, API
+routes, OAuth callbacks, and MCP endpoint at `/mcp` share that origin through Vite's development
+proxy. PostgreSQL is not published to the host. Services inside the project use stable addresses:
+the API reaches PostgreSQL at `postgres:5432`, and web reaches API and MCP at `api:8787` and
+`mcp:8788`.
 
-## Ports
+Compose Watch synchronizes source changes into the application containers without mounting host
+`node_modules`. Changes to package manifests rebuild the development image.
 
-Tier 1 is reserved for the primary checkout. Linked worktrees use the lowest free tier from 2 through 16 unless an existing stable allocation is being reused.
+## Lifecycle
 
-| Tier | Web | API | MCP | PostgreSQL |
-| ---: | ---: | ---: | ---: | ---: |
-| 1 | 8081 | 8788 | 8789 | 55433 |
-| 2 | 8086 | 8793 | 8794 | 55438 |
-| 3 | 8091 | 8798 | 8799 | 55443 |
-| 4 | 8096 | 8803 | 8804 | 55448 |
-| 5 | 8101 | 8808 | 8809 | 55453 |
-| 6 | 8106 | 8813 | 8814 | 55458 |
-| 7 | 8111 | 8818 | 8819 | 55463 |
-| 8 | 8116 | 8823 | 8824 | 55468 |
-| 9 | 8121 | 8828 | 8829 | 55473 |
-| 10 | 8126 | 8833 | 8834 | 55478 |
-| 11 | 8131 | 8838 | 8839 | 55483 |
-| 12 | 8136 | 8843 | 8844 | 55488 |
-| 13 | 8141 | 8848 | 8849 | 55493 |
-| 14 | 8146 | 8853 | 8854 | 55498 |
-| 15 | 8151 | 8858 | 8859 | 55503 |
-| 16 | 8156 | 8863 | 8864 | 55508 |
+- `pnpm env:start` builds and runs this worktree in the foreground.
+- `pnpm env:stop` stops its containers while retaining its PostgreSQL volume and port assignment.
+- `pnpm env:restart`, `pnpm env:status`, and `pnpm env:logs` operate only this worktree's project.
+- `pnpm env:gc` previews projects owned by this repository whose roots no longer appear in
+  `git worktree list`.
+- `pnpm env:purge` explicitly deletes this worktree's containers, network, and database volume.
 
-For a tier with API port `<api-port>`, register both connector callbacks when needed:
+Start performs the same confirmed-orphan check with pruning enabled. This is a portable backstop
+for worktrees deleted outside the lifecycle script; cleanup occurs on the next Start. The Codex
+**Destroy Worktree Runtime** action performs immediate explicit cleanup before removing a worktree.
 
-- `http://127.0.0.1:<api-port>/v1/connectors/google/callback`
-- `http://127.0.0.1:<api-port>/v1/x-bookmarks/callback`
+The primary checkout's ignored `.env` remains authoritative for secrets. Linked worktrees receive
+a mode-`0600` copy and generate a mode-`0600` `.env.codex.local` containing only their Compose
+identity and public local URLs. Every published port binds to `127.0.0.1`.
 
-Doctor prints the concrete callbacks for registered runtimes, but cannot prove that an external provider dashboard contains them.
+## Recovery
 
-## Commands and recovery
+If Start reports that its saved port is occupied after the project's containers were removed,
+delete `.env.codex.local` and Start again; the kernel will select another port. Use
+`pnpm env:purge` when the worktree database should be recreated from scratch.
 
-- `pnpm env:start`, `env:stop`, `env:restart`, `env:status`, and `env:logs` operate only the current checkout.
-- `pnpm env:config` prints its stable allocation; `pnpm env:list` shows the repository registry.
-- `pnpm env:doctor` reports Git/root drift, ownership mismatches, occupied ports, callbacks, quarantine, and reaper status without taking destructive action.
-- `pnpm env:gc` is dry-run only. Normal lifecycle actions perform conservative reconciliation.
-- `pnpm env:purge` deletes the stopped current runtime's labeled PostgreSQL volume and releases its tier.
-- `pnpm env:reaper:enable` and `pnpm env:reaper:disable` explicitly install or remove the repository-scoped macOS LaunchAgent.
-
-Automatic cleanup requires a missing checkout, absent-or-prunable unlocked Git state, two observations, and at least 60 seconds. Locked, present-but-unregistered, ambiguous-process, and Docker-label-mismatch cases fail closed and retain the tier. Use Doctor, repair the reported ownership or Git state, and rerun GC. Never delete registry records or Docker resources by tier alone.
-
-The primary checkout `.env` is authoritative for secrets. Setup creates it when absent; linked worktrees receive a mode-`0600` copy. Every published port binds to `127.0.0.1`. `cooper-run activate <tier>` only selects a saved project root and does not stop other runtimes.
+External OAuth providers must contain the exact callback URL printed for the worktree. Local
+container health cannot prove that an external provider dashboard has been configured correctly.

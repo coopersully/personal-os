@@ -2,8 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  type FinanceReceiptReview,
   type FinanceToolResult,
   financeMaintenanceInputSchema,
+  financeReceiptReviewInputSchema,
   financeSetupInputSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
@@ -44,7 +46,27 @@ function financeResult<T>(value: FinanceToolResult<T>) {
   };
 }
 
-async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+function receiptReviewResult(
+  review: FinanceReceiptReview,
+): FinanceToolResult<FinanceReceiptReview> {
+  const value = envelope(review, "Receipt evidence reviewed.");
+  if (review.evidence.nextAction !== "ask_person") return value;
+  return {
+    ...value,
+    communication: {
+      ...value.communication,
+      nextQuestion: {
+        answerType: "text",
+        id: `finance:receipt:${review.transaction.id}`,
+        prompt: review.evidence.question,
+      },
+    },
+    outcome: "user_input_required",
+    remainingWork: { categories: ["receipt_review"], count: 1 },
+  };
+}
+
+export async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
   try {
     return financeResult(await operation());
   } catch (error) {
@@ -127,6 +149,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       ),
   );
 
+    "review_finance_receipt",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Review one ambiguous transaction with an explicit, bounded Mail receipt lookup. This never categorizes or creates a merchant rule; missing or conflicting evidence becomes a question for the person.",
+      inputSchema: { id, ...financeReceiptReviewInputSchema.shape },
+      title: "Review Finance receipt evidence",
+    },
+    async ({ id: transactionId, ...input }) =>
+      financeApiResult(async () =>
+        receiptReviewResult(await api.reviewFinanceReceipt(transactionId, input)),
+      ),
+  );
   server.registerTool(
     "setup_finances",
     {
@@ -335,12 +370,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
   );
 
+  server.registerTool(
+    "get_finance_snapshot",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
+      inputSchema: {},
+      title: "Get Finance snapshot",
+    },
+    async () => financeApiResult(() => api.getFinanceSnapshot()),
+  );
+
   const reads: Array<[string, string, () => Promise<unknown>]> = [
-    [
-      "get_finance_snapshot",
-      "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
-      () => api.getFinanceOverview(),
-    ],
     [
       "get_finance_wealth_summary",
       "Read net worth, cash, investments, debt, income basis, and plan capacity.",

@@ -9,19 +9,22 @@ export const financeSnapshotSchema = z.object({
   asOf: isoDateTimeSchema,
   budget: z.object({
     activeVersionId: idSchema.nullable(),
-    allocated: z.number().finite().nonnegative(),
+    allocated: z.number().finite().nonnegative().nullable(),
     remaining: z.number().finite().nullable(),
-    spent: z.number().finite().nonnegative(),
+    spent: z.number().finite().nonnegative().nullable(),
   }),
+  cash: z.number().finite().nullable(),
+  debt: z.number().finite().nullable(),
   inbox: z.object({
-    critical: z.number().int().nonnegative(),
+    awaitingInput: z.number().int().nonnegative(),
     open: z.number().int().nonnegative(),
   }),
+  investments: z.number().finite().nullable(),
   ledger: z.object({
     reconciledThrough: z.iso.date().nullable(),
     trustworthy: z.boolean(),
   }),
-  netWorth: z.number().finite(),
+  netWorth: z.number().finite().nullable(),
 });
 export type FinanceSnapshot = z.infer<typeof financeSnapshotSchema>;
 

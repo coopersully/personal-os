@@ -92,13 +92,17 @@ compatible callers. A caller must not describe the total as verified when `trust
 
 ## Persistence and rollout
 
-Migration `0072` adds nullable provider type/subtype plus non-null planning metadata with bounded
+Migration `0072_finance_account_semantics` adds nullable provider type/subtype plus non-null planning metadata with bounded
 defaults. It performs no name-based or unbounded data backfill. Existing Plaid rows begin with
 `kindSource = default` and are corrected by the next normal account synchronization, which already
 loads `/accounts/get` before transaction synchronization. Manual accounts are initialized as
 user-owned individual accounts.
 
-The Drizzle schema, SQL migration, and migration journal ship together. No existing migration is
+The Drizzle schema, SQL migration, and migration journal ship together. Because the independently
+published `0072_texting` migration reached `main` first with a later Drizzle timestamp,
+`0073_finance_account_semantics_recovery` idempotently applies the same transition after that live
+cursor. Both published `0072` files and their journal entries remain unchanged, and an integration
+test covers the texting-first upgrade path. No existing migration is
 rewritten.
 
 ## Mutation and audit behavior

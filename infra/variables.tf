@@ -134,6 +134,26 @@ variable "x_enabled" {
   default     = false
 }
 
+variable "texting_enabled" {
+  description = "Enable Twilio texting only after sender registration, webhook delivery, and opt-out recovery have production evidence."
+  type        = bool
+  default     = false
+}
+
+variable "twilio_phone_number" {
+  description = "Shared Twilio sender in E.164 format."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      (!var.texting_enabled && var.twilio_phone_number == "") ||
+      can(regex("^\\+[1-9][0-9]{7,14}$", var.twilio_phone_number))
+    )
+    error_message = "twilio_phone_number must be a valid E.164 number when texting_enabled is true; it may be blank only while texting is disabled."
+  }
+}
+
 variable "google_gmail_push_enabled" {
   description = "Enable Gmail Pub/Sub push only after its external GCP authority and delivery path have production evidence."
   type        = bool

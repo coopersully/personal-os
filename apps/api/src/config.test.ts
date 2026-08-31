@@ -48,6 +48,14 @@ describe("API configuration", () => {
       resendApiKey: "",
       sessionCookieName: "personal_os_session",
       sessionTtlDays: 30,
+      texting: {
+        accountSid: "",
+        authToken: "",
+        enabled: false,
+        messagingServiceSid: "",
+        senderPhoneNumber: "",
+        verifyServiceSid: "",
+      },
       trustProxy: false,
       xClientId: "",
       xClientSecret: "",
@@ -57,6 +65,7 @@ describe("API configuration", () => {
 
   it("allows an explicitly empty local email sender outside production", () => {
     expect(loadConfig({ ...required, EMAIL_FROM: "" }).emailFrom).toBe("");
+    expect(() => loadConfig({ ...required, TEXTING_ENABLED: "true" })).toThrow();
   });
 
   it("fails closed unless enabled Gmail push configuration is complete", () => {

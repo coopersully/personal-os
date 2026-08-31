@@ -62,6 +62,8 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
+  FinanceReceiptReview,
+  FinanceReceiptReviewInput,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
@@ -161,6 +163,12 @@ type Options = {
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
   providerItems?: ReturnType<typeof createFinanceProviderItemService>;
+  searchReceiptCandidates?: (
+    userId: string,
+    input: { amount: number; from: string; merchant: string; to: string },
+  ) => Promise<
+    Array<{ date: string; fields: Array<"merchant" | "amount" | "date">; sourceId: string }>
+  >;
 };
 type CandidatePreparedPayload = Extract<
   FinanceMaintenanceCandidateItemDraft,
@@ -720,6 +728,7 @@ export function createFinanceService({
   onProposalSnapshotRead,
   plaid,
   providerItems: configuredProviderItems,
+  searchReceiptCandidates,
 }: Options) {
   const canonicalAccounts = createFinanceAccountService({ db, now });
   const inbox = createInboxService({ db, now });
@@ -3851,6 +3860,68 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    async reviewReceipt(
+      userId: string,
+      transactionId: string,
+      input: FinanceReceiptReviewInput,
+    ): Promise<FinanceReceiptReview> {
+      const row = await ownedTransaction(userId, transactionId);
+      const transaction = await enrichTransaction(row);
+      const question = `What did you buy or pay for at ${transaction.merchant}?`;
+      if (!input.searchMail || !searchReceiptCandidates) {
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: input.searchMail ? "mail_disabled" : "not_requested",
+          },
+          transaction,
+        };
+      }
+      const start = new Date(`${transaction.date}T00:00:00.000Z`);
+      start.setUTCDate(start.getUTCDate() - input.windowDays);
+      try {
+        const matches = await searchReceiptCandidates(userId, {
+          amount: transaction.amount,
+          from: start.toISOString().slice(0, 10),
+          merchant: transaction.merchant,
+          to: transaction.date,
+        });
+        const status =
+          matches.length === 1 ? "matched" : matches.length > 1 ? "conflicting" : "no_match";
+        return {
+          evidence: {
+            confidence: matches.length === 1 ? 0.92 : matches.length > 1 ? 0.55 : 0,
+            matches,
+            nextAction: status === "matched" ? "review_evidence" : "ask_person",
+            question,
+            status,
+          },
+          transaction,
+        };
+      } catch {
+        log?.({
+          durationMs: 0,
+          event: "finance_receipt_mail_search_failed",
+          method: "INTERNAL",
+          path: "/v1/finances/transactions/receipt-review",
+          requestId: randomUUID(),
+          status: 503,
+        });
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: "mail_disabled",
+          },
+          transaction,
+        };
+      }
+    },
     getFinanceAccountConnection: canonicalAccounts.getConnection,
     listFinanceAccounts: canonicalAccounts.list,
     updateFinanceAccount: canonicalAccounts.update,

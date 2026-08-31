@@ -23,11 +23,30 @@ import {
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
   oauthStates,
+  textingConsentEvents,
+  textingVerificationChallenges,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps texting verification recoverable and provider consent events idempotent", async () => {
+    const challenges = getTableConfig(textingVerificationChallenges);
+    const consentEvents = getTableConfig(textingConsentEvents);
+    expect(
+      challenges.columns.find((column) => column.name === "provider_verification_sid")?.notNull,
+    ).toBe(false);
+    expect(consentEvents.indexes.map((index) => index.config.name)).toContain(
+      "texting_consent_provider_event_idx",
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0073_texting_review_hardening.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("DROP NOT NULL");
+    expect(migrationSql).toContain('WHERE "provider_event_id" IS NOT NULL');
+  });
+
   it("keeps Calendar findings stable and reviews immutable", async () => {
     const findings = getTableConfig(calendarFindings);
     const reviews = getTableConfig(calendarReviews);
@@ -219,6 +238,9 @@ describe("database schema contracts", () => {
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
       "0072_finance_account_semantics",
+      "0072_texting",
+      "0073_texting_review_hardening",
+      "0073_finance_account_semantics_recovery",
     ]);
   });
 

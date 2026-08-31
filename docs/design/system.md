@@ -560,6 +560,15 @@ carry visual explanation; helper copy must earn its place; unavailable actions
 are not offered; and permanent alerts are reserved for persistent, actionable
 conditions.
 
+### Visual entrypoint truthfulness
+
+Advertising a visual entrypoint promises a designed, task-specific view. Ordinary
+reads stay in chat; raw structured output is never the default user-facing visual.
+Every advertised MCP App has a typed presentation contract, a useful text fallback,
+an explicit malformed-result fallback, and focused narrow-width, theme, keyboard,
+and lifecycle coverage. Removing visual metadata is the correct incomplete state;
+a generic JSON inspector is not a product preview.
+
 ### Agent-owned setup invariant
 
 Once an agent has authenticated, the product must stop treating the person as

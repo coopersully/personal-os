@@ -398,6 +398,9 @@ describe.sequential("finance service", () => {
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
       "0072_finance_account_semantics",
+      "0072_texting",
+      "0073_texting_review_hardening",
+      "0073_finance_account_semantics_recovery",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -915,6 +918,64 @@ describe.sequential("finance service", () => {
         .from(auditEvents)
         .where(eq(auditEvents.requestId, context.requestId)),
     ).resolves.toEqual([{ action: "finance.review_bypass_updated", actorType: "user" }]);
+  });
+
+  it("logs receipt Mail search failures without exposing the error", async () => {
+    const [receiptOwner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Receipt failure owner",
+        email: `receipt-failure-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!receiptOwner) throw new Error("Receipt failure owner was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Receipt failure bank",
+        name: "Receipt failure account",
+        provider: "manual",
+        status: "connected",
+        userId: receiptOwner.id,
+      })
+      .returning();
+    if (!account) throw new Error("Receipt failure account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 4250,
+        direction: "expense",
+        merchant: "Amazon",
+        transactionDate: "2026-07-19",
+        userId: receiptOwner.id,
+      })
+      .returning();
+    if (!transaction) throw new Error("Receipt failure transaction was not created.");
+    const logs = vi.fn();
+    const service = createFinanceService({
+      db: database.db,
+      log: logs,
+      now: () => now,
+      searchReceiptCandidates: async () => {
+        throw new Error("private connector failure");
+      },
+    });
+
+    await expect(
+      service.reviewReceipt(receiptOwner.id, transaction.id, { searchMail: true, windowDays: 7 }),
+    ).resolves.toMatchObject({ evidence: { status: "mail_disabled" } });
+    expect(logs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "finance_receipt_mail_search_failed",
+        method: "INTERNAL",
+        path: "/v1/finances/transactions/receipt-review",
+        status: 503,
+      }),
+    );
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("private connector failure");
   });
 
   it("atomically replaces an owned budget plan and records only a redacted audit summary", async () => {

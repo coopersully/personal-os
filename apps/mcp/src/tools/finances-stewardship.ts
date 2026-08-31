@@ -17,6 +17,7 @@ import {
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
+import { financeApiResult } from "./finances.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
 const readAnnotations = {
@@ -148,7 +149,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
       inputSchema: z.object({ reviewId: id }).strict(),
       title: "Get Finance period review",
     },
-    async (input) => apiResult(() => api.getFinancePeriodReview(input.reviewId)),
+    async (input) => financeApiResult(() => api.getFinancePeriodReviewPresentation(input.reviewId)),
   );
 
   server.registerTool(

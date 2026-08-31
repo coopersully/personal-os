@@ -99,6 +99,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import { createFinanceAccountService } from "./finance/account-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
@@ -545,11 +546,17 @@ function account(
     createdAt: row.createdAt.toISOString(),
     currencyCode: row.currencyCode,
     id: row.id,
+    includeInPlanning: row.includeInPlanning,
     institution: row.institution,
     kind: row.kind,
+    kindSource: row.kindSource,
     lastSyncedAt: synchronization.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
+    ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
+    ownershipType: row.ownershipType,
     provider: row.provider,
+    providerSubtype: row.providerSubtype,
+    providerType: row.providerType,
     status: item ? (item.syncRecovery === "reconnect" ? "needs_reauth" : "connected") : row.status,
     synchronization: {
       failureCode: synchronization.syncErrorCode,
@@ -3845,6 +3852,7 @@ export function createFinanceService({
   });
   return {
     getFinanceAccountConnection: canonicalAccounts.getConnection,
+    listFinanceAccounts: canonicalAccounts.list,
     updateFinanceAccount: canonicalAccounts.update,
     disconnectFinanceAccount: canonicalAccounts.disconnect,
     getFinanceTransaction: canonicalLedger.getTransaction,
@@ -7063,7 +7071,10 @@ export function createFinanceService({
                 balance: input.balance === null ? null : toCents(input.balance),
                 institution: input.institution,
                 kind: input.kind ?? "cash",
+                kindSource: "user",
                 name: input.name,
+                ownershipShareBps: 10_000,
+                ownershipType: "individual",
                 provider: input.provider,
                 status: input.provider === "manual" ? "manual" : "needs_reauth",
                 syncState: input.provider === "manual" ? "current" : "stale",
@@ -7965,14 +7976,9 @@ export function createFinanceService({
           .where(eq(financeReimbursementMatches.userId, userId)),
         this.getProfile(userId, nowDate.toISOString().slice(0, 10)),
       ]);
-      const totals = { cash: 0, debt: 0, investments: 0, otherAssets: 0 };
-      for (const item of accounts) {
-        const value = Math.abs(item.balance ?? 0) / 100;
-        if (item.kind === "debt") totals.debt += value;
-        else if (item.kind === "investment") totals.investments += value;
-        else if (item.kind === "other") totals.otherAssets += value;
-        else totals.cash += (item.balance ?? 0) / 100;
-      }
+      const { accountSemantics, totals } = summarizeFinanceAccounts(
+        accounts.map((item) => account(item)),
+      );
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =
         income
@@ -7989,6 +7995,7 @@ export function createFinanceService({
       const monthlyIncome = annualIncome / 12;
       return {
         ...totals,
+        accountSemantics,
         annualIncome,
         incomeBasis,
         monthlyIncome,

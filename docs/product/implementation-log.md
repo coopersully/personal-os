@@ -2,6 +2,15 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-27 — Trustworthy Finance account semantics
+
+- Persisted Plaid account type and subtype separately from user-owned kind, planning inclusion,
+  and ownership decisions; provider refreshes preserve explicit kind overrides.
+- Added filtered account discovery with ownership-weighted totals, exclusion and unresolved-owner
+  disclosures, and normalized possible-duplicate warnings through the API client and MCP.
+- Updated wealth reporting to subtract debt, apply confirmed joint shares, omit excluded accounts,
+  and report whether the account semantics are trustworthy.
+
 ## 2026-08-23 — Provider-aware event conferencing
 
 - Added unique Google Meet generation for events created on writable Google calendars using the

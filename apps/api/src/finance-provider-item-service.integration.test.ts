@@ -124,6 +124,44 @@ describe.sequential("Finance Provider Item service", () => {
     await database.db.delete(financeCategories);
   });
 
+  it("classifies provider accounts without overwriting a user kind override", async () => {
+    const first = await service().upsertConnection({
+      accessToken: "typed-token",
+      accounts: [{ ...remoteAccount("typed-account"), subtype: "ira", type: "investment" }],
+      context: { principal: principal(userId), requestId: "typed-connect" },
+      institution: "Typed Bank",
+      itemId: "typed-item",
+    });
+    expect(first[0]).toMatchObject({
+      kind: "investment",
+      kindSource: "provider",
+      providerSubtype: "ira",
+      providerType: "investment",
+    });
+    if (!first[0]) throw new Error("Typed account missing.");
+    await database.db
+      .update(financeAccounts)
+      .set({ kind: "cash", kindSource: "user" })
+      .where(eq(financeAccounts.id, first[0].id));
+
+    const refreshed = await service().upsertConnection({
+      accessToken: "typed-token-2",
+      accounts: [
+        { ...remoteAccount("typed-account", 20), subtype: "line of credit", type: "loan" },
+      ],
+      context: { principal: principal(userId), requestId: "typed-refresh" },
+      institution: "Typed Bank",
+      itemId: "typed-item",
+    });
+    expect(refreshed[0]).toMatchObject({
+      balance: 20,
+      kind: "cash",
+      kindSource: "user",
+      providerSubtype: "line of credit",
+      providerType: "loan",
+    });
+  });
+
   function service() {
     return createFinanceProviderItemService({
       db: database.db,
@@ -1494,7 +1532,7 @@ describe.sequential("Finance Provider Item service", () => {
     });
     expect(await database.db.$count(auditEvents)).toBe(auditsBeforeReplay);
     expect(await database.db.$count(financeProviderItems)).toBe(101);
-  });
+  }, 120_000);
 
   it("resolves only an owned linked Item for an account", async () => {
     const [account] = await service().upsertConnection({

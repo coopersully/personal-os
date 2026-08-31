@@ -132,6 +132,14 @@ shows monthly income, already planned limits, and remaining capacity when income
 available; otherwise it says that income cannot yet be inferred. Agents use the same wealth
 summary through MCP.
 
+Account planning keeps provider evidence separate from user decisions. Plaid type and subtype
+classify a provider account initially, while an explicit user kind override remains authoritative
+across later synchronization. Only accounts included in planning affect wealth totals. Individual
+accounts use a 100% share, joint accounts use their confirmed share, and unknown ownership uses the
+full visible balance conservatively while making the wealth summary untrustworthy. Account reads
+disclose excluded IDs, unresolved ownership, and normalized possible duplicates rather than
+silently presenting an incomplete net worth as settled.
+
 Budget spending excludes transfers. Moves between a linked account and its vaults, provider
 transactions explicitly classified as transfers, and matched cash-to-credit-card payments are
 account movement—not new purchases. A cross-account match must have compatible payment

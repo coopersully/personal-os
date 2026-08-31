@@ -118,7 +118,7 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
     reviewMode: { reviewBypassEnabled: false },
     review: { byReason: {}, total: 0 },
     rulebookVersion: `sha256:${"a".repeat(64)}`,
-    wealth: { cash: null, debt: null, investments: null, netWorth: null },
+    wealth: { cash: null, debt: null, investments: null, netWorth: null, otherAssets: null },
   },
   domain: "finances",
   freshness: { blockers: [], observedAt: now, state: "current" },
@@ -424,11 +424,17 @@ const financeAccount: FinanceAccount = {
   createdAt: now,
   currencyCode: null,
   id,
+  includeInPlanning: true,
   institution: "Test bank",
   kind: "cash",
+  kindSource: "user",
   lastSyncedAt: null,
   name: "Checking",
+  ownershipShare: 1,
+  ownershipType: "individual",
   provider: "manual",
+  providerSubtype: null,
+  providerType: null,
   status: "manual",
   synchronization: {
     failureCode: null,
@@ -971,6 +977,17 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/plaid/exchange") return json({ accounts: [financeAccount] });
     if (url.pathname === "/v1/finances/account-connections")
       return json(financeEnvelope({ connectionId: id, status: "pending" }));
+    if (url.pathname === "/v1/finances/accounts" && method === "GET")
+      return json({
+        accounts: [financeAccount],
+        accountSemantics: {
+          excludedAccountIds: [],
+          possibleDuplicateGroups: [],
+          trustworthy: true,
+          unresolvedOwnershipAccountIds: [],
+        },
+        totals: { cash: 1200, debt: 0, investments: 0, netWorth: 1200, otherAssets: 0 },
+      });
     if (url.pathname === `/v1/finances/account-connections/${id}`)
       return json(financeEnvelope({ id, status: "connected" }));
     if (url.pathname === `/v1/finances/accounts/${id}` && method === "PATCH")
@@ -2077,6 +2094,9 @@ describe("ilo API client", () => {
     await expect(api.getFinanceAccountConnection(id)).resolves.toMatchObject({
       data: { status: "connected" },
     });
+    await expect(
+      api.listFinanceAccounts({ includeExcluded: false, kind: "cash", query: "Checking" }),
+    ).resolves.toMatchObject({ accounts: [financeAccount], totals: { netWorth: 1200 } });
     await expect(
       api.updateFinanceAccount(id, { idempotencyKey: "account-1", name: "Primary" }),
     ).resolves.toMatchObject({ data: financeAccount });

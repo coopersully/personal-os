@@ -237,8 +237,10 @@ describe("database schema contracts", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
+      "0072_finance_account_semantics",
       "0072_texting",
       "0073_texting_review_hardening",
+      "0073_finance_account_semantics_recovery",
     ]);
   });
 
@@ -480,6 +482,33 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_initialization_idx"');
     expect(migrationSql).not.toMatch(/\bUPDATE "finance_accounts"/u);
     expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
+  it("keeps Finance provider evidence separate from user planning semantics", async () => {
+    const table = getTableConfig(financeAccounts);
+    expect(table.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "kind_source",
+        "provider_type",
+        "provider_subtype",
+        "include_in_planning",
+        "ownership_type",
+        "ownership_share_bps",
+      ]),
+    );
+    expect(table.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "finance_accounts_kind_source_check",
+        "finance_accounts_provider_type_check",
+        "finance_accounts_ownership_check",
+      ]),
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0072_finance_account_semantics.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("ADD COLUMN \"ownership_type\" text DEFAULT 'unknown' NOT NULL");
+    expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
   });
 
   it("keeps Provider Item synchronization authority isolated from Finance account projections", async () => {

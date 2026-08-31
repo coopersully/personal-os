@@ -11,6 +11,7 @@ import {
   createFinanceTransactionInputSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
+  financeAccountQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
@@ -618,6 +619,14 @@ export function registerFinanceRoutes({
         ),
       },
       201,
+    ),
+  );
+  app.get("/v1/finances/accounts", async (context) =>
+    context.json(
+      await finances.listFinanceAccounts(
+        context.get("principal").userId,
+        financeAccountQuerySchema.parse(context.req.query()),
+      ),
     ),
   );
   app.delete("/v1/finances/accounts/:id", requireHuman, async (context) => {

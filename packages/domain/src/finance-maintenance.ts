@@ -181,7 +181,7 @@ export const financeStatusDetailsSchema = z.object({
     debt: nullableMoneySchema,
     investments: nullableMoneySchema,
     netWorth: nullableMoneySchema,
-    otherAssets: nullableMoneySchema,
+    otherAssets: nullableMoneySchema.optional(),
   }),
 });
 

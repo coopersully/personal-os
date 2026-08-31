@@ -119,4 +119,38 @@ describe("Finance MCP workflows", () => {
       expect.objectContaining({ text: expect.stringContaining("Where do you live") }),
     ]);
   });
+
+  it("projects an unresolved receipt review as a person-directed question", async () => {
+    const question = "What did you buy or pay for at Amazon?";
+    const api = {
+      reviewFinanceReceipt: vi.fn(async () => ({
+        evidence: {
+          confidence: 0,
+          matches: [],
+          nextAction: "ask_person",
+          question,
+          status: "no_match",
+        },
+        transaction: { id, merchant: "Amazon" },
+      })),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-receipt-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { id, searchMail: true, windowDays: 7 },
+      name: "review_finance_receipt",
+    });
+
+    expect(response.structuredContent).toMatchObject({
+      communication: { nextQuestion: { prompt: question } },
+      outcome: "user_input_required",
+    });
+    expect(response.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining(question) }),
+    ]);
+  });
 });

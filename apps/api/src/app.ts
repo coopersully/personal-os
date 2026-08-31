@@ -397,6 +397,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
+    searchReceiptCandidates: mail.searchReceiptCandidates,
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });

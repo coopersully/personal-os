@@ -197,6 +197,7 @@ export const iloToolCatalog = {
   get_finance_wealth_summary: read("finances", ["finances:read"]),
   get_finance_cashflow: read("finances", ["finances:read"]),
   get_finance_ledger_health: read("finances", ["finances:read"]),
+  review_finance_receipt: read("finances", ["finances:read"]),
   list_finance_transactions: read("finances", ["finances:read"]),
   get_finance_categories: read("finances", ["finances:read"]),
   get_finance_budget_status: read("finances", ["finances:read"]),

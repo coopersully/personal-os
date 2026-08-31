@@ -18,6 +18,7 @@ import {
   financeMaintenanceHistoryQuerySchema,
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
+  financeReceiptReviewInputSchema,
   financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
   financeSetupInputSchema,
@@ -481,6 +482,15 @@ export function registerFinanceRoutes({
         context.req.param("id"),
       ),
     ),
+  );
+  app.post("/v1/finances/transactions/:id/receipt-review", async (context) =>
+    context.json({
+      review: await finances.reviewReceipt(
+        context.get("principal").userId,
+        context.req.param("id"),
+        await parseBody(context, financeReceiptReviewInputSchema),
+      ),
+    }),
   );
   app.post("/v1/finances/transactions/:id/remove", async (context) => {
     const input = await parseBody(

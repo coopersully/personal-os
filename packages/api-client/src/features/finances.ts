@@ -47,6 +47,8 @@ import type {
   FinanceProfile,
   FinanceProfileVersion,
   FinanceQuestion,
+  FinanceReceiptReview,
+  FinanceReceiptReviewInput,
   FinanceRecurringObligation,
   FinanceReimbursement,
   FinanceReimbursementQuestionAnswer,
@@ -139,6 +141,16 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async reviewFinanceReceipt(
+      id: string,
+      input: FinanceReceiptReviewInput,
+    ): Promise<FinanceReceiptReview> {
+      const response = await request<{ review: FinanceReceiptReview }>(
+        `/v1/finances/transactions/${encodeURIComponent(id)}/receipt-review`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.review;
+    },
     createFinanceBudget,
     async setupFinances(input: FinanceSetupInput): Promise<FinanceToolResult<FinanceSetupPayload>> {
       return request("/v1/finances/setup", {

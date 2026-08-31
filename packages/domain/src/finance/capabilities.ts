@@ -147,6 +147,13 @@ export const financeCapabilityManifest = [
     requiredScope: "finances:read",
   },
   {
+    apiOperation: "reviewFinanceReceipt",
+    capability: "ledger.receipt_review",
+    mcpTool: "review_finance_receipt",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "addFinanceTransaction",
     capability: "ledger.transaction_add",
     mcpTool: "add_finance_transaction",

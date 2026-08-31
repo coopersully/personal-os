@@ -14,6 +14,40 @@ const base = {
 };
 
 describe("Finance MCP workflows", () => {
+  it("forwards account filters to the typed API and returns planning disclosures", async () => {
+    const listFinanceAccounts = vi.fn(async () => ({
+      accounts: [],
+      accountSemantics: {
+        excludedAccountIds: [],
+        possibleDuplicateGroups: [],
+        trustworthy: false,
+        unresolvedOwnershipAccountIds: [id],
+      },
+      totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+    }));
+    const server = new McpServer({ name: "finance-accounts-test", version: "1" });
+    registerFinanceTools(server, { listFinanceAccounts } as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { includeExcluded: false, kind: "investment", query: "IRA" },
+      name: "list_finance_accounts",
+    });
+    expect(listFinanceAccounts).toHaveBeenCalledWith({
+      includeExcluded: false,
+      kind: "investment",
+      query: "IRA",
+    });
+    expect(response.structuredContent).toMatchObject({
+      data: {
+        accountSemantics: { unresolvedOwnershipAccountIds: [id] },
+        totals: { investments: 0 },
+      },
+    });
+  });
+
   it("routes natural setup intent and returns one concise question without queue state", async () => {
     const api = {
       setupFinances: vi.fn(async () => ({

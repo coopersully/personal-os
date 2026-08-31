@@ -11,6 +11,7 @@ import {
   createFinanceTransactionInputSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
+  financeAccountQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
@@ -51,6 +52,10 @@ import {
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { loadFinanceAuthorization } from "../finance/context.js";
+import {
+  buildFinancePeriodReviewResult,
+  buildFinanceSnapshotResult,
+} from "../finance/presentation-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
@@ -193,6 +198,23 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/snapshot", async (context) => {
+    const userId = context.get("principal").userId;
+    const [status, budget, wealth] = await Promise.all([
+      financeStatus.getFinanceStatus(userId, { type: "all_outstanding" }),
+      finances.getFinanceBudget(userId),
+      finances.getWealthSummary(userId),
+    ]);
+    return context.json(buildFinanceSnapshotResult(status, budget, wealth));
+  });
+  app.get("/v1/finances/period-reviews/:id/presentation", async (context) => {
+    if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
+    const review = await financePeriodReviews.getOwned(
+      context.get("principal").userId,
+      idSchema.parse(context.req.param("id")),
+    );
+    return context.json(buildFinancePeriodReviewResult(review));
+  });
   app.get("/v1/finances/period-reviews/:id", async (context) => {
     if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
     return context.json({
@@ -628,6 +650,14 @@ export function registerFinanceRoutes({
         ),
       },
       201,
+    ),
+  );
+  app.get("/v1/finances/accounts", async (context) =>
+    context.json(
+      await finances.listFinanceAccounts(
+        context.get("principal").userId,
+        financeAccountQuerySchema.parse(context.req.query()),
+      ),
     ),
   );
   app.delete("/v1/finances/accounts/:id", requireHuman, async (context) => {

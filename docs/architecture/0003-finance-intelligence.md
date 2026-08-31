@@ -257,7 +257,10 @@ action reviews, connect or disconnect providers, import transactions, administer
 accounts, or execute external financial activity. Bypass never waives evidence,
 confidence, or ambiguity checks. Agents can apply an explicitly prepared permanent
 merchant-learning rule through categorization only after those checks. The
-human-only question list returns bounded public descriptors; an originating agent
+account-list read accepts bounded name/institution, kind, status, and inclusion filters and returns
+the API-owned planning totals and trust disclosures. MCP forwards that typed result and does not
+reimplement provider classification, ownership weighting, debt signs, exclusion, or duplicate
+logic. The human-only question list returns bounded public descriptors; an originating agent
 may answer a question with only its requested bounded fields, which are merged
 into the original action and prepared again. `resolve_finance_review` safely
 translates legacy categorization answers only.

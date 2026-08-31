@@ -12,6 +12,8 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAccountConnection,
+  FinanceAccountList,
+  FinanceAccountQuery,
   FinanceActionOutcome,
   FinanceActionReview,
   FinanceAlert,
@@ -57,6 +59,7 @@ import type {
   FinanceScenarioResult,
   FinanceSetupInput,
   FinanceSetupPayload,
+  FinanceSnapshot,
   FinanceStatus,
   FinanceToolResult,
   FinanceTransaction,
@@ -178,6 +181,15 @@ export function createFinanceApi(request: FinanceRequest) {
       });
       return response.account;
     },
+    async listFinanceAccounts(
+      query: Partial<FinanceAccountQuery> = {},
+    ): Promise<FinanceAccountList> {
+      const search = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) search.set(key, String(value));
+      }
+      return request(`/v1/finances/accounts${search.size ? `?${search}` : ""}`);
+    },
     async approveFinanceBudget(
       input: ApproveFinanceBudgetInput,
     ): Promise<FinanceToolResult<FinanceBudgetVersion>> {
@@ -243,6 +255,9 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/status${financeMaintenanceScopeQuery(scope)}`,
       );
       return financeStatusSchema.parse(response.status);
+    },
+    async getFinanceSnapshot(): Promise<FinanceToolResult<FinanceSnapshot>> {
+      return request("/v1/finances/snapshot");
     },
     async compareFinanceScenarios(input: FinanceScenarioInput): Promise<FinanceScenarioResult> {
       const response = await request<{ scenario: FinanceScenarioResult }>(
@@ -336,6 +351,11 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/period-reviews/${encodeURIComponent(id)}`,
       );
       return financePeriodReviewSchema.parse(response.review);
+    },
+    async getFinancePeriodReviewPresentation(
+      id: string,
+    ): Promise<FinanceToolResult<FinancePeriodReview>> {
+      return request(`/v1/finances/period-reviews/${encodeURIComponent(id)}/presentation`);
     },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(

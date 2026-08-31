@@ -86,12 +86,16 @@ describe("Plaid connector", () => {
                   balances: { current: 12.5, iso_currency_code: "USD" },
                   name: "Checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
                 {
                   account_id: "account-unknown-currency",
                   balances: { current: 7.5 },
                   name: "Legacy account",
                   official_name: null,
+                  subtype: null,
+                  type: "investment",
                 },
               ],
             });
@@ -149,6 +153,8 @@ describe("Plaid connector", () => {
         currencyCode: "USD",
         name: "Checking",
         officialName: null,
+        subtype: "checking",
+        type: "depository",
       },
       {
         accountId: "account-unknown-currency",
@@ -156,6 +162,8 @@ describe("Plaid connector", () => {
         currencyCode: null,
         name: "Legacy account",
         officialName: null,
+        subtype: null,
+        type: "investment",
       },
     ]);
     await expect(
@@ -199,6 +207,32 @@ describe("Plaid connector", () => {
       message: "Plaid returned an invalid response.",
     });
     assertRedactedMessage(error.message, ["sensitive-access-token"]);
+  });
+
+  it("rejects an unsupported Plaid account type", async () => {
+    const plaid = createPlaidConnector({
+      clientId: "client-id",
+      environment: "sandbox",
+      fetch: async () =>
+        Response.json({
+          accounts: [
+            {
+              account_id: "account-1",
+              balances: { current: 10, iso_currency_code: "USD" },
+              name: "Wallet",
+              official_name: null,
+              subtype: null,
+              type: "wallet",
+            },
+          ],
+        }),
+      secret: "connector-secret",
+    });
+
+    await expect(plaid.getAccounts("access-token")).rejects.toMatchObject({
+      category: "invalid_response",
+      code: "plaid_invalid_response",
+    });
   });
 
   it("rejects a provider transaction whose pending identity self-references its transaction ID", async () => {

@@ -45,7 +45,7 @@ function financeResult<T>(value: FinanceToolResult<T>) {
   };
 }
 
-async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+export async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
   try {
     return financeResult(await operation());
   } catch (error) {
@@ -338,12 +338,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
   );
 
+  server.registerTool(
+    "get_finance_snapshot",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
+      inputSchema: {},
+      title: "Get Finance snapshot",
+    },
+    async () => financeApiResult(() => api.getFinanceSnapshot()),
+  );
+
   const reads: Array<[string, string, () => Promise<unknown>]> = [
-    [
-      "get_finance_snapshot",
-      "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
-      () => api.getFinanceOverview(),
-    ],
     [
       "get_finance_wealth_summary",
       "Read net worth, cash, investments, debt, income basis, and plan capacity.",
@@ -410,14 +417,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "List every connected or manual Finance account, current balance, source status, and last sync. Use before sync, connection, or account-specific investigation.",
-      inputSchema: {},
+        "Search connected or manual Finance accounts with planning totals, ownership gaps, exclusions, and duplicate warnings. Use before sync, connection, account-specific investigation, or wealth advice.",
+      inputSchema: {
+        includeExcluded: z.boolean().default(true),
+        kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
+        query: z.string().trim().min(1).max(160).optional(),
+        status: z.enum(["connected", "needs_reauth", "manual"]).optional(),
+      },
       title: "List Finance accounts",
     },
-    async () =>
+    async (input) =>
       financeApiResult(async () => {
-        const overview = await api.getFinanceOverview();
-        return envelope(overview.accounts, `Found ${overview.accounts.length} Finance accounts.`);
+        const accounts = await api.listFinanceAccounts(input);
+        return envelope(accounts, `Found ${accounts.accounts.length} Finance accounts.`);
       }),
   );
 

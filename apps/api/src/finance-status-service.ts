@@ -34,6 +34,7 @@ import {
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
+import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import {
   activeAllocationsByTransaction,
   excludedReimbursementCentsByAllocation,
@@ -642,6 +643,7 @@ export function createFinanceStatusService({ db, now }: Options) {
               : effectiveSynchronization(account, asOfDate, account.provider === "manual"),
           ),
         );
+        const planningAccountTotals = summarizeFinanceAccounts(serializedAccounts).totals;
         const sourceSynchronizations = [
           ...providerItems.map((item) => ({
             accountIds: accountIdsByItem.get(item.id) ?? [],
@@ -919,21 +921,9 @@ export function createFinanceStatusService({ db, now }: Options) {
                   health.month.rating === "off_track"
                 ? "needs_work"
                 : "clean";
-        const cash = evidenceCurrent
-          ? accounts
-              .filter((row) => row.kind === "cash")
-              .reduce((sum, row) => sum + (row.balance ?? 0), 0) / 100
-          : null;
-        const debt = evidenceCurrent
-          ? accounts
-              .filter((row) => row.kind === "debt")
-              .reduce((sum, row) => sum + Math.abs(row.balance ?? 0), 0) / 100
-          : null;
-        const investments = evidenceCurrent
-          ? accounts
-              .filter((row) => row.kind === "investment")
-              .reduce((sum, row) => sum + (row.balance ?? 0), 0) / 100
-          : null;
+        const cash = evidenceCurrent ? planningAccountTotals.cash : null;
+        const debt = evidenceCurrent ? planningAccountTotals.debt : null;
+        const investments = evidenceCurrent ? planningAccountTotals.investments : null;
         const cashflowProjection =
           evidenceCurrent && cash !== null
             ? forecastCashflow({
@@ -1171,7 +1161,7 @@ export function createFinanceStatusService({ db, now }: Options) {
               netWorth:
                 cash === null || debt === null || investments === null
                   ? null
-                  : cash + investments - debt,
+                  : planningAccountTotals.netWorth,
             },
           },
           domain: "finances",

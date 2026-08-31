@@ -201,6 +201,40 @@ describe.sequential("Finance status service", () => {
     expect(status.state).toBe("clean");
   });
 
+  it("uses planning inclusion and ownership shares for wealth totals", async () => {
+    const userId = await makeUser("Planning semantics wealth");
+    const cashAccount = await account(userId, "current");
+    const debtAccount = await account(userId, "current");
+    const excludedInvestment = await account(userId, "current");
+
+    await database.db
+      .update(financeAccounts)
+      .set({ ownershipShareBps: 5000, ownershipType: "joint" })
+      .where(eq(financeAccounts.id, cashAccount.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ kind: "debt", ownershipShareBps: 10000, ownershipType: "individual" })
+      .where(eq(financeAccounts.id, debtAccount.id));
+    await database.db
+      .update(financeAccounts)
+      .set({
+        includeInPlanning: false,
+        kind: "investment",
+        ownershipShareBps: 10000,
+        ownershipType: "individual",
+      })
+      .where(eq(financeAccounts.id, excludedInvestment.id));
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.wealth).toEqual({
+      cash: 2_500,
+      debt: 5_000,
+      investments: 0,
+      netWorth: -2_500,
+    });
+  });
+
   it("only scans reimbursement credits from the oldest open expense", async () => {
     const userId = await makeUser("Bounded reimbursement credits");
     const source = await account(userId, "current");

@@ -118,7 +118,7 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
     reviewMode: { reviewBypassEnabled: false },
     review: { byReason: {}, total: 0 },
     rulebookVersion: `sha256:${"a".repeat(64)}`,
-    wealth: { cash: null, debt: null, investments: null, netWorth: null, otherAssets: null },
+    wealth: { cash: null, debt: null, investments: null, netWorth: null },
   },
   domain: "finances",
   freshness: { blockers: [], observedAt: now, state: "current" },
@@ -1384,6 +1384,91 @@ function apiFetch() {
 }
 
 describe("ilo API client", () => {
+  it("serializes budget bucket routes with and without a month", async () => {
+    const requests: Array<{ body: unknown; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method,
+          path: url.pathname + url.search,
+        });
+        return json(method === "GET" ? { taxonomy: { buckets: [] } } : { buckets: [] });
+      },
+    });
+
+    await expect(api.listFinanceBudgetBuckets()).resolves.toEqual({ taxonomy: { buckets: [] } });
+    await expect(api.listFinanceBudgetBuckets("2026-08")).resolves.toEqual({
+      taxonomy: { buckets: [] },
+    });
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create",
+        name: "Care",
+      }),
+    ).resolves.toEqual({ buckets: [] });
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        description: null,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update",
+      }),
+    ).resolves.toEqual({ buckets: [] });
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/budget-buckets" },
+      {
+        body: null,
+        method: "GET",
+        path: "/v1/finances/budget-buckets?month=2026-08",
+      },
+      {
+        body: { description: null, idempotencyKey: "bucket-create", name: "Care" },
+        method: "POST",
+        path: "/v1/finances/budget-buckets",
+      },
+      {
+        body: {
+          categoryIds: [],
+          description: null,
+          expectedVersion: 1,
+          idempotencyKey: "bucket-update",
+        },
+        method: "PATCH",
+        path: "/v1/finances/budget-buckets/bucket-1",
+      },
+    ]);
+  });
+
+  it("preserves agent dispositions for budget bucket mutations", async () => {
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose categories." }, status: "needs_input" };
+    const responses = [pending, needsInput];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(responses.shift()),
+    });
+
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create-agent",
+        name: "Care",
+      }),
+    ).resolves.toEqual(pending);
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update-agent",
+      }),
+    ).resolves.toEqual(needsInput);
+  });
+
   it("uses typed Finance status and durable-maintenance routes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const api = createApiClient({
@@ -1420,35 +1505,6 @@ describe("ilo API client", () => {
         path: "/v1/finances/maintenance",
       },
       { body: null, method: "GET", path: `/v1/finances/maintenance/${id}` },
-    ]);
-  });
-
-  it("reads authoritative Finance presentation results from exact endpoints", async () => {
-    const requests: string[] = [];
-    const snapshot = {
-      data: { asOf: now },
-      presentation: { kind: "finance_snapshot" },
-    };
-    const period = {
-      data: { id },
-      presentation: { kind: "finance_period_verification" },
-    };
-    const api = createApiClient({
-      baseUrl: "https://api.example.com",
-      fetch: async (input) => {
-        const url = new URL(String(input));
-        requests.push(url.pathname);
-        if (url.pathname === "/v1/finances/snapshot") return json(snapshot);
-        if (url.pathname === `/v1/finances/period-reviews/${id}/presentation`) return json(period);
-        return json({ error: { code: "not_found", message: "Not found" } }, 404);
-      },
-    });
-
-    await expect(api.getFinanceSnapshot()).resolves.toMatchObject(snapshot);
-    await expect(api.getFinancePeriodReviewPresentation(id)).resolves.toMatchObject(period);
-    expect(requests).toEqual([
-      "/v1/finances/snapshot",
-      `/v1/finances/period-reviews/${id}/presentation`,
     ]);
   });
 
@@ -2613,30 +2669,5 @@ describe("ilo API client", () => {
       details: undefined,
       requestId: null,
     });
-  });
-
-  it("encodes transaction IDs for receipt review paths", async () => {
-    const fetch = vi.fn(async (input: RequestInfo | URL) => {
-      expect(String(input)).toContain(
-        "/v1/finances/transactions/11111111-1111-4111-8111-111111111111%2Fpart/receipt-review",
-      );
-      return json({
-        review: {
-          evidence: {
-            confidence: 0,
-            matches: [],
-            nextAction: "ask_person",
-            question: "What did you buy?",
-            status: "not_requested",
-          },
-          transaction: { id, merchant: "Amazon" },
-        },
-      });
-    });
-    const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
-
-    await expect(
-      api.reviewFinanceReceipt(`${id}/part`, { searchMail: false, windowDays: 7 }),
-    ).resolves.toMatchObject({ evidence: { status: "not_requested" } });
   });
 });

@@ -6,12 +6,14 @@ import {
   cancelFinanceReimbursementInputSchema,
   classifyFinanceTransactionsInputSchema,
   createFinanceAccountInputSchema,
+  createFinanceBudgetBucketInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceBudgetVersionInputSchema,
   createFinanceTransactionInputSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
   financeAccountQuerySchema,
+  financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
@@ -41,6 +43,7 @@ import {
   submitFinanceLedgerChallengeInputSchema,
   updateFinanceAccountInputSchema,
   updateFinanceAutomationSettingsInputSchema,
+  updateFinanceBudgetBucketInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -854,6 +857,51 @@ export function registerFinanceRoutes({
         201,
       ),
     );
+  });
+  app.get("/v1/finances/budget-buckets", async (context) =>
+    context.json(
+      await finances.listFinanceBudgetBuckets(
+        context.get("principal").userId,
+        financeBudgetBucketQuerySchema.parse(context.req.query()),
+      ),
+    ),
+  );
+  app.post("/v1/finances/budget-buckets", async (context) => {
+    const input = await parseBody(context, createFinanceBudgetBucketInputSchema);
+    return act(context, "budget_plan", { ...input, operation: "create" }, async () => {
+      const authorization = await financeContext(context);
+      return context.json(
+        await finances.mutateFinanceBudgetBucket(input, {
+          principal: {
+            actorId: authorization.actorId,
+            actorType: authorization.actorType,
+            userId: context.get("principal").userId,
+          },
+          requestId: context.get("requestId"),
+        }),
+        201,
+      );
+    });
+  });
+  app.patch("/v1/finances/budget-buckets/:id", async (context) => {
+    const body = await parseBody(context, z.record(z.string(), z.unknown()));
+    const fullInput = updateFinanceBudgetBucketInputSchema.parse({
+      ...body,
+      bucketId: routeId(context),
+    });
+    return act(context, "budget_plan", { ...fullInput, operation: "update" }, async () => {
+      const authorization = await financeContext(context);
+      return context.json(
+        await finances.mutateFinanceBudgetBucket(fullInput, {
+          principal: {
+            actorId: authorization.actorId,
+            actorType: authorization.actorType,
+            userId: context.get("principal").userId,
+          },
+          requestId: context.get("requestId"),
+        }),
+      );
+    });
   });
   app.get("/v1/finances/plaid/status", async (context) =>
     context.json({ available: finances.plaidAvailable() }),

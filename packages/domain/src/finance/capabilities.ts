@@ -84,6 +84,20 @@ export const financeCapabilityManifest = [
     requiredScope: "finances:read",
   },
   {
+    apiOperation: "listFinanceBudgetBuckets",
+    capability: "budget.bucket_list",
+    mcpTool: "list_finance_budget_buckets",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "mutateFinanceBudgetBucket",
+    capability: "budget.bucket_manage",
+    mcpTool: "manage_finance_budget_bucket",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
     apiOperation: "listFinanceGoals",
     capability: "goal.list",
     mcpTool: "list_finance_goals",

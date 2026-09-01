@@ -1182,6 +1182,7 @@ export const financeReviewDecisionInputSchema = z
 export type FinanceReviewDecisionInput = z.infer<typeof financeReviewDecisionInputSchema>;
 
 export const financeBudgetSchema = z.object({
+  bucketId: idSchema.nullable().optional(),
   category: categorySchema,
   createdAt: isoDateTimeSchema,
   id: idSchema,
@@ -1297,6 +1298,7 @@ export const updateFinanceTransactionInputSchema = z
 export type UpdateFinanceTransactionInput = z.infer<typeof updateFinanceTransactionInputSchema>;
 
 export const createFinanceBudgetInputSchema = z.object({
+  bucketId: idSchema.optional(),
   category: categorySchema,
   limit: moneySchema.positive(),
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
@@ -1327,6 +1329,7 @@ export const financeOverviewSchema = z.object({
 });
 export type FinanceOverview = z.infer<typeof financeOverviewSchema>;
 
+export * from "./finance/buckets.js";
 // Canonical Finance contracts are split by responsibility while this file
 // remains the stable public barrel for existing consumers.
 export * from "./finance/budget.js";

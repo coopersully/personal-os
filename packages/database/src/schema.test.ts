@@ -11,6 +11,10 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
+  financeBudgets,
+  financeBudgetTaxonomies,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
@@ -45,6 +49,29 @@ describe("database schema contracts", () => {
     );
     expect(migrationSql).toContain("DROP NOT NULL");
     expect(migrationSql).toContain('WHERE "provider_event_id" IS NOT NULL');
+  });
+
+  it("keeps budget buckets additive and category membership exclusive", async () => {
+    expect(
+      getTableConfig(financeBudgetTaxonomies).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_taxonomies_user_active_idx"]));
+    expect(getTableConfig(financeBudgetBuckets).columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["description", "version"]),
+    );
+    expect(
+      getTableConfig(financeBudgetBucketCategories).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_bucket_categories_taxonomy_category_idx"]));
+    expect(getTableConfig(financeBudgets).columns.map((column) => column.name)).toContain(
+      "bucket_id",
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0074_finance_budget_buckets.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ALTER TABLE "finance_budgets" ADD COLUMN "bucket_id"');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_budget_bucket_categories_taxonomy_category_idx"',
+    );
   });
 
   it("keeps Calendar findings stable and reviews immutable", async () => {
@@ -220,8 +247,13 @@ describe("database schema contracts", () => {
         resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),
         "utf8",
       ),
-    ) as { entries: Array<{ tag: string }> };
+    ) as { entries: Array<{ tag: string; when: number }> };
     const journalTags = journal.entries.map((entry) => entry.tag);
+    const budgetBucketIndex = journalTags.indexOf("0074_finance_budget_buckets");
+    expect(budgetBucketIndex).toBeGreaterThan(0);
+    expect(journal.entries[budgetBucketIndex]?.when).toBeGreaterThan(
+      journal.entries[budgetBucketIndex - 1]?.when ?? 0,
+    );
     const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
     expect(journalTags.slice(financeAutomationIndex)).toEqual([
       "0059_finance_automation_settings",
@@ -241,6 +273,7 @@ describe("database schema contracts", () => {
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
+      "0074_finance_budget_buckets",
     ]);
   });
 

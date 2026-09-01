@@ -12,6 +12,7 @@ import {
   manageFinanceRuleInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
+import { apiResult } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
 const idempotencyKey = z
@@ -267,6 +268,79 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Create Finance budget",
     },
     async (input) => financeApiResult(() => api.createFinanceBudget(input)),
+  );
+
+  server.registerTool(
+    "list_finance_budget_buckets",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the active Finance budget taxonomy, exclusive category membership, and monthly bucket rollups.",
+      inputSchema: {
+        month: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional(),
+      },
+      title: "List Finance budget buckets",
+    },
+    async ({ month }) =>
+      financeApiResult(async () =>
+        envelope(await api.listFinanceBudgetBuckets(month), "Loaded Finance budget buckets."),
+      ),
+  );
+
+  server.registerTool(
+    "manage_finance_budget_bucket",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
+      inputSchema: z.discriminatedUnion("operation", [
+        z
+          .object({
+            description: z.string().max(240).nullable().optional(),
+            idempotencyKey,
+            name: z.string().min(1).max(80),
+            operation: z.literal("create"),
+          })
+          .strict(),
+        z
+          .object({
+            bucketId: id,
+            categoryIds: z.array(id).max(200).optional(),
+            description: z.string().max(240).nullable().optional(),
+            expectedVersion: z.number().int().positive(),
+            idempotencyKey,
+            name: z.string().min(1).max(80).optional(),
+            operation: z.literal("update"),
+            position: z.number().int().nonnegative().optional(),
+          })
+          .strict(),
+      ]),
+      title: "Manage Finance budget bucket",
+    },
+    async (input) => {
+      if (input.operation === "create") {
+        return apiResult(() =>
+          api.createFinanceBudgetBucket({
+            description: input.description ?? null,
+            idempotencyKey: input.idempotencyKey,
+            name: input.name,
+          }),
+        );
+      }
+      return apiResult(() =>
+        api.updateFinanceBudgetBucket(input.bucketId, {
+          categoryIds: input.categoryIds,
+          description: input.description,
+          expectedVersion: input.expectedVersion,
+          idempotencyKey: input.idempotencyKey,
+          name: input.name,
+          position: input.position,
+        }),
+      );
+    },
   );
 
   server.registerTool(

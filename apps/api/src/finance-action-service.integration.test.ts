@@ -15,6 +15,7 @@ import {
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
+  financeMutationRecords,
   financeProfiles,
   financeRecurringObligations,
   financeReimbursementMatches,
@@ -31,7 +32,7 @@ import {
   type MaterialSourceReference,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
@@ -3513,6 +3514,455 @@ describe.sequential("finance action service", () => {
     expect(rows.some((row) => row.status === "pending")).toBe(true);
     expect(rows.some((row) => row.status === "superseded")).toBe(true);
   });
+
+  it("prepares and applies a bucket mutation through the budget action family", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const mutateFinanceBudgetBucket = vi.fn(async (input: unknown) => ({ input }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mutateFinanceBudgetBucket } as never,
+      now: () => now,
+    });
+
+    try {
+      await expect(
+        service.performDirect(
+          "budget_plan",
+          {
+            description: "Core spending",
+            idempotencyKey: "bucket-action-create",
+            name: "Core",
+            operation: "create",
+          },
+          { principal: agent(userId), requestId: "bucket-action-create" },
+        ),
+      ).resolves.toMatchObject({ status: "applied" });
+      expect(mutateFinanceBudgetBucket).toHaveBeenCalledOnce();
+    } finally {
+      await database.db
+        .insert(financeAutomationSettings)
+        .values({ reviewBypassEnabled: false, userId })
+        .onConflictDoUpdate({
+          set: { reviewBypassEnabled: false, updatedAt: now },
+          target: financeAutomationSettings.userId,
+        });
+    }
+
+    const queued = await service.performDirect(
+      "budget_plan",
+      {
+        description: "Future context",
+        idempotencyKey: "bucket-action-review",
+        name: "Future",
+        operation: "create",
+      },
+      { principal: agent(userId), requestId: "bucket-action-review" },
+    );
+    expect(queued).toMatchObject({ status: "pending_review" });
+    const [review] = await database.db
+      .select({ semanticTargetKeys: financeAgentActionReviews.semanticTargetKeys })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, userId))
+      .orderBy(desc(financeAgentActionReviews.createdAt))
+      .limit(1);
+    expect(review?.semanticTargetKeys).toContain(`finance-budget-buckets:${userId}`);
+  });
+
+  it("requests bucket recovery fields when an update omits its expected version", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mutateFinanceBudgetBucket: vi.fn() } as never,
+      now: () => now,
+    });
+
+    const result = await service.performDirect(
+      "budget_plan",
+      {
+        bucketId: crypto.randomUUID(),
+        description: "Updated context",
+        operation: "update",
+      },
+      { principal: agent(userId), requestId: "bucket-action-missing-version" },
+    );
+
+    expect(result.status).toBe("needs_input");
+    if (result.status !== "needs_input") throw new Error("Expected a recoverable bucket question.");
+    expect(result.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "bucketId",
+      "expectedVersion",
+    ]);
+  });
+
+  it("keeps malformed bucket mutations in bucket-specific recovery", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mutateFinanceBudgetBucket: vi.fn() } as never,
+      now: () => now,
+    });
+
+    const update = await service.performDirect(
+      "budget_plan",
+      {
+        bucketId: "not-a-bucket-id",
+        expectedVersion: 1,
+        operation: "update",
+      },
+      { principal: agent(userId), requestId: "bucket-action-invalid-update" },
+    );
+    expect(update).toMatchObject({ status: "needs_input" });
+    if (update.status !== "needs_input") throw new Error("Expected bucket update recovery.");
+    expect(update.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "idempotencyKey",
+      "bucketId",
+    ]);
+
+    const create = await service.performDirect(
+      "budget_plan",
+      { name: "", operation: "create" },
+      { principal: agent(userId), requestId: "bucket-action-invalid-create" },
+    );
+    expect(create).toMatchObject({ status: "needs_input" });
+    if (create.status !== "needs_input") throw new Error("Expected bucket create recovery.");
+    expect(create.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "idempotencyKey",
+      "name",
+    ]);
+  });
+
+  it("applies a bypassed bucket mutation in the action transaction without nesting a writer", async () => {
+    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    await contentionDatabase.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const finances = createFinanceService({ db: contentionDatabase.db, now: () => now });
+    const service = createFinanceActionService({
+      db: contentionDatabase.db,
+      finances,
+      now: () => now,
+    });
+    const bucketInput = {
+      description: "Serialized inside the action transaction",
+      idempotencyKey: `bucket-action-transaction-${crypto.randomUUID()}`,
+      name: `Action bucket ${crypto.randomUUID()}`,
+      operation: "create" as const,
+    };
+
+    try {
+      const recoveredName = `Recovered action bucket ${crypto.randomUUID()}`;
+      const recoverable = await service.performDirect(
+        "budget_plan",
+        {
+          idempotencyKey: `bucket-action-recovery-${crypto.randomUUID()}`,
+          name: "",
+          operation: "create",
+        },
+        { principal: agent(userId), requestId: "bucket-action-recovery" },
+      );
+      expect(recoverable).toMatchObject({ status: "needs_input" });
+      if (recoverable.status !== "needs_input")
+        throw new Error("Expected a recoverable bucket create question.");
+      expect(recoverable.question.expectedAnswer.map((field) => field.name)).toEqual(["name"]);
+      await expect(
+        service.answerQuestion(recoverable.question.id, JSON.stringify({ name: recoveredName }), {
+          principal: agent(userId),
+          requestId: "bucket-action-recovery-answer",
+        }),
+      ).resolves.toMatchObject({ status: "applied" });
+
+      const applied = await service.performDirect("budget_plan", bucketInput, {
+        principal: agent(userId),
+        requestId: "bucket-action-transaction",
+      });
+      const replayed = await service.performDirect("budget_plan", bucketInput, {
+        principal: agent(userId),
+        requestId: "bucket-action-transaction-replay",
+      });
+      expect(applied).toMatchObject({ status: "applied" });
+      expect(replayed).toEqual(applied);
+
+      const directInput = {
+        description: "Direct idempotent mutation",
+        idempotencyKey: `bucket-direct-${crypto.randomUUID()}`,
+        name: `Direct bucket ${crypto.randomUUID()}`,
+      };
+      const directContext = {
+        principal: user(userId),
+        requestId: "bucket-direct-transaction",
+      };
+      const created = await finances.mutateFinanceBudgetBucket(directInput, directContext);
+      await expect(finances.mutateFinanceBudgetBucket(directInput, directContext)).resolves.toEqual(
+        created,
+      );
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          { ...directInput, idempotencyKey: `bucket-direct-duplicate-${crypto.randomUUID()}` },
+          directContext,
+        ),
+      ).rejects.toThrow("already exists");
+      const failedAgentInput = {
+        description: "Duplicate through an agent action",
+        idempotencyKey: `bucket-agent-duplicate-${crypto.randomUUID()}`,
+        name: directInput.name,
+        operation: "create" as const,
+      };
+      await expect(
+        service.performDirect("budget_plan", failedAgentInput, {
+          principal: agent(userId),
+          requestId: "bucket-agent-duplicate-first",
+        }),
+      ).rejects.toThrow("already exists");
+      await expect(
+        service.performDirect("budget_plan", failedAgentInput, {
+          principal: agent(userId),
+          requestId: "bucket-agent-duplicate-retry",
+        }),
+      ).rejects.toThrow("already exists");
+      await expect(
+        contentionDatabase.db
+          .select({ id: financeMutationRecords.id })
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.idempotencyKey, failedAgentInput.idempotencyKey)),
+      ).resolves.toEqual([]);
+      const bucket = created.buckets.find((item) => item.name === directInput.name);
+      if (!bucket) throw new Error("The direct budget bucket was not created.");
+      const [category] = await contentionDatabase.db
+        .insert(financeCategories)
+        .values({
+          group: "Custom",
+          name: `Direct bucket category ${crypto.randomUUID()}`,
+          slug: `direct-bucket-category-${crypto.randomUUID()}`,
+          userId,
+        })
+        .returning();
+      if (!category) throw new Error("The direct budget category was not created.");
+      const sourceInput = {
+        description: null,
+        idempotencyKey: `bucket-source-${crypto.randomUUID()}`,
+        name: `Source bucket ${crypto.randomUUID()}`,
+      };
+      const sourceCreated = await finances.mutateFinanceBudgetBucket(sourceInput, directContext);
+      const sourceBucket = sourceCreated.buckets.find((item) => item.name === sourceInput.name);
+      if (!sourceBucket) throw new Error("The source budget bucket was not created.");
+      const sourceAssigned = await finances.mutateFinanceBudgetBucket(
+        {
+          bucketId: sourceBucket.id,
+          categoryIds: [category.id],
+          expectedVersion: sourceBucket.version,
+          idempotencyKey: `bucket-source-assign-${crypto.randomUUID()}`,
+        },
+        directContext,
+      );
+      const assignedSourceBucket = sourceAssigned.buckets.find(
+        (item) => item.id === sourceBucket.id,
+      );
+      if (!assignedSourceBucket) throw new Error("The source budget bucket was not updated.");
+      const [unmappedCategory] = await contentionDatabase.db
+        .insert(financeCategories)
+        .values({
+          group: "Custom",
+          name: `Unmapped direct category ${crypto.randomUUID()}`,
+          slug: `unmapped-direct-category-${crypto.randomUUID()}`,
+          userId,
+        })
+        .returning();
+      const [unspentCategory] = await contentionDatabase.db
+        .insert(financeCategories)
+        .values({
+          group: "Custom",
+          name: `Unspent direct category ${crypto.randomUUID()}`,
+          slug: `unspent-direct-category-${crypto.randomUUID()}`,
+          userId,
+        })
+        .returning();
+      const [account] = await contentionDatabase.db
+        .insert(financeAccounts)
+        .values({
+          institution: "Direct bucket bank",
+          name: "Direct bucket checking",
+          provider: "manual",
+          status: "manual",
+          userId,
+        })
+        .returning();
+      if (!unmappedCategory || !unspentCategory || !account)
+        throw new Error("The direct bucket rollup fixtures were not created.");
+      await contentionDatabase.db.insert(financeBudgets).values([
+        {
+          bucketId: bucket.id,
+          category: category.name.toLowerCase(),
+          limit: 10_000,
+          month: "2026-08",
+          userId,
+        },
+        {
+          category: category.name,
+          limit: 3_000,
+          month: "2026-08",
+          userId,
+        },
+        {
+          category: "Unmapped direct budget",
+          limit: 2_000,
+          month: "2026-08",
+          userId,
+        },
+      ]);
+      await contentionDatabase.db.insert(financeTransactions).values([
+        {
+          accountId: account.id,
+          amount: 2_500,
+          categoryId: category.id,
+          direction: "expense",
+          merchant: "Mapped direct expense",
+          transactionDate: "2026-08-17",
+          userId,
+        },
+        {
+          accountId: account.id,
+          amount: 1_000,
+          categoryId: unmappedCategory.id,
+          direction: "expense",
+          merchant: "Unmapped direct expense",
+          transactionDate: "2026-08-17",
+          userId,
+        },
+      ]);
+      const updateInput = {
+        bucketId: bucket.id,
+        categoryIds: [category.id, unspentCategory.id],
+        description: "Direct idempotent update",
+        expectedVersion: bucket.version,
+        idempotencyKey: `bucket-direct-update-${crypto.randomUUID()}`,
+      };
+      const updated = await finances.mutateFinanceBudgetBucket(updateInput, directContext);
+      await expect(finances.mutateFinanceBudgetBucket(updateInput, directContext)).resolves.toEqual(
+        updated,
+      );
+      const updatedBucket = updated.buckets.find((item) => item.id === bucket.id);
+      if (!updatedBucket) throw new Error("The direct budget bucket was not updated.");
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          {
+            bucketId: assignedSourceBucket.id,
+            description: "Stale source update",
+            expectedVersion: assignedSourceBucket.version,
+            idempotencyKey: `bucket-source-stale-${crypto.randomUUID()}`,
+          },
+          directContext,
+        ),
+      ).rejects.toThrow("changed");
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          {
+            bucketId: updatedBucket.id,
+            expectedVersion: updatedBucket.version,
+            idempotencyKey: `bucket-direct-duplicate-rename-${crypto.randomUUID()}`,
+            name: sourceInput.name,
+          },
+          directContext,
+        ),
+      ).rejects.toThrow("already exists");
+      expect(updated.rollups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ bucketId: bucket.id, budgeted: 100, spent: 25 }),
+          expect.objectContaining({ bucketId: null, budgeted: 50 }),
+        ]),
+      );
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          {
+            bucketId: crypto.randomUUID(),
+            expectedVersion: 1,
+            idempotencyKey: `bucket-direct-missing-${crypto.randomUUID()}`,
+          },
+          directContext,
+        ),
+      ).rejects.toThrow("not found");
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          {
+            bucketId: updatedBucket.id,
+            expectedVersion: bucket.version,
+            idempotencyKey: `bucket-direct-stale-${crypto.randomUUID()}`,
+          },
+          directContext,
+        ),
+      ).rejects.toThrow("changed");
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          {
+            bucketId: updatedBucket.id,
+            categoryIds: [crypto.randomUUID()],
+            expectedVersion: updatedBucket.version,
+            idempotencyKey: `bucket-direct-foreign-category-${crypto.randomUUID()}`,
+          },
+          directContext,
+        ),
+      ).rejects.toThrow("belong to you");
+      const cleared = await finances.mutateFinanceBudgetBucket(
+        {
+          bucketId: updatedBucket.id,
+          categoryIds: [],
+          expectedVersion: updatedBucket.version,
+          idempotencyKey: `bucket-direct-clear-${crypto.randomUUID()}`,
+        },
+        directContext,
+      );
+      expect(cleared.buckets).toEqual(
+        expect.arrayContaining([expect.objectContaining({ categories: [], id: updatedBucket.id })]),
+      );
+      const clearedBucket = cleared.buckets.find((item) => item.id === updatedBucket.id);
+      if (!clearedBucket) throw new Error("The cleared budget bucket was not returned.");
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          {
+            bucketId: updatedBucket.id,
+            categoryIds: [category.id],
+            expectedVersion: clearedBucket.version,
+            idempotencyKey: `bucket-direct-reassign-${crypto.randomUUID()}`,
+          },
+          directContext,
+        ),
+      ).resolves.toMatchObject({
+        buckets: expect.arrayContaining([
+          expect.objectContaining({ categories: [category.id], id: updatedBucket.id }),
+        ]),
+      });
+
+      const [emptyUser] = await contentionDatabase.db
+        .insert(users)
+        .values({
+          displayName: "Empty bucket owner",
+          email: `empty-bucket-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        })
+        .returning();
+      if (!emptyUser) throw new Error("The empty bucket owner was not created.");
+      await expect(finances.listFinanceBudgetBuckets(emptyUser.id)).resolves.toEqual({
+        taxonomy: null,
+      });
+    } finally {
+      await contentionDatabase.db
+        .insert(financeAutomationSettings)
+        .values({ reviewBypassEnabled: false, userId })
+        .onConflictDoUpdate({
+          set: { reviewBypassEnabled: false, updatedAt: now },
+          target: financeAutomationSettings.userId,
+        });
+      await contentionDatabase.close();
+    }
+  }, 15_000);
 
   it("supersedes a single-category budget review with a complete plan for the same month", async () => {
     const [category] = await database.db

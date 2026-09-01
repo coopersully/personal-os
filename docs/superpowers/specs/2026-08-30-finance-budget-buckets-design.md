@@ -27,8 +27,8 @@ Bucket mutations use a transaction-scoped advisory lock per user/taxonomy,
 optimistic `expectedVersion`, and append-only redacted audit records. Categories
 may be deleted only after membership is removed (restricting the FK); archived
 buckets remain readable for historical rows. A taxonomy update atomically
-replaces membership and snapshots the selected bucket on current/future budget
-rows only when explicitly requested by the caller.
+replaces membership rows. Budget rows snapshot a bucket only when that budget is
+created with an explicit `bucketId`; changing membership does not rewrite budgets.
 
 ## Surfaces and verification
 

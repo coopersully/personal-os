@@ -178,7 +178,6 @@ describe("Finance MCP workflows", () => {
       description: null,
       idempotencyKey: "bucket-create",
       name: "Care",
-      taxonomyId: undefined,
     });
     expect(api.updateFinanceBudgetBucket).toHaveBeenCalledWith(id, {
       categoryIds: [],
@@ -188,6 +187,36 @@ describe("Finance MCP workflows", () => {
       name: "Care",
       position: undefined,
     });
+  });
+
+  it("rejects create-only membership and ordering fields before calling the API", async () => {
+    const api = {
+      createFinanceBudgetBucket: vi.fn(),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-bucket-create-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: {
+        categoryIds: [id],
+        idempotencyKey: "bucket-create-membership",
+        name: "Care",
+        operation: "create",
+        position: 1,
+      },
+      name: "manage_finance_budget_bucket",
+    });
+
+    expect(response.isError).toBe(true);
+    expect(response.content).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining("create it first, then update it"),
+      }),
+    ]);
+    expect(api.createFinanceBudgetBucket).not.toHaveBeenCalled();
   });
 
   it("projects an unresolved receipt review as a person-directed question", async () => {

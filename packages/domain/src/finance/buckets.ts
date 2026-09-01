@@ -55,7 +55,6 @@ export const createFinanceBudgetBucketInputSchema = financeMutationMetaSchema.an
   z.object({
     description: bucketDescriptionSchema.default(null),
     name: bucketNameSchema,
-    taxonomyId: idSchema.optional(),
   }),
 );
 export type CreateFinanceBudgetBucketInput = z.infer<typeof createFinanceBudgetBucketInputSchema>;
@@ -78,7 +77,6 @@ export const manageFinanceBudgetBucketInputSchema = z.discriminatedUnion("operat
     description: bucketDescriptionSchema.default(null),
     name: bucketNameSchema,
     operation: z.literal("create"),
-    taxonomyId: idSchema.optional(),
   }),
   z.object({
     ...financeMutationMetaSchema.shape,

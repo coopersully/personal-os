@@ -1,5 +1,8 @@
 # Finance budget buckets implementation plan
 
+Before changing the Finance API, typed client, agent-action path, or MCP tools, read
+`docs/engineering/external-boundary-reliability.md` and record any boundary evidence gaps.
+
 1. Add canonical bucket/taxonomy contracts and mutation validation in
    `packages/domain/src/finance/buckets.ts`, export them from Finance, and
    extend the category-budget input with optional `bucketId`.
@@ -14,7 +17,8 @@
 5. Add an accessible bucket-management block to the existing Finance Budgets
    page using shared primitives, with loading/error/empty states and cache
    invalidation.
-6. Add domain, database/API, client/MCP, and Testing Library coverage. Run
-   focused tests, `pnpm verify`, `git diff --check`, then commit, push, and open
+6. Add domain, database/API, client/MCP, and Testing Library coverage. Complete the external-boundary
+   reliability checks, then run focused tests, `pnpm verify`, and `git diff --check` before committing,
+   pushing, and opening
    a draft dependent PR with base `cooper/finance-account-semantics`; do not
    merge.

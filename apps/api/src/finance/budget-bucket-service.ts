@@ -145,9 +145,9 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
       .select({ name: financeCategories.name })
       .from(financeCategories)
       .where(inArray(financeCategories.id, [...mapped]));
-    const mappedNames = new Set(mappedCategories.map((category) => category.name));
+    const mappedNames = new Set(mappedCategories.map((category) => category.name.toLowerCase()));
     const unmappedBudget = budgets
-      .filter((budget) => !mappedNames.has(budget.category))
+      .filter((budget) => !mappedNames.has(budget.category.toLowerCase()))
       .reduce((sum, budget) => sum + budget.limit, 0);
     const unmappedSpent = transactions
       .filter(
@@ -223,13 +223,16 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
             throw new AppError("not_found", "Every bucket category must belong to you.");
           await tx
             .delete(financeBudgetBucketCategories)
-            .where(
-              and(
-                eq(financeBudgetBucketCategories.taxonomyId, taxonomy.id),
-                inArray(financeBudgetBucketCategories.categoryId, input.categoryIds),
-              ),
-            );
-          if (input.categoryIds.length)
+            .where(eq(financeBudgetBucketCategories.bucketId, before.id));
+          if (input.categoryIds.length) {
+            await tx
+              .delete(financeBudgetBucketCategories)
+              .where(
+                and(
+                  eq(financeBudgetBucketCategories.taxonomyId, taxonomy.id),
+                  inArray(financeBudgetBucketCategories.categoryId, input.categoryIds),
+                ),
+              );
             await tx.insert(financeBudgetBucketCategories).values(
               input.categoryIds.map((categoryId) => ({
                 categoryId,
@@ -238,6 +241,7 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
                 userId: context.principal.userId,
               })),
             );
+          }
         }
         const [updated] = await tx
           .update(financeBudgetBuckets)

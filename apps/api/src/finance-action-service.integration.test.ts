@@ -3690,7 +3690,7 @@ describe.sequential("finance action service", () => {
       await contentionDatabase.db.insert(financeBudgets).values([
         {
           bucketId: bucket.id,
-          category: category.name,
+          category: category.name.toLowerCase(),
           limit: 10_000,
           month: "2026-08",
           userId,
@@ -3735,6 +3735,12 @@ describe.sequential("finance action service", () => {
       );
       const updatedBucket = updated.buckets.find((item) => item.id === bucket.id);
       if (!updatedBucket) throw new Error("The direct budget bucket was not updated.");
+      expect(updated.rollups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ bucketId: bucket.id, budgeted: 100, spent: 25 }),
+          expect.objectContaining({ bucketId: null, budgeted: 20 }),
+        ]),
+      );
       await expect(
         finances.mutateFinanceBudgetBucket(
           {
@@ -3766,17 +3772,33 @@ describe.sequential("finance action service", () => {
           directContext,
         ),
       ).rejects.toThrow("belong to you");
+      const cleared = await finances.mutateFinanceBudgetBucket(
+        {
+          bucketId: updatedBucket.id,
+          categoryIds: [],
+          expectedVersion: updatedBucket.version,
+          idempotencyKey: `bucket-direct-clear-${crypto.randomUUID()}`,
+        },
+        directContext,
+      );
+      expect(cleared.buckets).toEqual(
+        expect.arrayContaining([expect.objectContaining({ categories: [], id: updatedBucket.id })]),
+      );
       await expect(
         finances.mutateFinanceBudgetBucket(
           {
             bucketId: updatedBucket.id,
-            categoryIds: [],
-            expectedVersion: updatedBucket.version,
-            idempotencyKey: `bucket-direct-clear-${crypto.randomUUID()}`,
+            categoryIds: [category.id],
+            expectedVersion: updatedBucket.version + 1,
+            idempotencyKey: `bucket-direct-reassign-${crypto.randomUUID()}`,
           },
           directContext,
         ),
-      ).resolves.toMatchObject({ buckets: expect.any(Array) });
+      ).resolves.toMatchObject({
+        buckets: expect.arrayContaining([
+          expect.objectContaining({ categories: [category.id], id: updatedBucket.id }),
+        ]),
+      });
 
       const [emptyUser] = await contentionDatabase.db
         .insert(users)

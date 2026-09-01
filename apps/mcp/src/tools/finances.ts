@@ -304,23 +304,26 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         name: z.string().min(1).max(80),
         operation: z.enum(["create", "update"]),
         position: z.number().int().nonnegative().optional(),
-        taxonomyId: id.optional(),
       },
       title: "Manage Finance budget bucket",
     },
     async (input) => {
-      if (input.operation === "create")
+      if (input.operation === "create") {
+        if (input.categoryIds !== undefined || input.position !== undefined)
+          throw new Error(
+            "Creating a budget bucket does not accept categoryIds or position; create it first, then update it with the returned bucket version.",
+          );
         return financeApiResult(async () =>
           envelope(
             await api.createFinanceBudgetBucket({
               description: input.description ?? null,
               idempotencyKey: input.idempotencyKey,
               name: input.name,
-              taxonomyId: input.taxonomyId,
             }),
             "Finance budget bucket created.",
           ),
         );
+      }
       const bucketId = input.bucketId;
       const expectedVersion = input.expectedVersion;
       if (!bucketId || expectedVersion === undefined)

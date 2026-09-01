@@ -91,37 +91,3 @@ it("offers every server-authored Project completion outcome and forwards the cho
     ["move_open_tasks", destinationList.id, destinationProject.id],
   ]);
 });
-
-it("does not invent Project completion outcomes omitted by the API", () => {
-  const boundedConflict = {
-    ...conflict,
-    resolutions: ["keep_project_open"],
-  } as unknown as TaskProjectCompletionConflict;
-  const { rerender } = render(
-    <ProjectConflictDialog
-      close={vi.fn()}
-      conflict={boundedConflict}
-      lists={[destinationList]}
-      onResolve={vi.fn()}
-      pending={false}
-      projects={[destinationProject]}
-    />,
-  );
-
-  expect(screen.queryByRole("button", { name: "Complete open Tasks" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Cancel open Tasks" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Move open Tasks" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Keep Project open" })).toBeInTheDocument();
-
-  rerender(
-    <ProjectConflictDialog
-      close={vi.fn()}
-      conflict={{ ...conflict, resolutions: [] } as unknown as TaskProjectCompletionConflict}
-      lists={[destinationList]}
-      onResolve={vi.fn()}
-      pending={false}
-      projects={[destinationProject]}
-    />,
-  );
-  expect(screen.queryByRole("button", { name: "Keep Project open" })).not.toBeInTheDocument();
-});

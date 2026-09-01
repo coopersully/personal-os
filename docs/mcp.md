@@ -102,8 +102,8 @@ shows only “This result is available in chat.” It does not fall back to raw 
 financial values.
 
 The Finance API owns the typed values, evidence state, disclosures, and destination identity. The
-self-contained MCP Apps format that bounded contract, use the host theme and sizing lifecycle, and
-mediate an optional same-origin HTTPS destination through `ui/open-link`; they do not calculate
+self-contained MCP Apps format bounds that contract, uses the host theme and sizing lifecycle, and
+mediates an optional same-origin HTTPS destination through `ui/open-link`; MCP Apps do not calculate
 financial meaning or grant mutation authority.
 
 `personal-os://agenda/today` and `personal-os://brief/daily` remain readable compatibility

@@ -141,7 +141,10 @@ export function TaskDialog({
       setCurrentTask(movedTask);
       return api.updateTask(task.id, { ...fields, expectedRevision: movedTask.revision });
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: async (error) => {
+      toast.error(errorMessage(error));
+      await invalidateMaterial(queryClient);
+    },
     onSuccess: async (result) => {
       if (result) await finish(task ? "Task updated." : "Task created.");
     },
@@ -165,7 +168,10 @@ export function TaskDialog({
         expectedRevision: movedTask.revision,
       });
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: async (error) => {
+      toast.error(errorMessage(error));
+      await invalidateMaterial(queryClient);
+    },
     onSuccess: () => finish("Task moved and updated."),
   });
 
@@ -461,7 +467,18 @@ export function TaskDialog({
             </DialogHeader>
             {confirmMove.isError ? <InlineError error={confirmMove.error} /> : null}
             <DialogFooter>
-              <Button onClick={() => setPendingMove(null)} type="button" variant="outline">
+              <Button
+                onClick={() => {
+                  const persistedTask = currentTask ?? task;
+                  if (persistedTask) {
+                    setListId(persistedTask.listId);
+                    setProjectId(persistedTask.projectId ?? "");
+                  }
+                  setPendingMove(null);
+                }}
+                type="button"
+                variant="outline"
+              >
                 Keep current placement
               </Button>
               <Button disabled={confirmMove.isPending} onClick={() => confirmMove.mutate()}>

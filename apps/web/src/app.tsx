@@ -11,7 +11,6 @@ import type {
   PinterestWallpaperSettings,
   Reminder,
   Task,
-  TaskListQuery,
   Theme,
   User,
   WeatherCoordinates,
@@ -480,31 +479,6 @@ function workspaceDirection(
 }
 
 const ignorePreviewNavigation = () => undefined;
-
-const maximumTaskPagesPerSurface = 100;
-
-export async function loadAllTaskPages(
-  loadPage: (query: Partial<TaskListQuery>) => Promise<{
-    items: Task[];
-    nextCursor: string | null;
-  }>,
-  query: Partial<TaskListQuery>,
-): Promise<{ items: Task[]; nextCursor: null }> {
-  const items: Task[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-  for (let pageNumber = 0; pageNumber < maximumTaskPagesPerSurface; pageNumber += 1) {
-    const page = await loadPage({ ...query, limit: 100, ...(cursor ? { cursor } : {}) });
-    items.push(...page.items);
-    if (page.nextCursor === null) return { items, nextCursor: null };
-    if (seenCursors.has(page.nextCursor)) {
-      throw new Error("Task pagination returned a repeated cursor.");
-    }
-    seenCursors.add(page.nextCursor);
-    cursor = page.nextCursor;
-  }
-  throw new Error(`Task pagination exceeded ${maximumTaskPagesPerSurface} pages.`);
-}
 
 export function selectTodayTasks(
   tasks: Task[],
@@ -1726,7 +1700,7 @@ function WorkspaceSwitcher({
   });
   const taskInbox = useQuery({
     enabled: menuOpen,
-    queryFn: () => loadAllTaskPages(api.listTasks, { lifecycle: "open" }),
+    queryFn: () => api.listTasks({ lifecycle: "open", limit: 100 }),
     queryKey: ["tasks", "open", "all"],
     staleTime: workspaceIntentStaleTime,
   });
@@ -1751,7 +1725,9 @@ function WorkspaceSwitcher({
       "unread",
       "Inbox clear",
     ),
-    "/tasks": workspaceCountSummary(taskInbox.data?.items.length, "open", "All done", "open"),
+    "/tasks": taskInbox.data?.nextCursor
+      ? "99+ open"
+      : workspaceCountSummary(taskInbox.data?.items.length, "open", "All done", "open"),
     "/today": workspaceTodaySummary(currentWeather, user.homeLocation?.label),
   };
 

@@ -139,6 +139,7 @@ const event = {
   blockSourceEventId: null,
   blockMode: null,
   blocks: [],
+  conferenceStatus: null,
   conferenceUrl: null,
   title: "Focus block",
   notes: null,
@@ -2718,6 +2719,17 @@ describe("ilo web app", () => {
       next: null,
       now: [],
     });
+    const firstTaskPage = {
+      items: Array.from({ length: 100 }, (_, index) => ({
+        ...task,
+        id: `88888888-8888-4888-8888-${index.toString().padStart(12, "0")}`,
+      })),
+      nextCursor: "more-open-tasks",
+    };
+    mocks.listTasks.mockImplementation(async (query) => {
+      if (query.cursor) throw new Error("The workspace switcher must not load another Task page.");
+      return firstTaskPage;
+    });
     configureFinanceWorkspace();
     const view = setup("/goals");
     const browser = userEvent.setup();
@@ -2735,13 +2747,10 @@ describe("ilo web app", () => {
     expect(mocks.getFinanceBudgetPace).not.toHaveBeenCalled();
     expect(within(workspaceMenu).getByText("Weather · Set location")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("2 events today · 2 left")).toBeInTheDocument();
-    expect(within(workspaceMenu).getByText("1 open")).toBeInTheDocument();
+    expect(within(workspaceMenu).getByText("99+ open")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("1 unread")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("1 to review")).toBeInTheDocument();
-    expect(view.queryClient.getQueryData(["tasks", "open", "all"])).toEqual({
-      items: [task],
-      nextCursor: null,
-    });
+    expect(view.queryClient.getQueryData(["tasks", "open", "all"])).toEqual(firstTaskPage);
 
     fireEvent.pointerMove(
       within(workspaceMenu).getByRole("menuitem", { name: "Today at a Glance" }),
@@ -2987,6 +2996,7 @@ describe("ilo web app", () => {
         listId: id,
       }),
     );
+    expect(screen.getByText("1 completed task")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(filtered.location.value).toBe("/tasks"));
     expect(screen.getByText("Filters")).toBeInTheDocument();
@@ -3067,7 +3077,8 @@ describe("ilo web app", () => {
     });
     mocks.moveTask.mockResolvedValueOnce({ ...task, listId: secondId, revision: 4 });
     mocks.updateTask.mockRejectedValueOnce(new Error("Task content update failed after move"));
-    setup("/tasks");
+    const view = setup("/tasks");
+    const invalidateQueries = vi.spyOn(view.queryClient, "invalidateQueries");
     await screen.findByText("Draft brief");
     await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.selectOptions(screen.getByLabelText("List"), secondId);
@@ -3077,6 +3088,7 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Task content update failed after move",
     );
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["tasks"] }));
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(mocks.previewTaskMove).toHaveBeenCalledTimes(1);
@@ -3441,6 +3453,8 @@ describe("ilo web app", () => {
     await browser.click(await screen.findByRole("button", { name: "Keep current placement" }));
     expect(mocks.moveTask).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toHaveTextContent("Refine task");
+    expect(screen.getByLabelText("List")).toHaveValue(secondId);
+    expect(screen.getByLabelText("Project")).toHaveValue(thirdId);
     taskView.unmount();
 
     mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
@@ -5681,8 +5695,8 @@ describe("ilo web app", () => {
       recommendedTasks: [
         {
           capacity: "fits_remaining_time" as const,
-          task: suggestedTask,
-          urgency: "next" as const,
+          task,
+          urgency: "due_today" as const,
         },
       ],
       tasks: [overdueTask, task, scheduledTask, suggestedTask, futureTask],
@@ -5701,6 +5715,9 @@ describe("ilo web app", () => {
     expect(screen.getByText("Overdue tasks")).toBeInTheDocument();
     const todayTasks = screen.getByText("Today tasks").closest("section") as HTMLElement;
     expect(within(todayTasks).getByText("Draft brief")).toBeInTheDocument();
+    expect(
+      within(todayTasks).getByText("Due today · fits in the remaining planning window"),
+    ).toBeInTheDocument();
     expect(within(todayTasks).getByText("Reserved today")).toBeInTheDocument();
     expect(screen.queryByText("Suggested follow-up")).not.toBeInTheDocument();
     expect(screen.queryByText("Future task")).not.toBeInTheDocument();

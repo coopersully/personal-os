@@ -1,4 +1,4 @@
-import type { Task, TaskList, TaskProject, TaskSystemView } from "@personal-os/domain";
+import type { DailyBrief, Task, TaskList, TaskProject, TaskSystemView } from "@personal-os/domain";
 import { localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
 import { EmptyState } from "@personal-os/ui";
 import {
@@ -533,7 +533,9 @@ export function TasksPage({
     <div className="narrow-page flex flex-col gap-4">
       <TaskScopeHeader
         {...(scopeList ? { list: scopeList } : {})}
-        {...(archiveScope === null && !selectedView ? { openTaskCount: taskItems.length } : {})}
+        {...(archiveScope === null && !selectedView
+          ? { taskCount: taskItems.length, taskLifecycle: lifecycleFilter ?? "open" }
+          : {})}
         {...(selectedProject ? { project: selectedProject } : {})}
         scopeName={scopeName}
       />
@@ -595,14 +597,16 @@ export function TasksPage({
 
 function TaskScopeHeader({
   list,
-  openTaskCount,
   project,
   scopeName,
+  taskCount,
+  taskLifecycle,
 }: {
   list?: TaskList;
-  openTaskCount?: number;
   project?: TaskProject;
   scopeName: string;
+  taskCount?: number;
+  taskLifecycle?: "cancelled" | "completed" | "open";
 }) {
   const targetDate = project?.targetDate
     ? new Date(`${project.targetDate}T12:00:00.000Z`).toLocaleDateString("en-US", {
@@ -619,9 +623,9 @@ function TaskScopeHeader({
       ) : null}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-heading text-xl font-medium">{scopeName}</h1>
-        {openTaskCount !== undefined ? (
+        {taskCount !== undefined && taskLifecycle ? (
           <span className="text-xs text-muted-foreground">
-            {openTaskCount} open {openTaskCount === 1 ? "task" : "tasks"}
+            {taskCount} {taskLifecycle} {taskCount === 1 ? "task" : "tasks"}
           </span>
         ) : null}
       </div>
@@ -659,12 +663,14 @@ export function TaskRow({
   list,
   onEdit,
   project,
+  recommendation,
   task,
   timeZone,
 }: {
   list?: TaskList;
   onEdit: () => void;
   project?: TaskProject;
+  recommendation?: DailyBrief["recommendedTasks"][number];
   task: Task;
   timeZone: string;
 }) {
@@ -701,6 +707,9 @@ export function TaskRow({
           <TaskItemTitle>{task.title}</TaskItemTitle>
           {timing ? <TaskItemDue>{timing}</TaskItemDue> : null}
           {description ? <TaskItemDescription>{description}</TaskItemDescription> : null}
+          {recommendation ? (
+            <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
+          ) : null}
           {task.tags.length > 0 || task.priority !== "medium" ? (
             <TaskItemTags aria-label="Task tags" className="mt-1 pl-0">
               {task.priority !== "medium" ? (
@@ -1011,4 +1020,19 @@ export async function listAllTaskProjects() {
 function taskLifecycleLabel(task: Task) {
   if (task.deletedAt) return "Trash";
   return { cancelled: "Cancelled", completed: "Completed", open: "Open" }[task.lifecycle];
+}
+
+function recommendationCopy(recommendation: DailyBrief["recommendedTasks"][number]) {
+  const urgency = {
+    due_today: "Due today",
+    inbox: "Captured for later",
+    next: "Ready next",
+    overdue: "Overdue",
+  }[recommendation.urgency];
+  const capacity = {
+    does_not_fit: "does not fit in the remaining planning window",
+    fits_remaining_time: "fits in the remaining planning window",
+    needs_estimate: "needs an estimate before it can be planned",
+  }[recommendation.capacity];
+  return `${urgency} · ${capacity}`;
 }

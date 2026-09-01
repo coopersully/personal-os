@@ -344,6 +344,7 @@ const mocks = vi.hoisted(() => ({
   listPinterestPins: vi.fn(),
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
+  getFinancePlaybook: vi.fn(),
   getFinanceAutomationSettings: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
@@ -560,6 +561,10 @@ function defaults() {
     reviewCount: 0,
     spendingThisMonth: 0,
     transactions: [],
+  });
+  mocks.getFinancePlaybook.mockResolvedValue({
+    assessment: { blockers: [], nextActions: [], readiness: "on_track", uncertainty: [] },
+    playbook: { steps: [], version: "1.0.0" },
   });
   mocks.getFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
   mocks.updateFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });

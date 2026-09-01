@@ -48,6 +48,7 @@ import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
+import { createFinancePlaybookService } from "./finance-playbook-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -402,6 +403,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     providerItems: financeProviderItems,
   });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
+  const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
@@ -1159,6 +1161,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financeChallenges,
     financeMaintenance,
     financePeriodReviews,
+    financePlaybook,
     financeStatus,
     finances,
     mutationContext,

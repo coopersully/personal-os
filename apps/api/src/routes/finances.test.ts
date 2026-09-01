@@ -10,6 +10,67 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("does not serialize an absent playbook dependency and disables caching", async () => {
+    const app = new Hono<AppEnv>();
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: "playbook-route",
+      }),
+    });
+
+    const response = await app.request("/v1/finances/playbook");
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ error: "Finance playbook unavailable." });
+  });
+
+  it("returns a private playbook response when its service is registered", async () => {
+    const app = new Hono<AppEnv>();
+    const get = vi.fn(async () => ({ playbook: { version: "1.0.0" } }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financePlaybook: { get } as never,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: "playbook-route",
+      }),
+    });
+
+    const response = await app.request("/v1/finances/playbook");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ playbook: { version: "1.0.0" } });
+    expect(get).toHaveBeenCalledWith(id);
+  });
+
   it("parses account discovery filters and returns the structured account list", async () => {
     const app = new Hono<AppEnv>();
     const listFinanceAccounts = vi.fn(async () => ({

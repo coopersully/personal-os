@@ -18,13 +18,14 @@ import type {
 import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
+import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 
 type MutationContext = {
   principal: { actorId: string; actorType: "agent" | "user"; userId: string };
   requestId: string;
 };
-type FinanceExecutor = Pick<Database, "delete" | "insert" | "select" | "update"> &
-  Pick<Database, "execute">;
+type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type FinanceExecutor = Pick<Database, "delete" | "execute" | "insert" | "select" | "update">;
 
 function monthNow(now: () => Date) {
   return now().toISOString().slice(0, 7);
@@ -71,10 +72,11 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
   async function list(
     userId: string,
     query: FinanceBudgetBucketQuery = {},
+    executor: FinanceExecutor = db,
   ): Promise<FinanceBudgetBucketList> {
-    const taxonomy = await taxonomyForUser(userId);
+    const taxonomy = await taxonomyForUser(userId, executor);
     if (!taxonomy) return { taxonomy: null };
-    const buckets = await db
+    const buckets = await executor
       .select()
       .from(financeBudgetBuckets)
       .where(
@@ -84,16 +86,16 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
         ),
       )
       .orderBy(asc(financeBudgetBuckets.position), asc(financeBudgetBuckets.name));
-    const memberships = await db
+    const memberships = await executor
       .select()
       .from(financeBudgetBucketCategories)
       .where(eq(financeBudgetBucketCategories.taxonomyId, taxonomy.id));
     const month = query.month ?? monthNow(now);
-    const budgets = await db
+    const budgets = await executor
       .select()
       .from(financeBudgets)
       .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)));
-    const transactions = await db
+    const transactions = await executor
       .select()
       .from(financeTransactions)
       .where(
@@ -139,7 +141,7 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
       };
     });
     const mapped = new Set(memberships.map((membership) => membership.categoryId));
-    const mappedCategories = await db
+    const mappedCategories = await executor
       .select({ name: financeCategories.name })
       .from(financeCategories)
       .where(inArray(financeCategories.id, [...mapped]));
@@ -186,8 +188,9 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
   async function mutate(
     input: CreateFinanceBudgetBucketInput | UpdateFinanceBudgetBucketInput,
     context: MutationContext,
+    executor?: FinanceTransaction,
   ): Promise<FinanceBudgetBucketTaxonomy> {
-    await db.transaction(async (tx) => {
+    const write = async (tx: FinanceExecutor) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-buckets:${context.principal.userId}`}, 0))`,
       );
@@ -247,8 +250,10 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
           })
           .where(eq(financeBudgetBuckets.id, before.id))
           .returning();
+        /* v8 ignore start -- the locked row still exists in this transaction, so UPDATE ... RETURNING yields it or throws. */
         if (!updated)
           throw new AppError("internal_error", "The budget bucket could not be updated.");
+        /* v8 ignore stop */
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.budget_bucket_updated",
@@ -285,11 +290,34 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
           }),
         );
       }
-    });
-    const result = await list(context.principal.userId);
-    if (!result.taxonomy)
-      throw new AppError("internal_error", "The budget taxonomy could not be loaded.");
-    return result.taxonomy;
+    };
+    const mutationContext: FinanceMutationContext = {
+      actorId: context.principal.actorId,
+      actorType: context.principal.actorType,
+      bypassEnabled: context.principal.actorType === "agent",
+      canMutate: true,
+      canSelfApprove: context.principal.actorType === "agent",
+      requestId: context.requestId,
+      userId: context.principal.userId,
+    };
+    return executeFinanceIdempotently(
+      db,
+      mutationContext,
+      {
+        idempotencyKey: input.idempotencyKey,
+        operation:
+          "bucketId" in input ? "finance.budget_bucket.update" : "finance.budget_bucket.create",
+        payload: input,
+      },
+      async (tx) => {
+        await write(tx);
+        const result = await list(context.principal.userId, {}, tx);
+        if (!result.taxonomy)
+          throw new AppError("internal_error", "The budget taxonomy could not be loaded.");
+        return result.taxonomy;
+      },
+      executor,
+    );
   }
 
   return { list, mutate };

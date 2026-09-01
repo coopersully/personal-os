@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
+import { financePresentationSchema } from "./presentation.js";
 
 export const financeMoneySchema = z.number().finite().min(-100_000_000).max(100_000_000);
 export const financePositiveMoneySchema = financeMoneySchema.nonnegative();
@@ -105,6 +106,7 @@ export const financeToolResultSchema = z.object({
   diagnostics: financeDiagnosticsSchema.optional(),
   nextAction: financeNextActionSchema.optional(),
   outcome: financeOutcomeSchema,
+  presentation: financePresentationSchema.optional(),
   remainingWork: financeRemainingWorkSchema,
   schemaVersion: z.literal(1),
 });

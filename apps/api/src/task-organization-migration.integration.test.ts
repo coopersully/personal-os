@@ -8,6 +8,13 @@ const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
 const migrationPath = resolve(migrationsFolder, "0055_task_organization.sql");
 const reconciliationMigration = "0059_task_organization_reconciliation";
 const finalReconciliationMigration = "0073_task_organization_reconciliation";
+const migrationsAfterTaskOrganization = [
+  "0072_finance_account_semantics",
+  "0072_texting",
+  "0073_texting_review_hardening",
+  "0073_finance_account_semantics_recovery",
+  "0074_finance_budget_buckets",
+];
 
 function databaseUri(connectionUri: string, databaseName: string): string {
   const uri = new URL(connectionUri);
@@ -61,6 +68,7 @@ describe.sequential("Task organization migration", () => {
       "0071_calendar_event_links",
       "0072_finance_parallel_migration_reconciliation",
       finalReconciliationMigration,
+      ...migrationsAfterTaskOrganization,
     ]);
     temporaryMigrationFolders.push(folder);
     return folder;
@@ -333,7 +341,12 @@ describe.sequential("Task organization migration", () => {
     const financeHistory = await migrationsWithout(
       migrationsFolder,
       "ilo-task-organization-parallel-0055-",
-      ["0055_task_organization", reconciliationMigration, finalReconciliationMigration],
+      [
+        "0055_task_organization",
+        reconciliationMigration,
+        finalReconciliationMigration,
+        ...migrationsAfterTaskOrganization,
+      ],
     );
     temporaryMigrationFolders.push(financeHistory);
     await migrateDatabase(database.db, financeHistory);
@@ -413,6 +426,7 @@ describe.sequential("Task organization migration", () => {
         "0071_calendar_event_links",
         "0072_finance_parallel_migration_reconciliation",
         finalReconciliationMigration,
+        ...migrationsAfterTaskOrganization,
       ],
     );
     temporaryMigrationFolders.push(taskHistory);

@@ -5790,6 +5790,8 @@ describe.sequential("ilo API", () => {
               balances: { current: 50 },
               name: "Plaid checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
           ],
         });

@@ -6,6 +6,7 @@ import {
   financeAgentActionReviews,
   financeAlerts,
   financeAutomationSettings,
+  financeBudgetBuckets,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
@@ -43,6 +44,7 @@ import {
   financeReimbursementQuestionAnswerSchema,
   idSchema,
   type MaterialSourceReference,
+  manageFinanceBudgetBucketInputSchema,
   mergeFinanceMerchantsInputSchema,
   reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
@@ -238,7 +240,13 @@ export function semanticTargetKeys(
       // A one-category budget changes the same monthly capacity and replacement
       // set as a complete plan. Keeping one key prevents cross-variant reviews
       // from being approved against stale budget-month state.
-      return [`budget-month:${String(input.month)}`];
+      return [
+        "month" in input
+          ? `budget-month:${String(input.month)}`
+          : "bucketId" in input
+            ? `budget-bucket:${String(input.bucketId)}`
+            : `finance-budget-buckets:${String(input.userId ?? "")}`,
+      ];
     case "categorization":
       return ids(
         (input.decisions as Array<Record<string, unknown>> | undefined)?.map(
@@ -334,6 +342,27 @@ const profileValidationAnswers: Record<string, ExpectedAnswer> = {
   }),
   role: expectedAnswer("role", "string", { example: "Up to 160 characters", nullable: true }),
 };
+
+const bucketValidationAnswers: Record<string, ExpectedAnswer> = {
+  bucketId: expectedAnswer("bucketId", "string"),
+  categoryIds: expectedAnswer("categoryIds", "string_array"),
+  description: expectedAnswer("description", "string", { nullable: true }),
+  expectedVersion: expectedAnswer("expectedVersion", "number"),
+  idempotencyKey: expectedAnswer("idempotencyKey", "string"),
+  name: expectedAnswer("name", "string"),
+  position: expectedAnswer("position", "number"),
+};
+
+function bucketValidationAnswerFields(
+  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey> }>,
+): ExpectedAnswer[] {
+  const fields = new Set(
+    issues
+      .map((issue) => issue.path[0])
+      .filter((field): field is string => typeof field === "string" && field !== "operation"),
+  );
+  return [...fields].map((field) => bucketValidationAnswers[field] as ExpectedAnswer);
+}
 
 function profileValidationAnswer(input: Record<string, unknown>): ExpectedAnswer {
   const parsed = updateFinanceProfileInputSchema.safeParse(input);
@@ -484,7 +513,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           ? input.rationale
           : `Requested ${actionKind.replaceAll("_", " ")} change.`,
       safeChanges,
-      semanticTargetKeys: semanticTargetKeys(actionKind, input),
+      semanticTargetKeys: semanticTargetKeys(
+        actionKind,
+        actionKind === "budget_plan" ? { ...input, userId } : input,
+      ),
       // Public review projections are capped by the domain contract; the
       // complete private input remains available for transactional revalidation.
       sourceRefs: sourceRefs.slice(0, 100),
@@ -548,6 +580,59 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "budget_plan": {
+        const parsedBucketInput = manageFinanceBudgetBucketInputSchema.safeParse(rawInput);
+        const bucketInput = parsedBucketInput.success ? parsedBucketInput.data : null;
+        const invalidBucketFields = parsedBucketInput.success
+          ? []
+          : bucketValidationAnswerFields(parsedBucketInput.error.issues);
+        if (!bucketInput && rawInput.operation === "update")
+          return missing(
+            rawInput.expectedVersion === undefined
+              ? "Provide the budget bucket version before updating it."
+              : "Provide a complete budget bucket update.",
+            rawInput.expectedVersion === undefined
+              ? [bucketValidationAnswers.bucketId, bucketValidationAnswers.expectedVersion].filter(
+                  (field): field is ExpectedAnswer => field !== undefined,
+                )
+              : invalidBucketFields,
+          );
+        if (!bucketInput && rawInput.operation === "create")
+          return missing("Provide a complete budget bucket to create.", invalidBucketFields);
+        if (bucketInput) {
+          const existing =
+            bucketInput.operation === "update"
+              ? await lockRead(
+                  executor
+                    .select()
+                    .from(financeBudgetBuckets)
+                    .where(
+                      and(
+                        eq(financeBudgetBuckets.id, String(bucketInput.bucketId)),
+                        eq(financeBudgetBuckets.userId, userId),
+                      ),
+                    )
+                    .limit(1),
+                )
+              : [];
+          const row = existing[0];
+          if (bucketInput.operation === "update" && !row)
+            return missing("The budget bucket was not found.", [
+              expectedAnswer("bucketId", "string"),
+              expectedAnswer("expectedVersion", "number"),
+            ]);
+          return prepared(
+            bucketInput,
+            row?.updatedAt.toISOString() ?? "absent",
+            [
+              {
+                entityId: row?.id ?? null,
+                entityType: "finance_budget_bucket",
+                summary: `${bucketInput.operation === "create" ? "Create" : "Update"} budget bucket.`,
+              },
+            ],
+            row ? [localSource(row.id, row.updatedAt.toISOString())] : [],
+          );
+        }
         const plan = parse<Record<string, unknown>>(setFinanceBudgetPlanInputSchema);
         if (plan) {
           const allocations = plan.allocations as Array<{ categoryId: string; limit: number }>;
@@ -2412,6 +2497,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           executor as never,
         );
       case "budget_plan": {
+        if (
+          "operation" in input &&
+          (input.operation === "create" || input.operation === "update")
+        ) {
+          return invoke(
+            finances.mutateFinanceBudgetBucket,
+            input as never,
+            privilegedContext as never,
+            executor as never,
+          );
+        }
         // `payAccountId` is a recovery-only preparation override. It keeps a
         // corrected owned account in the private revision snapshot without
         // widening the public budget-plan writer contract or result.
@@ -2547,7 +2643,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     for (const key of [...prepared.semanticTargetKeys].sort()) {
       await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
     }
-    if (prepared.actionKind === "budget_plan") {
+    if (prepared.actionKind === "budget_plan" && "month" in prepared.input) {
       await executor.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${userId}:${String(prepared.input.month)}`}, 0))`,
       );

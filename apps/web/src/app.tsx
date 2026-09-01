@@ -332,6 +332,8 @@ import {
   TasksTopbarControls,
 } from "./features/tasks/page.js";
 import { TaskDialog } from "./features/tasks/task-dialog.js";
+import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
+import { TextingSettings } from "./features/texting/page.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
@@ -4660,6 +4662,7 @@ type SettingsSectionId =
   | "profile"
   | "sessions"
   | "tasks"
+  | "texting"
   | "wallpaper"
   | "workspace-access";
 
@@ -4700,6 +4703,7 @@ const settingsNavigation: Array<{
     items: [
       { icon: PlugIcon, id: "agent-connections", label: "Connected agents" },
       { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access" },
+      { ...textingSettingsNavigationItem, id: "texting" },
     ],
   },
 ];
@@ -4846,6 +4850,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         {section === "profile" ? <ProfileSettings user={user} /> : null}
         {section === "invitations" ? <InvitationsSettings /> : null}
         {section === "sessions" ? <SessionsSettings /> : null}
+        {section === "texting" ? <TextingSettings /> : null}
         {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
       </section>
     </div>

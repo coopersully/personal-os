@@ -280,6 +280,17 @@ describe("workspace maintenance", () => {
     ).toMatchObject({ providerItems: [] });
   });
 
+  it("accepts Finance status wealth from an older API without other assets", () => {
+    expect(
+      financeStatusDetailsSchema.shape.wealth.safeParse({
+        cash: null,
+        debt: null,
+        investments: null,
+        netWorth: null,
+      }).success,
+    ).toBe(true);
+  });
+
   it("reports a Finance health step that did not run", () => {
     expect(
       financeMaintenanceResultSchema.parse({
@@ -576,11 +587,17 @@ describe("domain schemas", () => {
       createdAt: start,
       currencyCode: "USD",
       id,
+      includeInPlanning: true,
       institution: "Example Bank",
       kind: "cash",
+      kindSource: "provider",
       lastSyncedAt: null,
       name: "Checking",
+      ownershipShare: null,
+      ownershipType: "unknown",
       provider: "plaid",
+      providerSubtype: "checking",
+      providerType: "depository",
       status: "connected",
       synchronization: {
         failureCode: null,
@@ -723,6 +740,7 @@ describe("domain schemas", () => {
       "reminders",
       "settings",
       "tasks",
+      "texting",
     ]);
     expect(agentMutationPolicies).toEqual([
       "read_only",

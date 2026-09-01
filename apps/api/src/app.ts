@@ -3,6 +3,7 @@ import {
   createGoogleConnector,
   createICloudConnector,
   createPlaidConnector,
+  createTwilioConnector,
   createXConnector,
 } from "@personal-os/connectors";
 import {
@@ -47,6 +48,7 @@ import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
+import { createFinancePlaybookService } from "./finance-playbook-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -58,6 +60,7 @@ import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
+import { readBoundedRequestBody } from "./request-body.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
@@ -74,9 +77,11 @@ import {
 import { registerTaskListRoutes } from "./routes/task-lists.js";
 import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
+import { registerTextingRoutes } from "./routes/texting.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
+import { createTextingService } from "./texting-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -153,28 +158,6 @@ const calendarNotificationHeadersSchema = z.object({
 });
 const GMAIL_PUSH_BODY_LIMIT_BYTES = 32_768;
 
-async function readBoundedRequestBody(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder();
-  let size = 0;
-  let value = "";
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      value += decoder.decode(chunk.value, { stream: true });
-    }
-    return value + decoder.decode();
-  } finally {
-    reader.releaseLock();
-  }
-}
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
   code_challenge: z.string().min(43).max(128),
@@ -210,6 +193,14 @@ const agentDomainSupport = {
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
+  const textingConfig = dependencies.config.texting ?? {
+    accountSid: "",
+    authToken: "",
+    enabled: false,
+    messagingServiceSid: "",
+    senderPhoneNumber: "",
+    verifyServiceSid: "",
+  };
   const observeRejectedNotification = (
     requestId: string,
     status: number,
@@ -420,10 +411,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
+    searchReceiptCandidates: mail.searchReceiptCandidates,
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
+  const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
@@ -523,6 +516,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     status: financeStatus,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
+  const twilio =
+    dependencies.twilio ??
+    (textingConfig.accountSid && textingConfig.authToken
+      ? createTwilioConnector({
+          accountSid: textingConfig.accountSid,
+          authToken: textingConfig.authToken,
+          messagingServiceSid: textingConfig.messagingServiceSid,
+          verifyServiceSid: textingConfig.verifyServiceSid,
+        })
+      : undefined);
+  const texting = createTextingService({
+    apiBaseUrl: dependencies.config.apiBaseUrl,
+    db: dependencies.db,
+    enabled: textingConfig.enabled,
+    encryptionKey: dependencies.config.encryptionKey,
+    senderPhoneNumber: textingConfig.senderPhoneNumber,
+    ...(twilio ? { twilio } : {}),
+    now,
+  });
 
   app.use("*", async (context, next) => {
     const requestId = context.req.header("x-request-id") ?? randomUUID();
@@ -889,6 +901,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/task-projects", authenticate);
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
+  app.use("/v1/texting/*", authenticate);
+  app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
   app.use("/v1/calendars", authenticate);
   app.use("/v1/events/*", authenticate);
@@ -1164,6 +1178,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financeChallenges,
     financeMaintenance,
     financePeriodReviews,
+    financePlaybook,
     financeStatus,
     finances,
     mutationContext,
@@ -1182,6 +1197,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     calendar,
     mutationContext,
     stewardship: calendarStewardship,
+  });
+
+  registerTextingRoutes({
+    app,
+    texting,
+    ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
 
   app.get("/v1/audit", async (context) => {

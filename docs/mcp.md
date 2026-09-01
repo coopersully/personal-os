@@ -78,7 +78,7 @@ Every tool result keeps its feature payload under `result` (or its structured `e
 and adds `_ilo` with the domain, stage, policy, read-only state, and first-party links. Text content
 remains available for clients that do not consume structured output.
 
-## Resources, prompts, and visual work surface
+## Resources, prompts, and selective visual presentations
 
 The primary resource namespace is `ilo://`:
 
@@ -86,9 +86,25 @@ The primary resource namespace is `ilo://`:
 - `ilo://setup/{domain}/{step}` provides one server-owned setup step.
 - `ilo://guidance/{domain}` provides active or draft domain guidance. Drafts are explicitly
   non-operative.
-- `ui://ilo/work-surface` is a self-contained `text/html;profile=mcp-app` view for context,
-  previews, approvals, and verification results. Selected entry tools link to it through standard
-  `_meta.ui.resourceUri` metadata; all tools retain text and structured fallbacks.
+- `ui://ilo/finances/snapshot` presents the current financial position and evidence gaps.
+- `ui://ilo/finances/budget` presents expected resources, allocations, balance, assumptions, and
+  approval state.
+- `ui://ilo/finances/review` presents the one Finance Inbox decision currently requested.
+- `ui://ilo/finances/period-verification` presents one immutable period-verification result.
+
+Only `get_finance_snapshot`, `get_finance_budget`, `get_finance_inbox`, and
+`get_finance_period_review` advertise standard `_meta.ui.resourceUri` metadata. The resources are
+registered only for a connection with `finances:read`. Context, setup, ordinary reads, and
+uncurated Calendar, Mail, Reminder, and Finance previews do not advertise a visual and therefore
+remain in chat. Every tool retains useful text and structured output for hosts without MCP Apps.
+An already-open view that receives a missing, malformed, oversized, or mismatched presentation
+shows only “This result is available in chat.” It does not fall back to raw JSON or disclose
+financial values.
+
+The Finance API owns the typed values, evidence state, disclosures, and destination identity. The
+self-contained MCP Apps format that bounded contract, use the host theme and sizing lifecycle, and
+mediate an optional same-origin HTTPS destination through `ui/open-link`; they do not calculate
+financial meaning or grant mutation authority.
 
 `personal-os://agenda/today` and `personal-os://brief/daily` remain readable compatibility
 resources. New clients should begin with `get_ilo_context` or `ilo://context/self`.
@@ -258,6 +274,10 @@ remaining tools include transactions, categories, budgets, merchants, review
 work, wealth, cash flow, recurring obligations, and alerts. Agents should read
 ledger health and the relevant transactions before offering a budget or
 cash-flow recommendation.
+`list_finance_accounts` accepts optional account text, kind, status, and inclusion filters. Its
+structured result includes planning totals plus excluded-account, unresolved-ownership, and
+possible-duplicate disclosures calculated by the Finance API; the MCP adapter only forwards the
+typed query and response.
 `create_finance_attention_item` is the bounded exception to the otherwise read/proposal Finance
 surface: it locks one owned transaction, derives provider/account/remote/revision attribution
 server-side, deduplicates the same open transaction/kind item, and writes a redacted audit in the
@@ -441,5 +461,19 @@ Grant only the scopes the host needs:
 - `bookmarks:read`
 - `audit:read`
 - `finances:read`, `finances:write`, `finances:maintain`
+- `texting:read`, `texting:write` (`texting:write` requires read access)
+
+Texting exposes `read_text_conversation` and `send_text_message`. Sending needs
+a fresh receipt from a preceding read, so the agent sees the current thread and
+timestamps first. It defaults to one concise bubble; only structured or
+explicitly requested large content should use a 2–3 message series.
 
 Only a token hash is stored. Revoke a host without ending human sessions or affecting another host. Connector and account administration remain human-only.
+## Receipt-aware Finance review
+
+`review_finance_receipt` is a read-only, explicit opt-in lookup for one
+transaction. It may search only the connected Mail projection within a bounded
+date window and amount/merchant match. Results contain redacted source IDs,
+matched fields, dates, and confidence—not message bodies. A missing,
+conflicting, disabled, or failed lookup asks the person what they
+bought or paid for; it never applies a category or creates a merchant rule.

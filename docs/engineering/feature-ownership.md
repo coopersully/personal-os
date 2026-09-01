@@ -36,6 +36,7 @@ parallel worktree ownership. It complements the system boundary in
 | Tracking (planned) | `apps/web/src/features/tracking`, future Tracking route/service modules, `packages/domain` Tracking contracts, typed client and MCP Tracking adapters | Tasks, Reminders, Today composition, global navigation, provider health bridges |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
+| Texting | `apps/web/src/features/texting`, `apps/api/src/routes/texting.ts`, `apps/api/src/texting-*`, `packages/domain/src/texting.ts`, `packages/connectors/src/twilio.ts`, `packages/api-client/src/features/texting.ts`, `apps/mcp/src/tools/texting.ts` | Account authentication, global navigation, migration journal |
 | Integration | app/API/MCP composition roots, global navigation, Today, Reviews composition, shared shadcn primitives, shared style tokens, migration journal | Feature-specific implementation details owned above |
 
 The following are Integration-owned until they are reduced to thin registries:

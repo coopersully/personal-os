@@ -43,7 +43,7 @@ import {
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import {
   type ConnectedMailGateway,
@@ -435,6 +435,51 @@ export function createMailService({
   }
 
   return {
+    async searchReceiptCandidates(
+      userId: string,
+      input: { amount: number; from: string; merchant: string; to: string },
+    ) {
+      const pattern = `%${input.merchant.replace(/[\\%_]/g, "\\$&")}%`;
+      const amount = input.amount.toFixed(2);
+      const rows = await db
+        .select({
+          id: mailThreads.id,
+          receivedAt: mailThreads.receivedAt,
+          bodyText: mailThreads.bodyText,
+          snippet: mailThreads.snippet,
+        })
+        .from(mailThreads)
+        .innerJoin(
+          calendarAccounts,
+          and(
+            eq(calendarAccounts.id, mailThreads.accountId),
+            eq(calendarAccounts.mailEnabled, true),
+          ),
+        )
+        .where(
+          and(
+            eq(mailThreads.userId, userId),
+            isNull(mailThreads.deletedAt),
+            gte(mailThreads.receivedAt, new Date(`${input.from}T00:00:00.000Z`)),
+            lte(mailThreads.receivedAt, new Date(`${input.to}T23:59:59.999Z`)),
+            or(ilike(mailThreads.bodyText, pattern), ilike(mailThreads.snippet, pattern)),
+          ),
+        )
+        .orderBy(desc(mailThreads.receivedAt), desc(mailThreads.id))
+        .limit(20);
+      return rows
+        .map((row) => ({
+          date: row.receivedAt.toISOString().slice(0, 10),
+          fields: ["merchant", "amount"] as Array<"merchant" | "amount" | "date">,
+          sourceId: row.id,
+        }))
+        .filter((match) =>
+          new RegExp(
+            `(?:\\$|USD\\s*)${amount.replace(".", "[.]?\\s*")}(?:\\b|$)|\\b${amount}\\b`,
+            "i",
+          ).test(rows.find((row) => row.id === match.sourceId)?.bodyText ?? ""),
+        );
+    },
     async validateProfileSources(
       transaction: MailSourceExecutor,
       userId: string,

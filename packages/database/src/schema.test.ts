@@ -13,6 +13,10 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
+  financeBudgets,
+  financeBudgetTaxonomies,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
@@ -25,6 +29,8 @@ import {
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
   oauthStates,
+  textingConsentEvents,
+  textingVerificationChallenges,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "./schema.js";
@@ -36,6 +42,46 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("keeps texting verification recoverable and provider consent events idempotent", async () => {
+    const challenges = getTableConfig(textingVerificationChallenges);
+    const consentEvents = getTableConfig(textingConsentEvents);
+    expect(
+      challenges.columns.find((column) => column.name === "provider_verification_sid")?.notNull,
+    ).toBe(false);
+    expect(consentEvents.indexes.map((index) => index.config.name)).toContain(
+      "texting_consent_provider_event_idx",
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0073_texting_review_hardening.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("DROP NOT NULL");
+    expect(migrationSql).toContain('WHERE "provider_event_id" IS NOT NULL');
+  });
+
+  it("keeps budget buckets additive and category membership exclusive", async () => {
+    expect(
+      getTableConfig(financeBudgetTaxonomies).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_taxonomies_user_active_idx"]));
+    expect(getTableConfig(financeBudgetBuckets).columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["description", "version"]),
+    );
+    expect(
+      getTableConfig(financeBudgetBucketCategories).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_bucket_categories_taxonomy_category_idx"]));
+    expect(getTableConfig(financeBudgets).columns.map((column) => column.name)).toContain(
+      "bucket_id",
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0074_finance_budget_buckets.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ALTER TABLE "finance_budgets" ADD COLUMN "bucket_id"');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_budget_bucket_categories_taxonomy_category_idx"',
+    );
+  });
+
   it("keeps Calendar findings stable and reviews immutable", async () => {
     const findings = getTableConfig(calendarFindings);
     const reviews = getTableConfig(calendarReviews);
@@ -209,11 +255,16 @@ describe("database schema contracts", () => {
         resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),
         "utf8",
       ),
-    ) as { entries: Array<{ tag: string }> };
+    ) as { entries: Array<{ tag: string; when: number }> };
     const journalTags = journal.entries.map((entry) => entry.tag);
-    const financeStart = journalTags.indexOf("0059_finance_automation_settings");
-    expect(financeStart).toBeGreaterThanOrEqual(0);
-    expect(journalTags.slice(financeStart)).toEqual([
+    const budgetBucketIndex = journalTags.indexOf("0074_finance_budget_buckets");
+    expect(budgetBucketIndex).toBeGreaterThan(0);
+    expect(journal.entries[budgetBucketIndex]?.when).toBeGreaterThan(
+      journal.entries[budgetBucketIndex - 1]?.when ?? 0,
+    );
+    const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
+    expect(financeAutomationIndex).toBeGreaterThanOrEqual(0);
+    expect(journalTags.slice(financeAutomationIndex)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
@@ -229,6 +280,11 @@ describe("database schema contracts", () => {
       "0071_calendar_event_links",
       "0072_finance_parallel_migration_reconciliation",
       "0073_task_organization_reconciliation",
+      "0072_finance_account_semantics",
+      "0072_texting",
+      "0073_texting_review_hardening",
+      "0073_finance_account_semantics_recovery",
+      "0074_finance_budget_buckets",
     ]);
   });
 
@@ -629,6 +685,33 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_initialization_idx"');
     expect(migrationSql).not.toMatch(/\bUPDATE "finance_accounts"/u);
     expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
+  it("keeps Finance provider evidence separate from user planning semantics", async () => {
+    const table = getTableConfig(financeAccounts);
+    expect(table.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "kind_source",
+        "provider_type",
+        "provider_subtype",
+        "include_in_planning",
+        "ownership_type",
+        "ownership_share_bps",
+      ]),
+    );
+    expect(table.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "finance_accounts_kind_source_check",
+        "finance_accounts_provider_type_check",
+        "finance_accounts_ownership_check",
+      ]),
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0072_finance_account_semantics.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("ADD COLUMN \"ownership_type\" text DEFAULT 'unknown' NOT NULL");
+    expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
   });
 
   it("keeps Provider Item synchronization authority isolated from Finance account projections", async () => {

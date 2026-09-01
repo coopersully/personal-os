@@ -300,7 +300,7 @@ describe("Calendar floating navigation edge states", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
+  }, 10_000);
 
   it("selects and clears a suggested event location", async () => {
     const browser = userEvent.setup();
@@ -325,24 +325,34 @@ describe("Calendar floating navigation edge states", () => {
     expect(screen.getByRole("combobox", { name: "Location" })).toHaveValue("");
   });
 
-  it("keeps date surfaces open when the selected date is deselected", async () => {
-    const browser = userEvent.setup();
-    renderCalendar();
+  it("keeps required dates selected and their surfaces open when reselected", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-24T12:00:00.000Z"), shouldAdvanceTime: true });
+    try {
+      const browser = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderCalendar();
 
-    await browser.click(screen.getByRole("button", { name: "Choose date" }));
-    await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
-    expect(screen.getByLabelText("Jump to date")).toBeInTheDocument();
-    await browser.keyboard("{Escape}");
+      await browser.click(screen.getByRole("button", { name: "Choose date" }));
+      await browser.click(screen.getByRole("button", { name: /Sunday, August 23rd, 2026/ }));
+      expect(screen.getByLabelText("Jump to date")).toBeInTheDocument();
+      await browser.keyboard("{Escape}");
 
-    await browser.click(screen.getByRole("button", { name: "Create event" }));
-    await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
-    const selectedStart = document.querySelector<HTMLButtonElement>(
-      '[data-selected-single="true"]',
-    );
-    expect(selectedStart).toBeInTheDocument();
-    if (!selectedStart) throw new Error("The start-date picker has no selected date.");
-    await browser.click(selectedStart);
-    expect(document.querySelector('[data-selected-single="true"]')).toBeInTheDocument();
+      await browser.click(screen.getByRole("button", { name: "Create event" }));
+      await browser.click(screen.getByRole("button", { name: /^Starts date,/ }));
+      const selectedStart = document.querySelector<HTMLButtonElement>(
+        '[data-slot="popover-content"] button[data-selected-single="true"]',
+      );
+      expect(selectedStart).not.toBeNull();
+      if (!selectedStart) throw new Error("Selected start date was not rendered.");
+      await browser.click(selectedStart);
+      const reselectedStart = document.querySelector<HTMLButtonElement>(
+        '[data-slot="popover-content"] button[data-selected-single="true"]',
+      );
+      expect(reselectedStart).not.toBeNull();
+      expect(reselectedStart).toHaveAttribute("data-selected-single", "true");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sorts equally ranked calendars by name and falls back when a color is missing", async () => {

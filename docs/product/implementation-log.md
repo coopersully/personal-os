@@ -2,6 +2,29 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-27 — Trustworthy Finance account semantics
+
+- Persisted provider account evidence separately from user-owned kind, planning inclusion, and
+  ownership decisions, preserving explicit overrides across refreshes.
+- Added filtered account discovery with ownership-weighted totals, exclusion and unresolved-owner
+  disclosures, and normalized possible-duplicate warnings through the API client and MCP.
+- Updated wealth reporting to apply those authoritative semantics and expose their trust state.
+
+## 2026-08-28 — Honest, selective MCP previews
+
+- Removed the generic Ilo MCP work surface and its scrollable JSON result panel from context,
+  setup, ordinary reads, and uncurated previews.
+- Added four typed, read-only Finance presentations for snapshot, budget, the current Inbox
+  decision, and immutable period verification. Each retains the normal text and structured result
+  for hosts that do not render MCP Apps.
+- Kept financial meaning in the Finance API, preserved unavailable values instead of converting
+  them to zero, bounded every rendered collection, and made malformed or mismatched results fail
+  closed without financial values.
+- Added light/dark host context, responsive semantic markup, keyboard-safe first-party links,
+  size reporting, teardown acknowledgement, and focused JSDOM plus MCP discovery coverage.
+- Interactive approval, universal dashboards, budget buckets, the opinionated Finance playbook,
+  and receipt lookup remain separate approved work and are not claimed by this slice.
+
 ## 2026-08-23 — Provider-aware event conferencing
 
 - Added unique Google Meet generation for events created on writable Google calendars using the
@@ -323,3 +346,7 @@ This log records delivered vertical slices against the master plan. It does not 
 - Enforced the same rule in the Daily Brief service: completed reminders cannot appear in `overdue`, `today`, or `anytime` automation output.
 - Added API integration coverage for the completion exclusion and UI coverage for expanding completed history/reopening an item.
 - Verified with the local runtime and the focused API/web regression suite. Generated shadcn primitives are excluded from product coverage; shared product compositions remain covered by the repository floor and focused behavior tests.
+- 2026-08-30: Added receipt-aware ambiguous-merchant review. Amazon, Walmart,
+  CVS, and other mixed retailers remain transaction-specific; optional bounded
+  Mail evidence is sanitized and review-only, with a person question when it
+  is absent or ambiguous.

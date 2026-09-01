@@ -2,8 +2,10 @@ import type {
   FinanceAccount,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
+  FinanceCategory,
   FinanceForecast,
   FinanceLedgerHealth,
+  FinancePlaybookResponse,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceStatus,
@@ -141,6 +143,11 @@ export function FinancesPage() {
     enabled: section === "overview",
     queryFn: () => api.getFinanceStatus(),
     queryKey: ["finance-status"],
+  });
+  const playbook = useQuery({
+    enabled: section === "overview",
+    queryFn: api.getFinancePlaybook,
+    queryKey: ["finance-playbook"],
   });
   const ledgerHealth = useQuery({
     enabled: section === "health" || section === "overview",
@@ -497,6 +504,8 @@ export function FinancesPage() {
       {section === "overview" && financeStatus.data ? (
         <FinanceAtAGlance status={financeStatus.data} />
       ) : null}
+      {section === "overview" && playbook.isError ? <InlineError error={playbook.error} /> : null}
+      {section === "overview" ? <FinancePlaybookCard data={playbook.data} /> : null}
       {section === "overview" ? (
         <BudgetPaceGraph
           data={budgetPace.data}
@@ -651,6 +660,7 @@ export function FinancesPage() {
             </ShadcnCardContent>
           </ShadcnCard>
           <section aria-label={`${formatMonth(budgetMonth)} budget`} hidden={section !== "budgets"}>
+            <FinanceBudgetBucketManager categories={categories.data ?? []} month={budgetMonth} />
             <FinanceBudgetSummary
               budgets={finance.budgets}
               month={budgetMonth}
@@ -1159,6 +1169,181 @@ export function FinancesPage() {
   );
 }
 
+function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefined }) {
+  if (!data) return null;
+  return (
+    <ShadcnCard>
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Wealth-building priorities</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Approved Ilo Finance playbook {data.playbook.version} ·{" "}
+          {data.assessment.readiness.replace("_", " ")}
+        </ShadcnCardDescription>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="grid gap-3">
+        <ol className="grid gap-2 text-sm">
+          {data.playbook.steps.map((step) => (
+            <li className="flex gap-3" key={step.id}>
+              <span className="text-muted-foreground tabular-nums">{step.rank}.</span>
+              <span>{step.title}</span>
+            </li>
+          ))}
+        </ol>
+        {data.assessment.blockers.length > 0 ? (
+          <p className="text-muted-foreground text-sm">Next: {data.assessment.blockers[0]}</p>
+        ) : null}
+      </ShadcnCardContent>
+    </ShadcnCard>
+  );
+}
+
+export function FinanceBudgetBucketManager({
+  categories,
+  month,
+}: {
+  categories: FinanceCategory[];
+  month: string;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedBucketId, setSelectedBucketId] = useState<string | null>(null);
+  const buckets = useQuery({
+    enabled: typeof api.listFinanceBudgetBuckets === "function",
+    queryFn: () => api.listFinanceBudgetBuckets(month),
+    queryKey: ["finance-budget-buckets", month],
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["finance-budget-buckets"] });
+  const create = useMutation({
+    mutationFn: () =>
+      api.createFinanceBudgetBucket({
+        description: description.trim() || null,
+        idempotencyKey: crypto.randomUUID(),
+        name: name.trim(),
+      }),
+    onSuccess: () => {
+      setName("");
+      setDescription("");
+      return refresh();
+    },
+  });
+  const taxonomy = buckets.data?.taxonomy;
+  const selectedBucket = taxonomy?.buckets.find((bucket) => bucket.id === selectedBucketId);
+  const update = useMutation({
+    mutationFn: (input: { categoryIds: string[]; description: string | null }) => {
+      if (!selectedBucket) throw new Error("Choose a bucket first.");
+      return api.updateFinanceBudgetBucket(selectedBucket.id, {
+        ...input,
+        expectedVersion: selectedBucket.version,
+        idempotencyKey: crypto.randomUUID(),
+      });
+    },
+    onSuccess: refresh,
+  });
+  if (typeof api.listFinanceBudgetBuckets !== "function") return null;
+  if (buckets.isPending) return <Spinner />;
+  if (buckets.isError) return <InlineError error={buckets.error} />;
+  return (
+    <ShadcnCard className="mb-5">
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Budget buckets</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Group granular transaction categories for planning. Categories can belong to only one
+          bucket.
+        </ShadcnCardDescription>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="grid gap-4">
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <ShadcnInput
+            aria-label="New bucket name"
+            onChange={(event) => setName(event.target.value)}
+            placeholder="New bucket"
+            value={name}
+          />
+          <ShadcnInput
+            aria-label="Bucket description"
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Optional description"
+            value={description}
+          />
+          <ShadcnButton disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>
+            Add bucket
+          </ShadcnButton>
+        </div>
+        {taxonomy?.buckets.length ? (
+          <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
+            <ul aria-label="Budget buckets" className="grid content-start gap-1">
+              {taxonomy.buckets.map((bucket) => (
+                <li key={bucket.id}>
+                  <ShadcnButton
+                    aria-pressed={selectedBucketId === bucket.id}
+                    onClick={() => setSelectedBucketId(bucket.id)}
+                    variant={selectedBucketId === bucket.id ? "secondary" : "ghost"}
+                  >
+                    {bucket.name}
+                  </ShadcnButton>
+                </li>
+              ))}
+            </ul>
+            {selectedBucket ? (
+              <div className="grid gap-3">
+                <ShadcnInput
+                  aria-label="Selected bucket description"
+                  defaultValue={selectedBucket.description ?? ""}
+                  disabled={update.isPending}
+                  key={selectedBucket.id}
+                  id="selected-bucket-description"
+                  onBlur={(event) => {
+                    const next = event.target.value.trim() || null;
+                    if (next !== selectedBucket.description)
+                      update.mutate({ categoryIds: selectedBucket.categories, description: next });
+                  }}
+                />
+                <fieldset className="grid gap-2">
+                  <legend className="text-sm font-medium">
+                    Categories in {selectedBucket.name}
+                  </legend>
+                  {categories.map((category) => (
+                    <label
+                      className="flex items-center gap-2 text-sm"
+                      htmlFor={`bucket-category-${category.id}`}
+                      key={category.id}
+                    >
+                      <ShadcnCheckbox
+                        checked={selectedBucket.categories.includes(category.id)}
+                        disabled={update.isPending}
+                        id={`bucket-category-${category.id}`}
+                        onCheckedChange={(checked) => {
+                          const current = new Set(selectedBucket.categories);
+                          if (checked) current.add(category.id);
+                          else current.delete(category.id);
+                          update.mutate({
+                            categoryIds: [...current],
+                            description: selectedBucket.description,
+                          });
+                        }}
+                      />
+                      {category.name}
+                    </label>
+                  ))}
+                </fieldset>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Select a bucket to manage its categories.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No buckets yet. Existing category budgets remain under Unmapped categories.
+          </p>
+        )}
+        {create.error || update.error ? <InlineError error={create.error ?? update.error} /> : null}
+      </ShadcnCardContent>
+    </ShadcnCard>
+  );
+}
 function FinanceMetric({
   detail,
   label,

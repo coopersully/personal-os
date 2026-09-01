@@ -11,6 +11,8 @@ import {
   financeAgentActionReviews,
   financeAlerts,
   financeAutomationSettings,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
@@ -62,6 +64,8 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
+  FinanceReceiptReview,
+  FinanceReceiptReviewInput,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
@@ -99,7 +103,9 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import { createFinanceAccountService } from "./finance/account-service.js";
+import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
@@ -160,6 +166,12 @@ type Options = {
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
   providerItems?: ReturnType<typeof createFinanceProviderItemService>;
+  searchReceiptCandidates?: (
+    userId: string,
+    input: { amount: number; from: string; merchant: string; to: string },
+  ) => Promise<
+    Array<{ date: string; fields: Array<"merchant" | "amount" | "date">; sourceId: string }>
+  >;
 };
 type CandidatePreparedPayload = Extract<
   FinanceMaintenanceCandidateItemDraft,
@@ -545,11 +557,17 @@ function account(
     createdAt: row.createdAt.toISOString(),
     currencyCode: row.currencyCode,
     id: row.id,
+    includeInPlanning: row.includeInPlanning,
     institution: row.institution,
     kind: row.kind,
+    kindSource: row.kindSource,
     lastSyncedAt: synchronization.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
+    ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
+    ownershipType: row.ownershipType,
     provider: row.provider,
+    providerSubtype: row.providerSubtype,
+    providerType: row.providerType,
     status: item ? (item.syncRecovery === "reconnect" ? "needs_reauth" : "connected") : row.status,
     synchronization: {
       failureCode: synchronization.syncErrorCode,
@@ -641,6 +659,7 @@ function transactionAllocation(
 }
 function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
   return {
+    bucketId: row.bucketId,
     category: row.category,
     createdAt: row.createdAt.toISOString(),
     id: row.id,
@@ -713,8 +732,10 @@ export function createFinanceService({
   onProposalSnapshotRead,
   plaid,
   providerItems: configuredProviderItems,
+  searchReceiptCandidates,
 }: Options) {
   const canonicalAccounts = createFinanceAccountService({ db, now });
+  const budgetBuckets = createFinanceBudgetBucketService({ db, now });
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
   const maintenance = createMaintenanceService({ db, inbox, now });
@@ -3844,7 +3865,72 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    async reviewReceipt(
+      userId: string,
+      transactionId: string,
+      input: FinanceReceiptReviewInput,
+    ): Promise<FinanceReceiptReview> {
+      const row = await ownedTransaction(userId, transactionId);
+      const transaction = await enrichTransaction(row);
+      const question = `What did you buy or pay for at ${transaction.merchant}?`;
+      if (!input.searchMail || !searchReceiptCandidates) {
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: input.searchMail ? "mail_disabled" : "not_requested",
+          },
+          transaction,
+        };
+      }
+      const start = new Date(`${transaction.date}T00:00:00.000Z`);
+      start.setUTCDate(start.getUTCDate() - input.windowDays);
+      try {
+        const matches = await searchReceiptCandidates(userId, {
+          amount: transaction.amount,
+          from: start.toISOString().slice(0, 10),
+          merchant: transaction.merchant,
+          to: transaction.date,
+        });
+        const status =
+          matches.length === 1 ? "matched" : matches.length > 1 ? "conflicting" : "no_match";
+        return {
+          evidence: {
+            confidence: matches.length === 1 ? 0.92 : matches.length > 1 ? 0.55 : 0,
+            matches,
+            nextAction: status === "matched" ? "review_evidence" : "ask_person",
+            question,
+            status,
+          },
+          transaction,
+        };
+      } catch {
+        log?.({
+          durationMs: 0,
+          event: "finance_receipt_mail_search_failed",
+          method: "INTERNAL",
+          path: "/v1/finances/transactions/receipt-review",
+          requestId: randomUUID(),
+          status: 503,
+        });
+        return {
+          evidence: {
+            confidence: 0,
+            matches: [],
+            nextAction: "ask_person",
+            question,
+            status: "mail_disabled",
+          },
+          transaction,
+        };
+      }
+    },
     getFinanceAccountConnection: canonicalAccounts.getConnection,
+    listFinanceAccounts: canonicalAccounts.list,
+    listFinanceBudgetBuckets: budgetBuckets.list,
+    mutateFinanceBudgetBucket: budgetBuckets.mutate,
     updateFinanceAccount: canonicalAccounts.update,
     disconnectFinanceAccount: canonicalAccounts.disconnect,
     getFinanceTransaction: canonicalLedger.getTransaction,
@@ -7063,7 +7149,10 @@ export function createFinanceService({
                 balance: input.balance === null ? null : toCents(input.balance),
                 institution: input.institution,
                 kind: input.kind ?? "cash",
+                kindSource: "user",
                 name: input.name,
+                ownershipShareBps: 10_000,
+                ownershipType: "individual",
                 provider: input.provider,
                 status: input.provider === "manual" ? "manual" : "needs_reauth",
                 syncState: input.provider === "manual" ? "current" : "stale",
@@ -7099,12 +7188,55 @@ export function createFinanceService({
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
         );
+        if (input.bucketId)
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-buckets:${context.principal.userId}`}, 0))`,
+          );
+        let categoryName = input.category;
+        if (input.bucketId) {
+          const [bucket] = await tx
+            .select()
+            .from(financeBudgetBuckets)
+            .where(
+              and(
+                eq(financeBudgetBuckets.id, input.bucketId),
+                eq(financeBudgetBuckets.userId, context.principal.userId),
+              ),
+            )
+            .limit(1);
+          if (!bucket) throw new AppError("not_found", "The budget bucket was not found.");
+          const [category] = await tx
+            .select({ id: financeCategories.id, name: financeCategories.name })
+            .from(financeCategories)
+            .where(
+              and(
+                eq(financeCategories.userId, context.principal.userId),
+                sql`lower(${financeCategories.name}) = lower(${input.category})`,
+              ),
+            )
+            .limit(1);
+          if (!category) throw new AppError("not_found", "The budget category was not found.");
+          categoryName = category.name;
+          const [membership] = await tx
+            .select({ id: financeBudgetBucketCategories.id })
+            .from(financeBudgetBucketCategories)
+            .where(
+              and(
+                eq(financeBudgetBucketCategories.bucketId, bucket.id),
+                eq(financeBudgetBucketCategories.categoryId, category.id),
+              ),
+            )
+            .limit(1);
+          if (!membership)
+            throw new AppError("invalid_request", "The budget category is not in that bucket.");
+        }
         const created = requireDatabaseRecord(
           (
             await tx
               .insert(financeBudgets)
               .values({
-                category: input.category,
+                bucketId: input.bucketId,
+                category: categoryName,
                 limit: toCents(input.limit),
                 month: input.month,
                 userId: context.principal.userId,
@@ -7965,14 +8097,9 @@ export function createFinanceService({
           .where(eq(financeReimbursementMatches.userId, userId)),
         this.getProfile(userId, nowDate.toISOString().slice(0, 10)),
       ]);
-      const totals = { cash: 0, debt: 0, investments: 0, otherAssets: 0 };
-      for (const item of accounts) {
-        const value = Math.abs(item.balance ?? 0) / 100;
-        if (item.kind === "debt") totals.debt += value;
-        else if (item.kind === "investment") totals.investments += value;
-        else if (item.kind === "other") totals.otherAssets += value;
-        else totals.cash += (item.balance ?? 0) / 100;
-      }
+      const { accountSemantics, totals } = summarizeFinanceAccounts(
+        accounts.map((item) => account(item)),
+      );
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =
         income
@@ -7989,6 +8116,7 @@ export function createFinanceService({
       const monthlyIncome = annualIncome / 12;
       return {
         ...totals,
+        accountSemantics,
         annualIncome,
         incomeBasis,
         monthlyIncome,

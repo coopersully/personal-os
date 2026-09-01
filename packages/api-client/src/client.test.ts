@@ -509,11 +509,17 @@ const financeAccount: FinanceAccount = {
   createdAt: now,
   currencyCode: null,
   id,
+  includeInPlanning: true,
   institution: "Test bank",
   kind: "cash",
+  kindSource: "user",
   lastSyncedAt: null,
   name: "Checking",
+  ownershipShare: 1,
+  ownershipType: "individual",
   provider: "manual",
+  providerSubtype: null,
+  providerType: null,
   status: "manual",
   synchronization: {
     failureCode: null,
@@ -1056,6 +1062,17 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/plaid/exchange") return json({ accounts: [financeAccount] });
     if (url.pathname === "/v1/finances/account-connections")
       return json(financeEnvelope({ connectionId: id, status: "pending" }));
+    if (url.pathname === "/v1/finances/accounts" && method === "GET")
+      return json({
+        accounts: [financeAccount],
+        accountSemantics: {
+          excludedAccountIds: [],
+          possibleDuplicateGroups: [],
+          trustworthy: true,
+          unresolvedOwnershipAccountIds: [],
+        },
+        totals: { cash: 1200, debt: 0, investments: 0, netWorth: 1200, otherAssets: 0 },
+      });
     if (url.pathname === `/v1/finances/account-connections/${id}`)
       return json(financeEnvelope({ id, status: "connected" }));
     if (url.pathname === `/v1/finances/accounts/${id}` && method === "PATCH")
@@ -1607,6 +1624,91 @@ describe("ilo API client", () => {
       },
     ]);
     expect(fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+  });
+
+  it("serializes budget bucket routes with and without a month", async () => {
+    const requests: Array<{ body: unknown; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method,
+          path: url.pathname + url.search,
+        });
+        return json(method === "GET" ? { taxonomy: { buckets: [] } } : { buckets: [] });
+      },
+    });
+
+    await expect(api.listFinanceBudgetBuckets()).resolves.toEqual({ taxonomy: { buckets: [] } });
+    await expect(api.listFinanceBudgetBuckets("2026-08")).resolves.toEqual({
+      taxonomy: { buckets: [] },
+    });
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create",
+        name: "Care",
+      }),
+    ).resolves.toEqual({ buckets: [] });
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        description: null,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update",
+      }),
+    ).resolves.toEqual({ buckets: [] });
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/budget-buckets" },
+      {
+        body: null,
+        method: "GET",
+        path: "/v1/finances/budget-buckets?month=2026-08",
+      },
+      {
+        body: { description: null, idempotencyKey: "bucket-create", name: "Care" },
+        method: "POST",
+        path: "/v1/finances/budget-buckets",
+      },
+      {
+        body: {
+          categoryIds: [],
+          description: null,
+          expectedVersion: 1,
+          idempotencyKey: "bucket-update",
+        },
+        method: "PATCH",
+        path: "/v1/finances/budget-buckets/bucket-1",
+      },
+    ]);
+  });
+
+  it("preserves agent dispositions for budget bucket mutations", async () => {
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose categories." }, status: "needs_input" };
+    const responses = [pending, needsInput];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(responses.shift()),
+    });
+
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create-agent",
+        name: "Care",
+      }),
+    ).resolves.toEqual(pending);
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update-agent",
+      }),
+    ).resolves.toEqual(needsInput);
   });
 
   it("uses typed Finance status and durable-maintenance routes", async () => {
@@ -2384,6 +2486,9 @@ describe("ilo API client", () => {
     await expect(api.getFinanceAccountConnection(id)).resolves.toMatchObject({
       data: { status: "connected" },
     });
+    await expect(
+      api.listFinanceAccounts({ includeExcluded: false, kind: "cash", query: "Checking" }),
+    ).resolves.toMatchObject({ accounts: [financeAccount], totals: { netWorth: 1200 } });
     await expect(
       api.updateFinanceAccount(id, { idempotencyKey: "account-1", name: "Primary" }),
     ).resolves.toMatchObject({ data: financeAccount });

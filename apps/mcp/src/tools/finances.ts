@@ -2,14 +2,17 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  type FinanceReceiptReview,
   type FinanceToolResult,
   financeMaintenanceInputSchema,
+  financeReceiptReviewInputSchema,
   financeSetupInputSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
+import { apiResult } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
 const idempotencyKey = z
@@ -44,7 +47,27 @@ function financeResult<T>(value: FinanceToolResult<T>) {
   };
 }
 
-async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+function receiptReviewResult(
+  review: FinanceReceiptReview,
+): FinanceToolResult<FinanceReceiptReview> {
+  const value = envelope(review, "Receipt evidence reviewed.");
+  if (review.evidence.nextAction !== "ask_person") return value;
+  return {
+    ...value,
+    communication: {
+      ...value.communication,
+      nextQuestion: {
+        answerType: "text",
+        id: `finance:receipt:${review.transaction.id}`,
+        prompt: review.evidence.question,
+      },
+    },
+    outcome: "user_input_required",
+    remainingWork: { categories: ["receipt_review"], count: 1 },
+  };
+}
+
+export async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
   try {
     return financeResult(await operation());
   } catch (error) {
@@ -113,11 +136,40 @@ const answerFinanceReviewToolInputSchema = z
 /** Intent-first Finance MCP surface. Domain policy and accounting stay in the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
   server.registerTool(
+    "get_finance_playbook",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read Ilo's approved, versioned Finance playbook and current assessment before setup, recommendations, or maintenance. It defaults toward cash-flow stability, resilience, risk protection, costly-debt removal, retirement, diversified long-term investing, and a sustainable good life. Use native web search for current tax, retirement, insurance, accounting, or product facts; never imply research occurred without recorded evidence.",
+      inputSchema: {},
+      title: "Get Finance playbook",
+    },
+    async () =>
+      financeApiResult(async () =>
+        envelope(await api.getFinancePlaybook(), "Finance playbook loaded."),
+      ),
+  );
+
+  server.registerTool(
+    "review_finance_receipt",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Review one ambiguous transaction with an explicit, bounded Mail receipt lookup. This never categorizes or creates a merchant rule; missing or conflicting evidence becomes a question for the person.",
+      inputSchema: { id, ...financeReceiptReviewInputSchema.shape },
+      title: "Review Finance receipt evidence",
+    },
+    async ({ id: transactionId, ...input }) =>
+      financeApiResult(async () =>
+        receiptReviewResult(await api.reviewFinanceReceipt(transactionId, input)),
+      ),
+  );
+  server.registerTool(
     "setup_finances",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. It inspects existing state, returns one question at a time, persists each answer, shows the proposed budget, accepts a plain approval or authorized bypass self-approval, then continues into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, show the proposed budget, accept a plain approval or authorized bypass self-approval, then continue into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -216,6 +268,79 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Create Finance budget",
     },
     async (input) => financeApiResult(() => api.createFinanceBudget(input)),
+  );
+
+  server.registerTool(
+    "list_finance_budget_buckets",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the active Finance budget taxonomy, exclusive category membership, and monthly bucket rollups.",
+      inputSchema: {
+        month: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional(),
+      },
+      title: "List Finance budget buckets",
+    },
+    async ({ month }) =>
+      financeApiResult(async () =>
+        envelope(await api.listFinanceBudgetBuckets(month), "Loaded Finance budget buckets."),
+      ),
+  );
+
+  server.registerTool(
+    "manage_finance_budget_bucket",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
+      inputSchema: z.discriminatedUnion("operation", [
+        z
+          .object({
+            description: z.string().max(240).nullable().optional(),
+            idempotencyKey,
+            name: z.string().min(1).max(80),
+            operation: z.literal("create"),
+          })
+          .strict(),
+        z
+          .object({
+            bucketId: id,
+            categoryIds: z.array(id).max(200).optional(),
+            description: z.string().max(240).nullable().optional(),
+            expectedVersion: z.number().int().positive(),
+            idempotencyKey,
+            name: z.string().min(1).max(80).optional(),
+            operation: z.literal("update"),
+            position: z.number().int().nonnegative().optional(),
+          })
+          .strict(),
+      ]),
+      title: "Manage Finance budget bucket",
+    },
+    async (input) => {
+      if (input.operation === "create") {
+        return apiResult(() =>
+          api.createFinanceBudgetBucket({
+            description: input.description ?? null,
+            idempotencyKey: input.idempotencyKey,
+            name: input.name,
+          }),
+        );
+      }
+      return apiResult(() =>
+        api.updateFinanceBudgetBucket(input.bucketId, {
+          categoryIds: input.categoryIds,
+          description: input.description,
+          expectedVersion: input.expectedVersion,
+          idempotencyKey: input.idempotencyKey,
+          name: input.name,
+          position: input.position,
+        }),
+      );
+    },
   );
 
   server.registerTool(
@@ -320,12 +445,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
   );
 
+  server.registerTool(
+    "get_finance_snapshot",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
+      inputSchema: {},
+      title: "Get Finance snapshot",
+    },
+    async () => financeApiResult(() => api.getFinanceSnapshot()),
+  );
+
   const reads: Array<[string, string, () => Promise<unknown>]> = [
-    [
-      "get_finance_snapshot",
-      "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
-      () => api.getFinanceOverview(),
-    ],
     [
       "get_finance_wealth_summary",
       "Read net worth, cash, investments, debt, income basis, and plan capacity.",
@@ -392,14 +524,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "List every connected or manual Finance account, current balance, source status, and last sync. Use before sync, connection, or account-specific investigation.",
-      inputSchema: {},
+        "Search connected or manual Finance accounts with planning totals, ownership gaps, exclusions, and duplicate warnings. Use before sync, connection, account-specific investigation, or wealth advice.",
+      inputSchema: {
+        includeExcluded: z.boolean().default(true),
+        kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
+        query: z.string().trim().min(1).max(160).optional(),
+        status: z.enum(["connected", "needs_reauth", "manual"]).optional(),
+      },
       title: "List Finance accounts",
     },
-    async () =>
+    async (input) =>
       financeApiResult(async () => {
-        const overview = await api.getFinanceOverview();
-        return envelope(overview.accounts, `Found ${overview.accounts.length} Finance accounts.`);
+        const accounts = await api.listFinanceAccounts(input);
+        return envelope(accounts, `Found ${accounts.accounts.length} Finance accounts.`);
       }),
   );
 

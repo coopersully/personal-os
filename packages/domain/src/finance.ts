@@ -14,6 +14,19 @@ export const transactionDirectionSchema = z.enum(["income", "expense", "transfer
 export type TransactionDirection = z.infer<typeof transactionDirectionSchema>;
 export const financeAccountKindSchema = z.enum(["cash", "investment", "debt", "other"]);
 export type FinanceAccountKind = z.infer<typeof financeAccountKindSchema>;
+export const financeProviderAccountTypeSchema = z.enum([
+  "depository",
+  "investment",
+  "brokerage",
+  "credit",
+  "loan",
+  "other",
+]);
+export type FinanceProviderAccountType = z.infer<typeof financeProviderAccountTypeSchema>;
+export const financeAccountKindSourceSchema = z.enum(["provider", "user", "default"]);
+export type FinanceAccountKindSource = z.infer<typeof financeAccountKindSourceSchema>;
+export const financeAccountOwnershipTypeSchema = z.enum(["individual", "joint", "unknown"]);
+export type FinanceAccountOwnershipType = z.infer<typeof financeAccountOwnershipTypeSchema>;
 
 export const financeSynchronizationSchema = z.object({
   failureCode: z.string().max(120).nullable(),
@@ -295,27 +308,94 @@ export const financeGuidedPreferencesSchema = z
   });
 export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
-export const financeAccountSchema = z.object({
-  balance: z.number().finite().nullable(),
-  createdAt: isoDateTimeSchema,
-  currencyCode: z
-    .string()
-    .regex(/^[A-Z]{3}$/u)
-    .nullable()
-    .default(null),
-  id: idSchema,
-  institution: z.string().min(1).max(160),
-  kind: financeAccountKindSchema,
-  lastSyncedAt: isoDateTimeSchema.nullable(),
-  name: z.string().min(1).max(160),
-  provider: financeProviderSchema,
-  status: z.enum(["connected", "needs_reauth", "manual"]),
-  synchronization: financeSynchronizationSchema,
-  updatedAt: isoDateTimeSchema,
-});
+export const financeAccountSchema = z
+  .object({
+    balance: z.number().finite().nullable(),
+    createdAt: isoDateTimeSchema,
+    currencyCode: z
+      .string()
+      .regex(/^[A-Z]{3}$/u)
+      .nullable()
+      .default(null),
+    id: idSchema,
+    includeInPlanning: z.boolean(),
+    institution: z.string().min(1).max(160),
+    kind: financeAccountKindSchema,
+    kindSource: financeAccountKindSourceSchema,
+    lastSyncedAt: isoDateTimeSchema.nullable(),
+    name: z.string().min(1).max(160),
+    ownershipShare: z.number().finite().gt(0).max(1).nullable(),
+    ownershipType: financeAccountOwnershipTypeSchema,
+    provider: financeProviderSchema,
+    providerSubtype: z.string().trim().min(1).max(120).nullable(),
+    providerType: financeProviderAccountTypeSchema.nullable(),
+    status: z.enum(["connected", "needs_reauth", "manual"]),
+    synchronization: financeSynchronizationSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .superRefine((account, context) => {
+    if (account.ownershipType === "individual" && account.ownershipShare !== 1) {
+      context.addIssue({
+        code: "custom",
+        message: "Individual accounts must use a 100% ownership share.",
+        path: ["ownershipShare"],
+      });
+    }
+    if (account.ownershipType === "joint" && account.ownershipShare === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Joint accounts require an ownership share.",
+        path: ["ownershipShare"],
+      });
+    }
+    if (account.ownershipType === "unknown" && account.ownershipShare !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Unknown ownership cannot claim a known ownership share.",
+        path: ["ownershipShare"],
+      });
+    }
+  });
 export type FinanceAccount = z.infer<typeof financeAccountSchema>;
 
+const financeQueryBooleanSchema = z.preprocess(
+  (value) => (value === "true" ? true : value === "false" ? false : value),
+  z.boolean(),
+);
+export const financeAccountQuerySchema = z.object({
+  includeExcluded: financeQueryBooleanSchema.default(true),
+  kind: financeAccountKindSchema.optional(),
+  query: z.string().trim().min(1).max(160).optional(),
+  status: z.enum(["connected", "needs_reauth", "manual"]).optional(),
+});
+export type FinanceAccountQuery = z.infer<typeof financeAccountQuerySchema>;
+
+export const financeAccountSemanticsSchema = z.object({
+  excludedAccountIds: z.array(idSchema),
+  possibleDuplicateGroups: z.array(z.object({ accountIds: z.array(idSchema).min(2) })),
+  trustworthy: z.boolean(),
+  unresolvedOwnershipAccountIds: z.array(idSchema),
+});
+export type FinanceAccountSemantics = z.infer<typeof financeAccountSemanticsSchema>;
+
+export const financeAccountTotalsSchema = z.object({
+  cash: z.number().finite(),
+  debt: z.number().finite(),
+  investments: z.number().finite(),
+  netWorth: z.number().finite(),
+  otherAssets: z.number().finite(),
+});
+export type FinanceAccountTotals = z.infer<typeof financeAccountTotalsSchema>;
+
+export const financeAccountListSchema = z.object({
+  accounts: z.array(financeAccountSchema),
+  accountSemantics: financeAccountSemanticsSchema,
+  totals: financeAccountTotalsSchema,
+});
+export type FinanceAccountList = z.infer<typeof financeAccountListSchema>;
+
 export const financeWealthSummarySchema = z.object({
+  accountSemantics: financeAccountSemanticsSchema,
   /** Planning baseline: the effective stated income when available, otherwise observed trailing income. */
   annualIncome: moneySchema,
   cash: z.number().finite(),
@@ -623,6 +703,33 @@ export const financeTransactionSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 export type FinanceTransaction = z.infer<typeof financeTransactionSchema>;
+
+export const financeReceiptReviewInputSchema = z.object({
+  searchMail: z.boolean().default(false),
+  windowDays: z.number().int().min(1).max(30).default(7),
+});
+export type FinanceReceiptReviewInput = z.infer<typeof financeReceiptReviewInputSchema>;
+export const financeReceiptEvidenceSchema = z.object({
+  confidence: z.number().min(0).max(1),
+  matches: z
+    .array(
+      z.object({
+        date: z.iso.date(),
+        fields: z.array(z.enum(["merchant", "amount", "date"])).min(1),
+        sourceId: idSchema,
+      }),
+    )
+    .max(20),
+  nextAction: z.enum(["ask_person", "review_evidence", "safe_to_review"]),
+  status: z.enum(["conflicting", "mail_disabled", "not_requested", "no_match", "matched"]),
+  question: z.string().max(300),
+});
+export type FinanceReceiptEvidence = z.infer<typeof financeReceiptEvidenceSchema>;
+export const financeReceiptReviewSchema = z.object({
+  evidence: financeReceiptEvidenceSchema,
+  transaction: financeTransactionSchema,
+});
+export type FinanceReceiptReview = z.infer<typeof financeReceiptReviewSchema>;
 
 export type FinanceTransactionAllocation = NonNullable<FinanceTransaction["allocations"]>[number];
 
@@ -1075,6 +1182,7 @@ export const financeReviewDecisionInputSchema = z
 export type FinanceReviewDecisionInput = z.infer<typeof financeReviewDecisionInputSchema>;
 
 export const financeBudgetSchema = z.object({
+  bucketId: idSchema.nullable().optional(),
   category: categorySchema,
   createdAt: isoDateTimeSchema,
   id: idSchema,
@@ -1190,6 +1298,7 @@ export const updateFinanceTransactionInputSchema = z
 export type UpdateFinanceTransactionInput = z.infer<typeof updateFinanceTransactionInputSchema>;
 
 export const createFinanceBudgetInputSchema = z.object({
+  bucketId: idSchema.optional(),
   category: categorySchema,
   limit: moneySchema.positive(),
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
@@ -1220,6 +1329,7 @@ export const financeOverviewSchema = z.object({
 });
 export type FinanceOverview = z.infer<typeof financeOverviewSchema>;
 
+export * from "./finance/buckets.js";
 // Canonical Finance contracts are split by responsibility while this file
 // remains the stable public barrel for existing consumers.
 export * from "./finance/budget.js";
@@ -1228,5 +1338,7 @@ export * from "./finance/common.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";
+export * from "./finance/playbook.js";
+export * from "./finance/presentation.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";

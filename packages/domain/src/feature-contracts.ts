@@ -19,6 +19,7 @@ export const featureIds = [
   "reminders",
   "settings",
   "tasks",
+  "texting",
 ] as const;
 
 export type FeatureId = (typeof featureIds)[number];
@@ -63,7 +64,17 @@ export type StartGoogleAuthorizationInput = z.infer<typeof startGoogleAuthorizat
  */
 export const materialSourceReferenceSchema = z.object({
   accountId: z.uuid().nullable(),
-  provider: z.enum(["google", "icloud", "local", "paypal", "plaid", "venmo", "x", "zelle"]),
+  provider: z.enum([
+    "google",
+    "icloud",
+    "local",
+    "paypal",
+    "plaid",
+    "twilio",
+    "venmo",
+    "x",
+    "zelle",
+  ]),
   remoteId: z.string().nullable(),
   revision: z.string().nullable(),
   sourceType: z.enum([
@@ -73,6 +84,7 @@ export const materialSourceReferenceSchema = z.object({
     "finance_recurring_obligation",
     "finance_transaction",
     "mail_thread",
+    "text_message",
     "reminder",
     "task",
     "task_list",
@@ -140,6 +152,11 @@ export const featureAccessPolicies = {
     readScope: "tasks:read",
     mutationPolicy: "approved_rule",
     writeScope: "tasks:write",
+  },
+  texting: {
+    readScope: "texting:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "texting:write",
   },
 } as const satisfies Record<
   string,

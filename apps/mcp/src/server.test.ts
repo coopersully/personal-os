@@ -450,6 +450,32 @@ function mockApi() {
       userId: id,
     })),
     getFinancePeriodReview: vi.fn(async () => ({ id, status: "completed" as const })),
+    getFinancePeriodReviewPresentation: vi.fn(async () => ({
+      changes: [],
+      communication: {
+        headline: "The period verification completed.",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: { id, status: "completed" as const },
+      outcome: "completed" as const,
+      presentation: {
+        cutoff: now,
+        destination: null,
+        diagnosticFacts: [],
+        disclosures: [],
+        eyebrow: "Finance verification",
+        kind: "finance_period_verification" as const,
+        period: { end: "2026-07-13", start: "2026-07-01" },
+        recommendations: [],
+        status: "completed" as const,
+        summary: "The verification completed.",
+        title: "Period verification",
+        work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 0 },
+      },
+      remainingWork: { categories: [], count: 0 },
+      schemaVersion: 1 as const,
+    })),
     getFinanceMaintenanceRun: vi.fn(async () => ({
       id,
       scope: { type: "all_outstanding" as const },
@@ -513,6 +539,30 @@ function mockApi() {
       reviewCount: 0,
       spendingThisMonth: 0,
       transactions: [],
+    })),
+    getFinanceSnapshot: vi.fn(async () => ({
+      changes: [],
+      communication: {
+        headline: "Your financial snapshot is current.",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: { asOf: now, cash: 0, debt: 0, investments: 0, netWorth: 0 },
+      outcome: "completed" as const,
+      presentation: {
+        asOf: now,
+        destination: null,
+        diagnosticFacts: [],
+        disclosures: [],
+        eyebrow: "Finance",
+        kind: "finance_snapshot" as const,
+        position: { cash: 0, debt: 0, investments: 0, netWorth: 0 },
+        summary: "Current financial position.",
+        title: "Financial snapshot",
+        trust: { gaps: [], state: "current" as const, trustworthy: true },
+      },
+      remainingWork: { categories: [], count: 0 },
+      schemaVersion: 1 as const,
     })),
     getFinanceWealthSummary: vi.fn(async () => ({
       annualIncome: 0,
@@ -1324,6 +1374,16 @@ describe("ilo MCP server", () => {
     expect(new Set(tools.tools.map((tool) => tool.name))).toEqual(
       new Set(availableToolNames(new Set(accessScopeSchema.options), false)),
     );
+    const visualTools = tools.tools
+      .filter((tool) => tool._meta && "ui" in tool._meta)
+      .map((tool) => [tool.name, tool._meta?.ui])
+      .sort(([left], [right]) => String(left).localeCompare(String(right)));
+    expect(visualTools).toEqual([
+      ["get_finance_budget", { resourceUri: "ui://ilo/finances/budget" }],
+      ["get_finance_inbox", { resourceUri: "ui://ilo/finances/review" }],
+      ["get_finance_period_review", { resourceUri: "ui://ilo/finances/period-verification" }],
+      ["get_finance_snapshot", { resourceUri: "ui://ilo/finances/snapshot" }],
+    ]);
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
@@ -2161,7 +2221,10 @@ describe("ilo MCP server", () => {
       "personal-os://agenda/today",
       "personal-os://brief/daily",
       "ilo://context/self",
-      "ui://ilo/work-surface",
+      "ui://ilo/finances/budget",
+      "ui://ilo/finances/period-verification",
+      "ui://ilo/finances/review",
+      "ui://ilo/finances/snapshot",
     ]);
     const templates = await client.listResourceTemplates();
     expect(templates.resourceTemplates.map((template) => template.uriTemplate)).toEqual([
@@ -2178,19 +2241,20 @@ describe("ilo MCP server", () => {
       "review_finances",
       "weekly_review",
     ]);
-    const workSurface = await client.readResource({ uri: "ui://ilo/work-surface" });
-    expect(workSurface.contents[0]).toMatchObject({
+    const snapshotPresentation = await client.readResource({ uri: "ui://ilo/finances/snapshot" });
+    expect(snapshotPresentation.contents[0]).toMatchObject({
       _meta: { ui: { prefersBorder: true } },
       mimeType: "text/html;profile=mcp-app",
-      uri: "ui://ilo/work-surface",
+      uri: "ui://ilo/finances/snapshot",
     });
-    const workSurfaceContent = workSurface.contents[0];
-    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
-      "ui/initialize",
+    const snapshotContent = snapshotPresentation.contents[0];
+    const snapshotHtml = String(
+      snapshotContent && "text" in snapshotContent ? snapshotContent.text : "",
     );
-    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
-      "ui/notifications/tool-result",
-    );
+    expect(snapshotHtml).toContain("ui/initialize");
+    expect(snapshotHtml).toContain("ui/notifications/tool-result");
+    expect(snapshotHtml).not.toContain("<pre");
+    expect(snapshotHtml).not.toContain("JSON.stringify(data.result");
     const agenda = await client.readResource({ uri: "personal-os://agenda/today" });
     const agendaContent = agenda.contents[0];
     expect(agendaContent && "text" in agendaContent).toBe(true);
@@ -2302,9 +2366,15 @@ describe("ilo MCP server", () => {
     expect(names).not.toContain("list_mail");
     expect(tools.tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_ilo_context")).toMatchObject({
-      _meta: { ui: { resourceUri: "ui://ilo/work-surface" } },
       outputSchema: { type: "object" },
     });
+    expect(tools.tools.find((tool) => tool.name === "get_ilo_context")?._meta).not.toHaveProperty(
+      "ui",
+    );
+    const resources = await client.listResources();
+    expect(resources.resources.map((resource) => resource.uri)).not.toContainEqual(
+      expect.stringMatching(/^ui:\/\/ilo\/finances\//u),
+    );
 
     const context = await client.callTool({ arguments: {}, name: "get_ilo_context" });
     expect(context.structuredContent).toMatchObject({
@@ -2415,7 +2485,12 @@ describe("ilo MCP server", () => {
       annotations: { readOnlyHint: false },
     });
     expect(tools.tools.find((tool) => tool.name === "get_finance_period_review")).toMatchObject({
-      _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+      _meta: {
+        "ilo/domain": "finances",
+        "ilo/policy": "read_only",
+        "ilo/stage": "inspect",
+        ui: { resourceUri: "ui://ilo/finances/period-verification" },
+      },
       annotations: { readOnlyHint: true },
     });
 
@@ -2489,7 +2564,7 @@ describe("ilo MCP server", () => {
     });
     expect(api.submitFinanceLedgerChallenge).toHaveBeenCalledOnce();
     await client.callTool({ arguments: { reviewId: id }, name: "get_finance_period_review" });
-    expect(api.getFinancePeriodReview).toHaveBeenCalledWith(id);
+    expect(api.getFinancePeriodReviewPresentation).toHaveBeenCalledWith(id);
     await client.callTool({ arguments: {}, name: "list_finance_reimbursements" });
     expect(api.listFinanceReimbursements).toHaveBeenCalledOnce();
     await client.callTool({

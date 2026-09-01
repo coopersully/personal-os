@@ -49,6 +49,12 @@ import type {
   TaskContainerAvailability,
   TaskLifecycle,
   TaskListKind,
+  TextContentKind,
+  TextingConnectionState,
+  TextingCountry,
+  TextMessageDirection,
+  TextMessageStatus,
+  TextOccurredAtSource,
   Theme,
   TransactionDirection,
 } from "@personal-os/domain";
@@ -2012,6 +2018,20 @@ export const financeAccounts = pgTable(
     institution: text("institution").notNull(),
     name: text("name").notNull(),
     kind: text("kind").$type<"cash" | "investment" | "debt" | "other">().notNull().default("cash"),
+    kindSource: text("kind_source")
+      .$type<"provider" | "user" | "default">()
+      .notNull()
+      .default("default"),
+    providerType: text("provider_type").$type<
+      "depository" | "investment" | "brokerage" | "credit" | "loan" | "other"
+    >(),
+    providerSubtype: text("provider_subtype"),
+    includeInPlanning: boolean("include_in_planning").notNull().default(true),
+    ownershipType: text("ownership_type")
+      .$type<"individual" | "joint" | "unknown">()
+      .notNull()
+      .default("unknown"),
+    ownershipShareBps: integer("ownership_share_bps"),
     balance: integer("balance_cents"),
     currencyCode: text("currency_code"),
     status: text("status")
@@ -2074,6 +2094,22 @@ export const financeAccounts = pgTable(
       sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
     ),
     check(
+      "finance_accounts_kind_source_check",
+      sql`${table.kindSource} IN ('provider', 'user', 'default')`,
+    ),
+    check(
+      "finance_accounts_provider_type_check",
+      sql`${table.providerType} IS NULL OR ${table.providerType} IN ('depository', 'investment', 'brokerage', 'credit', 'loan', 'other')`,
+    ),
+    check(
+      "finance_accounts_ownership_check",
+      sql`(
+        (${table.ownershipType} = 'individual' AND ${table.ownershipShareBps} = 10000)
+        OR (${table.ownershipType} = 'joint' AND ${table.ownershipShareBps} BETWEEN 1 AND 10000)
+        OR (${table.ownershipType} = 'unknown' AND ${table.ownershipShareBps} IS NULL)
+      )`,
+    ),
+    check(
       "finance_accounts_sync_claim_check",
       sql`(${table.syncClaimId} IS NULL) = (${table.syncClaimExpiresAt} IS NULL)`,
     ),
@@ -2109,6 +2145,84 @@ export const financeCategories = pgTable(
     uniqueIndex("finance_categories_id_user_id_unique").on(table.id, table.userId),
     index("finance_categories_user_idx").on(table.userId),
     uniqueIndex("finance_categories_user_slug_idx").on(table.userId, table.slug),
+  ],
+);
+
+/** User-owned reporting taxonomy; it never changes transaction categories. */
+export const financeBudgetTaxonomies = pgTable(
+  "finance_budget_taxonomies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_taxonomies_user_active_idx")
+      .on(table.userId)
+      .where(sql`${table.isActive} = true`),
+    index("finance_budget_taxonomies_user_idx").on(table.userId),
+    check("finance_budget_taxonomies_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const financeBudgetBuckets = pgTable(
+  "finance_budget_buckets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taxonomyId: uuid("taxonomy_id")
+      .notNull()
+      .references(() => financeBudgetTaxonomies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_buckets_taxonomy_name_idx").on(table.taxonomyId, table.name),
+    index("finance_budget_buckets_user_idx").on(table.userId, table.taxonomyId),
+    check("finance_budget_buckets_position_check", sql`${table.position} >= 0`),
+    check("finance_budget_buckets_version_check", sql`${table.version} > 0`),
+  ],
+);
+
+export const financeBudgetBucketCategories = pgTable(
+  "finance_budget_bucket_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taxonomyId: uuid("taxonomy_id")
+      .notNull()
+      .references(() => financeBudgetTaxonomies.id, { onDelete: "cascade" }),
+    bucketId: uuid("bucket_id")
+      .notNull()
+      .references(() => financeBudgetBuckets.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => financeCategories.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_budget_bucket_categories_taxonomy_category_idx").on(
+      table.taxonomyId,
+      table.categoryId,
+    ),
+    uniqueIndex("finance_budget_bucket_categories_bucket_category_idx").on(
+      table.bucketId,
+      table.categoryId,
+    ),
+    index("finance_budget_bucket_categories_bucket_idx").on(table.bucketId),
   ],
 );
 
@@ -2720,6 +2834,9 @@ export const financeBudgets = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    bucketId: uuid("bucket_id").references(() => financeBudgetBuckets.id, {
+      onDelete: "set null",
+    }),
     category: text("category").notNull(),
     month: text("month").notNull(),
     limit: integer("limit_cents").notNull(),
@@ -3131,6 +3248,119 @@ export const financeAlerts = pgTable(
       table.recurringObligationId,
       table.status,
     ),
+  ],
+);
+
+export const textingConnections = pgTable(
+  "texting_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhoneNumber: jsonb("encrypted_phone_number").$type<EncryptedCredentials>().notNull(),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    country: text("country").$type<TextingCountry>().notNull(),
+    state: text("state").$type<TextingConnectionState>().notNull().default("active"),
+    consentVersion: text("consent_version").notNull(),
+    consentEpoch: integer("consent_epoch").notNull().default(1),
+    conversationRevision: integer("conversation_revision").notNull().default(0),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    optedOutAt: timestamp("opted_out_at", { withTimezone: true }),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("texting_connections_user_idx").on(table.userId),
+    uniqueIndex("texting_connections_active_phone_idx")
+      .on(table.phoneFingerprint)
+      .where(sql`${table.state} <> 'disconnected'`),
+  ],
+);
+
+export const textingVerificationChallenges = pgTable(
+  "texting_verification_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhoneNumber: jsonb("encrypted_phone_number").$type<EncryptedCredentials>().notNull(),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    country: text("country").$type<TextingCountry>().notNull(),
+    providerVerificationSid: text("provider_verification_sid"),
+    consentVersion: text("consent_version").notNull(),
+    status: text("status")
+      .$type<
+        "starting" | "pending" | "approved" | "expired" | "failed" | "uncertain" | "cancelled"
+      >()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("texting_verification_user_idx").on(table.userId, table.createdAt)],
+);
+
+export const textMessages = pgTable(
+  "text_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => textingConnections.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerMessageSid: text("provider_message_sid"),
+    direction: text("direction").$type<TextMessageDirection>().notNull(),
+    status: text("status").$type<TextMessageStatus>().notNull(),
+    body: text("body").notNull(),
+    contentKind: text("content_kind").$type<TextContentKind>(),
+    predictedSegments: integer("predicted_segments"),
+    actualSegments: integer("actual_segments"),
+    seriesId: uuid("series_id"),
+    seriesPart: integer("series_part"),
+    seriesTotal: integer("series_total"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    occurredAtSource: text("occurred_at_source").$type<TextOccurredAtSource>().notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
+    index("text_messages_conversation_idx").on(table.connectionId, table.occurredAt, table.id),
+    index("text_messages_user_outbound_idx").on(table.userId, table.direction, table.createdAt),
+  ],
+);
+
+export const textingConsentEvents = pgTable(
+  "texting_consent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id").references(() => textingConnections.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    phoneFingerprint: text("phone_fingerprint").notNull(),
+    kind: text("kind")
+      .$type<
+        "verified_opt_in" | "provider_stop" | "provider_start" | "provider_block" | "disconnected"
+      >()
+      .notNull(),
+    source: text("source").$type<"ilo" | "twilio">().notNull(),
+    providerEventId: text("provider_event_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("texting_consent_phone_idx").on(table.phoneFingerprint, table.occurredAt),
+    uniqueIndex("texting_consent_provider_event_idx")
+      .on(table.providerEventId)
+      .where(sql`${table.providerEventId} IS NOT NULL`),
   ],
 );
 

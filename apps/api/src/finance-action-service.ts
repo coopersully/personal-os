@@ -243,7 +243,9 @@ export function semanticTargetKeys(
       return [
         "month" in input
           ? `budget-month:${String(input.month)}`
-          : `finance-budget-buckets:${String(input.userId ?? "")}`,
+          : "bucketId" in input
+            ? `budget-bucket:${String(input.bucketId)}`
+            : `finance-budget-buckets:${String(input.userId ?? "")}`,
       ];
     case "categorization":
       return ids(

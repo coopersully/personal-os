@@ -3921,12 +3921,14 @@ describe.sequential("finance action service", () => {
       expect(cleared.buckets).toEqual(
         expect.arrayContaining([expect.objectContaining({ categories: [], id: updatedBucket.id })]),
       );
+      const clearedBucket = cleared.buckets.find((item) => item.id === updatedBucket.id);
+      if (!clearedBucket) throw new Error("The cleared budget bucket was not returned.");
       await expect(
         finances.mutateFinanceBudgetBucket(
           {
             bucketId: updatedBucket.id,
             categoryIds: [category.id],
-            expectedVersion: updatedBucket.version + 1,
+            expectedVersion: clearedBucket.version,
             idempotencyKey: `bucket-direct-reassign-${crypto.randomUUID()}`,
           },
           directContext,

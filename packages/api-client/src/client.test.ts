@@ -1385,13 +1385,18 @@ function apiFetch() {
 
 describe("ilo API client", () => {
   it("serializes budget bucket routes with and without a month", async () => {
-    const requests: string[] = [];
+    const requests: Array<{ body: unknown; method: string; path: string }> = [];
     const api = createApiClient({
       baseUrl: "https://api.example.com",
       fetch: async (input, init) => {
         const url = new URL(String(input));
-        requests.push(url.pathname + url.search);
-        return json(init?.method ? { buckets: [] } : { taxonomy: { buckets: [] } });
+        const method = init?.method ?? "GET";
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method,
+          path: url.pathname + url.search,
+        });
+        return json(method === "GET" ? { taxonomy: { buckets: [] } } : { buckets: [] });
       },
     });
 
@@ -1415,10 +1420,27 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ buckets: [] });
     expect(requests).toEqual([
-      "/v1/finances/budget-buckets",
-      "/v1/finances/budget-buckets?month=2026-08",
-      "/v1/finances/budget-buckets",
-      "/v1/finances/budget-buckets/bucket-1",
+      { body: null, method: "GET", path: "/v1/finances/budget-buckets" },
+      {
+        body: null,
+        method: "GET",
+        path: "/v1/finances/budget-buckets?month=2026-08",
+      },
+      {
+        body: { description: null, idempotencyKey: "bucket-create", name: "Care" },
+        method: "POST",
+        path: "/v1/finances/budget-buckets",
+      },
+      {
+        body: {
+          categoryIds: [],
+          description: null,
+          expectedVersion: 1,
+          idempotencyKey: "bucket-update",
+        },
+        method: "PATCH",
+        path: "/v1/finances/budget-buckets/bucket-1",
+      },
     ]);
   });
 

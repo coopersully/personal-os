@@ -20,5 +20,8 @@ describe("Finance action identity", () => {
     expect(semanticTargetKeys("budget_plan", { userId: "user-1" })).toEqual([
       "finance-budget-buckets:user-1",
     ]);
+    expect(semanticTargetKeys("budget_plan", { bucketId: "bucket-1", userId: "user-1" })).toEqual([
+      "budget-bucket:bucket-1",
+    ]);
   });
 });

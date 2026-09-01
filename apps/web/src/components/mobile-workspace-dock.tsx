@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckIcon,
@@ -67,6 +67,7 @@ export function MobileWorkspaceDock({
   accountName,
   accountSections,
   onLogout,
+  renderWorkspaceNavigation,
   workspaceDefinitions,
   pathname,
 }: {
@@ -74,6 +75,7 @@ export function MobileWorkspaceDock({
   accountSections: MobileWorkspacePage[];
   onLogout: () => void;
   pathname: string;
+  renderWorkspaceNavigation?: (onNavigate: () => void) => ReactNode;
   workspaceDefinitions: WorkspaceDefinition[];
 }) {
   const [open, setOpen] = useState(false);
@@ -164,34 +166,41 @@ export function MobileWorkspaceDock({
               Choose a page in {sheetLabel}.
             </SheetDescription>
           </SheetHeader>
-          <section className="workspace-dock-sheet__section" aria-labelledby="workspace-dock-pages">
-            <h2 id="workspace-dock-pages">Pages</h2>
-            <ItemGroup className="workspace-dock-sheet__items">
-              {pages.map((page) => (
-                <Item asChild key={page.path} size="xs">
-                  <Link
-                    aria-label={page.badge ? `${page.label}: ${page.badge}` : undefined}
-                    onClick={() => setOpen(false)}
-                    to={page.path}
-                  >
-                    <ItemMedia variant="icon">
-                      <page.icon aria-hidden="true" />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle>{page.label}</ItemTitle>
-                    </ItemContent>
-                    {page.badge ? (
-                      <ItemActions>
-                        <Badge aria-hidden="true" variant="destructive">
-                          {page.badge}
-                        </Badge>
-                      </ItemActions>
-                    ) : null}
-                  </Link>
-                </Item>
-              ))}
-            </ItemGroup>
-          </section>
+          {renderWorkspaceNavigation ? (
+            renderWorkspaceNavigation(() => setOpen(false))
+          ) : (
+            <section
+              className="workspace-dock-sheet__section"
+              aria-labelledby="workspace-dock-pages"
+            >
+              <h2 id="workspace-dock-pages">Pages</h2>
+              <ItemGroup className="workspace-dock-sheet__items">
+                {pages.map((page) => (
+                  <Item asChild key={page.path} size="xs">
+                    <Link
+                      aria-label={page.badge ? `${page.label}: ${page.badge}` : undefined}
+                      onClick={() => setOpen(false)}
+                      to={page.path}
+                    >
+                      <ItemMedia variant="icon">
+                        <page.icon aria-hidden="true" />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>{page.label}</ItemTitle>
+                      </ItemContent>
+                      {page.badge ? (
+                        <ItemActions>
+                          <Badge aria-hidden="true" variant="destructive">
+                            {page.badge}
+                          </Badge>
+                        </ItemActions>
+                      ) : null}
+                    </Link>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </section>
+          )}
           <div className="workspace-dock-sheet__account">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

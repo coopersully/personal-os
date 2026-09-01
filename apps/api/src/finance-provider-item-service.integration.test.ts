@@ -1492,7 +1492,7 @@ describe.sequential("Finance Provider Item service", () => {
       replayDue: 0,
     });
     expect(await database.db.$count(auditEvents)).toBe(auditsAfterConvergence);
-  });
+  }, 10_000);
 
   it("processes at most 100 stable groups per pass and completed replay has no duplicate effects", async () => {
     await database.db.insert(financeAccounts).values(

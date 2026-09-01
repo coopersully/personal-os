@@ -6,8 +6,8 @@
 - Empty: `qa+empty@ilo.test`
 - Recovery: `qa+recovery@ilo.test`
 - Routes: `/today`, `/calendar`, `/tasks`, `/reminders`, `/goals`, `/motives`
-- Contracts: `docs/design/pages/today.md` and
-  `docs/design/pages/calendar.md`
+- Contracts: `docs/design/pages/today.md`, `docs/design/pages/calendar.md`, and
+  `docs/design/pages/commitments.md`
 
 ## Today
 
@@ -51,18 +51,30 @@ moment → day flow → decision queue.
 
 ## Tasks and reminders
 
-Verify the fixture across the dedicated task views:
+Verify the fixture across the Tasks workspace Views:
 
 | Route | Expected material |
 | --- | --- |
 | `/tasks` | Compare renters insurance renewals |
-| `/tasks?view=next` | Draft weekly product update |
+| `/tasks?view=today` | Draft weekly product update |
+| `/tasks?view=upcoming` | Review monthly subscriptions |
 | `/tasks?view=scheduled` | Review monthly subscriptions |
 | `/tasks?view=completed` | Book dentist appointment |
+| `/tasks?view=cancelled` | Replace spare charging cable |
+| `/tasks?view=trash` | Compare desk lamps |
 | `/reminders` | Send launch review agenda and Call Mom |
 
-Each row keeps title, most-useful schedule fact, tags, state, and named actions.
-The empty fixture must show a single capture-oriented empty state.
+Confirm Views, Lists, and Projects are separate sidebar groups. Inbox is the default `/tasks`
+selection and never puts its generated ID in the URL. Select Personal, Work, and Shopping Lists and
+confirm the URL uses `list`. Under Personal and Work, confirm the duplicate Project name
+**Quarterly reset** resolves within the selected List. Select a Project and confirm the canonical
+URL contains both `list` and `project` and survives refresh.
+
+Create/edit a Task with independent deadline and reserved-time fields; there must be no Next or
+status selector. Exercise complete/reopen, cancel/reopen, trash/restore, Task move detachment
+preview, Project move affected-count preview, Project completion conflict choices, and List archive
+conflict choices. Each row keeps title, useful organization/timing context, lifecycle, and named
+actions. The empty fixture must show selection-specific capture guidance.
 
 ## Personal context
 

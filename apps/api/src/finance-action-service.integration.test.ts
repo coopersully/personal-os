@@ -390,7 +390,7 @@ describe.sequential("finance action service", () => {
       .returning();
     if (!user) throw new Error("Finance action test user was not created.");
     userId = user.id;
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await database.close();

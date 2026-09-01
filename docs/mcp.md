@@ -102,8 +102,8 @@ shows only “This result is available in chat.” It does not fall back to raw 
 financial values.
 
 The Finance API owns the typed values, evidence state, disclosures, and destination identity. The
-self-contained MCP Apps format that bounded contract, use the host theme and sizing lifecycle, and
-mediate an optional same-origin HTTPS destination through `ui/open-link`; they do not calculate
+self-contained MCP Apps format bounds that contract, uses the host theme and sizing lifecycle, and
+mediates an optional same-origin HTTPS destination through `ui/open-link`; MCP Apps do not calculate
 financial meaning or grant mutation authority.
 
 `personal-os://agenda/today` and `personal-os://brief/daily` remain readable compatibility
@@ -112,19 +112,40 @@ resources. New clients should begin with `get_ilo_context` or `ilo://context/sel
 The server publishes task-oriented prompts for setup, daily planning, Mail triage, Calendar
 commitment preparation, overdue Reminder review, Finance review, and a weekly review. Prompts
 compose existing tools and approval boundaries; they do not embed new authority or business
-rules. MCP Tasks are intentionally not advertised yet: current long-lived Mail and Finance work
-has durable API-owned lifecycle state, but no shared MCP task handle contract. Exposing protocol
-Tasks before that contract exists would create a misleading in-memory completion surface.
+rules. MCP protocol Tasks are long-running operation handles and are unrelated to Ilo's user-owned
+Lists, Projects, and Tasks. Protocol Tasks remain unadvertised: current long-lived Mail and Finance
+work has durable API-owned lifecycle state, but no shared MCP operation-handle contract. Exposing
+protocol Tasks before that contract exists would create a misleading in-memory completion surface.
 
 ## Tools
 
 The server exposes focused Reminder list/get/create/update/complete/trash/restore tools and an exact,
-read-only overdue-deferral preview; read/create/update/delete event tools; calendar discovery and an
-evidence-based commitment preview tool; mailbox, mail search, conversation, and mail rule tools;
+read-only overdue-deferral preview; focused Task List, Project, executable Task, move-preview, move,
+lifecycle, Trash, and restore tools; read/create/update/delete event tools; calendar discovery and
+an evidence-based commitment preview tool; mailbox, mail search, conversation, and mail rule tools;
 actor-aware activity history; and Finance tools. Destructive, read-only, idempotent, and open-world
 annotations are compatible-host UX hints only. Authorization, policy, source evidence, provider
 capability, structured errors, conflict handling, audit history, recoverable deletion, and
 partial-effect reporting remain deterministic API behavior.
+
+Task organization follows `inspect → prepare → commit`: read a List, Project, or Task by its stable
+ID immediately before a mutation, then pass that source's integer `revision` as
+`expectedRevision`. Updates and lifecycle transitions are not safely replayable merely because
+they use optimistic revision checks. Agent creates require a UUID `idempotencyKey`; only an exact
+payload replay under the same key returns the original create, while a mismatched replay remains a
+structured API conflict. A material Project or Task move first calls the corresponding read-only
+preview tool, then passes the returned preview token and current expected revision to the commit
+tool. Both preview tools use `tasks:read`; the move commits and every other Task mutation require
+`tasks:write`. Revision or preview drift requires a new source read and preview. MCP never resolves
+a name, performs a cascade, or converts a structured archive/completion conflict into a local
+decision.
+
+Lists provide durable organization. Projects represent finite outcomes inside a List. Tasks are
+executable actions whose canonical lifecycle is `open`, `completed`, or `cancelled`; completion,
+reopening, and cancellation use separate transition tools rather than a boolean update. Reopening
+returns a Task to `open` and does not invent a legacy queue status. Today, Upcoming, Scheduled,
+Completed, Cancelled, and Trash are derived system Views rather than stored Lists. `trash_task` is
+recoverable and destructive for host UX; permanent Task deletion is not exposed.
 
 Finance includes read tools for ledger context and the current automation setting, plus
 `finances:write` tools that mutate the accounting ledger, profile and income data, and budget
@@ -286,7 +307,7 @@ confidence, ambiguity, evidence, ownership, and revision checks; bypass never
 waives those checks. A scoped same-user agent may list pending Finance questions
 through their public descriptors only. `answer_finance_question` accepts only
 the requested bounded fields as person-provided evidence and prepares the
-stored action again; Task 3's server-owned disposition still decides whether it
+stored action again; the server-owned disposition still decides whether it
 is applied or queued for individual review. An authorized same-user
 `finances:write` agent may answer a maintenance-generated question, while an
 ordinary agent answer remains limited to its originating agent. Reimbursement

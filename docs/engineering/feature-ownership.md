@@ -31,7 +31,9 @@ parallel worktree ownership. It complements the system boundary in
 | --- | --- | --- |
 | Finances | `apps/web/src/features/finances`, `apps/api/src/routes/finances.ts`, `apps/api/src/finance-*`, `packages/domain/src/finance.ts`, `packages/api-client/src/features/finances.ts`, `apps/mcp/src/tools/finances.ts`, `packages/connectors/src/plaid*` | Sessions, generic OAuth, Today composition, global navigation |
 | Mail | `apps/web/src/features/mail`, `apps/api/src/routes/mail.ts`, `apps/api/src/mail-*`, `packages/domain/src/mail.ts`, `packages/connectors/src/google/mail.ts`, `packages/connectors/src/icloud-mail*` | Google OAuth core, Calendar provider adapter, Today composition |
-| Commitments | `apps/web/src/features/reminders`, `apps/web/src/features/tasks`, `apps/api/src/routes/reminders.ts`, `apps/api/src/routes/tasks.ts`, `apps/api/src/reminder-service.ts`, `apps/api/src/task-service.ts`, `packages/domain/src/reminder.ts`, `packages/domain/src/task.ts`, `packages/api-client/src/features/reminders.ts`, `packages/api-client/src/features/tasks.ts` | Today composition, global navigation, generic Add menu |
+| Tasks | `apps/web/src/features/tasks`, `apps/api/src/routes/tasks.ts`, `apps/api/src/routes/task-lists.ts`, `apps/api/src/routes/task-projects.ts`, `apps/api/src/task-service.ts`, `apps/api/src/task-list-service.ts`, `apps/api/src/task-project-service.ts`, `packages/domain/src/task.ts`, `packages/domain/src/task-organization.ts`, `packages/api-client/src/features/tasks.ts`, `apps/mcp/src/tools/planning.ts` | Reminder lifecycle, Today composition, global navigation, generic Add menu, physical database extraction |
+| Reminders | `apps/web/src/features/reminders`, `apps/api/src/routes/reminders.ts`, `apps/api/src/reminder-service.ts`, `packages/domain/src/reminder.ts`, `packages/api-client/src/features/reminders.ts`, `apps/mcp/src/tools/reminders.ts` | Task/List/Project lifecycle, Prompt migration, Today composition, global navigation |
+| Tracking (planned) | `apps/web/src/features/tracking`, future Tracking route/service modules, `packages/domain` Tracking contracts, typed client and MCP Tracking adapters | Tasks, Reminders, Today composition, global navigation, provider health bridges |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
 | Texting | `apps/web/src/features/texting`, `apps/api/src/routes/texting.ts`, `apps/api/src/texting-*`, `packages/domain/src/texting.ts`, `packages/connectors/src/twilio.ts`, `packages/api-client/src/features/texting.ts`, `apps/mcp/src/tools/texting.ts` | Account authentication, global navigation, migration journal |
@@ -54,6 +56,37 @@ The following are Integration-owned until they are reduced to thin registries:
 Feature owners may add new feature modules freely. The Integration owner wires
 those modules into the composition roots, which keeps parallel feature branches
 from repeatedly conflicting on the same file.
+
+### Tasks domain boundary
+
+Tasks owns four distinct concepts:
+
+- a **View** is a query (`today`, `upcoming`, `scheduled`, `completed`, `cancelled`, or `trash`) and
+  owns no material;
+- a **List** is a persistent organizational context, including the one protected system Inbox;
+- a **Project** is a finite outcome inside exactly one List;
+- a **Task** is one independently completable action in exactly one List and optionally one
+  same-List Project.
+
+The web uses the canonical URL model `view | list + optional project`: a View excludes container
+selection, a Project implies its List, and Inbox is `/tasks` without a generated identifier. Task
+lifecycle (`open`, `completed`, `cancelled`), timing (`dueAt`, `scheduledAt`), container
+availability, and deletion are independent axes.
+
+`packages/database` currently stores Task rows in `reminders` beside Reminder rows, with Task-only
+columns protected by checks and foreign keys. That is a transitional physical boundary, not shared
+domain ownership. Task services must query `kind = 'task'`; Reminder services retain their own
+contract. Physical extraction is Integration/database-migration work and cannot begin until the
+compatibility observation gate in the Tasks and Tracking design is satisfied.
+
+Lists, Projects, and Tasks are local-only in v1. Their public `MaterialSourceReference` is derived
+from stable entity ID and revision (`provider: local`, no account), not accepted from callers or
+stored as a second provenance record. A future provider-backed container requires a new reviewed
+storage and source contract.
+
+The completed [Tasks Ilo charter](../product/tasks-ilo-charter.md) maps this shipped foundation and
+its explicit follow-ups to the workspace-stewardship doctrine. It does not turn the unimplemented
+maintenance, question, learning, status, or review layers into Integration-owned behavior.
 
 ## Workspace Ilo ownership
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { readFileSync } from "node:fs";
+import { ApiClientError } from "@personal-os/api-client";
 import type { CalendarStatus, UpdateAccountSetupInput, User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -15,14 +16,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { App, formatTimelineTimeRange, isNavigator, positionTimelineEvents } from "./app.js";
-import {
-  CircleCheckIcon,
-  type Icon,
-  InboxIcon,
-  ListChecksIcon,
-  ListTodoIcon,
-  StarIcon,
-} from "./components/icons.js";
+import { CircleCheckIcon, type Icon, ListTodoIcon, StarIcon } from "./components/icons.js";
 import { MotionProvider } from "./components/motion-provider.js";
 import {
   getWorkspaceCalendarEntry,
@@ -30,6 +24,7 @@ import {
   workspaceIndicatorOffset,
   workspaceTodaySummary,
 } from "./components/workspace-switching.js";
+import { loadAllTaskContainerPages } from "./features/tasks/page.js";
 
 const now = "2026-07-13T12:00:00.000Z";
 const capacity = {
@@ -45,6 +40,19 @@ const id = "11111111-1111-4111-8111-111111111111";
 const secondId = "22222222-2222-4222-8222-222222222222";
 const thirdId = "33333333-3333-4333-8333-333333333333";
 const fakeAppleAppPassword = ["xxxx", "xxxx", "xxxx", "xxxx"].join("-");
+
+it("bounds Tasks container pagination", async () => {
+  let pageNumber = 0;
+  const loadPage = vi.fn(async () => {
+    pageNumber += 1;
+    return { items: [], nextCursor: `cursor-${pageNumber}` };
+  });
+
+  await expect(loadAllTaskContainerPages(loadPage)).rejects.toThrow(
+    "Task container pagination exceeded 100 pages.",
+  );
+  expect(loadPage).toHaveBeenCalledTimes(100);
+});
 
 function iconMarkup(Icon: Icon, weight: "Filled" | "Outline") {
   const view = render(<Icon weight={weight} />);
@@ -131,6 +139,7 @@ const event = {
   blockSourceEventId: null,
   blockMode: null,
   blocks: [],
+  conferenceStatus: null,
   conferenceUrl: null,
   title: "Focus block",
   notes: null,
@@ -181,19 +190,90 @@ const overdueReminder = {
   dueAt: "2026-07-12T15:00:00.000Z",
 };
 const task = {
-  id: "88888888-8888-4888-8888-888888888888",
-  title: "Draft brief",
-  notes: "Keep it concise",
-  dueAt: "2026-07-13T16:00:00.000Z",
-  scheduledAt: null,
-  timezone: "UTC",
-  priority: "high" as const,
-  estimateMinutes: 30,
-  tags: ["planning"],
-  status: "next" as const,
+  cancelledAt: null,
   completedAt: null,
   createdAt: now,
+  deletedAt: null,
+  dueAt: "2026-07-13T16:00:00.000Z",
+  estimateMinutes: 30,
+  id: "88888888-8888-4888-8888-888888888888",
+  legacyStatus: "next" as const,
+  lifecycle: "open" as const,
+  listId: id,
+  notes: "Keep it concise",
+  priority: "high" as const,
+  projectId: null,
+  revision: 3,
+  scheduledAt: null,
+  source: {
+    accountId: null,
+    provider: "local" as const,
+    remoteId: "88888888-8888-4888-8888-888888888888",
+    revision: "3",
+    sourceType: "task" as const,
+  },
+  tags: ["planning"],
+  timezone: "UTC",
+  title: "Draft brief",
   updatedAt: now,
+  why: "Ship a clear decision",
+};
+const inboxTaskList = {
+  archivedAt: null,
+  availability: "active" as const,
+  color: null,
+  createdAt: now,
+  deletedAt: null,
+  description: null,
+  id,
+  kind: "inbox" as const,
+  name: "Inbox",
+  revision: 2,
+  source: {
+    accountId: null,
+    provider: "local" as const,
+    remoteId: id,
+    revision: "2",
+    sourceType: "task_list" as const,
+  },
+  updatedAt: now,
+};
+const workTaskList = {
+  ...inboxTaskList,
+  description: "Work commitments",
+  id: secondId,
+  kind: "standard" as const,
+  name: "Work",
+  revision: 4,
+  source: {
+    ...inboxTaskList.source,
+    remoteId: secondId,
+    revision: "4",
+  },
+};
+const launchTaskProject = {
+  archivedAt: null,
+  availability: "active" as const,
+  cancelledAt: null,
+  completedAt: null,
+  createdAt: now,
+  deletedAt: null,
+  id: thirdId,
+  lifecycle: "open" as const,
+  listId: secondId,
+  name: "Launch",
+  notes: null,
+  revision: 5,
+  source: {
+    accountId: null,
+    provider: "local" as const,
+    remoteId: thirdId,
+    revision: "5",
+    sourceType: "task_project" as const,
+  },
+  targetDate: "2026-08-01",
+  updatedAt: now,
+  why: "Release the new workspace",
 };
 const nullColorCalendar = {
   ...googleCalendar,
@@ -276,6 +356,7 @@ function iloSetupFixture() {
 const mocks = vi.hoisted(() => ({
   completeReminder: vi.fn(),
   completeTask: vi.fn(),
+  completeTaskProject: vi.fn(),
   confirmEmailVerification: vi.fn(),
   connectICloud: vi.fn(),
   createAccessToken: vi.fn(),
@@ -293,6 +374,8 @@ const mocks = vi.hoisted(() => ({
   exchangePlaidToken: vi.fn(),
   createReminder: vi.fn(),
   createTask: vi.fn(),
+  createTaskList: vi.fn(),
+  createTaskProject: vi.fn(),
   deleteAccessToken: vi.fn(),
   deleteCalendar: vi.fn(),
   deleteConnector: vi.fn(),
@@ -300,7 +383,10 @@ const mocks = vi.hoisted(() => ({
   deleteEvent: vi.fn(),
   deleteEventBlock: vi.fn(),
   deleteReminder: vi.fn(),
-  deleteTask: vi.fn(),
+  archiveTaskList: vi.fn(),
+  archiveTaskProject: vi.fn(),
+  cancelTask: vi.fn(),
+  cancelTaskProject: vi.fn(),
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
   disconnectTexting: vi.fn(),
@@ -378,6 +464,15 @@ const mocks = vi.hoisted(() => ({
   updatePinterestWallpaperSettings: vi.fn(),
   listReminders: vi.fn(),
   listTasks: vi.fn(),
+  listTaskLists: vi.fn(),
+  listTaskProjects: vi.fn(),
+  moveTask: vi.fn(),
+  moveTaskProject: vi.fn(),
+  previewTaskMove: vi.fn(),
+  previewTaskProjectMove: vi.fn(),
+  reopenTask: vi.fn(),
+  restoreTask: vi.fn(),
+  trashTask: vi.fn(),
   listSessions: vi.fn(),
   login: vi.fn(),
   logout: vi.fn(),
@@ -411,6 +506,8 @@ const mocks = vi.hoisted(() => ({
   updateAccountSetup: vi.fn(),
   updateReminder: vi.fn(),
   updateTask: vi.fn(),
+  updateTaskList: vi.fn(),
+  updateTaskProject: vi.fn(),
   upsertDomainProfile: vi.fn(),
   updateUser: vi.fn(),
   validateInvitation: vi.fn(),
@@ -485,6 +582,11 @@ function defaults() {
     nextCursor: null,
   });
   mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
+  mocks.listTaskLists.mockResolvedValue({
+    items: [inboxTaskList, workTaskList],
+    nextCursor: null,
+  });
+  mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
   mocks.getDailyBrief.mockResolvedValue({
     allDay: [allDayEvent],
     anytime: [
@@ -956,12 +1058,65 @@ function defaults() {
   ]);
   mocks.createReminder.mockResolvedValue(reminder);
   mocks.createTask.mockResolvedValue(task);
+  mocks.createTaskList.mockResolvedValue(workTaskList);
+  mocks.createTaskProject.mockResolvedValue(launchTaskProject);
   mocks.updateReminder.mockResolvedValue(reminder);
   mocks.updateTask.mockResolvedValue(task);
+  mocks.updateTaskList.mockResolvedValue(workTaskList);
+  mocks.updateTaskProject.mockResolvedValue(launchTaskProject);
   mocks.completeReminder.mockResolvedValue(reminder);
   mocks.completeTask.mockResolvedValue(task);
+  mocks.completeTaskProject.mockResolvedValue({
+    ...launchTaskProject,
+    completedAt: now,
+    lifecycle: "completed",
+    revision: 6,
+  });
+  mocks.cancelTask.mockResolvedValue({ ...task, cancelledAt: now, lifecycle: "cancelled" });
+  mocks.reopenTask.mockResolvedValue(task);
+  mocks.trashTask.mockResolvedValue({ ...task, deletedAt: now });
+  mocks.restoreTask.mockResolvedValue(task);
+  mocks.cancelTaskProject.mockResolvedValue({
+    ...launchTaskProject,
+    cancelledAt: now,
+    lifecycle: "cancelled",
+  });
+  mocks.archiveTaskProject.mockResolvedValue({
+    ...launchTaskProject,
+    archivedAt: now,
+    availability: "archived",
+  });
+  mocks.archiveTaskList.mockResolvedValue({
+    ...workTaskList,
+    archivedAt: now,
+    availability: "archived",
+  });
+  mocks.previewTaskMove.mockResolvedValue({
+    destinationListId: secondId,
+    destinationListRevision: 4,
+    destinationProjectId: null,
+    destinationProjectRevision: null,
+    detachedProjectId: null,
+    previewToken: "task-move-preview",
+    sourceListId: id,
+    sourceListRevision: 2,
+    sourceProjectId: null,
+    taskId: task.id,
+    taskRevision: 3,
+  });
+  mocks.moveTask.mockResolvedValue({ ...task, listId: secondId, revision: 4 });
+  mocks.previewTaskProjectMove.mockResolvedValue({
+    affectedTaskCount: 3,
+    destinationListId: id,
+    destinationListRevision: 2,
+    previewToken: "project-move-preview",
+    sourceListId: secondId,
+    sourceListRevision: 4,
+    taskProjectId: thirdId,
+    taskProjectRevision: 5,
+  });
+  mocks.moveTaskProject.mockResolvedValue({ ...launchTaskProject, listId: id, revision: 6 });
   mocks.deleteReminder.mockResolvedValue(undefined);
-  mocks.deleteTask.mockResolvedValue(undefined);
   mocks.createEvent.mockResolvedValue(event);
   mocks.createEventBlock.mockResolvedValue(event);
   mocks.updateEvent.mockResolvedValue(event);
@@ -1795,6 +1950,48 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
   });
 
+  it("agent access previews canonical open Tasks", async () => {
+    const guide = await mocks.getAgentConnectionGuide();
+    mocks.getAgentConnectionGuide.mockResolvedValue({
+      ...guide,
+      domains: [
+        ...guide.domains,
+        {
+          domain: "tasks",
+          readScope: "tasks:read",
+          support: "profile_and_attention",
+          writeScope: "tasks:write",
+        },
+      ],
+    });
+    const setupStatus = await mocks.getAssistantSetupStatus();
+    mocks.getAssistantSetupStatus.mockResolvedValue({
+      ...setupStatus,
+      domains: [
+        ...setupStatus.domains,
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: true,
+          domain: "tasks",
+          pendingDraftVersion: null,
+          profileStatus: null,
+          profileVersion: null,
+        },
+      ],
+    });
+    mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
+    setup("/settings?section=tasks");
+    const browser = userEvent.setup();
+
+    expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Review checks" }));
+    await browser.click(screen.getByRole("button", { name: /Show \d+ completed checks?/ }));
+    expect(await screen.findByText("1 open Task in Ilo.")).toBeInTheDocument();
+    expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 });
+  });
+
   it("uses the real provider flows while progressing through full setup", async () => {
     const setupUser: User = {
       ...user,
@@ -2522,6 +2719,17 @@ describe("ilo web app", () => {
       next: null,
       now: [],
     });
+    const firstTaskPage = {
+      items: Array.from({ length: 100 }, (_, index) => ({
+        ...task,
+        id: `88888888-8888-4888-8888-${index.toString().padStart(12, "0")}`,
+      })),
+      nextCursor: "more-open-tasks",
+    };
+    mocks.listTasks.mockImplementation(async (query) => {
+      if (query.cursor) throw new Error("The workspace switcher must not load another Task page.");
+      return firstTaskPage;
+    });
     configureFinanceWorkspace();
     const view = setup("/goals");
     const browser = userEvent.setup();
@@ -2531,7 +2739,7 @@ describe("ilo web app", () => {
     const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
     await waitFor(() => {
       expect(mocks.listEvents).toHaveBeenCalled();
-      expect(mocks.listTasks).toHaveBeenCalledWith({ completed: false, status: "inbox" });
+      expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 });
       expect(mocks.listMailThreads).toHaveBeenCalledWith({});
     });
     expect(mocks.getFinanceWealthSummary).not.toHaveBeenCalled();
@@ -2539,13 +2747,10 @@ describe("ilo web app", () => {
     expect(mocks.getFinanceBudgetPace).not.toHaveBeenCalled();
     expect(within(workspaceMenu).getByText("Weather · Set location")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("2 events today · 2 left")).toBeInTheDocument();
-    expect(within(workspaceMenu).getByText("1 in inbox")).toBeInTheDocument();
+    expect(within(workspaceMenu).getByText("99+ open")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("1 unread")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("1 to review")).toBeInTheDocument();
-    expect(view.queryClient.getQueryData(["tasks", "inbox"])).toEqual({
-      items: [task],
-      nextCursor: null,
-    });
+    expect(view.queryClient.getQueryData(["tasks", "open", "all"])).toEqual(firstTaskPage);
 
     fireEvent.pointerMove(
       within(workspaceMenu).getByRole("menuitem", { name: "Today at a Glance" }),
@@ -2646,17 +2851,17 @@ describe("ilo web app", () => {
 
     await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
     await waitFor(() =>
-      expect(mocks.listTasks).toHaveBeenCalledWith({ completed: false, status: "inbox" }),
+      expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 }),
     );
     const taskEntryCallsBeforeNavigation = mocks.listTasks.mock.calls.filter(
-      ([query]) => query?.status === "inbox",
+      ([query]) => query?.listId === id,
     ).length;
     await browser.click(screen.getByRole("menuitem", { name: "Tasks" }));
 
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     await waitFor(() =>
       expect(
-        mocks.listTasks.mock.calls.filter(([query]) => query?.status === "inbox").length,
+        mocks.listTasks.mock.calls.filter(([query]) => query?.listId === id).length,
       ).toBeGreaterThan(taskEntryCallsBeforeNavigation),
     );
     expect(view.container.querySelector(".workspace-route")).toHaveAttribute(
@@ -2677,19 +2882,57 @@ describe("ilo web app", () => {
     );
   });
 
-  it("captures, completes, and organizes tasks", async () => {
+  it("organizes Tasks with separate Views, Lists, and filtered Projects", async () => {
     const browser = userEvent.setup();
-    const { queryClient } = setup("/tasks");
+    const view = setup("/tasks");
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
+    const taskSidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    expect(within(taskSidebar).getByText("Views")).toBeInTheDocument();
+    expect(within(taskSidebar).getByText("Lists")).toBeInTheDocument();
+    expect(within(taskSidebar).getByRole("link", { name: "Today" })).toHaveAttribute(
+      "href",
+      "/tasks?view=today",
+    );
+    expect(within(taskSidebar).getByRole("link", { name: "Upcoming" })).toBeInTheDocument();
+    expect(within(taskSidebar).getByRole("link", { name: "Scheduled" })).toBeInTheDocument();
+    expect(within(taskSidebar).getByRole("link", { name: "Completed" })).toBeInTheDocument();
+    expect(within(taskSidebar).getByRole("link", { name: "Cancelled" })).toBeInTheDocument();
+    expect(within(taskSidebar).getByRole("link", { name: "Trash" })).toBeInTheDocument();
     const inboxLink = screen.getByRole("link", { name: "Inbox" });
-    const nextLink = screen.getByRole("link", { name: "Next" });
     expect(inboxLink).toHaveAttribute("aria-current", "page");
-    expect(inboxLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(InboxIcon, "Filled"));
-    expect(nextLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(ListChecksIcon, "Outline"));
-    expect(within(screen.getByLabelText("Task tags")).getByText("planning")).toBeInTheDocument();
+    expect(inboxLink).toHaveAttribute("href", "/tasks");
+    expect(within(taskSidebar).getByRole("link", { name: "Work" })).toBeInTheDocument();
+    expect(within(taskSidebar).queryByRole("link", { name: "Launch" })).not.toBeInTheDocument();
+
+    await browser.click(within(taskSidebar).getByRole("link", { name: "Work" }));
+    expect(view.location.value).toBe(`/tasks?list=${secondId}`);
+    expect(await within(taskSidebar).findByRole("link", { name: "Launch" })).toHaveAttribute(
+      "href",
+      `/tasks?list=${secondId}&project=${thirdId}`,
+    );
+    await browser.click(within(taskSidebar).getByRole("link", { name: "Launch" }));
+    expect(view.location.value).toBe(`/tasks?list=${secondId}&project=${thirdId}`);
+    expect(await screen.findByRole("heading", { name: "Launch" })).toBeInTheDocument();
+    expect(screen.getByText("Release the new workspace")).toBeInTheDocument();
+    expect(screen.getByText(/Target Aug 1, 2026/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenLastCalledWith({
+        lifecycle: "open",
+        limit: 100,
+        projectId: thirdId,
+      }),
+    );
+
     await browser.click(screen.getByRole("button", { name: "New task" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Capture a task");
+    expect(screen.queryByLabelText("Status")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("List")).toHaveValue(secondId);
+    expect(screen.getByLabelText("Project")).toHaveValue(thirdId);
+    expect(screen.getByLabelText("Deadline")).not.toBe(screen.getByLabelText("Reserved time"));
     await browser.type(screen.getByLabelText("Task"), "Write task coverage");
+    await browser.click(screen.getByText("More details"));
+    await browser.type(screen.getByLabelText("Why it matters"), "Keep the workspace reliable");
     await browser.type(screen.getByLabelText("Estimate in minutes"), "25");
     await browser.type(screen.getByLabelText("Tags"), "quality, coverage");
     await browser.click(screen.getByRole("button", { name: "Create task" }));
@@ -2697,29 +2940,1090 @@ describe("ilo web app", () => {
       expect(mocks.createTask).toHaveBeenCalledWith(
         expect.objectContaining({
           estimateMinutes: 25,
-          status: "inbox",
+          listId: secondId,
+          projectId: thirdId,
           tags: ["quality", "coverage"],
           timezone: null,
           title: "Write task coverage",
+          why: "Keep the workspace reliable",
         }),
       ),
     );
     await browser.click(screen.getByRole("checkbox", { name: "Complete Draft brief" }));
-    await waitFor(() => expect(mocks.completeTask).toHaveBeenCalledWith(task.id, true));
-    await waitFor(() => expect(mocks.listTasks.mock.calls.length).toBeGreaterThan(1));
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    await browser.click(screen.getByRole("button", { name: "Remove Draft brief" }));
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["daily-brief"] }));
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["tasks"] });
-    invalidate.mockRestore();
-    await browser.click(screen.getByRole("link", { name: "Next" }));
-    expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute("aria-current", "page");
-    expect(inboxLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(InboxIcon, "Outline"));
-    expect(nextLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(ListChecksIcon, "Filled"));
-    expect(mocks.listTasks).toHaveBeenCalledWith({ completed: false, status: "next" });
+    await waitFor(() =>
+      expect(mocks.completeTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
+    );
   });
 
-  it("captures unscheduled tasks cleanly and communicates a pending save", async () => {
+  it("keeps Reminders directly reachable from the Tasks contextual sidebar", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    const taskSidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    const related = within(taskSidebar).getByRole("navigation", {
+      name: "Related commitments",
+    });
+    const reminders = within(related).getByRole("link", { name: "Reminders" });
+    expect(reminders).toHaveAttribute("href", "/reminders");
+    await browser.click(reminders);
+    expect(view.location.value).toBe("/reminders");
+    expect(await screen.findByRole("heading", { name: "Reminders" })).toBeInTheDocument();
+  });
+
+  it("opens exact Task URLs and applies lifecycle and timing filters from the workspace", async () => {
+    const browser = userEvent.setup();
+    const direct = setup(`/tasks?task=${task.id}`);
+    expect(await screen.findByRole("dialog", { name: "Refine task" })).toBeInTheDocument();
+    expect(direct.location.value).toBe(`/tasks?task=${task.id}`);
+    await browser.click(screen.getByText("Record details"));
+    expect(screen.getByText("Revision").nextElementSibling).toHaveTextContent("3");
+    await browser.click(screen.getByRole("button", { name: "Close" }));
+    direct.unmount();
+
+    const filtered = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByText("Filters"));
+    await browser.selectOptions(screen.getByLabelText("Lifecycle"), "completed");
+    fireEvent.change(screen.getByLabelText("Deadline after"), {
+      target: { value: "2026-07-13T09:00" },
+    });
+    await browser.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenLastCalledWith({
+        dueAfter: "2026-07-13T09:00:00.000Z",
+        lifecycle: "completed",
+        limit: 100,
+        listId: id,
+      }),
+    );
+    expect(screen.getByText("1 completed task")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(filtered.location.value).toBe("/tasks"));
+    expect(screen.getByText("Filters")).toBeInTheDocument();
+    filtered.unmount();
+
+    const systemView = setup("/tasks?view=today&lifecycle=completed");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByText("Filters"));
+    expect(screen.queryByLabelText("Lifecycle")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(systemView.location.value).toBe("/tasks?view=today"));
+    expect(mocks.listTasks).toHaveBeenLastCalledWith({ limit: 100, view: "today" });
+    systemView.unmount();
+  });
+
+  it("requires an explicit Tasks move confirmation when a List change detaches a Project", async () => {
+    const browser = userEvent.setup();
+    const placedTask = { ...task, listId: secondId, projectId: thirdId };
+    mocks.listTasks.mockResolvedValue({ items: [placedTask], nextCursor: null });
+    mocks.previewTaskMove.mockResolvedValueOnce({
+      destinationListId: id,
+      destinationListRevision: 2,
+      destinationProjectId: null,
+      destinationProjectRevision: null,
+      detachedProjectId: thirdId,
+      previewToken: "detach-preview",
+      sourceListId: secondId,
+      sourceListRevision: 4,
+      sourceProjectId: thirdId,
+      taskId: task.id,
+      taskRevision: 7,
+    });
+    mocks.moveTask.mockResolvedValueOnce({
+      ...placedTask,
+      listId: id,
+      projectId: null,
+      revision: 4,
+    });
+    setup(`/tasks?list=${secondId}&project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.selectOptions(screen.getByLabelText("List"), id);
+    expect(screen.getByLabelText("Project")).toHaveValue("");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      await screen.findByRole("heading", { name: "Move Task without its Project?" }),
+    ).toBeInTheDocument();
+    expect(mocks.moveTask).not.toHaveBeenCalled();
+    await browser.click(screen.getByRole("button", { name: "Move and detach Project" }));
+    await waitFor(() =>
+      expect(mocks.moveTask).toHaveBeenCalledWith(task.id, {
+        destinationListId: id,
+        destinationProjectId: null,
+        expectedRevision: 7,
+        previewToken: "detach-preview",
+      }),
+    );
+    expect(mocks.updateTask).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({ expectedRevision: 4 }),
+    );
+  });
+
+  it("recovers Tasks content updates after a move commits without moving twice", async () => {
+    const browser = userEvent.setup();
+    mocks.previewTaskMove.mockResolvedValueOnce({
+      destinationListId: secondId,
+      destinationListRevision: 4,
+      destinationProjectId: null,
+      destinationProjectRevision: null,
+      detachedProjectId: null,
+      previewToken: "content-retry-preview",
+      sourceListId: id,
+      sourceListRevision: 2,
+      sourceProjectId: null,
+      taskId: task.id,
+      taskRevision: 3,
+    });
+    mocks.moveTask.mockResolvedValueOnce({ ...task, listId: secondId, revision: 4 });
+    mocks.updateTask.mockRejectedValueOnce(new Error("Task content update failed after move"));
+    const view = setup("/tasks");
+    const invalidateQueries = vi.spyOn(view.queryClient, "invalidateQueries");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.selectOptions(screen.getByLabelText("List"), secondId);
+    await browser.clear(screen.getByLabelText("Task"));
+    await browser.type(screen.getByLabelText("Task"), "Moved draft brief");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Task content update failed after move",
+    );
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["tasks"] }));
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.previewTaskMove).toHaveBeenCalledTimes(1);
+    expect(mocks.moveTask).toHaveBeenCalledTimes(1);
+    expect(mocks.updateTask).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({ expectedRevision: 4, title: "Moved draft brief" }),
+    );
+  });
+
+  it("manages Tasks Lists and Projects with API-authored conflict choices", async () => {
+    const browser = userEvent.setup();
+    const view = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    const sidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    expect(within(sidebar).queryByRole("button", { name: "Manage Inbox" })).not.toBeInTheDocument();
+
+    await browser.click(within(sidebar).getByRole("button", { name: "New List" }));
+    mocks.createTaskList.mockRejectedValueOnce(
+      new Error("That name is reserved for a system View."),
+    );
+    await browser.type(screen.getByLabelText("Name"), "Today");
+    await browser.click(screen.getByRole("button", { name: "Create List" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("reserved for a system View");
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await browser.click(within(sidebar).getByRole("button", { name: "New List" }));
+    mocks.createTaskList.mockRejectedValueOnce(new Error("A List named Work already exists."));
+    await browser.type(screen.getByLabelText("Name"), "Work");
+    await browser.click(screen.getByRole("button", { name: "Create List" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("already exists");
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const listFetchesBeforeCreate = mocks.listTaskLists.mock.calls.length;
+    await browser.click(within(sidebar).getByRole("button", { name: "New List" }));
+    await browser.type(screen.getByLabelText("Name"), "Personal");
+    await browser.click(screen.getByRole("button", { name: "Create List" }));
+    await waitFor(() =>
+      expect(mocks.createTaskList).toHaveBeenLastCalledWith(
+        expect.objectContaining({ name: "Personal" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(mocks.listTaskLists.mock.calls.length).toBeGreaterThan(listFetchesBeforeCreate),
+    );
+
+    await browser.click(within(sidebar).getByRole("button", { name: "Manage Work" }));
+    await browser.clear(screen.getByLabelText("Name"));
+    await browser.type(screen.getByLabelText("Name"), "Work updated");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(mocks.updateTaskList).toHaveBeenCalledWith(
+        secondId,
+        expect.objectContaining({ expectedRevision: 4, name: "Work updated" }),
+      ),
+    );
+
+    const listConflict = {
+      code: "task_list_has_active_contents" as const,
+      currentRevisions: { destinationList: null, project: null, sourceList: 9, task: null },
+      openContentCounts: { projects: 1, tasks: 3 },
+      resolutions: ["move_active_contents", "archive_contents_together", "cancel"] as const,
+    };
+    mocks.archiveTaskList.mockRejectedValueOnce(
+      new ApiClientError({
+        code: listConflict.code,
+        details: listConflict,
+        message: "Choose what happens to active contents.",
+        status: 409,
+      }),
+    );
+    await browser.click(within(sidebar).getByRole("button", { name: "Manage Work" }));
+    await browser.click(screen.getByRole("button", { name: "Archive List" }));
+    expect(await screen.findByText(/1 open Projects and 3 open Tasks/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Move them to another List or archive the List and its contents together.",
+    );
+    expect(screen.getByRole("button", { name: "Move active contents" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Archive contents together" })).toBeInTheDocument();
+    await browser.selectOptions(screen.getByLabelText("Destination List"), id);
+    await browser.click(screen.getByRole("button", { name: "Move active contents" }));
+    await waitFor(() =>
+      expect(mocks.archiveTaskList).toHaveBeenLastCalledWith(secondId, {
+        destinationListId: id,
+        expectedRevision: 9,
+        resolution: "move_active_contents",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await browser.click(within(sidebar).getByRole("button", { name: "New Project" }));
+    mocks.createTaskProject.mockRejectedValueOnce(
+      new Error("A Project named Launch already exists."),
+    );
+    await browser.type(screen.getByLabelText("Name"), "Launch");
+    await browser.click(screen.getByRole("button", { name: "Create Project" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("already exists");
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const projectFetchesBeforeCreate = mocks.listTaskProjects.mock.calls.length;
+    await browser.click(within(sidebar).getByRole("button", { name: "New Project" }));
+    await browser.type(screen.getByLabelText("Name"), "Quarterly reset");
+    await browser.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() =>
+      expect(mocks.createTaskProject).toHaveBeenCalledWith(
+        expect.objectContaining({ listId: secondId, name: "Quarterly reset" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(mocks.listTaskProjects.mock.calls.length).toBeGreaterThan(projectFetchesBeforeCreate),
+    );
+
+    await browser.click(within(sidebar).getByRole("button", { name: "Manage Launch" }));
+    await browser.clear(screen.getByLabelText("Name"));
+    await browser.type(screen.getByLabelText("Name"), "Launch updated");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(mocks.updateTaskProject).toHaveBeenCalledWith(
+        thirdId,
+        expect.objectContaining({ expectedRevision: 5, name: "Launch updated" }),
+      ),
+    );
+
+    await browser.click(within(sidebar).getByRole("button", { name: "Manage Launch" }));
+    await browser.selectOptions(screen.getByLabelText("Move to List"), id);
+    await browser.click(screen.getByRole("button", { name: "Preview Project move" }));
+    expect(await screen.findByText("3 Tasks will move")).toBeInTheDocument();
+    expect(mocks.moveTaskProject).not.toHaveBeenCalled();
+    await browser.click(screen.getByRole("button", { name: "Move Project and Tasks" }));
+    await waitFor(() =>
+      expect(mocks.moveTaskProject).toHaveBeenCalledWith(thirdId, {
+        destinationListId: id,
+        expectedRevision: 5,
+        previewToken: "project-move-preview",
+      }),
+    );
+    view.unmount();
+
+    const completionConflict = {
+      code: "task_project_has_open_tasks" as const,
+      currentRevisions: {
+        destinationList: null,
+        project: 8,
+        sourceList: 4,
+        task: null,
+      },
+      openContentCounts: { projects: 0, tasks: 2 },
+      resolutions: [
+        "complete_open_tasks",
+        "cancel_open_tasks",
+        "move_open_tasks",
+        "keep_project_open",
+      ] as const,
+    };
+    mocks.completeTaskProject.mockRejectedValueOnce(
+      new ApiClientError({
+        code: completionConflict.code,
+        details: completionConflict,
+        message: "Choose what happens to open Tasks.",
+        status: 409,
+      }),
+    );
+    const conflictView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    const conflictSidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    await browser.click(within(conflictSidebar).getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    expect(await screen.findByText(/The Project has 2 open Tasks/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Complete open Tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel open Tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move open Tasks" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Keep Project open" })).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Complete open Tasks" }));
+    await waitFor(() =>
+      expect(mocks.completeTaskProject).toHaveBeenLastCalledWith(thirdId, {
+        expectedRevision: 8,
+        resolution: "complete_open_tasks",
+      }),
+    );
+    conflictView.unmount();
+
+    const cancelView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Cancel Project" }));
+    await waitFor(() =>
+      expect(mocks.cancelTaskProject).toHaveBeenCalledWith(thirdId, { expectedRevision: 5 }),
+    );
+    cancelView.unmount();
+
+    const archiveView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Archive Project" }));
+    await waitFor(() =>
+      expect(mocks.archiveTaskProject).toHaveBeenCalledWith(thirdId, { expectedRevision: 5 }),
+    );
+    archiveView.unmount();
+  }, 20_000);
+
+  it("applies the recoverable List archive resolution with the server revision", async () => {
+    const browser = userEvent.setup();
+    const conflict = {
+      code: "task_list_has_active_contents" as const,
+      currentRevisions: { destinationList: null, project: null, sourceList: 9, task: null },
+      openContentCounts: { projects: 1, tasks: 3 },
+      resolutions: ["move_active_contents", "archive_contents_together", "cancel"] as const,
+    };
+    const rejectWithConflict = () =>
+      mocks.archiveTaskList.mockRejectedValueOnce(
+        new ApiClientError({
+          code: conflict.code,
+          details: conflict,
+          message: "Choose what happens to active contents.",
+          status: 409,
+        }),
+      );
+
+    rejectWithConflict();
+    const moveView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
+    await browser.click(screen.getByRole("button", { name: "Archive List" }));
+    await browser.selectOptions(screen.getByLabelText("Destination List"), id);
+    await browser.click(screen.getByRole("button", { name: "Move active contents" }));
+    await waitFor(() =>
+      expect(mocks.archiveTaskList).toHaveBeenLastCalledWith(secondId, {
+        destinationListId: id,
+        expectedRevision: 9,
+        resolution: "move_active_contents",
+      }),
+    );
+    moveView.unmount();
+
+    rejectWithConflict();
+    const archiveTogetherView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
+    await browser.click(screen.getByRole("button", { name: "Archive List" }));
+    await browser.click(screen.getByRole("button", { name: "Archive contents together" }));
+    await waitFor(() =>
+      expect(mocks.archiveTaskList).toHaveBeenLastCalledWith(secondId, {
+        expectedRevision: 9,
+        resolution: "archive_contents_together",
+      }),
+    );
+    archiveTogetherView.unmount();
+  });
+
+  it("resolves Project completion without inventing child outcomes", async () => {
+    const browser = userEvent.setup();
+    const destinationProject = {
+      ...launchTaskProject,
+      id: task.id,
+      listId: id,
+      name: "Inbox follow-through",
+      source: {
+        ...launchTaskProject.source,
+        remoteId: task.id,
+      },
+    };
+    mocks.listTaskProjects.mockResolvedValue({
+      items: [launchTaskProject, destinationProject],
+      nextCursor: null,
+    });
+    const conflict = {
+      code: "task_project_has_open_tasks" as const,
+      currentRevisions: {
+        destinationList: null,
+        project: 8,
+        sourceList: 4,
+        task: null,
+      },
+      openContentCounts: { projects: 0, tasks: 2 },
+      resolutions: [
+        "complete_open_tasks",
+        "cancel_open_tasks",
+        "move_open_tasks",
+        "keep_project_open",
+      ] as const,
+    };
+    const rejectWithConflict = () =>
+      mocks.completeTaskProject.mockRejectedValueOnce(
+        new ApiClientError({
+          code: conflict.code,
+          details: conflict,
+          message: "Choose what happens to open Tasks.",
+          status: 409,
+        }),
+      );
+
+    rejectWithConflict();
+    const cancelView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    await browser.click(await screen.findByRole("button", { name: "Cancel open Tasks" }));
+    await waitFor(() =>
+      expect(mocks.completeTaskProject).toHaveBeenLastCalledWith(thirdId, {
+        expectedRevision: 8,
+        resolution: "cancel_open_tasks",
+      }),
+    );
+    cancelView.unmount();
+
+    rejectWithConflict();
+    const moveView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    await browser.selectOptions(await screen.findByLabelText("Destination List"), id);
+    await browser.selectOptions(screen.getByLabelText("Destination Project"), task.id);
+    await browser.click(screen.getByRole("button", { name: "Move open Tasks" }));
+    await waitFor(() =>
+      expect(mocks.completeTaskProject).toHaveBeenLastCalledWith(thirdId, {
+        destinationListId: id,
+        destinationProjectId: task.id,
+        expectedRevision: 8,
+        resolution: "move_open_tasks",
+      }),
+    );
+    moveView.unmount();
+
+    rejectWithConflict();
+    const keepView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    await browser.click(await screen.findByRole("button", { name: "Keep Project open" }));
+    await waitFor(() =>
+      expect(mocks.completeTaskProject).toHaveBeenLastCalledWith(thirdId, {
+        expectedRevision: 8,
+        resolution: "keep_project_open",
+      }),
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
+    keepView.unmount();
+  });
+
+  it("keeps Task and Project move previews recoverable", async () => {
+    const browser = userEvent.setup();
+    const placedTask = { ...task, listId: secondId, projectId: thirdId };
+    mocks.listTasks.mockResolvedValue({ items: [placedTask], nextCursor: null });
+    mocks.previewTaskMove.mockResolvedValueOnce({
+      destinationListId: id,
+      destinationListRevision: 2,
+      destinationProjectId: null,
+      destinationProjectRevision: null,
+      detachedProjectId: thirdId,
+      previewToken: "detach-preview",
+      sourceListId: secondId,
+      sourceListRevision: 4,
+      sourceProjectId: thirdId,
+      taskId: task.id,
+      taskRevision: 7,
+    });
+    const taskView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.selectOptions(screen.getByLabelText("List"), id);
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await browser.click(await screen.findByRole("button", { name: "Keep current placement" }));
+    expect(mocks.moveTask).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent("Refine task");
+    expect(screen.getByLabelText("List")).toHaveValue(secondId);
+    expect(screen.getByLabelText("Project")).toHaveValue(thirdId);
+    taskView.unmount();
+
+    mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
+    mocks.moveTaskProject.mockRejectedValueOnce(new Error("Project move became stale"));
+    const projectView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.selectOptions(screen.getByLabelText("Move to List"), id);
+    await browser.click(screen.getByRole("button", { name: "Preview Project move" }));
+    await browser.click(await screen.findByRole("button", { name: "Move Project and Tasks" }));
+    expect(await screen.findByText("Project move became stale")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Keep current List" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
+    projectView.unmount();
+  });
+
+  it("keeps List and Project edits recoverable after public API failures", async () => {
+    const browser = userEvent.setup();
+
+    mocks.updateTaskList.mockRejectedValueOnce(new Error("List update needs a retry"));
+    const listView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
+    await browser.clear(screen.getByLabelText("Name"));
+    await browser.type(screen.getByLabelText("Name"), "Work retry");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("List update needs a retry");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.updateTaskList).toHaveBeenLastCalledWith(
+      secondId,
+      expect.objectContaining({ expectedRevision: 4, name: "Work retry" }),
+    );
+    listView.unmount();
+
+    mocks.updateTaskProject.mockRejectedValueOnce(new Error("Project update needs a retry"));
+    const projectView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.clear(screen.getByLabelText("Name"));
+    await browser.type(screen.getByLabelText("Name"), "Launch retry");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Project update needs a retry");
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.updateTaskProject).toHaveBeenLastCalledWith(
+      thirdId,
+      expect.objectContaining({ expectedRevision: 5, name: "Launch retry" }),
+    );
+    projectView.unmount();
+
+    mocks.previewTaskProjectMove.mockRejectedValueOnce(new Error("Project preview needs a retry"));
+    const previewView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.selectOptions(screen.getByLabelText("Move to List"), id);
+    await browser.click(screen.getByRole("button", { name: "Preview Project move" }));
+    expect(await screen.findByText("Project preview needs a retry")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Preview Project move" }));
+    expect(await screen.findByText("3 Tasks will move")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Keep current List" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
+    previewView.unmount();
+  });
+
+  it("keeps List and Project lifecycle failures inside their editors", async () => {
+    const browser = userEvent.setup();
+
+    mocks.archiveTaskList.mockRejectedValueOnce(new Error("List archive needs a retry"));
+    const listView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
+    await browser.click(screen.getByRole("button", { name: "Archive List" }));
+    expect(await screen.findByText("List archive needs a retry")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Work");
+    listView.unmount();
+
+    mocks.completeTaskProject.mockRejectedValueOnce(new Error("Project completion needs a retry"));
+    const projectView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    expect(await screen.findByText("Project completion needs a retry")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
+    projectView.unmount();
+
+    mocks.completeTask.mockRejectedValueOnce(new Error("Task completion needs a retry"));
+    const taskView = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("checkbox", { name: "Complete Draft brief" }));
+    expect(await screen.findByText("Task completion needs a retry")).toBeInTheDocument();
+    expect(screen.getByText("Draft brief")).toBeInTheDocument();
+    taskView.unmount();
+  });
+
+  it("keeps the Tasks workspace actionable when Project navigation fails", async () => {
+    mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
+    const view = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Projects are temporarily unavailable",
+    );
+    expect(screen.getByRole("button", { name: "New task" })).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps Task move failures recoverable and Project moves optional", async () => {
+    const browser = userEvent.setup();
+    const placedTask = { ...task, listId: secondId, projectId: thirdId };
+    mocks.listTasks.mockResolvedValue({ items: [placedTask], nextCursor: null });
+    mocks.previewTaskMove.mockResolvedValueOnce({
+      destinationListId: id,
+      destinationListRevision: 2,
+      destinationProjectId: null,
+      destinationProjectRevision: null,
+      detachedProjectId: thirdId,
+      previewToken: "failed-detach-preview",
+      sourceListId: secondId,
+      sourceListRevision: 4,
+      sourceProjectId: thirdId,
+      taskId: task.id,
+      taskRevision: 3,
+    });
+    mocks.moveTask.mockRejectedValueOnce(new Error("Task move needs a retry"));
+    const taskView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.selectOptions(screen.getByLabelText("List"), id);
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await browser.click(await screen.findByRole("button", { name: "Move and detach Project" }));
+    expect(await screen.findAllByText("Task move needs a retry")).toHaveLength(2);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Move Task without its Project?");
+    await browser.click(screen.getByRole("button", { name: "Move and detach Project" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    taskView.unmount();
+
+    mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
+    const conflict = {
+      code: "task_project_has_open_tasks" as const,
+      currentRevisions: { destinationList: null, project: 8, sourceList: 4, task: null },
+      openContentCounts: { projects: 0, tasks: 2 },
+      resolutions: [
+        "complete_open_tasks",
+        "cancel_open_tasks",
+        "move_open_tasks",
+        "keep_project_open",
+      ] as const,
+    };
+    mocks.completeTaskProject.mockRejectedValueOnce(
+      new ApiClientError({
+        code: conflict.code,
+        details: conflict,
+        message: "Choose what happens to open Tasks.",
+        status: 409,
+      }),
+    );
+    const projectView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    await browser.selectOptions(await screen.findByLabelText("Destination List"), id);
+    await browser.click(screen.getByRole("button", { name: "Move open Tasks" }));
+    await waitFor(() =>
+      expect(mocks.completeTaskProject).toHaveBeenLastCalledWith(thirdId, {
+        destinationListId: id,
+        expectedRevision: 8,
+        resolution: "move_open_tasks",
+      }),
+    );
+    projectView.unmount();
+  });
+
+  it("closes each Tasks organization editor without mutating material", async () => {
+    const browser = userEvent.setup();
+    const view = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    for (const name of ["Manage Work", "Manage Launch", "Open Draft brief"]) {
+      await browser.click(screen.getByRole("button", { name }));
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await browser.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
+    expect(mocks.updateTaskList).not.toHaveBeenCalled();
+    expect(mocks.updateTaskProject).not.toHaveBeenCalled();
+    expect(mocks.updateTask).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("captures List and Project context while their saves are pending", async () => {
+    const browser = userEvent.setup();
+    const view = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    const sidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+
+    let resolveList: ((value: typeof workTaskList) => void) | undefined;
+    mocks.createTaskList.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+    await browser.click(within(sidebar).getByRole("button", { name: "New List" }));
+    await browser.type(screen.getByLabelText("Name"), "Household");
+    await browser.type(screen.getByLabelText("Description"), "Shared household commitments");
+    await browser.click(screen.getByRole("button", { name: "Create List" }));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(mocks.createTaskList).toHaveBeenLastCalledWith({
+      color: null,
+      description: "Shared household commitments",
+      name: "Household",
+    });
+    resolveList?.(workTaskList);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    let resolveProject: ((value: typeof launchTaskProject) => void) | undefined;
+    mocks.createTaskProject
+      .mockRejectedValueOnce(new Error("Project creation needs a retry"))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveProject = resolve;
+          }),
+      );
+    await browser.click(within(sidebar).getByRole("button", { name: "New Project" }));
+    await browser.type(screen.getByLabelText("Name"), "Kitchen reset");
+    await browser.type(screen.getByLabelText("Why it matters"), "Make daily cleanup lighter");
+    fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-08-30" } });
+    await browser.type(screen.getByLabelText("Notes"), "Start with the pantry");
+    await browser.click(screen.getByRole("button", { name: "Create Project" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Project creation needs a retry");
+    await browser.click(screen.getByRole("button", { name: "Create Project" }));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(mocks.createTaskProject).toHaveBeenLastCalledWith({
+      listId: secondId,
+      name: "Kitchen reset",
+      notes: "Start with the pantry",
+      targetDate: "2026-08-30",
+      why: "Make daily cleanup lighter",
+    });
+    resolveProject?.(launchTaskProject);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    view.unmount();
+  });
+
+  it("captures an explicitly selected Task Project", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "New task" }));
+    await browser.type(screen.getByLabelText("Task"), "Prepare launch checklist");
+    await browser.selectOptions(screen.getByLabelText("List"), secondId);
+    await browser.selectOptions(screen.getByLabelText("Project"), thirdId);
+    await browser.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() =>
+      expect(mocks.createTask).toHaveBeenLastCalledWith(
+        expect.objectContaining({ listId: secondId, projectId: thirdId }),
+      ),
+    );
+    view.unmount();
+  });
+
+  it("captures a Task with its default Inbox placement and trimmed optional material", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "New task" }));
+    await browser.type(screen.getByLabelText("Task"), "Inbox capture");
+    await browser.click(screen.getByText("More details"));
+    await browser.type(screen.getByLabelText("Why it matters"), "   ");
+    await browser.type(screen.getByLabelText("Notes"), "   ");
+    await browser.type(screen.getByLabelText("Tags"), "alpha, , beta");
+    await browser.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() =>
+      expect(mocks.createTask).toHaveBeenLastCalledWith({
+        dueAt: null,
+        estimateMinutes: null,
+        lifecycle: "open",
+        listId: id,
+        notes: null,
+        priority: "medium",
+        scheduledAt: null,
+        tags: ["alpha", "beta"],
+        timezone: null,
+        title: "Inbox capture",
+        why: null,
+      }),
+    );
+    view.unmount();
+  });
+
+  it("describes Task placement without inventing missing containers", async () => {
+    const noPlacement = {
+      ...task,
+      dueAt: null,
+      estimateMinutes: null,
+      id: "77777777-7777-4777-8777-777777777777",
+      listId: "99999999-9999-4999-8999-999999999999",
+      notes: null,
+      projectId: null,
+      title: "Unresolved placement",
+    };
+    mocks.listTasks.mockResolvedValue({
+      items: [
+        { ...task, id: thirdId, listId: secondId, projectId: thirdId, title: "Both containers" },
+        { ...task, id: secondId, listId: secondId, title: "List container" },
+        {
+          ...task,
+          id: "66666666-6666-4666-8666-666666666666",
+          listId: noPlacement.listId,
+          projectId: thirdId,
+          title: "Project container",
+        },
+        noPlacement,
+      ],
+      nextCursor: null,
+    });
+    const view = setup("/tasks?view=today");
+    await screen.findByText("Both containers");
+    const taskRows = within(screen.getByRole("main"));
+    const bothRow = taskRows.getByText("Both containers").closest('[role="listitem"]');
+    const listRow = taskRows.getByText("List container").closest('[role="listitem"]');
+    expect(bothRow).not.toBeNull();
+    expect(listRow).not.toBeNull();
+    expect(within(bothRow as HTMLElement).getByText(/Work \/ Launch/)).toBeInTheDocument();
+    expect(within(listRow as HTMLElement).getByText(/^Work ·/u)).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("dismisses Task organization conflicts without committing their choices", async () => {
+    const browser = userEvent.setup();
+    const listConflict = {
+      code: "task_list_has_active_contents" as const,
+      currentRevisions: { destinationList: null, project: null, sourceList: 9, task: null },
+      openContentCounts: { projects: 1, tasks: 3 },
+      resolutions: ["move_active_contents", "archive_contents_together", "cancel"] as const,
+    };
+    mocks.archiveTaskList.mockRejectedValueOnce(
+      new ApiClientError({
+        code: listConflict.code,
+        details: listConflict,
+        message: "Choose what happens to active contents.",
+        status: 409,
+      }),
+    );
+    const listView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
+    await browser.click(screen.getByRole("button", { name: "Archive List" }));
+    await screen.findByText("Choose what happens to active contents");
+    await browser.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.archiveTaskList).toHaveBeenCalledTimes(1);
+    listView.unmount();
+
+    const completionConflict = {
+      code: "task_project_has_open_tasks" as const,
+      currentRevisions: { destinationList: null, project: 8, sourceList: 4, task: null },
+      openContentCounts: { projects: 0, tasks: 2 },
+      resolutions: [
+        "complete_open_tasks",
+        "cancel_open_tasks",
+        "move_open_tasks",
+        "keep_project_open",
+      ] as const,
+    };
+    mocks.completeTaskProject.mockRejectedValueOnce(
+      new ApiClientError({
+        code: completionConflict.code,
+        details: completionConflict,
+        message: "Choose what happens to open Tasks.",
+        status: 409,
+      }),
+    );
+    const completionView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.click(screen.getByRole("button", { name: "Complete Project" }));
+    await screen.findByText("Choose what happens to open Tasks");
+    await browser.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
+    expect(mocks.completeTaskProject).toHaveBeenCalledTimes(1);
+    completionView.unmount();
+
+    const previewView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Launch" }));
+    await browser.selectOptions(screen.getByLabelText("Move to List"), id);
+    await browser.click(screen.getByRole("button", { name: "Preview Project move" }));
+    await screen.findByText("Move Project?");
+    await browser.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
+    expect(mocks.moveTaskProject).not.toHaveBeenCalled();
+    previewView.unmount();
+
+    const placedTask = { ...task, listId: secondId, projectId: thirdId };
+    mocks.listTasks.mockResolvedValue({ items: [placedTask], nextCursor: null });
+    mocks.previewTaskMove.mockResolvedValueOnce({
+      destinationListId: id,
+      destinationListRevision: 2,
+      destinationProjectId: null,
+      destinationProjectRevision: null,
+      detachedProjectId: thirdId,
+      previewToken: "dismiss-detach-preview",
+      sourceListId: secondId,
+      sourceListRevision: 4,
+      sourceProjectId: thirdId,
+      taskId: task.id,
+      taskRevision: 3,
+    });
+    const taskMoveView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.selectOptions(screen.getByLabelText("List"), id);
+    await browser.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByText("Move Task without its Project?");
+    await browser.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toHaveTextContent("Refine task");
+    expect(mocks.moveTask).not.toHaveBeenCalled();
+    taskMoveView.unmount();
+  });
+
+  it("communicates Tasks pagination while the next page is pending", async () => {
+    const browser = userEvent.setup();
+    let resolveNextPage:
+      | ((value: { items: (typeof task)[]; nextCursor: null }) => void)
+      | undefined;
+    mocks.listTasks.mockImplementation((query) => {
+      if (query.cursor === "tasks-next" && query.listId === id) {
+        return new Promise((resolve) => {
+          resolveNextPage = resolve;
+        });
+      }
+      return Promise.resolve({
+        items: [task],
+        nextCursor: query.listId === id ? "tasks-next" : null,
+      });
+    });
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Load more Tasks" }));
+    expect(screen.getByRole("button", { name: "Loading more…" })).toBeDisabled();
+    resolveNextPage?.({
+      items: [{ ...task, id: thirdId, title: "Next page Task" }],
+      nextCursor: null,
+    });
+    expect(await screen.findByText("Next page Task")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more Tasks" })).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps loaded Tasks visible and retries a failed next page", async () => {
+    const browser = userEvent.setup();
+    let nextPageAttempts = 0;
+    mocks.listTasks.mockImplementation((query) => {
+      if (query.cursor === "tasks-next" && query.listId === id) {
+        nextPageAttempts += 1;
+        return nextPageAttempts === 1
+          ? Promise.reject(new Error("More Tasks are temporarily unavailable"))
+          : Promise.resolve({
+              items: [{ ...task, id: thirdId, title: "Recovered next page Task" }],
+              nextCursor: null,
+            });
+      }
+      return Promise.resolve({
+        items: [task],
+        nextCursor: query.listId === id ? "tasks-next" : null,
+      });
+    });
+
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Load more Tasks" }));
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: "tasks-next", listId: id }),
+      ),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "More Tasks are temporarily unavailable",
+    );
+    expect(screen.getByText("Draft brief")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Retry loading more Tasks" }));
+    expect(await screen.findByText("Recovered next page Task")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry loading more Tasks" })).toBeNull();
+    view.unmount();
+  });
+
+  it("canonicalizes Inbox and rewrites a mismatched List to the selected Project's List", async () => {
+    const browser = userEvent.setup();
+    const inboxView = setup(`/tasks?list=${id}`);
+    await screen.findByText("Draft brief");
+    await waitFor(() => expect(inboxView.location.value).toBe("/tasks"));
+    inboxView.unmount();
+
+    const projectTask = { ...task, listId: secondId, projectId: thirdId };
+    mocks.listTasks.mockResolvedValue({ items: [projectTask], nextCursor: null });
+    const projectView = setup(`/tasks?list=${id}&project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await waitFor(() =>
+      expect(projectView.location.value).toBe(`/tasks?list=${secondId}&project=${thirdId}`),
+    );
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    expect(screen.getByLabelText("List")).toHaveValue(secondId);
+    expect(screen.getByLabelText("Project")).toHaveValue(thirdId);
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+    projectView.unmount();
+  });
+
+  it("uses revision-guarded Tasks lifecycle, Trash, and restore actions", async () => {
+    const browser = userEvent.setup();
+    const openView = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Cancel task" }));
+    await waitFor(() =>
+      expect(mocks.cancelTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
+    );
+    openView.unmount();
+
+    mocks.listTasks.mockResolvedValue({
+      items: [{ ...task, cancelledAt: now, lifecycle: "cancelled" }],
+      nextCursor: null,
+    });
+    const cancelledView = setup("/tasks?view=cancelled");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Reopen task" }));
+    await waitFor(() =>
+      expect(mocks.reopenTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
+    );
+    cancelledView.unmount();
+
+    mocks.listTasks.mockResolvedValue({
+      items: [{ ...task, deletedAt: now }],
+      nextCursor: null,
+    });
+    const trashView = setup("/tasks?view=trash");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Restore task" }));
+    await waitFor(() =>
+      expect(mocks.restoreTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
+    );
+    trashView.unmount();
+  });
+
+  it("completes Tasks from both the row and lifecycle dialog", async () => {
+    const browser = userEvent.setup();
+    const openView = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Complete task" }));
+    await waitFor(() =>
+      expect(mocks.completeTask).toHaveBeenLastCalledWith(task.id, { expectedRevision: 3 }),
+    );
+    openView.unmount();
+
+    const completedTask = { ...task, completedAt: now, lifecycle: "completed" as const };
+    mocks.listTasks.mockResolvedValue({ items: [completedTask], nextCursor: null });
+    const completedView = setup("/tasks?view=completed");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("checkbox", { name: "Reopen Draft brief" }));
+    await waitFor(() =>
+      expect(mocks.reopenTask).toHaveBeenLastCalledWith(task.id, { expectedRevision: 3 }),
+    );
+    completedView.unmount();
+  });
+
+  it("captures Tasks without schedules cleanly and communicates a pending save", async () => {
     const browser = userEvent.setup();
     const view = setup("/tasks");
     await screen.findByText("Draft brief");
@@ -2747,7 +4051,6 @@ describe("ilo web app", () => {
 
     await browser.click(screen.getByRole("button", { name: "New task" }));
     await browser.type(screen.getByLabelText("Task"), "Reserved capture");
-    await browser.selectOptions(screen.getByLabelText("Status"), "scheduled");
     fireEvent.change(screen.getByLabelText("Reserved time"), {
       target: { value: "2026-07-14T09:00" },
     });
@@ -2763,7 +4066,7 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("edits tasks and renders task failures without hiding task metadata", async () => {
+  it("edits Tasks and renders failures without hiding Task metadata", async () => {
     const browser = userEvent.setup();
     const first = setup("/tasks");
     await screen.findByText("Draft brief");
@@ -2781,35 +4084,254 @@ describe("ilo web app", () => {
     first.unmount();
 
     mocks.listTasks.mockResolvedValue({ items: [{ ...task, tags: [] }], nextCursor: null });
-    mocks.deleteTask.mockRejectedValue(new Error("Task delete failed"));
+    mocks.trashTask.mockRejectedValue(new Error("Task trash failed"));
     const second = setup("/tasks");
     await screen.findByText("Draft brief");
-    expect(screen.queryByLabelText("Task tags")).not.toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Remove Draft brief" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Task delete failed");
+    expect(screen.getByLabelText("Task tags")).toHaveTextContent("High priority");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Move to Trash" }));
+    await waitFor(() =>
+      expect(mocks.trashTask).toHaveBeenCalledWith(task.id, { expectedRevision: task.revision }),
+    );
     second.unmount();
   });
 
-  it("keeps task views useful when loading fails or there is nothing to organize", async () => {
-    mocks.listTasks.mockRejectedValueOnce(new Error("Tasks are temporarily unavailable"));
-    const failed = setup("/tasks");
+  it("keeps Tasks views useful when loading fails or there is nothing to organize", async () => {
+    mocks.listTasks.mockImplementationOnce(() => new Promise(() => undefined));
+    const loading = setup("/tasks?view=today");
+    expect(await screen.findByRole("status", { name: "Loading tasks" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith({ limit: 100, view: "today" }),
+    );
+    loading.unmount();
+
+    mocks.listTasks.mockRejectedValue(new Error("Tasks are temporarily unavailable"));
+    const failed = setup("/tasks?view=upcoming");
     expect(await screen.findByRole("alert")).toHaveTextContent("Tasks are temporarily unavailable");
     failed.unmount();
 
-    mocks.listTasks.mockResolvedValueOnce({ items: [], nextCursor: null });
+    mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
     const empty = setup("/tasks?view=scheduled");
     expect(await screen.findByText("Nothing here yet")).toBeInTheDocument();
-    expect(
-      screen.getByText("Schedule a task when it needs a specific time block."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Tasks with reserved time will collect here.")).toBeInTheDocument();
     empty.unmount();
 
-    mocks.listTasks.mockResolvedValueOnce({ items: [], nextCursor: null });
+    mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
     const completed = setup("/tasks?view=completed");
     expect(await screen.findByText("Nothing here yet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Completed" })).toHaveAttribute("aria-current", "page");
-    expect(mocks.listTasks).toHaveBeenCalledWith({ completed: true });
+    expect(mocks.listTasks).toHaveBeenCalledWith({ limit: 100, view: "completed" });
     completed.unmount();
+  });
+
+  it("paginates Tasks organization and opens archived containers through explicit history URLs", async () => {
+    const archivedList = { ...workTaskList, archivedAt: now, availability: "archived" as const };
+    const archivedProject = {
+      ...launchTaskProject,
+      archivedAt: now,
+      availability: "archived" as const,
+    };
+    mocks.listTaskLists.mockImplementation(async (query) =>
+      query?.cursor === "lists-2"
+        ? { items: [inboxTaskList, archivedList], nextCursor: null }
+        : { items: [], nextCursor: "lists-2" },
+    );
+    mocks.listTaskProjects.mockImplementation(async (query) =>
+      query?.cursor === "projects-2"
+        ? { items: [archivedProject], nextCursor: null }
+        : { items: [], nextCursor: "projects-2" },
+    );
+    mocks.listTasks.mockImplementation(async (query) =>
+      query.cursor === "tasks-2"
+        ? { items: [{ ...task, id: thirdId, title: "Second page task" }], nextCursor: null }
+        : { items: [task], nextCursor: "tasks-2" },
+    );
+
+    const view = setup("/tasks");
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    expect(mocks.listTaskLists).toHaveBeenCalledWith({ cursor: "lists-2", limit: 100 });
+    expect(mocks.listTaskProjects).toHaveBeenCalledWith({ cursor: "projects-2", limit: 100 });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Load more Tasks" }));
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: "tasks-2", limit: 100 }),
+      ),
+    );
+    expect(await screen.findByText("Second page task")).toBeInTheDocument();
+    view.unmount();
+
+    mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
+    const archivedView = setup("/tasks?archive=all");
+    expect(await screen.findByRole("heading", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Work" })).toHaveAttribute(
+      "href",
+      `/tasks?archive=list&list=${secondId}`,
+    );
+    await userEvent.setup().click(screen.getByRole("link", { name: "Launch" }));
+    await waitFor(() =>
+      expect(archivedView.location.value).toBe(`/tasks?archive=project&project=${thirdId}`),
+    );
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith({
+        includeUnavailableProject: true,
+        limit: 100,
+        projectId: thirdId,
+      }),
+    );
+    archivedView.unmount();
+
+    const archivedListView = setup(`/tasks?archive=list&list=${secondId}`);
+    expect(await screen.findByRole("heading", { name: "Work" })).toBeInTheDocument();
+    expect(archivedListView.location.value).toBe(`/tasks?archive=list&list=${secondId}`);
+    expect(mocks.listTasks).toHaveBeenLastCalledWith({
+      limit: 100,
+      listId: secondId,
+    });
+    archivedListView.unmount();
+  });
+
+  it("explains an empty Tasks archive", async () => {
+    mocks.listTaskLists.mockResolvedValue({
+      items: [inboxTaskList, workTaskList],
+      nextCursor: null,
+    });
+    mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
+
+    const view = setup("/tasks?archive=all");
+    expect(await screen.findByRole("heading", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByText("No archived Lists.")).toBeInTheDocument();
+    expect(screen.getByText("No finished Projects.")).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("canonicalizes Tasks project-only and mixed workspace URLs", async () => {
+    const projectOnly = setup(`/tasks?project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await waitFor(() =>
+      expect(projectOnly.location.value).toBe(`/tasks?list=${secondId}&project=${thirdId}`),
+    );
+    projectOnly.unmount();
+
+    const mixed = setup(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await waitFor(() => expect(mixed.location.value).toBe("/tasks?view=today"));
+    mixed.unmount();
+  });
+
+  it("keeps unavailable Tasks Projects out of ordinary navigation and destinations", async () => {
+    const archivedList = { ...workTaskList, archivedAt: now, availability: "archived" as const };
+    mocks.listTaskProjects.mockResolvedValue({
+      items: [
+        launchTaskProject,
+        {
+          ...launchTaskProject,
+          archivedAt: now,
+          availability: "archived" as const,
+          id: "44444444-4444-4444-8444-444444444444",
+          listId: id,
+          name: "Archived Project",
+        },
+        {
+          ...launchTaskProject,
+          completedAt: now,
+          id: "55555555-5555-4555-8555-555555555555",
+          lifecycle: "completed" as const,
+          listId: id,
+          name: "Completed Project",
+        },
+        {
+          ...launchTaskProject,
+          cancelledAt: now,
+          id: "66666666-6666-4666-8666-666666666666",
+          lifecycle: "cancelled" as const,
+          listId: id,
+          name: "Cancelled Project",
+        },
+      ],
+      nextCursor: null,
+    });
+    mocks.listTaskLists.mockResolvedValue({
+      items: [inboxTaskList, archivedList],
+      nextCursor: null,
+    });
+    const browser = userEvent.setup();
+    const view = setup(`/tasks?project=${thirdId}`);
+    await screen.findByText("Draft brief");
+    await waitFor(() => expect(view.location.value).toBe("/tasks"));
+    const sidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    for (const name of ["Launch", "Archived Project", "Completed Project", "Cancelled Project"]) {
+      expect(within(sidebar).queryByRole("link", { name })).not.toBeInTheDocument();
+    }
+    await browser.click(screen.getByRole("button", { name: "New task" }));
+    for (const name of ["Launch", "Archived Project", "Completed Project", "Cancelled Project"]) {
+      expect(screen.getByLabelText("Project")).not.toHaveTextContent(name);
+    }
+    expect(mocks.listTasks).not.toHaveBeenCalledWith(
+      expect.objectContaining({ listId: archivedList.id }),
+    );
+    view.unmount();
+  });
+
+  it("retries named Tasks workspace dependencies after initial load failures", async () => {
+    const browser = userEvent.setup();
+
+    mocks.listTaskLists.mockRejectedValueOnce(new Error("Lists are temporarily unavailable"));
+    const listFailure = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Lists are temporarily unavailable");
+    await browser.click(screen.getByRole("button", { name: "Retry Lists" }));
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    listFailure.unmount();
+
+    mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
+    const projectFailure = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Projects are temporarily unavailable",
+    );
+    await browser.click(screen.getByRole("button", { name: "Retry Projects" }));
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    projectFailure.unmount();
+
+    let failedTaskPage = false;
+    mocks.listTasks.mockImplementation((query) => {
+      if (query.listId === id && !failedTaskPage) {
+        failedTaskPage = true;
+        return Promise.reject(new Error("Tasks are temporarily unavailable"));
+      }
+      return Promise.resolve({ items: [task], nextCursor: null });
+    });
+    const taskFailure = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Tasks are temporarily unavailable");
+    await browser.click(screen.getByRole("button", { name: "Retry Tasks" }));
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    taskFailure.unmount();
+  });
+
+  it("shows Tasks capture dependency failures by name", async () => {
+    mocks.listTaskLists.mockRejectedValue(new Error("Lists are temporarily unavailable"));
+    const browser = userEvent.setup();
+    const listFailure = setup("/tasks?view=today");
+    await browser.click(await screen.findByRole("button", { name: "New task" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Lists are temporarily unavailable");
+    mocks.listTaskLists.mockResolvedValue({
+      items: [inboxTaskList, workTaskList],
+      nextCursor: null,
+    });
+    await browser.click(screen.getByRole("button", { name: "Retry Lists" }));
+    await waitFor(() => expect(screen.queryByText("Lists are temporarily unavailable")).toBeNull());
+    listFailure.unmount();
+
+    mocks.listTaskProjects.mockRejectedValue(new Error("Projects are temporarily unavailable"));
+    const projectFailure = setup("/tasks?view=today");
+    await browser.click(await screen.findByRole("button", { name: "New task" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Projects are temporarily unavailable",
+    );
+    mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
+    await browser.click(screen.getByRole("button", { name: "Retry Projects" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Projects are temporarily unavailable")).toBeNull(),
+    );
+    projectFailure.unmount();
   });
 
   it("searches Tasks and Reminders from the app frame with honest empty states", async () => {
@@ -2823,16 +4345,21 @@ describe("ilo web app", () => {
     await browser.type(screen.getByRole("searchbox", { name: "Search tasks" }), "missing");
     expect(await screen.findByText("No matching tasks")).toBeInTheDocument();
     expect(mocks.listTasks).toHaveBeenCalledWith({
-      completed: false,
+      lifecycle: "open",
+      limit: 100,
+      listId: id,
       query: "missing",
-      status: "inbox",
     });
-    await browser.click(screen.getByRole("link", { name: "Next" }));
+    await browser.click(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("link", {
+        name: "Today",
+      }),
+    );
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("missing");
     expect(mocks.listTasks).toHaveBeenCalledWith({
-      completed: false,
+      limit: 100,
       query: "missing",
-      status: "next",
+      view: "today",
     });
     tasksView.unmount();
 
@@ -3882,13 +5409,25 @@ describe("ilo web app", () => {
 
   it("keeps Mail and Finances workspace controls on child routes", async () => {
     const mail = setup("/mail/thread/example");
-    const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "Top navigation" })).toHaveAttribute(
+        "data-workspace",
+        "mail",
+      ),
+    );
+    const mailAppBar = screen.getByRole("navigation", { name: "Top navigation" });
     expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
     expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
     mail.unmount();
 
     const finances = setup("/finances/transactions");
-    const financeAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "Top navigation" })).toHaveAttribute(
+        "data-workspace",
+        "finances",
+      ),
+    );
+    const financeAppBar = screen.getByRole("navigation", { name: "Top navigation" });
     expect(
       within(financeAppBar).getByRole("button", { name: "Add transaction" }),
     ).toBeInTheDocument();
@@ -3910,20 +5449,22 @@ describe("ilo web app", () => {
   });
 
   it("describes task material with scheduled, note-only, and blank states", async () => {
-    mocks.listTasks.mockResolvedValueOnce({
-      items: [
-        { ...task, dueAt: null, estimateMinutes: null, notes: null, scheduledAt: null },
-        {
-          ...task,
-          dueAt: null,
-          estimateMinutes: null,
-          id: "99999999-9999-4999-8999-999999999999",
-          scheduledAt: "2026-07-13T14:00:00.000Z",
-          title: "Reserved work",
-        },
-      ],
+    mocks.listTasks.mockImplementation(async (query) => ({
+      items: query.listId
+        ? [
+            { ...task, dueAt: null, estimateMinutes: null, notes: null, scheduledAt: null },
+            {
+              ...task,
+              dueAt: null,
+              estimateMinutes: null,
+              id: "99999999-9999-4999-8999-999999999999",
+              scheduledAt: "2026-07-13T14:00:00.000Z",
+              title: "Reserved work",
+            },
+          ]
+        : [task],
       nextCursor: null,
-    });
+    }));
     const view = setup("/tasks");
     expect(await screen.findByRole("button", { name: "Open Draft brief" })).toBeInTheDocument();
     expect(screen.queryByText("No date or estimate yet")).not.toBeInTheDocument();
@@ -4130,12 +5671,19 @@ describe("ilo web app", () => {
       id: "66666666-6666-4666-8666-666666666666",
       scheduledAt: "2026-07-13T14:00:00.000Z",
       status: "scheduled" as const,
+      title: "Reserved today",
     };
     const suggestedTask = {
       ...task,
       dueAt: null,
       id: "88888888-8888-4888-8888-888888888889",
       title: "Suggested follow-up",
+    };
+    const futureTask = {
+      ...task,
+      dueAt: "2026-07-14T16:00:00.000Z",
+      id: "99999999-9999-4999-8999-999999999999",
+      title: "Future task",
     };
     const completedTask = {
       ...task,
@@ -4155,12 +5703,22 @@ describe("ilo web app", () => {
       overdue: [],
       recommendedTasks: [
         {
+          capacity: "does_not_fit" as const,
+          task: overdueTask,
+          urgency: "overdue" as const,
+        },
+        {
           capacity: "fits_remaining_time" as const,
-          task: suggestedTask,
+          task,
+          urgency: "due_today" as const,
+        },
+        {
+          capacity: "needs_estimate" as const,
+          task: scheduledTask,
           urgency: "next" as const,
         },
       ],
-      tasks: [overdueTask, task, scheduledTask, suggestedTask],
+      tasks: [overdueTask, task, scheduledTask, suggestedTask, futureTask],
       timeZone: "UTC",
       today: [],
       tomorrow: [],
@@ -4174,13 +5732,22 @@ describe("ilo web app", () => {
     expect(screen.getByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
     expect(screen.getByText(/No free time before/)).toBeInTheDocument();
     expect(screen.getByText("Overdue tasks")).toBeInTheDocument();
-    expect(screen.getByText("Due today")).toBeInTheDocument();
-    expect(screen.getByText("Next tasks")).toBeInTheDocument();
     expect(
-      screen.getByText("Ready next · fits in the remaining planning window"),
+      screen.getByText("Overdue · does not fit in the remaining planning window"),
     ).toBeInTheDocument();
+    const todayTasks = screen.getByText("Today tasks").closest("section") as HTMLElement;
+    expect(within(todayTasks).getByText("Draft brief")).toBeInTheDocument();
+    expect(
+      within(todayTasks).getByText("Due today · fits in the remaining planning window"),
+    ).toBeInTheDocument();
+    expect(within(todayTasks).getByText("Reserved today")).toBeInTheDocument();
+    expect(
+      within(todayTasks).getByText("Ready next · needs an estimate before it can be planned"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Suggested follow-up")).not.toBeInTheDocument();
+    expect(screen.queryByText("Future task")).not.toBeInTheDocument();
     await browser.click(
-      within(screen.getByText("Next tasks").closest("section") as HTMLElement).getByRole("button", {
+      within(todayTasks).getByRole("button", {
         name: "Open Draft brief",
       }),
     );

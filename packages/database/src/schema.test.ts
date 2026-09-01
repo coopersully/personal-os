@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
+import { getTableName } from "drizzle-orm";
+import { getTableConfig, PgDialect, type PgTable } from "drizzle-orm/pg-core";
+import * as databaseSchema from "./schema.js";
 import {
   calendarAccounts,
   calendarFindings,
@@ -32,6 +34,12 @@ import {
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "./schema.js";
+
+function requiredTable(name: string): PgTable {
+  const table = (databaseSchema as Record<string, unknown>)[name];
+  if (!table) throw new Error(`${name} is missing from the canonical schema.`);
+  return table as PgTable;
+}
 
 describe("database schema contracts", () => {
   it("keeps texting verification recoverable and provider consent events idempotent", async () => {
@@ -255,6 +263,7 @@ describe("database schema contracts", () => {
       journal.entries[budgetBucketIndex - 1]?.when ?? 0,
     );
     const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
+    expect(financeAutomationIndex).toBeGreaterThanOrEqual(0);
     expect(journalTags.slice(financeAutomationIndex)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
@@ -269,11 +278,14 @@ describe("database schema contracts", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
+      "0072_finance_parallel_migration_reconciliation",
+      "0073_task_organization_reconciliation",
       "0072_finance_account_semantics",
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
       "0074_finance_budget_buckets",
+      "0075_finance_ownership_constraint",
     ]);
   });
 
@@ -424,6 +436,165 @@ describe("database schema contracts", () => {
     expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
   });
 
+  it("enforces Task List and Project ownership, names, lifecycle, and idempotency", () => {
+    const lists = getTableConfig(requiredTable("taskLists"));
+    const projects = getTableConfig(requiredTable("taskProjects"));
+
+    expect(lists.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "user_id",
+        "kind",
+        "name",
+        "normalized_name",
+        "description",
+        "color",
+        "availability",
+        "revision",
+        "create_idempotency_key",
+        "create_idempotency_fingerprint",
+        "archived_at",
+        "deleted_at",
+        "created_at",
+        "updated_at",
+      ]),
+    );
+    expect(lists.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining([
+        "task_lists_inbox_per_user_idx",
+        "task_lists_active_name_idx",
+        "task_lists_ownership_idx",
+      ]),
+    );
+    expect(lists.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "task_lists_kind_check",
+        "task_lists_availability_check",
+        "task_lists_revision_check",
+        "task_lists_create_idempotency_check",
+      ]),
+    );
+
+    expect(projects.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "user_id",
+        "list_id",
+        "name",
+        "normalized_name",
+        "notes",
+        "why",
+        "target_date",
+        "lifecycle",
+        "availability",
+        "revision",
+        "create_idempotency_key",
+        "create_idempotency_fingerprint",
+        "completed_at",
+        "cancelled_at",
+        "archived_at",
+        "deleted_at",
+        "created_at",
+        "updated_at",
+      ]),
+    );
+    expect(projects.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining(["task_projects_active_name_idx", "task_projects_location_idx"]),
+    );
+    expect(projects.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "task_projects_lifecycle_check",
+        "task_projects_availability_check",
+        "task_projects_revision_check",
+        "task_projects_create_idempotency_check",
+      ]),
+    );
+    expect(
+      projects.foreignKeys.map((candidate) => {
+        const reference = candidate.reference();
+        return {
+          columns: reference.columns.map((column) => column.name),
+          foreignColumns: reference.foreignColumns.map((column) => column.name),
+          foreignTable: getTableName(reference.foreignTable),
+        };
+      }),
+    ).toContainEqual({
+      columns: ["list_id", "user_id"],
+      foreignColumns: ["id", "user_id"],
+      foreignTable: "task_lists",
+    });
+
+    const listNameIndex = lists.indexes.find(
+      (candidate) => candidate.config.name === "task_lists_active_name_idx",
+    );
+    const projectNameIndex = projects.indexes.find(
+      (candidate) => candidate.config.name === "task_projects_active_name_idx",
+    );
+    if (!listNameIndex?.config.where || !projectNameIndex?.config.where) {
+      throw new Error("Task container name indexes must exclude only soft-deleted rows.");
+    }
+    const dialect = new PgDialect();
+    expect(dialect.sqlToQuery(listNameIndex.config.where).sql).toContain(
+      '"task_lists"."deleted_at" is null',
+    );
+    expect(dialect.sqlToQuery(projectNameIndex.config.where).sql).toContain(
+      '"task_projects"."deleted_at" is null',
+    );
+  });
+
+  it("keeps Task-only Reminder organization fields kind-sensitive and ownership-safe", () => {
+    const mixedRows = getTableConfig(requiredTable("reminders"));
+
+    expect(mixedRows.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "task_list_id",
+        "task_project_id",
+        "task_why",
+        "task_lifecycle",
+        "task_revision",
+        "task_cancelled_at",
+        "task_create_idempotency_key",
+        "task_create_idempotency_fingerprint",
+      ]),
+    );
+    expect(mixedRows.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "reminders_kind_check",
+        "reminders_priority_check",
+        "reminders_legacy_status_check",
+        "reminders_task_revision_check",
+        "reminders_task_create_idempotency_check",
+        "reminders_task_fields_check",
+      ]),
+    );
+    expect(mixedRows.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining(["reminders_task_list_idx", "reminders_task_project_idx"]),
+    );
+    expect(
+      mixedRows.foreignKeys.map((candidate) => {
+        const reference = candidate.reference();
+        return {
+          columns: reference.columns.map((column) => column.name),
+          foreignColumns: reference.foreignColumns.map((column) => column.name),
+          foreignTable: getTableName(reference.foreignTable),
+        };
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          columns: ["task_list_id", "user_id"],
+          foreignColumns: ["id", "user_id"],
+          foreignTable: "task_lists",
+        },
+        {
+          columns: ["task_project_id", "user_id", "task_list_id"],
+          foreignColumns: ["id", "user_id", "list_id"],
+          foreignTable: "task_projects",
+        },
+      ]),
+    );
+  });
+
   it("keeps workspace maintenance runs durable, exclusive, and claimable", async () => {
     const runs = getTableConfig(workspaceMaintenanceRuns);
     const steps = getTableConfig(workspaceMaintenanceSteps);
@@ -542,6 +713,12 @@ describe("database schema contracts", () => {
     );
     expect(migrationSql).toContain("ADD COLUMN \"ownership_type\" text DEFAULT 'unknown' NOT NULL");
     expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
+    const ownershipConstraintSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0075_finance_ownership_constraint.sql"),
+      "utf8",
+    );
+    expect(ownershipConstraintSql).toContain('"ownership_share_bps" IS NOT NULL');
+    expect(ownershipConstraintSql).toContain("NOT VALID");
   });
 
   it("keeps Provider Item synchronization authority isolated from Finance account projections", async () => {

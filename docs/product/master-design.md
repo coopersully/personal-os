@@ -1,7 +1,8 @@
 # ilo — Master Product & Experience Design
 
-- Status: Proposed master design
+- Status: Living master design; shipped and future behavior are labelled explicitly
 - Date: 2026-07-18
+- Last reconciled: 2026-08-12
 - Supersedes: the product direction in `docs/product/mvp.md` for future planning. The MVP remains the record of what has already been built.
 
 ## 1. Decision and intentional scope expansion
@@ -64,8 +65,9 @@ App
 ├── Today
 ├── Inbox
 ├── Calendar
-├── Reminders & Tasks
-├── Goals & Motives
+├── Tasks
+├── Reminders (legacy compatibility surface)
+├── Tracking (planned)
 ├── Finances
 ├── Reviews
 ├── Activity
@@ -101,8 +103,11 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Account & connection | Provider, OAuth/app-password credential reference, capabilities, health, selected sources, sync cursor, writeability. |
 | Mail conversation/message | Account/mailbox/labels, participants, headers, body/attachments safe representation, importance/category, thread state, provider revision, derived commitments. |
 | Calendar/event | Calendar, organizer/attendees/RSVP, title, notes, location, conferencing, attachment references, start/end/timezone/all-day, recurrence, visibility, transparency, event type, travel/buffer relationship, source/block relationship. |
-| Reminder/task | Title, notes, status, project/area, priority, due date, scheduled time, estimate, recurrence, subtasks, tags, energy/context, defer history, source material, goal/motive links. |
-| Goal/motive/habit | Outcome, timeframe, progress metric, parent/child relationship, rationale, rewards, constraints, coaching preference, habit schedule/flexibility and completion data. |
+| Task List | Persistent organizational context; one protected system Inbox per person; normalized unique name, availability, local source, revision, and soft-deletion state. |
+| Task Project | Finite outcome inside one List; lifecycle, availability, target date, notes, optional `why`, local source, revision, and explicit child-resolution behavior. |
+| Task | One independently completable action; exactly one List, optional same-List Project, title, notes, optional `why`, priority, estimate, tags, independent deadline and reserved time, lifecycle, local source, revision, and recoverable Trash state. Recurrence remains future work. |
+| Reminder | A currently separate lightweight actionable record and compatibility surface. The target model treats reminder delivery as a Prompt attached to a Task or Tracking check-in, but Prompt persistence and Reminder migration are not implemented. |
+| Tracker / entry / goal | Planned Tracking material: versioned repeated observation, check-in, habit, entry, and evaluative goal contracts. None of these Tracking contracts is shipped by the 2026-08-12 Task foundation. |
 | Finance | Institution/account, balance, transaction, merchant, category/tag, split, recurring stream, rule, budget, cash-flow forecast, goal, review state and confidence. |
 | Domain profile | Domain, objective, source meanings, categories, durable instructions/preferences, status, and optimistic version. |
 | Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
@@ -188,22 +193,52 @@ Mail policy tiers:
 - Flexible tasks, habits, focus blocks, meals, breaks, and buffers can be scheduled in an internal planning layer or written to a chosen calendar with explicit busy/privacy behavior.
 - Calendar has search, saved calendar sets, focus/out-of-office types, widgets, desktop notifications, and overlay quick-open.
 
-### 6.5 Reminders, tasks, projects, and time blocks
+### 6.5 Tasks, Lists, Projects, and Reminders
 
-- Capture accepts natural language but displays parsed due/scheduled dates before save.
-- A reminder is a simple actionable item; a task adds project/area, priority, estimate, scheduling, subtasks, recurrence, context/energy, source, goal/motive, and completion/defer history.
-- Lists include Inbox, Today, Upcoming, Someday, Projects, Areas, Habits, completed, and custom filters. Views include list, board, calendar, timeline, and focus mode.
-- Completion, reopen, delete/restore, duplicate, delegate/share-ready data model, bulk actions, search, tags, notes, attachments, and keyboard shortcuts are mandatory.
-- Recurrence supports calendar and completion-relative patterns, exception dates, skip/postpone, future occurrence preview, and a clear distinction between moving one occurrence and changing the series.
-- A time block is a relationship between a task/habit and a reserved interval; it may be internal-only or sync as an external event. It preserves estimate, actual duration, status, privacy, and calendar destination. Estimate calibration is opt-in and used only to offer a conservative suggestion; it never grades the user, infers diagnosis, or overrides a chosen plan.
-- Focus mode supports timer/Pomodoro, start/stop/extend, interruption capture, break prompts, and optional low-distraction overlay. It records focus time but does not imply completion.
-- Planning detects overload and offers: choose fewer tasks, reduce estimates, defer, split, schedule later, protect focus, or override with a recorded reason.
+The 2026-08-12 Task organization foundation is implemented. Tasks is one workspace at `/tasks`:
 
-### 6.6 Goals, motives, and habits
+The [Tasks Ilo charter](./tasks-ilo-charter.md) defines how this living ledger and its shipped
+surgical operations fit the workspace-stewardship model. It marks maintenance turns, questions and
+learning, domain status, advice, and review artifacts as target behavior rather than claiming this
+foundation already ships them.
 
-- Goals have outcomes, horizons, measurable targets, milestones, related projects/habits, progress, review cadence, and status. Motives store rationale, desired identity, benefits, constraints, rewards, anti-patterns, tone, and agent coaching boundaries.
-- Habits specify frequency, preferred windows, duration, flexibility, time defense, location/context, reminders, completion, skip policy, and relationship to goals/motives. A missed habit can be rescheduled, skipped, or reflected on; it is not treated as a moral failure.
-- Weekly/monthly reviews connect calendar time, task completion, habits, and finance only when those domains are consented to.
+- **Views** are queries and never own records: Today, Upcoming, Scheduled, Completed, Cancelled,
+  and Trash. Scheduled means an open Task has reserved time; it is not lifecycle.
+- **Lists** are persistent contexts. Every Task belongs to exactly one List. Each person has one
+  protected system Inbox, and `/tasks` selects it without putting its generated ID in the URL.
+- **Projects** are finite outcomes inside one List. A Task may belong to one Project in that same
+  List. Projects and Lists do not nest.
+- **Tasks** have only `open`, `completed`, or `cancelled` lifecycle. Deadline (`dueAt`) and reserved
+  time (`scheduledAt`) are independent. Availability/Trash is separate from lifecycle.
+
+Selection is linkable and canonical: `view` excludes `list` and `project`; a `project` implies its
+`list`; a non-Inbox List uses `list`; Inbox is the parameter-free `/tasks` default. Ordinary
+navigation includes only active Lists and active, open Projects. Container moves and terminal or
+archive operations return exact conflicts or require revision-bound previews rather than silently
+detaching, completing, hiding, or stranding work.
+
+Task create/edit supports List, optional same-List Project, title, notes, `why`, priority, estimate,
+tags, deadline, and reserved time. Lifecycle, Trash, and restore are focused actions outside the
+content form. Natural-language classification, Task recurrence/occurrences, attachments, bulk
+editing, Prompt persistence, time-block synchronization, and focus mode remain future work.
+
+Reminders remain a separate lightweight compatibility domain and `/reminders` surface today. The
+approved target is to model a reminder as delivery behavior attached to a Task or Tracking
+check-in, but ilo must preserve standalone Reminder behavior until Prompt persistence and a reviewed
+migration exist. Shared storage does not make Reminders and Tasks one domain.
+
+### 6.6 Tracking, goals, motives, and habits
+
+Tracking is the approved sibling workspace for repeated observations, habits, check-ins, and
+personal measurements. It is a personal ledger, not a wellness or diagnostic product. Habits are
+Tracker configurations; food, sleep, exercise, ratings, and other observations use general typed
+tracking primitives rather than dedicated verticals. Goals are evaluative targets that may link to
+Tasks or Trackers without containing them. Immediate motivation belongs in an optional `why`;
+broader preferences belong in the person's profile.
+
+The Tracking workspace, tracker/entry/check-in/goal persistence, classifier, recurrence, Prompt
+delivery, and migration of current Goals/Motives are not implemented. Their normative target and
+research basis live in the two 2026-08-12 Tasks and Tracking specifications.
 
 ### 6.7 Finances
 
@@ -230,6 +265,7 @@ Mail policy tiers:
 Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
+Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
 **Reviews:** `/reviews` is a Today-owned operational destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
 

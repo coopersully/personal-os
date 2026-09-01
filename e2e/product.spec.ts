@@ -9,7 +9,14 @@ test("the repository QA fixture login exposes representative workspace data", as
 
   await page.goto("/calendar");
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
-  await page.goto("/tasks?view=next");
+  await page.goto("/tasks");
+  if (test.info().project.name === "mobile-chromium") {
+    await page.getByRole("button", { name: "Workspace actions" }).click();
+  }
+  await page
+    .getByRole("navigation", { name: "Task Lists" })
+    .getByRole("link", { name: "Work", exact: true })
+    .click();
   await expect(page.getByText("Draft weekly product update", { exact: true })).toBeVisible();
   await page.goto("/mail");
   await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();

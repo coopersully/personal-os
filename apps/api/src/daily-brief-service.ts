@@ -1,5 +1,5 @@
 import { type Database, users } from "@personal-os/database";
-import type { AccessScope, DailyBrief } from "@personal-os/domain";
+import type { AccessScope, DailyBrief, TaskListQuery } from "@personal-os/domain";
 import {
   addLocalDays,
   localDateAt,
@@ -8,14 +8,45 @@ import {
   localDayRange,
 } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
+import { AppError } from "./errors.js";
 
 type DailyBriefServiceOptions = {
   db: Database;
   listEvents: (userId: string, range: { from: string; to: string }) => Promise<DailyBrief["now"]>;
   listReminders: (userId: string) => Promise<DailyBrief["today"]>;
-  listTasks: (userId: string, completed: boolean) => Promise<DailyBrief["tasks"]>;
+  listTasks: (
+    userId: string,
+    query: TaskListQuery,
+  ) => Promise<DailyBrief["tasks"] | { items: DailyBrief["tasks"]; nextCursor: string | null }>;
   now: () => Date;
 };
+
+const maximumTaskPagesPerBrief = 100;
+
+async function listAllTasks(
+  options: DailyBriefServiceOptions,
+  userId: string,
+  query: TaskListQuery,
+): Promise<DailyBrief["tasks"]> {
+  const items: DailyBrief["tasks"] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let pageNumber = 0; pageNumber < maximumTaskPagesPerBrief; pageNumber += 1) {
+    const page = await options.listTasks(userId, { ...query, ...(cursor ? { cursor } : {}) });
+    if (Array.isArray(page)) return [...items, ...page];
+    items.push(...page.items);
+    if (page.nextCursor === null) return items;
+    if (seenCursors.has(page.nextCursor)) {
+      throw new AppError("internal_error", "Task pagination returned a repeated cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+  throw new AppError(
+    "internal_error",
+    `Task pagination exceeded ${maximumTaskPagesPerBrief} pages.`,
+  );
+}
 
 export function createDailyBriefService(options: DailyBriefServiceOptions) {
   const { now } = options;
@@ -34,8 +65,12 @@ export function createDailyBriefService(options: DailyBriefServiceOptions) {
       options.listEvents(userId, todayRange),
       options.listEvents(userId, tomorrowRange),
       options.listReminders(userId),
-      canReadTasks ? options.listTasks(userId, false) : Promise.resolve([]),
-      canReadTasks ? options.listTasks(userId, true) : Promise.resolve([]),
+      canReadTasks
+        ? listAllTasks(options, userId, { lifecycle: "open", limit: 100 })
+        : Promise.resolve([]),
+      canReadTasks
+        ? listAllTasks(options, userId, { lifecycle: "completed", limit: 100 })
+        : Promise.resolve([]),
       options.db
         .select({ end: users.workdayEndMinute, start: users.workdayStartMinute })
         .from(users)
@@ -45,9 +80,7 @@ export function createDailyBriefService(options: DailyBriefServiceOptions) {
     const openReminders = reminders.filter((reminder) => reminder.completedAt === null);
     const currentTime = current.getTime();
     const endOfToday = new Date(todayRange.to).getTime();
-    const openTasks = tasks.filter(
-      (task) => task.completedAt === null && task.status !== "cancelled",
-    );
+    const openTasks = tasks.filter((task) => task.lifecycle === "open" && task.deletedAt === null);
     const capacity = calculateCapacity({
       current,
       events: todayEvents,
@@ -85,7 +118,10 @@ export function createDailyBriefService(options: DailyBriefServiceOptions) {
       recommendedTasks,
       timeZone,
       tasks: openTasks,
-      completedTasks: completedTasks.filter((task) => task.completedAt !== null),
+      completedTasks: completedTasks.filter(
+        (task) =>
+          task.lifecycle === "completed" && task.completedAt !== null && task.deletedAt === null,
+      ),
       today: openReminders.filter(
         (reminder) =>
           reminder.dueAt !== null &&
@@ -112,7 +148,9 @@ function recommendTasks({
 }): DailyBrief["recommendedTasks"] {
   let remainingMinutes = availableMinutes;
   return tasks
-    .filter((task) => task.status === "inbox" || task.status === "next")
+    .filter(
+      (task) => task.lifecycle === "open" && task.deletedAt === null && task.scheduledAt === null,
+    )
     .sort((left, right) => {
       const urgencyDifference =
         taskUrgencyRank(left, current, endOfToday) - taskUrgencyRank(right, current, endOfToday);
@@ -147,7 +185,7 @@ function taskUrgency(
 ): DailyBrief["recommendedTasks"][number]["urgency"] {
   if (task.dueAt !== null && new Date(task.dueAt).getTime() < current.getTime()) return "overdue";
   if (task.dueAt !== null && new Date(task.dueAt).getTime() < endOfToday) return "due_today";
-  return task.status === "next" ? "next" : "inbox";
+  return task.dueAt !== null || task.scheduledAt !== null ? "next" : "inbox";
 }
 
 function taskUrgencyRank(task: DailyBrief["tasks"][number], current: Date, endOfToday: number) {
@@ -204,10 +242,7 @@ function calculateCapacity({
     Math.round((workEnd - Math.max(workStart, current.getTime())) / 60_000),
   );
   const scheduledTaskIntervals = tasks
-    .filter(
-      (task) =>
-        task.status === "scheduled" && task.scheduledAt !== null && task.estimateMinutes !== null,
-    )
+    .filter((task) => task.scheduledAt !== null && task.estimateMinutes !== null)
     .map((task) => {
       const start = new Date(task.scheduledAt as string).getTime();
       return { end: start + (task.estimateMinutes as number) * 60_000, start };
@@ -226,7 +261,7 @@ function calculateCapacity({
     0,
   );
   const flexibleTaskMinutes = tasks
-    .filter((task) => task.status === "inbox" || task.status === "next")
+    .filter((task) => task.scheduledAt === null)
     .reduce((total, task) => total + (task.estimateMinutes ?? 0), 0);
   const occupiedMinutes = events.some((event) => event.allDay)
     ? remainingWindowMinutes

@@ -168,7 +168,7 @@ async function isInvalidCursorResponse(response: Response): Promise<boolean> {
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes > 4_096) {
-        await reader.cancel().catch(() => undefined);
+        void reader.cancel().catch(() => undefined);
         return false;
       }
       serialized += decoder.decode(chunk.value, { stream: true });
@@ -182,7 +182,7 @@ async function isInvalidCursorResponse(response: Response): Promise<boolean> {
       parsed.error_code === "INVALID_CURSOR"
     );
   } catch {
-    await reader.cancel().catch(() => undefined);
+    void reader.cancel().catch(() => undefined);
     return false;
   }
 }

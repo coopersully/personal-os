@@ -1,4 +1,5 @@
-import type { DailyBrief, Task, TaskList, TaskProject, TaskSystemView } from "@personal-os/domain";
+import type { Task, TaskList, TaskProject, TaskSystemView } from "@personal-os/domain";
+import { localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
 import { EmptyState } from "@personal-os/ui";
 import {
   type InfiniteData,
@@ -7,7 +8,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -26,7 +27,6 @@ import {
 } from "@/components/icons";
 import {
   TaskItem,
-  TaskItemActions,
   TaskItemCompletion,
   TaskItemContent,
   TaskItemDescription,
@@ -39,7 +39,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -112,6 +115,7 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
     queryKey: ["task-projects"],
   });
   const selectedView = taskViewFromParams(searchParams);
+  const archiveScope = archiveScopeFromParams(searchParams);
   const selectedProjectId = searchParams.get("project");
   const activeListIds = new Set(
     lists.data?.items.filter((list) => list.availability === "active").map((list) => list.id) ?? [],
@@ -164,6 +168,21 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
                       </SidebarMenuItem>
                     );
                   })}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={archiveScope !== null}>
+                      <Link
+                        aria-current={archiveScope !== null ? "page" : undefined}
+                        onClick={onNavigate}
+                        to="/tasks?archive=all"
+                      >
+                        <TrashIcon
+                          aria-hidden="true"
+                          weight={archiveScope !== null ? "Filled" : "Outline"}
+                        />
+                        <span>Archive</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </nav>
             </SidebarGroupContent>
@@ -352,11 +371,15 @@ export function TasksPage({
 }) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const openedTaskId = useRef<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<unknown>(null);
   const selectedView = taskViewFromParams(searchParams);
+  const archiveScope = archiveScopeFromParams(searchParams);
   const selectedProjectId = searchParams.get("project");
   const requestedListId = searchParams.get("list");
   const search = workspaceSearchFromParams(searchParams).trim();
+  const requestedTaskId = searchParams.get("task");
+  const lifecycleFilter = lifecycleFilterFromParams(searchParams);
   const lists = useQuery({ queryFn: listAllTaskLists, queryKey: ["task-lists"] });
   const projects = useQuery({
     queryFn: listAllTaskProjects,
@@ -365,38 +388,74 @@ export function TasksPage({
   const activeListIds = new Set(
     lists.data?.items.filter((list) => list.availability === "active").map((list) => list.id) ?? [],
   );
-  const selectedProject = projects.data?.items.find(
-    (project) =>
-      project.id === selectedProjectId &&
+  const selectedProject = projects.data?.items.find((project) => {
+    if (project.id !== selectedProjectId) return false;
+    if (archiveScope === "project") {
+      return project.availability === "archived" || project.lifecycle !== "open";
+    }
+    return (
       project.availability === "active" &&
       project.lifecycle === "open" &&
-      activeListIds.has(project.listId),
-  );
+      activeListIds.has(project.listId)
+    );
+  });
   const inbox = lists.data?.items.find((list) => list.kind === "inbox");
-  const requestedList = lists.data?.items.find(
-    (list) => list.id === requestedListId && list.availability === "active",
-  );
-  const selectedListId = selectedView
-    ? null
-    : (selectedProject?.listId ?? requestedList?.id ?? inbox?.id ?? null);
-  const canonicalPath = selectedView
-    ? taskPath(searchParams, { view: selectedView })
-    : selectedProject
-      ? taskPath(searchParams, { list: selectedProject.listId, project: selectedProject.id })
-      : requestedList
-        ? taskPath(searchParams, { list: requestedList.kind === "inbox" ? null : requestedList.id })
-        : taskPath(searchParams, { list: null });
+  const requestedList = lists.data?.items.find((list) => {
+    if (list.id !== requestedListId) return false;
+    return archiveScope === "list"
+      ? list.availability === "archived"
+      : list.availability === "active";
+  });
+  const selectedListId =
+    selectedView || archiveScope === "all"
+      ? null
+      : (selectedProject?.listId ?? requestedList?.id ?? inbox?.id ?? null);
+  const canonicalPath =
+    archiveScope === "all"
+      ? "/tasks?archive=all"
+      : archiveScope === "project" && selectedProject
+        ? `/tasks?archive=project&project=${selectedProject.id}`
+        : archiveScope === "list" && requestedList
+          ? `/tasks?archive=list&list=${requestedList.id}`
+          : archiveScope
+            ? "/tasks?archive=all"
+            : selectedView
+              ? taskPath(searchParams, { view: selectedView }, true)
+              : selectedProject
+                ? taskPath(
+                    searchParams,
+                    {
+                      list: selectedProject.listId,
+                      project: selectedProject.id,
+                    },
+                    true,
+                  )
+                : requestedList
+                  ? taskPath(
+                      searchParams,
+                      {
+                        list: requestedList.kind === "inbox" ? null : requestedList.id,
+                      },
+                      true,
+                    )
+                  : taskPath(searchParams, { list: null }, true);
   const currentPath = `/tasks${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`;
   useEffect(() => {
     if (lists.isSuccess && projects.isSuccess && canonicalPath !== currentPath) {
       navigate(canonicalPath, { replace: true });
     }
   }, [canonicalPath, currentPath, lists.isSuccess, navigate, projects.isSuccess]);
-  const ready = selectedView !== null || (lists.isSuccess && projects.isSuccess && selectedListId);
+  const ready =
+    archiveScope !== "all" &&
+    (selectedView !== null || (lists.isSuccess && projects.isSuccess && selectedListId));
   const query = {
     ...(selectedView ? { view: selectedView } : {}),
-    ...(!selectedView && selectedListId ? { listId: selectedListId } : {}),
+    ...(!selectedView && selectedListId && !selectedProject ? { listId: selectedListId } : {}),
     ...(!selectedView && selectedProject ? { projectId: selectedProject.id } : {}),
+    ...(archiveScope === "project" ? { includeUnavailableProject: true } : {}),
+    ...(!selectedView && archiveScope === null ? { lifecycle: "open" as const } : {}),
+    ...taskTimingFiltersFromParams(searchParams),
+    ...(!selectedView && lifecycleFilter ? { lifecycle: lifecycleFilter } : {}),
     ...(search ? { query: search } : {}),
   };
   const tasks = useInfiniteQuery<
@@ -422,12 +481,31 @@ export function TasksPage({
       setLoadMoreError(error);
     }
   };
+  const taskItems = tasks.data?.pages.flatMap((page) => page.items) ?? [];
+  useEffect(() => {
+    if (!requestedTaskId) {
+      openedTaskId.current = null;
+      return;
+    }
+    const requestedTask = taskItems.find((task) => task.id === requestedTaskId);
+    if (requestedTask && openedTaskId.current !== requestedTask.id) {
+      openedTaskId.current = requestedTask.id;
+      onEdit(requestedTask);
+    }
+  }, [onEdit, requestedTaskId, taskItems]);
 
-  if (lists.isPending || projects.isPending || tasks.isPending) {
+  if (lists.isPending || projects.isPending || (archiveScope !== "all" && tasks.isPending)) {
     return <WorkspaceSkeleton kind="tasks" />;
   }
   if (lists.isError) return <InlineError error={lists.error} />;
   if (projects.isError) return <InlineError error={projects.error} />;
+  if (archiveScope === "all") {
+    const archivedLists = lists.data.items.filter((list) => list.availability === "archived");
+    const terminalProjects = projects.data.items.filter(
+      (project) => project.availability === "archived" || project.lifecycle !== "open",
+    );
+    return <TaskArchive lists={archivedLists} projects={terminalProjects} />;
+  }
   if (tasks.isError && !tasks.data) {
     return (
       <div className="narrow-page">
@@ -442,10 +520,24 @@ export function TasksPage({
   const listById = new Map(lists.data.items.map((list) => [list.id, list]));
   const projectById = new Map(projects.data.items.map((project) => [project.id, project]));
   const emptyKey = selectedView ?? "list";
-  const taskItems = tasks.data.pages.flatMap((page) => page.items);
+  const scopeName =
+    selectedProject?.name ??
+    requestedList?.name ??
+    (selectedView ? taskViews.find((view) => view.value === selectedView)?.label : null) ??
+    inbox?.name ??
+    "Tasks";
+  const scopeList =
+    requestedList ?? (selectedProject ? listById.get(selectedProject.listId) : undefined);
 
   return (
-    <div className="narrow-page">
+    <div className="narrow-page flex flex-col gap-4">
+      <TaskScopeHeader
+        {...(scopeList ? { list: scopeList } : {})}
+        {...(archiveScope === null && !selectedView ? { openTaskCount: taskItems.length } : {})}
+        {...(selectedProject ? { project: selectedProject } : {})}
+        scopeName={scopeName}
+      />
+      <TaskFilters searchParams={searchParams} timeZone={timeZone} />
       {taskItems.length === 0 ? (
         search ? (
           <EmptyState icon={<SearchIcon />} title="No matching tasks">
@@ -465,7 +557,13 @@ export function TasksPage({
               <TaskRow
                 key={task.id}
                 {...(selectedView !== null && list ? { list } : {})}
-                onEdit={() => onEdit(task)}
+                onEdit={() => {
+                  const params = new URLSearchParams(searchParams);
+                  params.set("task", task.id);
+                  openedTaskId.current = task.id;
+                  onEdit(task);
+                  navigate(`/tasks?${params.toString()}`);
+                }}
                 {...(!selectedProjectId && project ? { project } : {})}
                 task={task}
                 timeZone={timeZone}
@@ -495,6 +593,47 @@ export function TasksPage({
   );
 }
 
+function TaskScopeHeader({
+  list,
+  openTaskCount,
+  project,
+  scopeName,
+}: {
+  list?: TaskList;
+  openTaskCount?: number;
+  project?: TaskProject;
+  scopeName: string;
+}) {
+  const targetDate = project?.targetDate
+    ? new Date(`${project.targetDate}T12:00:00.000Z`).toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+        timeZone: "UTC",
+        year: "numeric",
+      })
+    : null;
+  return (
+    <header className="flex flex-col gap-1 border-b border-border pb-3">
+      {project && list ? (
+        <p className="text-xs font-medium text-muted-foreground">{list.name}</p>
+      ) : null}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="font-heading text-xl font-medium">{scopeName}</h1>
+        {openTaskCount !== undefined ? (
+          <span className="text-xs text-muted-foreground">
+            {openTaskCount} open {openTaskCount === 1 ? "task" : "tasks"}
+          </span>
+        ) : null}
+      </div>
+      {project?.why ? <p className="text-sm text-muted-foreground">{project.why}</p> : null}
+      {targetDate ? <p className="text-xs text-muted-foreground">Target {targetDate}</p> : null}
+      {!project && list?.description ? (
+        <p className="text-sm text-muted-foreground">{list.description}</p>
+      ) : null}
+    </header>
+  );
+}
+
 function DependencyFailure({
   error,
   name,
@@ -520,14 +659,12 @@ export function TaskRow({
   list,
   onEdit,
   project,
-  recommendation,
   task,
   timeZone,
 }: {
   list?: TaskList;
   onEdit: () => void;
   project?: TaskProject;
-  recommendation?: DailyBrief["recommendedTasks"][number];
   task: Task;
   timeZone: string;
 }) {
@@ -564,11 +701,13 @@ export function TaskRow({
           <TaskItemTitle>{task.title}</TaskItemTitle>
           {timing ? <TaskItemDue>{timing}</TaskItemDue> : null}
           {description ? <TaskItemDescription>{description}</TaskItemDescription> : null}
-          {recommendation ? (
-            <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
-          ) : null}
-          {task.tags.length > 0 ? (
+          {task.tags.length > 0 || task.priority !== "medium" ? (
             <TaskItemTags aria-label="Task tags" className="mt-1 pl-0">
+              {task.priority !== "medium" ? (
+                <Badge asChild variant="outline">
+                  <li>{task.priority === "high" ? "High priority" : "Low priority"}</li>
+                </Badge>
+              ) : null}
               {task.tags.map((tag) => (
                 <Badge asChild key={tag} variant="outline">
                   <li>{tag}</li>
@@ -578,16 +717,13 @@ export function TaskRow({
           ) : null}
         </TaskItemContent>
       </TaskItemPrimaryAction>
-      <TaskItemMetadata>
-        <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-          {taskLifecycleLabel(task)}
-        </span>
-      </TaskItemMetadata>
-      <TaskItemActions>
-        <Button aria-label={`Edit ${task.title}`} onClick={onEdit} size="icon-xs" variant="ghost">
-          <EditIcon aria-hidden="true" />
-        </Button>
-      </TaskItemActions>
+      {task.lifecycle !== "open" || isTrashed ? (
+        <TaskItemMetadata>
+          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+            {taskLifecycleLabel(task)}
+          </span>
+        </TaskItemMetadata>
+      ) : null}
     </TaskItem>
   );
 }
@@ -599,18 +735,228 @@ function taskViewFromParams(searchParams: URLSearchParams): TaskSystemView | nul
     : null;
 }
 
+function lifecycleFilterFromParams(
+  searchParams: URLSearchParams,
+): "cancelled" | "completed" | "open" | null {
+  const lifecycle = searchParams.get("lifecycle");
+  return lifecycle === "open" || lifecycle === "completed" || lifecycle === "cancelled"
+    ? lifecycle
+    : null;
+}
+
+const taskTimingFilterKeys = [
+  "dueAfter",
+  "dueBefore",
+  "scheduledAfter",
+  "scheduledBefore",
+] as const;
+
+function taskTimingFiltersFromParams(searchParams: URLSearchParams) {
+  return Object.fromEntries(
+    taskTimingFilterKeys.flatMap((key) => {
+      const value = searchParams.get(key);
+      return value ? [[key, value]] : [];
+    }),
+  );
+}
+
+function TaskFilters({
+  searchParams,
+  timeZone,
+}: {
+  searchParams: URLSearchParams;
+  timeZone: string;
+}) {
+  const navigate = useNavigate();
+  const selectedView = taskViewFromParams(searchParams);
+  const activeCount =
+    taskTimingFilterKeys.filter((key) => searchParams.has(key)).length +
+    (lifecycleFilterFromParams(searchParams) && !selectedView ? 1 : 0);
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const next = new URLSearchParams(searchParams);
+    next.delete("task");
+    for (const key of taskTimingFilterKeys) {
+      const value = String(form.get(key) ?? "");
+      if (value) next.set(key, dateTimeLocalToIso(value, timeZone));
+      else next.delete(key);
+    }
+    const lifecycle = String(form.get("lifecycle") ?? "");
+    if (!selectedView && lifecycle) next.set("lifecycle", lifecycle);
+    else next.delete("lifecycle");
+    navigate(`/tasks?${next.toString()}`);
+  };
+  return (
+    <details className="rounded-lg border border-border px-3 py-2">
+      <summary className="cursor-pointer text-sm font-medium">
+        Filters{activeCount > 0 ? ` (${activeCount})` : ""}
+      </summary>
+      <form className="mt-3 flex flex-col gap-3" onSubmit={submit}>
+        {!selectedView ? (
+          <Field>
+            <FieldLabel htmlFor="task-filter-lifecycle">Lifecycle</FieldLabel>
+            <NativeSelect
+              defaultValue={lifecycleFilterFromParams(searchParams) ?? "open"}
+              id="task-filter-lifecycle"
+              name="lifecycle"
+            >
+              <NativeSelectOption value="open">Open</NativeSelectOption>
+              <NativeSelectOption value="completed">Completed</NativeSelectOption>
+              <NativeSelectOption value="cancelled">Cancelled</NativeSelectOption>
+            </NativeSelect>
+          </Field>
+        ) : null}
+        <FieldGroup className="grid gap-3 sm:grid-cols-2">
+          {taskTimingFilterKeys.map((key) => (
+            <Field key={key}>
+              <FieldLabel htmlFor={`task-filter-${key}`}>{taskTimingFilterLabel(key)}</FieldLabel>
+              <Input
+                defaultValue={toDateTimeLocal(searchParams.get(key), timeZone)}
+                id={`task-filter-${key}`}
+                name={key}
+                type="datetime-local"
+              />
+            </Field>
+          ))}
+        </FieldGroup>
+        <div className="flex gap-2">
+          <Button size="sm" type="submit">
+            Apply filters
+          </Button>
+          {activeCount > 0 ? (
+            <Button
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                for (const key of [...taskTimingFilterKeys, "lifecycle"]) next.delete(key);
+                navigate(`/tasks?${next.toString()}`);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Clear
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </details>
+  );
+}
+
+function taskTimingFilterLabel(key: (typeof taskTimingFilterKeys)[number]) {
+  return {
+    dueAfter: "Deadline after",
+    dueBefore: "Deadline before",
+    scheduledAfter: "Reserved after",
+    scheduledBefore: "Reserved before",
+  }[key];
+}
+
+type TaskArchiveScope = "all" | "list" | "project";
+
+function archiveScopeFromParams(searchParams: URLSearchParams): TaskArchiveScope | null {
+  const scope = searchParams.get("archive");
+  return scope === "all" || scope === "list" || scope === "project" ? scope : null;
+}
+
+function TaskArchive({ lists, projects }: { lists: TaskList[]; projects: TaskProject[] }) {
+  return (
+    <div className="narrow-page flex flex-col gap-6">
+      <header>
+        <h1 className="font-heading text-xl font-medium">Archive</h1>
+        <p className="text-sm text-muted-foreground">
+          Read the Tasks retained in archived Lists and finished Projects.
+        </p>
+      </header>
+      <section aria-labelledby="archived-lists-heading">
+        <h2 className="mb-2 font-heading text-base font-medium" id="archived-lists-heading">
+          Lists
+        </h2>
+        {lists.length > 0 ? (
+          <nav aria-label="Archived Lists" className="flex flex-col gap-1">
+            {lists.map((list) => (
+              <Button asChild className="justify-start" key={list.id} variant="ghost">
+                <Link to={`/tasks?archive=list&list=${list.id}`}>{list.name}</Link>
+              </Button>
+            ))}
+          </nav>
+        ) : (
+          <p className="text-sm text-muted-foreground">No archived Lists.</p>
+        )}
+      </section>
+      <section aria-labelledby="finished-projects-heading">
+        <h2 className="mb-2 font-heading text-base font-medium" id="finished-projects-heading">
+          Projects
+        </h2>
+        {projects.length > 0 ? (
+          <nav aria-label="Finished Projects" className="flex flex-col gap-1">
+            {projects.map((project) => (
+              <Button asChild className="justify-start" key={project.id} variant="ghost">
+                <Link to={`/tasks?archive=project&project=${project.id}`}>{project.name}</Link>
+              </Button>
+            ))}
+          </nav>
+        ) : (
+          <p className="text-sm text-muted-foreground">No finished Projects.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function taskPath(
   current: URLSearchParams,
   selection: { list?: string | null; project?: string | null; view?: TaskSystemView },
+  preserveTask = false,
 ) {
   const params = new URLSearchParams();
-  const search = current.get("q");
-  if (search) params.set("q", search);
+  for (const key of [
+    "q",
+    "dueAfter",
+    "dueBefore",
+    "scheduledAfter",
+    "scheduledBefore",
+    "lifecycle",
+  ]) {
+    const value = current.get(key);
+    if (value) params.set(key, value);
+  }
+  if (preserveTask && current.get("task")) params.set("task", current.get("task") as string);
   if (selection.view) params.set("view", selection.view);
   if (selection.list) params.set("list", selection.list);
   if (selection.project) params.set("project", selection.project);
   const query = params.toString();
   return query ? `/tasks?${query}` : "/tasks";
+}
+
+function toDateTimeLocal(value: string | null, timeZone: string) {
+  if (!value) return "";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      day: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+      minute: "2-digit",
+      month: "2-digit",
+      timeZone,
+      year: "numeric",
+    })
+      .formatToParts(new Date(value))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}`;
+}
+
+function dateTimeLocalToIso(value: string, timeZone: string) {
+  const [dateValue, timeValue] = value.split("T");
+  const date = parseLocalDate(dateValue as string);
+  const [hour, minute] = (timeValue as string).split(":").map(Number);
+  return localDateTimeToUtc(
+    date,
+    (hour as number) * 60 + (minute as number),
+    timeZone,
+  ).toISOString();
 }
 
 function taskTiming(task: Task, timeZone: string): string | null {
@@ -665,19 +1011,4 @@ export async function listAllTaskProjects() {
 function taskLifecycleLabel(task: Task) {
   if (task.deletedAt) return "Trash";
   return { cancelled: "Cancelled", completed: "Completed", open: "Open" }[task.lifecycle];
-}
-
-function recommendationCopy(recommendation: DailyBrief["recommendedTasks"][number]) {
-  const urgency = {
-    due_today: "Due today",
-    inbox: "Captured for later",
-    next: "Ready next",
-    overdue: "Overdue",
-  }[recommendation.urgency];
-  const capacity = {
-    does_not_fit: "does not fit in the remaining planning window",
-    fits_remaining_time: "fits in the remaining planning window",
-    needs_estimate: "needs an estimate before it can be planned",
-  }[recommendation.capacity];
-  return `${urgency} · ${capacity}`;
 }

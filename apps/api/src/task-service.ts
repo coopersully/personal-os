@@ -11,6 +11,7 @@ import {
   type CancelTaskInput,
   type CompleteTaskInput,
   type CreateTaskInput,
+  idSchema,
   localDayRange,
   type MoveTaskInput,
   type ReopenTaskInput,
@@ -22,7 +23,23 @@ import {
   type TrashTaskInput,
   type UpdateTaskInput,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import { z } from "zod";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -45,6 +62,53 @@ type TaskRow = typeof reminders.$inferSelect;
 type ListRow = typeof taskLists.$inferSelect;
 type ProjectRow = typeof taskProjects.$inferSelect;
 type DbTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+type TaskViewCursor = {
+  group: number;
+  id: string;
+  orderedAt: Date;
+};
+
+const taskViewCursorPayloadSchema = z.object({
+  group: z.number().int().min(0).max(2),
+  id: idSchema,
+  orderedAt: z.iso.datetime(),
+  version: z.literal(1),
+});
+
+type TaskViewOrdering = {
+  direction: "asc" | "desc";
+  group: SQL<number>;
+  grouped: boolean;
+  orderedAt: SQL<Date>;
+};
+
+function encodeTaskViewCursor(value: TaskViewCursor): string {
+  return Buffer.from(
+    JSON.stringify({
+      group: value.group,
+      id: value.id,
+      orderedAt: value.orderedAt.toISOString(),
+      version: 1,
+    }),
+    "utf8",
+  ).toString("base64url");
+}
+
+function decodeTaskViewCursor(value: string): TaskViewCursor {
+  try {
+    const parsed = taskViewCursorPayloadSchema.parse(
+      JSON.parse(Buffer.from(value, "base64url").toString("utf8")),
+    );
+    return {
+      group: parsed.group,
+      id: parsed.id,
+      orderedAt: new Date(parsed.orderedAt),
+    };
+  } catch {
+    throw new AppError("invalid_request", "The pagination cursor is invalid.");
+  }
+}
 
 type LockedTaskHierarchy = {
   destinationList: ListRow | null;
@@ -616,6 +680,30 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
       if (query.lifecycle) conditions.push(eq(reminders.taskLifecycle, query.lifecycle));
       if (query.listId) conditions.push(eq(reminders.taskListId, query.listId));
       if (query.projectId) {
+        const projectConditions = [
+          eq(taskProjects.id, query.projectId),
+          eq(taskProjects.userId, userId),
+          isNull(taskProjects.deletedAt),
+        ];
+        if (!query.includeUnavailableProject) {
+          projectConditions.push(
+            eq(taskProjects.availability, "active"),
+            eq(taskProjects.lifecycle, "open"),
+            inArray(
+              taskProjects.listId,
+              db
+                .select({ id: taskLists.id })
+                .from(taskLists)
+                .where(
+                  and(
+                    eq(taskLists.userId, userId),
+                    eq(taskLists.availability, "active"),
+                    isNull(taskLists.deletedAt),
+                  ),
+                ),
+            ),
+          );
+        }
         conditions.push(
           eq(reminders.taskProjectId, query.projectId),
           inArray(
@@ -623,28 +711,7 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
             db
               .select({ id: taskProjects.id })
               .from(taskProjects)
-              .where(
-                and(
-                  eq(taskProjects.id, query.projectId),
-                  eq(taskProjects.userId, userId),
-                  eq(taskProjects.availability, "active"),
-                  eq(taskProjects.lifecycle, "open"),
-                  isNull(taskProjects.deletedAt),
-                  inArray(
-                    taskProjects.listId,
-                    db
-                      .select({ id: taskLists.id })
-                      .from(taskLists)
-                      .where(
-                        and(
-                          eq(taskLists.userId, userId),
-                          eq(taskLists.availability, "active"),
-                          isNull(taskLists.deletedAt),
-                        ),
-                      ),
-                  ),
-                ),
-              ),
+              .where(and(...projectConditions)),
           ),
         );
       }
@@ -669,12 +736,33 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
         );
         if (search) conditions.push(search);
       }
+      let planningFrom: Date | null = null;
+      let planningTo: Date | null = null;
+      let ordering: TaskViewOrdering | null = null;
       if (query.view === "scheduled") {
         conditions.push(eq(reminders.taskLifecycle, "open"), isNotNull(reminders.scheduledAt));
+        ordering = {
+          direction: "asc",
+          group: sql<number>`CAST(0 AS integer)`,
+          grouped: false,
+          orderedAt: sql<Date>`${reminders.scheduledAt}`,
+        };
       } else if (query.view === "completed") {
         conditions.push(eq(reminders.taskLifecycle, "completed"));
+        ordering = {
+          direction: "desc",
+          group: sql<number>`CAST(0 AS integer)`,
+          grouped: false,
+          orderedAt: sql<Date>`${reminders.completedAt}`,
+        };
       } else if (query.view === "cancelled") {
         conditions.push(eq(reminders.taskLifecycle, "cancelled"));
+        ordering = {
+          direction: "desc",
+          group: sql<number>`CAST(0 AS integer)`,
+          grouped: false,
+          orderedAt: sql<Date>`${reminders.taskCancelledAt}`,
+        };
       } else if (query.view === "today" || query.view === "upcoming") {
         const user = (
           await db
@@ -685,41 +773,152 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
         )[0];
         if (!user) throw new AppError("not_found", "The Task owner was not found.");
         const range = localDayRange(now(), user.planningTimezone);
-        const from = query.view === "today" ? new Date(range.from) : new Date(range.to);
+        planningFrom = new Date(range.from);
+        planningTo = new Date(range.to);
+        const from = query.view === "today" ? planningFrom : planningTo;
         const timing =
           query.view === "today"
             ? or(
-                and(gte(reminders.dueAt, from), lt(reminders.dueAt, new Date(range.to))),
+                lt(reminders.dueAt, planningTo),
                 and(
-                  gte(reminders.scheduledAt, from),
-                  lt(reminders.scheduledAt, new Date(range.to)),
+                  gte(reminders.scheduledAt, planningFrom),
+                  lt(reminders.scheduledAt, planningTo),
                 ),
               )
             : or(gte(reminders.dueAt, from), gte(reminders.scheduledAt, from));
         conditions.push(eq(reminders.taskLifecycle, "open"));
         if (timing) conditions.push(timing);
+        ordering =
+          query.view === "today"
+            ? {
+                direction: "asc",
+                group: sql<number>`CASE
+                  WHEN ${reminders.dueAt} < ${planningFrom} THEN 0
+                  WHEN ${reminders.scheduledAt} >= ${planningFrom}
+                    AND ${reminders.scheduledAt} < ${planningTo} THEN 1
+                  ELSE 2
+                END`,
+                grouped: true,
+                orderedAt: sql<Date>`CASE
+                  WHEN ${reminders.dueAt} < ${planningFrom} THEN ${reminders.dueAt}
+                  WHEN ${reminders.scheduledAt} >= ${planningFrom}
+                    AND ${reminders.scheduledAt} < ${planningTo} THEN ${reminders.scheduledAt}
+                  ELSE ${reminders.dueAt}
+                END`,
+              }
+            : {
+                direction: "asc",
+                group: sql<number>`CAST(0 AS integer)`,
+                grouped: false,
+                orderedAt: sql<Date>`LEAST(${reminders.dueAt}, ${reminders.scheduledAt})`,
+              };
+      } else if (query.view === "trash") {
+        ordering = {
+          direction: "desc",
+          group: sql<number>`CAST(0 AS integer)`,
+          grouped: false,
+          orderedAt: sql<Date>`${reminders.deletedAt}`,
+        };
       }
+      const orderedTaskId = sql<string>`${reminders.id}::text`;
       if (query.cursor) {
-        const cursor = decodeCursor(query.cursor);
-        const cursorCondition = or(
-          lt(reminders.createdAt, cursor.createdAt),
-          and(eq(reminders.createdAt, cursor.createdAt), lt(reminders.id, cursor.id)),
-        );
+        const cursorCondition = ordering
+          ? (() => {
+              const cursor = decodeTaskViewCursor(query.cursor);
+              const orderedAfter =
+                ordering.direction === "asc"
+                  ? gt(ordering.orderedAt, cursor.orderedAt)
+                  : lt(ordering.orderedAt, cursor.orderedAt);
+              if (!ordering.grouped) {
+                return or(
+                  orderedAfter,
+                  and(eq(ordering.orderedAt, cursor.orderedAt), lt(orderedTaskId, cursor.id)),
+                );
+              }
+              return or(
+                gt(ordering.group, cursor.group),
+                and(eq(ordering.group, cursor.group), orderedAfter),
+                and(
+                  eq(ordering.group, cursor.group),
+                  eq(ordering.orderedAt, cursor.orderedAt),
+                  lt(orderedTaskId, cursor.id),
+                ),
+              );
+            })()
+          : (() => {
+              const cursor = decodeCursor(query.cursor);
+              return or(
+                lt(reminders.createdAt, cursor.createdAt),
+                and(eq(reminders.createdAt, cursor.createdAt), lt(reminders.id, cursor.id)),
+              );
+            })();
         if (cursorCondition) conditions.push(cursorCondition);
       }
-      const rows = await db
-        .select()
-        .from(reminders)
-        .where(and(...conditions))
-        .orderBy(desc(reminders.createdAt), desc(reminders.id))
-        .limit(query.limit + 1);
+      const rows = ordering
+        ? await db
+            .select()
+            .from(reminders)
+            .where(and(...conditions))
+            .orderBy(
+              asc(ordering.group),
+              ordering.direction === "asc" ? asc(ordering.orderedAt) : desc(ordering.orderedAt),
+              desc(orderedTaskId),
+            )
+            .limit(query.limit + 1)
+        : await db
+            .select()
+            .from(reminders)
+            .where(and(...conditions))
+            .orderBy(desc(reminders.createdAt), desc(reminders.id))
+            .limit(query.limit + 1);
       const hasMore = rows.length > query.limit;
       const page = hasMore ? rows.slice(0, query.limit) : rows;
       const last = page.at(-1);
+      let viewCursor: TaskViewCursor | null = null;
+      if (hasMore && last && ordering && query.view) {
+        let group = 0;
+        let orderedAt: Date | null = null;
+        if (query.view === "today" && planningFrom && planningTo) {
+          if (last.dueAt && last.dueAt < planningFrom) {
+            orderedAt = last.dueAt;
+          } else if (
+            last.scheduledAt &&
+            last.scheduledAt >= planningFrom &&
+            last.scheduledAt < planningTo
+          ) {
+            group = 1;
+            orderedAt = last.scheduledAt;
+          } else {
+            group = 2;
+            orderedAt = last.dueAt;
+          }
+        } else if (query.view === "upcoming") {
+          orderedAt =
+            [last.dueAt, last.scheduledAt]
+              .filter((value): value is Date => value !== null)
+              .sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+        } else if (query.view === "scheduled") {
+          orderedAt = last.scheduledAt;
+        } else if (query.view === "completed") {
+          orderedAt = last.completedAt;
+        } else if (query.view === "cancelled") {
+          orderedAt = last.taskCancelledAt;
+        } else if (query.view === "trash") {
+          orderedAt = last.deletedAt;
+        }
+        if (!orderedAt) {
+          throw new AppError("conflict", "The Task view order could not be determined.");
+        }
+        viewCursor = { group, id: last.id, orderedAt };
+      }
       return {
         items: page.map(serializeTask),
         nextCursor:
-          hasMore && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null,
+          hasMore && last
+            ? viewCursor
+              ? encodeTaskViewCursor(viewCursor)
+              : encodeCursor({ createdAt: last.createdAt, id: last.id })
+            : null,
       };
     },
 

@@ -2820,7 +2820,11 @@ describe.sequential("ilo API", () => {
       );
       const todayView = await payload(await taskRequest("/v1/tasks?view=today"));
       expect(todayView.items.map(({ id }: { id: string }) => id)).toContain(todayTask.id);
-      const upcomingView = await payload(await taskRequest("/v1/tasks?view=upcoming"));
+      const upcomingResponse = await taskRequest("/v1/tasks?view=upcoming");
+      expect(upcomingResponse.status, JSON.stringify(await payload(upcomingResponse.clone()))).toBe(
+        200,
+      );
+      const upcomingView = await payload(upcomingResponse);
       expect(upcomingView.items.map(({ id }: { id: string }) => id)).toContain(upcomingTask.id);
       const scheduledView = await payload(await taskRequest("/v1/tasks?view=scheduled"));
       expect(scheduledView.items).toEqual(
@@ -2883,6 +2887,215 @@ describe.sequential("ilo API", () => {
           .from(auditEvents)
           .where(eq(auditEvents.entityId, todayTask.id)),
       ).toHaveLength(auditBefore.length + 1);
+    });
+
+    it("includes overdue Tasks in Today and paginates the canonical planning order", async () => {
+      const list = await createTaskList("Today Planning Order");
+      const dueToday = await createTask("Due today after reserved work", {
+        dueAt: "2026-07-13T20:00:00.000Z",
+        listId: list.id,
+      });
+      const reservedToday = await createTask("Reserved today", {
+        listId: list.id,
+        scheduledAt: "2026-07-13T14:00:00.000Z",
+      });
+      const overdue = await createTask("Overdue deadline", {
+        dueAt: "2026-07-12T18:00:00.000Z",
+        listId: list.id,
+      });
+      await Promise.all([
+        database.db
+          .update(reminders)
+          .set({ createdAt: new Date("2026-07-13T11:59:59.000Z") })
+          .where(eq(reminders.id, dueToday.id)),
+        database.db
+          .update(reminders)
+          .set({ createdAt: new Date("2026-07-13T11:59:58.000Z") })
+          .where(eq(reminders.id, reservedToday.id)),
+        database.db
+          .update(reminders)
+          .set({ createdAt: new Date("2026-07-13T11:59:57.000Z") })
+          .where(eq(reminders.id, overdue.id)),
+      ]);
+
+      const firstPage = await payload(
+        await taskRequest(`/v1/tasks?view=today&listId=${list.id}&limit=1`),
+      );
+      expect(firstPage.items.map(({ id }: { id: string }) => id)).toEqual([overdue.id]);
+      expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+      const secondPage = await payload(
+        await taskRequest(
+          `/v1/tasks?view=today&listId=${list.id}&limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+        ),
+      );
+      expect(secondPage.items.map(({ id }: { id: string }) => id)).toEqual([reservedToday.id]);
+      expect(secondPage.nextCursor).toEqual(expect.any(String));
+
+      const thirdPage = await payload(
+        await taskRequest(
+          `/v1/tasks?view=today&listId=${list.id}&limit=1&cursor=${encodeURIComponent(secondPage.nextCursor)}`,
+        ),
+      );
+      expect(thirdPage.items.map(({ id }: { id: string }) => id)).toEqual([dueToday.id]);
+      expect(thirdPage.nextCursor).toBeNull();
+    });
+
+    it("paginates every canonical Task view with its semantic cursor", async () => {
+      const list = await createTaskList("Canonical View Pagination");
+      const upcoming = await Promise.all([
+        createTask("Earlier upcoming Task", {
+          dueAt: "2026-07-14T14:00:00.000Z",
+          listId: list.id,
+          scheduledAt: "2026-07-14T13:00:00.000Z",
+        }),
+        createTask("Later upcoming Task", {
+          dueAt: "2026-07-15T14:00:00.000Z",
+          listId: list.id,
+          scheduledAt: "2026-07-15T13:00:00.000Z",
+        }),
+      ]);
+      const completed = await Promise.all([
+        createTask("Completed view A", { listId: list.id }),
+        createTask("Completed view B", { listId: list.id }),
+      ]);
+      const cancelled = await Promise.all([
+        createTask("Cancelled view A", { listId: list.id }),
+        createTask("Cancelled view B", { listId: list.id }),
+      ]);
+      const trashed = await Promise.all([
+        createTask("Trash view A", { listId: list.id }),
+        createTask("Trash view B", { listId: list.id }),
+      ]);
+      await Promise.all(
+        completed.map((task) =>
+          taskRequest(`/v1/tasks/${task.id}/complete`, {
+            body: { expectedRevision: task.revision },
+          }),
+        ),
+      );
+      await Promise.all(
+        cancelled.map((task) =>
+          taskRequest(`/v1/tasks/${task.id}/cancel`, {
+            body: { expectedRevision: task.revision },
+          }),
+        ),
+      );
+      await Promise.all(
+        trashed.map((task) =>
+          taskRequest(`/v1/tasks/${task.id}`, {
+            body: { expectedRevision: task.revision },
+            method: "DELETE",
+          }),
+        ),
+      );
+
+      for (const [view, expected] of [
+        ["upcoming", upcoming],
+        ["scheduled", upcoming],
+        ["completed", completed],
+        ["cancelled", cancelled],
+        ["trash", trashed],
+      ] as const) {
+        const first = await payload(
+          await taskRequest(`/v1/tasks?view=${view}&listId=${list.id}&limit=1`),
+        );
+        expect(first.items).toHaveLength(1);
+        expect(first.nextCursor).toEqual(expect.any(String));
+        const second = await payload(
+          await taskRequest(
+            `/v1/tasks?view=${view}&listId=${list.id}&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`,
+          ),
+        );
+        expect(second.items, view).toHaveLength(1);
+        expect(second.nextCursor).toBeNull();
+        expect(
+          new Set([...first.items, ...second.items].map(({ id }: { id: string }) => id)),
+        ).toEqual(new Set(expected.map(({ id }) => id)));
+      }
+    });
+
+    it.each([
+      ["unreadable JSON", "not-json"],
+      [
+        "an unsupported version",
+        {
+          group: 0,
+          id: "11111111-1111-4111-8111-111111111111",
+          orderedAt: "2026-07-14T12:00:00.000Z",
+          version: 0,
+        },
+      ],
+      [
+        "a non-integer group",
+        {
+          group: "zero",
+          id: "11111111-1111-4111-8111-111111111111",
+          orderedAt: "2026-07-14T12:00:00.000Z",
+          version: 1,
+        },
+      ],
+      [
+        "an out-of-range group",
+        {
+          group: 3,
+          id: "11111111-1111-4111-8111-111111111111",
+          orderedAt: "2026-07-14T12:00:00.000Z",
+          version: 1,
+        },
+      ],
+      [
+        "an invalid Task ID",
+        { group: 0, id: "not-a-task-id", orderedAt: "2026-07-14T12:00:00.000Z", version: 1 },
+      ],
+      [
+        "an invalid ordering time",
+        {
+          group: 0,
+          id: "11111111-1111-4111-8111-111111111111",
+          orderedAt: "not-a-date",
+          version: 1,
+        },
+      ],
+    ])("rejects semantic Task view cursors with %s", async (_reason, cursorPayload) => {
+      const cursor = Buffer.from(
+        typeof cursorPayload === "string" ? cursorPayload : JSON.stringify(cursorPayload),
+        "utf8",
+      ).toString("base64url");
+
+      const response = await taskRequest(
+        `/v1/tasks?view=upcoming&cursor=${encodeURIComponent(cursor)}`,
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.message).toBe("The pagination cursor is invalid.");
+    });
+
+    it("reads terminal Project contents only through explicit history scope", async () => {
+      const list = await createTaskList("Project History List");
+      const project = await createTaskProject(list.id, "Completed Project History");
+      const projectTask = await createTask("Completed with its Project", {
+        listId: list.id,
+        projectId: project.id,
+      });
+      const completeResponse = await taskRequest(`/v1/task-projects/${project.id}/complete`, {
+        body: {
+          expectedRevision: project.revision,
+          resolution: "complete_open_tasks",
+        },
+      });
+      expect(completeResponse.status).toBe(200);
+
+      const defaultQuery = await payload(await taskRequest(`/v1/tasks?projectId=${project.id}`));
+      expect(defaultQuery.items).toEqual([]);
+
+      const historyQuery = await payload(
+        await taskRequest(
+          `/v1/tasks?projectId=${project.id}&includeUnavailableProject=true&lifecycle=completed`,
+        ),
+      );
+      expect(historyQuery.items).toEqual([
+        expect.objectContaining({ id: projectTask.id, lifecycle: "completed" }),
+      ]);
     });
 
     it("tasks combine canonical placement, timing, text, and cursor filters", async () => {

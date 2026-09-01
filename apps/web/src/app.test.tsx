@@ -24,6 +24,7 @@ import {
   workspaceIndicatorOffset,
   workspaceTodaySummary,
 } from "./components/workspace-switching.js";
+import { loadAllTaskContainerPages } from "./features/tasks/page.js";
 
 const now = "2026-07-13T12:00:00.000Z";
 const capacity = {
@@ -39,6 +40,19 @@ const id = "11111111-1111-4111-8111-111111111111";
 const secondId = "22222222-2222-4222-8222-222222222222";
 const thirdId = "33333333-3333-4333-8333-333333333333";
 const fakeAppleAppPassword = ["xxxx", "xxxx", "xxxx", "xxxx"].join("-");
+
+it("bounds Tasks container pagination", async () => {
+  let pageNumber = 0;
+  const loadPage = vi.fn(async () => {
+    pageNumber += 1;
+    return { items: [], nextCursor: `cursor-${pageNumber}` };
+  });
+
+  await expect(loadAllTaskContainerPages(loadPage)).rejects.toThrow(
+    "Task container pagination exceeded 100 pages.",
+  );
+  expect(loadPage).toHaveBeenCalledTimes(100);
+});
 
 function iconMarkup(Icon: Icon, weight: "Filled" | "Outline") {
   const view = render(<Icon weight={weight} />);
@@ -2827,6 +2841,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/tasks");
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
     const taskSidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
     expect(within(taskSidebar).getByText("Views")).toBeInTheDocument();
     expect(within(taskSidebar).getByText("Lists")).toBeInTheDocument();
@@ -2853,10 +2868,13 @@ describe("ilo web app", () => {
     );
     await browser.click(within(taskSidebar).getByRole("link", { name: "Launch" }));
     expect(view.location.value).toBe(`/tasks?list=${secondId}&project=${thirdId}`);
+    expect(await screen.findByRole("heading", { name: "Launch" })).toBeInTheDocument();
+    expect(screen.getByText("Release the new workspace")).toBeInTheDocument();
+    expect(screen.getByText(/Target Aug 1, 2026/)).toBeInTheDocument();
     await waitFor(() =>
       expect(mocks.listTasks).toHaveBeenLastCalledWith({
+        lifecycle: "open",
         limit: 100,
-        listId: secondId,
         projectId: thirdId,
       }),
     );
@@ -2868,6 +2886,7 @@ describe("ilo web app", () => {
     expect(screen.getByLabelText("Project")).toHaveValue(thirdId);
     expect(screen.getByLabelText("Deadline")).not.toBe(screen.getByLabelText("Reserved time"));
     await browser.type(screen.getByLabelText("Task"), "Write task coverage");
+    await browser.click(screen.getByText("More details"));
     await browser.type(screen.getByLabelText("Why it matters"), "Keep the workspace reliable");
     await browser.type(screen.getByLabelText("Estimate in minutes"), "25");
     await browser.type(screen.getByLabelText("Tags"), "quality, coverage");
@@ -2906,6 +2925,47 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("heading", { name: "Reminders" })).toBeInTheDocument();
   });
 
+  it("opens exact Task URLs and applies lifecycle and timing filters from the workspace", async () => {
+    const browser = userEvent.setup();
+    const direct = setup(`/tasks?task=${task.id}`);
+    expect(await screen.findByRole("dialog", { name: "Refine task" })).toBeInTheDocument();
+    expect(direct.location.value).toBe(`/tasks?task=${task.id}`);
+    await browser.click(screen.getByText("Record details"));
+    expect(screen.getByText("Revision").nextElementSibling).toHaveTextContent("3");
+    await browser.click(screen.getByRole("button", { name: "Close" }));
+    direct.unmount();
+
+    const filtered = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByText("Filters"));
+    await browser.selectOptions(screen.getByLabelText("Lifecycle"), "completed");
+    fireEvent.change(screen.getByLabelText("Deadline after"), {
+      target: { value: "2026-07-13T09:00" },
+    });
+    await browser.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenLastCalledWith({
+        dueAfter: "2026-07-13T09:00:00.000Z",
+        lifecycle: "completed",
+        limit: 100,
+        listId: id,
+      }),
+    );
+    await browser.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(filtered.location.value).toBe("/tasks"));
+    expect(screen.getByText("Filters")).toBeInTheDocument();
+    filtered.unmount();
+
+    const systemView = setup("/tasks?view=today&lifecycle=completed");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByText("Filters"));
+    expect(screen.queryByLabelText("Lifecycle")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => expect(systemView.location.value).toBe("/tasks?view=today"));
+    expect(mocks.listTasks).toHaveBeenLastCalledWith({ limit: 100, view: "today" });
+    systemView.unmount();
+  });
+
   it("requires an explicit Tasks move confirmation when a List change detaches a Project", async () => {
     const browser = userEvent.setup();
     const placedTask = { ...task, listId: secondId, projectId: thirdId };
@@ -2931,7 +2991,7 @@ describe("ilo web app", () => {
     });
     setup(`/tasks?list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.selectOptions(screen.getByLabelText("List"), id);
     expect(screen.getByLabelText("Project")).toHaveValue("");
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
@@ -2973,7 +3033,7 @@ describe("ilo web app", () => {
     mocks.updateTask.mockRejectedValueOnce(new Error("Task content update failed after move"));
     setup("/tasks");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.selectOptions(screen.getByLabelText("List"), secondId);
     await browser.clear(screen.getByLabelText("Task"));
     await browser.type(screen.getByLabelText("Task"), "Moved draft brief");
@@ -3056,12 +3116,10 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Archive List" }));
     expect(await screen.findByText(/1 open Projects and 3 open Tasks/)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Move active contents to another List before archiving this List.",
+      "Move them to another List or archive the List and its contents together.",
     );
     expect(screen.getByRole("button", { name: "Move active contents" })).toBeDisabled();
-    expect(
-      screen.queryByRole("button", { name: "Archive contents together" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive contents together" })).toBeInTheDocument();
     await browser.selectOptions(screen.getByLabelText("Destination List"), id);
     await browser.click(screen.getByRole("button", { name: "Move active contents" }));
     await waitFor(() =>
@@ -3216,6 +3274,20 @@ describe("ilo web app", () => {
       }),
     );
     moveView.unmount();
+
+    rejectWithConflict();
+    const archiveTogetherView = setup(`/tasks?list=${secondId}`);
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
+    await browser.click(screen.getByRole("button", { name: "Archive List" }));
+    await browser.click(screen.getByRole("button", { name: "Archive contents together" }));
+    await waitFor(() =>
+      expect(mocks.archiveTaskList).toHaveBeenLastCalledWith(secondId, {
+        expectedRevision: 9,
+        resolution: "archive_contents_together",
+      }),
+    );
+    archiveTogetherView.unmount();
   });
 
   it("resolves Project completion without inventing child outcomes", async () => {
@@ -3327,7 +3399,7 @@ describe("ilo web app", () => {
     });
     const taskView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.selectOptions(screen.getByLabelText("List"), id);
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await browser.click(await screen.findByRole("button", { name: "Keep current placement" }));
@@ -3458,7 +3530,7 @@ describe("ilo web app", () => {
     mocks.moveTask.mockRejectedValueOnce(new Error("Task move needs a retry"));
     const taskView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.selectOptions(screen.getByLabelText("List"), id);
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await browser.click(await screen.findByRole("button", { name: "Move and detach Project" }));
@@ -3508,7 +3580,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup(`/tasks?list=${secondId}`);
     await screen.findByText("Draft brief");
-    for (const name of ["Manage Work", "Manage Launch", "Edit Draft brief"]) {
+    for (const name of ["Manage Work", "Manage Launch", "Open Draft brief"]) {
       await browser.click(screen.getByRole("button", { name }));
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       await browser.keyboard("{Escape}");
@@ -3599,6 +3671,7 @@ describe("ilo web app", () => {
     await screen.findByText("Draft brief");
     await browser.click(screen.getByRole("button", { name: "New task" }));
     await browser.type(screen.getByLabelText("Task"), "Inbox capture");
+    await browser.click(screen.getByText("More details"));
     await browser.type(screen.getByLabelText("Why it matters"), "   ");
     await browser.type(screen.getByLabelText("Notes"), "   ");
     await browser.type(screen.getByLabelText("Tags"), "alpha, , beta");
@@ -3742,7 +3815,7 @@ describe("ilo web app", () => {
     });
     const taskMoveView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.selectOptions(screen.getByLabelText("List"), id);
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByText("Move Task without its Project?");
@@ -3833,7 +3906,7 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(projectView.location.value).toBe(`/tasks?list=${secondId}&project=${thirdId}`),
     );
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     expect(screen.getByLabelText("List")).toHaveValue(secondId);
     expect(screen.getByLabelText("Project")).toHaveValue(thirdId);
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
@@ -3844,7 +3917,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const openView = setup("/tasks");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.click(screen.getByRole("button", { name: "Cancel task" }));
     await waitFor(() =>
       expect(mocks.cancelTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
@@ -3857,7 +3930,7 @@ describe("ilo web app", () => {
     });
     const cancelledView = setup("/tasks?view=cancelled");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.click(screen.getByRole("button", { name: "Reopen task" }));
     await waitFor(() =>
       expect(mocks.reopenTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
@@ -3870,7 +3943,7 @@ describe("ilo web app", () => {
     });
     const trashView = setup("/tasks?view=trash");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.click(screen.getByRole("button", { name: "Restore task" }));
     await waitFor(() =>
       expect(mocks.restoreTask).toHaveBeenCalledWith(task.id, { expectedRevision: 3 }),
@@ -3882,7 +3955,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const openView = setup("/tasks");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.click(screen.getByRole("button", { name: "Complete task" }));
     await waitFor(() =>
       expect(mocks.completeTask).toHaveBeenLastCalledWith(task.id, { expectedRevision: 3 }),
@@ -3964,8 +4037,8 @@ describe("ilo web app", () => {
     mocks.trashTask.mockRejectedValue(new Error("Task trash failed"));
     const second = setup("/tasks");
     await screen.findByText("Draft brief");
-    expect(screen.queryByLabelText("Task tags")).not.toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    expect(screen.getByLabelText("Task tags")).toHaveTextContent("High priority");
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     await browser.click(screen.getByRole("button", { name: "Move to Trash" }));
     await waitFor(() =>
       expect(mocks.trashTask).toHaveBeenCalledWith(task.id, { expectedRevision: task.revision }),
@@ -4001,7 +4074,7 @@ describe("ilo web app", () => {
     completed.unmount();
   });
 
-  it("paginates Tasks organization and rejects archived URL selections", async () => {
+  it("paginates Tasks organization and opens archived containers through explicit history URLs", async () => {
     const archivedList = { ...workTaskList, archivedAt: now, availability: "archived" as const };
     const archivedProject = {
       ...launchTaskProject,
@@ -4038,10 +4111,38 @@ describe("ilo web app", () => {
     view.unmount();
 
     mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
-    const archivedView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
-    await screen.findByText("Draft brief");
-    await waitFor(() => expect(archivedView.location.value).toBe("/tasks"));
+    const archivedView = setup("/tasks?archive=all");
+    expect(await screen.findByRole("heading", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Work" })).toHaveAttribute(
+      "href",
+      `/tasks?archive=list&list=${secondId}`,
+    );
+    await userEvent.setup().click(screen.getByRole("link", { name: "Launch" }));
+    await waitFor(() =>
+      expect(archivedView.location.value).toBe(`/tasks?archive=project&project=${thirdId}`),
+    );
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith({
+        includeUnavailableProject: true,
+        limit: 100,
+        projectId: thirdId,
+      }),
+    );
     archivedView.unmount();
+  });
+
+  it("explains an empty Tasks archive", async () => {
+    mocks.listTaskLists.mockResolvedValue({
+      items: [inboxTaskList, workTaskList],
+      nextCursor: null,
+    });
+    mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
+
+    const view = setup("/tasks?archive=all");
+    expect(await screen.findByRole("heading", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByText("No archived Lists.")).toBeInTheDocument();
+    expect(screen.getByText("No finished Projects.")).toBeInTheDocument();
+    view.unmount();
   });
 
   it("canonicalizes Tasks project-only and mixed workspace URLs", async () => {
@@ -4185,6 +4286,7 @@ describe("ilo web app", () => {
     await browser.type(screen.getByRole("searchbox", { name: "Search tasks" }), "missing");
     expect(await screen.findByText("No matching tasks")).toBeInTheDocument();
     expect(mocks.listTasks).toHaveBeenCalledWith({
+      lifecycle: "open",
       limit: 100,
       listId: id,
       query: "missing",

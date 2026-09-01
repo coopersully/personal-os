@@ -144,6 +144,9 @@ export type TaskMovePreview = z.infer<typeof taskMovePreviewSchema>;
 export const taskListQuerySchema = paginationSchema.extend({
   dueAfter: isoDateTimeSchema.optional(),
   dueBefore: isoDateTimeSchema.optional(),
+  includeUnavailableProject: z
+    .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+    .optional(),
   lifecycle: taskLifecycleSchema.optional(),
   listId: idSchema.optional(),
   projectId: idSchema.optional(),

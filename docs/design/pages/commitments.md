@@ -23,9 +23,11 @@ Orientation (app frame)
 Tasks context (sidebar)
 ├── Views: Today, Upcoming, Scheduled, Completed, Cancelled, Trash
 ├── Lists: protected Inbox plus active user Lists
-└── Projects: active, open Projects in the selected List
+├── Projects: active, open Projects in the selected List
+└── Archive: archived Lists plus terminal or archived Projects
 
 Tasks queue
+├── Persistent selected scope and optional advanced filters
 └── One directly manipulable Task row with organization and timing context
 
 Reminders queue
@@ -41,14 +43,23 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
   survive browser history. The API searches title and notes; the page has no second client index.
 - Task selection has one canonical URL representation. `view` excludes `list` and `project`; a
   `project` implies its `list`; a List excludes `view` and `project`; Inbox is `/tasks` without its
-  generated ID. Search is preserved while selection normalizes.
+  generated ID. An exact Task adds `task`; search and advanced timing/lifecycle filters are
+  preserved while selection normalizes.
 - A valid Project is authoritative: a missing or mismatched `list` parameter rewrites to the
-  Project's actual List. Invalid, archived, or terminal selections return to canonical Inbox.
-  Archived Lists and terminal/archived Projects are not ordinary navigation or capture
-  destinations.
-- The Task editor chooses one List (Inbox by default) and an optional active, open Project in that
-  List. It edits content, `why`, priority, estimate, tags, deadline, and reserved time. Deadline and
-  reserved time are independent controls.
+  Project's actual List. Invalid ordinary selections return to canonical Inbox. Archived Lists and
+  terminal/archived Projects are read-only history destinations under `/tasks?archive=all`; they
+  remain unavailable to capture and move operations.
+- Ordinary List and Project queues contain open Tasks by default. Their closed history is reached
+  deliberately with the lifecycle filter rather than mixed into the action queue.
+- Today includes every open overdue deadline plus Tasks due or reserved in the person's local day.
+  It orders overdue deadlines first, reserved work second, and remaining due-today work third.
+  Upcoming and Scheduled are chronological; terminal and Trash Views use their lifecycle time.
+- Capture chooses one List (Inbox by default), an optional active/open Project in that List, a
+  deadline, and reserved time in the primary form. `why`, notes, priority, estimate, and tags stay
+  under **More details**. Deadline and reserved time are independent controls.
+- Existing Tasks open in a right-side inspector sheet. The full form, lifecycle actions, and a
+  progressive record-details disclosure (source, revision, creation, and update times) remain
+  available without losing the queue behind it.
 - Task lifecycle is only open, completed, or cancelled. There is no status selector and no Next
   destination. Complete, cancel, reopen, trash, and restore are focused actions outside the content
   form and use current revisions.
@@ -62,11 +73,14 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
   List, or Project, and it is not promoted to a second copy in Today navigation.
 - The app-frame primary action creates the current material directly: **New task** on Tasks and
   **New reminder** on Reminders.
+- Advanced lifecycle and timing filters are URL-backed and sent to the canonical API query. The UI
+  does not fetch a broad result and filter it locally.
 - Creating, editing, moving, completing, cancelling, reopening, trashing, restoring, or changing a
   Task container invalidates Tasks, Today, Calendar, Activity, and organization queries together.
   Reminder mutations invalidate the corresponding shared projections.
-- The body begins with the queue. It does not repeat the workspace title, search, selection
-  description, or create action inside an additional card.
+- The body begins with compact scope orientation, optional filters, and then the queue. Project
+  orientation includes its parent List, purpose, target date, and loaded open count. This context
+  remains visible when the desktop sidebar is absent.
 
 ## State matrix
 
@@ -80,7 +94,8 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
 | Mutation conflict | Exact structured choices and current revision data from the API. |
 | Mutation failed | The affected row or dialog stays open and actionable with the failure. |
 | Partial Task move | The dialog retains the moved revision/location and retries only the remaining edit. |
-| Populated | Compact, directly manipulable rows with lifecycle, organization, and useful timing. |
+| Populated | Compact, directly manipulable rows with organization, useful timing, and only meaningful non-default priority/lifecycle cues. |
+| Archive index | Archived Lists and terminal/archived Projects link to explicit read-only history URLs. |
 
 ## Implementation map
 
@@ -90,7 +105,7 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
 | shared projection invalidation | `lib/material-queries.ts` |
 | Reminder page, navigation, and rows | `features/reminders/page.tsx` |
 | Tasks workspace and navigation | `features/tasks/page.tsx` |
-| Task content and lifecycle dialog | `features/tasks/task-dialog.tsx` |
+| Task capture dialog and edit inspector | `features/tasks/task-dialog.tsx` |
 | List management | `features/tasks/task-list-dialog.tsx` |
 | Project management and conflicts | `features/tasks/task-project-dialog.tsx`, `features/tasks/project-conflict-dialog.tsx` |
 | app-frame composition and Today integration | `app.tsx` |
@@ -100,15 +115,18 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
 1. Open `/tasks`; confirm Inbox is selected without a generated URL parameter and Views, Lists, and
    Projects are distinct groups.
 2. Select Today, a standard List, and a Project. Confirm the canonical `view`, `list`, and
-   `list+project` URLs survive refresh and preserve `q`.
-3. Create a Task with a List, optional Project, `why`, deadline, and reserved time. Confirm there is
-   no Next/status selector and each timing field survives independently.
-4. Move a Project Task to another List and confirm the detachment preview appears before commit.
+   `list+project` URLs survive refresh and preserve `q` and advanced filters.
+3. Open a Task row, refresh its `task` URL, and confirm the same right-side inspector returns.
+4. Create a Task with a List, optional Project, `why`, deadline, and reserved time. Confirm there is
+   no Next/status selector, optional material starts under **More details**, and each timing field
+   survives independently.
+5. Move a Project Task to another List and confirm the detachment preview appears before commit.
    Move a Project and confirm the preview count and revision-bound commit.
-5. Exercise Project completion and List archive conflicts; confirm only the server-provided
-   resolutions appear and cancellation makes no write.
-6. Complete, cancel, reopen, trash, and restore a Task; confirm Tasks, Today, and Activity refresh.
-7. Search Tasks and Reminders by title or note; verify a no-match search differs from an empty
+6. Exercise Project completion and every List archive conflict resolution, including archiving
+   contents together; confirm cancellation makes no write.
+7. Open Archive and verify archived Lists and terminal Projects retain readable Task history.
+8. Complete, cancel, reopen, trash, and restore a Task; confirm Tasks, Today, and Activity refresh.
+9. Search Tasks and Reminders by title or note; verify a no-match search differs from an empty
    selection.
-8. Inspect desktop and 320 px layouts. Confirm search, direct creation, contextual navigation,
+10. Inspect desktop and 320 px layouts. Confirm search, direct creation, contextual navigation,
    conflict choices, and row actions remain reachable by keyboard.

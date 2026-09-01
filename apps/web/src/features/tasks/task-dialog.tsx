@@ -17,6 +17,14 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
@@ -201,16 +209,28 @@ export function TaskDialog({
   };
 
   const pending = save.isPending || confirmMove.isPending || transition.isPending;
+  const EditorRoot = task ? Sheet : Dialog;
+  const EditorContent = task ? SheetContent : DialogContent;
+  const EditorHeader = task ? SheetHeader : DialogHeader;
+  const EditorTitle = task ? SheetTitle : DialogTitle;
+  const EditorDescription = task ? SheetDescription : DialogDescription;
+  const EditorFooter = task ? SheetFooter : DialogFooter;
   return (
     <>
-      <Dialog open={!pendingMove} onOpenChange={(open) => !open && !pendingMove && close()}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{task ? "Refine task" : "Capture a task"}</DialogTitle>
-            <DialogDescription>
+      <EditorRoot open={!pendingMove} onOpenChange={(open) => !open && !pendingMove && close()}>
+        <EditorContent
+          className={
+            task
+              ? "w-full overflow-y-auto sm:max-w-lg"
+              : "max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+          }
+        >
+          <EditorHeader>
+            <EditorTitle>{task ? "Refine task" : "Capture a task"}</EditorTitle>
+            <EditorDescription>
               Keep the commitment separate from its deadline and reserved time.
-            </DialogDescription>
-          </DialogHeader>
+            </EditorDescription>
+          </EditorHeader>
           {lists.isError ? (
             <div className="flex flex-col gap-3">
               <InlineError error={lists.error} />
@@ -227,19 +247,11 @@ export function TaskDialog({
               </Button>
             </div>
           ) : null}
-          <form onSubmit={submit}>
+          <form className={task ? "px-4" : undefined} onSubmit={submit}>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="task-title">Task</FieldLabel>
                 <Input autoFocus defaultValue={task?.title} id="task-title" name="title" required />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="task-why">Why it matters</FieldLabel>
-                <Textarea defaultValue={task?.why ?? ""} id="task-why" name="why" rows={2} />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="task-notes">Notes</FieldLabel>
-                <Textarea defaultValue={task?.notes ?? ""} id="task-notes" name="notes" rows={3} />
               </Field>
               <FieldGroup className="grid gap-5 sm:grid-cols-2">
                 <Field>
@@ -283,32 +295,6 @@ export function TaskDialog({
               </FieldGroup>
               <FieldGroup className="grid gap-5 sm:grid-cols-2">
                 <Field>
-                  <FieldLabel htmlFor="task-priority">Priority</FieldLabel>
-                  <NativeSelect
-                    defaultValue={task?.priority ?? "medium"}
-                    id="task-priority"
-                    name="priority"
-                  >
-                    <NativeSelectOption value="low">Low</NativeSelectOption>
-                    <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                    <NativeSelectOption value="high">High</NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="task-estimate">Estimate in minutes</FieldLabel>
-                  <Input
-                    defaultValue={task?.estimateMinutes ?? ""}
-                    id="task-estimate"
-                    max={24 * 60}
-                    min={5}
-                    name="estimateMinutes"
-                    step={5}
-                    type="number"
-                  />
-                </Field>
-              </FieldGroup>
-              <FieldGroup className="grid gap-5 sm:grid-cols-2">
-                <Field>
                   <FieldLabel htmlFor="task-due-at">Deadline</FieldLabel>
                   <Input
                     defaultValue={toDateTimeLocal(task?.dueAt, user.planningTimezone)}
@@ -327,21 +313,68 @@ export function TaskDialog({
                   />
                 </Field>
               </FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="task-tags">Tags</FieldLabel>
-                <Input
-                  defaultValue={task?.tags.join(", ") ?? ""}
-                  id="task-tags"
-                  name="tags"
-                  placeholder="Planning, home"
-                />
-                <FieldDescription>Separate tags with commas.</FieldDescription>
-              </Field>
+              <details
+                className="rounded-lg border border-border px-3 py-2"
+                open={task ? true : undefined}
+              >
+                <summary className="cursor-pointer text-sm font-medium">More details</summary>
+                <FieldGroup className="mt-4">
+                  <Field>
+                    <FieldLabel htmlFor="task-why">Why it matters</FieldLabel>
+                    <Textarea defaultValue={task?.why ?? ""} id="task-why" name="why" rows={2} />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="task-notes">Notes</FieldLabel>
+                    <Textarea
+                      defaultValue={task?.notes ?? ""}
+                      id="task-notes"
+                      name="notes"
+                      rows={3}
+                    />
+                  </Field>
+                  <FieldGroup className="grid gap-5 sm:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="task-priority">Priority</FieldLabel>
+                      <NativeSelect
+                        defaultValue={task?.priority ?? "medium"}
+                        id="task-priority"
+                        name="priority"
+                      >
+                        <NativeSelectOption value="low">Low</NativeSelectOption>
+                        <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                        <NativeSelectOption value="high">High</NativeSelectOption>
+                      </NativeSelect>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="task-estimate">Estimate in minutes</FieldLabel>
+                      <Input
+                        defaultValue={task?.estimateMinutes ?? ""}
+                        id="task-estimate"
+                        max={24 * 60}
+                        min={5}
+                        name="estimateMinutes"
+                        step={5}
+                        type="number"
+                      />
+                    </Field>
+                  </FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="task-tags">Tags</FieldLabel>
+                    <Input
+                      defaultValue={task?.tags.join(", ") ?? ""}
+                      id="task-tags"
+                      name="tags"
+                      placeholder="Planning, home"
+                    />
+                    <FieldDescription>Separate tags with commas.</FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </details>
             </FieldGroup>
             {save.isError || confirmMove.isError ? (
               <InlineError error={save.error ?? confirmMove.error} />
             ) : null}
-            <DialogFooter className="mt-5">
+            <EditorFooter className={task ? "mt-5 p-0" : "mt-5"}>
               <Button onClick={close} type="button" variant="outline">
                 Cancel
               </Button>
@@ -351,55 +384,70 @@ export function TaskDialog({
               >
                 {save.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
               </Button>
-            </DialogFooter>
+            </EditorFooter>
           </form>
           {task ? (
-            <fieldset aria-label="Task lifecycle actions" className="flex flex-wrap gap-2">
-              {task.deletedAt ? (
-                <Button
-                  disabled={pending}
-                  onClick={() => transition.mutate("restore")}
-                  variant="outline"
-                >
-                  Restore task
-                </Button>
-              ) : (
-                <>
-                  {task.lifecycle === "open" ? (
-                    <>
-                      <Button disabled={pending} onClick={() => transition.mutate("complete")}>
-                        Complete task
-                      </Button>
-                      <Button
-                        disabled={pending}
-                        onClick={() => transition.mutate("cancel")}
-                        variant="outline"
-                      >
-                        Cancel task
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      disabled={pending}
-                      onClick={() => transition.mutate("reopen")}
-                      variant="outline"
-                    >
-                      Reopen task
-                    </Button>
-                  )}
+            <div className="flex flex-col gap-4 px-4 pb-4">
+              <details className="rounded-lg border border-border px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium">Record details</summary>
+                <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <dt>Source</dt>
+                  <dd>{task.source.provider}</dd>
+                  <dt>Revision</dt>
+                  <dd>{task.revision}</dd>
+                  <dt>Created</dt>
+                  <dd>{new Date(task.createdAt).toLocaleString()}</dd>
+                  <dt>Updated</dt>
+                  <dd>{new Date(task.updatedAt).toLocaleString()}</dd>
+                </dl>
+              </details>
+              <fieldset aria-label="Task lifecycle actions" className="flex flex-wrap gap-2">
+                {task.deletedAt ? (
                   <Button
                     disabled={pending}
-                    onClick={() => transition.mutate("trash")}
-                    variant="destructive"
+                    onClick={() => transition.mutate("restore")}
+                    variant="outline"
                   >
-                    Move to Trash
+                    Restore task
                   </Button>
-                </>
-              )}
-            </fieldset>
+                ) : (
+                  <>
+                    {task.lifecycle === "open" ? (
+                      <>
+                        <Button disabled={pending} onClick={() => transition.mutate("complete")}>
+                          Complete task
+                        </Button>
+                        <Button
+                          disabled={pending}
+                          onClick={() => transition.mutate("cancel")}
+                          variant="outline"
+                        >
+                          Cancel task
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        disabled={pending}
+                        onClick={() => transition.mutate("reopen")}
+                        variant="outline"
+                      >
+                        Reopen task
+                      </Button>
+                    )}
+                    <Button
+                      disabled={pending}
+                      onClick={() => transition.mutate("trash")}
+                      variant="destructive"
+                    >
+                      Move to Trash
+                    </Button>
+                  </>
+                )}
+              </fieldset>
+            </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </EditorContent>
+      </EditorRoot>
 
       {pendingMove ? (
         <Dialog open onOpenChange={(open) => !open && setPendingMove(null)}>

@@ -1388,10 +1388,10 @@ describe("ilo API client", () => {
     const requests: string[] = [];
     const api = createApiClient({
       baseUrl: "https://api.example.com",
-      fetch: async (input) => {
+      fetch: async (input, init) => {
         const url = new URL(String(input));
         requests.push(url.pathname + url.search);
-        return json({ taxonomy: { buckets: [] } });
+        return json(init?.method ? { buckets: [] } : { taxonomy: { buckets: [] } });
       },
     });
 
@@ -1405,7 +1405,7 @@ describe("ilo API client", () => {
         idempotencyKey: "bucket-create",
         name: "Care",
       }),
-    ).resolves.toEqual({ taxonomy: { buckets: [] } });
+    ).resolves.toEqual({ buckets: [] });
     await expect(
       api.updateFinanceBudgetBucket("bucket-1", {
         categoryIds: [],
@@ -1413,13 +1413,38 @@ describe("ilo API client", () => {
         expectedVersion: 1,
         idempotencyKey: "bucket-update",
       }),
-    ).resolves.toEqual({ taxonomy: { buckets: [] } });
+    ).resolves.toEqual({ buckets: [] });
     expect(requests).toEqual([
       "/v1/finances/budget-buckets",
       "/v1/finances/budget-buckets?month=2026-08",
       "/v1/finances/budget-buckets",
       "/v1/finances/budget-buckets/bucket-1",
     ]);
+  });
+
+  it("preserves agent dispositions for budget bucket mutations", async () => {
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose categories." }, status: "needs_input" };
+    const responses = [pending, needsInput];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(responses.shift()),
+    });
+
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create-agent",
+        name: "Care",
+      }),
+    ).resolves.toEqual(pending);
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update-agent",
+      }),
+    ).resolves.toEqual(needsInput);
   });
 
   it("uses typed Finance status and durable-maintenance routes", async () => {

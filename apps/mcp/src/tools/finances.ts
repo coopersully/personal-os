@@ -12,6 +12,7 @@ import {
   manageFinanceRuleInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
+import { apiResult } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
 const idempotencyKey = z
@@ -313,33 +314,27 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
           throw new Error(
             "Creating a budget bucket does not accept categoryIds or position; create it first, then update it with the returned bucket version.",
           );
-        return financeApiResult(async () =>
-          envelope(
-            await api.createFinanceBudgetBucket({
-              description: input.description ?? null,
-              idempotencyKey: input.idempotencyKey,
-              name: input.name,
-            }),
-            "Finance budget bucket created.",
-          ),
+        return apiResult(() =>
+          api.createFinanceBudgetBucket({
+            description: input.description ?? null,
+            idempotencyKey: input.idempotencyKey,
+            name: input.name,
+          }),
         );
       }
       const bucketId = input.bucketId;
       const expectedVersion = input.expectedVersion;
       if (!bucketId || expectedVersion === undefined)
         throw new Error("Updating a budget bucket requires bucketId and expectedVersion.");
-      return financeApiResult(async () =>
-        envelope(
-          await api.updateFinanceBudgetBucket(bucketId, {
-            categoryIds: input.categoryIds,
-            description: input.description,
-            expectedVersion,
-            idempotencyKey: input.idempotencyKey,
-            name: input.name,
-            position: input.position,
-          }),
-          "Finance budget bucket updated.",
-        ),
+      return apiResult(() =>
+        api.updateFinanceBudgetBucket(bucketId, {
+          categoryIds: input.categoryIds,
+          description: input.description,
+          expectedVersion,
+          idempotencyKey: input.idempotencyKey,
+          name: input.name,
+          position: input.position,
+        }),
       );
     },
   );

@@ -357,5 +357,14 @@ describe("canonical Finance contracts", () => {
         bucketId: id,
       }),
     ).toMatchObject({ categoryIds: [id, relatedId], operation: "update" });
+    expect(() =>
+      manageFinanceBudgetBucketInputSchema.parse({
+        bucketId: id,
+        categoryIds: [relatedId, relatedId],
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update-duplicates",
+        operation: "update",
+      }),
+    ).toThrow("Bucket categories must be unique");
   });
 });

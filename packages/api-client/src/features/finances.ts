@@ -533,7 +533,10 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async createFinanceBudgetBucket(
       input: CreateFinanceBudgetBucketInput,
-    ): Promise<FinanceBudgetBucketList["taxonomy"]> {
+    ): Promise<
+      | FinanceActionOutcome<NonNullable<FinanceBudgetBucketList["taxonomy"]>>
+      | NonNullable<FinanceBudgetBucketList["taxonomy"]>
+    > {
       return request(`/v1/finances/budget-buckets`, {
         body: JSON.stringify(input),
         method: "POST",
@@ -542,7 +545,10 @@ export function createFinanceApi(request: FinanceRequest) {
     async updateFinanceBudgetBucket(
       id: string,
       input: Omit<UpdateFinanceBudgetBucketInput, "bucketId">,
-    ): Promise<FinanceBudgetBucketList["taxonomy"]> {
+    ): Promise<
+      | FinanceActionOutcome<NonNullable<FinanceBudgetBucketList["taxonomy"]>>
+      | NonNullable<FinanceBudgetBucketList["taxonomy"]>
+    > {
       return request(`/v1/finances/budget-buckets/${encodeURIComponent(id)}`, {
         body: JSON.stringify(input),
         method: "PATCH",

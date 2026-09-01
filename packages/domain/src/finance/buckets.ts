@@ -5,6 +5,10 @@ import { financeMutationMetaSchema } from "./common.js";
 
 const bucketNameSchema = z.string().trim().min(1).max(80);
 const bucketDescriptionSchema = z.string().trim().max(240).nullable();
+const bucketCategoryIdsSchema = z
+  .array(idSchema)
+  .max(200)
+  .refine((ids) => new Set(ids).size === ids.length, "Bucket categories must be unique.");
 
 export const financeBudgetBucketSchema = z.object({
   categories: z.array(idSchema),
@@ -65,7 +69,7 @@ export const updateFinanceBudgetBucketInputSchema = financeMutationMetaSchema.an
     description: bucketDescriptionSchema.optional(),
     expectedVersion: z.number().int().positive(),
     name: bucketNameSchema.optional(),
-    categoryIds: z.array(idSchema).max(200).optional(),
+    categoryIds: bucketCategoryIdsSchema.optional(),
     position: z.number().int().nonnegative().optional(),
   }),
 );
@@ -81,7 +85,7 @@ export const manageFinanceBudgetBucketInputSchema = z.discriminatedUnion("operat
   z.object({
     ...financeMutationMetaSchema.shape,
     bucketId: idSchema,
-    categoryIds: z.array(idSchema).max(200).optional(),
+    categoryIds: bucketCategoryIdsSchema.optional(),
     description: bucketDescriptionSchema.optional(),
     expectedVersion: z.number().int().positive(),
     name: bucketNameSchema.optional(),

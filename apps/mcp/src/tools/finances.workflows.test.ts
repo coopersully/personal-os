@@ -145,8 +145,8 @@ describe("Finance MCP workflows", () => {
 
   it("routes both budget bucket operations through the typed API", async () => {
     const api = {
-      createFinanceBudgetBucket: vi.fn(async () => ({ taxonomy: null })),
-      updateFinanceBudgetBucket: vi.fn(async () => ({ taxonomy: null })),
+      createFinanceBudgetBucket: vi.fn(async () => ({ buckets: [] })),
+      updateFinanceBudgetBucket: vi.fn(async () => ({ buckets: [] })),
     } as unknown as PersonalOsApiClient;
     const server = new McpServer({ name: "finance-bucket-operations-test", version: "1" });
     registerFinanceTools(server, api);
@@ -187,6 +187,42 @@ describe("Finance MCP workflows", () => {
       name: "Care",
       position: undefined,
     });
+  });
+
+  it("preserves agent dispositions for both budget bucket operations", async () => {
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose categories." }, status: "needs_input" };
+    const api = {
+      createFinanceBudgetBucket: vi.fn(async () => pending),
+      updateFinanceBudgetBucket: vi.fn(async () => needsInput),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-bucket-disposition-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const created = await client.callTool({
+      arguments: {
+        idempotencyKey: "bucket-create-disposition",
+        name: "Care",
+        operation: "create",
+      },
+      name: "manage_finance_budget_bucket",
+    });
+    const updated = await client.callTool({
+      arguments: {
+        bucketId: id,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update-disposition",
+        name: "Care",
+        operation: "update",
+      },
+      name: "manage_finance_budget_bucket",
+    });
+
+    expect(created.structuredContent).toEqual({ result: pending });
+    expect(updated.structuredContent).toEqual({ result: needsInput });
   });
 
   it("rejects create-only membership and ordering fields before calling the API", async () => {

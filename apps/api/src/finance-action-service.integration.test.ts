@@ -31,7 +31,7 @@ import {
   type MaterialSourceReference,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
@@ -3529,26 +3529,48 @@ describe.sequential("finance action service", () => {
       now: () => now,
     });
 
-    await expect(
-      service.performDirect(
-        "budget_plan",
-        {
-          description: "Core spending",
-          idempotencyKey: "bucket-action-create",
-          name: "Core",
-          operation: "create",
-        },
-        { principal: agent(userId), requestId: "bucket-action-create" },
-      ),
-    ).resolves.toMatchObject({ status: "applied" });
-    expect(mutateFinanceBudgetBucket).toHaveBeenCalledOnce();
-    await database.db
-      .insert(financeAutomationSettings)
-      .values({ reviewBypassEnabled: false, userId })
-      .onConflictDoUpdate({
-        set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
-      });
+    try {
+      await expect(
+        service.performDirect(
+          "budget_plan",
+          {
+            description: "Core spending",
+            idempotencyKey: "bucket-action-create",
+            name: "Core",
+            operation: "create",
+          },
+          { principal: agent(userId), requestId: "bucket-action-create" },
+        ),
+      ).resolves.toMatchObject({ status: "applied" });
+      expect(mutateFinanceBudgetBucket).toHaveBeenCalledOnce();
+    } finally {
+      await database.db
+        .insert(financeAutomationSettings)
+        .values({ reviewBypassEnabled: false, userId })
+        .onConflictDoUpdate({
+          set: { reviewBypassEnabled: false, updatedAt: now },
+          target: financeAutomationSettings.userId,
+        });
+    }
+
+    const queued = await service.performDirect(
+      "budget_plan",
+      {
+        description: "Future context",
+        idempotencyKey: "bucket-action-review",
+        name: "Future",
+        operation: "create",
+      },
+      { principal: agent(userId), requestId: "bucket-action-review" },
+    );
+    expect(queued).toMatchObject({ status: "pending_review" });
+    const [review] = await database.db
+      .select({ semanticTargetKeys: financeAgentActionReviews.semanticTargetKeys })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, userId))
+      .orderBy(desc(financeAgentActionReviews.createdAt))
+      .limit(1);
+    expect(review?.semanticTargetKeys).toContain(`budget-buckets:${userId}`);
   });
 
   it("supersedes a single-category budget review with a complete plan for the same month", async () => {

@@ -2104,8 +2104,8 @@ export const financeAccounts = pgTable(
     check(
       "finance_accounts_ownership_check",
       sql`(
-        (${table.ownershipType} = 'individual' AND ${table.ownershipShareBps} = 10000)
-        OR (${table.ownershipType} = 'joint' AND ${table.ownershipShareBps} BETWEEN 1 AND 10000)
+        (${table.ownershipType} = 'individual' AND ${table.ownershipShareBps} IS NOT NULL AND ${table.ownershipShareBps} = 10000)
+        OR (${table.ownershipType} = 'joint' AND ${table.ownershipShareBps} IS NOT NULL AND ${table.ownershipShareBps} BETWEEN 1 AND 10000)
         OR (${table.ownershipType} = 'unknown' AND ${table.ownershipShareBps} IS NULL)
       )`,
     ),

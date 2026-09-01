@@ -285,6 +285,7 @@ describe("database schema contracts", () => {
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
       "0074_finance_budget_buckets",
+      "0075_finance_ownership_constraint",
     ]);
   });
 
@@ -712,6 +713,12 @@ describe("database schema contracts", () => {
     );
     expect(migrationSql).toContain("ADD COLUMN \"ownership_type\" text DEFAULT 'unknown' NOT NULL");
     expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
+    const ownershipConstraintSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0075_finance_ownership_constraint.sql"),
+      "utf8",
+    );
+    expect(ownershipConstraintSql).toContain('"ownership_share_bps" IS NOT NULL');
+    expect(ownershipConstraintSql).toContain("NOT VALID");
   });
 
   it("keeps Provider Item synchronization authority isolated from Finance account projections", async () => {

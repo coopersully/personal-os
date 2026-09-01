@@ -21,6 +21,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
         "0072_finance_account_semantics",
         "0073_finance_account_semantics_recovery",
         "0074_finance_budget_buckets",
+        "0075_finance_ownership_constraint",
       ],
     );
 
@@ -96,6 +97,16 @@ describe.sequential("Finance account-semantics migration recovery", () => {
           { conname: "finance_accounts_provider_type_check" },
         ],
       });
+      for (const ownershipType of ["individual", "joint"]) {
+        await expect(
+          database.pool.query(
+            `UPDATE finance_accounts
+             SET ownership_type = $1, ownership_share_bps = NULL
+             WHERE user_id = $2`,
+            [ownershipType, userId],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+      }
     } finally {
       await database.close();
       await container.stop();

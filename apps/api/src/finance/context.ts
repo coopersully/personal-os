@@ -52,6 +52,7 @@ export function requireFinanceMutation(
 
 type IdempotentOperation = {
   idempotencyKey: string;
+  lockIdentities?: string[];
   operation: string;
   payload: unknown;
 };
@@ -105,6 +106,11 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   );
 
   const execute = async (tx: FinanceTransaction, markClaimed: () => void) => {
+    // Agent actions acquire semantic locks while revalidating. Direct writers
+    // must take those same locks before their idempotency lock so the two paths
+    // cannot form a reversed-order advisory-lock cycle.
+    for (const identity of [...new Set(operation.lockIdentities ?? [])].sort())
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
     const existing = await tx.query.financeMutationRecords.findFirst({ where: whereKey });
     const claimedAt = new Date();

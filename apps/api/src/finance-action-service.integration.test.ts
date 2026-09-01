@@ -15,6 +15,7 @@ import {
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
+  financeMutationRecords,
   financeProfiles,
   financeRecurringObligations,
   financeReimbursementMatches,
@@ -3684,6 +3685,30 @@ describe.sequential("finance action service", () => {
           directContext,
         ),
       ).rejects.toThrow("already exists");
+      const failedAgentInput = {
+        description: "Duplicate through an agent action",
+        idempotencyKey: `bucket-agent-duplicate-${crypto.randomUUID()}`,
+        name: directInput.name,
+        operation: "create" as const,
+      };
+      await expect(
+        service.performDirect("budget_plan", failedAgentInput, {
+          principal: agent(userId),
+          requestId: "bucket-agent-duplicate-first",
+        }),
+      ).rejects.toThrow("already exists");
+      await expect(
+        service.performDirect("budget_plan", failedAgentInput, {
+          principal: agent(userId),
+          requestId: "bucket-agent-duplicate-retry",
+        }),
+      ).rejects.toThrow("already exists");
+      await expect(
+        contentionDatabase.db
+          .select({ id: financeMutationRecords.id })
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.idempotencyKey, failedAgentInput.idempotencyKey)),
+      ).resolves.toEqual([]);
       const bucket = created.buckets.find((item) => item.name === directInput.name);
       if (!bucket) throw new Error("The direct budget bucket was not created.");
       const [category] = await contentionDatabase.db

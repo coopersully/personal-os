@@ -15,7 +15,7 @@ import type {
   FinanceBudgetBucketTaxonomy,
   UpdateFinanceBudgetBucketInput,
 } from "@personal-os/domain";
-import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
@@ -185,10 +185,8 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
     context: MutationContext,
     executor?: FinanceTransaction,
   ): Promise<FinanceBudgetBucketTaxonomy> {
+    const bucketLockIdentity = `finance-budget-buckets:${context.principal.userId}`;
     const write = async (tx: FinanceExecutor) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-buckets:${context.principal.userId}`}, 0))`,
-      );
       const taxonomy = await ensureTaxonomy(context.principal.userId, tx);
       if ("bucketId" in input) {
         const [before] = await tx
@@ -316,6 +314,7 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
       mutationContext,
       {
         idempotencyKey: input.idempotencyKey,
+        lockIdentities: [bucketLockIdentity],
         operation:
           "bucketId" in input ? "finance.budget_bucket.update" : "finance.budget_bucket.create",
         payload: input,

@@ -39,7 +39,7 @@ bash ./.codex/scripts/environment.sh setup
 pnpm env:start
 ```
 
-Open `http://localhost:8081`. The API serves health checks at `http://localhost:8788/health/ready` and its OpenAPI document at `http://localhost:8788/openapi.json`.
+Start prints the worktree's loopback URL. API routes and the MCP endpoint (`/mcp`) use the same origin. Every worktree receives a separate Compose project, network, and PostgreSQL volume. See [local development](docs/local-development.md) for lifecycle and recovery details.
 
 For a foreground-only web/API development session, `pnpm dev` remains available on Vite's default `:5173`; use the environment actions for the repeatable full-stack path.
 
@@ -47,9 +47,10 @@ For a foreground-only web/API development session, `pnpm dev` remains available 
 
 The checked-in Codex environment exposes deterministic actions backed by one lifecycle controller:
 
-- **Start** synchronizes the primary checkout's authoritative `.env`, then runs PostgreSQL plus the current API, MCP, and web source on `:55433`, `:8788`, `:8789`, and `:8081`.
+- **Start** derives an isolated Compose project from the worktree, assigns one available loopback port, and runs PostgreSQL plus the current API, MCP, and web source with Compose Watch. Multiple Codex worktrees can remain running concurrently.
 - **Stop** shuts down the runtime without deleting PostgreSQL data.
-- **Restart**, **Status**, and **Logs** provide predictable operational controls without hunting for processes.
+- **Restart**, **Status**, **Logs**, and **GC Dry Run** provide predictable operational controls without hunting for processes.
+- **Destroy Worktree Runtime** removes only this worktree's labeled containers, network, and PostgreSQL volume.
 - **Load QA Fixtures** recreates the repository-owned demo, onboarding, empty, and recovery personas.
 - **Test** enforces the repository's coverage floor: 95% statements/functions/lines and 94% branches.
 - **E2E** runs the desktop and mobile Playwright acceptance suite.
@@ -60,9 +61,9 @@ Playwright uses local web `5174` and API `8797` by default. When another local p
 port, set `ILO_E2E_WEB_PORT` and `ILO_E2E_API_PORT`; the Playwright client and its isolated fixture
 servers consume the same overrides.
 
-The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down. All runtime state is kept under ignored `.codex/run/` PID and log directories.
+The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down.
 
-Linked worktrees copy the primary `.env` on setup and start, then load a generated, ignored `.env.codex.local` with a deterministic whole-set port shift. This keeps secrets authoritative in the primary checkout while allowing the primary and linked worktrees to run with separate ports, containers, and PostgreSQL volumes.
+Linked worktrees copy the primary `.env` on setup and start, then generate an ignored `.env.codex.local` containing only non-secret runtime configuration. Docker labels record ownership, and Start removes confirmed orphan projects that no longer appear in `git worktree list`.
 
 ### Run local source against production
 
@@ -102,6 +103,7 @@ pnpm env:start
 pnpm env:prod:status
 pnpm env:status
 pnpm env:logs
+pnpm env:gc
 pnpm env:restart
 pnpm env:stop
 pnpm fixtures:list

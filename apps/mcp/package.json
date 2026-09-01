@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "tsup",
+    "dev": "pnpm dev:http",
+    "dev:container": "PORT=8788 pnpm dev:http",
     "dev:http": "tsx watch src/http.ts",
     "dev:stdio": "tsx src/stdio.ts",
     "start": "node dist/http.js",

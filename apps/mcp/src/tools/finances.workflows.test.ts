@@ -137,8 +137,11 @@ describe("Finance MCP workflows", () => {
     expect(response.isError).toBe(true);
     expect(response.content).toEqual([
       expect.objectContaining({
-        text: "Updating a budget bucket requires bucketId and expectedVersion.",
+        text: expect.stringContaining("bucketId: Invalid input"),
       }),
+    ]);
+    expect(response.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining("expectedVersion: Invalid input") }),
     ]);
     expect(api.updateFinanceBudgetBucket).not.toHaveBeenCalled();
   });
@@ -159,7 +162,7 @@ describe("Finance MCP workflows", () => {
     });
     expect(response.isError).toBe(true);
     expect(response.content).toEqual([
-      expect.objectContaining({ text: "Creating a budget bucket requires name." }),
+      expect.objectContaining({ text: expect.stringContaining("name: Invalid input") }),
     ]);
     expect(api.createFinanceBudgetBucket).not.toHaveBeenCalled();
   });
@@ -269,7 +272,7 @@ describe("Finance MCP workflows", () => {
     expect(response.isError).toBe(true);
     expect(response.content).toEqual([
       expect.objectContaining({
-        text: expect.stringContaining("create it first, then update it"),
+        text: expect.stringContaining('Unrecognized keys: "categoryIds", "position"'),
       }),
     ]);
     expect(api.createFinanceBudgetBucket).not.toHaveBeenCalled();

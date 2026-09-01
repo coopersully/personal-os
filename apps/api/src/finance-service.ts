@@ -7188,6 +7188,10 @@ export function createFinanceService({
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
         );
+        if (input.bucketId)
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-buckets:${context.principal.userId}`}, 0))`,
+          );
         let categoryName = input.category;
         if (input.bucketId) {
           const [bucket] = await tx

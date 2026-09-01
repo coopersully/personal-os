@@ -15,7 +15,7 @@ import type {
   FinanceBudgetBucketTaxonomy,
   UpdateFinanceBudgetBucketInput,
 } from "@personal-os/domain";
-import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
@@ -202,6 +202,20 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
         if (!before) throw new AppError("not_found", "The budget bucket was not found.");
         if (before.version !== input.expectedVersion)
           throw new AppError("conflict", "The budget bucket changed; refresh and try again.");
+        if (input.name !== undefined) {
+          const [duplicate] = await tx
+            .select({ id: financeBudgetBuckets.id })
+            .from(financeBudgetBuckets)
+            .where(
+              and(
+                eq(financeBudgetBuckets.taxonomyId, taxonomy.id),
+                eq(financeBudgetBuckets.name, input.name),
+              ),
+            )
+            .limit(1);
+          if (duplicate && duplicate.id !== before.id)
+            throw new AppError("conflict", "A budget bucket with that name already exists.");
+        }
         if (input.categoryIds) {
           const categories = await tx
             .select({ id: financeCategories.id })
@@ -214,6 +228,24 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
             );
           if (categories.length !== new Set(input.categoryIds).size)
             throw new AppError("not_found", "Every bucket category must belong to you.");
+          const displacedMemberships = input.categoryIds.length
+            ? await tx
+                .select({ bucketId: financeBudgetBucketCategories.bucketId })
+                .from(financeBudgetBucketCategories)
+                .where(
+                  and(
+                    eq(financeBudgetBucketCategories.taxonomyId, taxonomy.id),
+                    inArray(financeBudgetBucketCategories.categoryId, input.categoryIds),
+                  ),
+                )
+            : [];
+          const displacedBucketIds = [
+            ...new Set(
+              displacedMemberships
+                .map((membership) => membership.bucketId)
+                .filter((bucketId) => bucketId !== before.id),
+            ),
+          ];
           await tx
             .delete(financeBudgetBucketCategories)
             .where(eq(financeBudgetBucketCategories.bucketId, before.id));
@@ -235,6 +267,14 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
               })),
             );
           }
+          if (displacedBucketIds.length)
+            await tx
+              .update(financeBudgetBuckets)
+              .set({
+                updatedAt: now(),
+                version: sql`${financeBudgetBuckets.version} + 1`,
+              })
+              .where(inArray(financeBudgetBuckets.id, displacedBucketIds));
         }
         const [updated] = await tx
           .update(financeBudgetBuckets)

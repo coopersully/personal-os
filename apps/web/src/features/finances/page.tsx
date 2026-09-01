@@ -1276,6 +1276,7 @@ export function FinanceBudgetBucketManager({
               {taxonomy.buckets.map((bucket) => (
                 <li key={bucket.id}>
                   <ShadcnButton
+                    aria-pressed={selectedBucketId === bucket.id}
                     onClick={() => setSelectedBucketId(bucket.id)}
                     variant={selectedBucketId === bucket.id ? "secondary" : "ghost"}
                   >

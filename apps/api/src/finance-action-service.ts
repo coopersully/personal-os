@@ -341,6 +341,27 @@ const profileValidationAnswers: Record<string, ExpectedAnswer> = {
   role: expectedAnswer("role", "string", { example: "Up to 160 characters", nullable: true }),
 };
 
+const bucketValidationAnswers: Record<string, ExpectedAnswer> = {
+  bucketId: expectedAnswer("bucketId", "string"),
+  categoryIds: expectedAnswer("categoryIds", "string_array"),
+  description: expectedAnswer("description", "string", { nullable: true }),
+  expectedVersion: expectedAnswer("expectedVersion", "number"),
+  idempotencyKey: expectedAnswer("idempotencyKey", "string"),
+  name: expectedAnswer("name", "string"),
+  position: expectedAnswer("position", "number"),
+};
+
+function bucketValidationAnswerFields(
+  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey> }>,
+): ExpectedAnswer[] {
+  const fields = new Set(
+    issues
+      .map((issue) => issue.path[0])
+      .filter((field): field is string => typeof field === "string" && field !== "operation"),
+  );
+  return [...fields].map((field) => bucketValidationAnswers[field] as ExpectedAnswer);
+}
+
 function profileValidationAnswer(input: Record<string, unknown>): ExpectedAnswer {
   const parsed = updateFinanceProfileInputSchema.safeParse(input);
   const field = parsed.success
@@ -557,18 +578,24 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "budget_plan": {
-        const bucketInput = parse<Record<string, unknown>>(manageFinanceBudgetBucketInputSchema);
+        const parsedBucketInput = manageFinanceBudgetBucketInputSchema.safeParse(rawInput);
+        const bucketInput = parsedBucketInput.success ? parsedBucketInput.data : null;
+        const invalidBucketFields = parsedBucketInput.success
+          ? []
+          : bucketValidationAnswerFields(parsedBucketInput.error.issues);
         if (!bucketInput && rawInput.operation === "update")
           return missing(
             rawInput.expectedVersion === undefined
               ? "Provide the budget bucket version before updating it."
               : "Provide a complete budget bucket update.",
-            [expectedAnswer("bucketId", "string"), expectedAnswer("expectedVersion", "number")],
+            rawInput.expectedVersion === undefined
+              ? [bucketValidationAnswers.bucketId, bucketValidationAnswers.expectedVersion].filter(
+                  (field): field is ExpectedAnswer => field !== undefined,
+                )
+              : invalidBucketFields,
           );
         if (!bucketInput && rawInput.operation === "create")
-          return missing("Provide a complete budget bucket to create.", [
-            expectedAnswer("name", "string"),
-          ]);
+          return missing("Provide a complete budget bucket to create.", invalidBucketFields);
         if (bucketInput) {
           const existing =
             bucketInput.operation === "update"

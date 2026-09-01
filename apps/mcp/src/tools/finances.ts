@@ -296,43 +296,45 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
-      inputSchema: {
-        bucketId: id.optional(),
-        categoryIds: z.array(id).max(200).optional(),
-        description: z.string().max(240).nullable().optional(),
-        expectedVersion: z.number().int().positive().optional(),
-        idempotencyKey,
-        name: z.string().min(1).max(80).optional(),
-        operation: z.enum(["create", "update"]),
-        position: z.number().int().nonnegative().optional(),
-      },
+      inputSchema: z.discriminatedUnion("operation", [
+        z
+          .object({
+            description: z.string().max(240).nullable().optional(),
+            idempotencyKey,
+            name: z.string().min(1).max(80),
+            operation: z.literal("create"),
+          })
+          .strict(),
+        z
+          .object({
+            bucketId: id,
+            categoryIds: z.array(id).max(200).optional(),
+            description: z.string().max(240).nullable().optional(),
+            expectedVersion: z.number().int().positive(),
+            idempotencyKey,
+            name: z.string().min(1).max(80).optional(),
+            operation: z.literal("update"),
+            position: z.number().int().nonnegative().optional(),
+          })
+          .strict(),
+      ]),
       title: "Manage Finance budget bucket",
     },
     async (input) => {
       if (input.operation === "create") {
-        const name = input.name;
-        if (!name) throw new Error("Creating a budget bucket requires name.");
-        if (input.categoryIds !== undefined || input.position !== undefined)
-          throw new Error(
-            "Creating a budget bucket does not accept categoryIds or position; create it first, then update it with the returned bucket version.",
-          );
         return apiResult(() =>
           api.createFinanceBudgetBucket({
             description: input.description ?? null,
             idempotencyKey: input.idempotencyKey,
-            name,
+            name: input.name,
           }),
         );
       }
-      const bucketId = input.bucketId;
-      const expectedVersion = input.expectedVersion;
-      if (!bucketId || expectedVersion === undefined)
-        throw new Error("Updating a budget bucket requires bucketId and expectedVersion.");
       return apiResult(() =>
-        api.updateFinanceBudgetBucket(bucketId, {
+        api.updateFinanceBudgetBucket(input.bucketId, {
           categoryIds: input.categoryIds,
           description: input.description,
-          expectedVersion,
+          expectedVersion: input.expectedVersion,
           idempotencyKey: input.idempotencyKey,
           name: input.name,
           position: input.position,

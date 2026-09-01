@@ -49,6 +49,7 @@ describe("Finance budget bucket manager", () => {
     await user.type(screen.getByLabelText("Bucket description"), "Fixed monthly care");
     await user.click(screen.getByRole("button", { name: "Add bucket" }));
     expect(mocks.createFinanceBudgetBucket).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByLabelText("New bucket name")).toHaveValue(""));
     await user.type(screen.getByLabelText("New bucket name"), "Unmapped");
     await user.click(screen.getByRole("button", { name: "Add bucket" }));
     expect(mocks.createFinanceBudgetBucket).toHaveBeenLastCalledWith(
@@ -58,8 +59,21 @@ describe("Finance budget bucket manager", () => {
     const description = screen.getByLabelText("Selected bucket description");
     fireEvent.change(description, { target: { value: "Updated context" } });
     fireEvent.blur(description);
-    await user.click(screen.getByRole("checkbox", { name: "Therapy" }));
-    expect(mocks.updateFinanceBudgetBucket).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mocks.updateFinanceBudgetBucket).toHaveBeenLastCalledWith(
+        "bucket-1",
+        expect.objectContaining({ description: "Updated context" }),
+      ),
+    );
+    const therapy = screen.getByRole("checkbox", { name: "Therapy" });
+    await waitFor(() => expect(therapy).toBeEnabled());
+    await user.click(therapy);
+    await waitFor(() =>
+      expect(mocks.updateFinanceBudgetBucket).toHaveBeenLastCalledWith(
+        "bucket-1",
+        expect.objectContaining({ categoryIds: ["cat-1"] }),
+      ),
+    );
   });
 
   it("shows empty and failed bucket states", async () => {
@@ -84,9 +98,14 @@ describe("Finance budget bucket manager", () => {
     });
     renderManager();
 
-    await user.click(await screen.findByRole("button", { name: "Care" }));
+    const care = await screen.findByRole("button", { name: "Care" });
+    await user.click(care);
+    expect(care).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Selected bucket description")).toHaveValue("Care context");
-    await user.click(screen.getByRole("button", { name: "Home" }));
+    const home = screen.getByRole("button", { name: "Home" });
+    await user.click(home);
+    expect(care).toHaveAttribute("aria-pressed", "false");
+    expect(home).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Selected bucket description")).toHaveValue("Home context");
   });
 

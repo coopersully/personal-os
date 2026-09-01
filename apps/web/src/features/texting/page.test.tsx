@@ -85,6 +85,7 @@ describe("Texting settings", () => {
     expect(await screen.findByText(/Ready/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Disconnect number" }));
     expect(mocks.disconnectTexting).toHaveBeenCalledOnce();
+    expect(await screen.findByLabelText("Mobile number")).toBeInTheDocument();
     activeView.unmount();
 
     mocks.getTextingConnection.mockResolvedValueOnce({

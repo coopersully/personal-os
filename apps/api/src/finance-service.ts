@@ -7188,6 +7188,7 @@ export function createFinanceService({
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
         );
+        let categoryName = input.category;
         if (input.bucketId) {
           const [bucket] = await tx
             .select()
@@ -7201,16 +7202,17 @@ export function createFinanceService({
             .limit(1);
           if (!bucket) throw new AppError("not_found", "The budget bucket was not found.");
           const [category] = await tx
-            .select({ id: financeCategories.id })
+            .select({ id: financeCategories.id, name: financeCategories.name })
             .from(financeCategories)
             .where(
               and(
                 eq(financeCategories.userId, context.principal.userId),
-                eq(financeCategories.name, input.category),
+                sql`lower(${financeCategories.name}) = lower(${input.category})`,
               ),
             )
             .limit(1);
           if (!category) throw new AppError("not_found", "The budget category was not found.");
+          categoryName = category.name;
           const [membership] = await tx
             .select({ id: financeBudgetBucketCategories.id })
             .from(financeBudgetBucketCategories)
@@ -7230,7 +7232,7 @@ export function createFinanceService({
               .insert(financeBudgets)
               .values({
                 bucketId: input.bucketId,
-                category: input.category,
+                category: categoryName,
                 limit: toCents(input.limit),
                 month: input.month,
                 userId: context.principal.userId,

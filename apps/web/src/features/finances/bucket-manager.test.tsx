@@ -71,4 +71,22 @@ describe("Finance budget bucket manager", () => {
     renderManager();
     expect(await screen.findByText("Buckets unavailable")).toBeInTheDocument();
   });
+
+  it("loads the selected bucket description when switching buckets", async () => {
+    const user = userEvent.setup();
+    mocks.listFinanceBudgetBuckets.mockResolvedValue({
+      taxonomy: {
+        buckets: [
+          { categories: [], description: "Care context", id: "bucket-1", name: "Care", version: 2 },
+          { categories: [], description: "Home context", id: "bucket-2", name: "Home", version: 3 },
+        ],
+      },
+    });
+    renderManager();
+
+    await user.click(await screen.findByRole("button", { name: "Care" }));
+    expect(screen.getByLabelText("Selected bucket description")).toHaveValue("Care context");
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    expect(screen.getByLabelText("Selected bucket description")).toHaveValue("Home context");
+  });
 });

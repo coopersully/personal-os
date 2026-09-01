@@ -74,18 +74,18 @@ export type UpdateFinanceBudgetBucketInput = z.infer<typeof updateFinanceBudgetB
 
 export const manageFinanceBudgetBucketInputSchema = z.discriminatedUnion("operation", [
   z.object({
+    ...financeMutationMetaSchema.shape,
     description: bucketDescriptionSchema.default(null),
-    idempotencyKey: z.string().min(1).max(200),
     name: bucketNameSchema,
     operation: z.literal("create"),
     taxonomyId: idSchema.optional(),
   }),
   z.object({
+    ...financeMutationMetaSchema.shape,
     bucketId: idSchema,
     categoryIds: z.array(idSchema).max(200).optional(),
     description: bucketDescriptionSchema.optional(),
     expectedVersion: z.number().int().positive(),
-    idempotencyKey: z.string().min(1).max(200),
     name: bucketNameSchema.optional(),
     operation: z.literal("update"),
     position: z.number().int().nonnegative().optional(),

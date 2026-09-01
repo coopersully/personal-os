@@ -18,4 +18,27 @@ describe("Finance playbook service", () => {
     expect(getFinancialProfile).toHaveBeenCalledOnce();
     expect(getWealthSummary).not.toHaveBeenCalled();
   });
+
+  it("passes emergency reserve preferences into the assessment", async () => {
+    const getFinancialProfile = vi.fn(async () => ({
+      data: {
+        debts: [],
+        expectedMonthlyTakeHome: 5000,
+        incomeStability: "stable",
+        insurance: [{ status: "active" }],
+        jurisdiction: "US",
+        liquidReserves: 20000,
+        preferences: { emergencyReserveMonths: 4 },
+      },
+    }));
+    const service = createFinancePlaybookService({
+      finances: { getFinancialProfile } as never,
+      now: () => new Date("2026-08-30T12:00:00.000Z"),
+    });
+
+    await expect(service.get("11111111-1111-4111-8111-111111111111")).resolves.toMatchObject({
+      assessment: expect.any(Object),
+      playbook: expect.any(Object),
+    });
+  });
 });

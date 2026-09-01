@@ -490,7 +490,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           ? input.rationale
           : `Requested ${actionKind.replaceAll("_", " ")} change.`,
       safeChanges,
-      semanticTargetKeys: semanticTargetKeys(actionKind, input),
+      semanticTargetKeys: semanticTargetKeys(
+        actionKind,
+        actionKind === "budget_plan" ? { ...input, userId } : input,
+      ),
       // Public review projections are capped by the domain contract; the
       // complete private input remains available for transactional revalidation.
       sourceRefs: sourceRefs.slice(0, 100),

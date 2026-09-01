@@ -4,7 +4,7 @@
    `packages/domain/src/finance/buckets.ts`, export them from Finance, and
    extend the category-budget input with optional `bucketId`.
 2. Add the three bucket tables and nullable budget snapshot foreign key in
-   `packages/database/src/schema.ts`; create migration `0073` and journal entry.
+   `packages/database/src/schema.ts`; create migration `0074` and journal entry.
 3. Add `apps/api/src/finance/budget-bucket-service.ts` with ownership checks,
    exclusive membership replacement, version locks, historical rollups, and
    redacted audit events. Wire it into `finance-service.ts` and routes.

@@ -247,8 +247,13 @@ describe("database schema contracts", () => {
         resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),
         "utf8",
       ),
-    ) as { entries: Array<{ tag: string }> };
+    ) as { entries: Array<{ tag: string; when: number }> };
     const journalTags = journal.entries.map((entry) => entry.tag);
+    const budgetBucketIndex = journalTags.indexOf("0074_finance_budget_buckets");
+    expect(budgetBucketIndex).toBeGreaterThan(0);
+    expect(journal.entries[budgetBucketIndex]?.when).toBeGreaterThan(
+      journal.entries[budgetBucketIndex - 1]?.when ?? 0,
+    );
     const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
     expect(journalTags.slice(financeAutomationIndex)).toEqual([
       "0059_finance_automation_settings",

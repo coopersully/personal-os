@@ -278,7 +278,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {
         month: z
           .string()
-          .regex(/^\\d{4}-(0[1-9]|1[0-2])$/)
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
           .optional(),
       },
       title: "List Finance budget buckets",

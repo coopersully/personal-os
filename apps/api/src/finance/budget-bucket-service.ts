@@ -139,8 +139,13 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
       };
     });
     const mapped = new Set(memberships.map((membership) => membership.categoryId));
+    const mappedCategories = await db
+      .select({ name: financeCategories.name })
+      .from(financeCategories)
+      .where(inArray(financeCategories.id, [...mapped]));
+    const mappedNames = new Set(mappedCategories.map((category) => category.name));
     const unmappedBudget = budgets
-      .filter((budget) => budget.bucketId === null)
+      .filter((budget) => !mappedNames.has(budget.category))
       .reduce((sum, budget) => sum + budget.limit, 0);
     const unmappedSpent = transactions
       .filter(
@@ -215,7 +220,12 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
             throw new AppError("not_found", "Every bucket category must belong to you.");
           await tx
             .delete(financeBudgetBucketCategories)
-            .where(eq(financeBudgetBucketCategories.bucketId, before.id));
+            .where(
+              and(
+                eq(financeBudgetBucketCategories.taxonomyId, taxonomy.id),
+                inArray(financeBudgetBucketCategories.categoryId, input.categoryIds),
+              ),
+            );
           if (input.categoryIds.length)
             await tx.insert(financeBudgetBucketCategories).values(
               input.categoryIds.map((categoryId) => ({

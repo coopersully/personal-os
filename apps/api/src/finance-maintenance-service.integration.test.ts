@@ -162,6 +162,7 @@ describe.sequential("Finance maintenance service", () => {
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
+      "0074_finance_budget_buckets",
     ]);
     const upgradeContainer = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")

@@ -120,6 +120,76 @@ describe("Finance MCP workflows", () => {
     ]);
   });
 
+  it("rejects an incomplete budget bucket update before calling the API", async () => {
+    const api = {
+      updateFinanceBudgetBucket: vi.fn(),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-bucket-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { idempotencyKey: "bucket-update", name: "Care", operation: "update" },
+      name: "manage_finance_budget_bucket",
+    });
+    expect(response.isError).toBe(true);
+    expect(response.content).toEqual([
+      expect.objectContaining({
+        text: "Updating a budget bucket requires bucketId and expectedVersion.",
+      }),
+    ]);
+    expect(api.updateFinanceBudgetBucket).not.toHaveBeenCalled();
+  });
+
+  it("routes both budget bucket operations through the typed API", async () => {
+    const api = {
+      createFinanceBudgetBucket: vi.fn(async () => ({ taxonomy: null })),
+      updateFinanceBudgetBucket: vi.fn(async () => ({ taxonomy: null })),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-bucket-operations-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    await client.callTool({
+      arguments: {
+        idempotencyKey: "bucket-create",
+        name: "Care",
+        operation: "create",
+      },
+      name: "manage_finance_budget_bucket",
+    });
+    await client.callTool({
+      arguments: {
+        bucketId: id,
+        categoryIds: [],
+        description: null,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update",
+        name: "Care",
+        operation: "update",
+      },
+      name: "manage_finance_budget_bucket",
+    });
+    expect(api.createFinanceBudgetBucket).toHaveBeenCalledWith({
+      description: null,
+      idempotencyKey: "bucket-create",
+      name: "Care",
+      taxonomyId: undefined,
+    });
+    expect(api.updateFinanceBudgetBucket).toHaveBeenCalledWith(id, {
+      categoryIds: [],
+      description: null,
+      expectedVersion: 1,
+      idempotencyKey: "bucket-update",
+      name: "Care",
+      position: undefined,
+    });
+  });
+
   it("projects an unresolved receipt review as a person-directed question", async () => {
     const question = "What did you buy or pay for at Amazon?";
     const api = {
@@ -152,5 +222,34 @@ describe("Finance MCP workflows", () => {
     expect(response.content).toEqual([
       expect.objectContaining({ text: expect.stringContaining(question) }),
     ]);
+  });
+
+  it("leaves resolved receipt reviews without a follow-up question", async () => {
+    const api = {
+      reviewFinanceReceipt: vi.fn(async () => ({
+        evidence: {
+          confidence: 1,
+          matches: [],
+          nextAction: "none",
+          question: null,
+          status: "matched",
+        },
+        transaction: { id, merchant: "Amazon" },
+      })),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-resolved-receipt-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { id, searchMail: false, windowDays: 7 },
+      name: "review_finance_receipt",
+    });
+    expect(response.structuredContent).toMatchObject({
+      data: { evidence: { nextAction: "none", status: "matched" } },
+    });
+    expect(response.structuredContent).not.toHaveProperty("communication.nextQuestion");
   });
 });

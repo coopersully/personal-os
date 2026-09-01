@@ -62,7 +62,9 @@ describe("Texting settings", () => {
   });
 
   it("does not start verification without consent", async () => {
+    const user = userEvent.setup();
     renderSettings();
+    await user.type(await screen.findByLabelText("Mobile number"), "5555550123");
     const button = await screen.findByRole("button", { name: "Send verification code" });
     const form = button.closest("form");
     expect(form).not.toBeNull();

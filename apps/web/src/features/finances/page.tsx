@@ -1289,6 +1289,7 @@ export function FinanceBudgetBucketManager({
                 <ShadcnInput
                   aria-label="Selected bucket description"
                   defaultValue={selectedBucket.description ?? ""}
+                  disabled={update.isPending}
                   key={selectedBucket.id}
                   id="selected-bucket-description"
                   onBlur={(event) => {

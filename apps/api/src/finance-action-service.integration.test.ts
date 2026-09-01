@@ -3735,6 +3735,12 @@ describe.sequential("finance action service", () => {
           userId,
         },
         {
+          category: category.name,
+          limit: 3_000,
+          month: "2026-08",
+          userId,
+        },
+        {
           category: "Unmapped direct budget",
           limit: 2_000,
           month: "2026-08",
@@ -3777,7 +3783,7 @@ describe.sequential("finance action service", () => {
       expect(updated.rollups).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ bucketId: bucket.id, budgeted: 100, spent: 25 }),
-          expect.objectContaining({ bucketId: null, budgeted: 20 }),
+          expect.objectContaining({ bucketId: null, budgeted: 50 }),
         ]),
       );
       await expect(

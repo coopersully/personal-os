@@ -141,13 +141,8 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
       };
     });
     const mapped = new Set(memberships.map((membership) => membership.categoryId));
-    const mappedCategories = await executor
-      .select({ name: financeCategories.name })
-      .from(financeCategories)
-      .where(inArray(financeCategories.id, [...mapped]));
-    const mappedNames = new Set(mappedCategories.map((category) => category.name.toLowerCase()));
     const unmappedBudget = budgets
-      .filter((budget) => !mappedNames.has(budget.category.toLowerCase()))
+      .filter((budget) => budget.bucketId === null)
       .reduce((sum, budget) => sum + budget.limit, 0);
     const unmappedSpent = transactions
       .filter(

@@ -302,7 +302,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         description: z.string().max(240).nullable().optional(),
         expectedVersion: z.number().int().positive().optional(),
         idempotencyKey,
-        name: z.string().min(1).max(80),
+        name: z.string().min(1).max(80).optional(),
         operation: z.enum(["create", "update"]),
         position: z.number().int().nonnegative().optional(),
       },
@@ -310,6 +310,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async (input) => {
       if (input.operation === "create") {
+        const name = input.name;
+        if (!name) throw new Error("Creating a budget bucket requires name.");
         if (input.categoryIds !== undefined || input.position !== undefined)
           throw new Error(
             "Creating a budget bucket does not accept categoryIds or position; create it first, then update it with the returned bucket version.",
@@ -318,7 +320,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
           api.createFinanceBudgetBucket({
             description: input.description ?? null,
             idempotencyKey: input.idempotencyKey,
-            name: input.name,
+            name,
           }),
         );
       }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FinanceBudgetBucketManager } from "./page.js";
 
@@ -88,5 +88,26 @@ describe("Finance budget bucket manager", () => {
     expect(screen.getByLabelText("Selected bucket description")).toHaveValue("Care context");
     await user.click(screen.getByRole("button", { name: "Home" }));
     expect(screen.getByLabelText("Selected bucket description")).toHaveValue("Home context");
+  });
+
+  it("locks description editing while a bucket update is pending", async () => {
+    const user = userEvent.setup();
+    mocks.listFinanceBudgetBuckets.mockResolvedValue({
+      taxonomy: {
+        buckets: [{ categories: [], description: null, id: "bucket-1", name: "Care", version: 2 }],
+      },
+    });
+    mocks.updateFinanceBudgetBucket.mockImplementation(() => new Promise(() => undefined));
+    renderManager();
+
+    await user.click(await screen.findByRole("button", { name: "Care" }));
+    const description = screen.getByLabelText("Selected bucket description");
+    fireEvent.change(description, { target: { value: "Updated context" } });
+    fireEvent.blur(description);
+
+    await waitFor(() => expect(description).toBeDisabled());
+    await user.click(description);
+    await user.tab();
+    expect(mocks.updateFinanceBudgetBucket).toHaveBeenCalledOnce();
   });
 });

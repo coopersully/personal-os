@@ -143,6 +143,27 @@ describe("Finance MCP workflows", () => {
     expect(api.updateFinanceBudgetBucket).not.toHaveBeenCalled();
   });
 
+  it("rejects a budget bucket create without a name before calling the API", async () => {
+    const api = {
+      createFinanceBudgetBucket: vi.fn(),
+    } as unknown as PersonalOsApiClient;
+    const server = new McpServer({ name: "finance-bucket-create-test", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { idempotencyKey: "bucket-create", operation: "create" },
+      name: "manage_finance_budget_bucket",
+    });
+    expect(response.isError).toBe(true);
+    expect(response.content).toEqual([
+      expect.objectContaining({ text: "Creating a budget bucket requires name." }),
+    ]);
+    expect(api.createFinanceBudgetBucket).not.toHaveBeenCalled();
+  });
+
   it("routes both budget bucket operations through the typed API", async () => {
     const api = {
       createFinanceBudgetBucket: vi.fn(async () => ({ buckets: [] })),
@@ -169,7 +190,6 @@ describe("Finance MCP workflows", () => {
         description: null,
         expectedVersion: 1,
         idempotencyKey: "bucket-update",
-        name: "Care",
         operation: "update",
       },
       name: "manage_finance_budget_bucket",
@@ -184,7 +204,7 @@ describe("Finance MCP workflows", () => {
       description: null,
       expectedVersion: 1,
       idempotencyKey: "bucket-update",
-      name: "Care",
+      name: undefined,
       position: undefined,
     });
   });

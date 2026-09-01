@@ -3598,6 +3598,39 @@ describe.sequential("finance action service", () => {
     ]);
   });
 
+  it("keeps malformed bucket mutations in bucket-specific recovery", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mutateFinanceBudgetBucket: vi.fn() } as never,
+      now: () => now,
+    });
+
+    const update = await service.performDirect(
+      "budget_plan",
+      {
+        bucketId: "not-a-bucket-id",
+        expectedVersion: 1,
+        operation: "update",
+      },
+      { principal: agent(userId), requestId: "bucket-action-invalid-update" },
+    );
+    expect(update).toMatchObject({ status: "needs_input" });
+    if (update.status !== "needs_input") throw new Error("Expected bucket update recovery.");
+    expect(update.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "bucketId",
+      "expectedVersion",
+    ]);
+
+    const create = await service.performDirect(
+      "budget_plan",
+      { name: "", operation: "create" },
+      { principal: agent(userId), requestId: "bucket-action-invalid-create" },
+    );
+    expect(create).toMatchObject({ status: "needs_input" });
+    if (create.status !== "needs_input") throw new Error("Expected bucket create recovery.");
+    expect(create.question.expectedAnswer.map((field) => field.name)).toEqual(["name"]);
+  });
+
   it("applies a bypassed bucket mutation in the action transaction without nesting a writer", async () => {
     const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
     await contentionDatabase.db
@@ -3645,6 +3678,12 @@ describe.sequential("finance action service", () => {
       await expect(finances.mutateFinanceBudgetBucket(directInput, directContext)).resolves.toEqual(
         created,
       );
+      await expect(
+        finances.mutateFinanceBudgetBucket(
+          { ...directInput, idempotencyKey: `bucket-direct-duplicate-${crypto.randomUUID()}` },
+          directContext,
+        ),
+      ).rejects.toThrow("already exists");
       const bucket = created.buckets.find((item) => item.name === directInput.name);
       if (!bucket) throw new Error("The direct budget bucket was not created.");
       const [category] = await contentionDatabase.db

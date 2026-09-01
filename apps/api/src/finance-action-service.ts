@@ -558,14 +558,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       }
       case "budget_plan": {
         const bucketInput = parse<Record<string, unknown>>(manageFinanceBudgetBucketInputSchema);
-        if (
-          !bucketInput &&
-          rawInput.operation === "update" &&
-          rawInput.expectedVersion === undefined
-        )
-          return missing("Provide the budget bucket version before updating it.", [
-            expectedAnswer("bucketId", "string"),
-            expectedAnswer("expectedVersion", "number"),
+        if (!bucketInput && rawInput.operation === "update")
+          return missing(
+            rawInput.expectedVersion === undefined
+              ? "Provide the budget bucket version before updating it."
+              : "Provide a complete budget bucket update.",
+            [expectedAnswer("bucketId", "string"), expectedAnswer("expectedVersion", "number")],
+          );
+        if (!bucketInput && rawInput.operation === "create")
+          return missing("Provide a complete budget bucket to create.", [
+            expectedAnswer("name", "string"),
           ]);
         if (bucketInput) {
           const existing =

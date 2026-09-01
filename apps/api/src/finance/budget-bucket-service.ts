@@ -270,6 +270,18 @@ export function createFinanceBudgetBucketService(input: { db: Database; now: () 
           }),
         );
       } else {
+        const [duplicate] = await tx
+          .select({ id: financeBudgetBuckets.id })
+          .from(financeBudgetBuckets)
+          .where(
+            and(
+              eq(financeBudgetBuckets.taxonomyId, taxonomy.id),
+              eq(financeBudgetBuckets.name, input.name),
+            ),
+          )
+          .limit(1);
+        if (duplicate)
+          throw new AppError("conflict", "A budget bucket with that name already exists.");
         const [created] = await tx
           .insert(financeBudgetBuckets)
           .values({

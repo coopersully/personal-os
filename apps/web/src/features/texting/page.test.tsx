@@ -39,6 +39,15 @@ describe("Texting settings", () => {
 
   it("walks through consent, verification, and connection", async () => {
     const user = userEvent.setup();
+    const activeConnection = {
+      id: "connection-1",
+      maskedPhoneNumber: "+1 ***-***-0123",
+      providerReady: true,
+      senderPhoneNumber: "+1 ***-***-0456",
+      state: "active",
+    } as const;
+    mocks.getTextingConnection.mockResolvedValueOnce(null).mockResolvedValue(activeConnection);
+    mocks.checkTextingVerification.mockResolvedValueOnce(activeConnection);
     renderSettings();
 
     await user.type(await screen.findByLabelText("Mobile number"), "5555550123");
@@ -49,6 +58,7 @@ describe("Texting settings", () => {
     await user.type(screen.getByLabelText("Verification code"), "1234");
     await user.click(screen.getByRole("button", { name: "Verify and connect" }));
     expect(mocks.checkTextingVerification).toHaveBeenCalledWith("challenge-1", { code: "1234" });
+    expect(await screen.findByText(/Ready/)).toBeInTheDocument();
   });
 
   it("does not start verification without consent", async () => {
@@ -111,14 +121,16 @@ describe("Texting settings", () => {
     expect(await screen.findByText(new RegExp(state))).toBeInTheDocument();
   });
 
-  it("renders a verification failure", async () => {
+  it("renders a verification-check failure", async () => {
     const user = userEvent.setup();
-    mocks.startTextingVerification.mockRejectedValueOnce(new Error("Provider rejected request"));
+    mocks.checkTextingVerification.mockRejectedValueOnce(new Error("Provider rejected code"));
     renderSettings();
     await user.type(await screen.findByLabelText("Mobile number"), "5555550123");
     await user.click(screen.getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider rejected request");
+    await user.type(await screen.findByLabelText("Verification code"), "1234");
+    await user.click(screen.getByRole("button", { name: "Verify and connect" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider rejected code");
   });
 
   it("returns to setup when the connection is disconnected", async () => {

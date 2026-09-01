@@ -3570,7 +3570,32 @@ describe.sequential("finance action service", () => {
       .where(eq(financeAgentActionReviews.userId, userId))
       .orderBy(desc(financeAgentActionReviews.createdAt))
       .limit(1);
-    expect(review?.semanticTargetKeys).toContain(`budget-buckets:${userId}`);
+    expect(review?.semanticTargetKeys).toContain(`finance-budget-buckets:${userId}`);
+  });
+
+  it("requests bucket recovery fields when an update omits its expected version", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mutateFinanceBudgetBucket: vi.fn() } as never,
+      now: () => now,
+    });
+
+    const result = await service.performDirect(
+      "budget_plan",
+      {
+        bucketId: crypto.randomUUID(),
+        description: "Updated context",
+        operation: "update",
+      },
+      { principal: agent(userId), requestId: "bucket-action-missing-version" },
+    );
+
+    expect(result.status).toBe("needs_input");
+    if (result.status !== "needs_input") throw new Error("Expected a recoverable bucket question.");
+    expect(result.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "bucketId",
+      "expectedVersion",
+    ]);
   });
 
   it("supersedes a single-category budget review with a complete plan for the same month", async () => {

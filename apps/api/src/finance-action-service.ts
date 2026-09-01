@@ -243,7 +243,7 @@ export function semanticTargetKeys(
       return [
         "month" in input
           ? `budget-month:${String(input.month)}`
-          : `budget-buckets:${String(input.userId ?? "")}`,
+          : `finance-budget-buckets:${String(input.userId ?? "")}`,
       ];
     case "categorization":
       return ids(
@@ -558,6 +558,15 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       }
       case "budget_plan": {
         const bucketInput = parse<Record<string, unknown>>(manageFinanceBudgetBucketInputSchema);
+        if (
+          !bucketInput &&
+          rawInput.operation === "update" &&
+          rawInput.expectedVersion === undefined
+        )
+          return missing("Provide the budget bucket version before updating it.", [
+            expectedAnswer("bucketId", "string"),
+            expectedAnswer("expectedVersion", "number"),
+          ]);
         if (bucketInput) {
           const existing =
             bucketInput.operation === "update"

@@ -18,7 +18,7 @@ describe("Finance action identity", () => {
       "budget-month:2026-08",
     ]);
     expect(semanticTargetKeys("budget_plan", { userId: "user-1" })).toEqual([
-      "budget-buckets:user-1",
+      "finance-budget-buckets:user-1",
     ]);
   });
 });

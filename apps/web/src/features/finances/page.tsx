@@ -1169,7 +1169,34 @@ export function FinancesPage() {
   );
 }
 
-<<<<<<< HEAD
+function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefined }) {
+  if (!data) return null;
+  return (
+    <ShadcnCard>
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Wealth-building priorities</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Approved Ilo Finance playbook {data.playbook.version} ·{" "}
+          {data.assessment.readiness.replace("_", " ")}
+        </ShadcnCardDescription>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="grid gap-3">
+        <ol className="grid gap-2 text-sm">
+          {data.playbook.steps.map((step) => (
+            <li className="flex gap-3" key={step.id}>
+              <span className="text-muted-foreground tabular-nums">{step.rank}.</span>
+              <span>{step.title}</span>
+            </li>
+          ))}
+        </ol>
+        {data.assessment.blockers.length > 0 ? (
+          <p className="text-muted-foreground text-sm">Next: {data.assessment.blockers[0]}</p>
+        ) : null}
+      </ShadcnCardContent>
+    </ShadcnCard>
+  );
+}
+
 export function FinanceBudgetBucketManager({
   categories,
   month,
@@ -1310,36 +1337,10 @@ export function FinanceBudgetBucketManager({
           </p>
         )}
         {create.error || update.error ? <InlineError error={create.error ?? update.error} /> : null}
-=======
-function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefined }) {
-  if (!data) return null;
-  return (
-    <ShadcnCard>
-      <ShadcnCardHeader>
-        <ShadcnCardTitle>Wealth-building priorities</ShadcnCardTitle>
-        <ShadcnCardDescription>
-          Approved Ilo Finance playbook {data.playbook.version} ·{" "}
-          {data.assessment.readiness.replace("_", " ")}
-        </ShadcnCardDescription>
-      </ShadcnCardHeader>
-      <ShadcnCardContent className="grid gap-3">
-        <ol className="grid gap-2 text-sm">
-          {data.playbook.steps.map((step) => (
-            <li className="flex gap-3" key={step.id}>
-              <span className="text-muted-foreground tabular-nums">{step.rank}.</span>
-              <span>{step.title}</span>
-            </li>
-          ))}
-        </ol>
-        {data.assessment.blockers.length > 0 ? (
-          <p className="text-muted-foreground text-sm">Next: {data.assessment.blockers[0]}</p>
-        ) : null}
->>>>>>> origin/main
       </ShadcnCardContent>
     </ShadcnCard>
   );
 }
-
 function FinanceMetric({
   detail,
   label,

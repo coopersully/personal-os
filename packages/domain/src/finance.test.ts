@@ -7,10 +7,7 @@ import {
   financeCapabilityManifest,
   financeInboxCaseSchema,
   financeMaintenanceInputSchema,
-<<<<<<< HEAD
-=======
   financePresentationSchema,
->>>>>>> origin/main
   financeProviderAccountTypeSchema,
   financeToolResultSchema,
   manageFinanceBudgetBucketInputSchema,

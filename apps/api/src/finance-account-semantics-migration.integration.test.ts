@@ -17,15 +17,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
     const textingOnlyMigrations = await migrationsWithout(
       migrationsFolder,
       "ilo-finance-account-semantics-recovery-",
-<<<<<<< HEAD
-      [
-        "0072_finance_account_semantics",
-        "0073_finance_account_semantics_recovery",
-        "0074_finance_budget_buckets",
-      ],
-=======
       ["0072_finance_account_semantics", "0073_finance_account_semantics_recovery"],
->>>>>>> origin/main
     );
 
     try {

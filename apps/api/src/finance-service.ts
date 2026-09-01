@@ -3929,11 +3929,8 @@ export function createFinanceService({
     },
     getFinanceAccountConnection: canonicalAccounts.getConnection,
     listFinanceAccounts: canonicalAccounts.list,
-<<<<<<< HEAD
     listFinanceBudgetBuckets: budgetBuckets.list,
     mutateFinanceBudgetBucket: budgetBuckets.mutate,
-=======
->>>>>>> origin/main
     updateFinanceAccount: canonicalAccounts.update,
     disconnectFinanceAccount: canonicalAccounts.disconnect,
     getFinanceTransaction: canonicalLedger.getTransaction,

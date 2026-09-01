@@ -34,29 +34,6 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
-  it("keeps budget buckets additive and category membership exclusive", async () => {
-    expect(
-      getTableConfig(financeBudgetTaxonomies).indexes.map((index) => index.config.name),
-    ).toEqual(expect.arrayContaining(["finance_budget_taxonomies_user_active_idx"]));
-    expect(getTableConfig(financeBudgetBuckets).columns.map((column) => column.name)).toEqual(
-      expect.arrayContaining(["description", "version"]),
-    );
-    expect(
-      getTableConfig(financeBudgetBucketCategories).indexes.map((index) => index.config.name),
-    ).toEqual(expect.arrayContaining(["finance_budget_bucket_categories_taxonomy_category_idx"]));
-    expect(getTableConfig(financeBudgets).columns.map((column) => column.name)).toContain(
-      "bucket_id",
-    );
-    const migrationSql = await readFile(
-      resolve(process.cwd(), "packages/database/migrations/0074_finance_budget_buckets.sql"),
-      "utf8",
-    );
-    expect(migrationSql).toContain('ALTER TABLE "finance_budgets" ADD COLUMN "bucket_id"');
-    expect(migrationSql).toContain(
-      'CREATE UNIQUE INDEX "finance_budget_bucket_categories_taxonomy_category_idx"',
-    );
-  });
-
   it("keeps texting verification recoverable and provider consent events idempotent", async () => {
     const challenges = getTableConfig(textingVerificationChallenges);
     const consentEvents = getTableConfig(textingConsentEvents);
@@ -72,6 +49,29 @@ describe("database schema contracts", () => {
     );
     expect(migrationSql).toContain("DROP NOT NULL");
     expect(migrationSql).toContain('WHERE "provider_event_id" IS NOT NULL');
+  });
+
+  it("keeps budget buckets additive and category membership exclusive", async () => {
+    expect(
+      getTableConfig(financeBudgetTaxonomies).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_taxonomies_user_active_idx"]));
+    expect(getTableConfig(financeBudgetBuckets).columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["description", "version"]),
+    );
+    expect(
+      getTableConfig(financeBudgetBucketCategories).indexes.map((index) => index.config.name),
+    ).toEqual(expect.arrayContaining(["finance_budget_bucket_categories_taxonomy_category_idx"]));
+    expect(getTableConfig(financeBudgets).columns.map((column) => column.name)).toContain(
+      "bucket_id",
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0073_finance_budget_buckets.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ALTER TABLE "finance_budgets" ADD COLUMN "bucket_id"');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_budget_bucket_categories_taxonomy_category_idx"',
+    );
   });
 
   it("keeps Calendar findings stable and reviews immutable", async () => {
@@ -268,10 +268,7 @@ describe("database schema contracts", () => {
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
-<<<<<<< HEAD
-      "0074_finance_budget_buckets",
-=======
->>>>>>> origin/main
+      "0073_finance_budget_buckets",
     ]);
   });
 

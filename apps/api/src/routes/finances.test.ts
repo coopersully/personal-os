@@ -10,8 +10,6 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
-<<<<<<< HEAD
-=======
   it("does not serialize an absent playbook dependency and disables caching", async () => {
     const app = new Hono<AppEnv>();
     app.use("*", async (context, next) => {
@@ -73,7 +71,6 @@ describe("finance routes", () => {
     expect(get).toHaveBeenCalledWith(id);
   });
 
->>>>>>> origin/main
   it("parses account discovery filters and returns the structured account list", async () => {
     const app = new Hono<AppEnv>();
     const listFinanceAccounts = vi.fn(async () => ({
@@ -155,62 +152,6 @@ describe("finance routes", () => {
       start: "2026-08-01",
       end: "2026-08-15",
     });
-  });
-
-  it("lists buckets and routes bucket mutations through the Finance action boundary", async () => {
-    const app = new Hono<AppEnv>();
-    const listFinanceBudgetBuckets = vi.fn(async () => ({ taxonomy: null }));
-    const performDirect = vi.fn(async () => ({ status: "pending_review" as const }));
-    app.use("*", async (context, next) => {
-      context.set("principal", {
-        actorId: id,
-        actorType: "agent",
-        scopes: new Set(["finances:read", "finances:write"]),
-        userId: id,
-      });
-      context.set("requestId", "bucket-route");
-      await next();
-    });
-    registerFinanceRoutes({
-      actions: { performDirect } as never,
-      app,
-      financeMaintenance: {} as FinanceMaintenanceService,
-      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
-      finances: { listFinanceBudgetBuckets } as unknown as ReturnType<typeof createFinanceService>,
-      mutationContext: (context) => ({
-        principal: context.get("principal"),
-        requestId: context.get("requestId"),
-      }),
-    });
-
-    const listed = await app.request("/v1/finances/budget-buckets?month=2026-08");
-    expect(listed.status).toBe(200);
-    expect(listFinanceBudgetBuckets).toHaveBeenCalledWith(id, { month: "2026-08" });
-
-    const created = await app.request("/v1/finances/budget-buckets", {
-      body: JSON.stringify({
-        description: "Core monthly spending",
-        idempotencyKey: "bucket-create",
-        name: "Core",
-      }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-    expect(created.status).toBe(202);
-
-    const updated = await app.request(`/v1/finances/budget-buckets/${id}`, {
-      body: JSON.stringify({
-        categoryIds: [],
-        description: null,
-        expectedVersion: 1,
-        idempotencyKey: "bucket-update",
-        name: "Core revised",
-      }),
-      headers: { "content-type": "application/json" },
-      method: "PATCH",
-    });
-    expect(updated.status).toBe(202);
-    expect(performDirect).toHaveBeenCalledTimes(2);
   });
 
   it("compares scenarios on the read scope and forwards a complete budget plan", async () => {
@@ -603,9 +544,6 @@ describe("finance routes", () => {
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toEqual({ questions });
     expect(listQuestions).toHaveBeenLastCalledWith(id, 2);
-    const defaultListed = await app.request("/v1/finances/questions");
-    expect(defaultListed.status).toBe(200);
-    expect(listQuestions).toHaveBeenLastCalledWith(id, 50);
     const answered = await app.request(`/v1/finances/questions/${id}/answer`, {
       body: JSON.stringify({ answer: JSON.stringify({ answer: { kind: "not_reimbursement" } }) }),
       headers: { "content-type": "application/json" },

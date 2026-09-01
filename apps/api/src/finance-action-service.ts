@@ -578,6 +578,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           if (bucketInput.operation === "update" && !row)
             return missing("The budget bucket was not found.", [
               expectedAnswer("bucketId", "string"),
+              expectedAnswer("expectedVersion", "number"),
             ]);
           return prepared(
             bucketInput,

@@ -37,7 +37,7 @@ describe("Finance playbook service", () => {
     });
 
     await expect(service.get("11111111-1111-4111-8111-111111111111")).resolves.toMatchObject({
-      assessment: expect.any(Object),
+      assessment: { readiness: "on_track" },
       playbook: expect.any(Object),
     });
   });

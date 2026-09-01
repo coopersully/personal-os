@@ -65,7 +65,7 @@ describe("database schema contracts", () => {
       "bucket_id",
     );
     const migrationSql = await readFile(
-      resolve(process.cwd(), "packages/database/migrations/0073_finance_budget_buckets.sql"),
+      resolve(process.cwd(), "packages/database/migrations/0074_finance_budget_buckets.sql"),
       "utf8",
     );
     expect(migrationSql).toContain('ALTER TABLE "finance_budgets" ADD COLUMN "bucket_id"');
@@ -268,7 +268,7 @@ describe("database schema contracts", () => {
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
-      "0073_finance_budget_buckets",
+      "0074_finance_budget_buckets",
     ]);
   });
 

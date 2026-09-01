@@ -5694,9 +5694,19 @@ describe("ilo web app", () => {
       overdue: [],
       recommendedTasks: [
         {
+          capacity: "does_not_fit" as const,
+          task: overdueTask,
+          urgency: "overdue" as const,
+        },
+        {
           capacity: "fits_remaining_time" as const,
           task,
           urgency: "due_today" as const,
+        },
+        {
+          capacity: "needs_estimate" as const,
+          task: scheduledTask,
+          urgency: "next" as const,
         },
       ],
       tasks: [overdueTask, task, scheduledTask, suggestedTask, futureTask],
@@ -5713,12 +5723,18 @@ describe("ilo web app", () => {
     expect(screen.getByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
     expect(screen.getByText(/No free time before/)).toBeInTheDocument();
     expect(screen.getByText("Overdue tasks")).toBeInTheDocument();
+    expect(
+      screen.getByText("Overdue · does not fit in the remaining planning window"),
+    ).toBeInTheDocument();
     const todayTasks = screen.getByText("Today tasks").closest("section") as HTMLElement;
     expect(within(todayTasks).getByText("Draft brief")).toBeInTheDocument();
     expect(
       within(todayTasks).getByText("Due today · fits in the remaining planning window"),
     ).toBeInTheDocument();
     expect(within(todayTasks).getByText("Reserved today")).toBeInTheDocument();
+    expect(
+      within(todayTasks).getByText("Ready next · needs an estimate before it can be planned"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Suggested follow-up")).not.toBeInTheDocument();
     expect(screen.queryByText("Future task")).not.toBeInTheDocument();
     await browser.click(

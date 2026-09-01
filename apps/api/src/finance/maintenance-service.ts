@@ -20,6 +20,7 @@ import type {
   FinanceReasoningItem,
   FinanceToolResult,
 } from "@personal-os/domain";
+import { ILO_FINANCE_PLAYBOOK } from "@personal-os/domain";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
@@ -227,6 +228,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
           ? await reasoningBatch(run.userId, run.scope, executor)
           : [],
       reviewQuestion: null,
+      playbookVersion: ILO_FINANCE_PLAYBOOK.version,
       runId: run.id,
       stage: run.stage,
       version: run.version,

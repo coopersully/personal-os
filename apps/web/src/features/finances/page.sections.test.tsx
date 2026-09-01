@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForAccounts: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
+  getFinancePlaybook: vi.fn(),
   getFinanceReviewQueue: vi.fn(),
   getFinanceStatus: vi.fn(),
   getFinanceWealthSummary: vi.fn(),
@@ -61,6 +62,10 @@ beforeEach(() => {
   api.getFinanceOverview.mockResolvedValue(overview);
   api.getFinanceOverviewForMonth.mockResolvedValue(overview);
   api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
+  api.getFinancePlaybook.mockResolvedValue({
+    assessment: { blockers: [], nextActions: [], readiness: "on_track", uncertainty: [] },
+    playbook: { steps: [], version: "1.0.0" },
+  });
   api.getPlaidStatus.mockResolvedValue({ available: false, items: [] });
   api.getFinanceWealthSummary.mockResolvedValue({
     annualIncome: 0,
@@ -120,6 +125,15 @@ beforeEach(() => {
 });
 
 describe("Finance section states", () => {
+  it("shows a playbook load failure without rendering an empty playbook", async () => {
+    api.getFinancePlaybook.mockRejectedValueOnce(new Error("Playbook unavailable"));
+
+    renderPage("/finances");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Playbook unavailable");
+    expect(screen.queryByText("Wealth-building priorities")).not.toBeInTheDocument();
+  });
+
   it("renders the empty but usable overview", async () => {
     renderPage("/finances");
     expect(await screen.findByText("Financial position")).toBeVisible();

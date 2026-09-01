@@ -5,6 +5,7 @@ import type {
   FinanceCategory,
   FinanceForecast,
   FinanceLedgerHealth,
+  FinancePlaybookResponse,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceStatus,
@@ -142,6 +143,11 @@ export function FinancesPage() {
     enabled: section === "overview",
     queryFn: () => api.getFinanceStatus(),
     queryKey: ["finance-status"],
+  });
+  const playbook = useQuery({
+    enabled: section === "overview",
+    queryFn: api.getFinancePlaybook,
+    queryKey: ["finance-playbook"],
   });
   const ledgerHealth = useQuery({
     enabled: section === "health" || section === "overview",
@@ -498,6 +504,8 @@ export function FinancesPage() {
       {section === "overview" && financeStatus.data ? (
         <FinanceAtAGlance status={financeStatus.data} />
       ) : null}
+      {section === "overview" && playbook.isError ? <InlineError error={playbook.error} /> : null}
+      {section === "overview" ? <FinancePlaybookCard data={playbook.data} /> : null}
       {section === "overview" ? (
         <BudgetPaceGraph
           data={budgetPace.data}
@@ -1161,6 +1169,7 @@ export function FinancesPage() {
   );
 }
 
+<<<<<<< HEAD
 export function FinanceBudgetBucketManager({
   categories,
   month,
@@ -1301,6 +1310,31 @@ export function FinanceBudgetBucketManager({
           </p>
         )}
         {create.error || update.error ? <InlineError error={create.error ?? update.error} /> : null}
+=======
+function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefined }) {
+  if (!data) return null;
+  return (
+    <ShadcnCard>
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Wealth-building priorities</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Approved Ilo Finance playbook {data.playbook.version} ·{" "}
+          {data.assessment.readiness.replace("_", " ")}
+        </ShadcnCardDescription>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="grid gap-3">
+        <ol className="grid gap-2 text-sm">
+          {data.playbook.steps.map((step) => (
+            <li className="flex gap-3" key={step.id}>
+              <span className="text-muted-foreground tabular-nums">{step.rank}.</span>
+              <span>{step.title}</span>
+            </li>
+          ))}
+        </ol>
+        {data.assessment.blockers.length > 0 ? (
+          <p className="text-muted-foreground text-sm">Next: {data.assessment.blockers[0]}</p>
+        ) : null}
+>>>>>>> origin/main
       </ShadcnCardContent>
     </ShadcnCard>
   );

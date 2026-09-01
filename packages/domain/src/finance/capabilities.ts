@@ -1,5 +1,12 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinancePlaybook",
+    capability: "policy.playbook",
+    mcpTool: "get_finance_playbook",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "setupFinances",
     capability: "workflow.setup",
     mcpTool: "setup_finances",
@@ -157,6 +164,13 @@ export const financeCapabilityManifest = [
     apiOperation: "getFinanceTransaction",
     capability: "ledger.transaction_read",
     mcpTool: "get_finance_transaction",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "reviewFinanceReceipt",
+    capability: "ledger.receipt_review",
+    mcpTool: "review_finance_receipt",
     mode: "read",
     requiredScope: "finances:read",
   },

@@ -1,6 +1,7 @@
 import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
+import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv } from "../types.js";
@@ -9,6 +10,70 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+<<<<<<< HEAD
+=======
+  it("does not serialize an absent playbook dependency and disables caching", async () => {
+    const app = new Hono<AppEnv>();
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: "playbook-route",
+      }),
+    });
+
+    const response = await app.request("/v1/finances/playbook");
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ error: "Finance playbook unavailable." });
+  });
+
+  it("returns a private playbook response when its service is registered", async () => {
+    const app = new Hono<AppEnv>();
+    const get = vi.fn(async () => ({ playbook: { version: "1.0.0" } }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financePlaybook: { get } as never,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: "playbook-route",
+      }),
+    });
+
+    const response = await app.request("/v1/finances/playbook");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ playbook: { version: "1.0.0" } });
+    expect(get).toHaveBeenCalledWith(id);
+  });
+
+>>>>>>> origin/main
   it("parses account discovery filters and returns the structured account list", async () => {
     const app = new Hono<AppEnv>();
     const listFinanceAccounts = vi.fn(async () => ({
@@ -605,5 +670,140 @@ describe("finance routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("required"),
     });
+  });
+
+  it("returns an authoritative Finance snapshot from the status and budget reads", async () => {
+    const app = new Hono<AppEnv>();
+    const getFinanceStatus = vi.fn(async () => ({
+      asOf: "2026-08-28T12:00:00.000Z",
+      details: {
+        accounts: { blocked: 0, current: 2, retrying: 0, stale: 0 },
+        closeReadiness: {
+          missingProvenance: 0,
+          possibleDuplicates: 0,
+          reconciledThrough: "2026-08-27",
+          uncategorized: 0,
+          unmatchedTransfers: 0,
+        },
+        month: { spending: 2_000 },
+        plan: { capacity: 1_000 },
+        review: { total: 0 },
+        wealth: { cash: 12_000, debt: 2_000, investments: 10_000, netWorth: 20_000 },
+      },
+      freshness: { blockers: [], observedAt: "2026-08-28T12:00:00.000Z", state: "current" },
+      recommendedNextOperation: null,
+      work: { awaitingInput: 0 },
+    }));
+    const getFinanceBudget = vi.fn(async () => ({
+      changes: [],
+      communication: {
+        headline: "No budget exists yet.",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: null,
+      outcome: "completed",
+      remainingWork: { categories: [], count: 0 },
+      schemaVersion: 1,
+    }));
+    const getWealthSummary = vi.fn(async () => ({
+      accountSemantics: {
+        excludedAccountIds: [],
+        possibleDuplicateGroups: [],
+        trustworthy: true,
+        unresolvedOwnershipAccountIds: [],
+      },
+      annualIncome: 60_000,
+      cash: 12_000,
+      debt: 2_000,
+      incomeBasis: "stated" as const,
+      investments: 10_000,
+      monthlyIncome: 5_000,
+      monthlyPlanRemaining: 1_000,
+      netWorth: 20_000,
+      observedAnnualIncome: 60_000,
+      otherAssets: 0,
+      plannedThisMonth: 4_000,
+      statedAnnualIncome: 60_000,
+    }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      context.set("requestId", "snapshot");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus } as unknown as FinanceStatusService,
+      finances: { getFinanceBudget, getWealthSummary } as unknown as ReturnType<
+        typeof createFinanceService
+      >,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request("/v1/finances/snapshot");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { cash: 12_000, netWorth: 20_000 },
+      presentation: { kind: "finance_snapshot", trust: { trustworthy: true } },
+    });
+    expect(getFinanceStatus).toHaveBeenCalledWith(id, { type: "all_outstanding" });
+    expect(getFinanceBudget).toHaveBeenCalledWith(id);
+    expect(getWealthSummary).toHaveBeenCalledWith(id);
+  });
+
+  it("keeps the raw period review while exposing its exact presentation route", async () => {
+    const app = new Hono<AppEnv>();
+    const review = {
+      cutoff: "2026-08-28T12:00:00.000Z",
+      id,
+      monitoring: { href: `/finances/reviews/${id}`, responsibility: "Review changes." },
+      period: { end: "2026-08-28", start: "2026-08-01" },
+      recommendations: [],
+      status: "completed",
+      work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 1 },
+    };
+    const getOwned = vi.fn(async () => review);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      context.set("requestId", "period-presentation");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financePeriodReviews: { getOwned } as unknown as FinancePeriodReviewService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const presented = await app.request(`/v1/finances/period-reviews/${id}/presentation`);
+    const raw = await app.request(`/v1/finances/period-reviews/${id}`);
+
+    expect(presented.status).toBe(200);
+    await expect(presented.json()).resolves.toMatchObject({
+      data: review,
+      presentation: { kind: "finance_period_verification" },
+    });
+    await expect(raw.json()).resolves.toEqual({ review });
+    expect(getOwned).toHaveBeenCalledTimes(2);
   });
 });

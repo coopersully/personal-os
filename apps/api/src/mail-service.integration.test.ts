@@ -162,7 +162,10 @@ describe.sequential("mail service", () => {
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
+<<<<<<< HEAD
       "0074_finance_budget_buckets",
+=======
+>>>>>>> origin/main
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -223,7 +226,10 @@ describe.sequential("mail service", () => {
       "0072_texting",
       "0073_texting_review_hardening",
       "0073_finance_account_semantics_recovery",
+<<<<<<< HEAD
       "0074_finance_budget_buckets",
+=======
+>>>>>>> origin/main
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

@@ -2,8 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  type FinanceReceiptReview,
   type FinanceToolResult,
   financeMaintenanceInputSchema,
+  financeReceiptReviewInputSchema,
   financeSetupInputSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
@@ -44,7 +46,27 @@ function financeResult<T>(value: FinanceToolResult<T>) {
   };
 }
 
-async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
+function receiptReviewResult(
+  review: FinanceReceiptReview,
+): FinanceToolResult<FinanceReceiptReview> {
+  const value = envelope(review, "Receipt evidence reviewed.");
+  if (review.evidence.nextAction !== "ask_person") return value;
+  return {
+    ...value,
+    communication: {
+      ...value.communication,
+      nextQuestion: {
+        answerType: "text",
+        id: `finance:receipt:${review.transaction.id}`,
+        prompt: review.evidence.question,
+      },
+    },
+    outcome: "user_input_required",
+    remainingWork: { categories: ["receipt_review"], count: 1 },
+  };
+}
+
+export async function financeApiResult<T>(operation: () => Promise<FinanceToolResult<T>>) {
   try {
     return financeResult(await operation());
   } catch (error) {
@@ -113,11 +135,40 @@ const answerFinanceReviewToolInputSchema = z
 /** Intent-first Finance MCP surface. Domain policy and accounting stay in the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
   server.registerTool(
+    "get_finance_playbook",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read Ilo's approved, versioned Finance playbook and current assessment before setup, recommendations, or maintenance. It defaults toward cash-flow stability, resilience, risk protection, costly-debt removal, retirement, diversified long-term investing, and a sustainable good life. Use native web search for current tax, retirement, insurance, accounting, or product facts; never imply research occurred without recorded evidence.",
+      inputSchema: {},
+      title: "Get Finance playbook",
+    },
+    async () =>
+      financeApiResult(async () =>
+        envelope(await api.getFinancePlaybook(), "Finance playbook loaded."),
+      ),
+  );
+
+  server.registerTool(
+    "review_finance_receipt",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Review one ambiguous transaction with an explicit, bounded Mail receipt lookup. This never categorizes or creates a merchant rule; missing or conflicting evidence becomes a question for the person.",
+      inputSchema: { id, ...financeReceiptReviewInputSchema.shape },
+      title: "Review Finance receipt evidence",
+    },
+    async ({ id: transactionId, ...input }) =>
+      financeApiResult(async () =>
+        receiptReviewResult(await api.reviewFinanceReceipt(transactionId, input)),
+      ),
+  );
+  server.registerTool(
     "setup_finances",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. It inspects existing state, returns one question at a time, persists each answer, shows the proposed budget, accepts a plain approval or authorized bypass self-approval, then continues into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, show the proposed budget, accept a plain approval or authorized bypass self-approval, then continue into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -392,12 +443,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
   );
 
+  server.registerTool(
+    "get_finance_snapshot",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
+      inputSchema: {},
+      title: "Get Finance snapshot",
+    },
+    async () => financeApiResult(() => api.getFinanceSnapshot()),
+  );
+
   const reads: Array<[string, string, () => Promise<unknown>]> = [
-    [
-      "get_finance_snapshot",
-      "Read the concise current Finance state. Lead with material issues, not internal identifiers.",
-      () => api.getFinanceOverview(),
-    ],
     [
       "get_finance_wealth_summary",
       "Read net worth, cash, investments, debt, income basis, and plan capacity.",

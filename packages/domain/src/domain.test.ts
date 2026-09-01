@@ -260,6 +260,17 @@ describe("workspace maintenance", () => {
     ).toMatchObject({ providerItems: [] });
   });
 
+  it("accepts Finance status wealth from an older API without other assets", () => {
+    expect(
+      financeStatusDetailsSchema.shape.wealth.safeParse({
+        cash: null,
+        debt: null,
+        investments: null,
+        netWorth: null,
+      }).success,
+    ).toBe(true);
+  });
+
   it("reports a Finance health step that did not run", () => {
     expect(
       financeMaintenanceResultSchema.parse({

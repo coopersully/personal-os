@@ -46,9 +46,12 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinancePeriodReview,
+  FinancePlaybookResponse,
   FinanceProfile,
   FinanceProfileVersion,
   FinanceQuestion,
+  FinanceReceiptReview,
+  FinanceReceiptReviewInput,
   FinanceRecurringObligation,
   FinanceReimbursement,
   FinanceReimbursementQuestionAnswer,
@@ -59,6 +62,7 @@ import type {
   FinanceScenarioResult,
   FinanceSetupInput,
   FinanceSetupPayload,
+  FinanceSnapshot,
   FinanceStatus,
   FinanceToolResult,
   FinanceTransaction,
@@ -141,6 +145,16 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async reviewFinanceReceipt(
+      id: string,
+      input: FinanceReceiptReviewInput,
+    ): Promise<FinanceReceiptReview> {
+      const response = await request<{ review: FinanceReceiptReview }>(
+        `/v1/finances/transactions/${encodeURIComponent(id)}/receipt-review`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.review;
+    },
     createFinanceBudget,
     async setupFinances(input: FinanceSetupInput): Promise<FinanceToolResult<FinanceSetupPayload>> {
       return request("/v1/finances/setup", {
@@ -246,6 +260,9 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return financeStatusSchema.parse(response.status);
     },
+    async getFinanceSnapshot(): Promise<FinanceToolResult<FinanceSnapshot>> {
+      return request("/v1/finances/snapshot");
+    },
     async compareFinanceScenarios(input: FinanceScenarioInput): Promise<FinanceScenarioResult> {
       const response = await request<{ scenario: FinanceScenarioResult }>(
         "/v1/finances/scenarios/compare",
@@ -339,6 +356,11 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return financePeriodReviewSchema.parse(response.review);
     },
+    async getFinancePeriodReviewPresentation(
+      id: string,
+    ): Promise<FinanceToolResult<FinancePeriodReview>> {
+      return request(`/v1/finances/period-reviews/${encodeURIComponent(id)}/presentation`);
+    },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(
         `/v1/finances?month=${encodeURIComponent(month)}`,
@@ -362,6 +384,9 @@ export function createFinanceApi(request: FinanceRequest) {
     async getFinanceWealthSummary(): Promise<FinanceWealthSummary> {
       const response = await request<{ wealth: FinanceWealthSummary }>("/v1/finances/wealth");
       return response.wealth;
+    },
+    async getFinancePlaybook(): Promise<FinancePlaybookResponse> {
+      return request("/v1/finances/playbook");
     },
     async getFinanceProfile(): Promise<FinanceProfile | null> {
       const response = await request<{ profile: FinanceProfile | null }>("/v1/finances/profile");

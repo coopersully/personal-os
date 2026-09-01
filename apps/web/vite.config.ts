@@ -139,9 +139,17 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
+        "/health": {
+          changeOrigin: true,
+          target: environment.VITE_PROXY_API_TARGET || "http://127.0.0.1:8788",
+        },
         "/v1": {
           changeOrigin: true,
           target: environment.VITE_PROXY_API_TARGET || "http://127.0.0.1:8788",
+        },
+        "/mcp": {
+          changeOrigin: false,
+          target: environment.VITE_PROXY_MCP_TARGET || "http://127.0.0.1:8789",
         },
       },
     },

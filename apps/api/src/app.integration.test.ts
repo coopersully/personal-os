@@ -32,7 +32,7 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import type { EmailMessage } from "./email-delivery.js";
 import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
-import { createRuntimeLifecycle } from "./runtime-lifecycle.js";
+import { createRuntimeLifecycle, type RuntimeLifecycle } from "./runtime-lifecycle.js";
 import { verifyPassword } from "./security.js";
 
 const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
@@ -50,6 +50,7 @@ describe.sequential("ilo API", () => {
   let database: DatabaseClient;
   let app: PersonalOsApp;
   let appConfig: Parameters<typeof createApp>[0]["config"];
+  let runtimeLifecycle: RuntimeLifecycle;
   let sessionToken = "";
   let agentToken = "";
   const logs = vi.fn();
@@ -161,6 +162,7 @@ describe.sequential("ilo API", () => {
       xClientSecret: "",
       xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
     };
+    runtimeLifecycle = createRuntimeLifecycle();
     app = createApp({
       config: appConfig,
       db: database.db,
@@ -169,13 +171,15 @@ describe.sequential("ilo API", () => {
       icloud: icloudConnector,
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
-      runtimeLifecycle: createRuntimeLifecycle(),
+      runtimeLifecycle,
       verifyGooglePubSubToken,
       x: xConnector,
     });
   }, 120_000);
 
   afterAll(async () => {
+    runtimeLifecycle.beginQuiesce(Date.now() + 30_000);
+    await runtimeLifecycle.waitForIdle();
     await database.close();
     await container.stop();
   });

@@ -4179,6 +4179,15 @@ describe("ilo web app", () => {
       }),
     );
     archivedView.unmount();
+
+    const archivedListView = setup(`/tasks?archive=list&list=${secondId}`);
+    expect(await screen.findByRole("heading", { name: "Work" })).toBeInTheDocument();
+    expect(archivedListView.location.value).toBe(`/tasks?archive=list&list=${secondId}`);
+    expect(mocks.listTasks).toHaveBeenLastCalledWith({
+      limit: 100,
+      listId: secondId,
+    });
+    archivedListView.unmount();
   });
 
   it("explains an empty Tasks archive", async () => {

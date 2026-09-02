@@ -995,7 +995,9 @@ describe("agent access settings", () => {
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Review checks" }));
     expect(
-      screen.getByText("Mail rules are unavailable, so nohmi cannot report an approved-rule count."),
+      screen.getByText(
+        "Mail rules are unavailable, so nohmi cannot report an approved-rule count.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/0 active approved Mail rules/)).not.toBeInTheDocument();
   });

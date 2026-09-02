@@ -25,12 +25,7 @@ import {
   todayTimelineItemRange,
   todayTimelineStartMinute,
 } from "./app.js";
-import {
-  CircleCheckIcon,
-  type Icon,
-  ListTodoIcon,
-  StarIcon,
-} from "./components/icons.js";
+import { CircleCheckIcon, type Icon, ListTodoIcon, StarIcon } from "./components/icons.js";
 import { MotionProvider } from "./components/motion-provider.js";
 import { loadAllTaskContainerPages } from "./features/tasks/page.js";
 
@@ -2036,7 +2031,7 @@ describe("ilo web app", () => {
     expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Review checks" }));
     await browser.click(screen.getByRole("button", { name: /Show \d+ completed checks?/ }));
-    expect(await screen.findByText("1 open Task in Ilo.")).toBeInTheDocument();
+    expect(await screen.findByText("1 open Task in nohmi.")).toBeInTheDocument();
     expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 });
   });
 
@@ -2762,6 +2757,7 @@ describe("ilo web app", () => {
     const view = setup("/tasks");
     const browser = userEvent.setup();
     await screen.findByRole("heading", { name: "Tasks" });
+    await screen.findByText("Draft brief");
     mocks.getDailyBrief.mockClear();
     mocks.listEvents.mockClear();
     mocks.listTasks.mockClear();
@@ -5360,7 +5356,7 @@ describe("ilo web app", () => {
   });
 
   it("keeps Mail and Finances workspace controls on child routes", async () => {
-    const mail = setup("/mail/thread/example");
+    const mail = setup("/mail?thread=example");
     await waitFor(() =>
       expect(screen.getByRole("navigation", { name: "Top navigation" })).toHaveAttribute(
         "data-workspace",
@@ -5683,7 +5679,7 @@ describe("ilo web app", () => {
     mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
     const view = setup();
     const scheduledTaskButton = await screen.findByRole("button", {
-      name: "Open task Draft brief",
+      name: "Open task Reserved today",
     });
     expect(scheduledTaskButton).toBeVisible();
     expect(screen.getByRole("heading", { name: "Your timeline" })).toBeInTheDocument();
@@ -5699,7 +5695,7 @@ describe("ilo web app", () => {
     expect(screen.queryByText("Later today")).not.toBeInTheDocument();
     expect(screen.queryByText("Decision queue")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "To take care of" })).toBeInTheDocument();
-    expect(screen.getByText("8 things left, 2 overdue")).toHaveClass(
+    expect(screen.getByText("7 things left, 2 overdue")).toHaveClass(
       "today-section-heading__description",
     );
     const todayQueue = screen.getByRole("complementary", { name: "To take care of" });
@@ -5712,21 +5708,24 @@ describe("ilo web app", () => {
     expect(within(commitmentList).getAllByRole("listitem")[0]).toHaveClass(
       "today-commitment-row--overdue",
     );
-    expect(within(todayQueue).getByText("1–6 of 8")).toBeVisible();
+    expect(within(todayQueue).getByText("1–6 of 7")).toBeVisible();
+    expect(within(todayQueue).queryByText("Suggested follow-up")).not.toBeInTheDocument();
+    expect(within(todayQueue).queryByText("Future task")).not.toBeInTheDocument();
     expect(within(todayQueue).queryByText("Ready next")).not.toBeInTheDocument();
     expect(within(todayQueue).queryByText("High priority")).not.toBeInTheDocument();
     expect(within(todayQueue).queryByText("Time reserved")).not.toBeInTheDocument();
     await browser.click(within(todayQueue).getByRole("link", { name: "Go to next page" }));
-    expect(within(todayQueue).getByText("7–8 of 8")).toBeVisible();
+    expect(within(todayQueue).getByText("7–7 of 7")).toBeVisible();
     await browser.click(within(todayQueue).getByRole("radio", { name: "Tasks" }));
-    expect(within(todayQueue).getByText("1–4 of 4")).toBeVisible();
+    expect(within(todayQueue).getByText("1–3 of 3")).toBeVisible();
     expect(within(todayQueue).queryByText("Overdue reminder")).not.toBeInTheDocument();
     await browser.click(within(todayQueue).getByRole("radio", { name: "Overdue" }));
     expect(within(todayQueue).getByText("1–2 of 2")).toBeVisible();
     expect(within(todayQueue).getByText("Overdue reminder")).toBeVisible();
     await browser.click(within(todayQueue).getByRole("radio", { name: "All" }));
-    await browser.click(within(todayQueue).getByRole("link", { name: "Go to next page" }));
-    await browser.click(within(todayQueue).getByRole("button", { name: "Open Draft brief" }));
+    await browser.click(
+      within(todayQueue).getAllByRole("button", { name: "Open Draft brief" })[0] as HTMLElement,
+    );
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -6139,6 +6138,7 @@ describe("ilo web app", () => {
     const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /^1:00 PM Focus block/ }));
+    await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
     expect(await screen.findByRole("heading", { name: "Agenda" })).toBeInTheDocument();
     expect(screen.getByText("launch plan")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /the brief/ })).toHaveAttribute(
@@ -6202,6 +6202,8 @@ describe("ilo web app", () => {
     const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /^1:00 PM Focus block/ }));
+    await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
+    await screen.findByRole("dialog");
     expect(
       within(screen.getByRole("list", { name: "Calendars with details included" })).getByRole(
         "button",
@@ -6460,10 +6462,16 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: /^11:00 PM Overnight work/ }));
-    expect(screen.getByText("Jul 13, 11:00 PM – Jul 14, 1:00 AM")).toBeInTheDocument();
+    await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
+    expect(await screen.findByText("Jul 13, 11:00 PM – Jul 14, 1:00 AM")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
+    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
+    await browser.click(screen.getByRole("menuitem", { name: "Today at a Glance" }));
     await browser.click(screen.getByRole("button", { name: /^11:00 PM New year work/ }));
-    expect(screen.getByText("Dec 31, 2026, 11:00 PM – Jan 1, 2027, 1:00 AM")).toBeInTheDocument();
+    await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
+    expect(
+      await screen.findByText("Dec 31, 2026, 11:00 PM – Jan 1, 2027, 1:00 AM"),
+    ).toBeInTheDocument();
   });
 
   it("reschedules writable events by drag and rolls back rejected moves", async () => {
@@ -6829,8 +6837,7 @@ describe("ilo web app", () => {
     expect(await screen.findByText("No matching activity")).toBeInTheDocument();
     await browser.clear(activitySearch);
 
-    await browser.click(screen.getByRole("button", { name: "Account menu" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Settings" }));
+    await browser.click(within(accountSidebar).getByRole("link", { name: "Account" }));
     expect(await screen.findByRole("heading", { name: "Account" })).toBeInTheDocument();
     const settingsSidebar = screen.getByRole("complementary", {
       name: "Account utility navigation",
@@ -6925,15 +6932,12 @@ describe("ilo web app", () => {
           resolveLogout = resolve;
         }),
     );
-    await browser.click(screen.getByRole("button", { name: "Account menu" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Log out" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Account" }));
+    await browser.click(screen.getByRole("button", { name: "Log out" }));
     await waitFor(() => expect(mocks.logout).toHaveBeenCalled());
-    expect(screen.getByRole("menuitem", { name: "Signing out…" })).toHaveAttribute(
-      "data-disabled",
-      "",
-    );
+    expect(screen.getByRole("button", { name: "Logging out…" })).toBeDisabled();
     resolveLogout?.();
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Log out" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled());
   }, 30_000);
 
   it("defaults to a compact calendar view on small screens and preserves view navigation", async () => {

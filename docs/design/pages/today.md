@@ -24,9 +24,9 @@ Today schedule (ordered list)
 └── Direct event actions and in-progress meeting controls
 
 Decision queue (quiet rail)
-├── Capacity summary in the person’s planning window
-├── Overdue and due material
-├── Flexible commitments that are ready next
+├── Remaining and overdue counts
+├── Overdue material and tasks due or reserved today
+├── Today and undated reminders
 └── Completion controls on each row
 
 History (collapsed)
@@ -39,14 +39,14 @@ History (collapsed)
 | --- | --- | --- |
 | `all-day markers` | A compact, unlabelled shadcn `ItemGroup` above the timed schedule for occasions that shape the day or span several days. Keep an accessible section label, but do not add visible category chrome. Use the distinct `OccasionCard`, composed from `Item`, not `EventCard`. Multi-day occasions show inclusive start and end dates joined by a quiet duration rail; same-day occasions collapse that metadata to one date plus “All day.” Source calendar color identifies the occasion without making it look like an appointment. Use normal sentence case and never show redundant midnight times. | Omit the strip. |
 | `schedule` | “Your timeline” is one minimal vertical timeline of every in-progress and upcoming timed event remaining today. Its description summarizes total visible events and those left to start; append the ongoing count only when nonzero. It begins at the most recent 15-minute mark, labels each full hour at its true position, marks unlabeled quarter hours with smaller dots, carries Calendar's connected live now badge and rule, and ends with the last event. Continue Calendar's solid hour and dotted subhour rules across the event track. Snap each event's visual bounds outward to the 15-minute grid and size its block by that duration. Content disclosure follows available height: a 15-minute block shows its title, a 30-minute block adds its exact time, and longer blocks may add location. Keep the time-axis gutter narrow and omit the redundant time column and accent rail inside spatial event cards. Place events by time and use compact columns for overlaps without reproducing Calendar's full grid. Each preview follows Calendar's title → exact time range → location hierarchy and pairs future titles with a small inline relative countdown without parentheses. The whole event surface opens a quick-action menu; its first action navigates to Calendar's week view and opens the native event inspector, followed only by contextually valid directions, meeting, or source-link actions. Never underline its title. | “The day is open.” Do not invent a next event. |
-| `queue` | “To take care of” is one quiet, bounded vertical `ItemGroup`, never separate category sections. Its description reports things left and appends the overdue count only when nonzero; planning-window capacity does not belong in this heading. Order overdue tasks first, then overdue reminders, today reminders, undated reminders, due tasks, and next tasks. Place single-select All, Overdue, Tasks, and Reminders filters above a height-bounded `ScrollArea`; paginate the filtered result with the shared `Pagination` below it. Today keeps task titles and timing but suppresses verbose descriptions and tags. A row with title only collapses to one vertically centered line; timing or useful metadata expands it. Overdue tasks use the semantic danger surface as a restrained row highlight. | “Nothing in this view” when a filter has no matches; “Nothing pulling at you” only when the complete queue is empty. |
+| `queue` | “To take care of” is one quiet, bounded vertical `ItemGroup`, never separate category sections. Its description reports things left and appends the overdue count only when nonzero; planning-window capacity does not belong in this heading. Order overdue tasks first, then overdue reminders, today reminders, undated reminders, and tasks due or reserved today. Task relevance uses the canonical open lifecycle and excludes trashed tasks; recommendations never pull unrelated future or undated tasks into Today. Place single-select All, Overdue, Tasks, and Reminders filters above a height-bounded `ScrollArea`; paginate the filtered result with the shared `Pagination` below it. Today keeps task titles and timing but suppresses verbose descriptions and tags. A row with title only collapses to one vertically centered line; timing or useful metadata expands it. Overdue tasks use the semantic danger surface as a restrained row highlight. | “Nothing in this view” when a filter has no matches; “Nothing pulling at you” only when the complete queue is empty. |
 | `history` | A labelled collapsible for completed reminders and tasks. Count remains visible when closed. | Omit when there is no completion history. |
 
 ## Content budget
 
 - Keep one ordered timed-event list; never duplicate an event between schedule states.
 - The default queue may show all currently actionable material; it must not show
-  completed or cancelled material.
+  completed, cancelled, or trashed material. Tasks must be overdue, due today, or reserved today in the person’s planning timezone.
 - Each queue row shows one title, one most-useful time/plan fact, one state or
   priority treatment, completion, and a secondary destructive action. Tasks and
   reminders share the commitment-item structure but use distinct neutral

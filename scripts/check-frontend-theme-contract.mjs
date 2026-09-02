@@ -33,10 +33,17 @@ const forbiddenPatterns = [
 ];
 
 const stylesheet = await readFile(resolve(root, "styles.css"), "utf8");
-const stylesheetForDecorativeChecks = stylesheet.replace(
-  /\/\* theme-contract-allow-start: functional-calendar-grid \*\/[\s\S]*?\/\* theme-contract-allow-end: functional-calendar-grid \*\//g,
-  "",
-);
+const stylesheetForDecorativeChecks = stylesheet
+  .replace(
+    /\/\* theme-contract-allow-start: functional-calendar-grid \*\/[\s\S]*?\/\* theme-contract-allow-end: functional-calendar-grid \*\//g,
+    "",
+  )
+  // The approved Setup edge fade keeps floating controls legible over content.
+  // Exempt only this selector and canvas-colored declaration, not other effects.
+  .replace(
+    /(\.setup-navigation__fade\s*\{\s*)background: linear-gradient\(to bottom, transparent, var\(--canvas\) 62%\);/g,
+    "$1",
+  );
 const stylesheetPatterns = [
   { name: "gradient", pattern: /(?:linear|radial|conic)-gradient\(/g },
   { name: "decorative shadow", pattern: /(?:box|text)-shadow\s*:/g },

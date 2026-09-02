@@ -164,7 +164,8 @@ export function ConnectionAuthorizationOutcome({
         <CircleAlertIcon />
         <AlertTitle>Restart the connection</AlertTitle>
         <AlertDescription>
-          nohmi couldn't confirm that connection. Start again; your existing account was not changed.
+          nohmi couldn't confirm that connection. Start again; your existing account was not
+          changed.
         </AlertDescription>
         <AlertAction>
           <Button onClick={() => onRetry(null)} size="sm" type="button">

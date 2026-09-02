@@ -663,6 +663,7 @@ function DependencyFailure({
 export function TaskRow({
   list,
   className,
+  compact = false,
   onEdit,
   project,
   recommendation,
@@ -671,6 +672,7 @@ export function TaskRow({
 }: {
   list?: TaskList;
   className?: string;
+  compact?: boolean;
   onEdit: () => void;
   project?: TaskProject;
   recommendation?: DailyBrief["recommendedTasks"][number];
@@ -726,11 +728,13 @@ export function TaskRow({
           {timing ? (
             <TaskItemDue className={overdue ? "text-destructive" : undefined}>{timing}</TaskItemDue>
           ) : null}
-          {description ? <TaskItemDescription>{description}</TaskItemDescription> : null}
-          {recommendation ? (
+          {!compact && description ? (
+            <TaskItemDescription>{description}</TaskItemDescription>
+          ) : null}
+          {!compact && recommendation ? (
             <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
           ) : null}
-          {task.tags.length > 0 || task.priority !== "medium" ? (
+          {!compact && (task.tags.length > 0 || task.priority !== "medium") ? (
             <TaskItemTags aria-label="Task tags" className="mt-1 pl-0">
               {task.priority !== "medium" ? (
                 <Badge asChild variant="outline">

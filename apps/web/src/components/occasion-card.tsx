@@ -53,7 +53,9 @@ function OccasionCard({
             {aside ? <ItemActions>{aside}</ItemActions> : null}
           </ItemHeader>
           <ItemDescription
-            aria-label={singleDay ? `${startLabel}, all day` : `Starts ${startLabel}, ends ${endLabel}`}
+            aria-label={
+              singleDay ? `${startLabel}, all day` : `Starts ${startLabel}, ends ${endLabel}`
+            }
             className="occasion-card__span"
             data-single-day={singleDay}
           >

@@ -5,7 +5,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 
   await page.goto("/calendar");
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
@@ -29,9 +29,9 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/reviews");
-  await expect(page.getByRole("heading", { level: 2, name: "Reviews", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reviews", exact: true })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Review" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Attention" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Setup" })).toHaveCount(0);
@@ -135,7 +135,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page).toHaveURL(/\/setup$/);
   await expect(page.getByRole("heading", { name: "Hi, E2E." })).toBeVisible();
   await page.getByRole("button", { name: "Exit setup" }).click();
-  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const applicationSidebar = page.getByRole("complementary", {
     name: "Today Sidebar",
   });
@@ -144,12 +144,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
     await page.getByRole("button", { name: "Switch workspace" }).click();
     const workspaceMenu = page.getByRole("menu", { name: "Switch workspace" });
     const calendarWorkspace = workspaceMenu.getByRole("menuitem", { name: "Calendar" });
-    await expect(calendarWorkspace.locator("small")).not.toHaveText("Loading calendar…");
     await calendarWorkspace.hover();
-    const calendarPreview = page.locator('.workspace-preview[data-workspace="calendar"]');
-    await expect(calendarPreview).toBeVisible();
-    await expect(calendarPreview.locator(".week-calendar")).toBeVisible();
-    await expect(calendarPreview).toHaveAttribute("data-direction", "down");
+    await expect(page.locator(".workspace-preview")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/today$/);
     await page.keyboard.press("Escape");
     await expect(page.locator(".workspace-preview")).toHaveCount(0);
     await expect(page).toHaveURL(/\/today$/);
@@ -269,7 +266,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   await openSettingsSection("Connected agents");
   await expect(page.getByRole("heading", { name: "Connected agents", exact: true })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Ilo MCP URL" })).toHaveValue(/\/mcp$/);
+  await expect(page.getByRole("textbox", { name: "nohmi MCP URL" })).toHaveValue(/\/mcp$/);
   await openSettingsSection("Workspace access");
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
   await expect(page.getByText("Mail readiness")).toHaveCount(0);
@@ -280,7 +277,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     .locator("main")
     .getByRole("status")
     .filter({ hasText: "Action required" });
-  await expect(mailAction).toContainText("Connect an MCP-compatible agent host to Ilo.");
+  await expect(mailAction).toContainText("Connect an MCP-compatible agent host to nohmi.");
   await expect(mailAction.getByRole("link", { name: "Connect agent" })).toBeVisible();
   await expect(page.getByText("Operational review")).toHaveCount(0);
   await expect(page.getByText("Connect an agent", { exact: true })).toHaveCount(0);

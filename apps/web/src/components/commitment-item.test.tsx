@@ -95,7 +95,9 @@ describe("commitment item components", () => {
     await user.click(screen.getByRole("button", { name: "Open Call Mom" }));
 
     expect(
-      screen.getByRole("button", { name: "Open Call Mom" }).closest('[data-component="commitment-item"]'),
+      screen
+        .getByRole("button", { name: "Open Call Mom" })
+        .closest('[data-component="commitment-item"]'),
     ).toHaveAttribute("data-slot", "reminder-item");
     expect(screen.getByRole("checkbox", { name: "Reopen Call Mom" })).toBeChecked();
     expect(onOpen).toHaveBeenCalledOnce();

@@ -309,7 +309,6 @@ import {
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
-import { SetupPage } from "./features/setup/page.js";
 import {
   TaskRow,
   TasksCreateButton,
@@ -373,6 +372,9 @@ const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> =
 ];
 
 const RichEventNotes = lazy(() => import("./rich-event-notes.js"));
+const SetupPage = lazy(() =>
+  import("./features/setup/page.js").then((module) => ({ default: module.SetupPage })),
+);
 
 const calendarHourHeight = 48;
 const calendarMinutesPerDay = 24 * 60;
@@ -471,7 +473,17 @@ function AuthenticatedExperience({ user }: { user: User }) {
   // redirect that sends unfinished accounts into it, or the redirect chases
   // its own destination and never renders.
   if (!rendersApplicationShell(navigationOwnerForLocation(location.pathname))) {
-    return <SetupPage user={user} />;
+    return (
+      <Suspense
+        fallback={
+          <main className="center-screen">
+            <Spinner label="Opening setup" />
+          </main>
+        }
+      >
+        <SetupPage user={user} />
+      </Suspense>
+    );
   }
   if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
     return <Navigate replace to="/setup" />;
@@ -2083,6 +2095,7 @@ function TodayCommitmentList({
                 const recommendation = recommendedTasks.get(commitment.task.id);
                 return (
                   <TaskRow
+                    compact
                     className={cn(commitment.overdue && "today-commitment-row--overdue")}
                     key={`task:${commitment.task.id}`}
                     onEdit={() => setEditor({ kind: "task", task: commitment.task })}
@@ -7580,7 +7593,11 @@ function EventInspector({
           {presentation === "floating" ? (
             <div className="event-details-card__schedule">
               <span>
-                {event.allDay
+                {event.allDay ||
+                !sameLocalDate(
+                  localDateAt(new Date(event.startsAt), user.planningTimezone),
+                  localDateAt(new Date(event.endsAt), user.planningTimezone),
+                )
                   ? formatEventRange(event, user.planningTimezone)
                   : formatTimelineTimeRange(event, user.planningTimezone)}
               </span>

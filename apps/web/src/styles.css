@@ -1777,11 +1777,13 @@ p {
 .today-timeline__grid i {
   --today-grid-rule: color-mix(in srgb, var(--line) 42%, transparent);
 
+  /* theme-contract-allow-start: functional-calendar-grid */
   background-image: radial-gradient(
     circle at 1px 0.5px,
     var(--today-grid-rule) 0 1px,
     transparent 1.25px
   );
+  /* theme-contract-allow-end: functional-calendar-grid */
   background-repeat: repeat-x;
   background-size: 9px 1px;
   height: 1px;
@@ -1983,7 +1985,8 @@ p {
 .today-commitments__list [data-slot="task-item"][data-status="next"] {
   background: color-mix(in srgb, var(--surface) 82%, var(--status-info-surface));
 }
-.today-commitments__list [data-slot="reminder-item"][data-priority="high"] {
+.today-commitments__list [data-slot="reminder-item"][data-priority="high"],
+.today-commitments__list [data-slot="task-item"][data-priority="high"] {
   background: color-mix(in srgb, var(--surface) 72%, var(--status-danger-surface));
 }
 .today-commitments__list [data-component="commitment-item"]:hover,

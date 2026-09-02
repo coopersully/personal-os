@@ -81,10 +81,7 @@ describe("EventCard", () => {
 
     const card = container.querySelector('[data-slot="event-card"]');
     expect(card).toHaveClass("event-card");
-    expect(card).toHaveAttribute(
-      "data-tone",
-      "calendar",
-    );
+    expect(card).toHaveAttribute("data-tone", "calendar");
     expect(card).toHaveStyle({
       "--calendar-color": "#34a853",
     });

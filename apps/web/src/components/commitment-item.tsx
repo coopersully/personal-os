@@ -13,11 +13,12 @@ import { cn } from "@/lib/utils";
 function CommitmentItem({ className, ...props }: React.ComponentProps<typeof Item>) {
   return (
     <Item
+      data-component="commitment-item"
       data-slot="commitment-item"
       role="listitem"
       variant="outline"
       className={cn(
-        "group/commitment-item min-h-14 items-start gap-x-2.5 gap-y-2 rounded-md px-3 py-3 [&[data-completed=true]]:opacity-65",
+        "group/commitment-item relative min-h-12 items-start gap-x-2 gap-y-1 rounded-md px-2.5 py-2 [&[data-completed=true]]:opacity-65",
         className,
       )}
       {...props}
@@ -127,7 +128,10 @@ function CommitmentItemActions({ className, ...props }: React.ComponentProps<typ
   return (
     <ItemActions
       data-slot="commitment-item-actions"
-      className={cn("self-start", className)}
+      className={cn(
+        "absolute right-1.5 bottom-1 opacity-0 transition-opacity group-hover/commitment-item:opacity-100 group-focus-within/commitment-item:opacity-100 [@media(hover:none)]:opacity-100",
+        className,
+      )}
       {...props}
     />
   );

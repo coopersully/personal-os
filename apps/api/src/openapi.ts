@@ -356,7 +356,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     info: {
       description:
         "The shared reminders, calendar, mail, finance, and assistant data plane for people and agents.",
-      title: "ilo API",
+      title: "nohmi API",
       version: "0.1.0",
     },
     openapi: "3.1.0",
@@ -890,7 +890,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/assistant/context": {
         get: {
           security,
-          responses: { 200: { description: "Authenticated Ilo agent context" } },
+          responses: { 200: { description: "Authenticated nohmi agent context" } },
         },
       },
       "/v1/assistant/setup-plan": {

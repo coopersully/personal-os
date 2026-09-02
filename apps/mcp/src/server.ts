@@ -24,7 +24,7 @@ export type ServerOptions = {
   timeZone: string;
 };
 
-/** Thin composition root for Ilo's feature-owned, scope-aware MCP surface. */
+/** Thin composition root for Nomi's feature-owned, scope-aware MCP surface. */
 export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   const appBaseUrl = (options.appBaseUrl ?? "http://localhost").replace(/\/$/, "");
   const readOnly = options.readOnly ?? false;
@@ -34,12 +34,12 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     {
       icons: [{ mimeType: "image/png", src: `${appBaseUrl}/icon-192.png` }],
       name: "ilo",
-      title: "ilo",
+      title: "Nomi",
       version: "0.1.0",
     },
     {
       instructions:
-        "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. Ilo's API remains the authority for access and policy.",
+        "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. Nomi's API remains the authority for access and policy.",
     },
   );
   const tools = createIloToolSurface(server, {
@@ -76,7 +76,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   return server;
 }
 
-/** Keep the original URIs readable while clients migrate to Ilo resource templates. */
+/** Keep the original URIs readable while clients migrate to Nomi resource templates. */
 function registerCompatibilityResources(
   server: McpServer,
   options: ServerOptions,

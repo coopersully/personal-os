@@ -10,7 +10,7 @@ import {
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
-const id = idSchema.describe("ilo object identifier");
+const id = idSchema.describe("Nomi object identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
 const timeZone = z.string().min(1).describe("IANA time zone, for example America/New_York");
 const visibility = z.enum(["default", "private", "public"]);
@@ -263,7 +263,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         readOnlyHint: false,
       },
       description:
-        "Create or refresh one open important, upcoming, or follow-up item for an owned Calendar event. Ilo locks and validates the event, derives provider provenance and current revision, deduplicates the open event/kind pair, and never copies event notes.",
+        "Create or refresh one open important, upcoming, or follow-up item for an owned Calendar event. Nomi locks and validates the event, derives provider provenance and current revision, deduplicates the open event/kind pair, and never copies event notes.",
       inputSchema: z.object({
         ...upsertCalendarAttentionItemInputSchema.shape,
         eventId: id,

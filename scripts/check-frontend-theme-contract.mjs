@@ -32,6 +32,49 @@ const forbiddenPatterns = [
   },
 ];
 
+const stylesheet = await readFile(resolve(root, "styles.css"), "utf8");
+const stylesheetForDecorativeChecks = stylesheet.replace(
+  /\/\* theme-contract-allow-start: functional-calendar-grid \*\/[\s\S]*?\/\* theme-contract-allow-end: functional-calendar-grid \*\//g,
+  "",
+);
+const stylesheetPatterns = [
+  { name: "gradient", pattern: /(?:linear|radial|conic)-gradient\(/g },
+  { name: "decorative shadow", pattern: /(?:box|text)-shadow\s*:/g },
+  { name: "frosted backdrop", pattern: /backdrop-filter\s*:/g },
+];
+const flatPrimitiveFiles = [
+  "avatar.tsx",
+  "badge.tsx",
+  "button.tsx",
+  "card.tsx",
+  "checkbox.tsx",
+  "context-menu.tsx",
+  "dialog.tsx",
+  "dropdown-menu.tsx",
+  "empty.tsx",
+  "input-group.tsx",
+  "input-otp.tsx",
+  "input.tsx",
+  "item.tsx",
+  "native-select.tsx",
+  "popover.tsx",
+  "radio-group.tsx",
+  "sheet.tsx",
+  "sidebar.tsx",
+  "slider.tsx",
+  "sonner.tsx",
+  "switch.tsx",
+  "tabs.tsx",
+  "textarea.tsx",
+  "toggle.tsx",
+];
+
+function withoutAllowedBoundaries(source) {
+  return source
+    .replace(/\b(?:focus-visible|aria-invalid|data-\[[^\]]+\]|forced-colors):[^\s"'`]+/g, "")
+    .replaceAll("border-transparent", "");
+}
+
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(
@@ -56,6 +99,27 @@ for (const path of await sourceFiles(root)) {
         `${relative(resolve(import.meta.dirname, ".."), path)}:${line} ${name}: ${match[0]}`,
       );
     }
+  }
+}
+
+for (const { name, pattern } of stylesheetPatterns) {
+  for (const match of stylesheetForDecorativeChecks.matchAll(pattern)) {
+    const line = stylesheetForDecorativeChecks.slice(0, match.index).split("\n").length;
+    violations.push(`apps/web/src/styles.css:${line} ${name}: ${match[0]}`);
+  }
+}
+
+for (const file of flatPrimitiveFiles) {
+  const path = resolve(root, "components", "ui", file);
+  const source = withoutAllowedBoundaries(await readFile(path, "utf8"));
+  const visibleRestingBorder = source.match(
+    /\b(?:border|border-[trblxy])-(?:border|input|sidebar-border)\b/,
+  );
+  if (visibleRestingBorder) {
+    const line = source.slice(0, visibleRestingBorder.index).split("\n").length;
+    violations.push(
+      `${relative(resolve(import.meta.dirname, ".."), path)}:${line} visible resting border: ${visibleRestingBorder[0]}`,
+    );
   }
 }
 

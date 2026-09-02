@@ -616,7 +616,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       if (sourceIds.length > 0) {
         throw new AppError(
           "invalid_request",
-          "Reminder setup uses Ilo's local Reminder collection and does not accept source contexts.",
+          "Reminder setup uses nohmi's local Reminder collection and does not accept source contexts.",
         );
       }
       const schema =

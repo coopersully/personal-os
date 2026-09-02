@@ -704,7 +704,7 @@ describe("domain schemas", () => {
         filteredTotal: 1,
         items: [
           {
-            action: { label: "Leave Ilo", to: "https://example.com" },
+            action: { label: "Leave nohmi", to: "https://example.com" },
             actionAt: null,
             domain: "mail",
             id: "bad-action",
@@ -771,12 +771,12 @@ describe("domain schemas", () => {
         ],
         mcpUrl: "https://mcp.example.com/mcp",
         skill: {
-          displayName: "Ilo Guided Setup",
-          installPrompt: "Install the Ilo skill.",
+          displayName: "nohmi Guided Setup",
+          installPrompt: "Install the nohmi skill.",
           invocation: "$ilo-setup",
           name: "ilo-setup",
           revision: "release-0.1.0",
-          setupPrompt: "Set up Ilo.",
+          setupPrompt: "Set up nohmi.",
           sourceUrl: "https://example.com/ilo-setup",
           version: "0.1.0",
         },

@@ -45,7 +45,7 @@ export function calendarAgentAccessReadiness({
       ...(selected.length === 0
         ? {
             action: { label: "Open Calendar", to: "/calendar" },
-            nextStep: "Select a calendar for Ilo to use",
+            nextStep: "Select a calendar for nohmi to use",
           }
         : {}),
       complete: selected.length > 0,
@@ -57,7 +57,7 @@ export function calendarAgentAccessReadiness({
       complete: writable.length > 0,
       description:
         writable.length > 0
-          ? `${writable.length} writable destination${writable.length === 1 ? "" : "s"}. Ilo can preview strong-evidence commitments; automatic creation is not enabled.`
+          ? `${writable.length} writable destination${writable.length === 1 ? "" : "s"}. nohmi can preview strong-evidence commitments; automatic creation is not enabled.`
           : "A selected writable calendar is required for commitment previews.",
       ...(writable.length === 0 ? { nextStep: "Select a writable calendar" } : {}),
       title: "Writable calendar",
@@ -87,7 +87,7 @@ export function calendarAgentAccessCapability(
       support === "executable_rules"
         ? "This deployment publishes Calendar profiles, commitment previews, and Calendar-owned executable rules."
         : "Calendar setup can learn preferences, inspect selected destinations, and preview strong-evidence commitments. Automatic event creation is not enabled.",
-    setupPrompt: `Use ${invocation} to set up my Calendar in Ilo. Inspect selected and writable calendars, ask the shortest useful preference interview, save a draft profile, and preview strong-evidence commitments without claiming automatic event creation${support === "executable_rules" ? " beyond the Calendar-owned rules this deployment publishes" : ""}.`,
+    setupPrompt: `Use ${invocation} to set up my Calendar in nohmi. Inspect selected and writable calendars, ask the shortest useful preference interview, save a draft profile, and preview strong-evidence commitments without claiming automatic event creation${support === "executable_rules" ? " beyond the Calendar-owned rules this deployment publishes" : ""}.`,
     title:
       support === "executable_rules"
         ? "Calendar profiles, previews, and rules"

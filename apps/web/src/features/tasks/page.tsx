@@ -27,6 +27,7 @@ import {
 } from "@/components/icons";
 import {
   TaskItem,
+  TaskItemActions,
   TaskItemCompletion,
   TaskItemContent,
   TaskItemDescription,
@@ -57,7 +58,7 @@ import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
-import { formatMaterialDateTime } from "../../lib/date-format.js";
+import { formatMaterialDateTime, formatRelativeMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { RemindersSidebar } from "../reminders/page.js";
 import { TaskListDialog } from "./task-list-dialog.js";
@@ -661,6 +662,7 @@ function DependencyFailure({
 
 export function TaskRow({
   list,
+  className,
   onEdit,
   project,
   recommendation,
@@ -668,6 +670,7 @@ export function TaskRow({
   timeZone,
 }: {
   list?: TaskList;
+  className?: string;
   onEdit: () => void;
   project?: TaskProject;
   recommendation?: DailyBrief["recommendedTasks"][number];
@@ -688,10 +691,25 @@ export function TaskRow({
   });
   const isCompleted = task.lifecycle === "completed";
   const isTrashed = task.deletedAt !== null;
+  const remove = useMutation({
+    mutationFn: () => api.trashTask(task.id, { expectedRevision: task.revision }),
+    onError: (error) => toast.error(errorMessage(error)),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const overdue =
+    task.lifecycle === "open" &&
+    !isTrashed &&
+    task.dueAt !== null &&
+    new Date(task.dueAt).getTime() < Date.now();
   const timing = taskTiming(task, timeZone);
   const description = taskDescription(task, list, project);
   return (
-    <TaskItem data-completed={isCompleted}>
+    <TaskItem
+      className={className}
+      data-completed={isCompleted}
+      data-status={recommendation?.urgency === "next" ? "next" : undefined}
+      data-priority={task.priority}
+    >
       <TaskItemCompletion>
         {task.lifecycle === "cancelled" || isTrashed ? null : (
           <Checkbox
@@ -705,7 +723,9 @@ export function TaskRow({
       <TaskItemPrimaryAction aria-label={`Open ${task.title}`} onClick={onEdit}>
         <TaskItemContent>
           <TaskItemTitle>{task.title}</TaskItemTitle>
-          {timing ? <TaskItemDue>{timing}</TaskItemDue> : null}
+          {timing ? (
+            <TaskItemDue className={overdue ? "text-destructive" : undefined}>{timing}</TaskItemDue>
+          ) : null}
           {description ? <TaskItemDescription>{description}</TaskItemDescription> : null}
           {recommendation ? (
             <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
@@ -726,6 +746,19 @@ export function TaskRow({
           ) : null}
         </TaskItemContent>
       </TaskItemPrimaryAction>
+      {!isTrashed ? (
+        <TaskItemActions>
+          <Button
+            aria-label={`Remove ${task.title}`}
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+            size="icon-xs"
+            variant="ghost"
+          >
+            <TrashIcon />
+          </Button>
+        </TaskItemActions>
+      ) : null}
       {task.lifecycle !== "open" || isTrashed ? (
         <TaskItemMetadata>
           <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
@@ -971,7 +1004,7 @@ function dateTimeLocalToIso(value: string, timeZone: string) {
 function taskTiming(task: Task, timeZone: string): string | null {
   const timing = [
     task.scheduledAt ? `Reserved ${formatMaterialDateTime(task.scheduledAt, timeZone)}` : null,
-    task.dueAt ? `Due ${formatMaterialDateTime(task.dueAt, timeZone)}` : null,
+    task.dueAt ? `Due ${formatRelativeMaterialDateTime(task.dueAt, timeZone)}` : null,
   ].filter((detail): detail is string => detail !== null);
   return timing.length > 0 ? timing.join(" · ") : null;
 }

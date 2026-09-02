@@ -6827,7 +6827,7 @@ describe.sequential("finance service", () => {
       rows: [
         {
           status: "connected",
-          sync_error: "Plaid is not configured correctly. ilo is resolving this.",
+          sync_error: "Plaid is not configured correctly. nohmi is resolving this.",
           sync_error_category: "configuration",
           sync_error_code: "plaid_configuration_invalid",
           sync_recovery: "operator",

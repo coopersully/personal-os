@@ -61,6 +61,11 @@ describe("commitment item components", () => {
     await user.click(screen.getByRole("button", { name: "Open Draft product update" }));
     await user.click(screen.getByRole("button", { name: "Remove Draft product update" }));
 
+    expect(
+      screen
+        .getByRole("button", { name: "Open Draft product update" })
+        .closest('[data-component="commitment-item"]'),
+    ).toHaveAttribute("data-slot", "task-item");
     expect(onComplete).toHaveBeenCalledWith(true);
     expect(onOpen).toHaveBeenCalledOnce();
     expect(onRemove).toHaveBeenCalledOnce();
@@ -89,6 +94,9 @@ describe("commitment item components", () => {
 
     await user.click(screen.getByRole("button", { name: "Open Call Mom" }));
 
+    expect(
+      screen.getByRole("button", { name: "Open Call Mom" }).closest('[data-component="commitment-item"]'),
+    ).toHaveAttribute("data-slot", "reminder-item");
     expect(screen.getByRole("checkbox", { name: "Reopen Call Mom" })).toBeChecked();
     expect(onOpen).toHaveBeenCalledOnce();
   });

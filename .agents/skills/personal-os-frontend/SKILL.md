@@ -82,6 +82,10 @@ performance work.
 - Keep interaction treatment flat. Shared controls use semantic background and
   border changes for hover, focus, and selection; do not add rings, outlines,
   or box shadows as interaction indicators.
+- Separate ordinary surfaces and controls with opaque semantic tone rather than
+  a visible resting border. Shared primitives may reserve transparent border
+  geometry for focus, invalid, increased-contrast, or functional data states;
+  a legacy `outline` variant does not require a drawn outline.
 - Keep semantic foreground tokens intact on interactive controls. Never add a
   global color override that can defeat a component's `text-*` contrast class.
 - Keep navigation icon geometry stable across states: use the regular and
@@ -99,11 +103,12 @@ performance work.
   and providers use unframed functional icons.
 - Treat Today, Calendar, Tasks, Mail, and Finances as the complete workspace
   set. The navigation-owner manifest, rather than a leaf route, determines the
-  active workspace sidebar: Today owns Goals, Motives, and Activity; Tasks owns
-  Reminders. Account configuration belongs to the account utility, a tenant of
-  the shell: it uses the shared frame, sidebar column, and app bar, but must not
-  become a workspace, take a workspace identity, or enter the switcher. Only a
-  standalone flow such as setup may replace the shell.
+  active workspace sidebar: Today has no contextual sidebar; Tasks owns
+  Reminders. Goals, Motives, Reviews, and Activity belong to the account utility
+  in Settings. Account configuration is a tenant of the shell: it uses the
+  shared frame, sidebar column, and app bar, but must not become a workspace,
+  take a workspace identity, or enter the switcher. Only a standalone flow such
+  as setup may replace the shell.
 - Combine only attributes that answer the same user question into one compact
   trigger and detail surface. Keep a neighbouring control when it represents a
   distinct action—for example, weather icon + temperature combine, while the

@@ -75,7 +75,7 @@ export async function connectorHttpError(
       category: "rate_limited",
       code: "plaid_rate_limited",
       disposition: "retry",
-      message: "Plaid is temporarily rate-limiting ilo.",
+      message: "Plaid is temporarily rate-limiting nohmi.",
       ...(retryAfterMs === null ? {} : { retryAfterMs }),
       status: response.status,
     });
@@ -125,7 +125,7 @@ export async function connectorHttpError(
       category: "rate_limited",
       code: `${prefix}_rate_limited`,
       disposition: "retry",
-      message: `${label} is temporarily rate-limiting ilo.`,
+      message: `${label} is temporarily rate-limiting nohmi.`,
       ...(retryAfterMs === null ? {} : { retryAfterMs }),
       status: response.status,
     });

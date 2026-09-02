@@ -42,7 +42,7 @@ export function classifyConnectorSyncFailure(
   return {
     category: "unknown",
     code: "connector_unknown_failure",
-    message: `${providerLabel(provider)} is temporarily unavailable. ilo will retry automatically.`,
+    message: `${providerLabel(provider)} is temporarily unavailable. nohmi will retry automatically.`,
     recovery: "automatic",
     retryAfterMs: null,
     status: null,
@@ -81,7 +81,10 @@ export function connectionHealthForAccount(account: {
             ? "retrying"
             : "ready";
   return {
-    message: state === "ready" || state === "syncing" ? null : account.syncError,
+    message:
+      state === "ready" || state === "syncing"
+        ? null
+        : (account.syncError?.replace(/\b(?:ilo|nohmi)\b/gi, "nohmi") ?? null),
     nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
     recovery: account.syncRecovery,
     state,
@@ -118,17 +121,17 @@ function safeConnectorMessage(
   }
   if (recovery === "operator") {
     if (category === "configuration") {
-      return `${label} is not configured correctly. ilo is resolving this.`;
+      return `${label} is not configured correctly. nohmi is resolving this.`;
     }
     if (category === "not_found") {
-      return `${label} could not find a connected resource. ilo is resolving this.`;
+      return `${label} could not find a connected resource. nohmi is resolving this.`;
     }
-    return `${label} returned an unexpected response. ilo is resolving this.`;
+    return `${label} returned an unexpected response. nohmi is resolving this.`;
   }
   if (category === "rate_limited") {
-    return `${label} is temporarily rate-limiting ilo. ilo will retry automatically.`;
+    return `${label} is temporarily rate-limiting nohmi. nohmi will retry automatically.`;
   }
-  return `${label} is temporarily unavailable. ilo will retry automatically.`;
+  return `${label} is temporarily unavailable. nohmi will retry automatically.`;
 }
 
 function providerLabel(provider: ExternalConnectorProvider): string {

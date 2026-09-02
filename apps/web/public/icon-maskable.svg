@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img">
-  <title>ilo</title>
-  <desc>The ilo mark inside the maskable safe zone on a full-bleed background.</desc>
+  <title>Nomi</title>
+  <desc>The Nomi mark inside the maskable safe zone on a full-bleed background.</desc>
   <!--
     Android crops a maskable icon to a circle, so the whole framed mark is scaled to 290px and
     centred, keeping it inside the safe zone (a square inscribed in the 80% safe circle measures

@@ -2,7 +2,7 @@ import { createEmailDelivery } from "./email-delivery.js";
 
 const message = {
   html: "<p>Welcome</p>",
-  subject: "Welcome to ilo",
+  subject: "Welcome to nohmi",
   text: "Welcome",
   to: "friend@example.com",
 };
@@ -26,7 +26,7 @@ describe("email delivery", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(null, { status: 202 }));
     const delivery = createEmailDelivery({
-      from: "ilo <hello@ilo.coopersully.me>",
+      from: "nohmi <hello@ilo.coopersully.me>",
       resendApiKey: "resend-test-key",
     });
 
@@ -34,7 +34,7 @@ describe("email delivery", () => {
 
     expect(request).toHaveBeenCalledWith("https://api.resend.com/emails", {
       body: JSON.stringify({
-        from: "ilo <hello@ilo.coopersully.me>",
+        from: "nohmi <hello@ilo.coopersully.me>",
         html: message.html,
         subject: message.subject,
         text: message.text,
@@ -55,7 +55,7 @@ describe("email delivery", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("provider detail", { status: 503 }));
     const delivery = createEmailDelivery({
-      from: "ilo <hello@ilo.coopersully.me>",
+      from: "nohmi <hello@ilo.coopersully.me>",
       resendApiKey: "resend-test-key",
     });
 

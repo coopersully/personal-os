@@ -7966,7 +7966,7 @@ describe.sequential("ilo API", () => {
     expect(consentPage).toContain("rule-approved categorization and reconciliation");
     expect(consentPage).toContain("pending rather than guessed");
     expect(consentPage).toContain("durable Finance maintenance run");
-    expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
+    expect(consentPage).toContain("Connected provider credentials remain inside nohmi");
     expect(consentPage).toContain('class="oauth-card"');
     expect(consentPage).toContain("Requested access");
     expect(consentPage).toContain('class="oauth-cancel"');

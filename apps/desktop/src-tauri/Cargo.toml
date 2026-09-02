@@ -2,7 +2,7 @@
 name = "personal-os"
 version = "0.1.0"
 description = "A shared daily surface for people and their agents"
-authors = ["ilo contributors"]
+authors = ["Nomi contributors"]
 edition = "2021"
 
 [lib]

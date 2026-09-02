@@ -2,7 +2,7 @@
 
 ## Purpose
 
-ilo has several composition roots that must remain stable while
+nohmi has several composition roots that must remain stable while
 independent product domains evolve. This document is the source of truth for
 parallel worktree ownership. It complements the system boundary in
 [`ADR 0001`](../architecture/0001-system-shape.md).

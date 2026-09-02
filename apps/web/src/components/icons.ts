@@ -93,7 +93,7 @@ import ErrorSource from "reicon-react/icons/XCircle";
 /**
  * The single icon vocabulary for the web application.
  *
- * Every glyph in ilo comes from reicon-react and is reached through this module. Importing an icon
+ * Every glyph in nohmi comes from reicon-react and is reached through this module. Importing an icon
  * package directly, or importing `reicon-react` anywhere else, fails `scripts/check-icon-contract.mjs`.
  * See `docs/design/system.md` for the icon contract.
  *

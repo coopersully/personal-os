@@ -14,12 +14,16 @@ import {
   siX,
   siZelle,
 } from "simple-icons";
+import { BRAND_NAME, BRAND_PROMISE } from "../brand.js";
+
+const ORBIT_PROMISE = BRAND_PROMISE.replace(/[.!?]+$/, "");
+const ORBIT_COPY = `✦\u00A0\u00A0${ORBIT_PROMISE}\u00A0\u00A0✦\u00A0\u00A0${ORBIT_PROMISE}\u00A0\u00A0`;
 
 /**
  * Third-party brand marks.
  *
  * Brand marks are deliberately NOT icons and never enter the reicon registry. An icon is a glyph
- * ilo chooses to express a meaning; a brand mark is someone else's trademark, whose artwork we may
+ * nohmi chooses to express a meaning; a brand mark is someone else's trademark, whose artwork we may
  * reproduce but not redesign. They therefore differ on every axis the icon contract governs: their
  * shape is fixed by the owner, some may not be recoloured, and none may be substituted for a
  * similar-looking glyph. This module is the only place in the application allowed to contain inline
@@ -174,4 +178,51 @@ export function BrandMark({
       {mark.render()}
     </svg>
   );
+}
+
+export function NohmiBrandMark({
+  auth = false,
+  compact = false,
+}: {
+  auth?: boolean;
+  compact?: boolean;
+}) {
+  if (auth) {
+    return (
+      <span aria-label={BRAND_NAME} className="auth-brand-graphic" role="img">
+        <svg aria-hidden="true" className="auth-brand-graphic__orbit" viewBox="0 0 100 100">
+          <defs>
+            <path
+              d="M 5,50 A 45,45 0 0,1 95,50 A 45,45 0 0,1 5,50"
+              id="auth-brand-graphic-orbit-circle"
+            />
+          </defs>
+          <text className="auth-brand-graphic__orbit-text">
+            <textPath
+              href="#auth-brand-graphic-orbit-circle"
+              lengthAdjust="spacing"
+              textLength="282.743"
+            >
+              {ORBIT_COPY}
+            </textPath>
+          </text>
+        </svg>
+        <span className="auth-brand-graphic__frame">
+          <svg aria-hidden="true" className="auth-brand-graphic__mark" viewBox="0 0 512 512">
+            <path d="M145 368V144h55v42c18-31 47-48 83-48 57 0 84 37 84 103v127h-55V254c0-38-13-61-48-61-39 0-64 27-64 73v102h-55Z" />
+          </svg>
+        </span>
+      </span>
+    );
+  }
+
+  if (compact) {
+    return (
+      <span aria-label={BRAND_NAME} className="brand-mark brand-mark--compact" role="img">
+        n
+      </span>
+    );
+  }
+
+  return <span className="brand-wordmark">{BRAND_NAME}</span>;
 }

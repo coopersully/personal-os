@@ -4,7 +4,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Open ilo" }).click();
+  await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
 
   await page.goto("/calendar");
@@ -28,7 +28,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Open ilo" }).click();
+  await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/reviews");
   await expect(page.getByRole("heading", { level: 2, name: "Reviews", exact: true })).toBeVisible();
@@ -123,8 +123,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   };
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
-  await page.getByRole("button", { name: "I have an invite code" }).click();
+  await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();
+  await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Invite code").fill("E2E12345");
   await page.getByLabel("Name").fill("E2E Person");
   await expect(page.getByText("Invitation accepted.")).toBeVisible();
@@ -139,10 +139,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const applicationSidebar = page.getByRole("complementary", {
     name: "Today Sidebar",
   });
-  if (mobile) {
-    await expect(applicationSidebar).toBeHidden();
-  } else {
-    await expect(applicationSidebar).toBeVisible();
+  await expect(applicationSidebar).toHaveCount(0);
+  if (!mobile) {
     await page.getByRole("button", { name: "Switch workspace" }).click();
     const workspaceMenu = page.getByRole("menu", { name: "Switch workspace" });
     const calendarWorkspace = workspaceMenu.getByRole("menuitem", { name: "Calendar" });
@@ -214,13 +212,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Today", exact: true }).click();
 
-  // Activity belongs to Today, so reach it from that workspace rather than the
-  // account menu it used to live in.
   await returnToApp();
-  await openWorkspacePage("Today", "Activity");
-  await expect(page.getByText("Reminder · created").first()).toBeVisible();
-  await expect(page.getByText("Calendar event · created").first()).toBeVisible();
-
   if (mobile) {
     await page.getByRole("button", { name: "Workspace actions" }).click();
     await page.getByRole("button", { name: /account$/ }).click();
@@ -242,7 +234,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     await settingsSidebar.getByRole("link", { name }).click();
   };
   await expect(
-    page.getByRole("navigation", { name: "Top navigation" }).getByText("Settings"),
+    page.getByRole("navigation", { name: "Top navigation" }).getByText("Account"),
   ).toBeVisible();
   if (mobile) {
     await expect(settingsSidebar).toBeHidden();
@@ -251,7 +243,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
     ).toBeVisible();
   } else {
     await expect(settingsSidebar).toBeVisible();
-    await expect(settingsSidebar.getByRole("link", { name: "Back to Today" })).toBeVisible();
+    await expect(settingsSidebar.getByRole("button", { name: "Switch workspace" })).toContainText(
+      "Settings",
+    );
   }
   await expect(page.getByRole("tablist", { name: "Settings sections" })).toHaveCount(0);
   await page.getByLabel("Planning day starts").fill("10:00");
@@ -259,6 +253,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByRole("button", { name: "Save profile" }).click();
   await expect(page.getByLabel("Planning day starts")).toHaveValue("10:00");
   await expect(page.getByLabel("Planning day ends")).toHaveValue("18:00");
+  await openSettingsSection("Activity");
+  await expect(page.getByText("Reminder · created").first()).toBeVisible();
+  await expect(page.getByText("Calendar event · created").first()).toBeVisible();
   await openSettingsSection("Appearance");
   await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
   const darkAppearance = page.getByRole("radio", { name: "Dark" });
@@ -268,7 +265,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     .poll(() => page.locator("html").evaluate((element) => element.classList.contains("dark")))
     .toBe(true);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   await openSettingsSection("Connected agents");
   await expect(page.getByRole("heading", { name: "Connected agents", exact: true })).toBeVisible();
@@ -309,7 +306,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await page.getByRole("menuitem", { name: "Today at a Glance" }).click();
   } else {
-    await settingsSidebar.getByRole("link", { name: "Back to Today" }).click();
+    await settingsSidebar.getByRole("button", { name: "Switch workspace" }).click();
+    await page.getByRole("menuitem", { name: "Today at a Glance" }).click();
   }
   await expect(page).toHaveURL(/\/today$/);
 });

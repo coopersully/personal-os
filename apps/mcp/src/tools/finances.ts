@@ -14,7 +14,7 @@ import {
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
-const id = z.string().uuid().describe("ilo object identifier");
+const id = z.string().uuid().describe("Nomi object identifier");
 const idempotencyKey = z
   .string()
   .min(1)
@@ -400,7 +400,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general ilo goals.",
+        "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general Nomi goals.",
       inputSchema: {
         changes: z.record(z.string(), z.unknown()).optional(),
         deadline: z.iso.date().nullable().optional(),
@@ -475,7 +475,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     ],
     [
       "export_finance_data",
-      "Export the user's ilo-owned Finance ledger, accounts, categories, and projections.",
+      "Export the user's Nomi-owned Finance ledger, accounts, categories, and projections.",
       () => api.exportFinanceData(),
     ],
   ];
@@ -545,7 +545,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: true },
       description:
-        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the ilo web application. The external provider may still require the user to authenticate and consent.",
+        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the Nomi web application. The external provider may still require the user to authenticate and consent.",
       inputSchema: { idempotencyKey, provider: z.literal("plaid").default("plaid") },
       title: "Start Finance account connection",
     },

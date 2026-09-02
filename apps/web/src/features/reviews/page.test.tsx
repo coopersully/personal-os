@@ -84,6 +84,9 @@ describe("Reviews", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Reviews" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Decisions and conditions that need your judgment across nohmi."),
+    ).not.toBeInTheDocument();
     expect(await screen.findByText("Review newsletters")).toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: "Setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review rule" })).toHaveAttribute(

@@ -46,7 +46,7 @@ describe("assistant setup routes", () => {
       getContext: vi.fn(async () => ({
         access: { grantedScopes: ["mail:read", "mail:write"] },
         generatedAt: now,
-        identity: { actorType: "agent" as const, displayName: "Ilo test", userId: id },
+        identity: { actorType: "agent" as const, displayName: "nohmi test", userId: id },
         links: {
           activity: "https://app.example.com/activity",
           agentAccess: "https://app.example.com/settings?section=workspace-access",
@@ -108,12 +108,12 @@ describe("assistant setup routes", () => {
         ],
         mcpUrl: "https://mcp.example.com/mcp",
         skill: {
-          displayName: "Ilo Guided Setup",
-          installPrompt: "Install the Ilo skill.",
+          displayName: "nohmi Guided Setup",
+          installPrompt: "Install the nohmi skill.",
           invocation: "$ilo-setup",
           name: "ilo-setup",
           revision: "release-0.1.0",
-          setupPrompt: "Set up Ilo.",
+          setupPrompt: "Set up nohmi.",
           sourceUrl: "https://example.com/ilo-setup",
           version: "0.1.0",
         },

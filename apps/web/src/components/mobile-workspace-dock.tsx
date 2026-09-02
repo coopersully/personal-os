@@ -1,10 +1,11 @@
+import type { WeatherSnapshot } from "@personal-os/domain";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckIcon,
   ChevronDownIcon,
-  HouseIcon,
   type Icon,
+  KeyIcon,
   LayersIcon,
   LogOutIcon,
   SettingsIcon,
@@ -41,15 +42,20 @@ import {
   type MobileWorkspacePage,
   mobileWorkspacePages,
 } from "../navigation/mobile-workspace-dock.js";
+import { TodayWorkspaceIcon } from "./today-workspace-icon.js";
 import { WorkspaceIcon } from "./workspace-identity.js";
 
-function DockWorkspaceIcon({ workspace }: { workspace: WorkspaceDefinition }) {
+function DockWorkspaceIcon({
+  timeZone,
+  weather,
+  workspace,
+}: {
+  timeZone: string;
+  weather: WeatherSnapshot | undefined;
+  workspace: WorkspaceDefinition;
+}) {
   if (workspace.id === "today") {
-    return (
-      <span aria-hidden="true" className="workspace-dock__identity-frame">
-        <HouseIcon />
-      </span>
-    );
+    return <TodayWorkspaceIcon timeZone={timeZone} weather={weather} />;
   }
   return <WorkspaceIcon size="sm" workspace={workspace.id} />;
 }
@@ -68,14 +74,20 @@ export function MobileWorkspaceDock({
   accountSections,
   onLogout,
   renderWorkspaceNavigation,
-  workspaceDefinitions,
+  onRequestPasswordReset,
   pathname,
+  planningTimezone,
+  weather,
+  workspaceDefinitions,
 }: {
   accountName: string;
   accountSections: MobileWorkspacePage[];
   onLogout: () => void;
+  onRequestPasswordReset: () => void;
   pathname: string;
   renderWorkspaceNavigation?: (onNavigate: () => void) => ReactNode;
+  planningTimezone: string;
+  weather: WeatherSnapshot | undefined;
   workspaceDefinitions: WorkspaceDefinition[];
 }) {
   const [open, setOpen] = useState(false);
@@ -106,7 +118,11 @@ export function MobileWorkspaceDock({
               variant="ghost"
             >
               {activeWorkspace ? (
-                <DockWorkspaceIcon workspace={activeWorkspace} />
+                <DockWorkspaceIcon
+                  timeZone={planningTimezone}
+                  weather={weather}
+                  workspace={activeWorkspace}
+                />
               ) : (
                 <DockAccountIcon />
               )}
@@ -120,27 +136,42 @@ export function MobileWorkspaceDock({
             className="workspace-dock__workspace-menu"
             side="top"
           >
-            {workspaceDefinitions.map((workspace) => {
-              const selected = workspace.id === activeWorkspace?.id;
-              const descriptionId = `workspace-dock-description-${workspace.id}`;
-              return (
-                <DropdownMenuItem asChild key={workspace.id}>
-                  <Link
-                    aria-current={selected ? "page" : undefined}
-                    aria-describedby={descriptionId}
-                    aria-label={workspace.label}
-                    to={workspace.path}
-                  >
-                    <DockWorkspaceIcon workspace={workspace} />
-                    <span className="workspace-dock__workspace-copy">
+            <DropdownMenuGroup>
+              {workspaceDefinitions.map((workspace) => {
+                const selected = workspace.id === activeWorkspace?.id;
+                return (
+                  <DropdownMenuItem asChild key={workspace.id}>
+                    <Link
+                      aria-current={selected ? "page" : undefined}
+                      aria-label={workspace.label}
+                      to={workspace.path}
+                    >
+                      <DockWorkspaceIcon
+                        timeZone={planningTimezone}
+                        weather={weather}
+                        workspace={workspace}
+                      />
                       <span>{workspace.label}</span>
-                      <small id={descriptionId}>{workspace.description}</small>
-                    </span>
-                    {selected ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
-                  </Link>
-                </DropdownMenuItem>
-              );
-            })}
+                      {selected ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
+                    </Link>
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <Link
+                  aria-current={activeWorkspace ? undefined : "page"}
+                  aria-label="Settings"
+                  to="/settings"
+                >
+                  <SettingsIcon aria-hidden="true" />
+                  <span>Settings</span>
+                  {activeWorkspace ? null : <CheckIcon aria-hidden="true" className="ml-auto" />}
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -228,6 +259,9 @@ export function MobileWorkspaceDock({
                     onNavigate={() => setOpen(false)}
                     path="/settings"
                   />
+                  <DropdownMenuItem onSelect={onRequestPasswordReset}>
+                    <KeyIcon aria-hidden="true" /> Change password
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onLogout} variant="destructive">

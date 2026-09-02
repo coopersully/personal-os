@@ -150,8 +150,8 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
     scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
   },
   {
-    description: "Create, manage, and audit all supported Ilo material.",
-    name: "Full Ilo",
+    description: "Create, manage, and audit all supported nohmi material.",
+    name: "Full nohmi",
     scopes: [
       "calendar:read",
       "calendar:write",
@@ -543,7 +543,7 @@ function AgentAccessSettings({
             <div>
               <h2>Connected agents</h2>
               <p>
-                See every host and local credential that can act in Ilo, then revoke access in one
+                See every host and local credential that can act in nohmi, then revoke access in one
                 place.
               </p>
             </div>
@@ -568,12 +568,12 @@ function AgentAccessSettings({
                 <h3>Connect an agent host</h3>
               </CardTitle>
               <CardDescription>
-                Add Ilo’s MCP endpoint to a compatible host. Provider credentials stay in Ilo.
+                Add nohmi’s MCP endpoint to a compatible host. Provider credentials stay in nohmi.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <CopyInput
-                label="Ilo MCP URL"
+                label="nohmi MCP URL"
                 loading={guide.isPending}
                 value={guide.data?.mcpUrl ?? ""}
               />
@@ -597,7 +597,7 @@ function AgentAccessSettings({
                     <h3>Connected hosts</h3>
                   </CardTitle>
                   <CardDescription>
-                    OAuth connections can be revoked without affecting Ilo sessions.
+                    OAuth connections can be revoked without affecting nohmi sessions.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -646,7 +646,7 @@ function AgentAccessSettings({
             />
           </section>
           <RevokeAccessDialog
-            description="This host will immediately lose its Ilo access. Your Ilo sessions and provider connections will not be changed."
+            description="This host will immediately lose its nohmi access. Your nohmi sessions and provider connections will not be changed."
             name={oauthClientToRevoke?.name ?? null}
             onConfirm={() => {
               if (oauthClientToRevoke) revokeOAuthClient.mutate(oauthClientToRevoke.id);
@@ -745,7 +745,7 @@ function MailRuleReviewDialog({
             <ShieldCheckIcon />
             <AlertTitle>Checking current matches</AlertTitle>
             <AlertDescription>
-              Ilo is rebuilding the bounded preview for this rule.
+              nohmi is rebuilding the bounded preview for this rule.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -930,7 +930,7 @@ function WorkspaceSettingsStatus({
   const description = error
     ? errorMessage(error)
     : loading
-      ? `Ilo is checking ${label} configuration.`
+      ? `nohmi is checking ${label} configuration.`
       : agentOwned
         ? (plan?.nextAction ?? step?.description ?? `The agent is setting up ${label}.`)
         : (step?.userAction ?? plan?.nextAction ?? `${label} setup has not started.`);
@@ -1060,8 +1060,8 @@ function SetupProtocolDetails({
       </CollapsibleTrigger>
       <CollapsibleContent className="agent-access__protocol-details">
         <p>
-          Connected agents read the current setup step from Ilo. If a host waits for a request, send
-          this one sentence; the hosted skill is optional.
+          Connected agents read the current setup step from nohmi. If a host waits for a request,
+          send this one sentence; the hosted skill is optional.
         </p>
         <CopyPrompt
           copyLabel="Copy agent setup request"
@@ -1416,7 +1416,7 @@ function TokenAccess({
           </Collapsible>
         ) : null}
         <RevokeAccessDialog
-          description="This local credential will immediately stop working. Existing Ilo sessions and connected providers will not be changed."
+          description="This local credential will immediately stop working. Existing nohmi sessions and connected providers will not be changed."
           name={tokenToRevoke?.name ?? null}
           onConfirm={() => {
             if (tokenToRevoke) remove.mutate(tokenToRevoke.id);

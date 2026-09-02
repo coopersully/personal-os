@@ -93,8 +93,8 @@ export function profileReadiness(
   }
   return {
     complete: false,
-    description: `Run the guided interview to teach Ilo your ${label} preferences.`,
-    nextStep: `Teach Ilo your ${label} preferences`,
+    description: `Run the guided interview to teach nohmi your ${label} preferences.`,
+    nextStep: `Teach nohmi your ${label} preferences`,
     title: "Preferences",
   };
 }
@@ -109,7 +109,7 @@ export function attentionReadiness(
   if (items.state === "unavailable") {
     return unavailableReadiness(
       `${label} attention`,
-      `${label} attention is unavailable until Ilo can load it.`,
+      `${label} attention is unavailable until nohmi can load it.`,
     );
   }
   return {
@@ -174,7 +174,7 @@ export function unsupportedCapability(label: string): DomainCapability {
   return {
     allowed: [],
     approvalRequired: [],
-    description: `${label} guided setup is not published by this Ilo deployment.`,
+    description: `${label} guided setup is not published by this nohmi deployment.`,
     sourceScope: `No ${label} sources are available to agents.`,
     setupPrompt: null,
     title: `${label} setup unavailable`,

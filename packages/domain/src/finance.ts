@@ -1033,7 +1033,7 @@ export const financeGuidedSetupContextSchema = z.object({
     approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(
-        "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
       )
       .nullable(),
     draftProposal: financeDomainProfileSchema.nullable(),

@@ -23,7 +23,7 @@ describe("connection health presentation", () => {
     ["syncing", "Syncing"],
     ["retrying", "Retrying automatically"],
     ["reconnect", "Reconnect required"],
-    ["service_attention", "ilo is resolving this"],
+    ["service_attention", "nohmi is resolving this"],
   ] as const)("renders %s as %s", (state, label) => {
     render(<ConnectionHealthBadge health={{ ...baseHealth, state }} />);
     expect(screen.getByText(label)).toBeInTheDocument();
@@ -33,7 +33,7 @@ describe("connection health presentation", () => {
     const { rerender } = render(
       <ConnectionHealthDescription
         health={{
-          message: "Google is temporarily unavailable. ilo will retry automatically.",
+          message: "Google is temporarily unavailable. nohmi will retry automatically.",
           nextSyncAt: "2026-08-05T20:05:00.000Z",
           recovery: "automatic",
           state: "retrying",
@@ -109,7 +109,7 @@ describe("connection health presentation", () => {
         lastSyncedAt={null}
       />,
     );
-    expect(screen.getByText("ilo is resolving a connection issue.")).toBeInTheDocument();
+    expect(screen.getByText("nohmi is resolving a connection issue.")).toBeInTheDocument();
 
     rerender(<ConnectionHealthDescription health={baseHealth} lastSyncedAt={null} />);
     expect(screen.getByText("Ready to sync")).toBeInTheDocument();
@@ -137,7 +137,7 @@ describe("connection health presentation", () => {
     expect(connectionHealth({ health: baseHealth, syncStatus: "error" })).toBe(baseHealth);
     expect(connectionHealth({ syncStatus: "syncing" })).toMatchObject({ state: "syncing" });
     expect(connectionHealth({ syncStatus: "error" })).toMatchObject({
-      message: "This connection needs attention. ilo is resolving this.",
+      message: "This connection needs attention. nohmi is resolving this.",
       state: "service_attention",
     });
     expect(connectionHealth({ syncStatus: "idle" })).toMatchObject({ state: "ready" });

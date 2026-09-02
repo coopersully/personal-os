@@ -35,6 +35,23 @@ describe("auth fields", () => {
     expect(screen.getAllByText(/[A-D2-5]/)).toHaveLength(8);
   });
 
+  it("renders field errors and both invite-code status messages", () => {
+    const { rerender } = render(
+      <InviteCodeField
+        error="That invitation is not available."
+        onChange={() => undefined}
+        status="checking"
+        value=""
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Checking invitation");
+    expect(screen.getByText("That invitation is not available.")).toBeInTheDocument();
+
+    rerender(<InviteCodeField onChange={() => undefined} status="valid" value="ABCD2345" />);
+    expect(screen.getByRole("status")).toHaveTextContent("Invitation accepted");
+  });
+
   it("checks password requirements and toggles both password fields together", async () => {
     function PasswordExample() {
       const [password, setPassword] = useState("");
@@ -70,5 +87,29 @@ describe("auth fields", () => {
     expect(password).toHaveAttribute("type", "text");
     expect(confirmation).toHaveAttribute("type", "text");
     expect(screen.getAllByRole("button", { name: "Hide passwords" })).toHaveLength(2);
+  });
+
+  it("supports a single current-password field with an inline action and error", async () => {
+    const onValueChange = () => undefined;
+    render(
+      <PasswordFields
+        autoComplete="current-password"
+        error="Password is required."
+        labelAction={<a href="/forgot-password">Forgot?</a>}
+        onValueChange={onValueChange}
+        value=""
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Forgot?" })).toBeInTheDocument();
+    expect(screen.getByText("Password is required.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Confirm password")).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Password requirements" })).not.toBeInTheDocument();
+
+    const password = screen.getByLabelText("Password");
+    expect(password).toHaveAttribute("type", "password");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show password" }));
+    expect(password).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: "Hide password" })).toBeInTheDocument();
   });
 });

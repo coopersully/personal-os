@@ -15,7 +15,6 @@ COPY packages/api-client/package.json packages/api-client/package.json
 COPY packages/connectors/package.json packages/connectors/package.json
 COPY packages/database/package.json packages/database/package.json
 COPY packages/domain/package.json packages/domain/package.json
-COPY packages/ui/package.json packages/ui/package.json
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 FROM dependencies AS build

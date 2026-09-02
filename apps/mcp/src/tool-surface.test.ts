@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { createIloToolSurface } from "./tool-surface.js";
 
-describe("Ilo MCP tool surface", () => {
+describe("Nomi MCP tool surface", () => {
   it("fails closed when a feature registers an operation missing from the catalog", () => {
     const registerTool = vi.fn();
     const server = { marker: "server", registerTool } as unknown as McpServer;
@@ -19,7 +19,7 @@ describe("Ilo MCP tool surface", () => {
     };
 
     expect(() => surface.registerTool("uncatalogued_finance_tool", {}, () => ({}))).toThrow(
-      "missing from the Ilo tool catalog",
+      "missing from the Nomi tool catalog",
     );
     expect(Reflect.get(surface, "marker")).toBe("server");
   });

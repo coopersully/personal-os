@@ -164,7 +164,7 @@ flowchart TD
 
 - Publish a Workspace access surface that names what agents may read, change, propose, and never do in every domain.
 - Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
-- Compose Review and Attention work into the Today-owned Reviews destination with workspace/type filters, honest partial availability, stable pagination, and deep links back to the owning domain.
+- Compose Review and Attention work into the Settings-owned Reviews destination with workspace/type filters, honest partial availability, stable pagination, and deep links back to the owning domain.
 - Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
 - Give a durable scheduler or queue only to a domain workflow that needs it, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior.
 - Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.

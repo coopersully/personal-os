@@ -1211,7 +1211,7 @@ describe.sequential("finance action service", () => {
       now: () => now,
     });
     const context = { principal: agent(userId), requestId: "action-queue" };
-    const input = { effectiveDate: "2026-08-17", employer: "Ilo", payFrequency: "monthly" };
+    const input = { effectiveDate: "2026-08-17", employer: "nohmi", payFrequency: "monthly" };
 
     await expect(service.performDirect("profile", input, context)).resolves.toMatchObject({
       status: "pending_review",
@@ -1433,7 +1433,7 @@ describe.sequential("finance action service", () => {
     });
     const input = {
       effectiveDate: "2026-08-18",
-      employer: "Ilo",
+      employer: "nohmi",
       payFrequency: "monthly",
     };
     const queued = await service.performDirect("profile", input, {
@@ -1594,7 +1594,7 @@ describe.sequential("finance action service", () => {
 
     const applying = service.performDirect(
       "profile",
-      { effectiveDate: "2026-08-18", employer: "Ilo", payFrequency: "monthly" },
+      { effectiveDate: "2026-08-18", employer: "nohmi", payFrequency: "monthly" },
       { principal: agent(userId), requestId: "bypass-lock" },
     );
     await started;
@@ -1641,7 +1641,7 @@ describe.sequential("finance action service", () => {
     });
     const queued = await service.performDirect(
       "profile",
-      { effectiveDate: "2026-08-19", employer: "Ilo", payFrequency: "monthly" },
+      { effectiveDate: "2026-08-19", employer: "nohmi", payFrequency: "monthly" },
       { principal: agent(userId), requestId: "rollback-queue" },
     );
     if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
@@ -3008,7 +3008,7 @@ describe.sequential("finance action service", () => {
       "profile",
       {
         effectiveDate: "2026-09-01",
-        employer: "Ilo",
+        employer: "nohmi",
         payAccountId: foreignAccount.id,
         payFrequency: "monthly",
       },

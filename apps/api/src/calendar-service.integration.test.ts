@@ -1118,7 +1118,7 @@ describe.sequential("Calendar commitment proposals", () => {
       .update(calendarAccounts)
       .set({
         nextSyncAt: new Date(timestamp.getTime() + 60_000),
-        syncError: "Google returned an unexpected response. ilo is resolving this.",
+        syncError: "Google returned an unexpected response. nohmi is resolving this.",
         syncErrorCategory: "invalid_response",
         syncErrorCode: "google_invalid_response",
         syncFailureCount: 1,
@@ -1131,7 +1131,7 @@ describe.sequential("Calendar commitment proposals", () => {
     expect(listed.find((calendar) => calendar.accountId === remoteAccountId)?.source).toMatchObject(
       {
         health: {
-          message: "Google returned an unexpected response. ilo is resolving this.",
+          message: "Google returned an unexpected response. nohmi is resolving this.",
           nextSyncAt: new Date(timestamp.getTime() + 60_000).toISOString(),
           recovery: "operator",
           state: "service_attention",

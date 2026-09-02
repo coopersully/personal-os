@@ -135,7 +135,7 @@ export function createIloToolSurface(server: McpServer, options: IloToolSurfaceO
 function getToolDefinition(name: string): IloToolDefinition {
   const definition = iloToolCatalog[name as IloToolName];
   if (!definition) {
-    throw new Error(`MCP tool ${name} is missing from the Ilo tool catalog.`);
+    throw new Error(`MCP tool ${name} is missing from the Nomi tool catalog.`);
   }
   return definition;
 }

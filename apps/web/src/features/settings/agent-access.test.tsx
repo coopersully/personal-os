@@ -130,13 +130,13 @@ describe("agent access settings", () => {
       ],
       mcpUrl: "https://mcp.example.com/mcp",
       skill: {
-        displayName: "Ilo Guided Setup",
+        displayName: "nohmi Guided Setup",
         installPrompt:
           "Install the ilo-setup skill from https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md.",
         invocation: "$ilo-setup",
         name: "ilo-setup",
         revision: "v0.2.0",
-        setupPrompt: "Use $ilo-setup to set up Ilo.",
+        setupPrompt: "Use $ilo-setup to set up nohmi.",
         sourceUrl: "https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md",
         version: "0.2.0",
       },
@@ -219,7 +219,7 @@ describe("agent access settings", () => {
         status: active ? "complete" : draft ? "needs_input" : "in_progress",
         steps: [
           {
-            completionEvidence: ["This authenticated MCP caller reached Ilo."],
+            completionEvidence: ["This authenticated MCP caller reached nohmi."],
             description: "Authorize one MCP host.",
             id: "connect_agent",
             instructions: [],
@@ -232,7 +232,8 @@ describe("agent access settings", () => {
           },
           {
             completionEvidence: active || draft ? ["Guidance exists at profile version 1."] : [],
-            description: "Inspect existing Ilo material and ask only about unresolved preferences.",
+            description:
+              "Inspect existing nohmi material and ask only about unresolved preferences.",
             id: "learn_preferences",
             instructions: [],
             order: 2,
@@ -256,7 +257,7 @@ describe("agent access settings", () => {
           },
           {
             completionEvidence: active ? ["Setup is confirmed."] : [],
-            description: "Ilo confirms setup.",
+            description: "nohmi confirms setup.",
             id: "complete",
             instructions: [],
             order: 4,
@@ -550,7 +551,7 @@ describe("agent access settings", () => {
     expect(screen.queryByText("Calendar readiness")).not.toBeInTheDocument();
     await screen.findByRole("heading", { name: "Mail profiles, previews, and approved rules" });
     expect(
-      screen.queryByRole("button", { name: /Let the agent set up Ilo/ }),
+      screen.queryByRole("button", { name: /Let the agent set up nohmi/ }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Mail" })).not.toHaveTextContent("Not set up");
 
@@ -577,7 +578,7 @@ describe("agent access settings", () => {
     );
     await browser.click(screen.getByRole("link", { name: "Connected agents" }));
     expect(await screen.findByRole("heading", { name: "Connected agents" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
+    expect(screen.getByLabelText("nohmi MCP URL")).toHaveValue("https://mcp.example.com/mcp");
   });
 
   it("shows one person-owned action without repeating setup or operational review state", async () => {
@@ -696,7 +697,7 @@ describe("agent access settings", () => {
     expect(screen.getByText(/Legacy inactive permission/)).toBeInTheDocument();
     const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
     expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();
-    await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
+    await browser.click(screen.getByRole("button", { name: "Copy nohmi MCP URL" }));
     await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
 
     await browser.click(screen.getByRole("button", { name: "Revoke Claude" }));
@@ -716,7 +717,7 @@ describe("agent access settings", () => {
     await waitFor(() => expect(mocks.revokeOAuthClient.mock.calls[0]?.[0]).toBe(id));
 
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
-    await browser.click(screen.getByRole("radio", { name: /Full Ilo/ }));
+    await browser.click(screen.getByRole("radio", { name: /Full nohmi/ }));
     await browser.click(screen.getByText(/Fine-tune permissions/));
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByLabelText("Read X bookmarks"));
@@ -930,7 +931,7 @@ describe("agent access settings", () => {
 
     expect(await screen.findByText("Calendar readiness")).toBeInTheDocument();
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
-      "Next step: Select a calendar for Ilo to use",
+      "Next step: Select a calendar for nohmi to use",
     );
     await browser.click(await screen.findByRole("button", { name: "Review checks" }));
     expect(screen.getByRole("link", { name: "Open Calendar" })).toBeInTheDocument();
@@ -943,7 +944,7 @@ describe("agent access settings", () => {
     view = renderSettings("/settings?section=tasks");
     expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
-      "Next step: Teach Ilo your Tasks preferences",
+      "Next step: Teach nohmi your Tasks preferences",
     );
     await browser.click(await screen.findByRole("button", { name: "Review checks" }));
     await browser.click(screen.getByRole("button", { name: /Show \d+ completed checks?/ }));
@@ -994,7 +995,7 @@ describe("agent access settings", () => {
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Review checks" }));
     expect(
-      screen.getByText("Mail rules are unavailable, so Ilo cannot report an approved-rule count."),
+      screen.getByText("Mail rules are unavailable, so nohmi cannot report an approved-rule count."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/0 active approved Mail rules/)).not.toBeInTheDocument();
   });

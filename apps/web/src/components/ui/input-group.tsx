@@ -14,7 +14,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="input-group"
       role="group"
       className={cn(
-        "group/input-group relative flex h-8 w-full min-w-0 items-center rounded-lg border border-input bg-transparent transition-colors outline-none has-[>textarea]:h-auto has-[[data-slot=input-group-control]:focus-visible]:border-foreground/50 has-[[data-slot=input-group-control]:focus-visible]:bg-selection has-[[data-slot][aria-invalid=true]]:border-destructive dark:bg-input/30",
+        "group/input-group relative flex h-8 w-full min-w-0 items-center rounded-lg border border-transparent bg-input/60 transition-colors outline-none hover:bg-input/80 has-[>textarea]:h-auto has-[[data-slot=input-group-control]:focus-visible]:border-foreground/50 has-[[data-slot=input-group-control]:focus-visible]:bg-selection has-[[data-slot][aria-invalid=true]]:border-destructive",
         className,
       )}
       {...props}
@@ -60,9 +60,9 @@ function InputGroupAddon({
 const inputGroupButtonVariants = cva("flex items-center gap-2 text-sm", {
   variants: {
     size: {
-      xs: "h-6 gap-1 rounded-[calc(var(--radius-md),10px)] px-2 has-[>svg]:px-2 [&>svg:not([class*='size-'])]:size-3.5",
+      xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 has-[>svg]:px-2 [&>svg:not([class*='size-'])]:size-3.5",
       sm: "h-7 gap-1.5 rounded-lg px-2.5 has-[>svg]:px-2.5",
-      "icon-xs": "size-6 rounded-[calc(var(--radius-md),10px)] p-0 has-[>svg]:p-0",
+      "icon-xs": "size-6 rounded-[min(var(--radius-md),10px)] p-0 has-[>svg]:p-0",
       "icon-sm": "size-7 p-0 has-[>svg]:p-0",
     },
   },

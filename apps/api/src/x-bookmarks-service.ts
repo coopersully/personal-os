@@ -446,5 +446,5 @@ function safeXSyncError(error: unknown): string {
   if (error instanceof ConnectorError && error.disposition === "reconnect") {
     return "X authorization is no longer valid. Reconnect to resume syncing.";
   }
-  return "X is temporarily unavailable. ilo will retry automatically.";
+  return "X is temporarily unavailable. nohmi will retry automatically.";
 }

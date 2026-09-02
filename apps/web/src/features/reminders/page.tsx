@@ -17,7 +17,6 @@ import {
   ReminderItemContent,
   ReminderItemDescription,
   ReminderItemDue,
-  ReminderItemMetadata,
   ReminderItemPrimaryAction,
   ReminderItemTitle,
 } from "@/components/reminder-item";
@@ -39,7 +38,7 @@ import {
   workspaceSearchFromParams,
   workspaceViewPath,
 } from "../../components/workspace-search.js";
-import { formatMaterialDateTime } from "../../lib/date-format.js";
+import { formatRelativeMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 
 export function RemindersCreateButton({ onCreate }: { onCreate: () => void }) {
@@ -172,14 +171,17 @@ export function ReminderRow({
     onSuccess: () => invalidateMaterial(queryClient),
   });
   const mutationError = complete.error ?? remove.error;
+  const completeReminder = reminder.completedAt !== null;
+  const overdue =
+    reminder.dueAt !== null && new Date(reminder.dueAt).getTime() < Date.now() && !completeReminder;
   return (
-    <ReminderItem data-completed={reminder.completedAt !== null}>
+    <ReminderItem data-completed={completeReminder} data-priority={reminder.priority}>
       <ReminderItemCompletion>
         <Checkbox
           aria-label={
             reminder.completedAt ? `Reopen ${reminder.title}` : `Complete ${reminder.title}`
           }
-          checked={reminder.completedAt !== null}
+          checked={completeReminder}
           disabled={complete.isPending}
           onCheckedChange={() => complete.mutate()}
         />
@@ -188,20 +190,13 @@ export function ReminderRow({
         <ReminderItemContent>
           <ReminderItemTitle>{reminder.title}</ReminderItemTitle>
           {reminder.dueAt ? (
-            <ReminderItemDue>
+            <ReminderItemDue className={overdue ? "text-destructive" : undefined}>
               <ClockIcon className="size-3" />
-              {formatMaterialDateTime(reminder.dueAt, timeZone)}
+              {formatRelativeMaterialDateTime(reminder.dueAt, timeZone)}
             </ReminderItemDue>
           ) : null}
         </ReminderItemContent>
       </ReminderItemPrimaryAction>
-      {reminder.priority === "high" ? (
-        <ReminderItemMetadata>
-          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-destructive uppercase">
-            High
-          </span>
-        </ReminderItemMetadata>
-      ) : null}
       <ReminderItemActions>
         <ShadcnButton
           aria-label={`Delete ${reminder.title}`}

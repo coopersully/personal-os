@@ -2,6 +2,7 @@
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { CSSProperties } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CalendarIcon } from "@/components/icons";
 import {
@@ -67,5 +68,25 @@ describe("EventCard", () => {
 
     expect(screen.getByText("Design review")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("supports calendar-colored event summaries", () => {
+    const { container } = render(
+      <EventCard style={{ "--calendar-color": "#34a853" } as CSSProperties} tone="calendar">
+        <EventCardContent>
+          <EventCardTitle>Dinner with Maya</EventCardTitle>
+        </EventCardContent>
+      </EventCard>,
+    );
+
+    const card = container.querySelector('[data-slot="event-card"]');
+    expect(card).toHaveClass("event-card");
+    expect(card).toHaveAttribute(
+      "data-tone",
+      "calendar",
+    );
+    expect(card).toHaveStyle({
+      "--calendar-color": "#34a853",
+    });
   });
 });

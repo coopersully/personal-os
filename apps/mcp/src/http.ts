@@ -45,7 +45,7 @@ const handler = createMcpHandler(
   ({ authInfo }) => {
     if (!authInfo) throw new Error("Authenticated MCP context is required.");
     const extra = authInfo.extra as IloAuthExtra | undefined;
-    if (!extra?.context) throw new Error("Validated Ilo context is required.");
+    if (!extra?.context) throw new Error("Validated Nomi context is required.");
     return createPersonalOsMcpServer({
       api: apiClient(authInfo.token),
       appBaseUrl,
@@ -113,7 +113,7 @@ app.post("/mcp", (request, response) => serveMcp(request, response, false));
 app.post("/mcp/readonly", (request, response) => serveMcp(request, response, true));
 
 const listener = app.listen(port, host, () => {
-  process.stderr.write(`ilo MCP listening at http://${host}:${port}/mcp\n`);
+  process.stderr.write(`Nomi MCP listening at http://${host}:${port}/mcp\n`);
 });
 
 async function serveMcp(request: Request, response: Response, readOnly: boolean): Promise<void> {
@@ -130,7 +130,7 @@ async function serveMcp(request: Request, response: Response, readOnly: boolean)
   if (!token) {
     response.setHeader("www-authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`);
     response.status(401).json({
-      error: "An Ilo bearer token is required.",
+      error: "A Nomi bearer token is required.",
       id: null,
       jsonrpc: "2.0",
     });
@@ -166,7 +166,7 @@ async function serveMcp(request: Request, response: Response, readOnly: boolean)
     if (error instanceof ApiClientError) {
       response.setHeader("www-authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`);
       response.status(error.status === 403 ? 403 : 401).json({
-        error: "The Ilo bearer token could not be authorized.",
+        error: "The Nomi bearer token could not be authorized.",
         id: null,
         jsonrpc: "2.0",
       });

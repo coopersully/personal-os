@@ -470,13 +470,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     })),
     mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,
     skill: {
-      displayName: "Ilo Guided Setup",
+      displayName: "nohmi Guided Setup",
       installPrompt: `Install the ilo-setup skill from ${agentSkillSourceUrl}.`,
       invocation: "$ilo-setup",
       name: "ilo-setup",
       revision: agentSkillRevision,
       setupPrompt:
-        "Set up Ilo for me. Start with get_ilo_context, then call get_ilo_setup and do the work it assigns before asking me for input.",
+        "Set up nohmi for me. Start with get_ilo_context, then call get_ilo_setup and do the work it assigns before asking me for input.",
       sourceUrl: agentSkillSourceUrl,
       version: agentSkillVersion,
     },
@@ -777,7 +777,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       ? authorization.slice(8)
       : getCookie(context, dependencies.config.sessionCookieName);
     if (!token)
-      throw new AppError("unauthorized", "Sign in to ilo before authorizing an MCP client.");
+      throw new AppError("unauthorized", "Sign in to nohmi before authorizing an MCP client.");
     const principal = await auth.authenticateSession(token);
     if (!(await auth.getUser(principal.userId)).emailVerified)
       throw new AppError("forbidden", "Verify your email before authorizing an MCP client.");
@@ -806,7 +806,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     )
       throw new AppError(
         "invalid_request",
-        "This authorization server only issues tokens for the ilo MCP resource.",
+        "This authorization server only issues tokens for the nohmi MCP resource.",
       );
     await oauthSession(context);
     const client = await oauth.getAuthorizationClient(query.client_id, query.redirect_uri);
@@ -821,7 +821,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     )
       throw new AppError(
         "invalid_request",
-        "This authorization server only issues tokens for the ilo MCP resource.",
+        "This authorization server only issues tokens for the nohmi MCP resource.",
       );
     const principal = await oauthSession(context);
     const code = await oauth.authorize({
@@ -1214,9 +1214,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     const token = await auth.createEmailVerificationToken(userId);
     const url = `${dependencies.config.appBaseUrl}/?verifyEmail=${encodeURIComponent(token)}`;
     await email.send({
-      html: `<p>Confirm your email address for ilo:</p><p><a href="${url}">Confirm email</a></p>`,
-      subject: "Confirm your ilo email",
-      text: `Confirm your ilo email: ${url}`,
+      html: `<p>Confirm your email address for nohmi:</p><p><a href="${url}">Confirm email</a></p>`,
+      subject: "Confirm your nohmi email",
+      text: `Confirm your nohmi email: ${url}`,
       to: emailAddress,
     });
   }
@@ -1224,9 +1224,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   async function sendPasswordReset(emailAddress: string, token: string): Promise<void> {
     const url = `${dependencies.config.appBaseUrl}/?resetPassword=${encodeURIComponent(token)}`;
     await email.send({
-      html: `<p>Reset your ilo password:</p><p><a href="${url}">Reset password</a></p>`,
-      subject: "Reset your ilo password",
-      text: `Reset your ilo password: ${url}`,
+      html: `<p>Reset your nohmi password:</p><p><a href="${url}">Reset password</a></p>`,
+      subject: "Reset your nohmi password",
+      text: `Reset your nohmi password: ${url}`,
       to: emailAddress,
     });
   }
@@ -1386,7 +1386,7 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
-  "audit:read": "Read Ilo activity history",
+  "audit:read": "Read nohmi activity history",
   "automations:read": "Read the generated daily brief",
   "automations:write": "Legacy automation access (inactive)",
   "bookmarks:read": "Read synchronized bookmarks",
@@ -1432,7 +1432,7 @@ function oauthConsentPage({
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Authorize ${escapeHtml(clientName)} · Ilo</title>
+  <title>Authorize ${escapeHtml(clientName)} · nohmi</title>
   <style>
     :root {
       color: #252524;
@@ -1621,12 +1621,12 @@ function oauthConsentPage({
 </head>
 <body>
   <main class="oauth-page">
-    <p class="oauth-brand"><span aria-hidden="true" class="oauth-brand__mark"></span>ilo</p>
+    <p class="oauth-brand"><span aria-hidden="true" class="oauth-brand__mark"></span>nohmi</p>
     <section aria-labelledby="consent-title" class="oauth-card">
       <header class="oauth-header">
         <p class="oauth-eyebrow">Agent access</p>
         <h1 id="consent-title">Connect ${escapeHtml(clientName)}</h1>
-        <p class="oauth-intro">This agent host is requesting access to your Ilo account. Connected provider credentials remain inside Ilo.</p>
+        <p class="oauth-intro">This agent host is requesting access to your nohmi account. Connected provider credentials remain inside nohmi.</p>
       </header>
       <section aria-labelledby="permissions-title" class="oauth-permissions">
         <h2 id="permissions-title">Requested access</h2>

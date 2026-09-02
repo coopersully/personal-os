@@ -5,10 +5,11 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 const eventCardVariants = cva(
-  "group/event-card w-full min-w-0 max-w-full gap-0 overflow-hidden py-0 [contain:inline-size]",
+  "event-card group/event-card w-full min-w-0 max-w-full gap-0 overflow-hidden py-0 [contain:inline-size]",
   {
     variants: {
       tone: {
+        calendar: "",
         default: "",
         inverse:
           "border-[var(--inverse-border-subtle)] bg-[var(--inverse-surface-raised)] text-[var(--inverse-content)]",
@@ -56,6 +57,19 @@ function EventCardTime({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="event-card-time"
       className={cn(
         "flex w-16 shrink-0 items-center whitespace-nowrap font-mono text-xs leading-none tabular-nums text-muted-foreground group-data-[tone=inverse]/event-card:text-[var(--inverse-content-tertiary)]",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+function EventCardTitleMeta({ className, ...props }: React.ComponentProps<"small">) {
+  return (
+    <small
+      data-slot="event-card-title-meta"
+      className={cn(
+        "shrink-0 text-xs leading-none font-normal text-muted-foreground group-data-[tone=inverse]/event-card:text-[var(--inverse-content-tertiary)]",
         className,
       )}
       {...props}
@@ -114,7 +128,7 @@ function EventCardTitle({ className, ...props }: React.ComponentProps<"strong">)
     <strong
       data-slot="event-card-title"
       className={cn(
-        "flex w-full min-w-0 max-w-full items-center gap-1 overflow-hidden text-sm leading-snug font-medium underline-offset-4 group-hover/event-card-action:underline group-focus-visible/event-card-action:underline",
+        "flex w-full min-w-0 max-w-full items-center gap-1 overflow-hidden text-sm leading-snug font-medium",
         className,
       )}
       {...props}
@@ -172,4 +186,5 @@ export {
   EventCardPrimaryAction,
   EventCardTime,
   EventCardTitle,
+  EventCardTitleMeta,
 };

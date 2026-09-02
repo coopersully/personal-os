@@ -32,7 +32,7 @@ function presentation(outcome: ConnectorAuthorizationOutcome) {
   switch (outcome.status) {
     case "connected":
       return {
-        description: "ilo will keep this account up to date automatically.",
+        description: "nohmi will keep this account up to date automatically.",
         retry: false,
         title: `${provider} is connected`,
         variant: "info" as const,
@@ -77,7 +77,7 @@ function presentation(outcome: ConnectorAuthorizationOutcome) {
       };
     default:
       return {
-        description: "ilo couldn't confirm that connection. Start again to continue securely.",
+        description: "nohmi couldn't confirm that connection. Start again to continue securely.",
         retry: true,
         title: "Restart the connection",
         variant: "warning" as const,
@@ -154,7 +154,7 @@ export function ConnectionAuthorizationOutcome({
       <Alert variant="info">
         <LoaderIcon />
         <AlertTitle>Confirming your connection</AlertTitle>
-        <AlertDescription>Checking the secure result with ilo.</AlertDescription>
+        <AlertDescription>Checking the secure result with nohmi.</AlertDescription>
       </Alert>
     );
   }
@@ -164,7 +164,7 @@ export function ConnectionAuthorizationOutcome({
         <CircleAlertIcon />
         <AlertTitle>Restart the connection</AlertTitle>
         <AlertDescription>
-          ilo couldn't confirm that connection. Start again; your existing account was not changed.
+          nohmi couldn't confirm that connection. Start again; your existing account was not changed.
         </AlertDescription>
         <AlertAction>
           <Button onClick={() => onRetry(null)} size="sm" type="button">

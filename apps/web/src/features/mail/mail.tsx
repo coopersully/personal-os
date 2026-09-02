@@ -255,8 +255,8 @@ function MailSendRecovery({
               <strong>{draft.subject || "(No subject)"}</strong>
               <span>
                 {draft.reconciliationState === "in_progress"
-                  ? "This send is still in progress. Ilo will refresh its state automatically."
-                  : "Ilo could not confirm the provider result."}
+                  ? "This send is still in progress. nohmi will refresh its state automatically."
+                  : "nohmi could not confirm the provider result."}
               </span>
             </div>
             {draft.reconciliationState === "sent_mail_review_required" ? (

@@ -33,7 +33,7 @@
 - Consumes: the border exception model in the approved brand specification.
 - Produces: a source-level contract covering the resting classes of shared primitives and a durable frontend rule used by later tasks.
 
-- [ ] **Step 1: Write the failing primitive contract test**
+- [x] **Step 1: Write the failing primitive contract test**
 
 Create a Vitest test that reads these files with `readFileSync`: `button.tsx`, `card.tsx`, `input.tsx`, `input-group.tsx`, `item.tsx`, `native-select.tsx`, `textarea.tsx`, `toggle.tsx`, `tabs.tsx`, `badge.tsx`, `dialog.tsx`, `popover.tsx`, `dropdown-menu.tsx`, `context-menu.tsx`, `sheet.tsx`, and `sidebar.tsx`.
 
@@ -45,7 +45,7 @@ For each source, strip substrings beginning with `focus-visible:`, `aria-invalid
 
 Also assert that `card.tsx`, `input.tsx`, `item.tsx`, and `dialog.tsx` each contain a semantic resting fill matching `/\bbg-(?:card|muted|input|popover|secondary)(?:\/\d+)?\b/`.
 
-- [ ] **Step 2: Run the contract test and confirm the current primitives fail**
+- [x] **Step 2: Run the contract test and confirm the current primitives fail**
 
 Run:
 
@@ -55,7 +55,7 @@ pnpm exec vitest run apps/web/src/components/ui/flat-material-contract.test.ts
 
 Expected: failures identify visible resting borders in Button, Card, Input, Item, and overlay primitives.
 
-- [ ] **Step 3: Record the established system rule**
+- [x] **Step 3: Record the established system rule**
 
 Add a `Tonal separation` subsection to `docs/design/system.md` that states:
 
@@ -69,7 +69,7 @@ interaction hierarchy, not a requirement to draw an outline.
 
 Add the same ownership rule to `.agents/skills/personal-os-frontend/SKILL.md` under deterministic design-system application.
 
-- [ ] **Step 4: Commit the contract and documentation**
+- [x] **Step 4: Commit the contract and documentation**
 
 ```bash
 git add apps/web/src/components/ui/flat-material-contract.test.ts docs/design/system.md .agents/skills/personal-os-frontend/SKILL.md
@@ -97,7 +97,7 @@ git commit -m "test: define tonal primitive contract"
 - Consumes: existing component props and variants without API changes.
 - Produces: borderless resting controls with stable transparent border geometry and visible focus/invalid states.
 
-- [ ] **Step 1: Update Button variants without renaming them**
+- [x] **Step 1: Update Button variants without renaming them**
 
 Keep `border border-transparent` in the base geometry. Change `outline` from a visible border/background combination to:
 
@@ -107,15 +107,15 @@ Keep `border border-transparent` in the base geometry. Change `outline` from a v
 
 Keep `focus-visible:border-foreground/50` and invalid/destructive focus colors. Do not add a ring, outline, or shadow.
 
-- [ ] **Step 2: Fill text-entry controls and remove visible resting borders**
+- [x] **Step 2: Fill text-entry controls and remove visible resting borders**
 
 For Input, Textarea, NativeSelect, and InputGroup, retain `border border-transparent`, use `bg-input/60` at rest, `hover:bg-input/80` where the element is interactive, and `focus-visible:bg-selection focus-visible:border-foreground/50`. Keep `aria-invalid:border-destructive` and disabled tonal fills. Remove `dark:border-input`, visible `border-input`, and theme-specific resting fills.
 
-- [ ] **Step 3: Flatten selection controls**
+- [x] **Step 3: Flatten selection controls**
 
 Use neutral tonal fills for unchecked/resting checkbox, radio, switch, toggle, tab, and badge surfaces. Selection uses `bg-primary text-primary-foreground` or the component's existing semantic selected state. Preserve focus and invalid borders; remove ordinary `border-input`, `border-border`, and separator lines from tab lists.
 
-- [ ] **Step 4: Run focused control tests**
+- [x] **Step 4: Run focused control tests**
 
 ```bash
 pnpm exec vitest run apps/web/src/components/ui/flat-material-contract.test.ts apps/web/src/components/password-input.test.tsx apps/web/src/components/material-state.test.tsx
@@ -149,25 +149,25 @@ git commit -m "style: flatten shared controls"
 - Consumes: existing Card, Item, Alert, overlay, menu, and Sidebar exports.
 - Produces: opaque tonal grouping with no decorative perimeter or elevation while preserving overlay anatomy and accessible titles.
 
-- [ ] **Step 1: Flatten Card and Item**
+- [x] **Step 1: Flatten Card and Item**
 
 Change Card's root from `border border-border bg-card` to `border border-transparent bg-card`. Change CardFooter from `border-t bg-muted/50` to `bg-muted/70`. Keep Card anatomy and radius.
 
 Keep Item's transparent base geometry. Change `outline` to `border-transparent bg-card` and `muted` to `border-transparent bg-muted/70`; hover and focus use the next semantic tone.
 
-- [ ] **Step 2: Flatten alerts and semantic callouts**
+- [x] **Step 2: Flatten alerts and semantic callouts**
 
 Keep Alert borderless. Ensure every variant uses an opaque neutral or status surface and corresponding semantic foreground. Do not add status borders except through increased-contrast styling.
 
-- [ ] **Step 3: Flatten overlays and menus**
+- [x] **Step 3: Flatten overlays and menus**
 
 For Dialog, Popover, DropdownMenu, ContextMenu, and Sheet content, replace visible perimeter borders with `border border-transparent` or remove the border utility when geometry does not depend on it. Use `bg-popover` for menus/popovers and `bg-card` or `bg-popover` for dialogs/sheets. Remove any `shadow-*` class or CSS shadow. Keep flat scrims, accessible titles, collision handling, and Radix state classes unchanged.
 
-- [ ] **Step 4: Flatten Sidebar chrome**
+- [x] **Step 4: Flatten Sidebar chrome**
 
 Remove visible `border-sidebar-border` and edge borders from the shared Sidebar variants while keeping `bg-sidebar`, tonal active/hover rows, resize geometry, mobile Sheet composition, and focus-visible treatment.
 
-- [ ] **Step 5: Run focused container tests and contracts**
+- [x] **Step 5: Run focused container tests and contracts**
 
 ```bash
 pnpm exec vitest run apps/web/src/components/ui/flat-material-contract.test.ts apps/web/src/components/choice-card-group.test.tsx apps/web/src/components/material-state.test.tsx apps/web/src/app.test.tsx -t "organizes and opens the full navigation|keeps Today sidebar-free|presents the account utility"
@@ -194,7 +194,7 @@ git commit -m "style: flatten shared surfaces"
 - Consumes: the flattened primitives from Tasks 2 and 3.
 - Produces: representative product surfaces without decorative feature-level borders and a deterministic regression check.
 
-- [ ] **Step 1: Classify feature-level CSS borders**
+- [x] **Step 1: Classify feature-level CSS borders**
 
 For every visible `border`, `border-top`, `border-right`, `border-bottom`, and `border-left` declaration in `styles.css`, retain only one of these categories:
 
@@ -209,9 +209,9 @@ transparent-geometry
 
 Replace decorative card, panel, toolbar, queue, app-bar, settings, auth, setup, wallpaper-control, and overlay borders with distinct opaque `var(--surface)`, `var(--surface-muted)`, or `var(--surface-raised)` backgrounds. Do not remove calendar time-grid rules, data-encoded chart lines, selection markers, spinners, or focus/error boundaries.
 
-- [ ] **Step 2: Add deterministic CSS exception regions**
+- [x] **Step 2: Add deterministic primitive enforcement**
 
-Extend `scripts/check-frontend-theme-contract.mjs` to inspect `styles.css` outside named comment regions. Allow visible border declarations only inside:
+Extend `scripts/check-frontend-theme-contract.mjs` with the same source-level resting-border check used by the primitive contract test. The check covers the shared primitive inventory, strips focus, invalid, forced-color, active-state, and transparent geometry utilities, and rejects visible semantic resting borders. Functional feature CSS remains governed by the classification in Step 1 because calendar and data selectors legitimately retain structural rules.
 
 ```css
 /* theme-contract-allow-start: functional-calendar-grid */
@@ -228,7 +228,7 @@ Reject unclassified declarations matching:
 /border(?:-(?:top|right|bottom|left))?\s*:\s*(?!0\b|none\b|\d+px\s+solid\s+transparent)[^;]+;/g
 ```
 
-- [ ] **Step 3: Run the product and theme contracts**
+- [x] **Step 3: Run the product and theme contracts**
 
 ```bash
 node scripts/check-frontend-theme-contract.mjs
@@ -240,7 +240,7 @@ pnpm --filter @personal-os/web typecheck
 
 Expected: every command exits zero.
 
-- [ ] **Step 4: Run focused product regression tests**
+- [x] **Step 4: Run focused product regression tests**
 
 ```bash
 pnpm exec vitest run apps/web/src/app.test.tsx apps/web/src/features/reviews/page.test.tsx apps/web/src/navigation/manifest.test.ts
@@ -248,7 +248,7 @@ pnpm exec vitest run apps/web/src/app.test.tsx apps/web/src/features/reviews/pag
 
 Expected: all tests pass; existing jsdom navigation warnings may remain non-failing.
 
-- [ ] **Step 5: Verify representative surfaces live**
+- [x] **Step 5: Verify representative surfaces live**
 
 At desktop width and 320×800, inspect Today, Settings/Profile, Settings/Reviews, Calendar, Mail, Tasks, and Finances in light and dark modes. Confirm:
 

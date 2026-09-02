@@ -79,11 +79,22 @@ describe("connector sync health policy", () => {
     expect(
       connectionHealthForAccount({
         nextSyncAt: syncRecovery === "reconnect" ? null : now,
-        syncError: syncRecovery ? "Safe ilo message" : null,
+        syncError: syncRecovery ? "Safe nohmi message" : null,
         syncRecovery,
         syncStatus,
       }),
     ).toMatchObject({ state });
+  });
+
+  it("normalizes legacy product names in stored health messages", () => {
+    expect(
+      connectionHealthForAccount({
+        nextSyncAt: now,
+        syncError: "This connection was interrupted. ilo will retry automatically.",
+        syncRecovery: "automatic",
+        syncStatus: "error",
+      }).message,
+    ).toBe("This connection was interrupted. nohmi will retry automatically.");
   });
 
   it("creates a safe structured application error", () => {
@@ -113,7 +124,7 @@ describe("connector sync health policy", () => {
       "icloud",
     );
     expect(notFound.message).toBe(
-      "iCloud could not find a connected resource. ilo is resolving this.",
+      "iCloud could not find a connected resource. nohmi is resolving this.",
     );
 
     const rejected = classifyConnectorSyncFailure(
@@ -125,7 +136,9 @@ describe("connector sync health policy", () => {
       }),
       "google",
     );
-    expect(rejected.message).toBe("Google returned an unexpected response. ilo is resolving this.");
+    expect(rejected.message).toBe(
+      "Google returned an unexpected response. nohmi is resolving this.",
+    );
 
     const rateLimited = classifyConnectorSyncFailure(
       new ConnectorError({
@@ -157,7 +170,7 @@ describe("connector sync health policy", () => {
     expect(configuration).toEqual({
       category: "configuration",
       code: "plaid_configuration_invalid",
-      message: "Plaid is not configured correctly. ilo is resolving this.",
+      message: "Plaid is not configured correctly. nohmi is resolving this.",
       recovery: "operator",
       retryAfterMs: null,
       status: 400,
@@ -176,7 +189,7 @@ describe("connector sync health policy", () => {
     );
     expect(rateLimited).toMatchObject({
       category: "rate_limited",
-      message: "Plaid is temporarily rate-limiting ilo. ilo will retry automatically.",
+      message: "Plaid is temporarily rate-limiting nohmi. nohmi will retry automatically.",
       recovery: "automatic",
       retryAfterMs: 120_000,
     });

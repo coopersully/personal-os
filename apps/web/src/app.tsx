@@ -27,13 +27,7 @@ import {
   sameLocalDate,
 } from "@personal-os/domain";
 import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
-import {
-  type QueryClient,
-  type UseQueryResult,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   type CSSProperties,
@@ -45,8 +39,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent,
   Suspense,
-  startTransition,
-  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -58,11 +50,9 @@ import { createPortal } from "react-dom";
 import {
   Link,
   Navigate,
-  type Navigator,
   NavLink,
   Route,
   Routes,
-  UNSAFE_NavigationContext,
   useLocation,
   useNavigate,
   useSearchParams,
@@ -76,23 +66,19 @@ import {
   PasswordFields,
   TextField,
 } from "@/components/auth-fields";
-import { BrandMark, brandTitle, hasBrandMark } from "@/components/brand-marks";
+import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import {
   EventCard,
-  EventCardAside,
   EventCardBody,
   EventCardContent,
   EventCardDescription,
-  EventCardFooter,
-  EventCardIndicator,
   EventCardPrimaryAction,
-  EventCardTime,
   EventCardTitle,
+  EventCardTitleMeta,
 } from "@/components/event-card";
 import {
   ActivityIcon,
-  ArrowLeftIcon,
   BankIcon,
   CalendarIcon,
   CalendarPlusIcon,
@@ -104,7 +90,6 @@ import {
   CircleCheckIcon,
   ClockIcon,
   CloudIcon,
-  CloudRainIcon,
   ColumnsIcon,
   CompassIcon,
   CopyIcon,
@@ -118,6 +103,7 @@ import {
   HouseIcon,
   type Icon,
   ImageIcon,
+  KeyIcon,
   LayersIcon,
   ListChecksIcon,
   ListTodoIcon,
@@ -129,7 +115,6 @@ import {
   MonitorIcon,
   MoonIcon,
   PaintBrushIcon,
-  PanelTopIcon,
   PinIcon,
   PlugIcon,
   PlusIcon,
@@ -149,6 +134,10 @@ import {
   XIcon,
 } from "@/components/icons";
 import { LogoMark } from "@/components/logo-mark";
+import { OccasionCard } from "@/components/occasion-card";
+import { OfflineState } from "@/components/offline-state";
+import { QuoteCard } from "@/components/quote-card";
+import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
 import {
   Alert as ShadcnAlert,
   AlertAction as ShadcnAlertAction,
@@ -230,6 +219,14 @@ import {
   NativeSelect as ShadcnNativeSelect,
 } from "@/components/ui/native-select";
 import {
+  Pagination as ShadcnPagination,
+  PaginationContent as ShadcnPaginationContent,
+  PaginationItem as ShadcnPaginationItem,
+  PaginationLink as ShadcnPaginationLink,
+  PaginationNext as ShadcnPaginationNext,
+  PaginationPrevious as ShadcnPaginationPrevious,
+} from "@/components/ui/pagination";
+import {
   Popover as ShadcnPopover,
   PopoverContent as ShadcnPopoverContent,
   PopoverDescription as ShadcnPopoverDescription,
@@ -237,6 +234,7 @@ import {
   PopoverTitle as ShadcnPopoverTitle,
   PopoverTrigger as ShadcnPopoverTrigger,
 } from "@/components/ui/popover";
+import { ScrollArea as ShadcnScrollArea } from "@/components/ui/scroll-area";
 import {
   SidebarContent as ShadcnSidebarContent,
   SidebarFooter as ShadcnSidebarFooter,
@@ -270,18 +268,8 @@ import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarContent,
 } from "./components/workspace-secondary-app-bar.js";
-import {
-  getWorkspaceCalendarEntry,
-  workspaceCalendarSummary,
-  workspaceCountSummary,
-  workspaceFinanceSummary,
-  workspaceIndicatorOffset,
-  workspaceIntentStaleTime,
-  workspaceTodaySummary,
-} from "./components/workspace-switching.js";
 import { ActivityPage, ActivityTopbarControls } from "./features/activity/page.js";
 import { CalendarFloatingNav } from "./features/calendar/floating-nav.js";
-import { calendarNavigationItem } from "./features/calendar/manifest.js";
 import {
   type CalendarView,
   calendarPeriodDays,
@@ -322,7 +310,6 @@ import {
 } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
-import { tasksNavigationItem } from "./features/tasks/manifest.js";
 import {
   TaskRow,
   TasksCreateButton,
@@ -336,6 +323,7 @@ import { TextingSettings } from "./features/texting/page.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
+import { cn } from "./lib/utils.js";
 import {
   navigationOwnerForLocation,
   rendersApplicationShell,
@@ -406,46 +394,7 @@ type NavigationItemDefinition = {
   path: string;
 };
 
-type NavigationGroupDefinition = {
-  items: NavigationItemDefinition[];
-  label: string;
-};
-
 type WorkspaceTransitionDirection = "down" | "none" | "up";
-
-type WorkspacePreview = {
-  direction: Exclude<WorkspaceTransitionDirection, "none">;
-  path: string;
-};
-
-const todayNavigationItem: NavigationItemDefinition = {
-  icon: PanelTopIcon,
-  label: "Today",
-  path: "/today",
-};
-
-const _planNavigationItems: NavigationItemDefinition[] = [
-  todayNavigationItem,
-  calendarNavigationItem,
-  {
-    ...tasksNavigationItem,
-    items: [{ icon: ListTodoIcon, label: "Reminders", path: "/reminders" }],
-  },
-];
-
-const lifeNavigationItems: NavigationItemDefinition[] = [
-  { icon: ShieldCheckIcon, label: "Reviews", path: "/reviews" },
-  { icon: TargetIcon, label: "Goals", path: "/goals" },
-  { icon: CompassIcon, label: "Motives", path: "/motives" },
-  // Today owns Activity. It left the account menu with the workspace-ownership
-  // change, so the Today sidebar is the only place that can still reach it.
-  { icon: ActivityIcon, label: "Activity", path: "/activity" },
-];
-
-const todayNavigationGroups: NavigationGroupDefinition[] = [
-  { items: [todayNavigationItem], label: "Plan" },
-  { items: lifeNavigationItems, label: "Personal" },
-];
 
 const workspaceShortcuts: WorkspaceDefinition[] = workspaceDefinitions;
 
@@ -462,12 +411,6 @@ function normalizeShellPathname(pathname: string): string {
   return pathname.replace(/\/+$/, "") || "/";
 }
 
-/** Today's registry label is its page title; navigation names it plainly. */
-function workspaceLabelForPath(pathname: string): string {
-  const workspace = workspaceForLocation(pathname);
-  return workspace && workspace.id !== "today" ? workspace.label : "Today";
-}
-
 function workspaceDirection(
   fromPath: string | null | undefined,
   toPath: string,
@@ -477,8 +420,6 @@ function workspaceDirection(
   if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return "none";
   return toIndex > fromIndex ? "down" : "up";
 }
-
-const ignorePreviewNavigation = () => undefined;
 
 export function selectTodayTasks(
   tasks: Task[],
@@ -503,13 +444,12 @@ export function selectTodayTasks(
   }
   return { overdue, today: relevantToday };
 }
-
 export function App() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   if (me.isPending) {
     return (
       <main className="center-screen">
-        <Spinner label="Opening ilo" />
+        <Spinner label="Opening nohmi" />
       </main>
     );
   }
@@ -702,50 +642,26 @@ function CredentialsScreen() {
   };
   return (
     <main className="auth-shell">
-      <section className="auth-story" aria-label="Product introduction">
-        <div className="wordmark wordmark--light">
-          <LogoMark /> ilo
-        </div>
-        <div>
-          <p className="eyebrow">A shared surface for you and your agents</p>
-          <h1>Your day, made tangible.</h1>
-          <p className="auth-story__copy">
-            One calm place for reminders and calendars. Directly editable by you. Safely available
-            to the agents you trust.
-          </p>
-        </div>
-        <EventCard aria-hidden="true" className="relative z-[1] max-w-[520px]" tone="inverse">
-          <EventCardContent>
-            <EventCardTime>09:30</EventCardTime>
-            <EventCardIndicator />
-            <EventCardBody>
-              <EventCardTitle>Design review</EventCardTitle>
-              <EventCardDescription>Product calendar · 45 min</EventCardDescription>
-            </EventCardBody>
-            <EventCardAside>
-              <CalendarIcon />
-            </EventCardAside>
-          </EventCardContent>
-        </EventCard>
-      </section>
+      <div className="auth-crest">
+        <NohmiBrandMark auth />
+      </div>
       <section className="auth-form-wrap">
         <form className="auth-form" onSubmit={submit}>
           <div className="auth-form__heading">
-            <LogoMark />
             <h2>
               {mode === "login"
-                ? "Welcome back"
+                ? "Login"
                 : mode === "recovery"
                   ? "Reset your password"
-                  : "Make this yours"}
+                  : "Redeem Invite Code"}
             </h2>
-            <p>
-              {mode === "login"
-                ? "Open your daily surface."
-                : mode === "recovery"
+            {mode !== "login" ? (
+              <p>
+                {mode === "recovery"
                   ? "We’ll send a reset link if this address has an account."
-                  : "Enter your invitation to create an account."}
-            </p>
+                  : "Welcome to the closed alpha. Thanks for trying nohmi—it’s early, experimental, and a little buggy."}
+              </p>
+            ) : null}
           </div>
           {mode === "register" && (
             <>
@@ -801,11 +717,11 @@ function CredentialsScreen() {
               labelAction={
                 mode === "login" ? (
                   <button
-                    className="text-button auth-field-action"
+                    className="text-button"
                     onClick={() => selectMode("recovery")}
                     type="button"
                   >
-                    Forgot your password?
+                    Forgot?
                   </button>
                 ) : undefined
               }
@@ -827,25 +743,31 @@ function CredentialsScreen() {
               If an account exists for that email, a password-reset link is on its way.
             </p>
           ) : null}
-          <Button
+          <ShadcnButton
             className="button--wide"
             disabled={mutation.isPending || !canSubmit}
-            tone="accent"
             type="submit"
           >
             {mutation.isPending ? (
               <Spinner label="Signing in" />
             ) : mode === "login" ? (
-              "Open ilo"
+              "Log in"
             ) : mode === "recovery" ? (
               "Send reset link"
             ) : (
               "Create account"
             )}
-          </Button>
+          </ShadcnButton>
           {mode === "login" ? (
-            <button className="text-button" type="button" onClick={() => selectMode("register")}>
-              I have an invite code
+            <button
+              aria-label="Have an invite? Create an account"
+              className="text-button auth-invite-link"
+              type="button"
+              onClick={() => selectMode("register")}
+            >
+              <span>Have an invite?</span>
+              <MailIcon aria-hidden="true" />
+              <span>Create an account</span>
             </button>
           ) : (
             <button className="text-button" type="button" onClick={() => selectMode("login")}>
@@ -866,13 +788,13 @@ function EmailVerificationScreen({ token }: { token: string }) {
   });
   return (
     <AuthActionShell title="Confirm your email">
-      <p>Confirm the email address for this ilo account.</p>
+      <p>Confirm the email address for this nohmi account.</p>
       {verification.isError ? (
         <p className="form-error">{errorMessage(verification.error)}</p>
       ) : null}
       {verification.isSuccess ? (
         <p className="form-success" role="status">
-          Your email is confirmed. You can close this page or continue using ilo.
+          Your email is confirmed. You can close this page or continue using nohmi.
         </p>
       ) : (
         <Button
@@ -939,10 +861,12 @@ function PasswordResetScreen({ token }: { token: string }) {
 function AuthActionShell({ children, title }: { children: ReactNode; title: string }) {
   return (
     <main className="auth-shell">
+      <div className="auth-crest">
+        <NohmiBrandMark auth />
+      </div>
       <section className="auth-form-wrap">
         <div className="auth-form">
           <div className="auth-form__heading">
-            <LogoMark />
             <h2>{title}</h2>
           </div>
           {children}
@@ -952,24 +876,11 @@ function AuthActionShell({ children, title }: { children: ReactNode; title: stri
   );
 }
 
-/**
- * Remembers the workspace the account utility was opened from so it can offer
- * an honest return target. Falls back to Today when no workspace was visited,
- * such as on a cold deep link straight to `/settings`.
- */
-function useAccountReturnPath(workspacePath: string | null): string {
-  const remembered = useRef("/today");
-  if (workspacePath) remembered.current = workspacePath;
-  return remembered.current;
-}
-
 function AuthenticatedApp({ user }: { user: User }) {
   const [editor, setEditor] = useState<Editor>(null);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
-  const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
-  const [workspacePreview, setWorkspacePreview] = useState<WorkspacePreview | null>(null);
   const location = useLocation();
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
@@ -989,23 +900,20 @@ function AuthenticatedApp({ user }: { user: User }) {
     });
   }
   const routeDirection = routeTransition.direction;
-  const accountReturnPath = useAccountReturnPath(activeWorkspace?.path ?? null);
   const isTodayWorkspace = activeWorkspace?.path === "/today";
   const deviceWeatherLocation = useDeviceWeatherLocation(isTodayWorkspace);
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
   const weather = useQuery({
     enabled:
-      (isTodayWorkspace || workspaceSwitcherOpen) &&
-      (deviceWeatherLocation.coordinates !== null ||
-        ((deviceWeatherLocation.status !== "pending" || workspaceSwitcherOpen) &&
-          user.homeLocation !== null)),
+      deviceWeatherLocation.coordinates !== null ||
+      (deviceWeatherLocation.status !== "pending" && user.homeLocation !== null),
     queryFn: () => api.getWeather(deviceWeatherLocation.coordinates ?? undefined),
     queryKey: ["weather", deviceWeatherLocation.coordinates, user.homeLocation],
     refetchInterval: 10 * 60_000,
     staleTime: 5 * 60_000,
   });
   const todayBrief = useQuery({
-    enabled: isTodayWorkspace || workspaceSwitcherOpen,
+    enabled: isTodayWorkspace,
     queryFn: api.getDailyBrief,
     queryKey: ["daily-brief", user.planningTimezone],
     refetchInterval: 60_000,
@@ -1014,11 +922,9 @@ function AuthenticatedApp({ user }: { user: User }) {
   // drawer to dismiss. Destinations still receive this hook so the dock's sheet
   // and the sidebar share one navigation contract.
   const closeMobileMenu = () => undefined;
-  // The manifest owner, never a route name, selects the sidebar. Today is the
-  // one workspace whose sidebar is the application navigation itself.
+  // The manifest owner, never a route name, selects the sidebar.
   // A standalone flow never reaches the shell, so an owner here is either a
-  // workspace or the account utility. Today's sidebar is the application
-  // navigation itself and therefore has no contextual mode.
+  // workspace or the account utility. Today has no contextual navigation.
   const sidebarMode: ContextSidebarMode =
     navigationOwner.kind !== "workspace"
       ? "settings"
@@ -1074,15 +980,23 @@ function AuthenticatedApp({ user }: { user: User }) {
         window.location.assign("/");
       });
   };
+  const mobileDockPasswordReset = () => {
+    void api
+      .requestPasswordReset({ email: user.email })
+      .then(() => toast.success(`Password reset link sent to ${user.email}.`))
+      .catch((error) => toast.error(errorMessage(error)));
+  };
 
   return (
     <>
-      <div className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : ""}`}>
+      <div
+        className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+      >
         <PinterestWallpaperScheduler />
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
-        {!isMobileWorkspaceDock && !isCalendarWorkspace ? (
+        {!isMobileWorkspaceDock && !isCalendarWorkspace && !isTodayWorkspace ? (
           <aside
             aria-label={
               navigationOwner.kind !== "workspace"
@@ -1096,28 +1010,13 @@ function AuthenticatedApp({ user }: { user: User }) {
             id="app-sidebar"
           >
             <ShadcnSidebarHeader className="sidebar__header">
-              {navigationOwner.kind === "account-utility" ? (
-                <Link
-                  aria-label={`Back to ${workspaceLabelForPath(accountReturnPath)}`}
-                  className="sidebar__back"
-                  onClick={closeMobileMenu}
-                  to={accountReturnPath}
-                >
-                  <ArrowLeftIcon aria-hidden="true" className="size-[18px]" />{" "}
-                  <span>{workspaceLabelForPath(accountReturnPath)}</span>
-                </Link>
-              ) : (
-                <WorkspaceSwitcher
-                  compact
-                  onNavigate={closeMobileMenu}
-                  onOpenChange={setWorkspaceSwitcherOpen}
-                  onPreviewChange={setWorkspacePreview}
-                  pathname={location.pathname}
-                  search={location.search}
-                  user={user}
-                  weather={weather.data}
-                />
-              )}
+              <WorkspaceSwitcher
+                compact
+                onNavigate={closeMobileMenu}
+                pathname={location.pathname}
+                user={user}
+                weather={weather.data}
+              />
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
@@ -1140,32 +1039,13 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <TasksSidebar onNavigate={closeMobileMenu} />
               ) : sidebarMode === "mail" ? (
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
-              ) : (
-                // Today is the only owner without a contextual sidebar, so this
-                // branch always renders its navigation.
-                todayNavigationGroups.map((group) => (
-                  <ShadcnSidebarGroup key={group.label}>
-                    <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
-                    <ShadcnSidebarGroupContent>
-                      <nav aria-label={group.label}>
-                        <ShadcnSidebarMenu>
-                          {group.items.map((item) => (
-                            <SidebarNavigationItem
-                              key={item.path}
-                              onNavigate={closeMobileMenu}
-                              {...item}
-                            />
-                          ))}
-                        </ShadcnSidebarMenu>
-                      </nav>
-                    </ShadcnSidebarGroupContent>
-                  </ShadcnSidebarGroup>
-                ))
-              )}
+              ) : null}
             </ShadcnSidebarContent>
-            <ShadcnSidebarFooter className="sidebar__footer">
-              <AccountMenu onNavigate={closeMobileMenu} user={user} />
-            </ShadcnSidebarFooter>
+            {sidebarMode !== "settings" ? (
+              <ShadcnSidebarFooter className="sidebar__footer">
+                <AccountMenu onNavigate={closeMobileMenu} user={user} />
+              </ShadcnSidebarFooter>
+            ) : null}
           </aside>
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
@@ -1176,6 +1056,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               workspaceSettingsActions,
             )}
             onLogout={mobileDockLogout}
+            onRequestPasswordReset={mobileDockPasswordReset}
             pathname={shellPathname}
             {...(sidebarMode === "tasks"
               ? {
@@ -1184,7 +1065,9 @@ function AuthenticatedApp({ user }: { user: User }) {
                   ),
                 }
               : {})}
+            planningTimezone={user.planningTimezone}
             workspaceDefinitions={workspaceDefinitions}
+            weather={weather.data}
           />
         ) : null}
         <div className="workspace">
@@ -1195,14 +1078,17 @@ function AuthenticatedApp({ user }: { user: User }) {
             </div>
           )}
           <WorkspaceAppBarForRoute
-            calendarWorkspaceSwitcher={
-              isCalendarWorkspace ? (
+            accountMenu={
+              isTodayWorkspace && !isMobileWorkspaceDock ? (
+                <AccountMenu onNavigate={closeMobileMenu} placement="topbar" user={user} />
+              ) : null
+            }
+            activeSettingsSection={activeSettingsSection}
+            workspaceSwitcher={
+              isCalendarWorkspace || (isTodayWorkspace && !isMobileWorkspaceDock) ? (
                 <WorkspaceSwitcher
                   onNavigate={closeMobileMenu}
-                  onOpenChange={setWorkspaceSwitcherOpen}
-                  onPreviewChange={setWorkspacePreview}
                   pathname={location.pathname}
-                  search={location.search}
                   user={user}
                   weather={weather.data}
                 />
@@ -1229,9 +1115,12 @@ function AuthenticatedApp({ user }: { user: User }) {
                 data-direction={routeDirection}
                 key={activeWorkspace?.path ?? location.pathname}
               >
-                {pageTitle ? <h1 className="sr-only">{pageTitle}</h1> : null}
+                {pageTitle && navigationOwner.kind !== "account-utility" ? (
+                  <h1 className="sr-only">{pageTitle}</h1>
+                ) : null}
                 <WorkspaceRoutes
                   calendarTodaySnap={calendarTodaySnap}
+                  calendars={calendars.data ?? []}
                   deviceWeatherLocation={deviceWeatherLocation}
                   setEditor={setEditor}
                   todayBrief={todayBrief}
@@ -1239,28 +1128,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                   weather={weather}
                 />
               </div>
-              {workspaceSwitcherOpen && workspacePreview ? (
-                <div
-                  aria-hidden="true"
-                  className="workspace-preview"
-                  data-direction={workspacePreview.direction}
-                  data-workspace={workspacePreview.path.slice(1)}
-                  inert
-                  key={`preview:${workspacePreview.path}`}
-                >
-                  <WorkspacePreviewNavigationBoundary>
-                    <WorkspaceRoutes
-                      calendarTodaySnap={calendarTodaySnap}
-                      deviceWeatherLocation={deviceWeatherLocation}
-                      locationOverride={workspacePreview.path}
-                      setEditor={setEditor}
-                      todayBrief={todayBrief}
-                      user={user}
-                      weather={weather}
-                    />
-                  </WorkspacePreviewNavigationBoundary>
-                </div>
-              ) : null}
             </div>
           </main>
         </div>
@@ -1301,55 +1168,18 @@ function AuthenticatedApp({ user }: { user: User }) {
   );
 }
 
-function WorkspacePreviewNavigationBoundary({ children }: { children: ReactNode }) {
-  const navigationContext = useContext(UNSAFE_NavigationContext);
-  const inertNavigationContext = useMemo(() => {
-    const source = navigationContext?.navigator;
-    if (!navigationContext || !isNavigator(source)) return null;
-    const navigator: Navigator = {
-      createHref: source.createHref.bind(source),
-      ...(source.encodeLocation
-        ? {
-            encodeLocation: source.encodeLocation.bind(source),
-          }
-        : {}),
-      go: ignorePreviewNavigation,
-      push: ignorePreviewNavigation,
-      replace: ignorePreviewNavigation,
-    };
-    return { ...navigationContext, navigator };
-  }, [navigationContext]);
-  if (!inertNavigationContext) return null;
-  return (
-    <UNSAFE_NavigationContext.Provider value={inertNavigationContext}>
-      {children}
-    </UNSAFE_NavigationContext.Provider>
-  );
-}
-
-export function isNavigator(value: unknown): value is Navigator {
-  if (!value || typeof value !== "object") return false;
-  const navigator = value as Partial<Record<keyof Navigator, unknown>>;
-  return (
-    typeof navigator.createHref === "function" &&
-    typeof navigator.go === "function" &&
-    typeof navigator.push === "function" &&
-    typeof navigator.replace === "function"
-  );
-}
-
 function WorkspaceRoutes({
   calendarTodaySnap,
+  calendars,
   deviceWeatherLocation,
-  locationOverride,
   setEditor,
   todayBrief,
   user,
   weather,
 }: {
   calendarTodaySnap: number;
+  calendars: Calendar[];
   deviceWeatherLocation: DeviceWeatherLocation;
-  locationOverride?: string;
   setEditor: (editor: Editor) => void;
   todayBrief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending">;
   user: User;
@@ -1360,12 +1190,13 @@ function WorkspaceRoutes({
   };
 }) {
   return (
-    <Routes {...(locationOverride ? { location: locationOverride } : {})}>
+    <Routes>
       <Route
         path="/today"
         element={
           <TodayPage
             brief={todayBrief}
+            calendars={calendars}
             deviceWeatherLocation={deviceWeatherLocation}
             setEditor={setEditor}
             user={user}
@@ -1401,10 +1232,10 @@ function WorkspaceRoutes({
         path="/automations"
         element={<Navigate replace to="/settings?section=workspace-access" />}
       />
-      <Route path="/activity" element={<ActivityPage />} />
-      <Route path="/reviews" element={<ReviewsPage />} />
-      <Route path="/goals" element={<GoalsPage />} />
-      <Route path="/motives" element={<MotivesPage />} />
+      <Route path="/activity" element={<LegacySettingsRedirect section="activity" />} />
+      <Route path="/reviews" element={<LegacySettingsRedirect section="reviews" />} />
+      <Route path="/goals" element={<LegacySettingsRedirect section="goals" />} />
+      <Route path="/motives" element={<LegacySettingsRedirect section="motives" />} />
       <Route
         path="/finances/profile"
         element={<Navigate replace to="/settings?section=finances#guidance" />}
@@ -1414,6 +1245,13 @@ function WorkspaceRoutes({
       <Route path="*" element={<Navigate replace to="/today" />} />
     </Routes>
   );
+}
+
+function LegacySettingsRedirect({ section }: { section: SettingsSectionId }) {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.set("section", section);
+  return <Navigate replace to={`/settings?${search.toString()}`} />;
 }
 
 function SidebarNavigationItem({
@@ -1449,6 +1287,7 @@ function SidebarNavigationItem({
 }
 
 const navigationIcons = {
+  Account: UserCircleIcon,
   "Connected agents": PlugIcon,
   Appearance: PaintBrushIcon,
   Calendar: CalendarIcon,
@@ -1459,7 +1298,6 @@ const navigationIcons = {
   Invitations: UsersIcon,
   Mail: MailIcon,
   Motives: CompassIcon,
-  Profile: UserCircleIcon,
   Reminders: CheckSquareIcon,
   Sessions: LockIcon,
   Settings: SettingsIcon,
@@ -1497,7 +1335,8 @@ function NavigationIcon({
 }
 
 function WorkspaceAppBarForRoute({
-  calendarWorkspaceSwitcher,
+  accountMenu,
+  activeSettingsSection,
   onCalendarToday,
   pageTitle,
   pathname,
@@ -1507,8 +1346,10 @@ function WorkspaceAppBarForRoute({
   togglePin,
   user,
   weather,
+  workspaceSwitcher,
 }: {
-  calendarWorkspaceSwitcher: ReactNode;
+  accountMenu: ReactNode;
+  activeSettingsSection: SettingsSectionId;
   onCalendarToday: () => void;
   pageTitle: string | null;
   pathname: string;
@@ -1518,13 +1359,24 @@ function WorkspaceAppBarForRoute({
   togglePin: () => void;
   user: User;
   weather: WeatherSnapshot | undefined;
+  workspaceSwitcher: ReactNode;
 }) {
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
   const identity = isSpatialCalendar ? (
-    <CalendarAppBarIdentity user={user} workspaceSwitcher={calendarWorkspaceSwitcher} />
-  ) : pathname === "/today" && todayBrief ? (
-    <TodayNavigationTitle generatedAt={todayBrief.generatedAt} timeZone={user.planningTimezone} />
+    <CalendarAppBarIdentity user={user} workspaceSwitcher={workspaceSwitcher} />
+  ) : pathname === "/today" ? (
+    <div className="calendar-app-bar__identity-cluster">
+      <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      {todayBrief ? (
+        <TodayNavigationTitle
+          generatedAt={todayBrief.generatedAt}
+          timeZone={user.planningTimezone}
+        />
+      ) : (
+        <span className="workspace-app-bar__title">Today</span>
+      )}
+    </div>
   ) : (
     <span className="workspace-app-bar__title">
       {/* Account routes always supply a page title, so the workspace registry
@@ -1537,8 +1389,9 @@ function WorkspaceAppBarForRoute({
   ) : workspace === "mail" ? (
     <MailTopbarSearch />
   ) : pathname === "/today" ? (
-    <TodayWeatherTopbar user={user} weather={weather} />
-  ) : pathname === "/activity" ? (
+    <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
+  ) : pathname === "/activity" ||
+    (pathname === "/settings" && activeSettingsSection === "activity") ? (
     <ActivityTopbarControls />
   ) : pathname === "/reminders" ? (
     <RemindersTopbarControls />
@@ -1580,6 +1433,7 @@ function WorkspaceAppBarForRoute({
           ) : workspace === "account" ? null : (
             <CreateMenu setEditor={setEditor} />
           )}
+          {accountMenu}
         </>
       }
       context={context}
@@ -1589,193 +1443,40 @@ function WorkspaceAppBarForRoute({
   );
 }
 
-function warmWorkspacePreview(queryClient: QueryClient, path: WorkspaceDefinition["path"]) {
-  if (path === "/mail") {
-    void Promise.all([
-      queryClient.prefetchQuery({
-        queryFn: api.listConnectors,
-        queryKey: ["connectors"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.listMailboxes,
-        queryKey: ["mailboxes"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-    ]);
-  }
-  if (path === "/finances") {
-    void Promise.all([
-      queryClient.prefetchQuery({
-        queryFn: api.getFinanceWealthSummary,
-        queryKey: ["finance-wealth"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.getFinanceLedgerHealth,
-        queryKey: ["finance-ledger-health"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.getFinanceProfile,
-        queryKey: ["finance-profile"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.listFinanceIncomeStreams,
-        queryKey: ["finance-income-streams"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.listFinanceRecurringObligations,
-        queryKey: ["finance-recurring"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.listFinanceAlerts,
-        queryKey: ["finance-alerts"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.getFinanceForecast,
-        queryKey: ["finance-forecast"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: () => api.getFinanceBudgetPace("week"),
-        queryKey: ["finance-budget-pace", "week"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-      queryClient.prefetchQuery({
-        queryFn: api.getFinanceCategories,
-        queryKey: ["finance-categories"],
-        staleTime: workspaceIntentStaleTime,
-      }),
-    ]);
-  }
-}
-
 function WorkspaceSwitcher({
   compact = false,
   onNavigate,
-  onOpenChange,
-  onPreviewChange,
   pathname,
-  search,
   user,
   weather: currentWeather,
 }: {
   compact?: boolean;
   onNavigate: () => void;
-  onOpenChange: (open: boolean) => void;
-  onPreviewChange: (preview: WorkspacePreview | null) => void;
   pathname: string;
-  search: string;
   user: User;
   weather: WeatherSnapshot | undefined;
 }) {
-  const queryClient = useQueryClient();
-  const [menuOpen, setMenuOpen] = useState(false);
   const workspace = workspaceForPath(pathname);
-  const section = workspace?.label ?? "Home OS";
+  const isSettings = pathname === "/settings";
+  const section = isSettings ? "Settings" : (workspace?.label ?? "Home OS");
   const activeWorkspaceId = workspace ? workspaceIdForPath(workspace.path) : undefined;
-  const activeIndex = Math.max(
-    0,
-    workspaceShortcuts.findIndex((item) => item.path === workspace?.path),
-  );
-  const previewIndex = useRef(activeIndex);
-  const previewPath = useRef<string | null>(workspace?.path ?? null);
-  const [indicatorIndex, setIndicatorIndex] = useState(activeIndex);
-  const indicatorOffset = workspaceIndicatorOffset(indicatorIndex);
-  const calendarEntry = getWorkspaceCalendarEntry(user, search);
-  const calendarEvents = useQuery({
-    enabled: menuOpen,
-    queryFn: () => api.listEvents(calendarEntry.range),
-    queryKey: calendarQueryKeys.events(
-      calendarEntry.view,
-      calendarEntry.range.from,
-      calendarEntry.range.to,
-    ),
-    staleTime: workspaceIntentStaleTime,
-  });
-  const taskInbox = useQuery({
-    enabled: menuOpen,
-    queryFn: () => api.listTasks({ lifecycle: "open", limit: 100 }),
-    queryKey: ["tasks", "open", "all"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  const mailThreads = useQuery({
-    enabled: menuOpen,
-    queryFn: () => api.listMailThreads({}),
-    queryKey: ["mail-threads", null, null, "", false],
-    staleTime: workspaceIntentStaleTime,
-  });
-  const financeMonth = new Date().toISOString().slice(0, 7);
-  const finances = useQuery({
-    enabled: menuOpen,
-    queryFn: api.getFinanceOverview,
-    queryKey: ["finance-overview", financeMonth],
-    staleTime: workspaceIntentStaleTime,
-  });
-  const workspaceSummaries: Record<string, string> = {
-    "/calendar": workspaceCalendarSummary(calendarEvents.data, user),
-    "/finances": workspaceFinanceSummary(finances.data),
-    "/mail": workspaceCountSummary(
-      mailThreads.data?.filter((thread) => thread.unread).length,
-      "unread",
-      "Inbox clear",
-    ),
-    "/tasks": taskInbox.data?.nextCursor
-      ? "99+ open"
-      : workspaceCountSummary(taskInbox.data?.items.length, "open", "All done", "open"),
-    "/today": workspaceTodaySummary(currentWeather, user.homeLocation?.label),
-  };
-
-  useEffect(() => {
-    previewIndex.current = activeIndex;
-    previewPath.current = pathname;
-    setIndicatorIndex(activeIndex);
-  }, [activeIndex, pathname]);
-
-  const preview = (item: WorkspaceDefinition, index: number) => {
-    if (previewPath.current === item.path) return;
-    warmWorkspacePreview(queryClient, item.path);
-    const direction = index >= previewIndex.current ? "down" : "up";
-    previewIndex.current = index;
-    previewPath.current = item.path;
-    setIndicatorIndex(index);
-    startTransition(() => {
-      onPreviewChange({ direction, path: item.path });
-    });
-  };
 
   return (
     <ShadcnSidebarMenu>
       <ShadcnSidebarMenuItem>
-        <DropdownMenu
-          onOpenChange={(open) => {
-            setMenuOpen(open);
-            onOpenChange(open);
-            if (open) {
-              previewIndex.current = activeIndex;
-              // Track the committed route, not the workspace default, so a
-              // child route such as /goals can still preview its own
-              // workspace's default surface.
-              previewPath.current = pathname;
-              setIndicatorIndex(activeIndex);
-            } else {
-              onPreviewChange(null);
-            }
-          }}
-        >
+        <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <ShadcnButton
               aria-label="Switch workspace"
               className="sidebar__workspace-trigger w-full justify-start"
               variant="secondary"
             >
-              {activeWorkspaceId ? (
+              {isSettings ? (
+                <SettingsIcon aria-hidden="true" />
+              ) : activeWorkspaceId ? (
                 <WorkspaceIcon size="sm" workspace={activeWorkspaceId} />
+              ) : workspace?.id === "today" ? (
+                <TodayWorkspaceIcon timeZone={user.planningTimezone} weather={currentWeather} />
               ) : (
                 <LogoMark compact />
               )}
@@ -1786,37 +1487,44 @@ function WorkspaceSwitcher({
           <DropdownMenuContent
             align="start"
             aria-label="Switch workspace"
-            className={`workspace-switcher__menu w-[--radix-popper-anchor-width]${compact ? " workspace-switcher__menu--calendar" : ""}`}
-            style={
-              {
-                "--workspace-indicator-y": `${indicatorOffset}px`,
-              } as CSSProperties
-            }
+            className={compact ? "w-64" : "w-[--radix-popper-anchor-width]"}
           >
-            <span aria-hidden="true" className="workspace-switcher__indicator" />
             <DropdownMenuGroup>
               <WorkspaceMenuItem
-                index={0}
                 item={workspaceShortcuts[0] as WorkspaceDefinition}
                 onNavigate={onNavigate}
-                onPreview={preview}
                 pathname={pathname}
-                summary={workspaceSummaries["/today"] as string}
+                timeZone={user.planningTimezone}
+                weather={currentWeather}
               />
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               {workspaceShortcuts.slice(1).map((item) => (
                 <WorkspaceMenuItem
-                  index={workspaceShortcuts.indexOf(item)}
                   item={item}
                   key={item.path}
                   onNavigate={onNavigate}
-                  onPreview={preview}
                   pathname={pathname}
-                  summary={workspaceSummaries[item.path] as string}
+                  timeZone={user.planningTimezone}
+                  weather={currentWeather}
                 />
               ))}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <Link
+                  aria-current={isSettings ? "page" : undefined}
+                  aria-label="Settings"
+                  onClick={onNavigate}
+                  to="/settings"
+                >
+                  <SettingsIcon aria-hidden="true" />
+                  <span>Settings</span>
+                  {isSettings ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
+                </Link>
+              </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -1826,51 +1534,52 @@ function WorkspaceSwitcher({
 }
 
 function WorkspaceMenuItem({
-  index,
   item,
   onNavigate,
-  onPreview,
   pathname,
-  summary,
+  timeZone,
+  weather,
 }: {
-  index: number;
   item: WorkspaceDefinition;
   onNavigate: () => void;
-  onPreview: (item: WorkspaceDefinition, index: number) => void;
   pathname: string;
-  summary: string;
+  timeZone: string;
+  weather: WeatherSnapshot | undefined;
 }) {
   const { icon: Icon, label, path } = item;
   const isActive = workspaceForPath(pathname)?.path === path;
   const workspaceId = workspaceIdForPath(path);
-  const summaryId = `workspace-switcher-summary-${path.slice(1)}`;
   return (
-    <DropdownMenuItem asChild className="workspace-switcher__item" data-active={isActive}>
+    <DropdownMenuItem asChild>
       <Link
         aria-current={isActive ? "page" : undefined}
-        aria-describedby={summaryId}
         aria-label={label}
         onClick={onNavigate}
-        onFocus={() => onPreview(item, index)}
-        onPointerMove={() => onPreview(item, index)}
         to={path}
       >
-        {workspaceId ? (
+        {item.id === "today" ? (
+          <TodayWorkspaceIcon timeZone={timeZone} weather={weather} />
+        ) : workspaceId ? (
           <WorkspaceIcon size="sm" workspace={workspaceId} />
         ) : (
           <Icon aria-hidden="true" />
         )}
-        <span className="workspace-switcher__copy">
-          <span>{label}</span>
-          <small id={summaryId}>{summary}</small>
-        </span>
+        <span>{label}</span>
         {isActive ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
       </Link>
     </DropdownMenuItem>
   );
 }
 
-function AccountMenu({ onNavigate, user }: { onNavigate: () => void; user: User }) {
+function AccountMenu({
+  onNavigate,
+  placement = "sidebar",
+  user,
+}: {
+  onNavigate: () => void;
+  placement?: "sidebar" | "topbar";
+  user: User;
+}) {
   const queryClient = useQueryClient();
   const accountName = user.displayName.trim() || user.email;
   const logout = useMutation({
@@ -1880,6 +1589,57 @@ function AccountMenu({ onNavigate, user }: { onNavigate: () => void; user: User 
       window.location.assign("/");
     },
   });
+
+  const menu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ShadcnButton aria-label="Account menu" size="icon" variant="ghost">
+          {placement === "topbar" ? (
+            <ShadcnAvatar size="sm">
+              <ShadcnAvatarFallback>{initials(accountName)}</ShadcnAvatarFallback>
+            </ShadcnAvatar>
+          ) : (
+            <SettingsIcon aria-hidden="true" />
+          )}
+        </ShadcnButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-56"
+        side={placement === "topbar" ? "bottom" : "top"}
+      >
+        <DropdownMenuLabel>
+          <span className="block truncate">{accountName}</span>
+          <span className="block truncate font-normal">{user.email}</span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          {accountNavigationItems.map(({ icon: Icon, label, path }) => (
+            <DropdownMenuItem asChild key={path}>
+              <NavLink onClick={onNavigate} to={path}>
+                <Icon aria-hidden="true" />
+                <span>{label}</span>
+              </NavLink>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={logout.isPending}
+          onSelect={(event) => {
+            event.preventDefault();
+            logout.mutate();
+          }}
+          variant="destructive"
+        >
+          <LogOutIcon aria-hidden="true" />
+          <span>{logout.isPending ? "Signing out…" : "Log out"}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  if (placement === "topbar") return menu;
 
   return (
     <ShadcnSidebarMenu>
@@ -1891,47 +1651,7 @@ function AccountMenu({ onNavigate, user }: { onNavigate: () => void; user: User 
           <span className="sidebar__account-name min-w-0 flex-1 truncate text-sm font-medium">
             {accountName}
           </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <ShadcnButton
-                aria-label="Account menu"
-                className="size-8 shrink-0"
-                size="icon"
-                variant="ghost"
-              >
-                <SettingsIcon aria-hidden="true" />
-              </ShadcnButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56" side="top">
-              <DropdownMenuLabel>
-                <span className="block truncate">{accountName}</span>
-                <span className="block truncate font-normal">{user.email}</span>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                {accountNavigationItems.map(({ icon: Icon, label, path }) => (
-                  <DropdownMenuItem asChild key={path}>
-                    <NavLink onClick={onNavigate} to={path}>
-                      <Icon aria-hidden="true" />
-                      <span>{label}</span>
-                    </NavLink>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={logout.isPending}
-                onSelect={(event) => {
-                  event.preventDefault();
-                  logout.mutate();
-                }}
-                variant="destructive"
-              >
-                <LogOutIcon aria-hidden="true" />
-                <span>{logout.isPending ? "Signing out…" : "Log out"}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {menu}
         </div>
       </ShadcnSidebarMenuItem>
     </ShadcnSidebarMenu>
@@ -1978,14 +1698,90 @@ function FinanceAddTransactionButton({ onSelect }: { onSelect?: () => void }) {
   );
 }
 
+type EmptyDayQuote = { author?: string; source?: string; text: string };
+
+const openDayQuotes: EmptyDayQuote[] = [
+  {
+    author: "Marcus Aurelius",
+    source: "Meditations, VII.67",
+    text: "Very little is needed to make a happy life.",
+  },
+  {
+    author: "Henry David Thoreau",
+    source: "Letter to H.G.O. Blake, November 16, 1857",
+    text: "It is not enough to be industrious; so are the ants. What are you industrious about?",
+  },
+  {
+    author: "Seneca",
+    source: "On the Shortness of Life",
+    text: "It is not that we have a short time to live, but that we waste much of it.",
+  },
+  {
+    author: "Ecclesiastes 3:1",
+    source: "KJV",
+    text: "To every thing there is a season, and a time to every purpose under the heaven.",
+  },
+  {
+    author: "Lao Tzu",
+    source: "Tao Te Ching, chapter 37",
+    text: "The Tao does nothing, and yet nothing is left undone.",
+  },
+  {
+    author: "Ovid",
+    text: "Take rest; a field that has rested gives a bountiful crop.",
+  },
+  {
+    author: "Annie Dillard",
+    source: "The Writing Life",
+    text: "How we spend our days is, of course, how we spend our lives.",
+  },
+  {
+    author: "Wendell Berry",
+    source: "The Real Work",
+    text: "The impeded stream is the one that sings.",
+  },
+  {
+    author: "Kurt Vonnegut",
+    source: "A Man Without a Country",
+    text: "If this isn't nice, I don't know what is.",
+  },
+  {
+    author: "Anne Lamott",
+    text: "Almost everything will work again if you unplug it for a few minutes, including you.",
+  },
+  { text: "Nothing on the calendar. That's not a mistake." },
+  { text: "A day with no shape yet." },
+  { text: "Some days are supposed to look like this." },
+  { text: "Unclaimed hours." },
+];
+
+const finishedDayQuotes: EmptyDayQuote[] = [
+  { text: "That's everything. Go be a person." },
+  { text: "Done. Don't go looking for more." },
+  { text: "You closed the loop. Leave it closed." },
+  { text: "Nothing left. This is what finished feels like." },
+  { text: "All handled. Resist the urge to add something." },
+  { text: "Empty by your own doing." },
+  { text: "The list is done being your problem." },
+  { text: "Rest isn't the reward for finishing. It's just what's next." },
+];
+
+function emptyDayQuote(day: LocalDate, allCommitmentsDone: boolean): EmptyDayQuote {
+  const quotes = allCommitmentsDone ? finishedDayQuotes : openDayQuotes;
+  const index = (day.year * 372 + day.month * 31 + day.day) % quotes.length;
+  return quotes[index] as EmptyDayQuote;
+}
+
 function TodayPage({
   brief,
+  calendars,
   deviceWeatherLocation,
   setEditor,
   user,
   weather,
 }: {
   brief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending">;
+  calendars: Calendar[];
   deviceWeatherLocation: DeviceWeatherLocation;
   setEditor: (editor: Editor) => void;
   user: User;
@@ -2005,6 +1801,9 @@ function TodayPage({
     return <PageLoading workspace="today" />;
   }
   const agenda = brief.data;
+  const calendarColorsById = new Map(
+    calendars.map((calendar) => [calendar.id, calendar.color] as const),
+  );
   const currentTime = new Date(agenda.generatedAt);
   const today = localDateAt(currentTime, user.planningTimezone);
   const overdueReminders = agenda.overdue.filter((reminder) => reminder.completedAt === null);
@@ -2040,163 +1839,124 @@ function TodayPage({
     anytimeReminders.length +
     overdueTasks.length +
     todayTasks.length;
+  const overdueCommitmentCount = overdueReminders.length + overdueTasks.length;
+  const commitmentCount =
+    overdueCommitmentCount + todayReminders.length + anytimeReminders.length + todayTasks.length;
+  const commitmentSummary =
+    commitmentCount === 0
+      ? "Nothing needs your attention"
+      : `${commitmentCount} ${commitmentCount === 1 ? "thing" : "things"} left${overdueCommitmentCount > 0 ? `, ${overdueCommitmentCount} overdue` : ""}`;
+  const remainingTimedEvents = Array.from(
+    new Map(
+      [...agenda.now, ...(agenda.next ? [agenda.next] : []), ...agenda.laterToday]
+        .filter(
+          (event) => !event.allDay && new Date(event.endsAt).getTime() > currentTime.getTime(),
+        )
+        .map((event) => [event.id, event] as const),
+    ).values(),
+  ).sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime());
+  const scheduledTasksToday = openTasks.filter((task) => {
+    if (!task.scheduledAt) return false;
+    const endsAt = scheduledTaskEndsAt(task);
+    return (
+      sameLocalDate(localDateAt(new Date(task.scheduledAt), user.planningTimezone), today) &&
+      endsAt.getTime() > currentTime.getTime()
+    );
+  });
+  const timelineItems: TodayTimelineItem[] = [
+    ...remainingTimedEvents.map((event) => ({
+      allDay: false as const,
+      endsAt: event.endsAt,
+      id: `event:${event.id}`,
+      material: { event, kind: "event" as const },
+      startsAt: event.startsAt,
+    })),
+    ...scheduledTasksToday.map((task) => ({
+      allDay: false as const,
+      endsAt: scheduledTaskEndsAt(task).toISOString(),
+      id: `task:${task.id}`,
+      material: { kind: "task" as const, task },
+      startsAt: task.scheduledAt as string,
+    })),
+  ].sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime());
+  const ongoingEventCount = timelineItems.filter(
+    (item) =>
+      new Date(item.startsAt).getTime() <= currentTime.getTime() &&
+      new Date(item.endsAt).getTime() > currentTime.getTime(),
+  ).length;
+  const eventsLeftToday = timelineItems.length - ongoingEventCount;
+  const eventSummary =
+    timelineItems.length === 0
+      ? "Nothing scheduled today"
+      : `${timelineItems.length} total ${timelineItems.length === 1 ? "event" : "events"}, ${eventsLeftToday} left today${ongoingEventCount > 0 ? `, ${ongoingEventCount} ongoing` : ""}`;
+  const openDayQuote = emptyDayQuote(today, remainingCount === 0);
   return (
     <div className="today-layout" data-page="today">
       <section className="day-column">
-        <TodayConditions
-          deviceWeatherLocation={deviceWeatherLocation}
-          savedLocation={user.homeLocation}
-          weather={weather}
-        />
-        <ShadcnCard aria-label="Current commitment" className="today-moment-block">
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>
-              <h2>{agenda.now.length > 0 ? "Happening now" : "Next commitment"}</h2>
-            </ShadcnCardTitle>
-            <ShadcnCardAction>
-              <ShadcnBadge variant="secondary">
-                {formatTime(currentTime.toISOString(), user.planningTimezone)}
-              </ShadcnBadge>
-            </ShadcnCardAction>
-          </ShadcnCardHeader>
-          <ShadcnCardContent className="today-moment-block__content">
-            {agenda.now.length > 0 ? (
-              <>
-                {agenda.now.map((event) => (
-                  <TodayEventCard
-                    currentTime={currentTime}
+        <section aria-label="Today's calendar" className="today-schedule">
+          <div className="section-heading today-section-heading">
+            <div className="today-section-heading__copy">
+              <h2>Your timeline</h2>
+              <p className="today-section-heading__description">{eventSummary}</p>
+            </div>
+          </div>
+          <TodayConditions
+            deviceWeatherLocation={deviceWeatherLocation}
+            savedLocation={user.homeLocation}
+            weather={weather}
+          />
+          {agenda.allDay.length > 0 ? (
+            <section aria-label="All-day occasions" className="today-all-day-strip">
+              <ShadcnItemGroup className="today-all-day-strip__events">
+                {agenda.allDay.map((event) => (
+                  <TodayAllDayEventCard
+                    calendarColor={calendarColorsById.get(event.calendarId)}
                     event={event}
                     key={event.id}
                     onEdit={() => setEditor({ event, kind: "event" })}
                     timeZone={user.planningTimezone}
                   />
                 ))}
-                {agenda.next ? (
-                  <div className="today-moment-block__then">
-                    <p className="eyebrow">Up next</p>
-                    <TodayEventCard
-                      event={agenda.next}
-                      onEdit={() =>
-                        setEditor({ event: agenda.next as CalendarEvent, kind: "event" })
-                      }
-                      timeZone={user.planningTimezone}
-                    />
-                  </div>
-                ) : null}
-              </>
-            ) : agenda.next ? (
-              <TodayEventCard
-                event={agenda.next}
-                onEdit={() => setEditor({ event: agenda.next as CalendarEvent, kind: "event" })}
-                timeZone={user.planningTimezone}
-              />
-            ) : (
-              <EmptyState icon={<CalendarIcon />} title="The day is open">
-                Leave it spacious or add a block when it matters.
-              </EmptyState>
-            )}
-          </ShadcnCardContent>
-        </ShadcnCard>
-        <section aria-label="Day flow" className="today-sequence">
-          <div className="section-heading">
-            <div>
-              <h2>Later today</h2>
-            </div>
-          </div>
-          {agenda.allDay.length > 0 ? (
-            <div className="today-all-day">
-              <p className="eyebrow">All day</p>
-              {agenda.allDay.map((event) => (
-                <TodayEventCard
-                  event={event}
-                  key={event.id}
-                  onEdit={() => setEditor({ event, kind: "event" })}
-                  timeZone={user.planningTimezone}
-                />
-              ))}
-            </div>
+              </ShadcnItemGroup>
+            </section>
           ) : null}
-          {agenda.laterToday.filter((event) => event.id !== agenda.next?.id).length > 0 ? (
-            agenda.laterToday
-              .filter((event) => event.id !== agenda.next?.id)
-              .map((event) => (
-                <TodayEventCard
-                  event={event}
-                  key={event.id}
-                  onEdit={() => setEditor({ event, kind: "event" })}
-                  timeZone={user.planningTimezone}
-                />
-              ))
+          {timelineItems.length > 0 ? (
+            <TodayTimeline
+              calendarColorsById={calendarColorsById}
+              currentTime={currentTime}
+              items={timelineItems}
+              onEditTask={(task) => setEditor({ kind: "task", task })}
+              timeZone={user.planningTimezone}
+            />
           ) : (
-            <p className="today-sequence__empty">Nothing else is fixed on the calendar.</p>
+            <QuoteCard
+              {...(openDayQuote.author ? { author: openDayQuote.author } : {})}
+              {...(openDayQuote.source ? { source: openDayQuote.source } : {})}
+              className="today-empty-quote"
+              label="An open calendar"
+              text={openDayQuote.text}
+            />
           )}
         </section>
       </section>
       <aside aria-labelledby="today-queue-title" className="today-queue">
-        <div className="section-heading">
-          <div>
-            <h2 id="today-queue-title">Your commitments</h2>
-            <p className="today-queue__summary">
-              {agenda.capacity.overcommitted
-                ? `No free time before ${formatTime(agenda.capacity.workdayEndsAt, user.planningTimezone)}.`
-                : `${formatMinutes(agenda.capacity.availableMinutes)} free until ${formatTime(
-                    agenda.capacity.workdayEndsAt,
-                    user.planningTimezone,
-                  )}`}
-            </p>
+        <div className="section-heading today-section-heading">
+          <div className="today-section-heading__copy">
+            <h2 id="today-queue-title">To take care of</h2>
+            <p className="today-section-heading__description">{commitmentSummary}</p>
           </div>
-          <ShadcnBadge variant="secondary">{remainingCount}</ShadcnBadge>
+          <ShadcnBadge variant="secondary">{commitmentCount}</ShadcnBadge>
         </div>
-        {overdueReminders.length > 0 && (
-          <ReminderGroup
-            label="Overdue"
-            reminders={overdueReminders}
-            setEditor={setEditor}
-            timeZone={user.planningTimezone}
-          />
-        )}
-        {todayReminders.length > 0 ? (
-          <ReminderGroup
-            label="Today"
-            reminders={todayReminders}
-            setEditor={setEditor}
-            timeZone={user.planningTimezone}
-          />
-        ) : (
-          overdueReminders.length === 0 &&
-          overdueTasks.length === 0 &&
-          todayTasks.length === 0 && (
-            <EmptyState icon={<CircleCheckIcon />} title="Nothing pulling at you">
-              Add a reminder when something deserves your attention.
-            </EmptyState>
-          )
-        )}
-        {anytimeReminders.length > 0 ? (
-          <ReminderGroup
-            label="No due date"
-            reminders={anytimeReminders}
-            setEditor={setEditor}
-            timeZone={user.planningTimezone}
-          />
-        ) : null}
-        {overdueTasks.length > 0 ? (
-          <TaskGroup
-            label="Overdue tasks"
-            recommendations={recommendedTasks}
-            setEditor={setEditor}
-            tasks={overdueTasks}
-            timeZone={user.planningTimezone}
-          />
-        ) : null}
-        {todayTasks.length > 0 ? (
-          <TaskGroup
-            label="Today tasks"
-            recommendations={recommendedTasks}
-            setEditor={setEditor}
-            tasks={todayTasks}
-            timeZone={user.planningTimezone}
-          />
-        ) : null}
+        <TodayCommitmentList
+          anytimeReminders={anytimeReminders}
+          overdueReminders={overdueReminders}
+          overdueTasks={overdueTasks}
+          recommendedTasks={recommendedTasks}
+          setEditor={setEditor}
+          timeZone={user.planningTimezone}
+          todayReminders={todayReminders}
+          todayTasks={todayTasks}
+        />
         {doneToday.length > 0 || doneTasksToday.length > 0 ? (
           <ShadcnCollapsible className="today-history">
             <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
@@ -2232,6 +1992,182 @@ function TodayPage({
   );
 }
 
+type TodayCommitmentFilter = "all" | "overdue" | "tasks" | "reminders";
+type TodayCommitment =
+  | { kind: "task"; overdue: boolean; task: Task }
+  | { kind: "reminder"; overdue: boolean; reminder: Reminder };
+
+const todayCommitmentsPerPage = 6;
+
+function TodayCommitmentList({
+  anytimeReminders,
+  overdueReminders,
+  overdueTasks,
+  recommendedTasks,
+  setEditor,
+  timeZone,
+  todayReminders,
+  todayTasks,
+}: {
+  anytimeReminders: Reminder[];
+  overdueReminders: Reminder[];
+  overdueTasks: Task[];
+  recommendedTasks: Map<string, DailyBrief["recommendedTasks"][number]>;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+  todayReminders: Reminder[];
+  todayTasks: Task[];
+}) {
+  const [filter, setFilter] = useState<TodayCommitmentFilter>("all");
+  const [requestedPage, setRequestedPage] = useState(1);
+  const commitments: TodayCommitment[] = [
+    ...overdueTasks.map((task) => ({ kind: "task" as const, overdue: true, task })),
+    ...overdueReminders.map((reminder) => ({
+      kind: "reminder" as const,
+      overdue: true,
+      reminder,
+    })),
+    ...todayReminders.map((reminder) => ({
+      kind: "reminder" as const,
+      overdue: false,
+      reminder,
+    })),
+    ...anytimeReminders.map((reminder) => ({
+      kind: "reminder" as const,
+      overdue: false,
+      reminder,
+    })),
+    ...todayTasks.map((task) => ({ kind: "task" as const, overdue: false, task })),
+  ];
+  const filteredCommitments = commitments.filter((commitment) => {
+    if (filter === "all") return true;
+    if (filter === "overdue") return commitment.overdue;
+    return filter === "tasks" ? commitment.kind === "task" : commitment.kind === "reminder";
+  });
+  const pageCount = Math.max(1, Math.ceil(filteredCommitments.length / todayCommitmentsPerPage));
+  const page = Math.min(requestedPage, pageCount);
+  const pageStart = (page - 1) * todayCommitmentsPerPage;
+  const visibleCommitments = filteredCommitments.slice(
+    pageStart,
+    pageStart + todayCommitmentsPerPage,
+  );
+  const selectFilter = (value: string) => {
+    if (!value) return;
+    setFilter(value as TodayCommitmentFilter);
+    setRequestedPage(1);
+  };
+  const selectPage = (nextPage: number) =>
+    setRequestedPage(Math.min(Math.max(nextPage, 1), pageCount));
+
+  return (
+    <div className="today-commitments">
+      <ShadcnToggleGroup
+        aria-label="Commitment filters"
+        className="today-commitments__filters"
+        onValueChange={selectFilter}
+        size="sm"
+        type="single"
+        value={filter}
+        variant="outline"
+      >
+        <ShadcnToggleGroupItem value="all">All</ShadcnToggleGroupItem>
+        <ShadcnToggleGroupItem value="overdue">Overdue</ShadcnToggleGroupItem>
+        <ShadcnToggleGroupItem value="tasks">Tasks</ShadcnToggleGroupItem>
+        <ShadcnToggleGroupItem value="reminders">Reminders</ShadcnToggleGroupItem>
+      </ShadcnToggleGroup>
+      {visibleCommitments.length > 0 ? (
+        <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
+          <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
+            {visibleCommitments.map((commitment) => {
+              if (commitment.kind === "task") {
+                const recommendation = recommendedTasks.get(commitment.task.id);
+                return (
+                  <TaskRow
+                    className={cn(commitment.overdue && "today-commitment-row--overdue")}
+                    key={`task:${commitment.task.id}`}
+                    onEdit={() => setEditor({ kind: "task", task: commitment.task })}
+                    {...(recommendation ? { recommendation } : {})}
+                    task={commitment.task}
+                    timeZone={timeZone}
+                  />
+                );
+              }
+              return (
+                <ReminderRow
+                  key={`reminder:${commitment.reminder.id}`}
+                  onEdit={() => setEditor({ kind: "reminder", reminder: commitment.reminder })}
+                  reminder={commitment.reminder}
+                  timeZone={timeZone}
+                />
+              );
+            })}
+          </ShadcnItemGroup>
+        </ShadcnScrollArea>
+      ) : (
+        <EmptyState
+          icon={<CircleCheckIcon />}
+          title={commitments.length === 0 ? "Nothing pulling at you" : "Nothing in this view"}
+        >
+          {commitments.length === 0
+            ? "Add something when it deserves your attention."
+            : "Try another filter."}
+        </EmptyState>
+      )}
+      {filteredCommitments.length > 0 ? (
+        <div className="today-commitments__pagination">
+          <span>
+            {pageStart + 1}–
+            {Math.min(pageStart + todayCommitmentsPerPage, filteredCommitments.length)} of{" "}
+            {filteredCommitments.length}
+          </span>
+          <ShadcnPagination>
+            <ShadcnPaginationContent>
+              <ShadcnPaginationItem>
+                <ShadcnPaginationPrevious
+                  aria-disabled={page === 1}
+                  href="#"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    selectPage(page - 1);
+                  }}
+                  tabIndex={page === 1 ? -1 : undefined}
+                  text="Prev"
+                />
+              </ShadcnPaginationItem>
+              {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
+                <ShadcnPaginationItem key={pageNumber}>
+                  <ShadcnPaginationLink
+                    aria-label={`Go to page ${pageNumber}`}
+                    href="#"
+                    isActive={pageNumber === page}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      selectPage(pageNumber);
+                    }}
+                  >
+                    {pageNumber}
+                  </ShadcnPaginationLink>
+                </ShadcnPaginationItem>
+              ))}
+              <ShadcnPaginationItem>
+                <ShadcnPaginationNext
+                  aria-disabled={page === pageCount}
+                  href="#"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    selectPage(page + 1);
+                  }}
+                  tabIndex={page === pageCount ? -1 : undefined}
+                />
+              </ShadcnPaginationItem>
+            </ShadcnPaginationContent>
+          </ShadcnPagination>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TodayConditions({
   deviceWeatherLocation,
   savedLocation,
@@ -2252,7 +2188,7 @@ function TodayConditions({
       ? "Finding local conditions…"
       : savedLocation
         ? `Checking ${savedLocation.label}…`
-        : "Allow device location or add a saved location in Profile.";
+        : "Allow device location or add a saved location in Account settings.";
   return (
     <ShadcnItem className="today-conditions" size="sm">
       <ShadcnItemMedia variant="icon">
@@ -2273,18 +2209,16 @@ function TodayConditions({
 }
 
 function TodayWeatherTopbar({
+  generatedAt,
   user,
   weather,
 }: {
+  generatedAt: string | undefined;
   user: User;
   weather: WeatherSnapshot | undefined;
 }) {
   if (!weather) return null;
-  const WeatherIcon = weather.alerts.some((alert) => alert.kind === "rain")
-    ? CloudRainIcon
-    : weather.condition.includes("Clear")
-      ? SunIcon
-      : CloudIcon;
+  const WeatherIcon = todayWeatherIcon(weather, user.planningTimezone);
   const temperature = `${Math.round(weather.temperatureF)}°F`;
   const alertDescription =
     weather.alerts.length > 0 ? weather.alerts.map((alert) => alert.label).join(" · ") : null;
@@ -2294,6 +2228,7 @@ function TodayWeatherTopbar({
         content={
           <WeatherConditionsPopoverContent
             alertDescription={alertDescription}
+            generatedAt={generatedAt}
             planningTimezone={user.planningTimezone}
             weather={weather}
             WeatherIcon={WeatherIcon}
@@ -2318,6 +2253,7 @@ function TodayWeatherTopbar({
         content={<WeatherLocationPopoverContent weather={weather} />}
         contentClassName="weather-location-popover"
         description={weather.location.source === "device" ? "Using this device" : "Home location"}
+        showHeader={false}
         tooltip={`Weather location: ${weather.location.shortLabel}`}
         title={weather.location.label}
       >
@@ -2336,11 +2272,13 @@ function TodayWeatherTopbar({
 
 function WeatherConditionsPopoverContent({
   alertDescription,
+  generatedAt,
   planningTimezone,
   weather,
   WeatherIcon,
 }: {
   alertDescription: string | null;
+  generatedAt: string | undefined;
   planningTimezone: string;
   weather: WeatherSnapshot;
   WeatherIcon: Icon;
@@ -2365,11 +2303,16 @@ function WeatherConditionsPopoverContent({
         <dl className="weather-popover__stats">
           <div>
             <dt>Updated</dt>
-            <dd>{formatTime(weather.observedAt, planningTimezone)}</dd>
+            <dd>
+              {formatWeatherFreshness(
+                weather.observedAt,
+                generatedAt ? new Date(generatedAt).getTime() : Date.now(),
+              )}
+            </dd>
           </div>
           <div>
             <dt>Air quality</dt>
-            <dd>{weather.usAqi === null ? "Unavailable" : `AQI ${weather.usAqi}`}</dd>
+            <dd>{airQualityDescription(weather.usAqi)}</dd>
           </div>
         </dl>
       </div>
@@ -2381,10 +2324,43 @@ function WeatherConditionsPopoverContent({
   );
 }
 
+export function formatWeatherFreshness(observedAt: string, now = Date.now()): string {
+  const elapsedMinutes = Math.max(0, Math.floor((now - new Date(observedAt).getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "Just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}min ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}hr ago`;
+  return `${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+export function airQualityDescription(usAqi: number | null): string {
+  if (usAqi === null) return "Unavailable";
+  if (usAqi <= 50) return "Good";
+  if (usAqi <= 100) return "Moderate";
+  if (usAqi <= 150) return "Sensitive groups";
+  if (usAqi <= 200) return "Unhealthy";
+  if (usAqi <= 300) return "Very unhealthy";
+  return "Hazardous";
+}
+
 function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }) {
-  const { coordinates, label, mapUrl, source } = weather.location;
+  const { coordinates, label, mapUrl, shortLabel, source } = weather.location;
+  const sourceLabel = source === "device" ? "Using this device" : "Home location";
   return (
     <>
+      <div className="weather-location-popover__header">
+        <div className="weather-location-popover__heading">
+          <span>
+            <MapPinIcon aria-hidden="true" />
+            {sourceLabel}
+          </span>
+          <span>{shortLabel}</span>
+        </div>
+        <strong>{label}</strong>
+        <span className="weather-location-popover__coordinates">
+          {formatWeatherCoordinates(coordinates)}
+        </span>
+      </div>
       <div className="weather-location-popover__map">
         <iframe loading="lazy" src={weatherMapEmbedUrl(coordinates)} title={`Map of ${label}`} />
         <a
@@ -2398,11 +2374,6 @@ function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }
             Open map
           </span>
         </a>
-      </div>
-      <div className="weather-location-popover__details">
-        <strong>{label}</strong>
-        <span>{source === "device" ? "Using this device" : "Home location"}</span>
-        <span>{formatWeatherCoordinates(coordinates)}</span>
       </div>
     </>
   );
@@ -2447,7 +2418,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/finances/transactions") return "Transactions";
   if (pathname === "/activity") return "Activity";
   if (pathname === "/reviews") return "Reviews";
-  if (pathname === "/settings") return "Settings";
+  if (pathname === "/settings") return settingsSectionLabel(settingsSectionFromSearch(search));
   return null;
 }
 
@@ -2515,6 +2486,7 @@ function CalendarPage({
   const view = calendarViewFromSearch(requestedView, defaultView);
   const includeWeekends = searchParams.get("weekends") !== "0";
   const requestedAnchor = searchParams.get("date");
+  const requestedEventId = searchParams.get("event");
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
     ? parseLocalDate(requestedAnchor as string)
     : localDateAt(currentTime, user.planningTimezone);
@@ -2603,6 +2575,20 @@ function CalendarPage({
       }),
     );
   }, [days, events.data, user.planningTimezone]);
+
+  useEffect(() => {
+    if (!requestedEventId || !events.data) return;
+    const requestedEvent = events.data.find((event) => event.id === requestedEventId);
+    if (requestedEvent) setInspectedEvent(requestedEvent);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("event");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [events.data, requestedEventId, setSearchParams]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 60_000);
@@ -3516,11 +3502,18 @@ function WeekCalendarView({
   );
 }
 
-type TimelineEventLayout = {
+type TimelinePositionable = {
+  allDay: boolean;
+  endsAt: string;
+  id: string;
+  startsAt: string;
+};
+
+type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> = {
   column: number;
   columns: number;
   endMinute: number;
-  event: CalendarEvent;
+  event: T;
   startMinute: number;
 };
 
@@ -3929,7 +3922,7 @@ function CalendarBlankContextMenu({
   const paste = useMutation({
     mutationFn: async () => {
       const event = parseClipboardCalendarEvent(await navigator.clipboard.readText());
-      if (!event) throw new Error("Copy an event from ilo before pasting it here.");
+      if (!event) throw new Error("Copy an event from nohmi before pasting it here.");
       const times = movedEventTimes(event, day, minute, timeZone);
       return api.createEvent({
         allDay: event.allDay,
@@ -4289,6 +4282,7 @@ function GoalsPage() {
   if (goals.isError) return <InlineError error={goals.error} />;
   return (
     <div className="wide-page flex flex-col gap-6 pb-8">
+      <h1 className="sr-only">Goals</h1>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ShadcnCard>
           <ShadcnCardHeader>
@@ -4459,6 +4453,7 @@ function MotivesPage() {
   if (motives.isError) return <InlineError error={motives.error} />;
   return (
     <div className="wide-page flex flex-col gap-6 pb-8">
+      <h1 className="sr-only">Motives</h1>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ShadcnCard>
           <ShadcnCardHeader>
@@ -4628,14 +4623,18 @@ function MailComposeButton({ onSelect }: { onSelect?: () => void }) {
 }
 
 type SettingsSectionId =
+  | "activity"
   | "agent-connections"
   | "appearance"
   | "calendar"
   | "connections"
   | "finances"
+  | "goals"
   | "invitations"
   | "mail"
+  | "motives"
   | "profile"
+  | "reviews"
   | "sessions"
   | "tasks"
   | "texting"
@@ -4647,16 +4646,28 @@ const settingsNavigation: Array<{
   label: string;
 }> = [
   {
+    label: "Account",
+    items: [{ icon: UserIcon, id: "profile", label: "Account" }],
+  },
+  {
     label: "Personal",
     items: [
-      { icon: UserIcon, id: "profile", label: "Profile" },
+      { icon: TargetIcon, id: "goals", label: "Goals" },
+      { icon: CompassIcon, id: "motives", label: "Motives" },
+      { icon: ShieldCheckIcon, id: "reviews", label: "Reviews" },
+    ],
+  },
+  {
+    label: "Experience",
+    items: [
       { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
     ],
   },
   {
-    label: "Security",
+    label: "History & access",
     items: [
+      { icon: ActivityIcon, id: "activity", label: "Activity" },
       { icon: LockIcon, id: "sessions", label: "Sessions" },
       { icon: UserIcon, id: "invitations", label: "Invitations" },
     ],
@@ -4705,12 +4716,23 @@ export function settingsSectionPath(section: SettingsSectionId): string {
   return `/settings?section=${section}`;
 }
 
+function settingsSectionLabel(section: SettingsSectionId): string {
+  return (
+    settingsNavigation.flatMap((group) => group.items).find((item) => item.id === section)?.label ??
+    "Settings"
+  );
+}
+
 /** One permission rule for every surface that lists account sections. */
 function visibleSettingsNavigation(canManageInvitations: boolean) {
   return settingsNavigation
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => item.id !== "invitations" || canManageInvitations),
+      items: group.items.filter(
+        (item) =>
+          (item.id !== "invitations" || canManageInvitations) &&
+          (item.id !== "wallpaper" || isTauri()),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 }
@@ -4776,6 +4798,16 @@ function SettingsSidebarNavigation({
                     />
                   );
                 })}
+                {group.label === "Account" ? (
+                  <ShadcnSidebarMenuItem>
+                    <ShadcnSidebarMenuButton asChild>
+                      <Link onClick={onNavigate} to="/setup">
+                        <SparklesIcon aria-hidden="true" />
+                        <span>Setup</span>
+                      </Link>
+                    </ShadcnSidebarMenuButton>
+                  </ShadcnSidebarMenuItem>
+                ) : null}
               </ShadcnSidebarMenu>
             </nav>
           </ShadcnSidebarGroupContent>
@@ -4799,6 +4831,9 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     return <Navigate replace to={`/settings?${next.toString()}`} />;
   }
   const section = settingsSectionFromSearch(location.search);
+  if (section === "wallpaper" && !isTauri()) {
+    return <Navigate replace to="/settings?section=appearance" />;
+  }
   if (section === "invitations" && user.canManageInvitations !== true) {
     return <Navigate replace to="/settings?section=profile" />;
   }
@@ -4822,8 +4857,12 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         {section === "connections" ? <ConnectorsSettings /> : null}
         {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
         {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
+        {section === "activity" ? <ActivityPage /> : null}
         {section === "appearance" ? <ThemeSettings user={user} /> : null}
+        {section === "goals" ? <GoalsPage /> : null}
+        {section === "motives" ? <MotivesPage /> : null}
         {section === "profile" ? <ProfileSettings user={user} /> : null}
+        {section === "reviews" ? <ReviewsPage /> : null}
         {section === "invitations" ? <InvitationsSettings /> : null}
         {section === "sessions" ? <SessionsSettings /> : null}
         {section === "texting" ? <TextingSettings /> : null}
@@ -4919,7 +4958,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                       </ShadcnItemTitle>
                       <ShadcnItemDescription>
                         {calendar.provider === "local"
-                          ? "ilo calendar"
+                          ? "nohmi calendar"
                           : calendar.provider === "icloud"
                             ? "iCloud Calendar"
                             : "Google Calendar"}{" "}
@@ -5335,7 +5374,7 @@ async function applyPinterestWallpaper(settings: PinterestWallpaperSettings): Pr
     throw new Error("This board needs at least four image Pins to make a collage.");
   }
   if (!isTauri()) {
-    throw new Error("Pinterest wallpaper is available in the ilo desktop app.");
+    throw new Error("Pinterest wallpaper is available in the nohmi desktop app.");
   }
   const { invoke } = await import("@tauri-apps/api/core");
   try {
@@ -5456,28 +5495,7 @@ function PinterestWallpaperScheduler() {
 }
 
 function PinterestWallpaperSettingsPanel() {
-  return isTauri() ? (
-    <PinterestWallpaperDesktopSettingsPanel />
-  ) : (
-    <PinterestWallpaperWebPlaceholder />
-  );
-}
-
-function PinterestWallpaperWebPlaceholder() {
-  return (
-    <SettingsSection
-      description="Pinterest wallpapers are created and applied from ilo for macOS."
-      title="Pinterest wallpaper"
-    >
-      <ShadcnAlert role="status" variant="info">
-        <ImageIcon />
-        <ShadcnAlertTitle>Available in ilo for macOS</ShadcnAlertTitle>
-        <ShadcnAlertDescription>
-          Open the desktop app to choose a public Pinterest board and refine the wallpaper.
-        </ShadcnAlertDescription>
-      </ShadcnAlert>
-    </SettingsSection>
-  );
+  return <PinterestWallpaperDesktopSettingsPanel />;
 }
 
 function PinterestWallpaperDesktopSettingsPanel() {
@@ -5599,7 +5617,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           {apply.isPending ? "Refreshing" : "Refresh now"}
         </ShadcnButton>
       }
-      description="Paste a public board URL and ilo will compose a fresh tiled collage from its Pins each day."
+      description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
       title="Pinterest wallpaper"
     >
       {settings.error ? <SettingsError error={settings.error} /> : null}
@@ -5618,7 +5636,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
             value={boardUrl}
           />
           <ShadcnFieldDescription>
-            The board must be public. If Pinterest only exposes a few Pins, ilo repeats them to
+            The board must be public. If Pinterest only exposes a few Pins, nohmi repeats them to
             complete the collage.
           </ShadcnFieldDescription>
         </ShadcnField>
@@ -5632,8 +5650,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
           <ShadcnFieldContent>
             <ShadcnFieldLabel htmlFor="pinterest-daily">Refresh every day</ShadcnFieldLabel>
             <ShadcnFieldDescription>
-              A new collage is applied at 8:00 AM while ilo is running, and catches up when you next
-              open it.
+              A new collage is applied at 8:00 AM while nohmi is running, and catches up when you
+              next open it.
             </ShadcnFieldDescription>
           </ShadcnFieldContent>
         </ShadcnField>
@@ -6320,6 +6338,19 @@ function ProfileSettings({ user }: { user: User }) {
     mutationFn: api.resendEmailVerification,
     onSuccess: () => toast.success("Confirmation email sent."),
   });
+  const passwordReset = useMutation({
+    mutationFn: () => api.requestPasswordReset({ email: user.email }),
+    onError: (error) => toast.error(errorMessage(error)),
+    onSuccess: () => toast.success(`Password reset link sent to ${user.email}.`),
+  });
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onError: (error) => toast.error(errorMessage(error)),
+    onSuccess: () => {
+      queryClient.clear();
+      window.location.assign("/");
+    },
+  });
   const timeZones = Array.from(
     new Set([
       planningTimezone,
@@ -6336,131 +6367,180 @@ function ProfileSettings({ user }: { user: User }) {
   return (
     <SettingsSection
       description="Your identity and local time are used to personalize the workspace and schedule material correctly."
-      title="Profile"
+      title="Account"
     >
-      <form
-        className="profile-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          update.mutate({
-            displayName: [form.get("firstName"), form.get("lastName")]
-              .map((value) => String(value).trim())
-              .filter(Boolean)
-              .join(" "),
-            email: String(form.get("email")),
-            planningTimezone,
-            homeLocation,
-            workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
-            workdayStartMinute: timeToMinute(String(form.get("workdayStart"))),
-          });
-        }}
-      >
-        {!user.emailVerified ? (
-          <ShadcnAlert role="status" variant="warning">
-            <MailIcon />
-            <ShadcnAlertTitle>Email confirmation needed</ShadcnAlertTitle>
-            <ShadcnAlertDescription>
-              Confirm this address to keep account recovery available and unlock connected accounts.
-            </ShadcnAlertDescription>
-            <ShadcnAlertAction>
-              <ShadcnButton
-                disabled={resendVerification.isPending}
-                onClick={() => resendVerification.mutate()}
-                type="button"
-                variant="outline"
+      <div className="flex flex-col gap-6">
+        <form
+          className="profile-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            update.mutate({
+              displayName: [form.get("firstName"), form.get("lastName")]
+                .map((value) => String(value).trim())
+                .filter(Boolean)
+                .join(" "),
+              email: String(form.get("email")),
+              planningTimezone,
+              homeLocation,
+              workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
+              workdayStartMinute: timeToMinute(String(form.get("workdayStart"))),
+            });
+          }}
+        >
+          {!user.emailVerified ? (
+            <ShadcnAlert role="status" variant="warning">
+              <MailIcon />
+              <ShadcnAlertTitle>Email confirmation needed</ShadcnAlertTitle>
+              <ShadcnAlertDescription>
+                Confirm this address to keep account recovery available and unlock connected
+                accounts.
+              </ShadcnAlertDescription>
+              <ShadcnAlertAction>
+                <ShadcnButton
+                  disabled={resendVerification.isPending}
+                  onClick={() => resendVerification.mutate()}
+                  type="button"
+                  variant="outline"
+                >
+                  {resendVerification.isPending ? "Sending…" : "Resend confirmation"}
+                </ShadcnButton>
+              </ShadcnAlertAction>
+            </ShadcnAlert>
+          ) : null}
+          <ShadcnFieldGroup className="form-grid">
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
+              <ShadcnInput
+                autoComplete="given-name"
+                defaultValue={firstName}
+                id="profile-first-name"
+                name="firstName"
+                required
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
+              <ShadcnInput
+                autoComplete="family-name"
+                defaultValue={lastName}
+                id="profile-last-name"
+                name="lastName"
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
+              <ShadcnInput
+                autoComplete="email"
+                defaultValue={user.email}
+                id="profile-email"
+                name="email"
+                required
+                type="email"
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="profile-workday-start">
+                Planning day starts
+              </ShadcnFieldLabel>
+              <ShadcnInput
+                defaultValue={minuteToTime(user.workdayStartMinute)}
+                id="profile-workday-start"
+                name="workdayStart"
+                required
+                type="time"
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="profile-workday-end">Planning day ends</ShadcnFieldLabel>
+              <ShadcnInput
+                defaultValue={minuteToTime(user.workdayEndMinute)}
+                id="profile-workday-end"
+                name="workdayEnd"
+                required
+                type="time"
+              />
+            </ShadcnField>
+            <HomeLocationField
+              key={user.updatedAt}
+              savedLocation={user.homeLocation}
+              onChange={(location) => {
+                setHomeLocation(location);
+                if (location?.timezone) setPlanningTimezone(location.timezone);
+              }}
+              onValidityChange={setHomeLocationValid}
+            />
+            <ShadcnField className="profile-form__full-row">
+              <ShadcnFieldLabel htmlFor="profile-timezone">Planning time zone</ShadcnFieldLabel>
+              <ShadcnNativeSelect
+                id="profile-timezone"
+                name="planningTimezone"
+                onChange={(event) => setPlanningTimezone(event.target.value)}
+                value={planningTimezone}
               >
-                {resendVerification.isPending ? "Sending…" : "Resend confirmation"}
+                {timeZones.map((timeZone) => (
+                  <NativeSelectOption key={timeZone} value={timeZone}>
+                    {timeZone.replace("_", " ")}
+                  </NativeSelectOption>
+                ))}
+              </ShadcnNativeSelect>
+              <ShadcnFieldDescription>
+                Home Location supplies this default. Choose a different zone when your planning day
+                should stay anchored elsewhere.
+              </ShadcnFieldDescription>
+            </ShadcnField>
+          </ShadcnFieldGroup>
+          {update.isError ? <SettingsError error={update.error} /> : null}
+          {resendVerification.isError ? <SettingsError error={resendVerification.error} /> : null}
+          <ShadcnButton disabled={update.isPending || !homeLocationValid} type="submit">
+            {update.isPending ? "Saving profile…" : "Save profile"}
+          </ShadcnButton>
+        </form>
+        <ShadcnItemGroup aria-label="Account actions">
+          <ShadcnItem size="sm">
+            <ShadcnItemMedia variant="icon">
+              <KeyIcon aria-hidden="true" />
+            </ShadcnItemMedia>
+            <ShadcnItemContent>
+              <ShadcnItemTitle>Change password</ShadcnItemTitle>
+              <ShadcnItemDescription>
+                We’ll email you a secure link to choose a new password.
+              </ShadcnItemDescription>
+            </ShadcnItemContent>
+            <ShadcnItemActions>
+              <ShadcnButton
+                disabled={passwordReset.isPending}
+                onClick={() => passwordReset.mutate()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {passwordReset.isPending ? "Sending…" : "Send link"}
               </ShadcnButton>
-            </ShadcnAlertAction>
-          </ShadcnAlert>
-        ) : null}
-        <ShadcnFieldGroup className="form-grid">
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
-            <ShadcnInput
-              autoComplete="given-name"
-              defaultValue={firstName}
-              id="profile-first-name"
-              name="firstName"
-              required
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
-            <ShadcnInput
-              autoComplete="family-name"
-              defaultValue={lastName}
-              id="profile-last-name"
-              name="lastName"
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
-            <ShadcnInput
-              autoComplete="email"
-              defaultValue={user.email}
-              id="profile-email"
-              name="email"
-              required
-              type="email"
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="profile-workday-start">Planning day starts</ShadcnFieldLabel>
-            <ShadcnInput
-              defaultValue={minuteToTime(user.workdayStartMinute)}
-              id="profile-workday-start"
-              name="workdayStart"
-              required
-              type="time"
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="profile-workday-end">Planning day ends</ShadcnFieldLabel>
-            <ShadcnInput
-              defaultValue={minuteToTime(user.workdayEndMinute)}
-              id="profile-workday-end"
-              name="workdayEnd"
-              required
-              type="time"
-            />
-          </ShadcnField>
-          <HomeLocationField
-            key={user.updatedAt}
-            savedLocation={user.homeLocation}
-            onChange={(location) => {
-              setHomeLocation(location);
-              if (location?.timezone) setPlanningTimezone(location.timezone);
-            }}
-            onValidityChange={setHomeLocationValid}
-          />
-          <ShadcnField className="profile-form__full-row">
-            <ShadcnFieldLabel htmlFor="profile-timezone">Planning time zone</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="profile-timezone"
-              name="planningTimezone"
-              onChange={(event) => setPlanningTimezone(event.target.value)}
-              value={planningTimezone}
-            >
-              {timeZones.map((timeZone) => (
-                <NativeSelectOption key={timeZone} value={timeZone}>
-                  {timeZone.replace("_", " ")}
-                </NativeSelectOption>
-              ))}
-            </ShadcnNativeSelect>
-            <ShadcnFieldDescription>
-              Home Location supplies this default. Choose a different zone when your planning day
-              should stay anchored elsewhere.
-            </ShadcnFieldDescription>
-          </ShadcnField>
-        </ShadcnFieldGroup>
-        {update.isError ? <SettingsError error={update.error} /> : null}
-        {resendVerification.isError ? <SettingsError error={resendVerification.error} /> : null}
-        <ShadcnButton disabled={update.isPending || !homeLocationValid} type="submit">
-          {update.isPending ? "Saving profile…" : "Save profile"}
-        </ShadcnButton>
-      </form>
+            </ShadcnItemActions>
+          </ShadcnItem>
+          <ShadcnItem size="sm">
+            <ShadcnItemMedia variant="icon">
+              <LogOutIcon aria-hidden="true" />
+            </ShadcnItemMedia>
+            <ShadcnItemContent>
+              <ShadcnItemTitle>Log out</ShadcnItemTitle>
+              <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
+            </ShadcnItemContent>
+            <ShadcnItemActions>
+              <ShadcnButton
+                disabled={logout.isPending}
+                onClick={() => logout.mutate()}
+                size="sm"
+                type="button"
+                variant="destructive"
+              >
+                {logout.isPending ? "Logging out…" : "Log out"}
+              </ShadcnButton>
+            </ShadcnItemActions>
+          </ShadcnItem>
+        </ShadcnItemGroup>
+      </div>
     </SettingsSection>
   );
 }
@@ -6708,7 +6788,7 @@ function SessionsSettings() {
   });
   return (
     <SettingsSection
-      description="Devices with an active sign-in to your ilo account. Revoke access you no longer recognize."
+      description="Devices with an active sign-in to your nohmi account. Revoke access you no longer recognize."
       title="Sessions"
     >
       <ShadcnItemGroup>
@@ -6908,19 +6988,21 @@ function ReminderGroup({
 
 function TaskGroup({
   label,
+  overdue = false,
   recommendations,
   setEditor,
   tasks,
   timeZone,
 }: {
   label: string;
+  overdue?: boolean;
   recommendations?: Map<string, DailyBrief["recommendedTasks"][number]>;
   setEditor: (editor: Editor) => void;
   tasks: Task[];
   timeZone: string;
 }) {
   return (
-    <section className="reminder-group">
+    <section className={cn("reminder-group", overdue && "reminder-group--overdue")}>
       <h3>
         {label}
         <span>{tasks.length}</span>
@@ -6944,77 +7026,371 @@ function TaskGroup({
 }
 
 function TodayEventCard({
+  calendarColor,
   currentTime,
+  density,
+  event,
+  layoutStyle,
+  timeZone,
+}: {
+  calendarColor: string | null | undefined;
+  currentTime?: Date;
+  density: TodayTimelineDensity;
+  event: CalendarEvent;
+  layoutStyle?: CSSProperties;
+  timeZone: string;
+}) {
+  const navigate = useNavigate();
+  const eventLabel = `${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`;
+  const minutesUntilStart =
+    currentTime !== undefined && new Date(event.startsAt).getTime() > currentTime.getTime()
+      ? Math.max(
+          1,
+          Math.ceil((new Date(event.startsAt).getTime() - currentTime.getTime()) / 60_000),
+        )
+      : null;
+  const minutesRemaining =
+    currentTime !== undefined &&
+    new Date(event.startsAt).getTime() <= currentTime.getTime() &&
+    new Date(event.endsAt).getTime() > currentTime.getTime()
+      ? Math.max(1, Math.ceil((new Date(event.endsAt).getTime() - currentTime.getTime()) / 60_000))
+      : null;
+  const directionsUrl = event.location
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(event.location)}`
+    : null;
+  const hasQuickActions = Boolean(directionsUrl || event.conferenceUrl || event.url);
+  const viewInCalendar = () => {
+    const params = new URLSearchParams({
+      date: localDateToIso(localDateAt(new Date(event.startsAt), timeZone)),
+      event: event.id,
+      view: "week",
+    });
+    navigate(`/calendar?${params.toString()}`);
+  };
+  return (
+    <DropdownMenu>
+      <EventCard
+        className="today-timeline__event"
+        data-density={density}
+        role="listitem"
+        style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
+        tone="calendar"
+      >
+        <EventCardContent>
+          <DropdownMenuTrigger asChild>
+            <EventCardPrimaryAction aria-label={`${eventLabel}. Open quick actions`}>
+              <EventCardBody>
+                <EventCardTitle>
+                  <span className="min-w-0 truncate">{event.title}</span>
+                  {minutesUntilStart !== null || minutesRemaining !== null ? (
+                    <EventCardTitleMeta>
+                      {minutesUntilStart !== null
+                        ? `in ${formatMinutes(minutesUntilStart)}`
+                        : `${formatMinutes(minutesRemaining ?? 0)} left`}
+                    </EventCardTitleMeta>
+                  ) : null}
+                  {event.blocks.length > 0 ? (
+                    <LockIcon aria-label="Blocks another calendar" />
+                  ) : null}
+                </EventCardTitle>
+                <EventCardDescription>
+                  {formatTimelineTimeRange(event, timeZone)}
+                </EventCardDescription>
+                {event.location ? (
+                  <EventCardDescription>{event.location}</EventCardDescription>
+                ) : null}
+              </EventCardBody>
+            </EventCardPrimaryAction>
+          </DropdownMenuTrigger>
+        </EventCardContent>
+      </EventCard>
+      <DropdownMenuContent className="today-event-menu" align="start">
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={viewInCalendar}>
+            <CalendarIcon aria-hidden="true" /> View Event in Calendar
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        {hasQuickActions ? <DropdownMenuSeparator /> : null}
+        {hasQuickActions ? (
+          <DropdownMenuGroup>
+            {directionsUrl ? (
+              <DropdownMenuItem asChild>
+                <a href={directionsUrl} rel="noreferrer" target="_blank">
+                  <MapPinIcon aria-hidden="true" /> Get Directions
+                </a>
+              </DropdownMenuItem>
+            ) : null}
+            {event.conferenceUrl ? (
+              <DropdownMenuItem asChild>
+                <a href={event.conferenceUrl} rel="noreferrer" target="_blank">
+                  <ExternalLinkIcon aria-hidden="true" /> Join Meeting
+                </a>
+              </DropdownMenuItem>
+            ) : null}
+            {event.url && event.url !== event.conferenceUrl ? (
+              <DropdownMenuItem asChild>
+                <a href={event.url} rel="noreferrer" target="_blank">
+                  <ExternalLinkIcon aria-hidden="true" /> View Link
+                </a>
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuGroup>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type TodayTimelineItem = TimelinePositionable & {
+  material: { event: CalendarEvent; kind: "event" } | { kind: "task"; task: Task };
+};
+
+function scheduledTaskEndsAt(task: Task): Date {
+  return new Date(
+    new Date(task.scheduledAt as string).getTime() +
+      Math.max(15, task.estimateMinutes ?? 30) * 60_000,
+  );
+}
+
+function TodayTaskTimelineCard({
+  currentTime,
+  density,
+  item,
+  layoutStyle,
+  onEdit,
+  timeZone,
+}: {
+  currentTime: Date;
+  density: TodayTimelineDensity;
+  item: TodayTimelineItem;
+  layoutStyle: CSSProperties;
+  onEdit: () => void;
+  timeZone: string;
+}) {
+  if (item.material.kind !== "task") return null;
+  const { task } = item.material;
+  const minutesUntilStart =
+    new Date(item.startsAt).getTime() > currentTime.getTime()
+      ? Math.max(1, Math.ceil((new Date(item.startsAt).getTime() - currentTime.getTime()) / 60_000))
+      : null;
+  const minutesRemaining =
+    new Date(item.startsAt).getTime() <= currentTime.getTime() &&
+    new Date(item.endsAt).getTime() > currentTime.getTime()
+      ? Math.max(1, Math.ceil((new Date(item.endsAt).getTime() - currentTime.getTime()) / 60_000))
+      : null;
+
+  return (
+    <EventCard
+      className="today-timeline__event today-timeline__task"
+      data-density={density}
+      role="listitem"
+      style={layoutStyle}
+    >
+      <EventCardContent>
+        <EventCardPrimaryAction aria-label={`Open task ${task.title}`} onClick={onEdit}>
+          <EventCardBody>
+            <EventCardTitle>
+              <ListChecksIcon aria-hidden="true" />
+              <span className="min-w-0 truncate">{task.title}</span>
+              {minutesUntilStart !== null || minutesRemaining !== null ? (
+                <EventCardTitleMeta>
+                  {minutesUntilStart !== null
+                    ? `in ${formatMinutes(minutesUntilStart)}`
+                    : `${formatMinutes(minutesRemaining ?? 0)} left`}
+                </EventCardTitleMeta>
+              ) : null}
+            </EventCardTitle>
+            <EventCardDescription>
+              {formatTime(item.startsAt, timeZone)}–{formatTime(item.endsAt, timeZone)}
+            </EventCardDescription>
+          </EventCardBody>
+        </EventCardPrimaryAction>
+      </EventCardContent>
+    </EventCard>
+  );
+}
+
+const todayTimelinePixelsPerMinute = 1.5;
+type TodayTimelineDensity = "compact" | "full" | "short";
+
+export function todayTimelineStartMinute(currentMinute: number): number {
+  return Math.floor(currentMinute / 15) * 15;
+}
+
+export function todayTimelineItemRange(startMinute: number, endMinute: number) {
+  const start = Math.floor(startMinute / 15) * 15;
+  const end = Math.max(start + 15, Math.ceil(endMinute / 15) * 15);
+  return { end, start };
+}
+
+export function todayTimelineDensity(durationMinutes: number): TodayTimelineDensity {
+  if (durationMinutes <= 15) return "compact";
+  if (durationMinutes <= 30) return "short";
+  return "full";
+}
+
+function TodayTimeline({
+  calendarColorsById,
+  currentTime,
+  items,
+  onEditTask,
+  timeZone,
+}: {
+  calendarColorsById: Map<string, string | null>;
+  currentTime: Date;
+  items: TodayTimelineItem[];
+  onEditTask: (task: Task) => void;
+  timeZone: string;
+}) {
+  const day = localDateAt(currentTime, timeZone);
+  const currentMinute = localDateTimeAt(currentTime, timeZone).minute;
+  const startMinute = todayTimelineStartMinute(currentMinute);
+  const layouts = positionTimelineEvents(items, day, timeZone);
+  const endMinute = Math.max(
+    startMinute,
+    ...layouts.map((layout) => todayTimelineItemRange(layout.startMinute, layout.endMinute).end),
+  );
+  const height = Math.max(
+    15 * todayTimelinePixelsPerMinute,
+    (endMinute - startMinute) * todayTimelinePixelsPerMinute,
+  );
+  const firstHourMinute = Math.ceil(startMinute / 60) * 60;
+  const hourTicks =
+    firstHourMinute > endMinute
+      ? []
+      : Array.from(
+          { length: Math.floor((endMinute - firstHourMinute) / 60) + 1 },
+          (_, index) => firstHourMinute + index * 60,
+        );
+  const minorTicks = Array.from(
+    { length: Math.floor((endMinute - startMinute) / 15) + 1 },
+    (_, index) => startMinute + index * 15,
+  ).filter((minute) => minute % 60 !== 0);
+  const gridTicks = Array.from(
+    { length: Math.floor((endMinute - startMinute) / 15) + 1 },
+    (_, index) => startMinute + index * 15,
+  );
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: The timeline interleaves its decorative time axis with event list items.
+    <div className="today-timeline" role="list" style={{ height }}>
+      <div aria-hidden="true" className="today-timeline__axis">
+        <span className="today-timeline__line" />
+        {hourTicks.map((minute) => (
+          <span
+            className="today-timeline__tick"
+            key={minute}
+            style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
+          >
+            <span>{formatHour(Math.floor(minute / 60) % 24)}</span>
+            <i />
+          </span>
+        ))}
+        {minorTicks.map((minute) => (
+          <i
+            className="today-timeline__minor-tick"
+            data-half-hour={minute % 60 === 30 ? "true" : "false"}
+            data-slot="today-timeline-minor-tick"
+            key={minute}
+            style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
+          />
+        ))}
+        {endMinute % 15 === 0 ? null : <i className="today-timeline__end-cap" />}
+      </div>
+      <div
+        aria-label={`Current time ${formatTime(currentTime.toISOString(), timeZone)}`}
+        className="calendar-now-line today-timeline__now"
+        role="timer"
+        style={{ top: (currentMinute - startMinute) * todayTimelinePixelsPerMinute }}
+      >
+        <span>{formatTime(currentTime.toISOString(), timeZone)}</span>
+        <i />
+      </div>
+      <div className="today-timeline__track">
+        <div aria-hidden="true" className="today-timeline__grid">
+          {gridTicks.map((minute) => (
+            <i
+              data-half-hour={minute % 60 === 30 ? "true" : "false"}
+              data-major={minute % 60 === 0 ? "true" : "false"}
+              data-slot="today-timeline-grid-line"
+              key={minute}
+              style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
+            />
+          ))}
+        </div>
+        {layouts.map((layout) => {
+          const snappedRange = todayTimelineItemRange(layout.startMinute, layout.endMinute);
+          const visibleStartMinute = Math.max(startMinute, snappedRange.start);
+          const visibleEndMinute = Math.max(visibleStartMinute + 15, snappedRange.end);
+          const visibleDurationMinutes = visibleEndMinute - visibleStartMinute;
+          const columnGap = 8;
+          const layoutStyle = {
+            height: visibleDurationMinutes * todayTimelinePixelsPerMinute,
+            left: `calc(${(layout.column / layout.columns) * 100}% + ${layout.column === 0 ? 0 : columnGap / 2}px)`,
+            top: (visibleStartMinute - startMinute) * todayTimelinePixelsPerMinute,
+            width: `calc(${100 / layout.columns}% - ${layout.columns === 1 ? 0 : columnGap / 2}px)`,
+          } satisfies CSSProperties;
+          const { material } = layout.event;
+          if (material.kind === "event") {
+            return (
+              <TodayEventCard
+                calendarColor={calendarColorsById.get(material.event.calendarId)}
+                currentTime={currentTime}
+                density={todayTimelineDensity(visibleDurationMinutes)}
+                event={material.event}
+                key={layout.event.id}
+                layoutStyle={layoutStyle}
+                timeZone={timeZone}
+              />
+            );
+          }
+          return (
+            <TodayTaskTimelineCard
+              currentTime={currentTime}
+              density={todayTimelineDensity(visibleDurationMinutes)}
+              item={layout.event}
+              key={layout.event.id}
+              layoutStyle={layoutStyle}
+              onEdit={() => onEditTask(material.task)}
+              timeZone={timeZone}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TodayAllDayEventCard({
+  calendarColor,
   event,
   onEdit,
   timeZone,
 }: {
-  currentTime?: Date;
+  calendarColor: string | null | undefined;
   event: CalendarEvent;
   onEdit: () => void;
   timeZone: string;
 }) {
-  const eventLabel = `${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`;
-  const isInProgress =
-    currentTime !== undefined &&
-    !event.allDay &&
-    new Date(event.startsAt).getTime() <= currentTime.getTime() &&
-    currentTime.getTime() < new Date(event.endsAt).getTime();
-  const conferenceProvider = event.conferenceUrl
-    ? conferenceProviderLabel(event.conferenceUrl)
-    : null;
+  const start = localDateAt(new Date(event.startsAt), timeZone);
+  const inclusiveEnd = localDateAt(new Date(new Date(event.endsAt).getTime() - 1), timeZone);
+  const startLabel = formatLocalDate(start, { day: "numeric", month: "short" });
+  const endLabel = formatLocalDate(inclusiveEnd, { day: "numeric", month: "short" });
   return (
-    <EventCard>
-      <EventCardContent>
-        <EventCardTime>
-          {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
-        </EventCardTime>
-        <EventCardIndicator />
-        <EventCardPrimaryAction aria-label={`${eventLabel}. Open details`} onClick={onEdit}>
-          <EventCardBody>
-            <EventCardTitle>
-              <span className="truncate">{event.title}</span>
-              {event.blocks.length > 0 ? <LockIcon aria-label="Blocks another calendar" /> : null}
-            </EventCardTitle>
-            <EventCardDescription>
-              {event.location ? (
-                <span className="flex min-w-0 items-center gap-1">
-                  <MapPinIcon aria-hidden="true" />
-                  <span className="truncate">{event.location}</span>
-                </span>
-              ) : (
-                `${formatTime(event.startsAt, timeZone)}–${formatTime(event.endsAt, timeZone)}`
-              )}
-            </EventCardDescription>
-          </EventCardBody>
-        </EventCardPrimaryAction>
-        {event.provider.toLowerCase() !== "local" ? (
-          <EventCardAside>
-            <ConnectedServiceMark provider={event.provider} />
-          </EventCardAside>
-        ) : null}
-      </EventCardContent>
-      {isInProgress ? (
-        <EventCardFooter>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <ShadcnBadge variant="outline">
-              <ClockIcon aria-hidden="true" data-icon="inline-start" /> In progress
-            </ShadcnBadge>
-            <span className="font-mono text-xs text-muted-foreground">
-              {meetingTimingSummary(event, currentTime)}
-            </span>
-          </div>
-          {event.conferenceUrl ? (
-            <ShadcnButton asChild size="sm">
-              <a href={event.conferenceUrl} rel="noreferrer" target="_blank">
-                Join {conferenceProvider}
-                <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
-              </a>
-            </ShadcnButton>
-          ) : null}
-        </EventCardFooter>
-      ) : null}
-    </EventCard>
+    <OccasionCard
+      accentColor={calendarColor ?? "#777ce3"}
+      aside={
+        event.provider.toLowerCase() !== "local" ? (
+          <ConnectedServiceMark provider={event.provider} />
+        ) : undefined
+      }
+      endDateTime={localDateToIso(inclusiveEnd)}
+      endLabel={endLabel}
+      onOpen={onEdit}
+      startDateTime={localDateToIso(start)}
+      startLabel={startLabel}
+      title={event.title}
+    />
   );
 }
 
@@ -7349,7 +7725,7 @@ function EventInspector({
           <span>
             {event.provider === "google"
               ? "Edits write through to Google Calendar before they appear here."
-              : "This event is stored in ilo and available to authorized agents."}
+              : "This event is stored in nohmi and available to authorized agents."}
           </span>
         </div>
         {remove.isError ? (
@@ -7769,15 +8145,7 @@ function Field({
 
 function FatalState({ error }: { error: unknown }) {
   if (error instanceof TypeError) {
-    return (
-      <main className="center-screen">
-        <div className="inline-error" role="alert">
-          <strong>ilo service is offline.</strong>
-          <span>Run the Start environment action, then try again.</span>
-        </div>
-        <Button onClick={() => window.location.reload()}>Try again</Button>
-      </main>
-    );
+    return <OfflineState />;
   }
   return (
     <main className="center-screen">
@@ -7913,27 +8281,6 @@ function formatMinutes(value: number) {
   const minutes = value % 60;
   if (hours === 0) return `${minutes} min`;
   return minutes === 0 ? `${hours} hr` : `${hours} hr ${minutes} min`;
-}
-function meetingTimingSummary(event: CalendarEvent, currentTime: Date) {
-  const elapsed = Math.max(
-    0,
-    Math.floor((currentTime.getTime() - new Date(event.startsAt).getTime()) / 60_000),
-  );
-  const remaining = Math.max(
-    0,
-    Math.ceil((new Date(event.endsAt).getTime() - currentTime.getTime()) / 60_000),
-  );
-  return `Started ${formatMinutes(elapsed)} ago · ${formatMinutes(remaining)} left`;
-}
-function conferenceProviderLabel(url: string): string {
-  const hostname = new URL(url).hostname;
-  if (hostname === "meet.google.com") return "Google Meet";
-  if (hostname === "teams.live.com" || hostname.endsWith(".teams.microsoft.com")) {
-    return "Microsoft Teams";
-  }
-  if (hostname === "zoom.us" || hostname.endsWith(".zoom.us")) return "Zoom";
-  if (hostname === "webex.com" || hostname.endsWith(".webex.com")) return "Webex";
-  return "meeting";
 }
 function minuteToTime(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
@@ -8186,11 +8533,11 @@ function minuteToTimelinePixels(minute: number): number {
   return (minute / 60) * calendarHourHeight;
 }
 
-export function positionTimelineEvents(
-  events: CalendarEvent[],
+export function positionTimelineEvents<T extends TimelinePositionable>(
+  events: T[],
   day: LocalDate,
   timeZone: string,
-): TimelineEventLayout[] {
+): TimelineEventLayout<T>[] {
   const intervals = events
     .filter((event) => !event.allDay)
     .map((event) => {
@@ -8217,7 +8564,7 @@ export function positionTimelineEvents(
         left.endMinute - right.endMinute ||
         left.event.id.localeCompare(right.event.id),
     );
-  const layouts: TimelineEventLayout[] = [];
+  const layouts: TimelineEventLayout<T>[] = [];
   let cluster: typeof intervals = [];
   let clusterEnd = -Infinity;
   const layoutCluster = () => {

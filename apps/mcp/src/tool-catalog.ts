@@ -90,7 +90,7 @@ function write(
 }
 
 /**
- * The single discoverability and safety registry for Ilo's MCP surface.
+ * The single discoverability and safety registry for Nomi's MCP surface.
  * Feature modules own behavior; this catalog owns how that behavior is exposed.
  */
 export const iloToolCatalog = {

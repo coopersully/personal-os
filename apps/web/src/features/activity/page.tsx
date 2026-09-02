@@ -30,9 +30,10 @@ export function ActivityPage() {
   const entries = filterActivityEvents(activity.data, search);
   return (
     <div className="narrow-page">
+      <h1 className="sr-only">Activity</h1>
       {activity.data.length === 0 ? (
         <EmptyState icon={<ActivityIcon />} title="No activity yet">
-          Changes made by you, agents, connectors, and ilo will collect here.
+          Changes made by you, agents, connectors, and nohmi will collect here.
         </EmptyState>
       ) : entries.length === 0 ? (
         <EmptyState icon={<SearchIcon />} title="No matching activity">

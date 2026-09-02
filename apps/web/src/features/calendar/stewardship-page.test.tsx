@@ -237,7 +237,7 @@ describe("Calendar schedule health", () => {
 
     expect(
       await screen.findByText(
-        "Ilo will keep retrying while its service operator resolves this constraint.",
+        "nohmi will keep retrying while its service operator resolves this constraint.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open Connections" })).not.toBeInTheDocument();
@@ -341,7 +341,7 @@ describe("Calendar schedule health", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Ilo will retry this source.")).toBeInTheDocument();
+    expect(await screen.findByText("nohmi will retry this source.")).toBeInTheDocument();
     expect(screen.getByText("Evidence is unavailable and unknown.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open Connections" })).not.toBeInTheDocument();
   });

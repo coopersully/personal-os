@@ -823,7 +823,7 @@ function normalizeCalendarObject(
 function eventDocument(uid: string, input: CreateEventInput): string {
   const root = new ICAL.Component(["vcalendar", [], []]);
   root.updatePropertyWithValue("version", "2.0");
-  root.updatePropertyWithValue("prodid", "-//ilo//EN");
+  root.updatePropertyWithValue("prodid", "-//nohmi//EN");
   const component = new ICAL.Component("vevent");
   root.addSubcomponent(component);
   const event = new ICAL.Event(component);

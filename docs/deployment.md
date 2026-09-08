@@ -1,5 +1,19 @@
 # Deployment
 
+## Mac migration in progress
+
+The attended Mac Mini production migration is documented in
+[`deploy/mac-mini/README.md`](../deploy/mac-mini/README.md). It preserves the RDS
+database and provider/encryption configuration while deploying current code. Its
+commands do not mean the public cutover has happened; AWS remains the source until
+the final writer freeze, verified transfer, and activation are recorded.
+
+The Mac target uses `nohmi.coopersully.me` (app), `nohmi-api.coopersully.me`
+(API), and `nohmi-mcp.coopersully.me` (MCP). These names use free Cloudflare
+Tunnel and Universal SSL. The old `*.ilo.coopersully.me` AWS addresses are source
+configuration, not the Mac target. Provider callbacks must be registered for the
+new addresses before cutover; the migration preserves provider secrets and data.
+
 ## Required configuration
 
 | Variable | Purpose |

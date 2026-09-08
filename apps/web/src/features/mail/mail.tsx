@@ -255,8 +255,8 @@ function MailSendRecovery({
               <strong>{draft.subject || "(No subject)"}</strong>
               <span>
                 {draft.reconciliationState === "in_progress"
-                  ? "This send is still in progress. Ilo will refresh its state automatically."
-                  : "Ilo could not confirm the provider result."}
+                  ? "This send is still in progress. nohmi will refresh its state automatically."
+                  : "nohmi could not confirm the provider result."}
               </span>
             </div>
             {draft.reconciliationState === "sent_mail_review_required" ? (
@@ -700,7 +700,11 @@ function MailSecondaryNavigation({
   trash: () => void;
 }) {
   return (
-    <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+    <WorkspaceSecondaryAppBar
+      aria-label="Conversation actions"
+      className="mail-secondary-nav"
+      placement="inline"
+    >
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
         <Button onClick={reply} tone="ghost">
           <ReplyIcon aria-hidden="true" className="size-4" />

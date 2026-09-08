@@ -704,7 +704,7 @@ describe("domain schemas", () => {
         filteredTotal: 1,
         items: [
           {
-            action: { label: "Leave Ilo", to: "https://example.com" },
+            action: { label: "Leave nohmi", to: "https://example.com" },
             actionAt: null,
             domain: "mail",
             id: "bad-action",
@@ -771,12 +771,12 @@ describe("domain schemas", () => {
         ],
         mcpUrl: "https://mcp.example.com/mcp",
         skill: {
-          displayName: "Ilo Guided Setup",
-          installPrompt: "Install the Ilo skill.",
+          displayName: "nohmi Guided Setup",
+          installPrompt: "Install the nohmi skill.",
           invocation: "$ilo-setup",
           name: "ilo-setup",
           revision: "release-0.1.0",
-          setupPrompt: "Set up Ilo.",
+          setupPrompt: "Set up nohmi.",
           sourceUrl: "https://example.com/ilo-setup",
           version: "0.1.0",
         },
@@ -1495,6 +1495,10 @@ describe("domain schemas", () => {
         name: "Personal",
       }).success,
     ).toBe(false);
+    expect(createTaskListInputSchema.parse({ name: "Personal" }).icon).toBe("list");
+    expect(
+      createTaskListInputSchema.safeParse({ icon: "not-an-icon", name: "Personal" }).success,
+    ).toBe(false);
     expect(
       createTaskListInputSchema.safeParse({
         name: "Local only",
@@ -1530,6 +1534,7 @@ describe("domain schemas", () => {
     expect(updateTaskInputSchema.safeParse({ expectedRevision: 1 }).success).toBe(false);
     expect(updateTaskInputSchema.safeParse({ title: undefined }).success).toBe(false);
     expect(updateTaskListInputSchema.safeParse({ description: undefined }).success).toBe(false);
+    expect(updateTaskListInputSchema.parse({ icon: "home" })).toEqual({ icon: "home" });
     expect(updateTaskProjectInputSchema.safeParse({ why: undefined }).success).toBe(false);
     expect(
       updateTaskInputSchema.safeParse({ expectedRevision: 0, title: "Invalid revision" }).success,
@@ -1596,6 +1601,7 @@ describe("domain schemas", () => {
       createdAt: start,
       deletedAt: null,
       description: null,
+      icon: "list",
       id: listId,
       kind: "inbox",
       name: "Inbox",

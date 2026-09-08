@@ -23,7 +23,7 @@ export function ConnectionHealthBadge({ health }: { health: ConnectedAccountHeal
     return <Badge variant="destructive">Reconnect required</Badge>;
   }
   if (health.state === "service_attention") {
-    return <Badge variant="outline">ilo is resolving this</Badge>;
+    return <Badge variant="outline">nohmi is resolving this</Badge>;
   }
   return <Badge variant="secondary">Ready</Badge>;
 }
@@ -50,7 +50,7 @@ export function ConnectionHealthDescription({
     return <>{health.message ?? "Reconnect this account to resume syncing."}</>;
   }
   if (health.state === "service_attention") {
-    return <>{health.message ?? "ilo is resolving a connection issue."}</>;
+    return <>{health.message ?? "nohmi is resolving a connection issue."}</>;
   }
   return <>{lastSyncedAt ? `Synced ${formatRelativeTime(lastSyncedAt, now)}` : "Ready to sync"}</>;
 }
@@ -94,7 +94,7 @@ export function connectionHealth(account: {
   }
   if (account.syncStatus === "error") {
     return {
-      message: "This connection needs attention. ilo is resolving this.",
+      message: "This connection needs attention. nohmi is resolving this.",
       nextSyncAt: null,
       recovery: "operator",
       state: "service_attention",

@@ -193,7 +193,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         category: "configuration",
         code: "plaid_configuration_missing",
         disposition: "operator",
-        message: "Plaid is not configured for this ilo instance.",
+        message: "Plaid is not configured for this nohmi instance.",
         status: 503,
       });
     }
@@ -1034,7 +1034,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         failure = {
           ...failure,
           code: invalidCursorReplayFailedCode,
-          message: "Plaid could not restart transaction synchronization. ilo is resolving this.",
+          message: "Plaid could not restart transaction synchronization. nohmi is resolving this.",
           recovery: "operator",
         };
       }

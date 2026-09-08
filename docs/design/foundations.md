@@ -115,6 +115,10 @@ unrelated tools.
   or interaction feedback. A border must communicate a control, ordered row,
   modal/sheet edge, or semantic state boundary; adjoining regions do not earn
   a border merely because they meet.
+- Empty states are the deliberate absence-boundary exception: their container
+  has no background fill and uses one quiet, widely spaced dashed semantic border. The dashed
+  treatment belongs only to absent material, including reflective empty-state
+  quotes, and never decorates populated cards or ordinary page sections.
 - Icons come from one pack, reicon, reached through the shared registry. Its
   Outline and Filled weights are the vocabulary for active state; a second pack
   is never the answer to a glyph that is missing or reads wrong.
@@ -142,12 +146,13 @@ unrelated tools.
   never communicates readiness, selection, warning, or completion. Each accent
   must remain immediately distinguishable at peripheral glance in both themes;
   muddy, gray-shifted variants are not a calmer substitute for workspace identity.
-- Today is ilo's neutral personal pseudo-workspace: it owns Today, Goals,
-  Motives, and Activity while summarizing the other workspaces. Reminders
-  belong within Tasks and do not receive a separate workspace palette.
+- Today is ilo's neutral daily workspace. It owns only the current-day operating
+  surface while summarizing the other workspaces. Goals, Motives, Reviews, and
+  Activity are personal account utilities in Settings. Reminders belong within
+  Tasks and do not receive a separate workspace palette.
 - The only workspace identities are Today, Calendar, Tasks, Mail, and Finances.
   Account utilities (profile, setup, connections, security, connected agents, and workspace
-  access) are full-page utilities, never a sixth workspace. Reviews belongs to Today.
+  access, goals, motives, reviews, and activity) are full-page utilities, never a sixth workspace.
 
 ### Typography
 

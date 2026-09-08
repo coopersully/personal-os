@@ -10,6 +10,7 @@
       "!**/playwright-report",
       "!**/test-results",
       "!**/target",
+      "!.superpowers",
       "!apps/desktop/src-tauri/gen",
       "!apps/web/dev-dist",
       "!apps/web/src/components/ui",

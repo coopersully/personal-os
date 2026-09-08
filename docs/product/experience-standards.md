@@ -1,8 +1,8 @@
-# ilo experience standards
+# nohmi experience standards
 
 ## Purpose
 
-ilo should feel like one shared work surface for a person and their
+nohmi should feel like one shared work surface for a person and their
 agents. Pages may expose different material, but they should not invent a new
 information hierarchy or a new location for common actions each time.
 

@@ -1,10 +1,8 @@
 import {
-  ActivityIcon,
   BankIcon,
   CalendarIcon,
   CircleCheckIcon,
   ClockIcon,
-  CompassIcon,
   DollarIcon,
   HouseIcon,
   type Icon,
@@ -13,7 +11,6 @@ import {
   MailIcon,
   ReceiptIcon,
   ShieldCheckIcon,
-  TargetIcon,
   TrashIcon,
   WalletIcon,
   XIcon,
@@ -28,13 +25,7 @@ export type MobileWorkspacePage = {
 };
 
 const mobileWorkspacePagesByWorkspace: Record<WorkspaceId, MobileWorkspacePage[]> = {
-  today: [
-    { icon: HouseIcon, label: "Today", path: "/today" },
-    { icon: ShieldCheckIcon, label: "Reviews", path: "/reviews" },
-    { icon: TargetIcon, label: "Goals", path: "/goals" },
-    { icon: CompassIcon, label: "Motives", path: "/motives" },
-    { icon: ActivityIcon, label: "Activity", path: "/activity" },
-  ],
+  today: [{ icon: HouseIcon, label: "Today", path: "/today" }],
   calendar: [{ icon: CalendarIcon, label: "Calendar", path: "/calendar" }],
   tasks: [
     { icon: InboxIcon, label: "Inbox", path: "/tasks" },

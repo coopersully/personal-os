@@ -14,7 +14,7 @@ import {
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
-const id = z.string().uuid().describe("ilo object identifier");
+const id = z.string().uuid().describe("Nomi object identifier");
 const idempotencyKey = z
   .string()
   .min(1)
@@ -400,7 +400,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general ilo goals.",
+        "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general Nomi goals.",
       inputSchema: {
         changes: z.record(z.string(), z.unknown()).optional(),
         deadline: z.iso.date().nullable().optional(),
@@ -475,7 +475,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     ],
     [
       "export_finance_data",
-      "Export the user's ilo-owned Finance ledger, accounts, categories, and projections.",
+      "Export the user's Nomi-owned Finance ledger, accounts, categories, and projections.",
       () => api.exportFinanceData(),
     ],
   ];
@@ -545,7 +545,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: true },
       description:
-        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the ilo web application. The external provider may still require the user to authenticate and consent.",
+        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the Nomi web application. The external provider may still require the user to authenticate and consent.",
       inputSchema: { idempotencyKey, provider: z.literal("plaid").default("plaid") },
       title: "Start Finance account connection",
     },
@@ -609,15 +609,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Correct an account's user-owned name, kind, institution, or manual balance. This never changes provider credentials or ledger history.",
+        "Correct an account's name, kind, institution, manual balance, ownership, or planning inclusion. Pass its observed updatedAt as expectedUpdatedAt to reject stale edits. This never changes provider credentials or ledger history.",
       inputSchema: {
         accountId: id,
         balance: z.number().finite().nullable().optional(),
+        expectedUpdatedAt: z.iso.datetime().optional(),
         expectedVersion: z.number().int().nonnegative().optional(),
         idempotencyKey,
+        includeInPlanning: z.boolean().optional(),
         institution: z.string().min(1).max(160).optional(),
         kind: z.enum(["cash", "investment", "debt", "other"]).optional(),
         name: z.string().min(1).max(160).optional(),
+        ownershipShare: z.number().finite().gt(0).max(1).nullable().optional(),
+        ownershipType: z.enum(["individual", "joint", "unknown"]).optional(),
       },
       title: "Update Finance account",
     },
@@ -652,6 +656,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         limit: z.number().int().min(1).max(200).default(50),
         pending: z.boolean().optional(),
         review: z.enum(["all", "needs_review", "resolved"]).default("all"),
+        search: z.string().trim().min(1).max(160).optional(),
         to: z.iso.date().optional(),
       },
       title: "List Finance transactions",

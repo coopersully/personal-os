@@ -1,7 +1,7 @@
 import { SideProfileIcon } from "@/components/icons";
 
 /**
- * The ilo application mark. The `.logo-mark` class supplies the rounded-square frame, so the glyph
+ * The nohmi application mark. The `.logo-mark` class supplies the rounded-square frame, so the glyph
  * itself renders unframed here. It uses the Filled weight to match the raster mark assets, which
  * cannot carry an outline legibly at favicon and browser-tab sizes.
  */

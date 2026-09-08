@@ -37,6 +37,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FinanceProfileEditor } from "./profile-editor.js";
 
 const financeHumanOnlyActionLabels = {
   add_manual_transaction: "add manual transactions",
@@ -202,6 +203,7 @@ export function FinanceSettings() {
 
   return (
     <div className="agent-access" id="guidance">
+      <FinanceProfileEditor />
       <FinanceAutomationPanel
         enabled={automation.data?.reviewBypassEnabled ?? false}
         error={automation.error ?? updateAutomation.error}
@@ -353,11 +355,11 @@ function FinanceAgentGuidancePanel({
             </Item>
             <Item size="sm" variant="muted">
               <ItemContent>
-                <ItemTitle>Human-only boundaries</ItemTitle>
+                <ItemTitle>Portal controls</ItemTitle>
                 <ItemDescription>
                   {humanOnlyActionLabels.length > 0
-                    ? `${humanOnlyActionLabels.join(", ")} stay in Finance.`
-                    : "Consequential finance actions stay in Finance."}
+                    ? `You can ${humanOnlyActionLabels.join(", ")} directly in Finance.`
+                    : "Manage your financial records and decisions directly in Finance."}
                 </ItemDescription>
               </ItemContent>
             </Item>
@@ -518,7 +520,7 @@ function FinancialProfilePanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Financial profile</CardTitle>
+        <CardTitle>Payroll details</CardTitle>
         <CardDescription>
           Your private baseline for paycheck and cash-flow checks. It is never inferred as a job
           change without your confirmation.

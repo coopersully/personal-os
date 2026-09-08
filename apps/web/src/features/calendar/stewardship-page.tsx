@@ -85,7 +85,7 @@ export function CalendarStewardshipPage() {
             </Link>
           </Button>
           <div>
-            <p className="text-sm font-medium text-muted-foreground">Calendar Ilo</p>
+            <p className="text-sm font-medium text-muted-foreground">Calendar nohmi</p>
             <h1 className="font-heading text-2xl font-medium tracking-tight">Schedule health</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Evidence-bound review of source trust, conflicts, buffers, and tentative holds.
@@ -178,8 +178,8 @@ function LifecyclePanel({ status }: { status: CalendarStatus }) {
           </dl>
         ) : (
           <p className="text-sm text-muted-foreground">
-            The first assessment reviews 30 days behind and 90 days ahead using the evidence Ilo can
-            currently read.
+            The first assessment reviews 30 days behind and 90 days ahead using the evidence nohmi
+            can currently read.
           </p>
         )}
       </CardContent>
@@ -414,7 +414,7 @@ function RecommendationPanel({ review }: { review: CalendarReview | null }) {
             </EmptyTitle>
             <EmptyDescription>
               {review
-                ? "Ilo has no bounded recommendation for the supported evidence."
+                ? "nohmi has no bounded recommendation for the supported evidence."
                 : "Recommendations appear only after an evidence-bound assessment."}
             </EmptyDescription>
           </EmptyHeader>
@@ -507,7 +507,7 @@ function lifecycleCopy(lifecycle: CalendarStatus["lifecycle"]): {
     case "active":
       return {
         badgeVariant: "secondary",
-        description: "Ilo is evaluating the available evidence.",
+        description: "nohmi is evaluating the available evidence.",
         label: "Assessing",
         title: "Assessment in progress",
       };
@@ -549,9 +549,9 @@ function sourceLabel(source: CalendarSourceFreshness) {
 function sourceRecoveryCopy(source: CalendarSourceFreshness) {
   switch (source.recovery) {
     case "automatic":
-      return "Ilo will retry this source.";
+      return "nohmi will retry this source.";
     case "operator":
-      return "Ilo will keep retrying while its service operator resolves this constraint.";
+      return "nohmi will keep retrying while its service operator resolves this constraint.";
     case "reconnect":
       return "Reconnect this calendar account.";
     default:

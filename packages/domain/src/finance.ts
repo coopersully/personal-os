@@ -1033,7 +1033,7 @@ export const financeGuidedSetupContextSchema = z.object({
     approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(
-        "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
       )
       .nullable(),
     draftProposal: financeDomainProfileSchema.nullable(),
@@ -1056,6 +1056,7 @@ export const financeGuidedSetupContextSchema = z.object({
 export type FinanceGuidedSetupContext = z.infer<typeof financeGuidedSetupContextSchema>;
 
 export const financeTransactionQuerySchema = z.object({
+  search: z.string().trim().min(1).max(160).optional(),
   accountId: idSchema.optional(),
   categoryId: idSchema.optional(),
   cursor: z.string().min(1).max(600).optional(),

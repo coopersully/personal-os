@@ -1898,7 +1898,7 @@ function draftNeedsSentMailReconciliation(
 ): AppError {
   return new AppError(
     "conflict",
-    "Ilo cannot prove whether this draft was accepted by the provider. Inspect the provider's Sent Mail before any retry, then reconcile the draft in Ilo.",
+    "nohmi cannot prove whether this draft was accepted by the provider. Inspect the provider's Sent Mail before any retry, then reconcile the draft in nohmi.",
     {
       accountId,
       draftId,
@@ -1906,8 +1906,8 @@ function draftNeedsSentMailReconciliation(
       reason,
       repairAction: "verify_sent_mail_then_reconcile_draft",
       userAction:
-        "Inspect the provider's Sent Mail before any retry. Then mark the draft as sent or not sent in Ilo Mail.",
-      userActionDestination: "Provider Sent Mail; then Ilo Mail",
+        "Inspect the provider's Sent Mail before any retry. Then mark the draft as sent or not sent in nohmi Mail.",
+      userActionDestination: "Provider Sent Mail; then nohmi Mail",
       userActionRequired: true,
     },
   );
@@ -1921,7 +1921,7 @@ function draftSendClaimOwnershipLost(
   return new AppError(
     "conflict",
     providerEffectPossible
-      ? "This send no longer owns the draft claim, and the provider may have accepted the message. Inspect Sent Mail and the draft's current Ilo state before any retry."
+      ? "This send no longer owns the draft claim, and the provider may have accepted the message. Inspect Sent Mail and the draft's current nohmi state before any retry."
       : "This send no longer owns the draft claim. Do not retry while another draft send or reconciliation is current.",
     {
       accountId,
@@ -1933,11 +1933,11 @@ function draftSendClaimOwnershipLost(
         ? "verify_sent_mail_then_reconcile_draft"
         : "review_current_draft_state",
       userAction: providerEffectPossible
-        ? "Inspect the provider's Sent Mail and the draft's current Ilo state before any retry."
-        : "Review the draft's current state in Ilo Mail before taking another action.",
+        ? "Inspect the provider's Sent Mail and the draft's current nohmi state before any retry."
+        : "Review the draft's current state in nohmi Mail before taking another action.",
       userActionDestination: providerEffectPossible
-        ? "Provider Sent Mail; then Ilo Mail"
-        : "Ilo Mail",
+        ? "Provider Sent Mail; then nohmi Mail"
+        : "nohmi Mail",
       userActionRequired: true,
     },
   );
@@ -1946,7 +1946,7 @@ function draftSendClaimOwnershipLost(
 function draftClaimReleaseFailed(accountId: string, draftId: string): AppError {
   return new AppError(
     "service_unavailable",
-    "The provider rejected the message before accepting it, but Ilo could not safely release the draft claim. The message was not sent; review the current draft state before retrying.",
+    "The provider rejected the message before accepting it, but nohmi could not safely release the draft claim. The message was not sent; review the current draft state before retrying.",
     {
       accountId,
       draftClaimReleasePersisted: false,
@@ -1955,8 +1955,8 @@ function draftClaimReleaseFailed(accountId: string, draftId: string): AppError {
       providerAcceptance: "rejected",
       repairAction: "review_current_draft_state",
       retrySafe: false,
-      userAction: "Review the draft's current state in Ilo Mail before retrying.",
-      userActionDestination: "Ilo Mail",
+      userAction: "Review the draft's current state in nohmi Mail before retrying.",
+      userActionDestination: "nohmi Mail",
       userActionRequired: true,
     },
   );
@@ -1994,8 +1994,8 @@ function draftProviderPartialEffectError({
     draftReconciliationStatePersisted,
     repairAction: "verify_sent_mail_then_reconcile_draft",
     userAction:
-      "Inspect the provider's Sent Mail before any retry. Then use the recovery panel in Ilo Mail to mark the draft as sent or not sent.",
-    userActionDestination: "Provider Sent Mail; then Ilo Mail",
+      "Inspect the provider's Sent Mail before any retry. Then use the recovery panel in nohmi Mail to mark the draft as sent or not sent.",
+    userActionDestination: "Provider Sent Mail; then nohmi Mail",
     userActionRequired: true,
   });
 }

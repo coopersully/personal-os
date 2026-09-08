@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the ilo desktop overlay",
+  "description": "Capabilities for the Nomi desktop overlay",
   "windows": ["main"],
   "permissions": [
     "core:default",

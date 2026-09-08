@@ -6,9 +6,19 @@ import {
   type Icon,
   ListChecksIcon,
   ReceiptIcon,
+  SettingsIcon,
   ShieldCheckIcon,
+  TargetIcon,
   WalletIcon,
 } from "@/components/icons";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 
 export type FinanceSection =
   | "accounts"
@@ -17,6 +27,9 @@ export type FinanceSection =
   | "health"
   | "imports"
   | "overview"
+  | "plan"
+  | "wealth"
+  | "setup"
   | "review"
   | "subscriptions"
   | "transactions";
@@ -30,11 +43,10 @@ const navigation: Array<{
       { icon: GridIcon, id: "overview", label: "Overview" },
       { icon: ListChecksIcon, id: "review", label: "Review" },
       { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
+      { icon: WalletIcon, id: "plan", label: "Plan" },
       { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
-      { icon: WalletIcon, id: "budgets", label: "Budgets" },
-      { icon: ReceiptIcon, id: "subscriptions", label: "Subscriptions" },
+      { icon: TargetIcon, id: "wealth", label: "Wealth" },
       { icon: BankIcon, id: "accounts", label: "Accounts" },
-      { icon: ShieldCheckIcon, id: "health", label: "Ledger health" },
     ],
     label: "Finances",
   },
@@ -42,6 +54,8 @@ const navigation: Array<{
 
 export function financeSectionFromPath(pathname: string): FinanceSection {
   const section = pathname.split("/")[2];
+  if (section === "budgets") return "plan";
+  if (section === "reviews") return "overview";
   return (
     [
       "accounts",
@@ -50,6 +64,9 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
       "health",
       "imports",
       "overview",
+      "plan",
+      "wealth",
+      "setup",
       "review",
       "subscriptions",
       "transactions",
@@ -57,6 +74,14 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   ).some((item) => item === section)
     ? (section as FinanceSection)
     : "overview";
+}
+
+function financeNavigationActive(section: FinanceSection, destination: FinanceSection) {
+  return (
+    section === destination ||
+    (destination === "cashflow" && section === "subscriptions") ||
+    (destination === "accounts" && (section === "imports" || section === "health"))
+  );
 }
 
 export function FinanceSidebarNavigation({
@@ -69,23 +94,56 @@ export function FinanceSidebarNavigation({
   section: FinanceSection;
 }) {
   return navigation.map((group) => (
-    <nav aria-label={group.label} className="sidebar-group" key={group.label}>
-      <p className="sidebar-group__label">{group.label}</p>
-      <div className="nav-list">
-        {group.items.map(({ icon: Icon, id, label }) => (
-          <Link
-            aria-current={section === id ? "page" : undefined}
-            className={`nav-item${section === id ? " nav-item--active" : ""}`}
-            key={id}
-            onClick={onNavigate}
-            to={id === "overview" ? "/finances" : `/finances/${id}`}
-          >
-            <Icon aria-hidden="true" className="size-[19px]" />
-            <span>{label}</span>
-            {id === "review" && reviewCount > 0 ? <b>{reviewCount}</b> : null}
-          </Link>
-        ))}
-      </div>
-    </nav>
+    <SidebarGroup key={group.label}>
+      <SidebarGroupContent>
+        <nav aria-label={group.label}>
+          <SidebarMenu>
+            {group.items.map(({ icon: Icon, id, label }) => (
+              <SidebarMenuItem key={id}>
+                <SidebarMenuButton asChild isActive={financeNavigationActive(section, id)}>
+                  <Link
+                    aria-current={financeNavigationActive(section, id) ? "page" : undefined}
+                    aria-label={
+                      id === "review" && reviewCount > 0 ? `${label} ${reviewCount}` : label
+                    }
+                    onClick={onNavigate}
+                    to={id === "overview" ? "/finances" : `/finances/${id}`}
+                  >
+                    <Icon
+                      aria-hidden="true"
+                      weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
+                    />
+                    <span>{label}</span>
+                  </Link>
+                </SidebarMenuButton>
+                {id === "review" && reviewCount > 0 ? (
+                  <SidebarMenuBadge aria-hidden="true">{reviewCount}</SidebarMenuBadge>
+                ) : null}
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </nav>
+        <SidebarMenu className="mt-6">
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={section === "setup"}>
+              <Link
+                aria-current={section === "setup" ? "page" : undefined}
+                onClick={onNavigate}
+                to="/finances/setup"
+              >
+                <ShieldCheckIcon /> <span>Financial setup</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild>
+              <Link onClick={onNavigate} to="/settings?section=finances">
+                <SettingsIcon /> <span>Finance settings</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   ));
 }

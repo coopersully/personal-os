@@ -252,6 +252,8 @@ export async function runManager(args, overrides = {}) {
       "-T",
       "-e",
       "MIGRATIONS_DIR=/workspace/packages/database/migrations",
+      "-e",
+      "QA_FIXTURES_DOCKER_LOCAL=true",
       "api",
       "pnpm",
       "exec",

@@ -14,6 +14,40 @@ const base = {
 };
 
 describe("Finance MCP workflows", () => {
+  it("forwards ledger search and versioned ownership corrections without dropping fields", async () => {
+    const api = {
+      listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
+      updateFinanceAccount: vi.fn(async () => ({ ...base, outcome: "completed", data: { id } })),
+    };
+    const server = new McpServer({ name: "finance-portal-parity", version: "1" });
+    registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    await client.callTool({
+      name: "list_finance_transactions",
+      arguments: { search: "market", accountId: id },
+    });
+    expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({ search: "market", accountId: id }),
+    );
+    const input = {
+      accountId: id,
+      expectedUpdatedAt: "2026-09-03T12:00:00.000Z",
+      includeInPlanning: true,
+      ownershipType: "joint",
+      ownershipShare: 0.5,
+      idempotencyKey: "ownership-correction",
+    };
+    expect(
+      (await client.callTool({ name: "update_finance_account", arguments: input })).isError,
+    ).not.toBe(true);
+    const { accountId, ...changes } = input;
+    expect(api.updateFinanceAccount).toHaveBeenCalledWith(accountId, changes);
+    await client.close();
+    await server.close();
+  });
+
   it("forwards account filters to the typed API and returns planning disclosures", async () => {
     const listFinanceAccounts = vi.fn(async () => ({
       accounts: [],

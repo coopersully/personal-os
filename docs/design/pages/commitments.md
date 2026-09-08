@@ -21,30 +21,61 @@ Orientation (app frame)
 └── Direct create action for the current material
 
 Tasks context (sidebar)
-├── Views: Today, Upcoming, Scheduled, Completed, Cancelled, Trash
-├── Lists: protected Inbox plus active user Lists
-├── Projects: active, open Projects in the selected List
-└── Archive: archived Lists plus terminal or archived Projects
+├── Inbox, Today, Upcoming, All
+├── Lists: active user Lists with their nested active, open Projects
+└── History, Trash
 
-Tasks queue
-├── Persistent selected scope and optional advanced filters
-└── One directly manipulable Task row with organization and timing context
+Tasks secondary navigation (shared app frame)
+├── Selected View/List/Project and available count/context
+├── Filter, Sort, Display, and removable active-filter chips
+└── Contextual List/Project actions
 
-Reminders queue
-└── One directly manipulable Reminder row
+Shared queue
+├── Task and Reminder rows retain their own record type and actions
+└── Explicit selection reveals compatible batch actions
 ```
 
 Views are queries and own no records. Inbox is a List, not a View or Task lifecycle. Scheduled is
 derived from reserved time; Completed and Cancelled derive from lifecycle.
 
+### Compact navigation and queue (trial)
+
+The Tasks feature owns this hierarchy trial: all destinations are visible, and common controls
+work across the shared queue. Behavior coverage and responsive inspection validate implementation,
+not user comprehension or research outcomes.
+
+- Inbox is visually promoted but remains the protected List. Projects can still belong to Inbox.
+- Every active List and open Project remains visible as a direct link. User-created Lists sit under
+  **My lists** with a quiet tonal button treatment and their chosen semantic icon, distinguishing
+  them from system destinations without changing active-state geometry. Projects are permanently
+  indented under their List with no filled submenu surface or disclosure toggle. Only the selected
+  destination is current. Menus expose actions, never additional destinations.
+- A header plus creates a List. List menus expose New project, Edit list, and Archive list. Inbox
+  only exposes New project. Project menus open the existing management flow, including lifecycle
+  and move previews. The secondary bar exposes the same contextual menu when a container is open.
+  Menu controls are keyboard-accessible and visible on touch. Archive menu selection opens a
+  confirmation before any write; active-content conflicts remain server-authored.
+- Today, Upcoming, and All can mix tasks and reminders. All includes undated material. History
+  includes completed/cancelled records and unavailable container context; its archived-container
+  link preserves even empty List/Project history. Trash is separate and recoverable. Scheduled is
+  a reserved-time filter, Reminder is a type filter, and Completed/Cancelled are History filters.
+- `/reminders`, `view=scheduled`, `view=completed`, and `view=cancelled` redirect to equivalent
+  shared queries. No record is converted, moved, or duplicated by changing views.
+- Workspace rows show a checkbox, title, and one compact timing/organization/estimate line.
+  Notes and tags are optional Display details and remain in the inspector. High priority uses a
+  subtle semantic tone and accessible text label. Reminder checkboxes remain round; Task
+  checkboxes remain rounded-square. Trash is confirmed and restored from Trash. Today retains
+  its separate compact row composition.
+
 ## Interaction contract
 
 - Search belongs in the app frame and uses the `q` query parameter so results are linkable and
   survive browser history. The API searches title and notes; the page has no second client index.
-- Task selection has one canonical URL representation. `view` excludes `list` and `project`; a
-  `project` implies its `list`; a List excludes `view` and `project`; Inbox is `/tasks` without its
-  generated ID. An exact Task adds `task`; search and advanced timing/lifecycle filters are
-  preserved while selection normalizes.
+- Direct container navigation uses `list` and optional `project`; Inbox is `/tasks` without its
+  generated ID. Global views may additionally filter by List/Project. An exact record adds `task`
+  or `reminder`. Filters, sorting, grouping, and optional row details are URL-backed. Navigation
+  preserves search/presentation preferences while starting the new destination without stale
+  lifecycle/type filters.
 - A valid Project is authoritative: a missing or mismatched `list` parameter rewrites to the
   Project's actual List. Invalid ordinary selections return to canonical Inbox. Archived Lists and
   terminal/archived Projects are read-only history destinations under `/tasks?archive=all`; they
@@ -69,18 +100,47 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
   not invent cascade behavior.
 - The protected Inbox cannot be renamed or archived. List and Project names surface normalized
   duplicate/reserved-name failures without hiding the form.
-- Reminders remains reachable from Tasks as a related compatibility surface. It is not a Task View,
-  List, or Project, and it is not promoted to a second copy in Today navigation.
-- The app-frame primary action creates the current material directly: **New task** on Tasks and
-  **New reminder** on Reminders.
+- Reminders remain distinct records inside the Tasks workspace, never members of a Task List or
+  Project. **New task** is primary; its adjacent create menu exposes **New reminder**.
 - Advanced lifecycle and timing filters are URL-backed and sent to the canonical API query. The UI
   does not fetch a broad result and filter it locally.
+- Date filters start with Any time, Today, Tomorrow, and Next 7 days. Custom range reveals exact
+  deadline/reserved bounds under Advanced. Presets use the planning timezone and calendar-day
+  boundaries, including daylight saving; inclusive upper bounds exclude the following midnight.
+  Applied ranges are fixed, shareable instants, not silently moving saved relative queries. Chips
+  remove a complete range without dropping search or container selection. Clear removes filters
+  and task selection, not the current scope or search.
 - Creating, editing, moving, completing, cancelling, reopening, trashing, restoring, or changing a
   Task container invalidates Tasks, Today, Calendar, Activity, and organization queries together.
   Reminder mutations invalidate the corresponding shared projections.
-- The body begins with compact scope orientation, optional filters, and then the queue. Project
+- The optional shared secondary app bar sits directly below the Tasks title/search row. It keeps
+  scope orientation and Filters out of the scrolling queue. Filters opens the shared responsive
+  dialog (desktop) or drawer (mobile); Apply and Clear update the URL and close it. Lifecycle is
+  available only where the current scope supports it. Archive has scope orientation but no filters.
+- The body begins with the queue. Project
   orientation includes its parent List, purpose, target date, and loaded open count. This context
   remains visible when the desktop sidebar is absent.
+
+### Query and action ownership
+
+- `GET /v1/task-workspace` and the typed client return canonical discriminated Task/Reminder
+  records, read-only state, relevant date, grouping key, total matched count, and a bounded cursor.
+  SQL applies kind/status/priority/tag/deadline/reserved-time/container/search filters before
+  sorting, grouping, counting, or paging. Never sort only the first loaded page in the browser.
+- Sort choices are recommended, relevant date, reserved time, priority, newest, oldest, title, and shortest
+  estimate. Group choices are none, date, List, and Project. Missing dates/organization remain
+  visible in an explicit ungrouped bucket. Grouping is also server-ordered before pagination.
+- Mixed reads require Tasks and Reminders read scopes. Single-kind API reads retain least
+  privilege. MCP exposes the shared read projection without copying its query rules; surgical
+  mutation tools and their scopes remain separate.
+- Select items switches completion controls to selection controls. Select visible is explicitly
+  bounded to the first 100 loaded mutable rows. Selection never silently expands to unseen pages.
+- Batch Complete/Reopen/Trash/Restore appears only when compatible with every selected item.
+  Operations call each existing guarded API with its current revision, not a new generic mutation
+  endpoint. Partial failure reports the count and each failed title/error; successful rows leave
+  selection. No implied transaction or silent partial success.
+- This does not introduce agent maintenance, generated review queues, task recurrence, tracking,
+  or notification delivery. Use existing source/revision details and audits as evidence.
 
 ## State matrix
 
@@ -102,9 +162,12 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
 | System concept | Current implementation |
 | --- | --- |
 | shared app-frame search | `components/workspace-search.tsx` |
+| optional secondary frame and contextual slots | `components/workspace-layout.tsx`, `components/workspace-secondary-app-bar.tsx` |
 | shared projection invalidation | `lib/material-queries.ts` |
-| Reminder page, navigation, and rows | `features/reminders/page.tsx` |
-| Tasks workspace and navigation | `features/tasks/page.tsx` |
+| Shared workspace/rows/controls | `features/tasks/workspace-page.tsx`, `workspace-row.tsx`, `workspace-controls.tsx` |
+| Query and batch helpers | `features/tasks/workspace-query.ts`, `workspace-actions.ts` |
+| Context navigation, Today rows, archive compatibility | `features/tasks/task-navigation.tsx`, `features/tasks/page.tsx` |
+| Planning-timezone date presets | `features/tasks/task-filter-presets.ts` |
 | Task capture dialog and edit inspector | `features/tasks/task-dialog.tsx` |
 | List management | `features/tasks/task-list-dialog.tsx` |
 | Project management and conflicts | `features/tasks/task-project-dialog.tsx`, `features/tasks/project-conflict-dialog.tsx` |
@@ -112,8 +175,9 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
 
 ## Verification
 
-1. Open `/tasks`; confirm Inbox is selected without a generated URL parameter and Views, Lists, and
-   Projects are distinct groups.
+1. Open `/tasks`; confirm Inbox is selected without a generated URL parameter and Inbox, Today,
+   Upcoming, All, Lists/Projects, History, and Trash are visible without opening a menu. Switch and
+   reload; every project remains visible and only the selected destination is current.
 2. Select Today, a standard List, and a Project. Confirm the canonical `view`, `list`, and
    `list+project` URLs survive refresh and preserve `q` and advanced filters.
 3. Open a Task row, refresh its `task` URL, and confirm the same right-side inspector returns.
@@ -130,3 +194,7 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
    selection.
 10. Inspect desktop and 320 px layouts. Confirm search, direct creation, contextual navigation,
    conflict choices, and row actions remain reachable by keyboard.
+11. Filter mixed material by kind, dates, no deadline, priority, reserved time, and container. Sort
+    across multiple pages and group with ties/nulls; compare API totals and cursor traversal.
+12. Select a mixed set, test compatible actions and partial conflicts, then confirm Trash recovery
+    does not discard source, revision, or container fallback information.

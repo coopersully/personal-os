@@ -1154,7 +1154,7 @@ describe.sequential("Finance Provider Item service", () => {
     expect(orphanItems.rows).toEqual([]);
   });
 
-  it("blocks conflicting or undecryptable credential groups with only safe Ilo-authored reasons", async () => {
+  it("blocks conflicting or undecryptable credential groups with only safe nohmi-authored reasons", async () => {
     await insertLegacyGroup("legacy-mismatch", [null, null], ["token-a", "token-b"]);
     const [corrupt] = await insertLegacyGroup("legacy-corrupt", [null]);
     if (!corrupt) throw new Error("The corrupt legacy fixture was not created.");

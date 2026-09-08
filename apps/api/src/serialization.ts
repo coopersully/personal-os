@@ -142,6 +142,7 @@ export function serializeTaskList(row: TaskListRow): TaskList {
     createdAt: row.createdAt.toISOString(),
     deletedAt: row.deletedAt?.toISOString() ?? null,
     description: row.description,
+    icon: row.icon,
     id: row.id,
     kind: row.kind,
     name: row.name,

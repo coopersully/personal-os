@@ -315,6 +315,39 @@ describe.sequential("ilo API", () => {
       ).toEqual(result.items[0]);
     });
 
+    it("task lists persist validated sidebar icons across create and update", async () => {
+      const createdResponse = await listRequest("/v1/task-lists", {
+        body: { icon: "home", name: "Household" },
+      });
+      expect(createdResponse.status).toBe(201);
+      const created = (await payload(createdResponse)).taskList;
+      expect(created).toMatchObject({ icon: "home", name: "Household", revision: 1 });
+
+      const updatedResponse = await listRequest(`/v1/task-lists/${created.id}`, {
+        body: { expectedRevision: created.revision, icon: "star" },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      expect((await payload(updatedResponse)).taskList).toMatchObject({
+        icon: "star",
+        revision: 2,
+      });
+      await expect(
+        database.db
+          .select({ icon: taskLists.icon })
+          .from(taskLists)
+          .where(eq(taskLists.id, created.id)),
+      ).resolves.toEqual([{ icon: "star" }]);
+
+      expect(
+        (
+          await listRequest("/v1/task-lists", {
+            body: { icon: "not-an-icon", name: "Invalid icon" },
+          })
+        ).status,
+      ).toBe(400);
+    });
+
     it("task lists reject reserved and colliding names while preserving user and idempotency boundaries", async () => {
       const reserved = await listRequest("/v1/task-lists", {
         body: { name: "  Ｔｏｄａｙ  " },
@@ -2293,6 +2326,32 @@ describe.sequential("ilo API", () => {
       });
       expect(tokenResponse.status).toBe(201);
       taskAgentToken = (await payload(tokenResponse)).token.token;
+    });
+
+    it("task workspace authenticates the real route and preserves mixed and least-privilege reads", async () => {
+      await createTask("Workspace boundary Task");
+      expect(
+        (await taskRequest("/v1/reminders", { body: { title: "Workspace boundary Reminder" } }))
+          .status,
+      ).toBe(201);
+      expect((await request("/v1/task-workspace", { auth: "none" })).status).toBe(401);
+      expect((await taskAgentRequest("/v1/task-workspace")).status).toBe(403);
+      expect((await taskAgentRequest("/v1/task-workspace?kind=task")).status).toBe(200);
+      const query = new URLSearchParams({ query: "Workspace boundary", sort: "title", limit: "1" });
+      const page = await payload(await taskRequest(`/v1/task-workspace?${query}`));
+      expect(page.total).toBe(2);
+      expect(page.items[0]).toMatchObject({
+        kind: "reminder",
+        record: { title: "Workspace boundary Reminder" },
+      });
+      expect(page.nextCursor).toEqual(expect.any(String));
+      query.set("cursor", page.nextCursor);
+      const second = await payload(await taskRequest(`/v1/task-workspace?${query}`));
+      expect(second).toMatchObject({ total: 2, nextCursor: null });
+      expect(second.items[0]).toMatchObject({
+        kind: "task",
+        record: { title: "Workspace boundary Task", listId: taskInboxId },
+      });
     });
 
     it("tasks create in Inbox or an explicit same-List Project with local provenance and idempotency", async () => {
@@ -7966,7 +8025,7 @@ describe.sequential("ilo API", () => {
     expect(consentPage).toContain("rule-approved categorization and reconciliation");
     expect(consentPage).toContain("pending rather than guessed");
     expect(consentPage).toContain("durable Finance maintenance run");
-    expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
+    expect(consentPage).toContain("Connected provider credentials remain inside nohmi");
     expect(consentPage).toContain('class="oauth-card"');
     expect(consentPage).toContain("Requested access");
     expect(consentPage).toContain('class="oauth-cancel"');

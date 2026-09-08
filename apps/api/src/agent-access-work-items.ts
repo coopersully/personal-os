@@ -378,7 +378,7 @@ function projectItems({
         kind: "review",
         priority: "person_review",
         source: null,
-        summary: "A Finance decision needs signed-in judgment; Ilo will not guess.",
+        summary: "A Finance decision needs signed-in judgment; nohmi will not guess.",
         title: "Review a Finance decision",
         updatedAt: review.updatedAt.toISOString(),
       });

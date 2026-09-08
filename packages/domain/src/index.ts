@@ -17,6 +17,7 @@ export * from "./reflection.js";
 export * from "./reminder.js";
 export * from "./task.js";
 export * from "./task-organization.js";
+export * from "./task-workspace.js";
 export * from "./texting.js";
 export * from "./time.js";
 export * from "./weather.js";

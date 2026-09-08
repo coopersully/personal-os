@@ -543,7 +543,7 @@ describe.sequential("connector service", () => {
       (await service.listAccounts(userId)).find((item) => item.id === account.id),
     ).toMatchObject({
       mailEnabled: true,
-      syncError: "Google is temporarily unavailable. ilo will retry automatically.",
+      syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
       syncStatus: "error",
     });
     await service.syncAccount(userId, account.id);
@@ -773,7 +773,7 @@ describe.sequential("connector service", () => {
     expect(settled).toMatchObject({
       lastSyncedAt: timestamp,
       nextSyncAt: timestamp,
-      syncError: "Synchronization was interrupted. ilo will retry automatically.",
+      syncError: "Synchronization was interrupted. nohmi will retry automatically.",
       syncRecovery: "automatic",
       syncStatus: "idle",
     });
@@ -873,7 +873,7 @@ describe.sequential("connector service", () => {
         .where(eq(calendarAccounts.id, missingCredentialsAccount.id)),
     ).resolves.toEqual([
       expect.objectContaining({
-        syncError: "Google is not configured correctly. ilo is resolving this.",
+        syncError: "Google is not configured correctly. nohmi is resolving this.",
         syncRecovery: "operator",
         syncStatus: "error",
       }),
@@ -974,7 +974,7 @@ describe.sequential("connector service", () => {
         nextSyncAt: new Date(timestamp.getTime() - 3 * 60_000),
         provider: "google",
         providerAccountId: "scheduler-retry",
-        syncError: "Google is temporarily unavailable. ilo will retry automatically.",
+        syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
         syncErrorCategory: "temporary",
         syncErrorCode: "google_temporary_failure",
         syncFailureCount: 1,
@@ -1178,7 +1178,7 @@ describe.sequential("connector service", () => {
         mailEnabled: false,
         provider: "google",
         providerAccountId: "freshness-operator",
-        syncError: "Google is not configured correctly. ilo is resolving this.",
+        syncError: "Google is not configured correctly. nohmi is resolving this.",
         syncErrorCategory: "configuration",
         syncErrorCode: "google_configuration_failed",
         syncFailureCount: 1,
@@ -1492,7 +1492,7 @@ describe.sequential("connector service", () => {
           draftReconciliationStatePersisted: true,
           partialEffect: true,
           repairAction: "verify_sent_mail_then_reconcile_draft",
-          userActionDestination: "Provider Sent Mail; then Ilo Mail",
+          userActionDestination: "Provider Sent Mail; then nohmi Mail",
           userActionRequired: true,
         }),
       });
@@ -3885,7 +3885,7 @@ describe.sequential("connector service", () => {
       (await service.listAccounts(userId)).find((item) => item.id === connected.accountId),
     ).toMatchObject({
       email: "unavailable@icloud.com",
-      syncError: "iCloud is temporarily unavailable. ilo will retry automatically.",
+      syncError: "iCloud is temporarily unavailable. nohmi will retry automatically.",
       syncStatus: "error",
     });
   });
@@ -4549,7 +4549,7 @@ describe.sequential("connector service", () => {
       .where(eq(calendarAccounts.id, account.id));
     expect(retrying).toMatchObject({
       lastSyncAttemptAt: timestamp,
-      syncError: "Google is temporarily unavailable. ilo will retry automatically.",
+      syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
       syncErrorCategory: "unknown",
       syncFailureCount: 1,
       syncRecovery: "automatic",

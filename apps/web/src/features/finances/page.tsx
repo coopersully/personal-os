@@ -2,7 +2,6 @@ import type {
   FinanceAccount,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
-  FinanceCategory,
   FinanceForecast,
   FinanceLedgerHealth,
   FinancePlaybookResponse,
@@ -95,6 +94,10 @@ import {
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
+import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+
+export { FinanceBudgetBucketManager } from "./bucket-manager.js";
+
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
@@ -102,10 +105,18 @@ import { PlaidConnectButton } from "./plaid-connect.js";
 import { FinanceReimbursementList } from "./reimbursement-list.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
+import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
+import { financeTransactionFilters } from "./transaction-query.js";
 
 export function FinancesPage() {
   const location = useLocation();
-  const section = financeSectionFromPath(location.pathname);
+  const section =
+    location.pathname === "/finances/budgets"
+      ? "budgets"
+      : financeSectionFromPath(location.pathname);
+  const transactionParams = new URLSearchParams(location.search);
+  const transactionFilters = financeTransactionFilters(transactionParams);
+  const linkedTransactionId = transactionParams.get("transactionId");
   const queryClient = useQueryClient();
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
@@ -240,30 +251,20 @@ export function FinancesPage() {
     sortDirection: FinanceTransactionQuery["sortDirection"];
   }>({ sortBy: "date", sortDirection: "desc" });
   const refresh = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["finance-overview"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-review-queue"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-transactions"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-wealth"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-ledger-health"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-budget-status"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-spending-scope"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-profile"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-income-streams"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-recurring"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-alerts"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-forecast"] }),
-    ]);
+    queryClient.invalidateQueries({
+      predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
+    });
   const transactionList = useQuery({
     enabled: section === "transactions",
     queryFn: () =>
       api.listFinanceTransactions({
+        ...transactionFilters,
         cursor: transactionCursor ?? undefined,
         limit: 50,
         sortBy: transactionSort.sortBy,
         sortDirection: transactionSort.sortDirection,
       }),
-    queryKey: ["finance-transactions", transactionCursor, transactionSort],
+    queryKey: ["finance-transactions", transactionCursor, transactionSort, transactionFilters],
   });
   const addAccount = useMutation({
     mutationFn: () =>
@@ -447,6 +448,20 @@ export function FinancesPage() {
     <div
       className={`wide-page flex w-full max-w-6xl flex-col gap-5 pb-8${section === "budgets" ? " wide-page--compact" : ""}`}
     >
+      {section === "transactions" ? (
+        <FinanceTransactionControls
+          accounts={finance.accounts}
+          categories={categories.data ?? []}
+          onAdd={() => setShowTransactionForm(true)}
+        />
+      ) : null}
+      {section === "transactions" && linkedTransactionId ? (
+        <FinanceLinkedTransaction
+          id={linkedTransactionId}
+          onBreakdown={setBreakdownTransaction}
+          onCategorize={openCategorize}
+        />
+      ) : null}
       {section === "budgets" ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FinanceMonthNavigator
@@ -516,10 +531,17 @@ export function FinancesPage() {
       {section === "overview" && ledgerHealth.data ? (
         <FinanceLedgerHealthDisclosure health={ledgerHealth.data} />
       ) : null}
-      {section === "review" ? <FinanceAgentReviewQueue /> : null}
+      {section === "review" && !location.pathname.endsWith("/legacy") ? (
+        <FinanceAgentReviewQueue />
+      ) : null}
       <section
         className={
-          section === "budgets" ? "grid gap-6" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
+          section === "budgets" ||
+          section === "transactions" ||
+          section === "health" ||
+          section === "imports"
+            ? "grid gap-6"
+            : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
         }
         hidden={section === "overview" || section === "cashflow" || section === "subscriptions"}
       >
@@ -553,9 +575,7 @@ export function FinancesPage() {
               </ShadcnCardDescription>
               <ShadcnCardAction>
                 {section === "transactions" ? (
-                  <ShadcnButton onClick={() => setShowTransactionForm(true)} size="sm">
-                    New transaction
-                  </ShadcnButton>
+                  <FinanceExportMenu />
                 ) : (
                   <ShadcnButton
                     onClick={() => setReviewOnly((value) => !value)}
@@ -568,6 +588,9 @@ export function FinancesPage() {
               </ShadcnCardAction>
             </ShadcnCardHeader>
             <ShadcnCardContent className={section === "transactions" ? "min-w-0" : undefined}>
+              {section === "transactions" && transactionList.isError ? (
+                <InlineError error={transactionList.error} />
+              ) : null}
               {section === "transactions" ? (
                 <FinanceTransactionsTable
                   hasPreviousPage={transactionCursorHistory.length > 0}
@@ -1197,153 +1220,6 @@ function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefin
   );
 }
 
-export function FinanceBudgetBucketManager({
-  categories,
-  month,
-}: {
-  categories: FinanceCategory[];
-  month: string;
-}) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [selectedBucketId, setSelectedBucketId] = useState<string | null>(null);
-  const buckets = useQuery({
-    enabled: typeof api.listFinanceBudgetBuckets === "function",
-    queryFn: () => api.listFinanceBudgetBuckets(month),
-    queryKey: ["finance-budget-buckets", month],
-  });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["finance-budget-buckets"] });
-  const create = useMutation({
-    mutationFn: () =>
-      api.createFinanceBudgetBucket({
-        description: description.trim() || null,
-        idempotencyKey: crypto.randomUUID(),
-        name: name.trim(),
-      }),
-    onSuccess: () => {
-      setName("");
-      setDescription("");
-      return refresh();
-    },
-  });
-  const taxonomy = buckets.data?.taxonomy;
-  const selectedBucket = taxonomy?.buckets.find((bucket) => bucket.id === selectedBucketId);
-  const update = useMutation({
-    mutationFn: (input: { categoryIds: string[]; description: string | null }) => {
-      if (!selectedBucket) throw new Error("Choose a bucket first.");
-      return api.updateFinanceBudgetBucket(selectedBucket.id, {
-        ...input,
-        expectedVersion: selectedBucket.version,
-        idempotencyKey: crypto.randomUUID(),
-      });
-    },
-    onSuccess: refresh,
-  });
-  if (typeof api.listFinanceBudgetBuckets !== "function") return null;
-  if (buckets.isPending) return <Spinner />;
-  if (buckets.isError) return <InlineError error={buckets.error} />;
-  return (
-    <ShadcnCard className="mb-5">
-      <ShadcnCardHeader>
-        <ShadcnCardTitle>Budget buckets</ShadcnCardTitle>
-        <ShadcnCardDescription>
-          Group granular transaction categories for planning. Categories can belong to only one
-          bucket.
-        </ShadcnCardDescription>
-      </ShadcnCardHeader>
-      <ShadcnCardContent className="grid gap-4">
-        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <ShadcnInput
-            aria-label="New bucket name"
-            onChange={(event) => setName(event.target.value)}
-            placeholder="New bucket"
-            value={name}
-          />
-          <ShadcnInput
-            aria-label="Bucket description"
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Optional description"
-            value={description}
-          />
-          <ShadcnButton disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>
-            Add bucket
-          </ShadcnButton>
-        </div>
-        {taxonomy?.buckets.length ? (
-          <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
-            <ul aria-label="Budget buckets" className="grid content-start gap-1">
-              {taxonomy.buckets.map((bucket) => (
-                <li key={bucket.id}>
-                  <ShadcnButton
-                    aria-pressed={selectedBucketId === bucket.id}
-                    onClick={() => setSelectedBucketId(bucket.id)}
-                    variant={selectedBucketId === bucket.id ? "secondary" : "ghost"}
-                  >
-                    {bucket.name}
-                  </ShadcnButton>
-                </li>
-              ))}
-            </ul>
-            {selectedBucket ? (
-              <div className="grid gap-3">
-                <ShadcnInput
-                  aria-label="Selected bucket description"
-                  defaultValue={selectedBucket.description ?? ""}
-                  disabled={update.isPending}
-                  key={selectedBucket.id}
-                  id="selected-bucket-description"
-                  onBlur={(event) => {
-                    const next = event.target.value.trim() || null;
-                    if (next !== selectedBucket.description)
-                      update.mutate({ categoryIds: selectedBucket.categories, description: next });
-                  }}
-                />
-                <fieldset className="grid gap-2">
-                  <legend className="text-sm font-medium">
-                    Categories in {selectedBucket.name}
-                  </legend>
-                  {categories.map((category) => (
-                    <label
-                      className="flex items-center gap-2 text-sm"
-                      htmlFor={`bucket-category-${category.id}`}
-                      key={category.id}
-                    >
-                      <ShadcnCheckbox
-                        checked={selectedBucket.categories.includes(category.id)}
-                        disabled={update.isPending}
-                        id={`bucket-category-${category.id}`}
-                        onCheckedChange={(checked) => {
-                          const current = new Set(selectedBucket.categories);
-                          if (checked) current.add(category.id);
-                          else current.delete(category.id);
-                          update.mutate({
-                            categoryIds: [...current],
-                            description: selectedBucket.description,
-                          });
-                        }}
-                      />
-                      {category.name}
-                    </label>
-                  ))}
-                </fieldset>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Select a bucket to manage its categories.
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No buckets yet. Existing category budgets remain under Unmapped categories.
-          </p>
-        )}
-        {create.error || update.error ? <InlineError error={create.error ?? update.error} /> : null}
-      </ShadcnCardContent>
-    </ShadcnCard>
-  );
-}
 function FinanceMetric({
   detail,
   label,
@@ -1653,7 +1529,7 @@ function FinanceBudgetSummary({
   );
 }
 
-function BudgetMetricCard({
+export function BudgetMetricCard({
   aside,
   label,
   onClick,
@@ -1798,7 +1674,7 @@ function FinanceExportMenu() {
   );
 }
 
-function FinanceBudgetAllocationChart({
+export function FinanceBudgetAllocationChart({
   budgets,
 }: {
   budgets: Array<{ category: string; limit: number }>;
@@ -1901,7 +1777,7 @@ function BudgetProgress({
   );
 }
 
-function FinanceBudgetDetailDialog({
+export function FinanceBudgetDetailDialog({
   budgets,
   detail,
   month,
@@ -2291,7 +2167,7 @@ function CashflowPanel({
   );
 }
 
-function SubscriptionsPanel({
+export function SubscriptionsPanel({
   items,
   onUpdate,
 }: {
@@ -2662,7 +2538,7 @@ function FinanceTransactionsTable({
       </ShadcnTable>
       <div className="flex items-center justify-between gap-3 border-t pt-3">
         <p className="font-mono text-xs text-muted-foreground">
-          {transactions.length} transactions
+          {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
         </p>
         <div className="flex items-center gap-2">
           <ShadcnButton
@@ -2729,7 +2605,7 @@ function transactionTableColumnClass(columnId: string) {
   }[columnId];
 }
 
-function TransactionDetails({
+export function TransactionDetails({
   isCategorizing,
   onBreakdown,
   onCategorize,
@@ -2782,7 +2658,7 @@ function TransactionDetail({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FinanceReviewItems({
+export function FinanceReviewItems({
   cases,
   isPending,
   onApprove,

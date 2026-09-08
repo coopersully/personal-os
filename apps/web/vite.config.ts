@@ -95,7 +95,7 @@ export default defineConfig(({ mode }) => {
         devOptions: { enabled: false },
         includeAssets: ["apple-touch-icon.png", "favicon-32.png", "icon.svg"],
         manifest: {
-          background_color: "#12110f",
+          background_color: "#18181b",
           description: "A shared daily surface for people and their agents.",
           display: "standalone",
           icons: [
@@ -112,11 +112,11 @@ export default defineConfig(({ mode }) => {
               type: "image/png",
             },
           ],
-          name: "ilo",
+          name: "Nomi",
           orientation: "any",
-          short_name: "ilo",
+          short_name: "Nomi",
           start_url: "/",
-          theme_color: "#12110f",
+          theme_color: "#18181b",
         },
         registerType: "autoUpdate",
         workbox: {

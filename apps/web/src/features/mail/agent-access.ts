@@ -49,7 +49,7 @@ export function mailAgentAccessReadiness({
       : rules.state === "unavailable"
         ? unavailableReadiness(
             "Rules",
-            "Mail rules are unavailable, so Ilo cannot report an approved-rule count.",
+            "Mail rules are unavailable, so nohmi cannot report an approved-rule count.",
           )
         : mailPreferences(profile, rules.data);
   const automation =
@@ -110,7 +110,7 @@ export function mailAgentAccessCapability(
         "Mail permission applies to every connected Mail source; per-inbox agent credentials are not available.",
       description:
         "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures delayed archive or recoverable Trash preferences. Approved work is bounded, durable, and activated by the signed-in person.",
-      setupPrompt: `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed Mail rule work shown in setup context. Treat commitment intake as preview-only whenever automaticCreationEnabled is false; do not promise Mail-to-Calendar creation from cached prose or attachment metadata. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Workspace access → Mail. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`,
+      setupPrompt: `Use ${invocation} to set up my Mail in nohmi. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed Mail rule work shown in setup context. Treat commitment intake as preview-only whenever automaticCreationEnabled is false; do not promise Mail-to-Calendar creation from cached prose or attachment metadata. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in nohmi Settings → Workspace access → Mail. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`,
       title: "Mail profiles, previews, and approved rules",
       unavailable: [
         "Permanent deletion",
@@ -126,7 +126,7 @@ export function mailAgentAccessCapability(
       "Mail permission applies to every connected Mail source; per-inbox agent credentials are not available.",
     description:
       "This deployment publishes Mail preferences and attention setup, but not executable Mail rules.",
-    setupPrompt: `Use ${invocation} to set up my Mail preferences and attention in Ilo. Inspect connected inboxes, ask the shortest useful interview, save a draft profile, and do not claim executable rules are available.`,
+    setupPrompt: `Use ${invocation} to set up my Mail preferences and attention in nohmi. Inspect connected inboxes, ask the shortest useful interview, save a draft profile, and do not claim executable rules are available.`,
     title: "Mail preferences and attention",
     unavailable: ["Executable Mail rules", "Permanent deletion"],
   };

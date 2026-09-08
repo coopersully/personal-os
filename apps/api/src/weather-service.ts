@@ -242,7 +242,7 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
         {
           headers: {
             "Accept-Language": "en",
-            "User-Agent": "ilo/1.0 (https://github.com/coopersully/personal-os)",
+            "User-Agent": "nohmi/1.0 (https://github.com/coopersully/personal-os)",
           },
         },
         5_000,

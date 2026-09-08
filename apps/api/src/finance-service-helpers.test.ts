@@ -148,8 +148,10 @@ describe("Finance service deterministic helpers", () => {
   it("handles paced calendar ranges and provider categorization signals", () => {
     expect(nextMonth("2026-12")).toBe("2027-01");
     expect(nextMonth("2026-01")).toBe("2026-02");
+    expect(nextMonth("2026")).toBe("2026-01");
     expect(daysInCalendarMonth("2028-02")).toBe(29);
     expect(daysInCalendarMonth("2026-02")).toBe(28);
+    expect(daysInCalendarMonth("2026")).toBe(31);
     expect(budgetPaceDates("week", "2026-08-19")).toHaveLength(7);
     expect(budgetPaceDates("month", "2026-02-11")).toHaveLength(28);
     expect(budgetPaceDates("year", "2026-08-19")).toHaveLength(365);

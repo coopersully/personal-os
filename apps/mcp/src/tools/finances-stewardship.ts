@@ -19,7 +19,7 @@ import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 import { financeApiResult } from "./finances.js";
 
-const id = z.string().uuid().describe("ilo object identifier");
+const id = z.string().uuid().describe("Nomi object identifier");
 const readAnnotations = {
   destructiveHint: false,
   idempotentHint: true,
@@ -68,7 +68,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: readAnnotations,
       description:
-        "Read whether the signed-in person has enabled Finance review bypass. The setting is informational only: Ilo decides whether justified Finance work applies, queues for review, or needs more input.",
+        "Read whether the signed-in person has enabled Finance review bypass. The setting is informational only: Nomi decides whether justified Finance work applies, queues for review, or needs more input.",
       inputSchema: z.object({}),
       title: "Get Finance automation settings",
     },
@@ -106,7 +106,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Set one complete monthly budget plan with its assumptions and rationale. Ilo returns applied, pending_review, or needs_input.",
+        "Set one complete monthly budget plan with its assumptions and rationale. Nomi returns applied, pending_review, or needs_input.",
       inputSchema: setFinanceBudgetPlanInputSchema,
       title: "Set Finance budget plan",
     },
@@ -133,7 +133,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Submit complete structured coverage of a Finance maintenance candidate. Keep supported items, remove or replace corrections, and surface genuine questions or blockers. Ilo then resumes the same durable maintenance run and applies or queues the batch according to the app review setting.",
+        "Submit complete structured coverage of a Finance maintenance candidate. Keep supported items, remove or replace corrections, and surface genuine questions or blockers. Nomi then resumes the same durable maintenance run and applies or queues the batch according to the app review setting.",
       inputSchema: submitFinanceLedgerChallengeInputSchema,
       title: "Submit Finance ledger challenge",
     },
@@ -174,7 +174,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
         readOnlyHint: false,
       },
       description:
-        "Create or refresh one open important, upcoming, or follow-up attention item for an owned Finance transaction. Ilo locks and validates the transaction, derives its source reference, and deduplicates the same open transaction/kind pair. Repeated calls refresh the item and advance its version.",
+        "Create or refresh one open important, upcoming, or follow-up attention item for an owned Finance transaction. Nomi locks and validates the transaction, derives its source reference, and deduplicates the same open transaction/kind pair. Repeated calls refresh the item and advance its version.",
       inputSchema: z.object({
         transactionId: id,
         ...upsertFinanceAttentionItemInputSchema.shape,
@@ -221,7 +221,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Apply revision-guarded categorization decisions. Ilo requires evidence first, then either applies, queues one review, or asks a bounded question.",
+        "Apply revision-guarded categorization decisions. Nomi requires evidence first, then either applies, queues one review, or asks a bounded question.",
       inputSchema: applyFinanceCategorizationsInputSchema,
       title: "Apply finance categorizations",
     },
@@ -276,7 +276,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Accept, pause, or cancel a recurring ledger obligation; Ilo returns its apply-or-review disposition.",
+        "Accept, pause, or cancel a recurring ledger obligation; Nomi returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...updateFinanceRecurringObligationInputSchema.shape }),
       title: "Update finance recurring obligation",
     },
@@ -289,7 +289,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Resolve or dismiss a Finance ledger alert; Ilo returns its apply-or-review disposition.",
+        "Resolve or dismiss a Finance ledger alert; Nomi returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...resolveFinanceAlertInputSchema.shape }),
       title: "Resolve finance alert",
     },
@@ -313,7 +313,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: { ...writeAnnotations, destructiveHint: true },
       description:
-        "Create, evidence-match a ledger credit to, or cancel a reimbursement. This can change Finance projections and may require review; Ilo never executes an external payment.",
+        "Create, evidence-match a ledger credit to, or cancel a reimbursement. This can change Finance projections and may require review; Nomi never executes an external payment.",
       inputSchema: reconcileFinanceReimbursementInputSchema,
       title: "Reconcile finance reimbursement",
     },
@@ -325,7 +325,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Set exact category allocations for one posted transaction. Allocations are one-off unless the optional futureRule explicitly requests an evidence-backed, consequential reusable merchant rule; Ilo returns its apply-or-review disposition.",
+        "Set exact category allocations for one posted transaction. Allocations are one-off unless the optional futureRule explicitly requests an evidence-backed, consequential reusable merchant rule; Nomi returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...setFinanceTransactionBreakdownInputSchema.shape }),
       title: "Set finance transaction breakdown",
     },
@@ -338,7 +338,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Accept or pause an inferred income stream; Ilo returns its apply-or-review disposition.",
+        "Accept or pause an inferred income stream; Nomi returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...updateFinanceIncomeStreamInputSchema.shape }),
       title: "Update finance income stream",
     },
@@ -351,7 +351,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Update the financial planning baseline; Ilo returns its apply-or-review disposition.",
+        "Update the financial planning baseline; Nomi returns its apply-or-review disposition.",
       inputSchema: updateFinanceProfileInputSchema,
       title: "Update finance profile",
     },
@@ -363,7 +363,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Refresh recurring, income, and alert ledger insights through Ilo's apply-or-review flow.",
+        "Refresh recurring, income, and alert ledger insights through Nomi's apply-or-review flow.",
       inputSchema: z.object({}),
       title: "Refresh finance insights",
     },

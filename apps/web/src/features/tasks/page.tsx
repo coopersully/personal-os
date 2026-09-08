@@ -9,24 +9,29 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  CalendarIcon,
-  CircleCheckIcon,
-  ClockIcon,
-  EditIcon,
-  type Icon,
-  InboxIcon,
+  ChevronRightIcon,
   ListChecksIcon,
-  ListTodoIcon,
+  MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons";
 import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@/components/responsive-dialog";
+import {
   TaskItem,
+  TaskItemActions,
   TaskItemCompletion,
   TaskItemContent,
   TaskItemDescription,
@@ -39,44 +44,40 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuAction,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  WorkspaceSecondaryAppBar,
+  WorkspaceSecondaryAppBarActions,
+  WorkspaceSecondaryAppBarContent,
+} from "@/components/workspace-secondary-app-bar";
+import { cn } from "@/lib/utils";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
-import { formatMaterialDateTime } from "../../lib/date-format.js";
+import { formatMaterialDateTime, formatRelativeMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
-import { RemindersSidebar } from "../reminders/page.js";
-import { TaskListDialog } from "./task-list-dialog.js";
-import { TaskProjectDialog } from "./task-project-dialog.js";
-
-const taskViews: Array<{ icon: Icon; label: string; value: TaskSystemView }> = [
-  { icon: CalendarIcon, label: "Today", value: "today" },
-  { icon: ClockIcon, label: "Upcoming", value: "upcoming" },
-  { icon: CalendarIcon, label: "Scheduled", value: "scheduled" },
-  { icon: CircleCheckIcon, label: "Completed", value: "completed" },
-  { icon: XIcon, label: "Cancelled", value: "cancelled" },
-  { icon: TrashIcon, label: "Trash", value: "trash" },
-];
-
-/** Tasks owns both commitment surfaces, so the contextual sidebar links them as siblings. */
-const relatedCommitments: Array<{ icon: Icon; label: string; path: string }> = [
-  { icon: ListChecksIcon, label: "Tasks", path: "/tasks" },
-  { icon: ListTodoIcon, label: "Reminders", path: "/reminders" },
-];
+import { type DatePreset, datePresets, identifyPreset, presetBounds } from "./task-filter-presets";
+import {
+  archiveScopeFromParams,
+  TaskContainerActions,
+  TaskNavigation,
+  taskPath,
+  taskViewFromParams,
+  taskViews,
+} from "./task-navigation";
 
 const taskEmptyCopy: Record<TaskSystemView | "list", string> = {
   cancelled: "Cancelled tasks will collect here.",
@@ -90,275 +91,83 @@ const taskEmptyCopy: Record<TaskSystemView | "list", string> = {
 
 type TaskPage = { items: Task[]; nextCursor: string | null };
 
-export function TasksCreateButton({ onCreate }: { onCreate: () => void }) {
+export function TasksCreateButton({
+  onCreate,
+  onCreateReminder,
+}: {
+  onCreate: () => void;
+  onCreateReminder?: () => void;
+}) {
   return (
-    <Button onClick={onCreate} size="sm">
-      <PlusIcon aria-hidden="true" data-icon="inline-start" />
-      New task
-    </Button>
+    <div className="flex items-center gap-1">
+      <Button onClick={onCreate} size="sm">
+        <PlusIcon aria-hidden="true" data-icon="inline-start" />
+        New task
+      </Button>
+      {onCreateReminder ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="More create options" size="icon-sm" variant="ghost">
+              <MoreHorizontalIcon aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={onCreateReminder}>New reminder</DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
   );
 }
 
 export function TasksTopbarControls() {
-  return <WorkspaceSearch label="Search tasks" />;
+  return <WorkspaceSearch label="Search tasks and reminders" />;
 }
 
 export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
-  const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const remindersActive = location.pathname === "/reminders";
-  const [listDialog, setListDialog] = useState<TaskList | null | undefined>(undefined);
-  const [projectDialog, setProjectDialog] = useState<TaskProject | null | undefined>(undefined);
   const lists = useQuery({ queryFn: listAllTaskLists, queryKey: ["task-lists"] });
-  const projects = useQuery({
-    queryFn: listAllTaskProjects,
-    queryKey: ["task-projects"],
-  });
-  const selectedView = taskViewFromParams(searchParams);
-  const archiveScope = archiveScopeFromParams(searchParams);
-  const selectedProjectId = searchParams.get("project");
-  const activeListIds = new Set(
-    lists.data?.items.filter((list) => list.availability === "active").map((list) => list.id) ?? [],
-  );
-  const selectedProject = projects.data?.items.find(
-    (project) =>
-      project.id === selectedProjectId &&
-      project.availability === "active" &&
-      project.lifecycle === "open" &&
-      activeListIds.has(project.listId),
-  );
-  const inbox = lists.data?.items.find((list) => list.kind === "inbox");
-  const selectedListId = selectedView
-    ? null
-    : (selectedProject?.listId ?? searchParams.get("list") ?? inbox?.id ?? null);
+  const projects = useQuery({ queryFn: listAllTaskProjects, queryKey: ["task-projects"] });
   const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
-  const activeProjects =
-    projects.data?.items.filter(
-      (project) =>
-        project.availability === "active" &&
-        project.lifecycle === "open" &&
-        project.listId === selectedListId,
-    ) ?? [];
-
+  const activeListIds = new Set(activeLists.map((list) => list.id));
   return (
-    <>
-      {remindersActive ? (
-        <RemindersSidebar onNavigate={onNavigate} />
-      ) : (
+    <TaskNavigation
+      lists={activeLists}
+      projects={
+        projects.data?.items.filter(
+          (project) =>
+            project.availability === "active" &&
+            project.lifecycle === "open" &&
+            activeListIds.has(project.listId),
+        ) ?? []
+      }
+      onNavigate={onNavigate}
+      status={
         <>
-          <SidebarGroup>
-            <SidebarGroupLabel>Views</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <nav aria-label="Task views">
-                <SidebarMenu>
-                  {taskViews.map(({ icon: ViewIcon, label, value }) => {
-                    const selected = selectedView === value;
-                    return (
-                      <SidebarMenuItem key={value}>
-                        <SidebarMenuButton asChild isActive={selected}>
-                          <Link
-                            aria-current={selected ? "page" : undefined}
-                            onClick={onNavigate}
-                            to={taskPath(searchParams, { view: value })}
-                          >
-                            <ViewIcon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
-                            <span>{label}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={archiveScope !== null}>
-                      <Link
-                        aria-current={archiveScope !== null ? "page" : undefined}
-                        onClick={onNavigate}
-                        to="/tasks?archive=all"
-                      >
-                        <TrashIcon
-                          aria-hidden="true"
-                          weight={archiveScope !== null ? "Filled" : "Outline"}
-                        />
-                        <span>Archive</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </nav>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          <SidebarGroup>
-            <SidebarGroupLabel>Lists</SidebarGroupLabel>
-            <SidebarGroupContent>
-              {lists.isPending ? (
-                <div aria-label="Loading Lists" className="flex flex-col gap-2" role="status">
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-8 w-3/4" />
-                </div>
-              ) : lists.isError ? (
-                <DependencyFailure
-                  error={lists.error}
-                  name="Lists"
-                  retry={() => void lists.refetch()}
-                />
-              ) : (
-                <nav aria-label="Task Lists">
-                  <SidebarMenu>
-                    {activeLists.map((list) => {
-                      const selected = selectedView === null && selectedListId === list.id;
-                      return (
-                        <SidebarMenuItem key={list.id}>
-                          <SidebarMenuButton asChild isActive={selected}>
-                            <Link
-                              aria-current={selected ? "page" : undefined}
-                              onClick={onNavigate}
-                              to={taskPath(searchParams, {
-                                list: list.kind === "inbox" ? null : list.id,
-                              })}
-                            >
-                              {list.kind === "inbox" ? (
-                                <InboxIcon
-                                  aria-hidden="true"
-                                  weight={selected ? "Filled" : "Outline"}
-                                />
-                              ) : (
-                                <ListTodoIcon
-                                  aria-hidden="true"
-                                  weight={selected ? "Filled" : "Outline"}
-                                />
-                              )}
-                              <span>{list.name}</span>
-                            </Link>
-                          </SidebarMenuButton>
-                          {list.kind !== "inbox" ? (
-                            <SidebarMenuAction
-                              aria-label={`Manage ${list.name}`}
-                              onClick={() => setListDialog(list)}
-                              showOnHover
-                            >
-                              <EditIcon aria-hidden="true" />
-                            </SidebarMenuAction>
-                          ) : null}
-                        </SidebarMenuItem>
-                      );
-                    })}
-                    <SidebarMenuItem>
-                      <SidebarMenuButton onClick={() => setListDialog(null)}>
-                        <PlusIcon aria-hidden="true" />
-                        <span>New List</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
-                </nav>
-              )}
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          {selectedListId ? (
-            <SidebarGroup>
-              <SidebarGroupLabel>Projects</SidebarGroupLabel>
-              <SidebarGroupContent>
-                {projects.isPending ? (
-                  <Skeleton aria-label="Loading Projects" className="h-8 w-full" role="status" />
-                ) : projects.isError ? (
-                  <DependencyFailure
-                    error={projects.error}
-                    name="Projects"
-                    retry={() => void projects.refetch()}
-                  />
-                ) : (
-                  <nav aria-label="Task Projects">
-                    <SidebarMenu>
-                      {activeProjects.map((project) => {
-                        const selected = selectedProjectId === project.id;
-                        return (
-                          <SidebarMenuItem key={project.id}>
-                            <SidebarMenuButton asChild isActive={selected}>
-                              <Link
-                                aria-current={selected ? "page" : undefined}
-                                onClick={onNavigate}
-                                to={taskPath(searchParams, {
-                                  list: project.listId,
-                                  project: project.id,
-                                })}
-                              >
-                                <ListChecksIcon
-                                  aria-hidden="true"
-                                  weight={selected ? "Filled" : "Outline"}
-                                />
-                                <span>{project.name}</span>
-                              </Link>
-                            </SidebarMenuButton>
-                            <SidebarMenuAction
-                              aria-label={`Manage ${project.name}`}
-                              onClick={() => setProjectDialog(project)}
-                              showOnHover
-                            >
-                              <EditIcon aria-hidden="true" />
-                            </SidebarMenuAction>
-                          </SidebarMenuItem>
-                        );
-                      })}
-                      <SidebarMenuItem>
-                        <SidebarMenuButton onClick={() => setProjectDialog(null)}>
-                          <PlusIcon aria-hidden="true" />
-                          <span>New Project</span>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    </SidebarMenu>
-                  </nav>
-                )}
-              </SidebarGroupContent>
-            </SidebarGroup>
+          {lists.isPending ? (
+            <Skeleton aria-label="Loading Lists" className="h-8 w-full" role="status" />
+          ) : null}
+          {lists.isError ? (
+            <DependencyFailure
+              error={lists.error}
+              name="Lists"
+              retry={() => void lists.refetch()}
+            />
+          ) : null}
+          {projects.isPending ? (
+            <Skeleton aria-label="Loading Projects" className="h-8 w-full" role="status" />
+          ) : null}
+          {projects.isError ? (
+            <DependencyFailure
+              error={projects.error}
+              name="Projects"
+              retry={() => void projects.refetch()}
+            />
           ) : null}
         </>
-      )}
-
-      <SidebarGroup>
-        <SidebarGroupLabel>Related</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <nav aria-label="Related commitments">
-            <SidebarMenu>
-              {relatedCommitments.map(({ icon: RelatedIcon, label, path }) => {
-                const selected = path === (remindersActive ? "/reminders" : "/tasks");
-                return (
-                  <SidebarMenuItem key={path}>
-                    <SidebarMenuButton asChild isActive={selected}>
-                      <Link
-                        aria-current={selected ? "page" : undefined}
-                        onClick={onNavigate}
-                        to={path}
-                      >
-                        <RelatedIcon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
-                        <span>{label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
-
-      {listDialog !== undefined ? (
-        <TaskListDialog
-          close={() => setListDialog(undefined)}
-          list={listDialog ?? undefined}
-          lists={activeLists}
-        />
-      ) : null}
-      {projectDialog !== undefined && selectedListId ? (
-        <TaskProjectDialog
-          close={() => setProjectDialog(undefined)}
-          listId={selectedListId}
-          lists={activeLists}
-          project={projectDialog ?? undefined}
-          projects={projects.data?.items ?? []}
-        />
-      ) : null}
-    </>
+      }
+    />
   );
 }
 
@@ -494,118 +303,162 @@ export function TasksPage({
     }
   }, [onEdit, requestedTaskId, taskItems]);
 
-  if (lists.isPending || projects.isPending || (archiveScope !== "all" && tasks.isPending)) {
-    return <WorkspaceSkeleton kind="tasks" />;
-  }
-  if (lists.isError) return <InlineError error={lists.error} />;
-  if (projects.isError) return <InlineError error={projects.error} />;
-  if (archiveScope === "all") {
-    const archivedLists = lists.data.items.filter((list) => list.availability === "archived");
-    const terminalProjects = projects.data.items.filter(
-      (project) => project.availability === "archived" || project.lifecycle !== "open",
-    );
-    return <TaskArchive lists={archivedLists} projects={terminalProjects} />;
-  }
-  if (tasks.isError && !tasks.data) {
-    return (
-      <div className="narrow-page">
-        <InlineError error={tasks.error} />
-        <Button onClick={() => void tasks.refetch()} size="sm" variant="outline">
-          Retry Tasks
-        </Button>
-      </div>
-    );
-  }
-
-  const listById = new Map(lists.data.items.map((list) => [list.id, list]));
-  const projectById = new Map(projects.data.items.map((project) => [project.id, project]));
+  const listById = new Map(lists.data?.items.map((list) => [list.id, list]) ?? []);
+  const projectById = new Map(projects.data?.items.map((project) => [project.id, project]) ?? []);
   const emptyKey = selectedView ?? "list";
   const scopeName =
-    selectedProject?.name ??
-    requestedList?.name ??
-    (selectedView ? taskViews.find((view) => view.value === selectedView)?.label : null) ??
-    inbox?.name ??
-    "Tasks";
+    archiveScope === "all"
+      ? "Archive"
+      : (selectedProject?.name ??
+        requestedList?.name ??
+        (selectedView ? taskViews.find((view) => view.value === selectedView)?.label : null) ??
+        inbox?.name ??
+        "Tasks");
   const scopeList =
-    requestedList ?? (selectedProject ? listById.get(selectedProject.listId) : undefined);
+    requestedList ??
+    (selectedProject
+      ? listById.get(selectedProject.listId)
+      : selectedListId
+        ? listById.get(selectedListId)
+        : undefined);
 
-  return (
-    <div className="narrow-page flex flex-col gap-4">
-      <TaskScopeHeader
-        {...(scopeList ? { list: scopeList } : {})}
-        {...(archiveScope === null && !selectedView
-          ? { taskCount: taskItems.length, taskLifecycle: lifecycleFilter ?? "open" }
-          : {})}
-        {...(selectedProject ? { project: selectedProject } : {})}
-        scopeName={scopeName}
-      />
-      <TaskFilters searchParams={searchParams} timeZone={timeZone} />
-      {taskItems.length === 0 ? (
-        search ? (
-          <EmptyState icon={<SearchIcon />} title="No matching tasks">
-            Try another title or note.
-          </EmptyState>
+  const renderContent = () => {
+    if (lists.isPending || projects.isPending || (archiveScope !== "all" && tasks.isPending)) {
+      return <WorkspaceSkeleton kind="tasks" />;
+    }
+    if (lists.isError) return <InlineError error={lists.error} />;
+    if (projects.isError) return <InlineError error={projects.error} />;
+    if (archiveScope === "all") {
+      const archivedLists = lists.data.items.filter((list) => list.availability === "archived");
+      const terminalProjects = projects.data.items.filter(
+        (project) => project.availability === "archived" || project.lifecycle !== "open",
+      );
+      return <TaskArchive lists={archivedLists} projects={terminalProjects} />;
+    }
+    if (tasks.isError && !tasks.data) {
+      return (
+        <div className="narrow-page">
+          <InlineError error={tasks.error} />
+          <Button onClick={() => void tasks.refetch()} size="sm" variant="outline">
+            Retry Tasks
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="narrow-page flex flex-col gap-4">
+        {taskItems.length === 0 ? (
+          search ||
+          Object.keys(taskTimingFiltersFromParams(searchParams)).length > 0 ||
+          lifecycleFilter ? (
+            <EmptyState icon={<SearchIcon />} title="No matching tasks">
+              {search
+                ? "Try another title or note."
+                : "Try a different filter or clear the current filters."}
+            </EmptyState>
+          ) : (
+            <EmptyState icon={<ListChecksIcon />} title="Nothing here yet">
+              {taskEmptyCopy[emptyKey]}
+            </EmptyState>
+          )
         ) : (
-          <EmptyState icon={<ListChecksIcon />} title="Nothing here yet">
-            {taskEmptyCopy[emptyKey]}
-          </EmptyState>
-        )
-      ) : (
-        <ItemGroup>
-          {taskItems.map((task) => {
-            const list = listById.get(task.listId);
-            const project = task.projectId ? projectById.get(task.projectId) : undefined;
-            return (
-              <TaskRow
-                key={task.id}
-                {...(selectedView !== null && list ? { list } : {})}
-                onEdit={() => {
-                  const params = new URLSearchParams(searchParams);
-                  params.set("task", task.id);
-                  openedTaskId.current = task.id;
-                  onEdit(task);
-                  navigate(`/tasks?${params.toString()}`);
-                }}
-                {...(!selectedProjectId && project ? { project } : {})}
-                task={task}
-                timeZone={timeZone}
-              />
-            );
-          })}
-          {tasks.hasNextPage ? (
-            <Button
-              disabled={tasks.isFetchingNextPage}
-              onClick={() => void loadMoreTasks()}
-              variant="outline"
-            >
-              {tasks.isFetchingNextPage ? "Loading more…" : "Load more Tasks"}
-            </Button>
-          ) : null}
-          {loadMoreError ? (
-            <div className="flex flex-col items-start gap-2">
-              <InlineError error={loadMoreError} />
-              <Button onClick={() => void loadMoreTasks()} size="sm" variant="outline">
-                Retry loading more Tasks
+          <ItemGroup>
+            {taskItems.map((task) => {
+              const list = listById.get(task.listId);
+              const project = task.projectId ? projectById.get(task.projectId) : undefined;
+              return (
+                <TaskRow
+                  dense
+                  key={task.id}
+                  {...(selectedView !== null && list ? { list } : {})}
+                  onEdit={() => {
+                    const params = new URLSearchParams(searchParams);
+                    params.set("task", task.id);
+                    openedTaskId.current = task.id;
+                    onEdit(task);
+                    navigate(`/tasks?${params.toString()}`);
+                  }}
+                  {...(!selectedProjectId && project ? { project } : {})}
+                  task={task}
+                  timeZone={timeZone}
+                />
+              );
+            })}
+            {tasks.hasNextPage ? (
+              <Button
+                disabled={tasks.isFetchingNextPage}
+                onClick={() => void loadMoreTasks()}
+                variant="outline"
+              >
+                {tasks.isFetchingNextPage ? "Loading more…" : "Load more Tasks"}
               </Button>
-            </div>
+            ) : null}
+            {loadMoreError ? (
+              <div className="flex flex-col items-start gap-2">
+                <InlineError error={loadMoreError} />
+                <Button onClick={() => void loadMoreTasks()} size="sm" variant="outline">
+                  Retry loading more Tasks
+                </Button>
+              </div>
+            ) : null}
+          </ItemGroup>
+        )}
+      </div>
+    );
+  };
+  return (
+    <>
+      <WorkspaceSecondaryAppBar aria-label="Tasks page controls">
+        <WorkspaceSecondaryAppBarContent className="flex-wrap gap-x-3 gap-y-2">
+          <TaskScopeHeader
+            {...(scopeList ? { list: scopeList } : {})}
+            {...(archiveScope === null && tasks.data
+              ? {
+                  taskCount: taskItems.length,
+                  hasMore: tasks.hasNextPage,
+                  ...(!selectedView ? { taskLifecycle: lifecycleFilter ?? "open" } : {}),
+                }
+              : {})}
+            {...(selectedProject ? { project: selectedProject } : {})}
+            scopeName={scopeName}
+          />
+          {archiveScope === null ? (
+            <TaskFilterChips searchParams={searchParams} timeZone={timeZone} />
           ) : null}
-        </ItemGroup>
-      )}
-    </div>
+        </WorkspaceSecondaryAppBarContent>
+        {archiveScope === null ? (
+          <WorkspaceSecondaryAppBarActions>
+            <TaskFilters searchParams={searchParams} timeZone={timeZone} />
+            {!selectedView && scopeList && lists.data && projects.data ? (
+              <TaskContainerActions
+                list={scopeList}
+                {...(selectedProject ? { project: selectedProject } : {})}
+                lists={lists.data.items.filter((list) => list.availability === "active")}
+                projects={projects.data.items}
+              />
+            ) : null}
+          </WorkspaceSecondaryAppBarActions>
+        ) : null}
+      </WorkspaceSecondaryAppBar>
+      {renderContent()}
+    </>
   );
 }
 
-function TaskScopeHeader({
+export function TaskScopeHeader({
   list,
   project,
   scopeName,
   taskCount,
   taskLifecycle,
+  hasMore = false,
 }: {
   list?: TaskList;
   project?: TaskProject;
   scopeName: string;
   taskCount?: number;
+  hasMore?: boolean;
   taskLifecycle?: "cancelled" | "completed" | "open";
 }) {
   const targetDate = project?.targetDate
@@ -617,22 +470,30 @@ function TaskScopeHeader({
       })
     : null;
   return (
-    <header className="flex flex-col gap-1 border-b border-border pb-3">
+    <header className="flex min-w-0 flex-col gap-1">
       {project && list ? (
         <p className="text-xs font-medium text-muted-foreground">{list.name}</p>
       ) : null}
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="font-heading text-xl font-medium">{scopeName}</h1>
-        {taskCount !== undefined && taskLifecycle ? (
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="min-w-0 break-words font-heading text-sm font-medium">{scopeName}</h1>
+        {taskCount !== undefined ? (
           <span className="text-xs text-muted-foreground">
-            {taskCount} {taskLifecycle} {taskCount === 1 ? "task" : "tasks"}
+            {taskCount}
+            {hasMore ? "+" : ""} {taskLifecycle ? `${taskLifecycle} ` : ""}
+            {taskCount === 1 && !hasMore ? "task" : "tasks"}
           </span>
         ) : null}
       </div>
-      {project?.why ? <p className="text-sm text-muted-foreground">{project.why}</p> : null}
+      {project?.why ? (
+        <p className="line-clamp-1 text-xs text-muted-foreground" title={project.why}>
+          {project.why}
+        </p>
+      ) : null}
       {targetDate ? <p className="text-xs text-muted-foreground">Target {targetDate}</p> : null}
       {!project && list?.description ? (
-        <p className="text-sm text-muted-foreground">{list.description}</p>
+        <p className="line-clamp-1 text-xs text-muted-foreground" title={list.description}>
+          {list.description}
+        </p>
       ) : null}
     </header>
   );
@@ -661,6 +522,9 @@ function DependencyFailure({
 
 export function TaskRow({
   list,
+  className,
+  compact = false,
+  dense = false,
   onEdit,
   project,
   recommendation,
@@ -668,6 +532,9 @@ export function TaskRow({
   timeZone,
 }: {
   list?: TaskList;
+  className?: string;
+  compact?: boolean;
+  dense?: boolean;
   onEdit: () => void;
   project?: TaskProject;
   recommendation?: DailyBrief["recommendedTasks"][number];
@@ -688,11 +555,42 @@ export function TaskRow({
   });
   const isCompleted = task.lifecycle === "completed";
   const isTrashed = task.deletedAt !== null;
+  const remove = useMutation({
+    mutationFn: () => api.trashTask(task.id, { expectedRevision: task.revision }),
+    onError: (error) => toast.error(errorMessage(error)),
+    onSuccess: async (trashed) => {
+      toast.success("Task moved to Trash.", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await api.restoreTask(trashed.id, { expectedRevision: trashed.revision });
+              await invalidateMaterial(queryClient);
+            } catch (error) {
+              toast.error(errorMessage(error));
+            }
+          },
+        },
+      });
+      await invalidateMaterial(queryClient);
+    },
+  });
+  const overdue =
+    task.lifecycle === "open" &&
+    !isTrashed &&
+    task.dueAt !== null &&
+    new Date(task.dueAt).getTime() < Date.now();
   const timing = taskTiming(task, timeZone);
-  const description = taskDescription(task, list, project);
+  const description = taskDescription(task, list, project, !dense);
   return (
-    <TaskItem data-completed={isCompleted}>
-      <TaskItemCompletion>
+    <TaskItem
+      className={cn(className, dense && "task-workspace-row min-h-0 items-center")}
+      data-completed={isCompleted}
+      data-status={recommendation?.urgency === "next" ? "next" : undefined}
+      data-priority={task.priority}
+      size={dense ? "xs" : "default"}
+    >
+      <TaskItemCompletion className={dense ? "self-center pt-0" : undefined}>
         {task.lifecycle === "cancelled" || isTrashed ? null : (
           <Checkbox
             aria-label={`${isCompleted ? "Reopen" : "Complete"} ${task.title}`}
@@ -704,13 +602,40 @@ export function TaskRow({
       </TaskItemCompletion>
       <TaskItemPrimaryAction aria-label={`Open ${task.title}`} onClick={onEdit}>
         <TaskItemContent>
-          <TaskItemTitle>{task.title}</TaskItemTitle>
-          {timing ? <TaskItemDue>{timing}</TaskItemDue> : null}
-          {description ? <TaskItemDescription>{description}</TaskItemDescription> : null}
-          {recommendation ? (
+          <TaskItemTitle className={dense && !timing && !description ? "pr-6" : undefined}>
+            {task.title}
+          </TaskItemTitle>
+          {dense ? (
+            <>
+              {task.priority !== "medium" ? (
+                <span className="sr-only">
+                  {task.priority === "high" ? "High priority" : "Low priority"}
+                </span>
+              ) : null}
+              {timing || description ? (
+                <TaskItemDescription
+                  className="line-clamp-1 pr-7"
+                  title={[timing, description].filter(Boolean).join(" · ")}
+                >
+                  {timing ? (
+                    <span className={overdue ? "text-destructive" : undefined}>{timing}</span>
+                  ) : null}
+                  {description && timing ? " · " : ""}
+                  {description ? <span>{description}</span> : null}
+                </TaskItemDescription>
+              ) : null}
+            </>
+          ) : null}
+          {!dense && timing ? (
+            <TaskItemDue className={overdue ? "text-destructive" : undefined}>{timing}</TaskItemDue>
+          ) : null}
+          {!dense && !compact && description ? (
+            <TaskItemDescription>{description}</TaskItemDescription>
+          ) : null}
+          {!dense && !compact && recommendation ? (
             <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
           ) : null}
-          {task.tags.length > 0 || task.priority !== "medium" ? (
+          {!dense && !compact && (task.tags.length > 0 || task.priority !== "medium") ? (
             <TaskItemTags aria-label="Task tags" className="mt-1 pl-0">
               {task.priority !== "medium" ? (
                 <Badge asChild variant="outline">
@@ -726,6 +651,47 @@ export function TaskRow({
           ) : null}
         </TaskItemContent>
       </TaskItemPrimaryAction>
+      {!isTrashed ? (
+        <TaskItemActions>
+          {dense ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  aria-label={`${task.title} options`}
+                  title="Task options"
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <MoreHorizontalIcon aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={onEdit}>Open task</DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={remove.isPending}
+                    onSelect={() => remove.mutate()}
+                    variant="destructive"
+                  >
+                    <TrashIcon aria-hidden="true" />
+                    Move to Trash
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button
+              aria-label={`Remove ${task.title}`}
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <TrashIcon />
+            </Button>
+          )}
+        </TaskItemActions>
+      ) : null}
       {task.lifecycle !== "open" || isTrashed ? (
         <TaskItemMetadata>
           <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
@@ -735,13 +701,6 @@ export function TaskRow({
       ) : null}
     </TaskItem>
   );
-}
-
-function taskViewFromParams(searchParams: URLSearchParams): TaskSystemView | null {
-  const requestedView = searchParams.get("view");
-  return taskViews.some((view) => view.value === requestedView)
-    ? (requestedView as TaskSystemView)
-    : null;
 }
 
 function lifecycleFilterFromParams(
@@ -769,6 +728,60 @@ function taskTimingFiltersFromParams(searchParams: URLSearchParams) {
   );
 }
 
+function TaskFilterChips({
+  searchParams,
+  timeZone,
+}: {
+  searchParams: URLSearchParams;
+  timeZone: string;
+}) {
+  const navigate = useNavigate();
+  const active = taskTimingFilterKeys.filter((key) => searchParams.get(key));
+  const lifecycle = !taskViewFromParams(searchParams) && lifecycleFilterFromParams(searchParams);
+  if (!active.length && !lifecycle) return null;
+  const remove = (key: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete(key);
+    next.delete("task");
+    navigate(next.size ? `/tasks?${next}` : "/tasks");
+  };
+  return (
+    <fieldset aria-label="Active task filters" className="flex min-w-0 flex-wrap gap-1">
+      {active.map((key) => {
+        const label = `${taskTimingFilterLabel(key)} ${formatMaterialDateTime(searchParams.get(key) as string, timeZone)}`;
+        return (
+          <Button
+            key={key}
+            aria-label={`Remove ${label}`}
+            onClick={() => remove(key)}
+            size="xs"
+            variant="secondary"
+            className="max-w-full"
+          >
+            <span className="truncate">{label}</span>
+            <XIcon aria-hidden="true" data-icon="inline-end" />
+          </Button>
+        );
+      })}
+      {lifecycle ? (
+        <Button
+          aria-label={`Remove ${lifecycle} filter`}
+          onClick={() => remove("lifecycle")}
+          size="xs"
+          variant="secondary"
+        >
+          {lifecycle === "completed"
+            ? "Completed"
+            : lifecycle === "cancelled"
+              ? "Cancelled"
+              : "Open"}
+          <XIcon aria-hidden="true" data-icon="inline-end" />
+        </Button>
+      ) : null}
+    </fieldset>
+  );
+}
+
 function TaskFilters({
   searchParams,
   timeZone,
@@ -777,9 +790,17 @@ function TaskFilters({
   timeZone: string;
 }) {
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [customRanges, setCustomRanges] = useState({ due: false, scheduled: false });
+  const initialValues = () =>
+    Object.fromEntries(
+      taskTimingFilterKeys.map((key) => [key, searchParams.get(key) ?? ""]),
+    ) as Record<(typeof taskTimingFilterKeys)[number], string>;
+  const [values, setValues] = useState(initialValues);
   const selectedView = taskViewFromParams(searchParams);
   const activeCount =
-    taskTimingFilterKeys.filter((key) => searchParams.has(key)).length +
+    taskTimingFilterKeys.filter((key) => searchParams.get(key)).length +
     (lifecycleFilterFromParams(searchParams) && !selectedView ? 1 : 0);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -787,69 +808,158 @@ function TaskFilters({
     const next = new URLSearchParams(searchParams);
     next.delete("task");
     for (const key of taskTimingFilterKeys) {
-      const value = String(form.get(key) ?? "");
-      if (value) next.set(key, dateTimeLocalToIso(value, timeZone));
+      if (values[key]) next.set(key, values[key]);
       else next.delete(key);
     }
     const lifecycle = String(form.get("lifecycle") ?? "");
-    if (!selectedView && lifecycle) next.set("lifecycle", lifecycle);
+    if (!selectedView && lifecycle && lifecycle !== "open") next.set("lifecycle", lifecycle);
     else next.delete("lifecycle");
-    navigate(`/tasks?${next.toString()}`);
+    navigate(next.size ? `/tasks?${next}` : "/tasks");
+    setOpen(false);
   };
   return (
-    <details className="rounded-lg border border-border px-3 py-2">
-      <summary className="cursor-pointer text-sm font-medium">
-        Filters{activeCount > 0 ? ` (${activeCount})` : ""}
-      </summary>
-      <form className="mt-3 flex flex-col gap-3" onSubmit={submit}>
-        {!selectedView ? (
-          <Field>
-            <FieldLabel htmlFor="task-filter-lifecycle">Lifecycle</FieldLabel>
-            <NativeSelect
-              defaultValue={lifecycleFilterFromParams(searchParams) ?? "open"}
-              id="task-filter-lifecycle"
-              name="lifecycle"
-            >
-              <NativeSelectOption value="open">Open</NativeSelectOption>
-              <NativeSelectOption value="completed">Completed</NativeSelectOption>
-              <NativeSelectOption value="cancelled">Cancelled</NativeSelectOption>
-            </NativeSelect>
-          </Field>
-        ) : null}
-        <FieldGroup className="grid gap-3 sm:grid-cols-2">
-          {taskTimingFilterKeys.map((key) => (
-            <Field key={key}>
-              <FieldLabel htmlFor={`task-filter-${key}`}>{taskTimingFilterLabel(key)}</FieldLabel>
-              <Input
-                defaultValue={toDateTimeLocal(searchParams.get(key), timeZone)}
-                id={`task-filter-${key}`}
-                name={key}
-                type="datetime-local"
-              />
-            </Field>
-          ))}
-        </FieldGroup>
-        <div className="flex gap-2">
-          <Button size="sm" type="submit">
+    <ResponsiveDialog
+      open={open}
+      onOpenChange={(value) => {
+        if (value) {
+          setValues(initialValues());
+          setAdvanced(false);
+          setCustomRanges({ due: false, scheduled: false });
+        }
+        setOpen(value);
+      }}
+    >
+      <ResponsiveDialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          Filters{activeCount > 0 ? ` (${activeCount})` : ""}
+        </Button>
+      </ResponsiveDialogTrigger>
+      <ResponsiveDialogContent aria-describedby={undefined}>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Task filters</ResponsiveDialogTitle>
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody>
+          <form id="task-filters-form" onSubmit={submit}>
+            <FieldGroup>
+              {!selectedView ? (
+                <Field>
+                  <FieldLabel htmlFor="task-filter-lifecycle">Show</FieldLabel>
+                  <NativeSelect
+                    defaultValue={lifecycleFilterFromParams(searchParams) ?? "open"}
+                    id="task-filter-lifecycle"
+                    name="lifecycle"
+                  >
+                    <NativeSelectOption value="open">Open tasks</NativeSelectOption>
+                    <NativeSelectOption value="completed">Completed tasks</NativeSelectOption>
+                    <NativeSelectOption value="cancelled">Cancelled tasks</NativeSelectOption>
+                  </NativeSelect>
+                </Field>
+              ) : null}
+              {(["due", "scheduled"] as const).map((kind) => {
+                const after = kind === "due" ? "dueAfter" : "scheduledAfter";
+                const before = kind === "due" ? "dueBefore" : "scheduledBefore";
+                return (
+                  <Field key={kind}>
+                    <FieldLabel htmlFor={`task-filter-${kind}-preset`}>
+                      {kind === "due" ? "Deadline" : "Reserved time"}
+                    </FieldLabel>
+                    <NativeSelect
+                      id={`task-filter-${kind}-preset`}
+                      value={
+                        customRanges[kind]
+                          ? "custom"
+                          : identifyPreset(
+                              { after: values[after], before: values[before] },
+                              timeZone,
+                            )
+                      }
+                      onChange={(event) => {
+                        const preset = event.target.value as DatePreset;
+                        setCustomRanges((previous) => ({
+                          ...previous,
+                          [kind]: preset === "custom",
+                        }));
+                        if (preset === "custom") {
+                          setAdvanced(true);
+                          return;
+                        }
+                        const bounds = presetBounds(preset, timeZone);
+                        setValues((previous) => ({
+                          ...previous,
+                          [after]: bounds.after,
+                          [before]: bounds.before,
+                        }));
+                      }}
+                    >
+                      {datePresets.map((preset) => (
+                        <NativeSelectOption key={preset.value} value={preset.value}>
+                          {preset.label}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                );
+              })}
+              <Collapsible open={advanced} onOpenChange={setAdvanced}>
+                <CollapsibleTrigger asChild>
+                  <Button size="sm" variant="ghost" type="button">
+                    <ChevronRightIcon
+                      aria-hidden="true"
+                      data-icon="inline-start"
+                      className={advanced ? "rotate-90" : undefined}
+                    />
+                    Advanced
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-3">
+                  <FieldGroup className="grid gap-3 sm:grid-cols-2">
+                    {taskTimingFilterKeys.map((key) => (
+                      <Field key={key}>
+                        <FieldLabel htmlFor={`task-filter-${key}`}>
+                          {taskTimingFilterLabel(key)}
+                        </FieldLabel>
+                        <Input
+                          id={`task-filter-${key}`}
+                          type="datetime-local"
+                          value={toDateTimeLocal(values[key], timeZone)}
+                          onChange={(event) =>
+                            setValues((previous) => ({
+                              ...previous,
+                              [key]: event.target.value
+                                ? dateTimeLocalToIso(event.target.value, timeZone)
+                                : "",
+                            }))
+                          }
+                        />
+                      </Field>
+                    ))}
+                  </FieldGroup>
+                </CollapsibleContent>
+              </Collapsible>
+            </FieldGroup>
+          </form>
+        </ResponsiveDialogBody>
+        <ResponsiveDialogFooter>
+          <Button form="task-filters-form" size="sm" type="submit">
             Apply filters
           </Button>
           {activeCount > 0 ? (
             <Button
+              size="sm"
+              variant="outline"
               onClick={() => {
                 const next = new URLSearchParams(searchParams);
-                for (const key of [...taskTimingFilterKeys, "lifecycle"]) next.delete(key);
-                navigate(`/tasks?${next.toString()}`);
+                for (const key of [...taskTimingFilterKeys, "lifecycle", "task"]) next.delete(key);
+                navigate(next.size ? `/tasks?${next}` : "/tasks");
+                setOpen(false);
               }}
-              size="sm"
-              type="button"
-              variant="outline"
             >
               Clear
             </Button>
           ) : null}
-        </div>
-      </form>
-    </details>
+        </ResponsiveDialogFooter>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 
@@ -862,18 +972,10 @@ function taskTimingFilterLabel(key: (typeof taskTimingFilterKeys)[number]) {
   }[key];
 }
 
-type TaskArchiveScope = "all" | "list" | "project";
-
-function archiveScopeFromParams(searchParams: URLSearchParams): TaskArchiveScope | null {
-  const scope = searchParams.get("archive");
-  return scope === "all" || scope === "list" || scope === "project" ? scope : null;
-}
-
 function TaskArchive({ lists, projects }: { lists: TaskList[]; projects: TaskProject[] }) {
   return (
     <div className="narrow-page flex flex-col gap-6">
       <header>
-        <h1 className="font-heading text-xl font-medium">Archive</h1>
         <p className="text-sm text-muted-foreground">
           Read the Tasks retained in archived Lists and finished Projects.
         </p>
@@ -914,33 +1016,8 @@ function TaskArchive({ lists, projects }: { lists: TaskList[]; projects: TaskPro
   );
 }
 
-function taskPath(
-  current: URLSearchParams,
-  selection: { list?: string | null; project?: string | null; view?: TaskSystemView },
-  preserveTask = false,
-) {
-  const params = new URLSearchParams();
-  for (const key of [
-    "q",
-    "dueAfter",
-    "dueBefore",
-    "scheduledAfter",
-    "scheduledBefore",
-    "lifecycle",
-  ]) {
-    const value = current.get(key);
-    if (value) params.set(key, value);
-  }
-  if (preserveTask && current.get("task")) params.set("task", current.get("task") as string);
-  if (selection.view) params.set("view", selection.view);
-  if (selection.list) params.set("list", selection.list);
-  if (selection.project) params.set("project", selection.project);
-  const query = params.toString();
-  return query ? `/tasks?${query}` : "/tasks";
-}
-
-function toDateTimeLocal(value: string | null, timeZone: string) {
-  if (!value) return "";
+export function toDateTimeLocal(value: string | null, timeZone: string) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "";
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
       day: "2-digit",
@@ -957,7 +1034,7 @@ function toDateTimeLocal(value: string | null, timeZone: string) {
   return `${parts.year}-${parts.month}-${parts.day}T${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}`;
 }
 
-function dateTimeLocalToIso(value: string, timeZone: string) {
+export function dateTimeLocalToIso(value: string, timeZone: string) {
   const [dateValue, timeValue] = value.split("T");
   const date = parseLocalDate(dateValue as string);
   const [hour, minute] = (timeValue as string).split(":").map(Number);
@@ -968,19 +1045,24 @@ function dateTimeLocalToIso(value: string, timeZone: string) {
   ).toISOString();
 }
 
-function taskTiming(task: Task, timeZone: string): string | null {
+export function taskTiming(task: Task, timeZone: string): string | null {
   const timing = [
     task.scheduledAt ? `Reserved ${formatMaterialDateTime(task.scheduledAt, timeZone)}` : null,
-    task.dueAt ? `Due ${formatMaterialDateTime(task.dueAt, timeZone)}` : null,
+    task.dueAt ? `Due ${formatRelativeMaterialDateTime(task.dueAt, timeZone)}` : null,
   ].filter((detail): detail is string => detail !== null);
   return timing.length > 0 ? timing.join(" · ") : null;
 }
 
-function taskDescription(task: Task, list?: TaskList, project?: TaskProject): string | null {
+export function taskDescription(
+  task: Task,
+  list?: TaskList,
+  project?: TaskProject,
+  includeNotes = true,
+): string | null {
   const details = [
     project && list ? `${list.name} / ${project.name}` : (project?.name ?? list?.name),
     task.estimateMinutes ? `${task.estimateMinutes} min` : null,
-    task.notes || null,
+    includeNotes ? task.notes || null : null,
   ].filter((detail): detail is string => Boolean(detail));
   return details.length > 0 ? details.join(" · ") : null;
 }

@@ -30,7 +30,7 @@ export type NavigationOwner =
 
 export const workspaceDefinitions: WorkspaceDefinition[] = [
   {
-    description: "See your day and personal direction.",
+    description: "See what matters now and what comes next.",
     icon: PanelTopIcon,
     id: "today",
     label: "Today at a Glance",
@@ -44,8 +44,10 @@ export const workspaceDefinitions: WorkspaceDefinition[] = [
 
 export function navigationOwnerForLocation(pathname: string): NavigationOwner {
   if (pathname === "/setup") return { kind: "standalone-flow" };
-  if (pathname === "/settings") return { kind: "account-utility" };
-  if (["/today", "/reviews", "/goals", "/motives", "/activity"].includes(pathname)) {
+  if (["/settings", "/reviews", "/goals", "/motives", "/activity"].includes(pathname)) {
+    return { kind: "account-utility" };
+  }
+  if (pathname === "/today") {
     return { kind: "workspace", workspace: "today" };
   }
   if (pathname === "/reminders" || pathname === "/tasks") {

@@ -1,3 +1,6 @@
+import { taskWorkspacePageSchema } from "@personal-os/domain";
+import { z } from "zod";
+
 export function createOpenApiDocument(apiBaseUrl: string) {
   const security = [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }];
   const taskReadScope = ["tasks:read"];
@@ -36,6 +39,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
   return {
     components: {
       schemas: {
+        TaskWorkspacePage: z.toJSONSchema(taskWorkspacePageSchema, { io: "input" }),
         FinanceMaintenanceRequest: {
           properties: {
             scope: { $ref: "#/components/schemas/MaintenanceScope" },
@@ -356,7 +360,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     info: {
       description:
         "The shared reminders, calendar, mail, finance, and assistant data plane for people and agents.",
-      title: "ilo API",
+      title: "nohmi API",
       version: "0.1.0",
     },
     openapi: "3.1.0",
@@ -610,6 +614,79 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: {
           ...taskWrite("Task Project and its Tasks moved", "TaskProjectMoveInput"),
           parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-workspace": {
+        get: {
+          security,
+          description:
+            "Read a globally filtered, grouped and sorted mixed Tasks/Reminders page. Both read scopes are required by default. kind=task requires only tasks:read; kind=reminder requires only reminders:read. Omitted status means open for All/Today/Upcoming and all for History/Trash. History includes terminal records or unavailable containers. readOnly marks unavailable containers outside Trash; Trash permits guarded restoration including Inbox fallback. deletedAt is independent. Today uses the user's planning timezone; Upcoming starts after today. Exact due/scheduled bounds are inclusive. Date groupKey is YYYY-MM-DD in that timezone; container keys are IDs; missing or ungrouped keys are none. Cursor is signed and bound to user, timezone and filters; it freezes the clock, not concurrent record changes. total is the matching count before cursor pagination.",
+          "x-required-scopes": ["tasks:read", "reminders:read"],
+          "x-required-scopes-by-kind": { task: ["tasks:read"], reminder: ["reminders:read"] },
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", {
+              type: "string",
+              enum: ["all", "task", "reminder"],
+              default: "all",
+            }),
+            queryParameter("view", {
+              type: "string",
+              enum: ["all", "today", "upcoming", "history", "trash"],
+              default: "all",
+            }),
+            queryParameter("status", {
+              type: "string",
+              enum: ["all", "open", "completed", "cancelled", "archived"],
+            }),
+            queryParameter("listId", { format: "uuid", type: "string" }),
+            queryParameter("projectId", { format: "uuid", type: "string" }),
+            queryParameter("query", { minLength: 1, maxLength: 200, type: "string" }),
+            queryParameter("priority", { type: "string", enum: ["low", "medium", "high"] }),
+            queryParameter("tag", { minLength: 1, maxLength: 60, type: "string" }),
+            queryParameter("due", {
+              type: "string",
+              enum: ["any", "overdue", "none", "dated"],
+              default: "any",
+            }),
+            queryParameter("reserved", {
+              type: "string",
+              enum: ["any", "none", "scheduled"],
+              default: "any",
+            }),
+            ...["dueAfter", "dueBefore", "scheduledAfter", "scheduledBefore"].map((name) =>
+              queryParameter(name, { format: "date-time", type: "string" }),
+            ),
+            queryParameter("sort", {
+              type: "string",
+              enum: [
+                "default",
+                "date",
+                "reserved",
+                "priority",
+                "newest",
+                "oldest",
+                "title",
+                "estimate",
+              ],
+              default: "default",
+            }),
+            queryParameter("group", {
+              type: "string",
+              enum: ["none", "date", "list", "project"],
+              default: "none",
+            }),
+          ],
+          responses: {
+            200: {
+              description: "Task workspace page",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/TaskWorkspacePage" } },
+              },
+            },
+            400: { description: "Invalid query, date bounds, or mismatched cursor" },
+            403: { description: "Required task/reminder read scope missing" },
+          },
         },
       },
       "/v1/tasks": {
@@ -890,7 +967,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/assistant/context": {
         get: {
           security,
-          responses: { 200: { description: "Authenticated Ilo agent context" } },
+          responses: { 200: { description: "Authenticated nohmi agent context" } },
         },
       },
       "/v1/assistant/setup-plan": {

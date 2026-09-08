@@ -203,6 +203,11 @@ describe("iCloud connector", () => {
       title: "Focus",
     });
     expect(created.remoteEventId).toMatch(/\.ics$/);
+    expect(client.createCalendarObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        iCalString: expect.stringContaining("PRODID:-//nohmi//EN"),
+      }),
+    );
 
     const sync = await value.syncCalendar(credentials, calendarId, null);
     expect(sync).toMatchObject({ nextSyncToken: "ctag-1", reset: true });

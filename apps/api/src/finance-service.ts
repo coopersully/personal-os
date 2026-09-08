@@ -99,7 +99,22 @@ import {
   localDateAt,
   toCents,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  like,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -2266,7 +2281,7 @@ export function createFinanceService({
   }
   function getPlaid() {
     if (!plaid) {
-      throw new AppError("invalid_request", "Plaid is not configured for this ilo instance.");
+      throw new AppError("invalid_request", "Plaid is not configured for this nohmi instance.");
     }
     return plaid;
   }
@@ -2483,6 +2498,14 @@ export function createFinanceService({
     const sortDirection = query.sortDirection ?? "desc";
     if (query.accountId) conditions.push(eq(financeTransactions.accountId, query.accountId));
     if (query.categoryId) conditions.push(eq(financeTransactions.categoryId, query.categoryId));
+    if (query.search) {
+      const literal = `%${query.search.replace(/[\\%_]/g, "\\$&")}%`;
+      const match = or(
+        ilike(financeTransactions.merchant, literal),
+        ilike(financeTransactions.notes, literal),
+      );
+      if (match) conditions.push(match);
+    }
     if (query.from) conditions.push(gte(financeTransactions.transactionDate, query.from));
     if (query.to) conditions.push(lte(financeTransactions.transactionDate, query.to));
     if (query.pending !== undefined)
@@ -4295,7 +4318,7 @@ export function createFinanceService({
         guidance: {
           approvedProfile,
           draftNotice: draftProposal
-            ? "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it."
+            ? "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it."
             : null,
           draftProposal,
         },
@@ -4348,7 +4371,7 @@ export function createFinanceService({
             "read_only",
             "Review ledger health, budgets, cash flow, and unresolved decisions before summarizing the month.",
             accountRows.length > 0,
-            "Add a Finance account in Ilo before running a monthly review.",
+            "Add a Finance account in nohmi before running a monthly review.",
           ),
         ],
       };
@@ -4694,7 +4717,7 @@ export function createFinanceService({
     },
     async createPlaidLinkToken(userId: string) {
       return getPlaid().createLinkToken({
-        clientName: "ilo",
+        clientName: "nohmi",
         countryCodes: ["US"],
         language: "en",
         linkCustomizationName: "default",

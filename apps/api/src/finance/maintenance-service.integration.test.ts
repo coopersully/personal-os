@@ -10,6 +10,7 @@ import {
   financeEconomicEvents,
   financeEventTransactions,
   financeMaintenanceRuns,
+  financeSetupSessions,
   financeTransactions,
   migrateDatabase,
   users,
@@ -20,6 +21,8 @@ import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createInboxService } from "./inbox-service.js";
 import { createMaintenanceService } from "./maintenance-service.js";
+import { createProfileBudgetService } from "./profile-budget-service.js";
+import { createSetupService } from "./setup-service.js";
 
 describe.sequential("caller-driven Finance maintenance", () => {
   let container: StartedPostgreSqlContainer;
@@ -50,6 +53,78 @@ describe.sequential("caller-driven Finance maintenance", () => {
     await database.close();
     await container.stop();
   });
+
+  async function setupFixture(label: string, priorMaintenance?: "active" | "settled") {
+    const [owner] = await database.db
+      .insert(users)
+      .values({ displayName: label, email: `${label}@example.com`, passwordHash: "unused" })
+      .returning();
+    if (!owner) throw new Error("Setup owner missing.");
+    const now = () => new Date("2026-09-03T12:00:00Z");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId: owner.id,
+      },
+      requestId: label,
+    });
+    const inbox = createInboxService({ db: database.db, now });
+    const maintenance = createMaintenanceService({ db: database.db, inbox, now });
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const setup = createSetupService({ db: database.db, now, planning });
+    const priorRun = priorMaintenance
+      ? await maintenance.maintainFinances(
+          { operation: "start", scope: { type: "all_outstanding" } },
+          context,
+        )
+      : null;
+    if (priorMaintenance === "settled" && priorRun) {
+      await maintenance.maintainFinances(
+        {
+          operation: "submit_audit",
+          runId: priorRun.data.runId,
+          expectedVersion: priorRun.data.version,
+          findings: [],
+          idempotencyKey: `${label}:prior-audit`,
+        },
+        context,
+      );
+    }
+    await planning.updateFinancialProfile(
+      {
+        expectedVersion: 0,
+        idempotencyKey: `${label}:profile`,
+        changes: {
+          jurisdiction: "US-NY",
+          householdSize: 1,
+          expectedMonthlyTakeHome: 4000,
+          liquidReserves: 2000,
+        },
+      },
+      context,
+    );
+    const proposed = await setup.setupFinances({ operation: "start" }, context);
+    if (!proposed.data.budgetVersionId) throw new Error("Budget proposal missing.");
+    const ready = await setup.setupFinances(
+      {
+        operation: "approve_budget",
+        approvalSource: "user_instruction",
+        sessionId: proposed.data.sessionId,
+        expectedVersion: proposed.data.version,
+        budgetVersionId: proposed.data.budgetVersionId,
+        idempotencyKey: `${label}:approve`,
+      },
+      context,
+    );
+    const savedSession = () =>
+      database.db.query.financeSetupSessions.findFirst({
+        where: eq(financeSetupSessions.id, ready.data.sessionId),
+      });
+    return { context, inbox, maintenance, owner, priorRun, ready, savedSession, setup };
+  }
 
   it("advances synchronously through reasoning and audit to settlement", async () => {
     const now = () => new Date("2026-08-23T20:00:00Z");
@@ -530,5 +605,244 @@ describe.sequential("caller-driven Finance maintenance", () => {
         context,
       ),
     ).resolves.toMatchObject({ data: { stage: "agent_audit" } });
+  });
+  it("atomically links full initial maintenance and settles its real setup session once", async () => {
+    const fixture = await setupFixture("setup-maintenance");
+    const starts = await Promise.all([
+      fixture.maintenance.maintainFinances(
+        { operation: "start", scope: { type: "all_outstanding" } },
+        fixture.context,
+      ),
+      fixture.maintenance.maintainFinances(
+        { operation: "start", scope: { type: "all_outstanding" } },
+        fixture.context,
+      ),
+    ]);
+    const started = starts[0];
+    if (!started) throw new Error("Run missing.");
+    expect(starts[1]?.data.runId).toBe(started.data.runId);
+    expect(await fixture.savedSession()).toMatchObject({
+      status: "initial_maintenance",
+      maintenanceRunId: started.data.runId,
+      version: fixture.ready.data.version + 1,
+    });
+    const audit = {
+      operation: "submit_audit" as const,
+      runId: started.data.runId,
+      expectedVersion: started.data.version,
+      findings: [],
+      idempotencyKey: "setup-maintenance:audit",
+    };
+    await fixture.maintenance.maintainFinances(audit, fixture.context);
+    await fixture.maintenance.maintainFinances(audit, fixture.context);
+    expect(await fixture.savedSession()).toMatchObject({
+      status: "settled",
+      maintenanceRunId: started.data.runId,
+      version: fixture.ready.data.version + 2,
+    });
+    await expect(
+      fixture.setup.setupFinances(
+        { operation: "resume", sessionId: fixture.ready.data.sessionId },
+        fixture.context,
+      ),
+    ).resolves.toMatchObject({
+      data: { stage: "settled", maintenanceRunId: started.data.runId },
+      outcome: "completed",
+    });
+  });
+
+  it("keeps initial setup pending for Inbox questions and settles it after answers and an explicit run resume", async () => {
+    const fixture = await setupFixture("setup-inbox");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Bank",
+        name: "Checking",
+        provider: "manual",
+        userId: fixture.owner.id,
+      })
+      .returning();
+    if (!account) throw new Error("Account missing.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 4200,
+        direction: "expense",
+        merchant: "Unclear purchase",
+        transactionDate: "2026-09-01",
+        userId: fixture.owner.id,
+      })
+      .returning();
+    if (!transaction) throw new Error("Transaction missing.");
+    const started = await fixture.maintenance.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      fixture.context,
+    );
+    const judged = await fixture.maintenance.maintainFinances(
+      {
+        operation: "submit_judgments",
+        runId: started.data.runId,
+        expectedVersion: started.data.version,
+        judgments: [
+          {
+            type: "needs_user_review",
+            transactionId: transaction.id,
+            confidence: 0.3,
+            questionReason: "The purchase purpose is unclear.",
+          },
+        ],
+        idempotencyKey: "setup-inbox:judgment",
+      },
+      fixture.context,
+    );
+    const settled = await fixture.maintenance.maintainFinances(
+      {
+        operation: "submit_audit",
+        runId: judged.data.runId,
+        expectedVersion: judged.data.version,
+        findings: [],
+        idempotencyKey: "setup-inbox:audit",
+      },
+      fixture.context,
+    );
+    expect(settled).toMatchObject({
+      data: { stage: "settled" },
+      remainingWork: { count: 1, categories: ["finance_inbox"] },
+    });
+    expect(await fixture.savedSession()).toMatchObject({
+      status: "initial_maintenance",
+      maintenanceRunId: started.data.runId,
+      version: fixture.ready.data.version + 1,
+    });
+    await fixture.maintenance.maintainFinances(
+      { operation: "resume", runId: started.data.runId },
+      fixture.context,
+    );
+    expect((await fixture.savedSession())?.status).toBe("initial_maintenance");
+    const question = (await fixture.inbox.getFinanceInbox(fixture.owner.id)).data[0];
+    if (!question) throw new Error("Inbox question missing.");
+    await fixture.inbox.answerFinanceReview(
+      question.id,
+      {
+        answer: "A legitimate personal expense.",
+        resolution: { type: "dismiss", rationale: "Confirmed by the person." },
+        idempotencyKey: "setup-inbox:answer",
+      },
+      fixture.context,
+    );
+    expect((await fixture.savedSession())?.status).toBe("initial_maintenance");
+    await fixture.maintenance.maintainFinances(
+      { operation: "resume", runId: started.data.runId },
+      fixture.context,
+    );
+    expect(await fixture.savedSession()).toMatchObject({
+      status: "settled",
+      version: fixture.ready.data.version + 2,
+    });
+  });
+
+  it.each([
+    "accounts",
+    "since",
+  ] as const)("does not attach or settle setup from a narrow %s run", async (type) => {
+    const fixture = await setupFixture(`setup-narrow-${type}`);
+    const started = await fixture.maintenance.maintainFinances(
+      {
+        operation: "start",
+        scope:
+          type === "accounts"
+            ? { type, accountIds: [fixture.owner.id] }
+            : { type, from: "2099-01-01" },
+      },
+      fixture.context,
+    );
+    await fixture.maintenance.maintainFinances(
+      { operation: "resume", runId: started.data.runId },
+      fixture.context,
+    );
+    await fixture.maintenance.maintainFinances(
+      {
+        operation: "submit_audit",
+        runId: started.data.runId,
+        expectedVersion: started.data.version,
+        findings: [],
+        idempotencyKey: `setup-narrow-${type}:audit`,
+      },
+      fixture.context,
+    );
+    expect(await fixture.savedSession()).toMatchObject({
+      status: "initial_maintenance",
+      maintenanceRunId: null,
+      version: fixture.ready.data.version,
+    });
+  });
+  it("links an existing full run on explicit resume without changing another owner's setup", async () => {
+    const fixture = await setupFixture("setup-resume", "active");
+    const other = await setupFixture("setup-other-owner");
+    if (!fixture.priorRun) throw new Error("Existing run missing.");
+    expect(await fixture.savedSession()).toMatchObject({
+      maintenanceRunId: null,
+      status: "initial_maintenance",
+    });
+    await expect(
+      other.maintenance.maintainFinances(
+        { operation: "resume", runId: fixture.priorRun.data.runId },
+        other.context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const resumed = await fixture.maintenance.maintainFinances(
+      { operation: "resume", runId: fixture.priorRun.data.runId },
+      fixture.context,
+    );
+    await fixture.maintenance.maintainFinances(
+      { operation: "resume", runId: resumed.data.runId },
+      fixture.context,
+    );
+    expect(await fixture.savedSession()).toMatchObject({
+      maintenanceRunId: resumed.data.runId,
+      status: "initial_maintenance",
+      version: fixture.ready.data.version + 1,
+    });
+    await fixture.maintenance.maintainFinances(
+      {
+        operation: "submit_audit",
+        runId: resumed.data.runId,
+        expectedVersion: resumed.data.version,
+        findings: [],
+        idempotencyKey: "setup-resume:audit",
+      },
+      fixture.context,
+    );
+    expect((await fixture.savedSession())?.status).toBe("settled");
+    expect(await other.savedSession()).toMatchObject({
+      maintenanceRunId: null,
+      status: "initial_maintenance",
+      version: other.ready.data.version,
+    });
+  });
+
+  it("does not use an old unlinked completed run to settle a later setup session", async () => {
+    const fixture = await setupFixture("setup-old-run", "settled");
+    if (!fixture.priorRun) throw new Error("Old run missing.");
+    await fixture.maintenance.maintainFinances(
+      { operation: "resume", runId: fixture.priorRun.data.runId },
+      fixture.context,
+    );
+    expect(await fixture.savedSession()).toMatchObject({
+      maintenanceRunId: null,
+      status: "initial_maintenance",
+      version: fixture.ready.data.version,
+    });
+    const current = await fixture.maintenance.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      fixture.context,
+    );
+    expect(current.data.runId).not.toBe(fixture.priorRun.data.runId);
+    expect(await fixture.savedSession()).toMatchObject({
+      maintenanceRunId: current.data.runId,
+      status: "initial_maintenance",
+      version: fixture.ready.data.version + 1,
+    });
   });
 });

@@ -11,7 +11,7 @@ const appBaseUrl = resolveAppBaseUrl(process.env, {
 const token = process.env.PERSONAL_OS_TOKEN;
 
 if (!token) {
-  process.stderr.write("PERSONAL_OS_TOKEN is required. Create one in ilo settings.\n");
+  process.stderr.write("PERSONAL_OS_TOKEN is required. Create one in Nomi settings.\n");
   process.exit(1);
 }
 

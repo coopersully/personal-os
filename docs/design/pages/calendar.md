@@ -13,6 +13,8 @@ event without losing the shape of the day.
 - Calendar composes the shared secondary app bar in every view. The day bar
   owns all-day material, the week bar owns weekday/date controls and all-day
   material, and the month bar owns weekday wayfinding.
+  These bars use the shared inline-placement option rather than the default
+  layout outlet, preserving horizontal alignment with the spatial grid.
 - The week secondary bar expands only for real all-day material and meets the
   timeline without a decorative divider.
 - The persistent Calendar orientation occupies the shared workspace app bar's

@@ -48,6 +48,7 @@ import type {
   MaterialSourceReference,
   TaskContainerAvailability,
   TaskLifecycle,
+  TaskListIcon,
   TaskListKind,
   TextContentKind,
   TextingConnectionState,
@@ -1602,6 +1603,7 @@ export const taskLists = pgTable(
     normalizedName: text("normalized_name").notNull(),
     description: text("description"),
     color: text("color"),
+    icon: text("icon").$type<TaskListIcon>().notNull().default("list"),
     availability: text("availability")
       .$type<TaskContainerAvailability>()
       .notNull()
@@ -1626,6 +1628,10 @@ export const taskLists = pgTable(
       .where(sql`${table.createIdempotencyKey} is not null`),
     index("task_lists_user_availability_idx").on(table.userId, table.availability),
     check("task_lists_kind_check", sql`${table.kind} IN ('inbox', 'standard')`),
+    check(
+      "task_lists_icon_check",
+      sql`${table.icon} IN ('list', 'home', 'star', 'target', 'calendar', 'wallet', 'people', 'receipt')`,
+    ),
     check(
       "task_lists_availability_check",
       sql`

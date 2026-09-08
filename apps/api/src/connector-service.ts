@@ -100,7 +100,7 @@ import type { RequestLog } from "./types.js";
 
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
 const CONNECTOR_SYNC_INTERRUPTED_ERROR =
-  "Synchronization was interrupted. ilo will retry automatically.";
+  "Synchronization was interrupted. nohmi will retry automatically.";
 const MAIL_RULE_WORK_CONCURRENCY = 2;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
@@ -153,7 +153,7 @@ function calendarProviderMutationError(
       effectState: "indeterminate",
       provider: calendar.provider,
       recovery:
-        "Synchronize Calendar before retrying so Ilo can determine whether the provider mutation completed.",
+        "Synchronize Calendar before retrying so nohmi can determine whether the provider mutation completed.",
       ...(remoteEventId ? { remoteEventId } : {}),
     },
   );
@@ -265,20 +265,20 @@ export function mailProviderPartialEffectError({
   const userAction = !credentialsPersisted
     ? "Open Settings → Connections, reconnect this Mail account, then open Mail and choose Sync."
     : sentMessageNeedsReconciliation
-      ? "Inspect the provider's Sent Mail before any retry. If the message exists, do not resend it; return to Ilo to reconcile the local state."
+      ? "Inspect the provider's Sent Mail before any retry. If the message exists, do not resend it; return to nohmi to reconcile the local state."
       : "Open Mail and choose Sync before retrying this action.";
   const userActionDestination = !credentialsPersisted
     ? "Settings → Connections → reconnect; Mail → Sync"
     : sentMessageNeedsReconciliation
-      ? "Provider Sent Mail; then Ilo Mail"
+      ? "Provider Sent Mail; then nohmi Mail"
       : "Mail → Sync";
   const message = !credentialsPersisted
-    ? "The provider Mail mutation may have committed, but Ilo could not persist rotated provider credentials. Reconnect this Mail account, then sync it to reconcile provider state before retrying."
+    ? "The provider Mail mutation may have committed, but nohmi could not persist rotated provider credentials. Reconnect this Mail account, then sync it to reconcile provider state before retrying."
     : sentDraftNeedsReconciliation
-      ? "The provider may have sent this message, but Ilo could not mark its draft as sent. Verify Sent Mail before retrying, then reconcile or remove the local draft."
+      ? "The provider may have sent this message, but nohmi could not mark its draft as sent. Verify Sent Mail before retrying, then reconcile or remove the local draft."
       : sentMessageNeedsReconciliation
-        ? "The provider may have sent this message, but this draftless send has no durable Ilo recovery object. Inspect Sent Mail and never automatically retry this request."
-        : "The provider Mail mutation may have committed, but Ilo could not persist its local projection and audit. Sync this Mail account to reconcile provider state before retrying.";
+        ? "The provider may have sent this message, but this draftless send has no durable nohmi recovery object. Inspect Sent Mail and never automatically retry this request."
+        : "The provider Mail mutation may have committed, but nohmi could not persist its local projection and audit. Sync this Mail account to reconcile provider state before retrying.";
   return new AppError("service_unavailable", message, {
     accountId,
     ...(cause instanceof AppError ? { causeCode: cause.code } : {}),
@@ -520,7 +520,7 @@ export function createConnectorService({
         } catch {
           throw new AppError(
             "service_unavailable",
-            "The provider event was created, but Ilo could not persist refreshed provider credentials.",
+            "The provider event was created, but nohmi could not persist refreshed provider credentials.",
             {
               partialEffect: "provider_event_created",
               provider: "google",
@@ -566,7 +566,7 @@ export function createConnectorService({
         } catch {
           throw new AppError(
             "service_unavailable",
-            "The provider event was deleted, but Ilo could not persist refreshed provider credentials.",
+            "The provider event was deleted, but nohmi could not persist refreshed provider credentials.",
             {
               partialEffect: "provider_event_deleted",
               provider: "google",
@@ -614,7 +614,7 @@ export function createConnectorService({
         } catch {
           throw new AppError(
             "service_unavailable",
-            "The provider event was updated, but Ilo could not persist refreshed provider credentials.",
+            "The provider event was updated, but nohmi could not persist refreshed provider credentials.",
             {
               partialEffect: "provider_event_updated",
               provider: "google",
@@ -2727,7 +2727,7 @@ export function createConnectorService({
           await transitionMailRuleWork([candidate.work], {
             code: "projection_commit_failed",
             effect: "applied",
-            message: "Ilo observed the provider change but could not commit its projection.",
+            message: "nohmi observed the provider change but could not commit its projection.",
             status: "reconcile",
           }).catch(() => {});
         }
@@ -2874,8 +2874,8 @@ export function createConnectorService({
             "none",
           ),
           message: itemMutated
-            ? "The provider change completed, but Ilo could not commit its projection."
-            : "Ilo could not commit the reconciled Mail projection.",
+            ? "The provider change completed, but nohmi could not commit its projection."
+            : "nohmi could not commit the reconciled Mail projection.",
           status: itemMutated ? "reconcile" : "pending",
         }).catch(() => {});
       }

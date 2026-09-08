@@ -26,4 +26,21 @@ describe("QuoteCard", () => {
 
     expect(screen.getByLabelText("An open calendar").querySelector("figcaption")).toBeNull();
   });
+
+  it("renders author-only and source-only attribution without a separator", () => {
+    render(
+      <>
+        <QuoteCard author="Anne Lamott" label="Author only" text="Take a breath." />
+        <QuoteCard label="Source only" source="A field note" text="Leave some room." />
+      </>,
+    );
+
+    const authorCard = screen.getByLabelText("Author only");
+    expect(within(authorCard).getByText("Anne Lamott")).toBeVisible();
+    expect(within(authorCard).queryByText("·")).not.toBeInTheDocument();
+
+    const sourceCard = screen.getByLabelText("Source only");
+    expect(within(sourceCard).getByText("A field note")).toBeVisible();
+    expect(within(sourceCard).queryByText("·")).not.toBeInTheDocument();
+  });
 });

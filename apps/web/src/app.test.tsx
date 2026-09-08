@@ -8203,7 +8203,7 @@ describe("ilo web app", () => {
       mocks.getMe.mockRejectedValue(new Error("unauthorized"));
     });
     await browser.click(screen.getByRole("button", { name: "Log out" }));
-    expect(await screen.findByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
   });
 

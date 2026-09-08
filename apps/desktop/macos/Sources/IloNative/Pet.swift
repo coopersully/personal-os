@@ -9,7 +9,7 @@ final class QuickAccessModel: ObservableObject {
   var action: (([String: Any]) -> Void)?
   func complete(_ item: WorkItem, kind: String) {
     guard let s = snapshot, !s.stale else {
-      failure = "Reconnect to ilo before completing items."
+      failure = "Reconnect to nohmi before completing items."
       return
     }
     let key = "\(kind):\(item.id)"
@@ -21,7 +21,7 @@ final class QuickAccessModel: ObservableObject {
     ])
     DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
       guard let self, self.pending.remove(key) != nil else { return }
-      self.failure = "Completion has not been confirmed. Open ilo to check or retry."
+      self.failure = "Completion has not been confirmed. Open nohmi to check or retry."
     }
   }
   func update(_ s: NativeSnapshot?) {
@@ -66,7 +66,7 @@ struct QuickAccessView: View {
         } label: {
           Image(systemName: "arrow.clockwise")
         }.accessibilityLabel("Refresh today")
-        Button("Open ilo") { open("/today") }
+        Button("Open nohmi") { open("/today") }
       }
       if let s = model.snapshot {
         Text(
@@ -136,7 +136,7 @@ struct QuickAccessView: View {
         }
       } else {
         Text("Sign in to see your day.").foregroundStyle(.secondary)
-        Button("Open ilo") { open("/today") }
+        Button("Open nohmi") { open("/today") }
       }
     }.padding(16).frame(width: 360)
   }
@@ -159,7 +159,7 @@ final class PetView: NSView {
     super.init(frame: frame)
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
-    setAccessibilityLabel("ilo desktop pet. Open quick access")
+    setAccessibilityLabel("nohmi desktop pet. Open quick access")
     NotificationCenter.default.addObserver(
       self, selector: #selector(restartAnimation),
       name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)

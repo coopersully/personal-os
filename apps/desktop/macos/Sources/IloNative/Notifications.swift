@@ -195,8 +195,8 @@ enum PendingNotificationPolicy {
     c.sound = p.sound ? .default : nil
     if !p.preview {
       c.title =
-        kind == "mail" ? "New mail" : (kind == "event" ? "Upcoming event" : "Due item in ilo")
-      c.body = "Open ilo to view details"
+        kind == "mail" ? "New mail" : (kind == "event" ? "Upcoming event" : "Due item in nohmi")
+      c.body = "Open nohmi to view details"
     }
     return UNNotificationRequest(
       identifier: request.identifier, content: c,
@@ -237,7 +237,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
   override init() {
     super.init()
     center.delegate = self
-    let open = UNNotificationAction(identifier: "open", title: "Open ilo", options: .foreground)
+    let open = UNNotificationAction(identifier: "open", title: "Open nohmi", options: .foreground)
     let complete = UNNotificationAction(identifier: "complete", title: "Complete", options: [])
     let snooze = UNNotificationAction(identifier: "snooze", title: "Snooze 10 minutes", options: [])
     let join = UNNotificationAction(identifier: "join", title: "Join meeting", options: .foreground)
@@ -269,7 +269,9 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
   func requestPermission() {
     center.requestAuthorization(options: [.alert, .sound, .badge]) { _, error in
       DispatchQueue.main.async {
-        self.lastError = error.map { _ in "macOS could not authorize notifications. Check System Settings → Notifications, or install the signed ilo release." }
+        self.lastError = error.map { _ in
+          "macOS could not authorize notifications. Check System Settings → Notifications, or install the signed nohmi release."
+        }
         self.refreshPermission()
       }
     }
@@ -429,7 +431,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
           : identifier,
         server: server, userID: userID, mailAccountID: accountID,
         title: summary
-          ? "New mail in ilo" : (preferences.preview ? String(title.prefix(240)) : "New mail"),
+          ? "New mail in nohmi" : (preferences.preview ? String(title.prefix(240)) : "New mail"),
         path: summary ? "/mail" : path, fireAt: fire, createdAt: Date(), scheduledAt: nil))
     // Rust may now durably advance its cursor: retry material survives any scheduling failure or crash.
     refreshMailDelivery()
@@ -464,7 +466,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         mailSubmissions.insert(requestID)
         let c = UNMutableNotificationContent()
         c.title = preferences.preview ? first.title : "New mail"
-        c.body = "Open ilo to view your inbox"
+        c.body = "Open nohmi to view your inbox"
         c.categoryIdentifier = "ilo.mail"
         if preferences.sound { c.sound = .default }
         c.userInfo = [
@@ -495,7 +497,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
       throw NativeError.message("Enable macOS notification permission first")
     }
     let c = UNMutableNotificationContent()
-    c.title = "ilo notifications are ready"
+    c.title = "nohmi notifications are ready"
     c.body = "Your notification settings are working."
     if preferences.sound { c.sound = .default }
     enqueue(

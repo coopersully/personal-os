@@ -98,7 +98,8 @@ struct NativeSnapshot: Codable {
         return due >= today && due < tomorrow ? 0 : (due < today ? 1 : 2)
       }
       return items.sorted { left, right in
-        let a = rank(left), b = rank(right)
+        let a = rank(left)
+        let b = rank(right)
         if a != b { return a < b }
         return (left.dueAt ?? "", left.id) < (right.dueAt ?? "", right.id)
       }
@@ -203,7 +204,7 @@ struct AlertPlanner {
           PlannedAlert(
             identifier: stableID(s.identity, kind, item.id, item.dueAt!), kind: kind,
             materialID: item.id, title: p.preview ? item.title : "\(kind.capitalized) due",
-            body: p.preview ? "Due now" : "Open ilo to view details", fireAt: fire,
+            body: p.preview ? "Due now" : "Open nohmi to view details", fireAt: fire,
             path: kind == "task" ? "/tasks" : "/reminders", conferenceURL: nil))
       }
     }
@@ -212,7 +213,7 @@ struct AlertPlanner {
       alerts.append(
         PlannedAlert(
           identifier: stableID(s.identity, "catchup", day), kind: "summary", materialID: "",
-          title: "Work to catch up on", body: "\(missed.count) incomplete due items in ilo",
+          title: "Work to catch up on", body: "\(missed.count) incomplete due items in nohmi",
           fireAt: afterQuietHours(now.addingTimeInterval(2), preferences: p, calendar: s.calendar),
           path: "/today", conferenceURL: nil))
     }
@@ -232,7 +233,7 @@ struct AlertPlanner {
           PlannedAlert(
             identifier: stableID(s.identity, "event", event.id, event.startsAt), kind: "event",
             materialID: event.id, title: p.preview ? event.title : "Upcoming event",
-            body: "Open ilo for event details", fireAt: fire, path: "/calendar",
+            body: "Open nohmi for event details", fireAt: fire, path: "/calendar",
             conferenceURL: validMeetingURL(event.conferenceUrl)?.absoluteString))
       }
     }

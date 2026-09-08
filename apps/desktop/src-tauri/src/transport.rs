@@ -127,7 +127,7 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
             && (pathname == "/v1/auth/login" || pathname == "/v1/auth/register")
         {
             let mut value: Value = serde_json::from_str(&response.body)
-                .map_err(|_| "The server did not return an ilo login response.")?;
+                .map_err(|_| "The server did not return a nohmi login response.")?;
             let account = value["user"]["id"]
                 .as_str()
                 .filter(|s| !s.is_empty())
@@ -223,12 +223,12 @@ pub async fn desktop_test_connection(
     )
     .await?;
     let value: Value = serde_json::from_str(&response.body)
-        .map_err(|_| "This address returned a webpage instead of an ilo API response.")?;
+        .map_err(|_| "This address returned a webpage instead of a nohmi API response.")?;
     if response.status == 401 && value["error"]["code"] == "unauthorized" {
         return Ok(json!({"ok":true,"serverUrl":origin}));
     }
     Err(format!(
-        "This server did not return the expected ilo authentication response (HTTP {}).",
+        "This server did not return the expected nohmi authentication response (HTTP {}).",
         response.status
     ))
 }

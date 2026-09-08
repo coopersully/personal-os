@@ -6,7 +6,7 @@ set -euo pipefail
 : "${ILO_HOST_ENTITLEMENTS:?Set the existing host entitlement plist to preserve required Tauri capabilities}"
 : "${ILO_WIDGET_PROVISIONING_PROFILE:?Set the matching widget provisioning profile}"
 : "${ILO_HOST_PROVISIONING_PROFILE:?Set the matching host provisioning profile}"
-app="${1:?Usage: embed-widgets.sh /path/to/ilo.app}"
+app="${1:?Usage: embed-widgets.sh /path/to/Nomi.app}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 [[ -d "$app/Contents" ]] || { printf 'Not an application bundle: %s\n' "$app" >&2; exit 1; }
 export ILO_APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"

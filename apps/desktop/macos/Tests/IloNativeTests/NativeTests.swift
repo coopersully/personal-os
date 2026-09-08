@@ -445,7 +445,7 @@ extension NativeTests {
     let refreshed = PendingNotificationPolicy.refreshed(
       request, snapshot: s, preferences: p, now: now)
     XCTAssertNil(refreshed?.content.sound)
-    XCTAssertEqual(refreshed?.content.title, "Due item in ilo")
+    XCTAssertEqual(refreshed?.content.title, "Due item in nohmi")
     XCTAssertEqual((refreshed?.trigger as? UNTimeIntervalNotificationTrigger)?.timeInterval, 7200)
     p.tasks = false
     XCTAssertNil(

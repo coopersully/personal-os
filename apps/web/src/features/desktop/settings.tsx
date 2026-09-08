@@ -181,8 +181,8 @@ export function DesktopSettingsPanel({
                 required
               />
               <FieldDescription>
-                Use Hosted ilo or the HTTPS address of your own ilo API. Switching servers signs you
-                out.
+                Use Hosted nohmi or the HTTPS address of your own nohmi API. Switching servers signs
+                you out.
               </FieldDescription>
             </Field>
             <div className="flex flex-wrap gap-2">
@@ -194,7 +194,7 @@ export function DesktopSettingsPanel({
                   setTested(null);
                 }}
               >
-                Use Hosted ilo
+                Use Hosted nohmi
               </Button>
               <Button
                 type="button"
@@ -215,11 +215,11 @@ export function DesktopSettingsPanel({
                 />
                 {query.data?.wallpaperError ? (
                   <p role="alert">
-                    Wallpaper: {query.data.wallpaperError}. ilo will retry while it is running.
+                    Wallpaper: {query.data.wallpaperError}. nohmi will retry while it is running.
                   </p>
                 ) : null}
                 <FieldDescription>
-                  Closing the window keeps ilo in the menu bar. Use Quit ilo to exit.
+                  Closing the window keeps nohmi in the menu bar. Use Quit nohmi to exit.
                 </FieldDescription>
                 {query.data?.native.loginStatus ? (
                   <p role="status">Login item: {query.data.native.loginStatus}</p>
@@ -422,8 +422,8 @@ export function DesktopSettingsPanel({
               {mailboxes.error ? <p role="alert">Mail accounts could not be loaded.</p> : null}
               {query.data?.mailError ? (
                 <p role="alert">
-                  Mail notifications could not refresh: {query.data.mailError}. ilo will retry while
-                  running.
+                  Mail notifications could not refresh: {query.data.mailError}. nohmi will retry
+                  while running.
                 </p>
               ) : null}
               {accounts.data

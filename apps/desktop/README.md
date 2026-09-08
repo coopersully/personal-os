@@ -1,14 +1,14 @@
-# ilo for macOS
+# nohmi for macOS
 
 The desktop app bundles the React interface with a resident Tauri/Rust process and a Swift companion. It supports macOS 14 or later. Windows still compiles, but the pet, WidgetKit extension, login registration and native wallpaper compositor are macOS features.
 
 ## Connection and daily use
 
-Release builds start with `https://api.ilo.coopersully.me`. Settings → Desktop supports a custom HTTPS API origin; HTTP is permitted only for loopback development. The same server controls are available before sign-in and when the selected API is unavailable. Test connection checks the actual ilo authentication response.
+Release builds start with `https://api.ilo.coopersully.me`. Settings → Desktop supports a custom HTTPS API origin; HTTP is permitted only for loopback development. The same server controls are available before sign-in and when the selected API is unavailable. Test connection checks the actual nohmi authentication response.
 
 Requests use the selected origin through native HTTP. Session credentials stay in Keychain; redirects never forward them. Switching servers requires a fresh sign-in and clears the previous account's ambient data. Pet, widget and notification preferences are saved per installation, server and account. Login registration is an installation preference.
 
-Closing the red window button hides the window and Dock icon. The menu-bar item remains available with Open ilo, Quick access, Settings and Quit. Finder/Dock reopening restores the existing window; Command-comma opens Settings. Quit and Command-Q exit. Release preferences enable Open at login; debug builds leave it off. The actual macOS registration/approval state appears in settings.
+Closing the red window button hides the window and Dock icon. The menu-bar item remains available with Open nohmi, Quick access, Settings and Quit. Finder/Dock reopening restores the existing window; Command-comma opens Settings. Quit and Command-Q exit. Release preferences enable Open at login; debug builds leave it off. The actual macOS registration/approval state appears in settings.
 
 ## Pet, widgets and notifications
 
@@ -31,10 +31,12 @@ The connector bounds board fetches to ten seconds and 4 MiB, refuses redirects a
 From the repository root:
 
 ```sh
+pnpm env:start
+# In another terminal:
 pnpm --filter @personal-os/desktop dev
 ```
 
-This invokes the checked-in lifecycle (`pnpm env:start`) on the repository's stable ports. Use `pnpm env:status`, `pnpm env:logs` and `pnpm env:stop` to manage it. Debug desktop connections default to the local API.
+The checked-in lifecycle assigns this worktree one loopback origin and stores it in `.env.codex.local`; `pnpm env:status` reports it. In the desktop sign-in screen, save that origin as a custom server. Tauri runs its renderer on the standard Vite development URL while API calls use the selected native server. Use `pnpm env:logs` and `pnpm env:stop` to manage the worktree runtime. Debug desktop connections otherwise retain the last selected server and default to Hosted nohmi on a fresh install.
 
 ```sh
 pnpm verify
@@ -63,7 +65,7 @@ Distribution requires final installed acceptance: notifications/permission setti
 
 ## Validation record (2026-09-08)
 
-`pnpm verify` passed: 290 tests in 47 files, both desktop/mobile E2E cases, and all coverage gates (95.95% statements/lines, 94.15% branches, 95.5% functions). Separate native verification passed 23 Rust tests, 29 Swift tests, four provisioning-script tests, WidgetKit extension compilation and the packaged debug app build.
+`pnpm verify` passed: 1,852 tests in 198 files, 24 desktop/mobile E2E cases, and all coverage gates (96.79% statements/lines, 94.03% branches, 95.87% functions). Separate native verification passed 23 Rust tests, 29 Swift tests, four provisioning-script tests, WidgetKit extension compilation and the packaged debug app build.
 
 Local packaged-app checks exercised native sign-in/sign-out, Keychain session restoration across Quit, Today tasks/reminders, Command-comma, settings rendering, server switching, pet enable/disable, close-to-background, pet quick access, task completion, quick capture and explicit Quit. Session transitions reset mounted query observers without reloading the packaged webview. Native notification permission was requested and macOS returned `UNErrorDomain` code 1 for this local build; real delivery has not been accepted. No valid Apple signing identity was available, so signed widget installation and login-item registration remain external acceptance requirements. Hosted readiness and the app's production API request returned HTTP 503, preventing production sign-in verification. Live provider OAuth, Pinterest application across physical displays/Spaces, and signed installed acceptance remain to be exercised. No production deployment or release publication was performed.
 

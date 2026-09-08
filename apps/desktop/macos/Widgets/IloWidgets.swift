@@ -6,7 +6,7 @@ import WidgetKit
 struct WorkspaceConfiguration: WidgetConfigurationIntent {
   static var title: LocalizedStringResource = "Today workspaces"
   static var description = IntentDescription(
-    "Choose the workspaces shown by this widget. Enable private finance summaries in ilo Desktop settings first."
+    "Choose the workspaces shown by this widget. Enable private finance summaries in nohmi Desktop settings first."
   )
   @Parameter(title: "Tasks", default: true) var tasks: Bool
   @Parameter(title: "Reminders", default: true) var reminders: Bool
@@ -86,7 +86,7 @@ final class WidgetTransport: NSObject, URLSessionTaskDelegate {
     -> [String: Any]
   {
     guard let url = URL(string: origin + path) else {
-      throw NativeError.message("Invalid ilo server")
+      throw NativeError.message("Invalid nohmi server")
     }
     var request = URLRequest(url: url)
     request.httpMethod = method
@@ -105,7 +105,7 @@ final class WidgetTransport: NSObject, URLSessionTaskDelegate {
     defer { session.invalidateAndCancel() }
     let (data, response) = try await session.data(for: request)
     guard let response = response as? HTTPURLResponse else {
-      throw NativeError.message("ilo did not respond")
+      throw NativeError.message("nohmi did not respond")
     }
     guard (200..<300).contains(response.statusCode) else {
       if response.statusCode == 401 {
@@ -114,18 +114,19 @@ final class WidgetTransport: NSObject, URLSessionTaskDelegate {
       }
       throw NativeError.message(
         response.statusCode == 401
-          ? "Sign in to ilo again" : "ilo could not complete this item (\(response.statusCode))")
+          ? "Sign in to nohmi again" : "nohmi could not complete this item (\(response.statusCode))"
+      )
     }
     guard data.count <= 1024 * 1024,
       let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { throw NativeError.message("Unexpected ilo response") }
+    else { throw NativeError.message("Unexpected nohmi response") }
     return json
   }
 }
 struct CompleteWorkIntent: AppIntent {
-  static var title: LocalizedStringResource = "Complete ilo item"
+  static var title: LocalizedStringResource = "Complete nohmi item"
   static var description = IntentDescription(
-    "Complete the selected task or reminder in your signed-in ilo account.")
+    "Complete the selected task or reminder in your signed-in nohmi account.")
   static var openAppWhenRun = false
   @Parameter(title: "Item") var itemID: String
   @Parameter(title: "Kind") var kind: String
@@ -141,21 +142,21 @@ struct CompleteWorkIntent: AppIntent {
   func perform() async throws -> some IntentResult {
     guard ["task", "reminder"].contains(kind),
       itemID.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil
-    else { throw NativeError.message("Invalid ilo item") }
+    else { throw NativeError.message("Invalid nohmi item") }
     let origin = try canonicalOrigin(server)
     guard let s = SharedSnapshotStore.read(), s.serverUrl == origin, s.accountId == account else {
-      throw NativeError.message("This widget belongs to a previous sign-in. Open ilo to refresh.")
+      throw NativeError.message("This widget belongs to a previous sign-in. Open nohmi to refresh.")
     }
     guard let group = SessionKeychain.accessGroup, !group.isEmpty,
       let token = try SessionKeychain.get(origin)
     else {
       throw NativeError.message(
-        "Open ilo to sign in. Widget completion requires provisioned shared Keychain access.")
+        "Open nohmi to sign in. Widget completion requires provisioned shared Keychain access.")
     }
     let transport = WidgetTransport(account: account)
     let me = try await transport.request(origin: origin, path: "/v1/me", token: token)
     guard let user = me["user"] as? [String: Any], user["id"] as? String == account else {
-      throw NativeError.message("Your ilo account changed. Open ilo to refresh.")
+      throw NativeError.message("Your nohmi account changed. Open nohmi to refresh.")
     }
     let collection = kind == "task" ? "tasks" : "reminders"
     let existing = try await transport.request(
@@ -166,16 +167,16 @@ struct CompleteWorkIntent: AppIntent {
       current.active
     else {
       throw NativeError.message(
-        "This item is no longer available to complete. Open ilo to refresh.")
+        "This item is no longer available to complete. Open nohmi to refresh.")
     }
     guard SharedSnapshotStore.read()?.identity == s.identity else {
-      throw NativeError.message("Your ilo account changed")
+      throw NativeError.message("Your nohmi account changed")
     }
     let result = try await transport.request(
       origin: origin, path: "/v1/\(collection)/\(itemID)/complete", token: token, method: "POST")
     guard let completed = result[kind] as? [String: Any], completed["id"] as? String == itemID,
       completed["completedAt"] is String || completed["status"] as? String == "completed"
-    else { throw NativeError.message("ilo did not confirm completion") }
+    else { throw NativeError.message("nohmi did not confirm completion") }
     try SharedSnapshotStore.removeCompleted(id: itemID, kind: kind, identity: s.identity)
     return .result()
   }
@@ -243,16 +244,16 @@ struct WorkTodayView: View {
     Link(destination: widgetRoute("/today")) {
       Text(
         entry.stale
-          ? "May be outdated · Open ilo"
+          ? "May be outdated · Open nohmi"
           : "Updated \((parseDate(entry.snapshot?.generatedAt) ?? entry.date).formatted(date: .omitted, time: .shortened))"
       ).font(.caption2).foregroundStyle(.secondary)
     }
   }
   var empty: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("ilo Today").font(.headline)
+      Text("nohmi Today").font(.headline)
       Text("Sign in to see your day").font(.callout).foregroundStyle(.secondary)
-      Link("Open ilo", destination: widgetRoute("/today"))
+      Link("Open nohmi", destination: widgetRoute("/today"))
     }
   }
 }
@@ -317,7 +318,7 @@ struct GlanceView: View {
         WorkTodayView(entry: entry).freshness
       } else {
         Text("Sign in to see your day").foregroundStyle(.secondary)
-        Link("Open ilo", destination: widgetRoute("/today"))
+        Link("Open nohmi", destination: widgetRoute("/today"))
       }
     }.containerBackground(.background, for: .widget).widgetURL(widgetRoute("/today"))
   }

@@ -188,7 +188,7 @@ describe("desktop preferences", () => {
     expect(mocks.accounts).not.toHaveBeenCalled();
   });
 
-  it("invalidates the connection test when the address changes or Hosted ilo is selected", async () => {
+  it("invalidates the connection test when the address changes or Hosted nohmi is selected", async () => {
     mount({ connectionOnly: true });
     const server = await screen.findByLabelText("API server");
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
@@ -196,7 +196,7 @@ describe("desktop preferences", () => {
     await screen.findByText("Connection verified");
     fireEvent.change(server, { target: { value: "https://other.example.com" } });
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Use Hosted ilo" }));
+    await userEvent.click(screen.getByRole("button", { name: "Use Hosted nohmi" }));
     expect(server).toHaveValue(hostedServer);
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
   });
@@ -349,8 +349,8 @@ describe("desktop preferences", () => {
     mocks.invoke.mockReturnValueOnce(test.promise);
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
     expect(screen.getByRole("button", { name: "Testing…" })).toBeDisabled();
-    await act(async () => test.reject(new Error("This is a website, not an ilo API")));
-    expect(await screen.findByText("This is a website, not an ilo API")).toBeInTheDocument();
+    await act(async () => test.reject(new Error("This is a website, not a nohmi API")));
+    expect(await screen.findByText("This is a website, not a nohmi API")).toBeInTheDocument();
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
     expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
   });
@@ -396,7 +396,7 @@ describe("desktop preferences", () => {
     mount({ section: "notifications" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Mail notifications could not refresh: Activity feed unavailable. ilo will retry while running.",
+      "Mail notifications could not refresh: Activity feed unavailable. nohmi will retry while running.",
     );
     expect(
       await screen.findByText(

@@ -5,8 +5,8 @@
   "identifier": "app.personal-os.desktop",
   "build": {
     "beforeBuildCommand": "pnpm --dir ../.. --filter @personal-os/web build",
-    "beforeDevCommand": "pnpm --dir ../.. env:start",
-    "devUrl": "http://localhost:8080",
+    "beforeDevCommand": "pnpm --dir ../.. --filter @personal-os/web dev",
+    "devUrl": "http://localhost:5173",
     "frontendDist": "../../web/dist"
   },
   "app": {

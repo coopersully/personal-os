@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type {
   GoogleConnector,
   GoogleCredentials,
@@ -1107,7 +1108,7 @@ export function createConnectorService({
         before?.remoteEtag === change.event.etag &&
         !before.deletedAt &&
         (change.event.attendees === undefined ||
-          JSON.stringify(before.attendees) === JSON.stringify(change.event.attendees))
+          isDeepStrictEqual(before.attendees, change.event.attendees))
       )
         continue;
       const values = remoteEventValues(userId, calendar.id, calendar.provider, change.event, now());

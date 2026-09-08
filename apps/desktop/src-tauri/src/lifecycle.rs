@@ -171,14 +171,14 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         menu::{Menu, MenuItem},
         tray::TrayIconBuilder,
     };
-    let open = MenuItem::with_id(app, "open", "Open ilo", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open nohmi", true, None::<&str>)?;
     let quick = MenuItem::with_id(app, "quick", "Quick access", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit ilo", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit nohmi", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quick, &settings, &quit])?;
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("ilo")
+        .tooltip("nohmi")
         .on_menu_event(|app, event| {
             let app = app.clone();
             match event.id.as_ref() {

@@ -14,7 +14,7 @@ export function useDesktopActions(capture: (kind: "task" | "reminder" | "event")
     let disposed = false;
     const cleanup: Array<() => void> = [];
     const reportFailure = () => {
-      if (!disposed) toast.error("Desktop quick actions could not connect. Reopen ilo to retry.");
+      if (!disposed) toast.error("Desktop quick actions could not connect. Reopen nohmi to retry.");
     };
     const receive = async () => {
       if (disposed) return;

@@ -207,7 +207,7 @@ fn image_client() -> Result<reqwest::Client, String> {
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(20))
-        .user_agent("ilo-desktop-wallpaper/1")
+        .user_agent("nohmi-desktop-wallpaper/1")
         .build()
         .map_err(|e| e.to_string())
 }

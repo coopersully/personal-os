@@ -49,7 +49,7 @@ export async function fetchPinterestBoardPins(
       timeout,
       (async () => {
         const response = await requestFetch(url.toString(), {
-      headers: { "user-agent": "nohmi wallpaper/1.0" },
+          headers: { "user-agent": "nohmi wallpaper/1.0" },
           redirect: "manual",
           signal: controller.signal,
         });

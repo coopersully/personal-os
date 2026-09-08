@@ -33,23 +33,23 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain
 cd "$desktop"
 # The initial bundle is ad-hoc; embedding signs the complete bundle exactly once with Developer ID.
 env -u APPLE_CERTIFICATE -u APPLE_CERTIFICATE_PASSWORD -u APPLE_SIGNING_IDENTITY -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID pnpm exec tauri build --bundles app --ci
-app="$desktop/src-tauri/target/release/bundle/macos/ilo.app"
+app="$desktop/src-tauri/target/release/bundle/macos/Nomi.app"
 export ILO_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" ILO_SIGNING_KEYCHAIN="$keychain"
 export ILO_HOST_ENTITLEMENTS="$root/Widgets/Host.entitlements"
 export ILO_HOST_PROVISIONING_PROFILE="$workspace/host.provisionprofile"
 export ILO_WIDGET_PROVISIONING_PROFILE="$workspace/widget.provisionprofile"
 "$root/scripts/embed-widgets.sh" "$app"
-ditto -c -k --keepParent "$app" "$workspace/ilo.zip"
-xcrun notarytool submit "$workspace/ilo.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+ditto -c -k --keepParent "$app" "$workspace/nohmi.zip"
+xcrun notarytool submit "$workspace/nohmi.zip" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
 xcrun stapler staple "$app"
 xcrun stapler validate "$app"
 spctl --assess --type execute --verbose=2 "$app"
 mkdir -p "$workspace/image" "$desktop/src-tauri/target/release/bundle/dmg"
-ditto "$app" "$workspace/image/ilo.app"
+ditto "$app" "$workspace/image/Nomi.app"
 ln -s /Applications "$workspace/image/Applications"
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
-image="$desktop/src-tauri/target/release/bundle/dmg/ilo_${version}_$(uname -m).dmg"
-hdiutil create -volname ilo -srcfolder "$workspace/image" -ov -format UDZO "$image"
+image="$desktop/src-tauri/target/release/bundle/dmg/nohmi_${version}_$(uname -m).dmg"
+hdiutil create -volname nohmi -srcfolder "$workspace/image" -ov -format UDZO "$image"
 codesign --force --timestamp --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$image"
 xcrun notarytool submit "$image" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
 xcrun stapler staple "$image"

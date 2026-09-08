@@ -7,8 +7,8 @@ Do not use the August unattended-controller plan as the initial release gate.
 ## What runs where
 
 The Mac also hosts Halara and other programs. Leave their services, ports, storage,
-and Docker Desktop context alone. Production uses the `ilo-production` macOS
-account, its `ilo-production` Colima profile, and an explicit socket. No production
+and Docker Desktop context alone. Production uses the `nohmi-production` macOS
+account, its `nohmi-production` Colima profile, and an explicit socket. No production
 container publishes a host port. Only Cloudflare Tunnel reaches the gateway; the
 gateway routes the new nohmi app/API/MCP hostnames. PostgreSQL is on an internal
 network and a named Linux volume. Application containers retain their existing
@@ -51,9 +51,14 @@ credentials and data remain intact; browser sessions and MCP connections must be
 re-established at the new origins. Finish any in-flight OAuth attempt before the
 writer freeze, or restart it after cutover.
 
-The `ilo-production` runtime ownership labels, database names, AWS resource names,
-package identifiers, MCP tool/resource names, and versioned `ilo-setup` artifact
-remain compatibility identifiers. Renaming them is not part of the public rebrand.
+All newly provisioned Mac runtime identities use `nohmi-production`: the macOS
+account and home, Colima profile, runtime directory, and Compose project. The
+operator must verify the actual account home before provisioning; do not create
+an `ilo-production` account or reuse an old runtime configuration.
+
+Existing database names, AWS resource names, package identifiers, MCP tool/resource
+names, and the versioned `ilo-setup` artifact remain compatibility identifiers.
+Renaming existing data or protocol identifiers is not part of the public rebrand.
 
 ## 1. Preserve and rehearse the database
 
@@ -109,13 +114,13 @@ encoding/collation; select a compatible PostgreSQL image, not merely a matching
 major version. Inspect application image labels against the recorded revision.
 
 Create owner-only `config.json` (0600) in a private runtime directory (0700) ending
-in `/ilo-production`, outside every checkout. Its fields are:
+in `/nohmi-production`, outside every checkout. Its fields are:
 
 ```json
 {
   "version": 1,
-  "root": "/Users/ilo-production/ilo-production",
-  "dockerHost": "unix:///Users/ilo-production/.colima/ilo-production/docker.sock",
+  "root": "/Users/nohmi-production/nohmi-production",
+  "dockerHost": "unix:///Users/nohmi-production/.colima/nohmi-production/docker.sock",
   "revision": "FULL_40_CHARACTER_COMMIT",
   "postgresMajor": 17,
   "backupRecipient": "age1PUBLIC_RECIPIENT",
@@ -191,7 +196,7 @@ node deploy/mac-mini/cli.mjs restore /PRIVATE/recovery-config.json /PRIVATE/new-
 ```
 
 Use a genuinely separate empty Docker engine/database (for example a fresh recovery
-host, or a new isolated Colima home containing its own `ilo-production` profile).
+host, or a new isolated Colima home containing its own `nohmi-production` profile).
 Never reuse the old production volume. Recovery manifests retain `mode: recovery`;
 do not rename them to `final-frozen`. After verifying data and stopping every old
 writer, recovery activation requires `--previous-writers-stopped`, not the AWS

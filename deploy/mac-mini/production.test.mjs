@@ -6,12 +6,12 @@ import test from "node:test";
 import { composeModel, environmentFiles, validateConfig } from "./compose.mjs";
 import { assertEmptyDatabase, validateRestoreReceipt, withLock } from "./safety.mjs";
 
-function fixture(root = "/private/var/ilo-production") {
+function fixture(root = "/Users/nohmi-production/nohmi-production") {
   const image = `example.invalid/ilo@sha256:${"a".repeat(64)}`;
   return {
     version: 1,
     root,
-    dockerHost: "unix:///Users/ilo-production/.colima/ilo-production/docker.sock",
+    dockerHost: "unix:///Users/nohmi-production/.colima/nohmi-production/docker.sock",
     revision: "b".repeat(40),
     images: Object.fromEntries(
       ["api", "mcp", "web", "postgres", "gateway", "tunnel"].map((k) => [k, image]),
@@ -23,7 +23,7 @@ function fixture(root = "/private/var/ilo-production") {
 
 test("production has isolated storage, no published ports and explicit resource limits", () => {
   const model = composeModel(fixture());
-  assert.equal(model.name, "ilo-production");
+  assert.equal(model.name, "nohmi-production");
   for (const service of Object.values(model.services)) {
     assert.equal(service.ports, undefined);
     assert.equal(service.build, undefined);
@@ -46,6 +46,12 @@ test("refuses mutable images, unknown keys, shared runtime sockets and unsafe pa
     },
     (c) => {
       c.dockerHost = "unix:///var/run/docker.sock";
+    },
+    (c) => {
+      c.dockerHost = "unix:///Users/nohmi-production/.colima/ilo-production/docker.sock";
+    },
+    (c) => {
+      c.root = "/Users/nohmi-production/ilo-production";
     },
     (c) => {
       c.root = "/";

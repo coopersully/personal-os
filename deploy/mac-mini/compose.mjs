@@ -19,14 +19,14 @@ export function validateConfig(config) {
     typeof config.root !== "string" ||
     !isAbsolute(config.root) ||
     resolve(config.root) !== config.root ||
-    !config.root.endsWith("/ilo-production") ||
+    !config.root.endsWith("/nohmi-production") ||
     /[\s$]/.test(config.root)
   )
     throw new Error(
-      "Runtime root must be an absolute path ending in /ilo-production, without whitespace or interpolation.",
+      "Runtime root must be an absolute path ending in /nohmi-production, without whitespace or interpolation.",
     );
-  if (!/^unix:\/\/\/[^\s]+\/\.colima\/ilo-production\/docker\.sock$/.test(config.dockerHost))
-    throw new Error("Use the dedicated ilo-production Colima socket.");
+  if (!/^unix:\/\/\/[^\s]+\/\.colima\/nohmi-production\/docker\.sock$/.test(config.dockerHost))
+    throw new Error("Use the dedicated nohmi-production Colima socket.");
   if (!/^[a-f0-9]{40}$/.test(config.revision))
     throw new Error("A full release commit is required.");
   if (
@@ -74,7 +74,7 @@ export function composeModel(input) {
     labels: { "org.opencontainers.image.revision": c.revision },
   });
   return {
-    name: "ilo-production",
+    name: "nohmi-production",
     services: {
       postgres: {
         ...common,

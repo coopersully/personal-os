@@ -15,13 +15,13 @@ try {
   const [manifestPath, destination, postgresImage, tunnelImage] = process.argv.slice(2);
   const built = JSON.parse(privateFile(manifestPath));
   mkdirSync(resolve(destination), { mode: 0o700 });
-  const root = join(realpathSync(resolve(destination)), "ilo-production");
+  const root = join(realpathSync(resolve(destination)), "nohmi-production");
   mkdirSync(root, { mode: 0o700 });
   failurePath = join(root, "smoke-errors.log");
   const config = {
     version: 1,
     root,
-    dockerHost: "unix:///Users/ilo-production/.colima/ilo-production/docker.sock",
+    dockerHost: "unix:///Users/nohmi-production/.colima/nohmi-production/docker.sock",
     revision: built.revision,
     postgresMajor: 17,
     backupRecipient: "age1smoketest",

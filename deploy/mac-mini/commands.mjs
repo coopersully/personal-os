@@ -112,7 +112,7 @@ export function loadRuntime(configPath) {
       [
         "compose",
         "--project-name",
-        "ilo-production",
+        "nohmi-production",
         "--project-directory",
         root,
         "--env-file",
@@ -488,7 +488,7 @@ export async function stop(runtime) {
       "ps",
       "-aq",
       "--filter",
-      "label=com.docker.compose.project=ilo-production",
+      "label=com.docker.compose.project=nohmi-production",
       "--filter",
       `label=com.docker.compose.project.working_dir=${runtime.root}`,
       "--filter",

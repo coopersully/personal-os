@@ -4,7 +4,10 @@ Approved execution scope: September 8, 2026. This supersedes the August 23 plan'
 requirement to finish unattended deployment infrastructure before cutover.
 
 The Mac is shared with other always-running services. Use a separate production
-account and Colima socket, bounded resources, and an ilo-only Compose project.
+account and Colima socket, bounded resources, and a nohmi-only Compose project.
+The created account is `nohmi-production`, with home `/Users/nohmi-production`.
+Use `nohmi-production` for its Colima profile, runtime directory, and Compose
+project as well; verify the actual host account before provisioning.
 Keep application behavior unchanged. The user subsequently approved deploying the
 latest code rather than repairing the old AWS application; preserve the database
 and provider/encryption configuration. Rehearse any latest-code migrations on an
@@ -14,7 +17,7 @@ The user approved free Cloudflare hosting with new nohmi public origins:
 `nohmi.coopersully.me`, `nohmi-api.coopersully.me`, and
 `nohmi-mcp.coopersully.me`. This supersedes preserving the old public hostnames.
 Rebrand user-facing metadata and the tunnel label, but retain compatibility tool,
-resource, database, package, and runtime ownership identifiers. Add provider callback
+resource, database, and package identifiers. Add provider callback
 registrations before activation and require browser/MCP reconnection at the new URLs.
 Do not purchase Advanced Certificate Manager.
 

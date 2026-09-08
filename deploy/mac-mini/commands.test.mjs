@@ -20,7 +20,7 @@ test("stop works without release images, environment files or gateway config", a
     assert.equal(calls.filter((args) => args[0] === "stop").length, 5);
     for (const args of calls.filter((args) => args[0] === "ps")) {
       assert.ok(args.includes(`label=com.docker.compose.project.working_dir=${root}`));
-      assert.ok(args.includes("label=com.docker.compose.project=ilo-production"));
+      assert.ok(args.includes("label=com.docker.compose.project=nohmi-production"));
       assert.ok(!args.includes("label=com.docker.compose.service=postgres"));
     }
     await assert.rejects(stop({ root, docker: async () => "invalid-container" }), /identity/);

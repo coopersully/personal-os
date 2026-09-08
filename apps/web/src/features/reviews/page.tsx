@@ -161,13 +161,9 @@ export function ReviewsPage() {
 
   return (
     <div className="narrow-page reviews-page">
-      <header className="reviews-page__header">
-        <p className="eyebrow">Today</p>
-        <h2 ref={headingRef} tabIndex={-1}>
-          Reviews
-        </h2>
-        <p>Decisions and conditions that need your judgment across Ilo.</p>
-      </header>
+      <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
+        Reviews
+      </h2>
 
       <section aria-label="Review filters" className="reviews-page__filters">
         <ToggleGroup

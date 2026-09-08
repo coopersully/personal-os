@@ -9,6 +9,8 @@ import type {
   MailThread,
   Reminder,
   Task,
+  TaskList,
+  TaskProject,
 } from "@personal-os/domain";
 import { accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
@@ -17,6 +19,7 @@ import { availableToolNames } from "./tool-catalog.js";
 const now = "2026-07-13T12:00:00.000Z";
 const id = "11111111-1111-4111-8111-111111111111";
 const accountId = "22222222-2222-4222-8222-222222222222";
+const projectId = "33333333-3333-4333-8333-333333333333";
 const reminder: Reminder = {
   id,
   title: "Test",
@@ -36,19 +39,78 @@ const reminder: Reminder = {
   updatedAt: now,
 };
 const task: Task = {
-  id,
-  title: "Plan task",
-  notes: null,
-  dueAt: null,
-  scheduledAt: "2026-07-13T13:00:00.000Z",
-  timezone: "America/New_York",
-  priority: "medium",
-  estimateMinutes: 30,
-  tags: ["planning"],
-  status: "scheduled",
+  cancelledAt: null,
   completedAt: null,
   createdAt: now,
+  deletedAt: null,
+  dueAt: null,
+  estimateMinutes: 30,
+  id,
+  legacyStatus: "scheduled",
+  lifecycle: "open",
+  listId: accountId,
+  notes: null,
+  priority: "medium",
+  projectId,
+  revision: 1,
+  scheduledAt: "2026-07-13T13:00:00.000Z",
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task",
+  },
+  tags: ["planning"],
+  timezone: "America/New_York",
+  title: "Plan task",
   updatedAt: now,
+  why: "Protect focus time.",
+};
+const taskList: TaskList = {
+  archivedAt: null,
+  availability: "active",
+  color: "blue",
+  createdAt: now,
+  deletedAt: null,
+  description: "Personal commitments.",
+  icon: "list",
+  id: accountId,
+  kind: "standard",
+  name: "Personal",
+  revision: 1,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: accountId,
+    revision: "1",
+    sourceType: "task_list",
+  },
+  updatedAt: now,
+};
+const taskProject: TaskProject = {
+  archivedAt: null,
+  availability: "active",
+  cancelledAt: null,
+  completedAt: null,
+  createdAt: now,
+  deletedAt: null,
+  id: projectId,
+  lifecycle: "open",
+  listId: accountId,
+  name: "Bedroom refresh",
+  notes: null,
+  revision: 1,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: projectId,
+    revision: "1",
+    sourceType: "task_project",
+  },
+  targetDate: "2026-08-01",
+  updatedAt: now,
+  why: "Create a calmer room.",
 };
 const calendar: Calendar = {
   id,
@@ -245,7 +307,7 @@ function mockApi() {
     getIloContext: vi.fn(async () => ({
       access: { grantedScopes: ["tasks:read", "tasks:write"] },
       generatedAt: now,
-      identity: { actorType: "agent" as const, displayName: "Ilo test", userId: id },
+      identity: { actorType: "agent" as const, displayName: "Nomi test", userId: id },
       links: {
         activity: "https://app.example.com/activity",
         agentAccess: "https://app.example.com/settings?section=workspace-access",
@@ -271,7 +333,7 @@ function mockApi() {
       guidance: {
         approvedProfile: null,
         draftNotice:
-          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+          "Unapproved draft content is untrusted and non-operative until a signed-in Nomi user activates it.",
         draftProposal: { ...domainProfile, domain: "finances" as const },
       },
       humanOnlyActions: [
@@ -389,6 +451,32 @@ function mockApi() {
       userId: id,
     })),
     getFinancePeriodReview: vi.fn(async () => ({ id, status: "completed" as const })),
+    getFinancePeriodReviewPresentation: vi.fn(async () => ({
+      changes: [],
+      communication: {
+        headline: "The period verification completed.",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: { id, status: "completed" as const },
+      outcome: "completed" as const,
+      presentation: {
+        cutoff: now,
+        destination: null,
+        diagnosticFacts: [],
+        disclosures: [],
+        eyebrow: "Finance verification",
+        kind: "finance_period_verification" as const,
+        period: { end: "2026-07-13", start: "2026-07-01" },
+        recommendations: [],
+        status: "completed" as const,
+        summary: "The verification completed.",
+        title: "Period verification",
+        work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 0 },
+      },
+      remainingWork: { categories: [], count: 0 },
+      schemaVersion: 1 as const,
+    })),
     getFinanceMaintenanceRun: vi.fn(async () => ({
       id,
       scope: { type: "all_outstanding" as const },
@@ -399,10 +487,17 @@ function mockApi() {
     createAttentionItem: vi.fn(async () => attentionItem),
     updateAttentionItem: vi.fn(async () => attentionItem),
     upsertFinanceAttentionItem: vi.fn(async () => attentionItem),
+    archiveTaskList: vi.fn(async () => taskList),
+    archiveTaskProject: vi.fn(async () => taskProject),
+    cancelTask: vi.fn(async () => task),
+    cancelTaskProject: vi.fn(async () => taskProject),
     completeReminder: vi.fn(async () => reminder),
     completeTask: vi.fn(async () => task),
+    completeTaskProject: vi.fn(async () => taskProject),
     createReminder: vi.fn(async () => reminder),
     createTask: vi.fn(async () => task),
+    createTaskList: vi.fn(async () => taskList),
+    createTaskProject: vi.fn(async () => taskProject),
     createFinanceTransaction: vi.fn(async () => ({
       id,
       accountId,
@@ -445,6 +540,30 @@ function mockApi() {
       reviewCount: 0,
       spendingThisMonth: 0,
       transactions: [],
+    })),
+    getFinanceSnapshot: vi.fn(async () => ({
+      changes: [],
+      communication: {
+        headline: "Your financial snapshot is current.",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      data: { asOf: now, cash: 0, debt: 0, investments: 0, netWorth: 0 },
+      outcome: "completed" as const,
+      presentation: {
+        asOf: now,
+        destination: null,
+        diagnosticFacts: [],
+        disclosures: [],
+        eyebrow: "Finance",
+        kind: "finance_snapshot" as const,
+        position: { cash: 0, debt: 0, investments: 0, netWorth: 0 },
+        summary: "Current financial position.",
+        title: "Financial snapshot",
+        trust: { gaps: [], state: "current" as const, trustworthy: true },
+      },
+      remainingWork: { categories: [], count: 0 },
+      schemaVersion: 1 as const,
     })),
     getFinanceWealthSummary: vi.fn(async () => ({
       annualIncome: 0,
@@ -574,8 +693,9 @@ function mockApi() {
     })),
     updateReminder: vi.fn(async () => reminder),
     updateTask: vi.fn(async () => task),
+    updateTaskList: vi.fn(async () => taskList),
+    updateTaskProject: vi.fn(async () => taskProject),
     deleteReminder: vi.fn(async () => undefined),
-    deleteTask: vi.fn(async () => undefined),
     listReminders: vi.fn(async () => ({ items: [reminder], nextCursor: null })),
     getReminder: vi.fn(async () => reminder),
     previewOverdueReminderDeferral: vi.fn(async () => ({
@@ -598,7 +718,40 @@ function mockApi() {
     restoreReminder: vi.fn(async () => reminder),
     trashReminder: vi.fn(async () => reminder),
     upsertReminderAttentionItem: vi.fn(async () => attentionItem),
+    getTask: vi.fn(async () => task),
+    getTaskList: vi.fn(async () => taskList),
+    getTaskProject: vi.fn(async () => taskProject),
+    listTaskLists: vi.fn(async () => ({ items: [taskList], nextCursor: null })),
+    listTaskProjects: vi.fn(async () => ({ items: [taskProject], nextCursor: null })),
     listTasks: vi.fn(async () => ({ items: [task], nextCursor: null })),
+    moveTask: vi.fn(async () => task),
+    moveTaskProject: vi.fn(async () => taskProject),
+    previewTaskMove: vi.fn(async () => ({
+      destinationListId: accountId,
+      destinationListRevision: 1,
+      destinationProjectId: projectId,
+      destinationProjectRevision: 1,
+      detachedProjectId: null,
+      previewToken: "task-move-preview",
+      sourceListId: accountId,
+      sourceListRevision: 1,
+      sourceProjectId: projectId,
+      taskId: id,
+      taskRevision: 1,
+    })),
+    previewTaskProjectMove: vi.fn(async () => ({
+      affectedTaskCount: 1,
+      destinationListId: accountId,
+      destinationListRevision: 1,
+      previewToken: "project-move-preview",
+      sourceListId: accountId,
+      sourceListRevision: 1,
+      taskProjectId: projectId,
+      taskProjectRevision: 1,
+    })),
+    reopenTask: vi.fn(async () => task),
+    restoreTask: vi.fn(async () => task),
+    trashTask: vi.fn(async () => task),
     listGoals: vi.fn(async () => []),
     createGoal: vi.fn(async () => ({
       id,
@@ -868,6 +1021,354 @@ describe("ilo MCP server", () => {
     await server.close();
   });
 
+  it("discovers the focused task organization surface with truthful annotations and guards", async () => {
+    const server = createPersonalOsMcpServer({
+      api: mockApi() as unknown as PersonalOsApiClient,
+      scopes: new Set(["tasks:read", "tasks:write"]),
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = (await client.listTools()).tools;
+    const taskTools = tools.filter((tool) => tool._meta?.["ilo/domain"] === "tasks");
+    const expectedNames = [
+      "list_task_lists",
+      "get_task_list",
+      "create_task_list",
+      "update_task_list",
+      "archive_task_list",
+      "list_task_projects",
+      "get_task_project",
+      "create_task_project",
+      "update_task_project",
+      "complete_task_project",
+      "cancel_task_project",
+      "archive_task_project",
+      "preview_task_project_move",
+      "move_task_project",
+      "list_tasks",
+      "get_task",
+      "create_task",
+      "update_task",
+      "complete_task",
+      "reopen_task",
+      "cancel_task",
+      "trash_task",
+      "restore_task",
+      "preview_task_move",
+      "move_task",
+    ];
+    expect(taskTools.map((tool) => tool.name).sort()).toEqual(expectedNames.sort());
+    expect(taskTools.map((tool) => tool.name)).not.toContain("delete_task");
+
+    const readNames = new Set([
+      "list_task_lists",
+      "get_task_list",
+      "list_task_projects",
+      "get_task_project",
+      "list_tasks",
+      "get_task",
+    ]);
+    const previewNames = new Set(["preview_task_project_move", "preview_task_move"]);
+    const createNames = new Set(["create_task_list", "create_task_project", "create_task"]);
+    const destructiveNames = new Set([
+      "archive_task_list",
+      "archive_task_project",
+      "move_task_project",
+      "move_task",
+      "trash_task",
+    ]);
+    for (const tool of taskTools) {
+      const isRead = readNames.has(tool.name);
+      const isPreview = previewNames.has(tool.name);
+      const isCreate = createNames.has(tool.name);
+      expect(tool.annotations).toEqual({
+        destructiveHint: destructiveNames.has(tool.name),
+        idempotentHint: isRead || isPreview || isCreate,
+        openWorldHint: false,
+        readOnlyHint: isRead || isPreview,
+      });
+      expect(tool._meta).toMatchObject({
+        "ilo/policy": isPreview ? "preview" : isRead ? "read_only" : "approve_each",
+        "ilo/stage": isPreview ? "prepare" : isRead ? "inspect" : "commit",
+      });
+    }
+
+    for (const name of createNames) {
+      const schema = taskTools.find((tool) => tool.name === name)?.inputSchema as {
+        required?: string[];
+      };
+      expect(schema.required).toContain("idempotencyKey");
+    }
+    for (const name of [
+      "update_task_list",
+      "archive_task_list",
+      "update_task_project",
+      "complete_task_project",
+      "cancel_task_project",
+      "archive_task_project",
+      "preview_task_project_move",
+      "move_task_project",
+      "update_task",
+      "complete_task",
+      "reopen_task",
+      "cancel_task",
+      "trash_task",
+      "restore_task",
+      "preview_task_move",
+      "move_task",
+    ]) {
+      const schema = taskTools.find((tool) => tool.name === name)?.inputSchema as {
+        required?: string[];
+      };
+      expect(schema.required).toContain("expectedRevision");
+    }
+
+    const invalidListMove = await client.callTool({
+      name: "archive_task_list",
+      arguments: { expectedRevision: 1, id: accountId, resolution: "move_active_contents" },
+    });
+    const invalidProjectCompletion = await client.callTool({
+      name: "complete_task_project",
+      arguments: { expectedRevision: 1, id: projectId, resolution: "move_open_tasks" },
+    });
+    expect(invalidListMove).toMatchObject({ isError: true });
+    expect(invalidProjectCompletion).toMatchObject({ isError: true });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("forwards task organization calls and structured revision conflicts through the API client", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      scopes: new Set(["tasks:read", "tasks:write"]),
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    await client.callTool({
+      name: "list_task_lists",
+      arguments: { cursor: "lists-next", limit: 25 },
+    });
+    await client.callTool({ name: "get_task_list", arguments: { id: accountId } });
+    await client.callTool({
+      name: "create_task_list",
+      arguments: { idempotencyKey: id, name: "Personal" },
+    });
+    await client.callTool({
+      name: "update_task_list",
+      arguments: { expectedRevision: 1, id: accountId, name: "Home" },
+    });
+    await client.callTool({
+      name: "archive_task_list",
+      arguments: { expectedRevision: 1, id: accountId, resolution: "archive_contents_together" },
+    });
+
+    await client.callTool({
+      name: "list_task_projects",
+      arguments: { cursor: "projects-next", limit: 20 },
+    });
+    await client.callTool({ name: "get_task_project", arguments: { id: projectId } });
+    await client.callTool({
+      name: "create_task_project",
+      arguments: { idempotencyKey: id, listId: accountId, name: "Bedroom refresh" },
+    });
+    await client.callTool({
+      name: "update_task_project",
+      arguments: { expectedRevision: 1, id: projectId, name: "Bedroom reset" },
+    });
+    await client.callTool({
+      name: "complete_task_project",
+      arguments: { expectedRevision: 1, id: projectId, resolution: "complete_open_tasks" },
+    });
+    await client.callTool({
+      name: "cancel_task_project",
+      arguments: { expectedRevision: 1, id: projectId },
+    });
+    await client.callTool({
+      name: "archive_task_project",
+      arguments: { expectedRevision: 1, id: projectId },
+    });
+    await client.callTool({
+      name: "preview_task_project_move",
+      arguments: { destinationListId: accountId, expectedRevision: 1, id: projectId },
+    });
+    await client.callTool({
+      name: "move_task_project",
+      arguments: {
+        destinationListId: accountId,
+        expectedRevision: 1,
+        id: projectId,
+        previewToken: "project-move-preview",
+      },
+    });
+
+    await client.callTool({
+      name: "list_tasks",
+      arguments: { lifecycle: "open", limit: 15, listId: accountId, view: "scheduled" },
+    });
+    await client.callTool({ name: "get_task", arguments: { id } });
+    await client.callTool({
+      name: "create_task",
+      arguments: { idempotencyKey: projectId, listId: accountId, title: "Plan task" },
+    });
+    await client.callTool({
+      name: "update_task",
+      arguments: { estimateMinutes: 45, expectedRevision: 1, id },
+    });
+    for (const name of [
+      "complete_task",
+      "reopen_task",
+      "cancel_task",
+      "trash_task",
+      "restore_task",
+    ]) {
+      await client.callTool({ name, arguments: { expectedRevision: 1, id } });
+    }
+    await client.callTool({
+      name: "preview_task_move",
+      arguments: {
+        destinationListId: accountId,
+        destinationProjectId: projectId,
+        expectedRevision: 1,
+        id,
+      },
+    });
+    await client.callTool({
+      name: "move_task",
+      arguments: {
+        destinationListId: accountId,
+        destinationProjectId: projectId,
+        expectedRevision: 1,
+        id,
+        previewToken: "task-move-preview",
+      },
+    });
+
+    expect(api.listTaskLists).toHaveBeenCalledWith({ cursor: "lists-next", limit: 25 });
+    expect(api.getTaskList).toHaveBeenCalledWith(accountId);
+    expect(api.createTaskList).toHaveBeenCalledWith({
+      color: null,
+      description: null,
+      icon: "list",
+      idempotencyKey: id,
+      name: "Personal",
+    });
+    expect(api.updateTaskList).toHaveBeenCalledWith(accountId, {
+      expectedRevision: 1,
+      name: "Home",
+    });
+    expect(api.archiveTaskList).toHaveBeenCalledWith(accountId, {
+      expectedRevision: 1,
+      resolution: "archive_contents_together",
+    });
+    expect(api.listTaskProjects).toHaveBeenCalledWith({ cursor: "projects-next", limit: 20 });
+    expect(api.getTaskProject).toHaveBeenCalledWith(projectId);
+    expect(api.createTaskProject).toHaveBeenCalledWith({
+      idempotencyKey: id,
+      listId: accountId,
+      name: "Bedroom refresh",
+      notes: null,
+      targetDate: null,
+      why: null,
+    });
+    expect(api.updateTaskProject).toHaveBeenCalledWith(projectId, {
+      expectedRevision: 1,
+      name: "Bedroom reset",
+    });
+    expect(api.completeTaskProject).toHaveBeenCalledWith(projectId, {
+      expectedRevision: 1,
+      resolution: "complete_open_tasks",
+    });
+    expect(api.cancelTaskProject).toHaveBeenCalledWith(projectId, { expectedRevision: 1 });
+    expect(api.archiveTaskProject).toHaveBeenCalledWith(projectId, { expectedRevision: 1 });
+    expect(api.previewTaskProjectMove).toHaveBeenCalledWith(projectId, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+    });
+    expect(api.moveTaskProject).toHaveBeenCalledWith(projectId, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+      previewToken: "project-move-preview",
+    });
+    expect(api.listTasks).toHaveBeenCalledWith({
+      lifecycle: "open",
+      limit: 15,
+      listId: accountId,
+      view: "scheduled",
+    });
+    expect(api.getTask).toHaveBeenCalledWith(id);
+    expect(api.createTask).toHaveBeenCalledWith({
+      dueAt: null,
+      estimateMinutes: null,
+      idempotencyKey: projectId,
+      lifecycle: "open",
+      listId: accountId,
+      notes: null,
+      priority: "medium",
+      scheduledAt: null,
+      tags: [],
+      timezone: null,
+      title: "Plan task",
+      why: null,
+    });
+    expect(api.updateTask).toHaveBeenCalledWith(id, {
+      estimateMinutes: 45,
+      expectedRevision: 1,
+    });
+    expect(api.completeTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
+    expect(api.reopenTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
+    expect(api.cancelTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
+    expect(api.trashTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
+    expect(api.restoreTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
+    expect(api.previewTaskMove).toHaveBeenCalledWith(id, {
+      destinationListId: accountId,
+      destinationProjectId: projectId,
+      expectedRevision: 1,
+    });
+    expect(api.moveTask).toHaveBeenCalledWith(id, {
+      destinationListId: accountId,
+      destinationProjectId: projectId,
+      expectedRevision: 1,
+      previewToken: "task-move-preview",
+    });
+
+    api.updateTask.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { currentRevision: 2 },
+        message: "The Task changed since it was loaded.",
+        requestId: "task-conflict",
+        status: 409,
+      }),
+    );
+    const conflict = await client.callTool({
+      name: "update_task",
+      arguments: { expectedRevision: 1, id, title: "Stale change" },
+    });
+    expect(conflict).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "conflict",
+          details: { currentRevision: 2 },
+          message: "The Task changed since it was loaded.",
+          requestId: "task-conflict",
+          status: 409,
+        },
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("exposes and executes the complete agent surface and today resource", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
@@ -883,6 +1384,16 @@ describe("ilo MCP server", () => {
     expect(new Set(tools.tools.map((tool) => tool.name))).toEqual(
       new Set(availableToolNames(new Set(accessScopeSchema.options), false)),
     );
+    const visualTools = tools.tools
+      .filter((tool) => tool._meta && "ui" in tool._meta)
+      .map((tool) => [tool.name, tool._meta?.ui])
+      .sort(([left], [right]) => String(left).localeCompare(String(right)));
+    expect(visualTools).toEqual([
+      ["get_finance_budget", { resourceUri: "ui://ilo/finances/budget" }],
+      ["get_finance_inbox", { resourceUri: "ui://ilo/finances/review" }],
+      ["get_finance_period_review", { resourceUri: "ui://ilo/finances/period-verification" }],
+      ["get_finance_snapshot", { resourceUri: "ui://ilo/finances/snapshot" }],
+    ]);
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
@@ -1378,23 +1889,26 @@ describe("ilo MCP server", () => {
       name: "restore_reminder",
       arguments: { expectedUpdatedAt: now, id },
     });
-    await client.callTool({ name: "list_tasks", arguments: { status: "scheduled" } });
+    await client.callTool({ name: "list_tasks", arguments: { view: "scheduled" } });
     await client.callTool({
       name: "create_task",
       arguments: {
+        idempotencyKey: projectId,
         title: "Plan task",
-        status: "scheduled",
         scheduledAt: task.scheduledAt,
         timezone: task.timezone,
       },
     });
     await client.callTool({
       name: "update_task",
-      arguments: { id, estimateMinutes: 45, status: "next" },
+      arguments: { expectedRevision: 1, id, estimateMinutes: 45 },
     });
-    await client.callTool({ name: "complete_task", arguments: { id } });
-    const deletedTask = await client.callTool({ name: "delete_task", arguments: { id } });
-    expect(deletedTask.structuredContent).toMatchObject({ ok: true });
+    await client.callTool({ name: "complete_task", arguments: { expectedRevision: 1, id } });
+    const trashedTask = await client.callTool({
+      name: "trash_task",
+      arguments: { expectedRevision: 1, id },
+    });
+    expect(trashedTask.structuredContent).toMatchObject({ result: task });
     await client.callTool({ name: "list_calendars", arguments: {} });
     await client.callTool({ name: "list_mailboxes", arguments: {} });
     await client.callTool({ name: "get_mail_setup_context", arguments: {} });
@@ -1555,15 +2069,17 @@ describe("ilo MCP server", () => {
       title: "Plan task",
       dueAt: null,
       estimateMinutes: null,
+      idempotencyKey: projectId,
+      lifecycle: "open",
       notes: null,
       priority: "medium",
       scheduledAt: task.scheduledAt,
-      status: "scheduled",
       tags: [],
       timezone: task.timezone,
+      why: null,
     });
-    expect(api.completeTask).toHaveBeenCalledWith(id, true);
-    expect(api.deleteTask).toHaveBeenCalledWith(id);
+    expect(api.completeTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
+    expect(api.trashTask).toHaveBeenCalledWith(id, { expectedRevision: 1 });
     expect(api.createEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         allDay: false,
@@ -1679,7 +2195,10 @@ describe("ilo MCP server", () => {
       "personal-os://agenda/today",
       "personal-os://brief/daily",
       "ilo://context/self",
-      "ui://ilo/work-surface",
+      "ui://ilo/finances/budget",
+      "ui://ilo/finances/period-verification",
+      "ui://ilo/finances/review",
+      "ui://ilo/finances/snapshot",
     ]);
     const templates = await client.listResourceTemplates();
     expect(templates.resourceTemplates.map((template) => template.uriTemplate)).toEqual([
@@ -1696,19 +2215,20 @@ describe("ilo MCP server", () => {
       "review_finances",
       "weekly_review",
     ]);
-    const workSurface = await client.readResource({ uri: "ui://ilo/work-surface" });
-    expect(workSurface.contents[0]).toMatchObject({
+    const snapshotPresentation = await client.readResource({ uri: "ui://ilo/finances/snapshot" });
+    expect(snapshotPresentation.contents[0]).toMatchObject({
       _meta: { ui: { prefersBorder: true } },
       mimeType: "text/html;profile=mcp-app",
-      uri: "ui://ilo/work-surface",
+      uri: "ui://ilo/finances/snapshot",
     });
-    const workSurfaceContent = workSurface.contents[0];
-    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
-      "ui/initialize",
+    const snapshotContent = snapshotPresentation.contents[0];
+    const snapshotHtml = String(
+      snapshotContent && "text" in snapshotContent ? snapshotContent.text : "",
     );
-    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
-      "ui/notifications/tool-result",
-    );
+    expect(snapshotHtml).toContain("ui/initialize");
+    expect(snapshotHtml).toContain("ui/notifications/tool-result");
+    expect(snapshotHtml).not.toContain("<pre");
+    expect(snapshotHtml).not.toContain("JSON.stringify(data.result");
     const agenda = await client.readResource({ uri: "personal-os://agenda/today" });
     const agendaContent = agenda.contents[0];
     expect(agendaContent && "text" in agendaContent).toBe(true);
@@ -1757,13 +2277,40 @@ describe("ilo MCP server", () => {
     vi.useRealTimers();
   });
 
-  it("filters discovery by scopes and read-only posture while keeping typed Ilo metadata", async () => {
+  it("scopes each Today compatibility source independently", async () => {
+    for (const expectation of [
+      { events: 1, reminders: 0, scope: "calendar:read" },
+      { events: 0, reminders: 1, scope: "reminders:read" },
+    ] as const) {
+      const api = mockApi();
+      const server = createPersonalOsMcpServer({
+        api: api as unknown as PersonalOsApiClient,
+        now: () => new Date("2026-07-13T12:00:00.000Z"),
+        scopes: new Set([expectation.scope]),
+        timeZone: "UTC",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const agenda = await client.readResource({ uri: "personal-os://agenda/today" });
+      const content = agenda.contents[0];
+      const value = JSON.parse(String(content && "text" in content && content.text));
+      expect(value.events).toHaveLength(expectation.events);
+      expect(value.reminders).toHaveLength(expectation.reminders);
+
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("filters task discovery by scopes and read-only posture while keeping typed Ilo metadata", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
       api: api as unknown as PersonalOsApiClient,
       appBaseUrl: "https://app.example.com",
       readOnly: true,
-      scopes: new Set(["tasks:read", "tasks:write"]),
+      scopes: new Set(["tasks:read"]),
       timeZone: "America/New_York",
     });
     const client = new Client({ name: "test", version: "1.0.0" });
@@ -1773,15 +2320,35 @@ describe("ilo MCP server", () => {
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name);
     expect(names).toContain("get_ilo_context");
-    expect(names).toContain("list_tasks");
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "list_task_lists",
+        "get_task_list",
+        "list_task_projects",
+        "get_task_project",
+        "preview_task_project_move",
+        "list_tasks",
+        "get_task",
+        "preview_task_move",
+      ]),
+    );
     expect(names).not.toContain("get_daily_brief");
     expect(names).not.toContain("create_task");
+    expect(names).not.toContain("archive_task_list");
+    expect(names).not.toContain("move_task_project");
+    expect(names).not.toContain("trash_task");
     expect(names).not.toContain("list_mail");
     expect(tools.tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_ilo_context")).toMatchObject({
-      _meta: { ui: { resourceUri: "ui://ilo/work-surface" } },
       outputSchema: { type: "object" },
     });
+    expect(tools.tools.find((tool) => tool.name === "get_ilo_context")?._meta).not.toHaveProperty(
+      "ui",
+    );
+    const resources = await client.listResources();
+    expect(resources.resources.map((resource) => resource.uri)).not.toContainEqual(
+      expect.stringMatching(/^ui:\/\/ilo\/finances\//u),
+    );
 
     const context = await client.callTool({ arguments: {}, name: "get_ilo_context" });
     expect(context.structuredContent).toMatchObject({
@@ -1799,8 +2366,46 @@ describe("ilo MCP server", () => {
       },
     });
 
+    await client.callTool({
+      name: "preview_task_project_move",
+      arguments: { destinationListId: accountId, expectedRevision: 1, id: projectId },
+    });
+    await client.callTool({
+      name: "preview_task_move",
+      arguments: { destinationListId: accountId, expectedRevision: 1, id },
+    });
+    expect(api.previewTaskProjectMove).toHaveBeenCalledWith(projectId, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+    });
+    expect(api.previewTaskMove).toHaveBeenCalledWith(id, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+    });
+
     await client.close();
     await server.close();
+
+    const writeOnlyServer = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      scopes: new Set(["tasks:write"]),
+      timeZone: "UTC",
+    });
+    const writeOnlyClient = new Client({ name: "test", version: "1.0.0" });
+    const [writeOnlyClientTransport, writeOnlyServerTransport] =
+      InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      writeOnlyServer.connect(writeOnlyServerTransport),
+      writeOnlyClient.connect(writeOnlyClientTransport),
+    ]);
+    const writeOnlyNames = (await writeOnlyClient.listTools()).tools.map((tool) => tool.name);
+    expect(writeOnlyNames).toContain("move_task");
+    expect(writeOnlyNames).toContain("move_task_project");
+    expect(writeOnlyNames).not.toContain("preview_task_move");
+    expect(writeOnlyNames).not.toContain("preview_task_project_move");
+    expect(writeOnlyNames).not.toContain("get_task");
+    await writeOnlyClient.close();
+    await writeOnlyServer.close();
   });
 
   it("exposes complete-workspace Finance status and maintenance intents", async () => {
@@ -1854,7 +2459,12 @@ describe("ilo MCP server", () => {
       annotations: { readOnlyHint: false },
     });
     expect(tools.tools.find((tool) => tool.name === "get_finance_period_review")).toMatchObject({
-      _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+      _meta: {
+        "ilo/domain": "finances",
+        "ilo/policy": "read_only",
+        "ilo/stage": "inspect",
+        ui: { resourceUri: "ui://ilo/finances/period-verification" },
+      },
       annotations: { readOnlyHint: true },
     });
 
@@ -1928,7 +2538,7 @@ describe("ilo MCP server", () => {
     });
     expect(api.submitFinanceLedgerChallenge).toHaveBeenCalledOnce();
     await client.callTool({ arguments: { reviewId: id }, name: "get_finance_period_review" });
-    expect(api.getFinancePeriodReview).toHaveBeenCalledWith(id);
+    expect(api.getFinancePeriodReviewPresentation).toHaveBeenCalledWith(id);
     await client.callTool({ arguments: {}, name: "list_finance_reimbursements" });
     expect(api.listFinanceReimbursements).toHaveBeenCalledOnce();
     await client.callTool({
@@ -2248,7 +2858,7 @@ describe("ilo MCP server", () => {
           repairAction: "reconnect_then_sync_mail_account",
         },
         message:
-          "The provider update may have committed, but Ilo could not persist rotated credentials.",
+          "The provider update may have committed, but Nomi could not persist rotated credentials.",
         requestId: "mail-request-123",
         status: 502,
       }),
@@ -2275,7 +2885,7 @@ describe("ilo MCP server", () => {
         repairAction: "reconnect_then_sync_mail_account",
       },
       message:
-        "The provider update may have committed, but Ilo could not persist rotated credentials.",
+        "The provider update may have committed, but Nomi could not persist rotated credentials.",
       requestId: "mail-request-123",
       status: 502,
     };
@@ -2315,7 +2925,7 @@ describe("ilo MCP server", () => {
           remoteEventId: "remote-event-1",
         },
         message:
-          "The provider event changed, but Ilo could not finish its local Calendar projection.",
+          "The provider event changed, but Nomi could not finish its local Calendar projection.",
         requestId: "calendar-request-123",
         status: 502,
       }),
@@ -2359,7 +2969,7 @@ describe("ilo MCP server", () => {
         remoteEventId: "remote-event-1",
       },
       message:
-        "The provider event changed, but Ilo could not finish its local Calendar projection.",
+        "The provider event changed, but Nomi could not finish its local Calendar projection.",
       requestId: "calendar-request-123",
       status: 502,
     };

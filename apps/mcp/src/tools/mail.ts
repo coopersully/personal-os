@@ -10,7 +10,7 @@ import {
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
-const id = idSchema.describe("ilo object identifier");
+const id = idSchema.describe("nohmi object identifier");
 const mailRuleFields = {
   actions: mailRuleSchema.shape.actions,
   condition: mailRuleSchema.shape.condition,
@@ -164,7 +164,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: false,
       },
       description:
-        "Temporarily hide a cached conversation until a specified time. This changes Ilo's local snooze state, not provider mail.",
+        "Temporarily hide a cached conversation until a specified time. This changes nohmi's local snooze state, not provider mail.",
       inputSchema: z.object({ id, until: z.string().datetime({ offset: true }) }),
       title: "Snooze mail",
     },
@@ -184,7 +184,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: false,
       },
       description:
-        "Create or refresh one open important, upcoming, or follow-up attention item for an owned Mail conversation. Ilo derives the source reference from the thread and deduplicates the same open thread/kind pair.",
+        "Create or refresh one open important, upcoming, or follow-up attention item for an owned Mail conversation. nohmi derives the source reference from the thread and deduplicates the same open thread/kind pair.",
       inputSchema: z.object({
         ...upsertMailAttentionItemInputSchema.shape,
         threadId: id,
@@ -240,7 +240,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: true,
       },
       description:
-        "Re-preview one saved Mail rule against the current bounded recent window. Returns the rule ID/version, exact thread IDs, due states, dates, truncation, and a fingerprint; it never changes mail or rule state. Activation is an interactive review action in Ilo Settings.",
+        "Re-preview one saved Mail rule against the current bounded recent window. Returns the rule ID/version, exact thread IDs, due states, dates, truncation, and a fingerprint; it never changes mail or rule state. Activation is an interactive review action in nohmi Settings.",
       inputSchema: z.object({ id }),
       title: "Review saved Mail rule",
     },
@@ -272,7 +272,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: false,
       },
       description:
-        "Revise or pause a Mail rule using optimistic version matching. Agent activation is intentionally unavailable: the person reviews and activates the saved rule in Ilo Settings. Pause an active rule before changing matching behavior.",
+        "Revise or pause a Mail rule using optimistic version matching. Agent activation is intentionally unavailable: the person reviews and activates the saved rule in nohmi Settings. Pause an active rule before changing matching behavior.",
       inputSchema: z.object({
         actions: mailRuleFields.actions.optional(),
         condition: mailRuleFields.condition.optional(),

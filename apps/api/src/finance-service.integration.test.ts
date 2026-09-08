@@ -128,12 +128,16 @@ function plaidFetch(): typeof globalThis.fetch {
             balances: { current: 91.25, iso_currency_code: "USD" },
             name: "Checking",
             official_name: null,
+            subtype: "checking",
+            type: "depository",
           },
           {
             account_id: "plaid-account-2",
             balances: { current: null, iso_currency_code: "USD" },
             name: "Savings",
             official_name: "High Yield Savings",
+            subtype: "savings",
+            type: "depository",
           },
         ],
       });
@@ -372,10 +376,12 @@ describe.sequential("finance service", () => {
       "0052_connector_notifications",
       "0053_oauth_states_expiry_index",
       "0054_agent_access_work_item_snapshots",
+      "0055_task_organization",
       "0055_finance_sync_health",
       "0056_workspace_maintenance_runs",
       "0057_finance_currency_evidence",
       "0058_finance_provider_items",
+      "0059_task_organization_reconciliation",
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
@@ -393,7 +399,17 @@ describe.sequential("finance service", () => {
       "0069_finance_legacy_budget_backfill",
       "0070_calendar_stewardship_foundations",
       "0071_calendar_event_links",
+      "0072_finance_parallel_migration_reconciliation",
+      "0073_task_organization_reconciliation",
+      "0072_finance_account_semantics",
       "0072_texting",
+      "0073_texting_review_hardening",
+      "0073_finance_account_semantics_recovery",
+      "0074_finance_budget_buckets",
+      "0075_finance_ownership_constraint",
+      // The task-list icon migration depends on task organization, which this
+      // legacy Finance-upgrade fixture deliberately omits above.
+      "0076_task_list_icons",
       "0073_mail_workspace_stewardship",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
@@ -912,6 +928,64 @@ describe.sequential("finance service", () => {
         .from(auditEvents)
         .where(eq(auditEvents.requestId, context.requestId)),
     ).resolves.toEqual([{ action: "finance.review_bypass_updated", actorType: "user" }]);
+  });
+
+  it("logs receipt Mail search failures without exposing the error", async () => {
+    const [receiptOwner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Receipt failure owner",
+        email: `receipt-failure-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!receiptOwner) throw new Error("Receipt failure owner was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Receipt failure bank",
+        name: "Receipt failure account",
+        provider: "manual",
+        status: "connected",
+        userId: receiptOwner.id,
+      })
+      .returning();
+    if (!account) throw new Error("Receipt failure account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 4250,
+        direction: "expense",
+        merchant: "Amazon",
+        transactionDate: "2026-07-19",
+        userId: receiptOwner.id,
+      })
+      .returning();
+    if (!transaction) throw new Error("Receipt failure transaction was not created.");
+    const logs = vi.fn();
+    const service = createFinanceService({
+      db: database.db,
+      log: logs,
+      now: () => now,
+      searchReceiptCandidates: async () => {
+        throw new Error("private connector failure");
+      },
+    });
+
+    await expect(
+      service.reviewReceipt(receiptOwner.id, transaction.id, { searchMail: true, windowDays: 7 }),
+    ).resolves.toMatchObject({ evidence: { status: "mail_disabled" } });
+    expect(logs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "finance_receipt_mail_search_failed",
+        method: "INTERNAL",
+        path: "/v1/finances/transactions/receipt-review",
+        status: 503,
+      }),
+    );
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("private connector failure");
   });
 
   it("atomically replaces an owned budget plan and records only a redacted audit summary", async () => {
@@ -1966,6 +2040,68 @@ describe.sequential("finance service", () => {
     );
     expect(orphanItems.rows).toEqual([]);
     await database.db.delete(users).where(eq(users.id, owner.id));
+  });
+
+  it("searches only owned transactions by merchant or notes and treats wildcard characters literally", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Search owner",
+        email: "finance-search@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Search owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "finance-search" };
+    const account = await service.createAccount(
+      { balance: 100, institution: "Test", name: "Search account", provider: "manual" },
+      context,
+    );
+    const item = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 12,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Everyday Supplies",
+        notes: "Receipt 100%_matched",
+      },
+      context,
+    );
+    expect(
+      (
+        await service.listTransactions(owner.id, {
+          search: "everyday supplies",
+          limit: 50,
+          review: "all",
+        })
+      ).items.map((row) => row.id),
+    ).toEqual([item.id]);
+    expect(
+      (
+        await service.listTransactions(owner.id, {
+          search: "100%_matched",
+          limit: 50,
+          review: "all",
+        })
+      ).items.map((row) => row.id),
+    ).toEqual([item.id]);
+    expect(
+      (
+        await service.listTransactions(owner.id, {
+          search: "absent merchant",
+          limit: 50,
+          review: "all",
+        })
+      ).items,
+    ).toEqual([]);
+    expect(
+      (await service.listTransactions(userId, { search: "100%_matched", limit: 50, review: "all" }))
+        .items,
+    ).toEqual([]);
   });
 
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
@@ -3128,6 +3264,8 @@ describe.sequential("finance service", () => {
                   balances: { current: 42, iso_currency_code: "USD" },
                   name: "Atomic checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
               ],
             });
@@ -6157,6 +6295,8 @@ describe.sequential("finance service", () => {
               balances: { current: 100 },
               name: "Amount drift checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
           ],
         });
@@ -6468,12 +6608,16 @@ describe.sequential("finance service", () => {
               balances: { current: 250 },
               name: "Health checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
             {
               account_id: "health-sibling-account",
               balances: { current: 500 },
               name: "Health savings",
               official_name: null,
+              subtype: "savings",
+              type: "depository",
             },
           ],
         });
@@ -6749,7 +6893,7 @@ describe.sequential("finance service", () => {
       rows: [
         {
           status: "connected",
-          sync_error: "Plaid is not configured correctly. ilo is resolving this.",
+          sync_error: "Plaid is not configured correctly. nohmi is resolving this.",
           sync_error_category: "configuration",
           sync_error_code: "plaid_configuration_invalid",
           sync_recovery: "operator",
@@ -6992,6 +7136,8 @@ describe.sequential("finance service", () => {
               balances: { current: 100 },
               name: "Restart checking",
               official_name: null,
+              subtype: "checking",
+              type: "depository",
             },
           ],
         });
@@ -7156,6 +7302,8 @@ describe.sequential("finance service", () => {
                   balances: { current: 100 },
                   name: "Checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
               ],
             });
@@ -7309,12 +7457,16 @@ describe.sequential("finance service", () => {
                   balances: { current: 100, iso_currency_code: "USD" },
                   name: "Scope checking",
                   official_name: null,
+                  subtype: "checking",
+                  type: "depository",
                 },
                 {
                   account_id: "scope-account-two",
                   balances: { current: 200, iso_currency_code: "USD" },
                   name: "Unrelated savings",
                   official_name: null,
+                  subtype: "savings",
+                  type: "depository",
                 },
               ],
             });
@@ -7834,12 +7986,16 @@ describe.sequential("finance service", () => {
                 balances: { current: 100, iso_currency_code: "USD" },
                 name: "Canonical one",
                 official_name: null,
+                subtype: "checking",
+                type: "depository",
               },
               {
                 account_id: "canonical-account-two",
                 balances: { current: 200, iso_currency_code: "USD" },
                 name: "Canonical two",
                 official_name: null,
+                subtype: "savings",
+                type: "depository",
               },
             ],
           });
@@ -9283,6 +9439,7 @@ describe.sequential("finance service", () => {
       expectedAmount: 22_000,
       payer: "Alex",
       rationale: "Alex owes their share",
+      createdAt: now,
       userId: anomalyUser.id,
     });
     const service = createFinanceService({ db: database.db, now: () => now });
@@ -9569,6 +9726,27 @@ describe.sequential("finance service", () => {
       netWorth: 1325,
       otherAssets: 75,
     });
+    const investmentAccount = accounts[2];
+    const otherAccount = accounts[3];
+    if (!investmentAccount || !otherAccount) throw new Error("Planning account fixtures missing.");
+    await database.db
+      .update(financeAccounts)
+      .set({ ownershipShareBps: 5_000, ownershipType: "joint" })
+      .where(eq(financeAccounts.id, investmentAccount.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ includeInPlanning: false })
+      .where(eq(financeAccounts.id, otherAccount.id));
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      accountSemantics: {
+        excludedAccountIds: [otherAccount.id],
+        trustworthy: true,
+        unresolvedOwnershipAccountIds: [],
+      },
+      investments: 250,
+      netWorth: 1000,
+      otherAssets: 0,
+    });
     await expect(service.listMerchants(owner.id, 1)).resolves.toEqual([]);
     await service.createTransaction(
       {
@@ -9686,5 +9864,107 @@ describe.sequential("finance service", () => {
     await expect(
       service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
     ).resolves.toEqual({ reviewBypassEnabled: true });
+  });
+
+  it("runs and replays each canonical Finance compatibility mutation", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Canonical Finance mutations",
+        email: `canonical-finance-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Canonical mutation owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const legacyContext = { principal: financePrincipal(owner.id), requestId: "canonical-seed" };
+    const context = {
+      actorId: owner.id,
+      actorType: "user" as const,
+      bypassEnabled: false,
+      canMutate: true,
+      canSelfApprove: false,
+      requestId: "canonical-mutations",
+      userId: owner.id,
+    };
+    const account = await service.createAccount(
+      { balance: null, institution: "PayPal", name: "Canonical wallet", provider: "paypal" },
+      legacyContext,
+    );
+    const first = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Canonical source",
+        notes: null,
+      },
+      legacyContext,
+    );
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 12,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Canonical target",
+        notes: null,
+      },
+      legacyContext,
+    );
+    const updateInput = { idempotencyKey: crypto.randomUUID(), notes: "Reviewed" };
+    await expect(
+      service.updateFinanceTransaction(first.id, updateInput, context),
+    ).resolves.toMatchObject({
+      outcome: "completed",
+      data: expect.objectContaining({ notes: "Reviewed" }),
+    });
+    await expect(
+      service.updateFinanceTransaction(first.id, updateInput, context),
+    ).resolves.toMatchObject({
+      outcome: "completed",
+    });
+    const merchants = await service.listMerchants(owner.id, 20);
+    const source = merchants.find((item) => item.displayName === "Canonical Source");
+    const target = merchants.find((item) => item.displayName === "Canonical Target");
+    if (!source || !target) throw new Error("Canonical merchant fixtures were not created.");
+    await expect(
+      service.updateFinanceMerchant(
+        source.id,
+        { displayName: "Canonical source renamed", idempotencyKey: crypto.randomUUID() },
+        context,
+      ),
+    ).resolves.toMatchObject({ outcome: "completed" });
+    await expect(
+      service.mergeFinanceMerchantRecords(
+        {
+          idempotencyKey: crypto.randomUUID(),
+          rationale: "These records represent one merchant.",
+          sourceMerchantId: source.id,
+          targetMerchantId: target.id,
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ outcome: "completed" });
+    const importInput = {
+      accountId: account.id,
+      csv: "Date,Name,Amount,Transaction ID\n07/18/2026,Canonical import,4.25,canonical-1",
+      idempotencyKey: crypto.randomUUID(),
+      provider: "paypal" as const,
+    };
+    await expect(service.importFinanceTransactions(importInput, context)).resolves.toMatchObject({
+      outcome: "completed",
+      data: { imported: 1, skipped: 0 },
+    });
+    await expect(service.importFinanceTransactions(importInput, context)).resolves.toMatchObject({
+      outcome: "completed",
+      data: { imported: 1, skipped: 0 },
+    });
   });
 });

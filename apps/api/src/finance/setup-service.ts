@@ -7,6 +7,7 @@ import type {
   FinanceToolResult,
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
+import { ILO_FINANCE_PLAYBOOK } from "@personal-os/domain";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
@@ -98,6 +99,7 @@ export function setupResult(input: {
   headline: string;
   maintenanceRunId?: string | null;
   nextAction?: FinanceToolResult<unknown>["nextAction"];
+  optionalDetails?: string[];
   question?: FinanceInteractionQuestion | null;
   sessionId: string;
   stage: FinanceSetupPayload["stage"];
@@ -116,7 +118,10 @@ export function setupResult(input: {
     communication: {
       headline: input.headline,
       ...(input.question ? { nextQuestion: input.question } : {}),
-      optionalDetails: [],
+      optionalDetails: [
+        `Priorities follow approved Ilo Finance playbook ${ILO_FINANCE_PLAYBOOK.version}: cash-flow stability, resilience, risk protection, costly debt, retirement, diversified investing, and a sustainable good life.`,
+        ...(input.optionalDetails ?? []),
+      ],
       requiredDisclosures: input.disclosures ?? [],
     },
     data: payload,
@@ -255,6 +260,41 @@ export function createSetupService({ db, now, planning }: Options) {
     context: FinanceMutationContext,
   ): Promise<FinanceToolResult<FinanceSetupPayload>> {
     if (session.status === "budget_approval") {
+      // The same plan can be revised or approved through the portal or MCP.
+      // Reconcile saved setup progress with that canonical decision on resume.
+      const currentBudget = (await planning.getFinanceBudget(context.userId)).data;
+      if (
+        currentBudget &&
+        (currentBudget.id !== session.budgetVersionId || currentBudget.status === "active")
+      ) {
+        if (currentBudget.status !== "proposed" && currentBudget.status !== "active")
+          throw new AppError(
+            "conflict",
+            "Create a current proposal in Plan, then resume financial setup.",
+          );
+        const [updated] = await db
+          .update(financeSetupSessions)
+          .set({
+            budgetVersionId: currentBudget.id,
+            currentQuestionKey: currentBudget.status === "active" ? null : "budget:approval",
+            status: currentBudget.status === "active" ? "initial_maintenance" : "budget_approval",
+            updatedAt: now(),
+            version: session.version + 1,
+          })
+          .where(
+            and(
+              eq(financeSetupSessions.id, session.id),
+              eq(financeSetupSessions.version, session.version),
+            ),
+          )
+          .returning();
+        if (!updated)
+          throw new AppError(
+            "conflict",
+            "Financial setup changed. Resume saved progress to continue.",
+          );
+        return continueSession(updated, context);
+      }
       return setupResult({
         budgetVersionId: session.budgetVersionId,
         headline: "Your balanced budget proposal is ready for approval.",
@@ -271,9 +311,12 @@ export function createSetupService({ db, now, planning }: Options) {
     if (session.status === "initial_maintenance") {
       return setupResult({
         budgetVersionId: session.budgetVersionId,
+        maintenanceRunId: session.maintenanceRunId,
         headline: "Your profile and budget are set; maintenance is the next step.",
         nextAction: {
-          arguments: { operation: "start", scope: { type: "all_outstanding" } },
+          arguments: session.maintenanceRunId
+            ? { operation: "resume", runId: session.maintenanceRunId }
+            : { operation: "start", scope: { type: "all_outstanding" } },
           reason: "Categorize, reconcile, and audit current activity.",
           tool: "maintain_finances",
         },

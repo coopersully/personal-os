@@ -11,7 +11,7 @@ export type CalendarProviderEffect = {
 };
 
 const syncRecovery =
-  "Synchronize Calendar before retrying so Ilo can reconcile provider truth with its local projection.";
+  "Synchronize Calendar before retrying so nohmi can reconcile provider truth with its local projection.";
 
 function detailsRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -143,7 +143,7 @@ export function createCalendarProviderEffectLedger(
         : new AppError(
             "service_unavailable",
             projectionFailure
-              ? "Calendar providers were changed, but Ilo could not commit its local projection and audit."
+              ? "Calendar providers were changed, but nohmi could not commit its local projection and audit."
               : "A Calendar provider mutation failed after one or more provider effects completed.",
             details,
           );

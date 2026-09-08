@@ -252,6 +252,20 @@ describe("agent access readiness adapters", () => {
     expect(compactRows[1]?.description).toBe("Profile v1 · 0 approved rules active");
     expect(compactRows[3]?.description).toBe("Automatic calendar creation is on · 3 verified");
 
+    const reconnectRows = mailAgentAccessReadiness({
+      ...base,
+      setup: ready({
+        ...emptySetup,
+        accounts: [
+          { email: "one@example.com", label: "One", syncStatus: "error" },
+          { email: "two@example.com", label: "Two", syncStatus: "error" },
+        ],
+      } as MailSetupContext),
+    });
+    expect(reconnectRows[0]?.description).toBe(
+      "2 connected · one@example.com and two@example.com · 2 need reconnect",
+    );
+
     const oneCandidateRows = mailAgentAccessReadiness({
       ...base,
       setup: ready({
@@ -347,10 +361,22 @@ describe("agent access readiness adapters", () => {
         reminders: ready({ items: [{ id: "one" } as Reminder], nextCursor: "next" }),
       })[0]?.description,
     ).toContain("1+ open Reminder");
+    expect(
+      reminderAgentAccessReadiness({
+        ...shared,
+        reminders: ready({
+          items: [{ id: "one" } as Reminder, { id: "two" } as Reminder],
+          nextCursor: null,
+        }),
+      })[0]?.description,
+    ).toContain("2 open Reminders");
     expect(reminderAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(reminderAgentAccessCapability("executable_rules", "$ilo-setup").title).toContain(
       "rules",
     );
+    expect(reminderAgentAccessCapability("profile_and_attention", "$ilo-setup")).toMatchObject({
+      title: "Reminder preferences, actions, and previews",
+    });
 
     expect(taskAgentAccessReadiness({ ...shared, tasks: loading })[0]?.description).toContain(
       "loading",
@@ -378,13 +404,13 @@ describe("agent access readiness adapters", () => {
         ...shared,
         tasks: ready({ items: [{ id: "one" } as Task], nextCursor: "next" }),
       })[0]?.description,
-    ).toContain("1+ open Task in Ilo");
+    ).toContain("1+ open Task in nohmi");
     expect(
       taskAgentAccessReadiness({
         ...shared,
         tasks: ready({ items: [{ id: "one" } as Task, { id: "two" } as Task], nextCursor: null }),
       })[0]?.description,
-    ).toContain("2 open Tasks in Ilo");
+    ).toContain("2 open Tasks in nohmi");
     expect(taskAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(taskAgentAccessCapability("profile_and_attention", "$ilo-setup").title).toContain(
       "bounded actions",

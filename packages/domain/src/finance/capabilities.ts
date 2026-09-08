@@ -1,5 +1,12 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinancePlaybook",
+    capability: "policy.playbook",
+    mcpTool: "get_finance_playbook",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "setupFinances",
     capability: "workflow.setup",
     mcpTool: "setup_finances",
@@ -77,6 +84,20 @@ export const financeCapabilityManifest = [
     requiredScope: "finances:read",
   },
   {
+    apiOperation: "listFinanceBudgetBuckets",
+    capability: "budget.bucket_list",
+    mcpTool: "list_finance_budget_buckets",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "mutateFinanceBudgetBucket",
+    capability: "budget.bucket_manage",
+    mcpTool: "manage_finance_budget_bucket",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
     apiOperation: "listFinanceGoals",
     capability: "goal.list",
     mcpTool: "list_finance_goals",
@@ -143,6 +164,13 @@ export const financeCapabilityManifest = [
     apiOperation: "getFinanceTransaction",
     capability: "ledger.transaction_read",
     mcpTool: "get_finance_transaction",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "reviewFinanceReceipt",
+    capability: "ledger.receipt_review",
+    mcpTool: "review_finance_receipt",
     mode: "read",
     requiredScope: "finances:read",
   },

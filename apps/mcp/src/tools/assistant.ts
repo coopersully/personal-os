@@ -11,7 +11,7 @@ import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
 export const assistantDomain = assistantDomainSchema;
-const id = idSchema.describe("ilo object identifier");
+const id = idSchema.describe("Nomi object identifier");
 const isoDateTime = isoDateTimeSchema;
 const preferenceValue = domainPreferenceValueSchema;
 
@@ -27,16 +27,16 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: true,
       },
       description:
-        "Start or continue Ilo setup. Call this immediately after connecting and again after saving or approving guidance. It returns the current semantic step, evidence, domain-specific instructions, required tools, and human approval boundary. No separately installed skill is required.",
+        "Start or continue Nomi setup. Call this immediately after connecting and again after saving or approving guidance. It returns the current semantic step, evidence, domain-specific instructions, required tools, and human approval boundary. No separately installed skill is required.",
       inputSchema: z.object({
         domain: assistantDomain
           .optional()
-          .describe("Ilo domain to set up. Omit to begin with Mail."),
+          .describe("Nomi domain to set up. Omit to begin with Mail."),
         stepId: assistantSetupStepIdSchema
           .optional()
           .describe("Optional semantic step to inspect without changing setup state."),
       }),
-      title: "Start or continue Ilo setup",
+      title: "Start or continue Nomi setup",
     },
     async (input) => apiResult(() => api.getIloSetup(input)),
   );
@@ -51,9 +51,9 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: true,
       },
       description:
-        "Compatibility status view for Ilo domains and profiles. Prefer get_ilo_setup for the current step and self-contained setup instructions.",
+        "Compatibility status view for Nomi domains and profiles. Prefer get_ilo_setup for the current step and self-contained setup instructions.",
       inputSchema: z.object({}),
-      title: "Get ilo agent setup status",
+      title: "Get Nomi agent setup status",
     },
     async () => apiResult(() => api.getAssistantSetupStatus()),
   );
@@ -68,9 +68,9 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: true,
       },
       description:
-        "Read one ilo domain profile and its status. Active profiles are operative guidance; draft profiles are unapproved proposals and must not be treated as operating instructions.",
+        "Read one Nomi domain profile and its status. Active profiles are operative guidance; draft profiles are unapproved proposals and must not be treated as operating instructions.",
       inputSchema: z.object({ domain: assistantDomain }),
-      title: "Get ilo domain profile",
+      title: "Get Nomi domain profile",
     },
     async ({ domain }) => apiResult(() => api.getDomainProfile(domain)),
   );
@@ -117,7 +117,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         status: z.enum(["draft", "active"]).default("draft"),
         summary: z.string().min(1).max(4_000),
       }),
-      title: "Save ilo domain profile",
+      title: "Save Nomi domain profile",
     },
     async (input) => apiResult(() => api.upsertDomainProfile(input)),
   );
@@ -138,7 +138,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         limit: z.number().int().min(1).max(100).default(50),
         status: z.enum(["open", "resolved", "dismissed"]).default("open"),
       }),
-      title: "List ilo attention items",
+      title: "List Nomi attention items",
     },
     async (input) => apiResult(() => api.listAttentionItems(input)),
   );
@@ -153,7 +153,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: false,
       },
       description:
-        "Record an intentionally unlinked generic note in one domain. For Mail conversations, Calendar events, Reminders, or Finance transactions, use the domain-owned attention tool so Ilo can validate ownership and derive provenance.",
+        "Record an intentionally unlinked generic note in one domain. For Mail conversations, Calendar events, Reminders, or Finance transactions, use the domain-owned attention tool so Nomi can validate ownership and derive provenance.",
       inputSchema: z.object({
         domain: assistantDomain,
         expiresAt: isoDateTime.nullable().default(null),
@@ -163,7 +163,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         summary: z.string().min(1).max(4_000),
         title: z.string().min(1).max(240),
       }),
-      title: "Create ilo attention item",
+      title: "Create Nomi attention item",
     },
     async (input) =>
       apiResult(() =>
@@ -186,14 +186,14 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: false,
       },
       description:
-        "Resolve, dismiss, or reopen one ilo attention item using the version returned by list_attention_items. If another workflow refreshed it first, Ilo returns a conflict with the current version.",
+        "Resolve, dismiss, or reopen one Nomi attention item using the version returned by list_attention_items. If another workflow refreshed it first, Nomi returns a conflict with the current version.",
       inputSchema: z.object({
         domain: assistantDomain,
         id,
         expectedVersion: z.number().int().positive(),
         status: z.enum(["open", "resolved", "dismissed"]),
       }),
-      title: "Update ilo attention item",
+      title: "Update Nomi attention item",
     },
     async ({ domain, expectedVersion, id: itemId, status }) =>
       apiResult(() => api.updateAttentionItem(domain, itemId, { expectedVersion, status })),

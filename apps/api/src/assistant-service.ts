@@ -270,7 +270,7 @@ export function createAssistantService({
           .then(([record]) => record),
         getSetupStatus(principal),
       ]);
-      if (!user) throw new AppError("not_found", "The Ilo account was not found.");
+      if (!user) throw new AppError("not_found", "The nohmi account was not found.");
       const link = (path: string) => new URL(path, appBaseUrl).href;
       const timestamp = now().toISOString();
       return {
@@ -345,29 +345,29 @@ export function createAssistantService({
           completionEvidence: connection.observed
             ? [
                 principal.actorType === "agent"
-                  ? "This authenticated MCP caller reached Ilo."
-                  : `An authenticated agent last reached Ilo at ${connection.lastObservedAt}.`,
+                  ? "This authenticated MCP caller reached nohmi."
+                  : `An authenticated agent last reached nohmi at ${connection.lastObservedAt}.`,
               ]
             : [],
-          description: "Authorize one MCP host so Ilo can identify its actual scoped authority.",
+          description: "Authorize one MCP host so nohmi can identify its actual scoped authority.",
           id: "connect_agent",
           instructions: [
-            "Connect the host to the Ilo MCP URL and complete OAuth when the host supports it.",
-            "Do not request provider credentials; they remain inside Ilo.",
+            "Connect the host to the nohmi MCP URL and complete OAuth when the host supports it.",
+            "Do not request provider credentials; they remain inside nohmi.",
           ],
           order: 1,
           owner: "person",
           requiredTools: [],
           state: connection.observed ? "complete" : "current",
           title: "Connect an agent",
-          userAction: connection.observed ? null : "Connect an MCP-compatible agent host to Ilo.",
+          userAction: connection.observed ? null : "Connect an MCP-compatible agent host to nohmi.",
         },
         {
           completionEvidence: profileExists
             ? [`${domain} guidance exists at profile version ${domainStatus.profileVersion}.`]
             : [],
           description:
-            "Inspect existing Ilo material, infer useful defaults, and ask only about unresolved preferences.",
+            "Inspect existing nohmi material, infer useful defaults, and ask only about unresolved preferences.",
           id: "learn_preferences",
           instructions: recipe.inspect,
           order: 2,
@@ -381,7 +381,7 @@ export function createAssistantService({
           title: `Learn ${domain} preferences`,
           userAction:
             connection.observed && canRead && canWrite
-              ? "Answer only the preference questions the agent cannot resolve from Ilo evidence."
+              ? "Answer only the preference questions the agent cannot resolve from nohmi evidence."
               : null,
         },
         {
@@ -406,16 +406,16 @@ export function createAssistantService({
           userAction:
             profileExists && !profileActive
               ? profileRequiresApproval(domain)
-                ? `Review and approve the ${domain} guidance while signed in to Ilo.`
+                ? `Review and approve the ${domain} guidance while signed in to nohmi.`
                 : "Accept or revise the agent's summary before it activates the guidance."
               : null,
         },
         {
           completionEvidence:
             connection.observed && profileActive
-              ? ["Ilo observes both an authenticated agent and active domain guidance."]
+              ? ["nohmi observes both an authenticated agent and active domain guidance."]
               : [],
-          description: "Ilo confirms setup from observed connection and guidance state.",
+          description: "nohmi confirms setup from observed connection and guidance state.",
           id: "complete",
           instructions: [
             "Call get_ilo_setup again after saving or approval to verify the terminal state.",
@@ -439,7 +439,7 @@ export function createAssistantService({
               ? "needs_input"
               : "complete";
       const nextAction = !connection.observed
-        ? "Connect an MCP-compatible host to Ilo."
+        ? "Connect an MCP-compatible host to nohmi."
         : !canRead || !canWrite
           ? `Reconnect the agent with both ${access.readScope} and ${access.writeScope}.`
           : !profileExists

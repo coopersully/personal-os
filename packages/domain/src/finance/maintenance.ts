@@ -110,6 +110,7 @@ export const financeMaintenancePayloadSchema = z.object({
   auditContext: z.record(z.string(), z.unknown()).nullable(),
   reasoningBatch: z.array(financeReasoningItemSchema),
   reviewQuestion: financeInteractionQuestionSchema.nullable(),
+  playbookVersion: z.literal("1.0.0").default("1.0.0"),
   runId: idSchema,
   stage: financeMaintenanceStageSchema,
   version: z.number().int().positive(),

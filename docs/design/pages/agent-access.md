@@ -2,11 +2,13 @@
 
 Agent work has three distinct user questions. Ilo gives each one a dedicated destination.
 
-## Reviews in Today
+## Reviews in Settings
 
-`/reviews` answers **What needs my judgment now?** It is owned by Today and appears in the Today
-sidebar and mobile dock.
+`/settings?section=reviews` answers **What needs my judgment now?** It is an account utility and
+appears in Settings navigation on desktop and in the Settings action sheet on narrow screens.
 
+- The shared Settings app bar owns the visible page title. The feature body begins with filters and
+  queue material rather than repeating a title, eyebrow, or description.
 - It contains only `review` and `attention` work. Setup state is never queue work.
 - Kind and workspace filters are stored in the URL as `kind` and `workspace`.
 - Results use cursor pagination with Previous and Next controls and an honest displayed range.

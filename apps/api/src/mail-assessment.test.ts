@@ -134,7 +134,7 @@ describe("Mail stewardship assessment", () => {
     expect(result.obligationCounts.resolved).toBe(0);
   });
 
-  it("derives deferral from an active Ilo snooze without guessing a deadline", () => {
+  it("derives deferral from an active nohmi snooze without guessing a deadline", () => {
     const result = assessMail(
       snapshot([
         thread({

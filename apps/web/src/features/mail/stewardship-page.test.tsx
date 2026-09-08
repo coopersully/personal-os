@@ -2,10 +2,13 @@
 import "@testing-library/jest-dom/vitest";
 import type { MailReview, MailStatus, MailStewardshipQuestion } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MailStewardshipPage } from "./stewardship-page.js";
+
+afterEach(cleanup);
 
 const mocks = vi.hoisted(() => ({
   answerMailQuestion: vi.fn(),
@@ -166,7 +169,7 @@ describe("Mail workspace stewardship", () => {
       expectedVersion: 2,
       generalize: false,
     });
-    expect(screen.getByText(/Ilo never sends email\./)).toBeVisible();
+    expect(screen.getByText(/Agents and automation never send email\./)).toBeVisible();
   });
 
   it("requests one maintenance turn and never renders a transmission action", async () => {
@@ -179,6 +182,14 @@ describe("Mail workspace stewardship", () => {
     expect(
       screen.queryByRole("button", { name: /compose|reply|forward|send/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps the maintenance action honest while the turn is pending", async () => {
+    mocks.maintainMail.mockReturnValue(new Promise(() => undefined));
+    const user = userEvent.setup();
+    renderPage("/mail/review");
+    await user.click(await screen.findByRole("button", { name: "Maintain Mail" }));
+    expect(await screen.findByRole("button", { name: "Maintaining…" })).toBeDisabled();
   });
 
   it("shows the immutable review evidence", async () => {

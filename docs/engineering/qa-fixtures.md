@@ -34,17 +34,21 @@ for a real account.
 
 ## Data contract
 
-- IDs are stable UUIDs scoped to each persona.
+- IDs are stable UUIDs scoped to each persona except the protected Task Inbox. PostgreSQL creates
+  each user's Inbox through the user trigger; the loader resolves that generated ID before
+  assigning Inbox Tasks and never inserts or mutates Inbox directly.
 - Calendar, task, and financial dates are regenerated relative to load time so
   Today, the current week, and the current month stay useful.
 - Provider-backed records are projections with no real credentials. They are
   suitable for reading, empty/error/reconnect UI, and service behavior that does
   not call a provider.
 - The demo and loaded-workspace accounts cover all-day, overlapping, tentative,
-  focus, private, and future calendar events; overdue, inbox, scheduled, and
-  completed work; unread, starred, snoozed, attachment, draft, and rule mail
-  states; and cash, investment, debt, budget, review, recurring, alert, pending,
-  and transfer finance states.
+  focus, private, and future calendar events; the protected Task Inbox plus
+  Personal, Work, and Shopping Lists; same-named Projects across different Lists;
+  same-List Project moves; open, due, reserved, completed, cancelled, and trashed
+  Tasks; unread, starred, snoozed, attachment, draft, and rule mail states; and
+  cash, investment, debt, budget, review, recurring, alert, pending, and transfer
+  finance states.
 - Playwright loads this same catalog into its disposable PostgreSQL container
   and verifies the demo login across Calendar, Tasks, Mail, and Finances.
 

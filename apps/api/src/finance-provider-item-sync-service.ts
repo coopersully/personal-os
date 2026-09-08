@@ -37,6 +37,7 @@ import {
   connectorSyncAppError,
 } from "./connector-sync-health.js";
 import { AppError } from "./errors.js";
+import { financeAccountKindFromProviderType } from "./finance/account-semantics.js";
 import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { decryptJson } from "./security.js";
 import type { Principal, RequestLog } from "./types.js";
@@ -192,7 +193,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         category: "configuration",
         code: "plaid_configuration_missing",
         disposition: "operator",
-        message: "Plaid is not configured for this ilo instance.",
+        message: "Plaid is not configured for this nohmi instance.",
         status: 503,
       });
     }
@@ -890,7 +891,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
             balance:
               snapshot.balanceCurrent === null ? null : Math.round(snapshot.balanceCurrent * 100),
             currencyCode: normalizedCurrencyCode(snapshot.currencyCode),
+            kind: sql`CASE WHEN ${financeAccounts.kindSource} = 'user' THEN ${financeAccounts.kind} ELSE ${financeAccountKindFromProviderType(snapshot.type)} END`,
+            kindSource: sql`CASE WHEN ${financeAccounts.kindSource} = 'user' THEN 'user' ELSE 'provider' END`,
             name: snapshot.officialName ?? snapshot.name,
+            providerSubtype: snapshot.subtype ?? null,
+            providerType: snapshot.type ?? null,
             updatedAt: now(),
           })
           .where(eq(financeAccounts.id, linkedAccount.id));
@@ -1029,7 +1034,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         failure = {
           ...failure,
           code: invalidCursorReplayFailedCode,
-          message: "Plaid could not restart transaction synchronization. ilo is resolving this.",
+          message: "Plaid could not restart transaction synchronization. nohmi is resolving this.",
           recovery: "operator",
         };
       }

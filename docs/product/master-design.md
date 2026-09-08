@@ -1,12 +1,13 @@
-# ilo — Master Product & Experience Design
+# nohmi — Master Product & Experience Design
 
-- Status: Proposed master design
+- Status: Living master design; shipped and future behavior are labelled explicitly
 - Date: 2026-07-18
+- Last reconciled: 2026-08-12
 - Supersedes: the product direction in `docs/product/mvp.md` for future planning. The MVP remains the record of what has already been built.
 
 ## 1. Decision and intentional scope expansion
 
-ilo will be a private, cross-device operating layer for an individual's commitments, communications, priorities, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
+nohmi will be a private, cross-device operating layer for an individual's commitments, communications, priorities, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
 
 This design intentionally expands scope beyond the current MVP. The expansion is necessary to make safe automation usable: a permission prompt alone is not a workflow. Every automated mutation therefore needs a comprehensible UI path, a preview or rule policy, audit evidence, undo/recovery where possible, and a way to stop future runs.
 
@@ -14,7 +15,7 @@ There are no deferred product domains in this document. Delivery is phased for d
 
 ## 2. Product promise
 
-> At any moment, ilo shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
+> At any moment, nohmi shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
 
 It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
 
@@ -22,7 +23,7 @@ Each material workspace has an Ilo: a persistent expert steward that maintains t
 living ledger, applies its approved rulebook, asks only for irreducible human judgment, learns from
 explicit answers, and produces an evidence-backed review and recommendations. Clients express
 intent; the workspace domain owns the expertise and durable workflow. The shared product doctrine
-is [`Ilo workspace stewardship`](ilo-workspace-stewardship.md).
+is [`nohmi workspace stewardship`](ilo-workspace-stewardship.md).
 
 ### 2.1 Target user and jobs
 
@@ -64,11 +65,10 @@ App
 ├── Today
 ├── Inbox
 ├── Calendar
-├── Reminders & Tasks
-├── Goals & Motives
+├── Tasks
+├── Reminders (legacy compatibility surface)
+├── Tracking (planned)
 ├── Finances
-├── Reviews
-├── Activity
 └── Account menu
     ├── Profile
     ├── Settings
@@ -77,15 +77,17 @@ App
 
 Settings
 ├── Back to app
-├── Personal: Profile, Appearance, Locale & time
-├── Security: Sessions, recovery, privacy, exports
+├── Account: Profile settings, password, log out
+├── Personal: Goals, Motives, Reviews
+├── Experience: Appearance, wallpaper where supported, locale & time
+├── History & access: Activity, sessions, invitations, recovery, privacy, exports
 ├── Workspace: Connections, calendars, mail, notifications, widgets
 └── Agents: Connected agents, Workspace access
 ```
 
 ### 4.1 Shared chrome
 
-- **Sidebar:** product identity, stable navigation, contextual material list, then account menu. Count badges are reserved for unread mail, overdue/due commitments, approvals, failed runs, and finance review items.
+- **Sidebar:** shared workspace picker and contextual navigation. Today remains sidebar-free, with workspace switching and account access in the top bar. Settings uses the shared picker without an account footer. Count badges are reserved for unread mail, overdue/due commitments, approvals, failed runs, and finance review items.
 - **Top bar:** only global creation, exceptional system state, platform/overlay controls, and mobile navigation. It never repeats a screen title, date, or an action already present in the page header.
 - **Page header:** route title and route-specific view controls. Calendar owns date, period, view, timezone, and visibility controls here; Inbox owns search/sync/filter here; Today owns no generic creation action.
 - **Inspector:** non-destructive read, source identity, linked material, quick actions, history, and advanced fields. On mobile it is a bottom sheet.
@@ -101,8 +103,11 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Account & connection | Provider, OAuth/app-password credential reference, capabilities, health, selected sources, sync cursor, writeability. |
 | Mail conversation/message | Account/mailbox/labels, participants, headers, body/attachments safe representation, importance/category, thread state, provider revision, derived commitments. |
 | Calendar/event | Calendar, organizer/attendees/RSVP, title, notes, location, conferencing, attachment references, start/end/timezone/all-day, recurrence, visibility, transparency, event type, travel/buffer relationship, source/block relationship. |
-| Reminder/task | Title, notes, status, project/area, priority, due date, scheduled time, estimate, recurrence, subtasks, tags, energy/context, defer history, source material, goal/motive links. |
-| Goal/motive/habit | Outcome, timeframe, progress metric, parent/child relationship, rationale, rewards, constraints, coaching preference, habit schedule/flexibility and completion data. |
+| Task List | Persistent organizational context; one protected system Inbox per person; normalized unique name, availability, local source, revision, and soft-deletion state. |
+| Task Project | Finite outcome inside one List; lifecycle, availability, target date, notes, optional `why`, local source, revision, and explicit child-resolution behavior. |
+| Task | One independently completable action; exactly one List, optional same-List Project, title, notes, optional `why`, priority, estimate, tags, independent deadline and reserved time, lifecycle, local source, revision, and recoverable Trash state. Recurrence remains future work. |
+| Reminder | A currently separate lightweight actionable record and compatibility surface. The target model treats reminder delivery as a Prompt attached to a Task or Tracking check-in, but Prompt persistence and Reminder migration are not implemented. |
+| Tracker / entry / goal | Planned Tracking material: versioned repeated observation, check-in, habit, entry, and evaluative goal contracts. None of these Tracking contracts is shipped by the 2026-08-12 Task foundation. |
 | Finance | Institution/account, balance, transaction, merchant, category/tag, split, recurring stream, rule, budget, cash-flow forecast, goal, review state and confidence. |
 | Domain profile | Domain, objective, source meanings, categories, durable instructions/preferences, status, and optimistic version. |
 | Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
@@ -115,13 +120,13 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 ### 6.1 Onboarding, identity, and connections
 
 1. Create account or sign in; persist session across refresh and device restart.
-2. Set preferred name, primary timezone, locale, notification preference, brand color, and optional ilo name (for example, “Home OS”).
+2. Set preferred name, primary timezone, locale, notification preference, brand color, and optional nohmi name (for example, “Home OS”).
 3. Choose a starting path: connect Google, connect iCloud, create local-only workspace, connect Plaid, or import later.
 4. Google connection asks separately for Calendar read/write, Gmail read, Gmail modify/send, Gmail settings/filters, and optional contacts. Multiple accounts are supported, named, and independently revocable. The product discloses the verification/security-assessment implications before enabling restricted Gmail scopes or server-side storage.
 5. iCloud connection prefers Apple Account authorization when the platform supports it and otherwise accepts an app-specific password through an encrypted credential flow. Mail and CalDAV calendar are independently enabled, discovered, health-checked, and designed for revocation when an Apple password reset invalidates app passwords.
 6. Plaid uses Link, explains read-only access and data freshness, lets the user select institutions/accounts, and requires a finance-specific consent screen before the first sync.
 7. Source selection lets the user include/exclude individual calendars, mailboxes, and financial accounts; it also defines busy-mirror destinations and notification privacy.
-8. The finishing screen creates a private local calendar/reminder inbox, previews the generated daily brief, and clearly states that no agent has access until a token is created.
+8. The finishing screen offers full-width Today at a Glance and Connect an Agent actions; no floating Next control is shown. It clearly states that an agent requires an explicit connection and consent.
 
 Failure UX: expired OAuth, app-password rejection, partial capability grant, unsupported provider, stale sync, duplicate account, and connector reconnection each retain progress, explain consequence, and provide one retry/reconnect action.
 
@@ -188,26 +193,56 @@ Mail policy tiers:
 - Flexible tasks, habits, focus blocks, meals, breaks, and buffers can be scheduled in an internal planning layer or written to a chosen calendar with explicit busy/privacy behavior.
 - Calendar has search, saved calendar sets, focus/out-of-office types, widgets, desktop notifications, and overlay quick-open.
 
-### 6.5 Reminders, tasks, projects, and time blocks
+### 6.5 Tasks, Lists, Projects, and Reminders
 
-- Capture accepts natural language but displays parsed due/scheduled dates before save.
-- A reminder is a simple actionable item; a task adds project/area, priority, estimate, scheduling, subtasks, recurrence, context/energy, source, goal/motive, and completion/defer history.
-- Lists include Inbox, Today, Upcoming, Someday, Projects, Areas, Habits, completed, and custom filters. Views include list, board, calendar, timeline, and focus mode.
-- Completion, reopen, delete/restore, duplicate, delegate/share-ready data model, bulk actions, search, tags, notes, attachments, and keyboard shortcuts are mandatory.
-- Recurrence supports calendar and completion-relative patterns, exception dates, skip/postpone, future occurrence preview, and a clear distinction between moving one occurrence and changing the series.
-- A time block is a relationship between a task/habit and a reserved interval; it may be internal-only or sync as an external event. It preserves estimate, actual duration, status, privacy, and calendar destination. Estimate calibration is opt-in and used only to offer a conservative suggestion; it never grades the user, infers diagnosis, or overrides a chosen plan.
-- Focus mode supports timer/Pomodoro, start/stop/extend, interruption capture, break prompts, and optional low-distraction overlay. It records focus time but does not imply completion.
-- Planning detects overload and offers: choose fewer tasks, reduce estimates, defer, split, schedule later, protect focus, or override with a recorded reason.
+The 2026-08-12 Task organization foundation is implemented. Tasks is one workspace at `/tasks`:
 
-### 6.6 Goals, motives, and habits
+The [Tasks nohmi charter](./tasks-ilo-charter.md) defines how this living ledger and its shipped
+surgical operations fit the workspace-stewardship model. It marks maintenance turns, questions and
+learning, domain status, advice, and review artifacts as target behavior rather than claiming this
+foundation already ships them.
 
-- Goals have outcomes, horizons, measurable targets, milestones, related projects/habits, progress, review cadence, and status. Motives store rationale, desired identity, benefits, constraints, rewards, anti-patterns, tone, and agent coaching boundaries.
-- Habits specify frequency, preferred windows, duration, flexibility, time defense, location/context, reminders, completion, skip policy, and relationship to goals/motives. A missed habit can be rescheduled, skipped, or reflected on; it is not treated as a moral failure.
-- Weekly/monthly reviews connect calendar time, task completion, habits, and finance only when those domains are consented to.
+- **Views** are queries and never own records: Today, Upcoming, Scheduled, Completed, Cancelled,
+  and Trash. Scheduled means an open Task has reserved time; it is not lifecycle.
+- **Lists** are persistent contexts. Every Task belongs to exactly one List. Each person has one
+  protected system Inbox, and `/tasks` selects it without putting its generated ID in the URL.
+- **Projects** are finite outcomes inside one List. A Task may belong to one Project in that same
+  List. Projects and Lists do not nest.
+- **Tasks** have only `open`, `completed`, or `cancelled` lifecycle. Deadline (`dueAt`) and reserved
+  time (`scheduledAt`) are independent. Availability/Trash is separate from lifecycle.
+
+Selection is linkable and canonical: `view` excludes `list` and `project`; a `project` implies its
+`list`; a non-Inbox List uses `list`; Inbox is the parameter-free `/tasks` default. Ordinary
+navigation includes only active Lists and active, open Projects. Container moves and terminal or
+archive operations return exact conflicts or require revision-bound previews rather than silently
+detaching, completing, hiding, or stranding work.
+
+Task create/edit supports List, optional same-List Project, title, notes, `why`, priority, estimate,
+tags, deadline, and reserved time. Lifecycle, Trash, and restore are focused actions outside the
+content form. Natural-language classification, Task recurrence/occurrences, attachments, bulk
+editing, Prompt persistence, time-block synchronization, and focus mode remain future work.
+
+Reminders remain a separate lightweight compatibility domain and `/reminders` surface today. The
+approved target is to model a reminder as delivery behavior attached to a Task or Tracking
+check-in, but nohmi must preserve standalone Reminder behavior until Prompt persistence and a reviewed
+migration exist. Shared storage does not make Reminders and Tasks one domain.
+
+### 6.6 Tracking, goals, motives, and habits
+
+Tracking is the approved sibling workspace for repeated observations, habits, check-ins, and
+personal measurements. It is a personal ledger, not a wellness or diagnostic product. Habits are
+Tracker configurations; food, sleep, exercise, ratings, and other observations use general typed
+tracking primitives rather than dedicated verticals. Goals are evaluative targets that may link to
+Tasks or Trackers without containing them. Immediate motivation belongs in an optional `why`;
+broader preferences belong in the person's profile.
+
+The Tracking workspace, tracker/entry/check-in/goal persistence, classifier, recurrence, Prompt
+delivery, and migration of current Goals/Motives are not implemented. Their normative target and
+research basis live in the two 2026-08-12 Tasks and Tracking specifications.
 
 ### 6.7 Finances
 
-- The Finance Ilo combines the useful methods of a bookkeeper, accountant/controller, financial
+- The Finance nohmi combines the useful methods of a bookkeeper, accountant/controller, financial
   planner, investment analyst, auditor, and coach. Its maintenance turn reconciles and classifies a
   selected period, balances it against budgets and goals, updates income/recurring/cash-flow/wealth
   models, isolates questions, learns only explicitly approved rules, and publishes a period review.
@@ -217,7 +252,7 @@ Mail policy tiers:
 - Categorization uses provider categories, deterministic merchant rules, and agent suggestions. The user can correct one transaction, apply a rule to matching future items, split transactions, exclude/transfers, tag projects, and review all changed history.
 - Budgets support category, flexible, envelope/zero-based optional modes, rollovers, targets, recurring bills/income, cash-flow forecast, safe-to-spend/left-this-month, savings goals, watchlists, net worth, investments, subscriptions, and reports.
 - The agent may explain and propose categorization/review work under a finance-read scope. The
-  Finance Ilo may provide evidence-backed informational planning, budget, savings, investment, and
+  Finance nohmi may provide evidence-backed informational planning, budget, savings, investment, and
   market-context recommendations within the product's approved advisory model. It cannot transfer
   money, trade, pay a bill, file a return, or claim a human professional credential.
 - Pending and posted transactions are separate states. Pending categorization is provisional, cannot create durable merchant rules or definitive budget/"safe to spend" claims, and must reconcile against provider removals/replacements before becoming settled data.
@@ -225,22 +260,23 @@ Mail policy tiers:
 
 ### 6.8 Agent controls, Reviews, and activity
 
-**Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. Settings → Workspace access then explains the actual read, write, approval, source-scope, and unavailable boundaries for Mail, Calendar, Tasks, and Finances while supervising one server-owned setup plan. After authentication the agent calls `get_ilo_setup`, which returns the current semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Personal preferences live in Ilo rather than in a host skill or conversation memory.
+**Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. Settings → Workspace access then explains the actual read, write, approval, source-scope, and unavailable boundaries for Mail, Calendar, Tasks, and Finances while supervising one server-owned setup plan. After authentication the agent calls `get_ilo_setup`, which returns the current semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Personal preferences live in nohmi rather than in a host skill or conversation memory.
 
 Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
+Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/reviews` is a Today-owned operational destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
+**Reviews:** `/settings?section=reviews` is an account-utility destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
 
-Ilo does not publish a generic routine catalog, routine-run API, or routine scheduler. Durable background behavior is domain-owned—for example, reviewed Mail rule work—and must expose domain-specific pending, success, reconciliation, and failure state.
+nohmi does not publish a generic routine catalog, routine-run API, or routine scheduler. Durable background behavior is domain-owned—for example, reviewed Mail rule work—and must expose domain-specific pending, success, reconciliation, and failure state.
 
 The Activity view filters by material, actor, source, result, date, and reversible state. Every event links to the affected material and source evidence.
 
 ### 6.9 Desktop overlay, widgets, notifications, and mobile
 
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
-- The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact ilo panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
+- The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.
 - Notifications use a per-domain policy, quiet hours, time zone, device selection, escalation/reminder behavior, and source privacy. Calendar/reminder notifications respect platform permissions and are de-duplicated across devices.
 - PWA and native shell preserve core actions offline, visibly queue local changes, reconcile provider material on return, and show conflict/resolution UI.
@@ -300,9 +336,9 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
 ## 9. Design system and interaction specification
 
 - Use generated shadcn primitives first: Sidebar, Button, Card, Field, Item, Input, Textarea, Checkbox, Switch, Tabs, Dialog/Sheet, Popover, DropdownMenu, Command, Tooltip, ScrollArea, Table, Calendar, Alert, Badge, Skeleton, Sonner, and DataTable patterns where applicable.
-- Use Plus Jakarta Sans for UI and DM Mono only for compact time/date/identifier metadata. The default control height is 36px; default text is 14px; shared semantic tokens own primary/accent theme color.
-- User color selection updates the semantic primary **and** accent tokens in all surfaces, including widgets and overlay; no hard-coded yellow or feature-specific brand colors.
-- Account color is applied at the document root so portals inherit it. Selected navigation, dropdown choices, tabs, toggles, checked controls, and focus rings consume the shared selection or primary tokens; overlays may never fall back to a default accent.
+- Use Geist throughout the product, including compact time/date/identifier metadata. The default control height is 36px; default text is 14px; shared semantic tokens keep product chrome neutral while semantic and user material may use color.
+- Product chrome has no signature hue. Color belongs to semantic state or user/provider material, never a global accent override.
+- Shared semantic tokens apply at the document root so portals inherit the same neutral selection and flat focus treatment.
 - Appearance preference is account-scoped and offers System, Light, and Dark. System follows `prefers-color-scheme` as it changes; the resolved mode applies at the document root through the same semantic shadcn, sidebar, and application-surface tokens, never through feature-local overrides.
 - The visual system is intentionally flat and recessive: use solid, predominantly monochromatic tonal surfaces; no gradients, decorative textures, or elevation shadows. Establish hierarchy through spacing, typography, and clearly different surface tones rather than pervasive hairline borders. Keep borders for controls, focus, and structural boundaries where they materially improve comprehension.
 - Native desktop shells may use a restrained semi-transparent outer surface so the product can recede into the operating system. This is an outer-window treatment, never an excuse to blur the interface: dense material canvases, forms, overlays, sensitive content, and error states stay opaque enough for reliable contrast. Reduced-transparency and high-contrast modes retain the same hierarchy with solid surfaces.

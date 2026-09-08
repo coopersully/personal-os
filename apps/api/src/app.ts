@@ -48,6 +48,7 @@ import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
+import { createFinancePlaybookService } from "./finance-playbook-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -61,6 +62,7 @@ import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
+import { readBoundedRequestBody } from "./request-body.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
@@ -75,9 +77,15 @@ import {
   requireHuman,
   requireScope,
 } from "./routes/support.js";
+import { registerTaskListRoutes } from "./routes/task-lists.js";
+import { registerTaskProjectRoutes } from "./routes/task-projects.js";
+import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
+import { createTaskListService } from "./task-list-service.js";
+import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
+import { createTaskWorkspaceService } from "./task-workspace-service.js";
 import { createTextingService } from "./texting-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
@@ -156,28 +164,6 @@ const calendarNotificationHeadersSchema = z.object({
 });
 const GMAIL_PUSH_BODY_LIMIT_BYTES = 32_768;
 
-async function readBoundedRequestBody(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder();
-  let size = 0;
-  let value = "";
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      value += decoder.decode(chunk.value, { stream: true });
-    }
-    return value + decoder.decode();
-  } finally {
-    reader.releaseLock();
-  }
-}
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
   code_challenge: z.string().min(43).max(128),
@@ -262,7 +248,22 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       resendApiKey: dependencies.config.resendApiKey,
     });
   const reminders = createReminderService({ db: dependencies.db, now });
-  const tasks = createTaskService({ db: dependencies.db, now });
+  const taskWorkspace = createTaskWorkspaceService({
+    db: dependencies.db,
+    now,
+    cursorSecret: dependencies.config.encryptionKey,
+  });
+  const taskLists = createTaskListService({ db: dependencies.db, now });
+  const taskProjects = createTaskProjectService({
+    db: dependencies.db,
+    movePreviewSecret: dependencies.config.encryptionKey,
+    now,
+  });
+  const tasks = createTaskService({
+    db: dependencies.db,
+    movePreviewSecret: dependencies.config.encryptionKey,
+    now,
+  });
   const google =
     dependencies.google ??
     createGoogleConnector({
@@ -391,8 +392,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     listEvents: calendar.listEvents,
     listReminders: async (userId) =>
       (await reminders.list(userId, { completed: false, limit: 100 })).items,
-    listTasks: async (userId, completed) =>
-      (await tasks.list(userId, { completed, limit: 100 })).items,
+    listTasks: (userId, query) => tasks.list(userId, query),
     now,
   });
   const audit = createAuditService(dependencies.db);
@@ -423,10 +423,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
+    searchReceiptCandidates: mail.searchReceiptCandidates,
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
+  const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
@@ -480,13 +482,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     })),
     mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,
     skill: {
-      displayName: "Ilo Guided Setup",
+      displayName: "nohmi Guided Setup",
       installPrompt: `Install the ilo-setup skill from ${agentSkillSourceUrl}.`,
       invocation: "$ilo-setup",
       name: "ilo-setup",
       revision: agentSkillRevision,
       setupPrompt:
-        "Set up Ilo for me. Start with get_ilo_context, then call get_ilo_setup and do the work it assigns before asking me for input.",
+        "Set up nohmi for me. Start with get_ilo_context, then call get_ilo_setup and do the work it assigns before asking me for input.",
       sourceUrl: agentSkillSourceUrl,
       version: agentSkillVersion,
     },
@@ -813,7 +815,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       ? authorization.slice(8)
       : getCookie(context, dependencies.config.sessionCookieName);
     if (!token)
-      throw new AppError("unauthorized", "Sign in to ilo before authorizing an MCP client.");
+      throw new AppError("unauthorized", "Sign in to nohmi before authorizing an MCP client.");
     const principal = await auth.authenticateSession(token);
     if (!(await auth.getUser(principal.userId)).emailVerified)
       throw new AppError("forbidden", "Verify your email before authorizing an MCP client.");
@@ -842,7 +844,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     )
       throw new AppError(
         "invalid_request",
-        "This authorization server only issues tokens for the ilo MCP resource.",
+        "This authorization server only issues tokens for the nohmi MCP resource.",
       );
     await oauthSession(context);
     const client = await oauth.getAuthorizationClient(query.client_id, query.redirect_uri);
@@ -857,7 +859,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     )
       throw new AppError(
         "invalid_request",
-        "This authorization server only issues tokens for the ilo MCP resource.",
+        "This authorization server only issues tokens for the nohmi MCP resource.",
       );
     const principal = await oauthSession(context);
     const code = await oauth.authorize({
@@ -931,8 +933,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/invitations", authenticate, requireHuman);
   app.use("/v1/reminders/*", authenticate);
   app.use("/v1/reminders", authenticate);
+  app.use("/v1/task-lists/*", authenticate);
+  app.use("/v1/task-lists", authenticate);
+  app.use("/v1/task-projects/*", authenticate);
+  app.use("/v1/task-projects", authenticate);
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
+  app.use("/v1/task-workspace", authenticate);
   app.use("/v1/texting/*", authenticate);
   app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1216,6 +1223,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financeChallenges,
     financeMaintenance,
     financePeriodReviews,
+    financePlaybook,
     financeStatus,
     finances,
     mutationContext,
@@ -1223,7 +1231,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerReminderRoutes({ app, mutationContext, reminders });
 
+  registerTaskListRoutes({ app, mutationContext, taskLists });
+
+  registerTaskProjectRoutes({ app, mutationContext, taskProjects });
+
   registerTaskRoutes({ app, mutationContext, tasks });
+  registerTaskWorkspaceRoutes({ app, taskWorkspace });
 
   registerCalendarRoutes({
     app,
@@ -1247,9 +1260,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     const token = await auth.createEmailVerificationToken(userId);
     const url = `${dependencies.config.appBaseUrl}/?verifyEmail=${encodeURIComponent(token)}`;
     await email.send({
-      html: `<p>Confirm your email address for ilo:</p><p><a href="${url}">Confirm email</a></p>`,
-      subject: "Confirm your ilo email",
-      text: `Confirm your ilo email: ${url}`,
+      html: `<p>Confirm your email address for nohmi:</p><p><a href="${url}">Confirm email</a></p>`,
+      subject: "Confirm your nohmi email",
+      text: `Confirm your nohmi email: ${url}`,
       to: emailAddress,
     });
   }
@@ -1257,9 +1270,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   async function sendPasswordReset(emailAddress: string, token: string): Promise<void> {
     const url = `${dependencies.config.appBaseUrl}/?resetPassword=${encodeURIComponent(token)}`;
     await email.send({
-      html: `<p>Reset your ilo password:</p><p><a href="${url}">Reset password</a></p>`,
-      subject: "Reset your ilo password",
-      text: `Reset your ilo password: ${url}`,
+      html: `<p>Reset your nohmi password:</p><p><a href="${url}">Reset password</a></p>`,
+      subject: "Reset your nohmi password",
+      text: `Reset your nohmi password: ${url}`,
       to: emailAddress,
     });
   }
@@ -1422,7 +1435,7 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
-  "audit:read": "Read Ilo activity history",
+  "audit:read": "Read nohmi activity history",
   "automations:read": "Read the generated daily brief",
   "automations:write": "Legacy automation access (inactive)",
   "bookmarks:read": "Read synchronized bookmarks",
@@ -1468,7 +1481,7 @@ function oauthConsentPage({
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Authorize ${escapeHtml(clientName)} · Ilo</title>
+  <title>Authorize ${escapeHtml(clientName)} · nohmi</title>
   <style>
     :root {
       color: #252524;
@@ -1657,12 +1670,12 @@ function oauthConsentPage({
 </head>
 <body>
   <main class="oauth-page">
-    <p class="oauth-brand"><span aria-hidden="true" class="oauth-brand__mark"></span>ilo</p>
+    <p class="oauth-brand"><span aria-hidden="true" class="oauth-brand__mark"></span>nohmi</p>
     <section aria-labelledby="consent-title" class="oauth-card">
       <header class="oauth-header">
         <p class="oauth-eyebrow">Agent access</p>
         <h1 id="consent-title">Connect ${escapeHtml(clientName)}</h1>
-        <p class="oauth-intro">This agent host is requesting access to your Ilo account. Connected provider credentials remain inside Ilo.</p>
+        <p class="oauth-intro">This agent host is requesting access to your nohmi account. Connected provider credentials remain inside nohmi.</p>
       </header>
       <section aria-labelledby="permissions-title" class="oauth-permissions">
         <h2 id="permissions-title">Requested access</h2>

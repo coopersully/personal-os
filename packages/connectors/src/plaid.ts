@@ -21,6 +21,10 @@ export type PlaidAccountSnapshot = {
   currencyCode: string | null;
   name: string;
   officialName: string | null;
+  /** Always populated by the real connector; optional only for injected test connectors. */
+  subtype?: string | null;
+  /** Always populated by the real connector; optional only for injected test connectors. */
+  type?: "depository" | "investment" | "brokerage" | "credit" | "loan" | "other";
 };
 
 export type PlaidTransactionSnapshot = {
@@ -84,6 +88,8 @@ const accountSchema = z.object({
   }),
   name: z.string(),
   official_name: z.string().nullable(),
+  subtype: z.string().nullable(),
+  type: z.enum(["depository", "investment", "brokerage", "credit", "loan", "other"]),
 });
 const transactionSchema = z
   .object({
@@ -162,7 +168,7 @@ async function isInvalidCursorResponse(response: Response): Promise<boolean> {
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes > 4_096) {
-        await reader.cancel().catch(() => undefined);
+        void reader.cancel().catch(() => undefined);
         return false;
       }
       serialized += decoder.decode(chunk.value, { stream: true });
@@ -176,7 +182,7 @@ async function isInvalidCursorResponse(response: Response): Promise<boolean> {
       parsed.error_code === "INVALID_CURSOR"
     );
   } catch {
-    await reader.cancel().catch(() => undefined);
+    void reader.cancel().catch(() => undefined);
     return false;
   }
 }
@@ -290,6 +296,8 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
         currencyCode: account.balances.iso_currency_code ?? null,
         name: account.name,
         officialName: account.official_name,
+        subtype: account.subtype,
+        type: account.type,
       }));
     },
     async syncTransactions(input) {

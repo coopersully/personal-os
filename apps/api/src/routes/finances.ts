@@ -6,17 +6,21 @@ import {
   cancelFinanceReimbursementInputSchema,
   classifyFinanceTransactionsInputSchema,
   createFinanceAccountInputSchema,
+  createFinanceBudgetBucketInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceBudgetVersionInputSchema,
   createFinanceTransactionInputSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
+  financeAccountQuerySchema,
+  financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
   financeMaintenanceHistoryQuerySchema,
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
+  financeReceiptReviewInputSchema,
   financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
   financeSetupInputSchema,
@@ -39,6 +43,7 @@ import {
   submitFinanceLedgerChallengeInputSchema,
   updateFinanceAccountInputSchema,
   updateFinanceAutomationSettingsInputSchema,
+  updateFinanceBudgetBucketInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -50,10 +55,15 @@ import {
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { loadFinanceAuthorization } from "../finance/context.js";
+import {
+  buildFinancePeriodReviewResult,
+  buildFinanceSnapshotResult,
+} from "../finance/presentation-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
+import type { createFinancePlaybookService } from "../finance-playbook-service.js";
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
@@ -78,6 +88,7 @@ type FinanceRouteOptions = {
   financeChallenges?: FinanceChallengeService;
   financeMaintenance: FinanceMaintenanceService;
   financePeriodReviews?: FinancePeriodReviewService;
+  financePlaybook?: ReturnType<typeof createFinancePlaybookService>;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -91,6 +102,7 @@ export function registerFinanceRoutes({
   financeChallenges,
   financeMaintenance,
   financePeriodReviews,
+  financePlaybook,
   financeStatus,
   finances,
   mutationContext,
@@ -192,6 +204,23 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/snapshot", async (context) => {
+    const userId = context.get("principal").userId;
+    const [status, budget, wealth] = await Promise.all([
+      financeStatus.getFinanceStatus(userId, { type: "all_outstanding" }),
+      finances.getFinanceBudget(userId),
+      finances.getWealthSummary(userId),
+    ]);
+    return context.json(buildFinanceSnapshotResult(status, budget, wealth));
+  });
+  app.get("/v1/finances/period-reviews/:id/presentation", async (context) => {
+    if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
+    const review = await financePeriodReviews.getOwned(
+      context.get("principal").userId,
+      idSchema.parse(context.req.param("id")),
+    );
+    return context.json(buildFinancePeriodReviewResult(review));
+  });
   app.get("/v1/finances/period-reviews/:id", async (context) => {
     if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
     return context.json({
@@ -234,6 +263,13 @@ export function registerFinanceRoutes({
   app.get("/v1/finances/wealth", async (context) =>
     context.json({ wealth: await finances.getWealthSummary(context.get("principal").userId) }),
   );
+  app.get("/v1/finances/playbook", async (context) => {
+    context.header("Cache-Control", "no-store");
+    if (!financePlaybook) {
+      return context.json({ error: "Finance playbook unavailable." }, 503);
+    }
+    return context.json(await financePlaybook.get(context.get("principal").userId));
+  });
   app.get("/v1/finances/profile/current", async (context) =>
     context.json(await finances.getFinancialProfile(context.get("principal").userId)),
   );
@@ -460,6 +496,15 @@ export function registerFinanceRoutes({
       ),
     ),
   );
+  app.post("/v1/finances/transactions/:id/receipt-review", async (context) =>
+    context.json({
+      review: await finances.reviewReceipt(
+        context.get("principal").userId,
+        context.req.param("id"),
+        await parseBody(context, financeReceiptReviewInputSchema),
+      ),
+    }),
+  );
   app.post("/v1/finances/transactions/:id/remove", async (context) => {
     const input = await parseBody(
       context,
@@ -618,6 +663,14 @@ export function registerFinanceRoutes({
         ),
       },
       201,
+    ),
+  );
+  app.get("/v1/finances/accounts", async (context) =>
+    context.json(
+      await finances.listFinanceAccounts(
+        context.get("principal").userId,
+        financeAccountQuerySchema.parse(context.req.query()),
+      ),
     ),
   );
   app.delete("/v1/finances/accounts/:id", requireHuman, async (context) => {
@@ -804,6 +857,51 @@ export function registerFinanceRoutes({
         201,
       ),
     );
+  });
+  app.get("/v1/finances/budget-buckets", async (context) =>
+    context.json(
+      await finances.listFinanceBudgetBuckets(
+        context.get("principal").userId,
+        financeBudgetBucketQuerySchema.parse(context.req.query()),
+      ),
+    ),
+  );
+  app.post("/v1/finances/budget-buckets", async (context) => {
+    const input = await parseBody(context, createFinanceBudgetBucketInputSchema);
+    return act(context, "budget_plan", { ...input, operation: "create" }, async () => {
+      const authorization = await financeContext(context);
+      return context.json(
+        await finances.mutateFinanceBudgetBucket(input, {
+          principal: {
+            actorId: authorization.actorId,
+            actorType: authorization.actorType,
+            userId: context.get("principal").userId,
+          },
+          requestId: context.get("requestId"),
+        }),
+        201,
+      );
+    });
+  });
+  app.patch("/v1/finances/budget-buckets/:id", async (context) => {
+    const body = await parseBody(context, z.record(z.string(), z.unknown()));
+    const fullInput = updateFinanceBudgetBucketInputSchema.parse({
+      ...body,
+      bucketId: routeId(context),
+    });
+    return act(context, "budget_plan", { ...fullInput, operation: "update" }, async () => {
+      const authorization = await financeContext(context);
+      return context.json(
+        await finances.mutateFinanceBudgetBucket(fullInput, {
+          principal: {
+            actorId: authorization.actorId,
+            actorType: authorization.actorType,
+            userId: context.get("principal").userId,
+          },
+          requestId: context.get("requestId"),
+        }),
+      );
+    });
   });
   app.get("/v1/finances/plaid/status", async (context) =>
     context.json({ available: finances.plaidAvailable() }),

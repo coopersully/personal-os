@@ -6,7 +6,7 @@ import type {
   MailSyncResult,
   NormalizedRemoteEvent,
 } from "@personal-os/connectors";
-import { ConnectorError } from "@personal-os/connectors";
+import { ConnectorError, MailSendPreAcceptanceError } from "@personal-os/connectors";
 import {
   attentionItems,
   auditEvents,
@@ -19,6 +19,7 @@ import {
   domainProfiles,
   mailboxes,
   mailCalendarCommitmentIntakes,
+  mailDrafts,
   mailMessages,
   mailRules,
   mailRuleWorkItems,
@@ -32,7 +33,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
 import { createCalendarService } from "./calendar-service.js";
-import { createConnectorService } from "./connector-service.js";
+import { createConnectorService, MailProviderRejectedError } from "./connector-service.js";
 import {
   invalidateMailCalendarCommitmentIntakes,
   mailCommitmentMessageLockKey,
@@ -169,6 +170,7 @@ function mockGoogle(): GoogleConnector {
         threads: [],
       },
     })),
+    sendMail: vi.fn(async () => rotatedCredentials),
     trashMailThread: vi.fn(async () => rotatedCredentials),
     updateMailThread: vi.fn(async () => rotatedCredentials),
     updateEvent: vi.fn(async () => ({
@@ -222,6 +224,7 @@ function mockICloud(): ICloudConnector {
         },
       ],
     })),
+    sendMail: vi.fn(async () => undefined),
     updateMailThread: vi.fn(async () => undefined),
     updateEvent: vi.fn(async () =>
       remoteEvent("icloud-created", "icloud-updated", "iCloud update"),
@@ -539,7 +542,7 @@ describe.sequential("connector service", () => {
       (await service.listAccounts(userId)).find((item) => item.id === account.id),
     ).toMatchObject({
       mailEnabled: true,
-      syncError: "Google is temporarily unavailable. ilo will retry automatically.",
+      syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
       syncStatus: "error",
     });
     await service.syncAccount(userId, account.id);
@@ -568,10 +571,12 @@ describe.sequential("connector service", () => {
       .where(eq(calendarAccounts.providerAccountId, "google-person"));
     if (!account) throw new Error("Google account fixture is missing.");
 
+    const googleSendMail = google.sendMail;
+    delete google.sendMail;
     await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
       "unavailable",
     );
-    google.sendMail = vi.fn(async (value) => value);
+    google.sendMail = googleSendMail ?? vi.fn(async (value) => value);
     await database.db
       .update(calendarAccounts)
       .set({
@@ -627,10 +632,12 @@ describe.sequential("connector service", () => {
       email: "sender@icloud.com",
       mail: true,
     });
+    const iCloudSendMail = icloud.sendMail;
+    delete icloud.sendMail;
     await expect(service.mailGateway.sendCapability?.(userId, connected.accountId)).resolves.toBe(
       "unavailable",
     );
-    icloud.sendMail = vi.fn(async () => undefined);
+    icloud.sendMail = iCloudSendMail ?? vi.fn(async () => undefined);
     await expect(service.mailGateway.sendCapability?.(userId, connected.accountId)).resolves.toBe(
       "available",
     );
@@ -849,7 +856,7 @@ describe.sequential("connector service", () => {
     expect(settled).toMatchObject({
       lastSyncedAt: timestamp,
       nextSyncAt: timestamp,
-      syncError: "Synchronization was interrupted. ilo will retry automatically.",
+      syncError: "Synchronization was interrupted. nohmi will retry automatically.",
       syncRecovery: "automatic",
       syncStatus: "idle",
     });
@@ -949,7 +956,7 @@ describe.sequential("connector service", () => {
         .where(eq(calendarAccounts.id, missingCredentialsAccount.id)),
     ).resolves.toEqual([
       expect.objectContaining({
-        syncError: "Google is not configured correctly. ilo is resolving this.",
+        syncError: "Google is not configured correctly. nohmi is resolving this.",
         syncRecovery: "operator",
         syncStatus: "error",
       }),
@@ -1050,7 +1057,7 @@ describe.sequential("connector service", () => {
         nextSyncAt: new Date(timestamp.getTime() - 3 * 60_000),
         provider: "google",
         providerAccountId: "scheduler-retry",
-        syncError: "Google is temporarily unavailable. ilo will retry automatically.",
+        syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
         syncErrorCategory: "temporary",
         syncErrorCode: "google_temporary_failure",
         syncFailureCount: 1,
@@ -1254,7 +1261,7 @@ describe.sequential("connector service", () => {
         mailEnabled: false,
         provider: "google",
         providerAccountId: "freshness-operator",
-        syncError: "Google is not configured correctly. ilo is resolving this.",
+        syncError: "Google is not configured correctly. nohmi is resolving this.",
         syncErrorCategory: "configuration",
         syncErrorCode: "google_configuration_failed",
         syncFailureCount: 1,
@@ -1371,6 +1378,173 @@ describe.sequential("connector service", () => {
         removeMailboxIds: ["UNREAD"],
       }),
     ).rejects.toThrow("Mail is not enabled");
+    const [missingSender] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        encryptedCredentials: {
+          ciphertext: "unused",
+          iv: "unused",
+          tag: "unused",
+          version: 1,
+        },
+        label: "Missing sender",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "missing-sender",
+        userId,
+      })
+      .returning();
+    if (!missingSender) throw new Error("Missing sender account fixture was not created.");
+    await expect(
+      service.mailGateway.send(userId, missingSender.id, {
+        body: "Blocked",
+        cc: [],
+        subject: "Blocked",
+        to: [{ address: "to@example.com", name: null }],
+      }),
+    ).rejects.toThrow("no sender address");
+  });
+
+  it("classifies only failures before a Google send request as safe pre-acceptance failures", async () => {
+    const [googleAccount] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!googleAccount) throw new Error("Google account fixture is missing.");
+    const sendGoogle = google.sendMail;
+    const sendICloud = icloud.sendMail;
+    if (!sendGoogle || !sendICloud) throw new Error("Mail send fixtures are unavailable.");
+    vi.mocked(sendGoogle).mockRejectedValueOnce(
+      new MailSendPreAcceptanceError("Token refresh rejected", connectorError("401", 401)),
+    );
+    await expect(
+      service.mailGateway.send(userId, googleAccount.id, {
+        body: "Rejected",
+        cc: [],
+        subject: "Rejected",
+        to: [{ address: "to@example.com", name: null }],
+      }),
+    ).rejects.toBeInstanceOf(MailProviderRejectedError);
+    for (const status of [400, 401, 500]) {
+      vi.mocked(sendGoogle).mockRejectedValueOnce(
+        connectorError(`Ambiguous Google ${status}`, status),
+      );
+      await expect(
+        service.mailGateway.send(userId, googleAccount.id, {
+          body: "Ambiguous",
+          cc: [],
+          subject: `Ambiguous ${status}`,
+          to: [{ address: "to@example.com", name: null }],
+        }),
+      ).rejects.toMatchObject({ status });
+    }
+    vi.mocked(sendGoogle).mockRejectedValueOnce(new DOMException("Timed out", "AbortError"));
+    await expect(
+      service.mailGateway.send(userId, googleAccount.id, {
+        body: "Timed out",
+        cc: [],
+        subject: "Timed out",
+        to: [{ address: "to@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    const connectedICloud = await service.connectICloud(userId, {
+      appSpecificPassword: "test-app-password",
+      calendar: false,
+      email: "ambiguous@icloud.example",
+      mail: true,
+    });
+    vi.mocked(sendICloud).mockRejectedValueOnce(connectorError("SMTP transport closed", 502));
+    await expect(
+      service.mailGateway.send(userId, connectedICloud.accountId, {
+        body: "Ambiguous",
+        cc: [],
+        subject: "Ambiguous",
+        to: [{ address: "to@example.com", name: null }],
+      }),
+    ).rejects.toBeInstanceOf(ConnectorError);
+    vi.mocked(sendGoogle).mockResolvedValue(rotatedCredentials);
+    vi.mocked(sendICloud).mockResolvedValue(undefined);
+  });
+
+  it("preserves durable draft recovery when provider send credential persistence fails", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Google account fixture is missing.");
+    const mail = createMailService({
+      db: database.db,
+      gateway: service.mailGateway,
+      now: () => timestamp,
+      reviewSigningKey: "connector-send-review-key",
+    });
+    const draft = await mail.createDraft(userId, {
+      accountId: account.id,
+      body: "Credential persistence body",
+      cc: [],
+      subject: "Credential persistence send",
+      to: [{ address: "to@example.com", name: null }],
+    });
+    const sendGoogle = google.sendMail;
+    if (!sendGoogle) throw new Error("Google Mail send fixture is unavailable.");
+    vi.mocked(sendGoogle).mockResolvedValueOnce({
+      ...rotatedCredentials,
+      accessToken: "send-persistence-fault-token",
+      expiresAt: "2032-07-13T13:00:00.000Z",
+    });
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_mail_send_credential_save_for_test() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced credential persistence failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_mail_send_credential_save_for_test
+      BEFORE UPDATE OF encrypted_credentials ON calendar_accounts
+      FOR EACH ROW
+      WHEN (OLD.id = '${account.id}'::uuid)
+      EXECUTE FUNCTION fail_mail_send_credential_save_for_test();
+    `);
+    try {
+      await expect(
+        mail.sendDraft(
+          userId,
+          {
+            confirmedUpdatedAt: draft.updatedAt,
+            draftId: draft.id,
+          },
+          {
+            principal: {
+              actorId: userId,
+              actorType: "user",
+              scopes: new Set(["mail:read", "mail:write"]),
+              userId,
+            },
+            requestId: "credential-partial-draft-send",
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "service_unavailable",
+        details: expect.objectContaining({
+          credentialPersistenceMayHaveFailed: true,
+          draftId: draft.id,
+          draftReconciliationStatePersisted: true,
+          partialEffect: true,
+          repairAction: "verify_sent_mail_then_reconcile_draft",
+          userActionDestination: "Provider Sent Mail; then nohmi Mail",
+          userActionRequired: true,
+        }),
+      });
+      await expect(
+        database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
+      ).resolves.toEqual([expect.objectContaining({ sendStatus: "reconcile" })]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_mail_send_credential_save_for_test ON calendar_accounts;
+        DROP FUNCTION IF EXISTS fail_mail_send_credential_save_for_test();
+      `);
+    }
   });
 
   it("persists the newest out-of-order Google credential across concurrent Mail gateways", async () => {
@@ -3744,7 +3918,7 @@ describe.sequential("connector service", () => {
       (await service.listAccounts(userId)).find((item) => item.id === connected.accountId),
     ).toMatchObject({
       email: "unavailable@icloud.com",
-      syncError: "iCloud is temporarily unavailable. ilo will retry automatically.",
+      syncError: "iCloud is temporarily unavailable. nohmi will retry automatically.",
       syncStatus: "error",
     });
   });
@@ -4408,7 +4582,7 @@ describe.sequential("connector service", () => {
       .where(eq(calendarAccounts.id, account.id));
     expect(retrying).toMatchObject({
       lastSyncAttemptAt: timestamp,
-      syncError: "Google is temporarily unavailable. ilo will retry automatically.",
+      syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
       syncErrorCategory: "unknown",
       syncFailureCount: 1,
       syncRecovery: "automatic",

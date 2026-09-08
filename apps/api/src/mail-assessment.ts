@@ -252,7 +252,7 @@ export function assessMail(
           value,
         })),
         reason:
-          "This surfaced thread has no recorded disposition. Choose how Ilo should steward it.",
+          "This surfaced thread has no recorded disposition. Choose how nohmi should steward it.",
         threadId: thread.id,
       });
       openQuestionCount += 1;

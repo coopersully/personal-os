@@ -207,7 +207,7 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             monitoring: {
               href: "/finances/reviews",
               responsibility:
-                "Ilo will monitor new ledger activity and surface evidence gaps instead of guessing.",
+                "nohmi will monitor new ledger activity and surface evidence gaps instead of guessing.",
             },
             position: {
               cashLowPoint: observed.details.cashFlow.projectedLowestBalance,

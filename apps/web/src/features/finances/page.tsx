@@ -4,6 +4,7 @@ import type {
   FinanceBudgetStatus,
   FinanceForecast,
   FinanceLedgerHealth,
+  FinancePlaybookResponse,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceStatus,
@@ -93,6 +94,10 @@ import {
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
+import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+
+export { FinanceBudgetBucketManager } from "./bucket-manager.js";
+
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
@@ -100,10 +105,18 @@ import { PlaidConnectButton } from "./plaid-connect.js";
 import { FinanceReimbursementList } from "./reimbursement-list.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
+import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
+import { financeTransactionFilters } from "./transaction-query.js";
 
 export function FinancesPage() {
   const location = useLocation();
-  const section = financeSectionFromPath(location.pathname);
+  const section =
+    location.pathname === "/finances/budgets"
+      ? "budgets"
+      : financeSectionFromPath(location.pathname);
+  const transactionParams = new URLSearchParams(location.search);
+  const transactionFilters = financeTransactionFilters(transactionParams);
+  const linkedTransactionId = transactionParams.get("transactionId");
   const queryClient = useQueryClient();
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
@@ -141,6 +154,11 @@ export function FinancesPage() {
     enabled: section === "overview",
     queryFn: () => api.getFinanceStatus(),
     queryKey: ["finance-status"],
+  });
+  const playbook = useQuery({
+    enabled: section === "overview",
+    queryFn: api.getFinancePlaybook,
+    queryKey: ["finance-playbook"],
   });
   const ledgerHealth = useQuery({
     enabled: section === "health" || section === "overview",
@@ -233,30 +251,20 @@ export function FinancesPage() {
     sortDirection: FinanceTransactionQuery["sortDirection"];
   }>({ sortBy: "date", sortDirection: "desc" });
   const refresh = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["finance-overview"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-review-queue"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-transactions"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-wealth"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-ledger-health"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-budget-status"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-spending-scope"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-profile"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-income-streams"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-recurring"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-alerts"] }),
-      queryClient.invalidateQueries({ queryKey: ["finance-forecast"] }),
-    ]);
+    queryClient.invalidateQueries({
+      predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
+    });
   const transactionList = useQuery({
     enabled: section === "transactions",
     queryFn: () =>
       api.listFinanceTransactions({
+        ...transactionFilters,
         cursor: transactionCursor ?? undefined,
         limit: 50,
         sortBy: transactionSort.sortBy,
         sortDirection: transactionSort.sortDirection,
       }),
-    queryKey: ["finance-transactions", transactionCursor, transactionSort],
+    queryKey: ["finance-transactions", transactionCursor, transactionSort, transactionFilters],
   });
   const addAccount = useMutation({
     mutationFn: () =>
@@ -440,6 +448,20 @@ export function FinancesPage() {
     <div
       className={`wide-page flex w-full max-w-6xl flex-col gap-5 pb-8${section === "budgets" ? " wide-page--compact" : ""}`}
     >
+      {section === "transactions" ? (
+        <FinanceTransactionControls
+          accounts={finance.accounts}
+          categories={categories.data ?? []}
+          onAdd={() => setShowTransactionForm(true)}
+        />
+      ) : null}
+      {section === "transactions" && linkedTransactionId ? (
+        <FinanceLinkedTransaction
+          id={linkedTransactionId}
+          onBreakdown={setBreakdownTransaction}
+          onCategorize={openCategorize}
+        />
+      ) : null}
       {section === "budgets" ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FinanceMonthNavigator
@@ -497,6 +519,8 @@ export function FinancesPage() {
       {section === "overview" && financeStatus.data ? (
         <FinanceAtAGlance status={financeStatus.data} />
       ) : null}
+      {section === "overview" && playbook.isError ? <InlineError error={playbook.error} /> : null}
+      {section === "overview" ? <FinancePlaybookCard data={playbook.data} /> : null}
       {section === "overview" ? (
         <BudgetPaceGraph
           data={budgetPace.data}
@@ -507,10 +531,17 @@ export function FinancesPage() {
       {section === "overview" && ledgerHealth.data ? (
         <FinanceLedgerHealthDisclosure health={ledgerHealth.data} />
       ) : null}
-      {section === "review" ? <FinanceAgentReviewQueue /> : null}
+      {section === "review" && !location.pathname.endsWith("/legacy") ? (
+        <FinanceAgentReviewQueue />
+      ) : null}
       <section
         className={
-          section === "budgets" ? "grid gap-6" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
+          section === "budgets" ||
+          section === "transactions" ||
+          section === "health" ||
+          section === "imports"
+            ? "grid gap-6"
+            : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
         }
         hidden={section === "overview" || section === "cashflow" || section === "subscriptions"}
       >
@@ -544,9 +575,7 @@ export function FinancesPage() {
               </ShadcnCardDescription>
               <ShadcnCardAction>
                 {section === "transactions" ? (
-                  <ShadcnButton onClick={() => setShowTransactionForm(true)} size="sm">
-                    New transaction
-                  </ShadcnButton>
+                  <FinanceExportMenu />
                 ) : (
                   <ShadcnButton
                     onClick={() => setReviewOnly((value) => !value)}
@@ -559,6 +588,9 @@ export function FinancesPage() {
               </ShadcnCardAction>
             </ShadcnCardHeader>
             <ShadcnCardContent className={section === "transactions" ? "min-w-0" : undefined}>
+              {section === "transactions" && transactionList.isError ? (
+                <InlineError error={transactionList.error} />
+              ) : null}
               {section === "transactions" ? (
                 <FinanceTransactionsTable
                   hasPreviousPage={transactionCursorHistory.length > 0}
@@ -651,6 +683,7 @@ export function FinancesPage() {
             </ShadcnCardContent>
           </ShadcnCard>
           <section aria-label={`${formatMonth(budgetMonth)} budget`} hidden={section !== "budgets"}>
+            <FinanceBudgetBucketManager categories={categories.data ?? []} month={budgetMonth} />
             <FinanceBudgetSummary
               budgets={finance.budgets}
               month={budgetMonth}
@@ -1159,6 +1192,34 @@ export function FinancesPage() {
   );
 }
 
+function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefined }) {
+  if (!data) return null;
+  return (
+    <ShadcnCard>
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Wealth-building priorities</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Approved Ilo Finance playbook {data.playbook.version} ·{" "}
+          {data.assessment.readiness.replace("_", " ")}
+        </ShadcnCardDescription>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="grid gap-3">
+        <ol className="grid gap-2 text-sm">
+          {data.playbook.steps.map((step) => (
+            <li className="flex gap-3" key={step.id}>
+              <span className="text-muted-foreground tabular-nums">{step.rank}.</span>
+              <span>{step.title}</span>
+            </li>
+          ))}
+        </ol>
+        {data.assessment.blockers.length > 0 ? (
+          <p className="text-muted-foreground text-sm">Next: {data.assessment.blockers[0]}</p>
+        ) : null}
+      </ShadcnCardContent>
+    </ShadcnCard>
+  );
+}
+
 function FinanceMetric({
   detail,
   label,
@@ -1468,7 +1529,7 @@ function FinanceBudgetSummary({
   );
 }
 
-function BudgetMetricCard({
+export function BudgetMetricCard({
   aside,
   label,
   onClick,
@@ -1613,7 +1674,7 @@ function FinanceExportMenu() {
   );
 }
 
-function FinanceBudgetAllocationChart({
+export function FinanceBudgetAllocationChart({
   budgets,
 }: {
   budgets: Array<{ category: string; limit: number }>;
@@ -1716,7 +1777,7 @@ function BudgetProgress({
   );
 }
 
-function FinanceBudgetDetailDialog({
+export function FinanceBudgetDetailDialog({
   budgets,
   detail,
   month,
@@ -2106,7 +2167,7 @@ function CashflowPanel({
   );
 }
 
-function SubscriptionsPanel({
+export function SubscriptionsPanel({
   items,
   onUpdate,
 }: {
@@ -2477,7 +2538,7 @@ function FinanceTransactionsTable({
       </ShadcnTable>
       <div className="flex items-center justify-between gap-3 border-t pt-3">
         <p className="font-mono text-xs text-muted-foreground">
-          {transactions.length} transactions
+          {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
         </p>
         <div className="flex items-center gap-2">
           <ShadcnButton
@@ -2544,7 +2605,7 @@ function transactionTableColumnClass(columnId: string) {
   }[columnId];
 }
 
-function TransactionDetails({
+export function TransactionDetails({
   isCategorizing,
   onBreakdown,
   onCategorize,
@@ -2597,7 +2658,7 @@ function TransactionDetail({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FinanceReviewItems({
+export function FinanceReviewItems({
   cases,
   isPending,
   onApprove,

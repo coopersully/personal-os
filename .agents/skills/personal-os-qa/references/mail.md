@@ -9,7 +9,9 @@
 
 ## Populated pass
 
-1. Confirm the primary top frame contains Search mail, Sync, and Compose.
+1. Confirm the global app bar contains only the Mail identity and Sync. Search
+   belongs in the conversation list, and Compose is the end-justified floating
+   plus action.
 2. Confirm Unified inbox precedes provider-account mailbox groups.
 3. Confirm the provider row keeps display name, service name, unread count, and
    disclosure geometry separate.

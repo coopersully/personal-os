@@ -6,6 +6,7 @@ import {
   assistantSetupStepIdSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
+import { registerFinancePresentationResources } from "./presentation-resources.js";
 import { availableToolNames } from "./tool-catalog.js";
 import { apiResult } from "./tool-result.js";
 
@@ -24,9 +25,9 @@ export function registerIloContextTool(server: McpServer, options: DiscoveryOpti
     "get_ilo_context",
     {
       description:
-        "Call this first. Identify the Ilo user, local time, setup readiness, granted capabilities, available tools, safe workflow stages, and links back to the Ilo work surface.",
+        "Call this first. Identify the Nomi user, local time, setup readiness, granted capabilities, available tools, safe workflow stages, and links back to the Nomi work surface.",
       inputSchema: z.object({}),
-      title: "Orient to Ilo",
+      title: "Orient to Nomi",
     },
     async () =>
       apiResult(async () => ({
@@ -42,9 +43,9 @@ export function registerIloContextTool(server: McpServer, options: DiscoveryOpti
             "context: orient to the user, time, readiness, and granted access",
             "inspect: read current state and source evidence",
             "prepare: preview a proposed change without committing it",
-            "commit: perform an authorized mutation through Ilo's API",
+            "commit: perform an authorized mutation through Nomi's API",
             "verify: confirm the result from authoritative state or activity",
-            "recover: use Ilo's reversible state and recovery links when needed",
+            "recover: use Nomi's reversible state and recovery links when needed",
           ],
         },
       })),
@@ -57,9 +58,9 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
     "ilo://context/self",
     {
       description:
-        "Authenticated identity, local time, readiness, granted scopes, available MCP tools, and Ilo work-surface links.",
+        "Authenticated identity, local time, readiness, granted scopes, available MCP tools, and Nomi work-surface links.",
       mimeType: "application/json",
-      title: "Ilo context",
+      title: "Nomi context",
     },
     async (uri) => ({
       contents: [
@@ -97,9 +98,9 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
     }),
     {
       description:
-        "One self-contained Ilo setup step, including evidence, instructions, required capabilities, and the human approval boundary.",
+        "One self-contained Nomi setup step, including evidence, instructions, required capabilities, and the human approval boundary.",
       mimeType: "application/json",
-      title: "Ilo setup step",
+      title: "Nomi setup step",
     },
     async (uri, variables) => {
       const domain = assistantDomainSchema.parse(variables.domain);
@@ -128,9 +129,9 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
       }),
       {
         description:
-          "The user's operative or draft guidance for one Ilo domain. Draft guidance is never execution authority.",
+          "The user's operative or draft guidance for one Nomi domain. Draft guidance is never execution authority.",
         mimeType: "application/json",
-        title: "Ilo domain guidance",
+        title: "Nomi domain guidance",
       },
       async (uri, variables) => {
         const domain = assistantDomainSchema.parse(variables.domain);
@@ -147,26 +148,7 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
     );
   }
 
-  server.registerResource(
-    "ilo-agent-work-surface",
-    "ui://ilo/work-surface",
-    {
-      description:
-        "A compact visual work surface for Ilo context, previews, approvals, and verification results.",
-      mimeType: "text/html;profile=mcp-app",
-      title: "Ilo agent work surface",
-    },
-    async (uri) => ({
-      contents: [
-        {
-          _meta: { ui: { prefersBorder: true } },
-          mimeType: "text/html;profile=mcp-app",
-          text: iloWorkSurfaceHtml,
-          uri: uri.href,
-        },
-      ],
-    }),
-  );
+  if (options.scopes.has("finances:read")) registerFinancePresentationResources(server);
 
   registerPrompts(server, options);
 }
@@ -183,10 +165,10 @@ function registerPrompts(
     );
   const prompts = [
     {
-      description: "Orient to Ilo, then continue the next incomplete setup step.",
+      description: "Orient to Nomi, then continue the next incomplete setup step.",
       name: "set_up_ilo",
       text: "Call get_ilo_context, then get_ilo_setup. Follow only the returned current step, verify its evidence, and stop at any human approval boundary.",
-      title: "Set up Ilo",
+      title: "Set up Nomi",
     },
     {
       description: "Build a grounded plan for today without silently changing commitments.",
@@ -216,12 +198,12 @@ function registerPrompts(
       description: "Review finances with freshness, source, and reconciliation context.",
       name: "review_finances",
       text: canMaintainFinances
-        ? "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. When the caller intends maintenance, invoke maintain_finances once; Ilo keeps questions and approvals pending rather than guessing."
+        ? "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. When the caller intends maintenance, invoke maintain_finances once; Nomi keeps questions and approvals pending rather than guessing."
         : "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. Present pending work and stop after status; questions and approvals remain pending rather than guessed.",
       title: "Review finances",
     },
     {
-      description: "Run a cross-domain weekly review grounded in Ilo's current state.",
+      description: "Run a cross-domain weekly review grounded in Nomi's current state.",
       name: "weekly_review",
       text: "Call get_ilo_context, inspect goals, tasks, reminders, calendar, attention items, and finances where granted. Summarize evidence first, then propose a small set of reversible next actions.",
       title: "Weekly review",
@@ -250,20 +232,3 @@ function registerPrompts(
     );
   }
 }
-
-const iloWorkSurfaceHtml = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-:root{color-scheme:light dark;font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif;--bg:#f7f7f5;--card:#fff;--ink:#20201e;--muted:#706f6a;--line:#deddd8;--accent:#2f6fed}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}main{padding:18px}.eyebrow{margin:0 0 8px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}.card{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:18px;box-shadow:0 1px 2px #0000000a}h1{font-size:20px;line-height:1.2;margin:0 0 6px}.summary{color:var(--muted);margin:0 0 16px}.meta{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}.pill{border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:var(--muted);font-size:12px}pre{margin:0;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word;border-top:1px solid var(--line);padding-top:14px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}@media(prefers-color-scheme:dark){:root{--bg:#171716;--card:#222220;--ink:#f3f2ee;--muted:#aaa8a1;--line:#3a3935;--accent:#8aafff}}
-</style></head><body><main><p class="eyebrow">ilo · agent work surface</p><section class="card"><h1 id="title">Ready for an Ilo result</h1><p class="summary" id="summary">Context, previews, and verification will appear here.</p><div class="meta" id="meta"></div><pre id="result">Waiting for a tool result…</pre></section></main>
-<script>
-const title=document.querySelector('#title'),summary=document.querySelector('#summary'),meta=document.querySelector('#meta'),result=document.querySelector('#result');
-function render(payload){const data=payload?.structuredContent??payload?.params?.structuredContent??payload?.params?.result?.structuredContent??payload;const ilo=data?._ilo;if(!data||typeof data!=='object')return;title.textContent=ilo?.domain?ilo.domain[0].toUpperCase()+ilo.domain.slice(1):'Ilo result';summary.textContent=ilo?.stage?('Workflow stage: '+ilo.stage):'Grounded in Ilo’s authenticated state.';meta.replaceChildren();for(const value of [ilo?.policy,ilo?.readOnly?'read only':null].filter(Boolean)){const chip=document.createElement('span');chip.className='pill';chip.textContent=value.replaceAll('_',' ');meta.append(chip)}result.textContent=JSON.stringify(data.result??data.error??data,null,2)}
-const initId='ilo-'+(crypto.randomUUID?.()??String(Date.now()));let initialized=false;
-function send(message){parent.postMessage(message,'*')}
-function applyHostContext(context){if(context?.theme)document.documentElement.style.colorScheme=context.theme}
-function reportSize(){if(!initialized)return;send({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth}})}
-addEventListener('message',event=>{if(event.source!==parent)return;const message=event.data;if(!message||message.jsonrpc!=='2.0')return;if(message.id===initId&&message.result){initialized=true;applyHostContext(message.result.hostContext);send({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}});reportSize();return}if(message.method==='ui/notifications/tool-result'){render(message.params);return}if(message.method==='ui/notifications/host-context-changed'){applyHostContext(message.params);return}if(message.method==='ui/resource-teardown'&&message.id!==undefined){send({id:message.id,jsonrpc:'2.0',result:{}})}});
-new ResizeObserver(()=>requestAnimationFrame(reportSize)).observe(document.documentElement);
-send({id:initId,jsonrpc:'2.0',method:'ui/initialize',params:{appCapabilities:{availableDisplayModes:['inline']},appInfo:{name:'ilo-work-surface',title:'Ilo agent work surface',version:'0.1.0'},protocolVersion:'2026-01-26'}});
-</script></body></html>`;

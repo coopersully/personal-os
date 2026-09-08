@@ -41,6 +41,97 @@ describe.sequential("guided Finance setup", () => {
     await container.stop();
   });
 
+  it("resumes a setup proposal revised and approved through another Finance surface", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Portal setup",
+        email: "portal-setup@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Fixture user was not created.");
+    const now = () => new Date("2026-08-23T20:00:00Z");
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const service = createSetupService({ db: database.db, now, planning });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId: owner.id,
+      },
+      requestId: "cross-surface-setup",
+    });
+    await planning.updateFinancialProfile(
+      {
+        expectedVersion: 0,
+        idempotencyKey: "cross-profile",
+        changes: {
+          jurisdiction: "US-NY",
+          householdSize: 1,
+          expectedMonthlyTakeHome: 4000,
+          liquidReserves: 2000,
+        },
+      },
+      context,
+    );
+    const started = await service.setupFinances({ operation: "start" }, context);
+    const original = (await planning.getFinanceBudget(owner.id)).data;
+    if (!original) throw new Error("Setup proposal missing.");
+    const revised = await planning.reviseFinanceBudget(
+      {
+        planId: original.planId,
+        expectedVersion: original.version,
+        idempotencyKey: "cross-revise",
+        effectiveFrom: original.effectiveFrom,
+        name: "Updated portal plan",
+        resources: original.resources,
+        allocations: original.allocations,
+        assumptions: original.assumptions,
+        rationale: "Revised in the portal.",
+      },
+      context,
+    );
+    const resumed = await service.setupFinances(
+      { operation: "resume", sessionId: started.data.sessionId },
+      context,
+    );
+    expect(resumed.data).toMatchObject({
+      budgetVersionId: revised.data.id,
+      stage: "budget_approval",
+      version: started.data.version + 1,
+    });
+    await planning.approveFinanceBudget(
+      {
+        budgetVersionId: revised.data.id,
+        expectedVersion: revised.data.version,
+        approvalSource: "user_instruction",
+        idempotencyKey: "cross-approve",
+      },
+      context,
+    );
+    const ready = await service.setupFinances(
+      { operation: "resume", sessionId: started.data.sessionId },
+      context,
+    );
+    expect(ready.data).toMatchObject({
+      budgetVersionId: revised.data.id,
+      stage: "initial_maintenance",
+      version: resumed.data.version + 1,
+    });
+    expect(ready.nextAction?.tool).toBe("maintain_finances");
+    expect(
+      (
+        await service.setupFinances(
+          { operation: "resume", sessionId: started.data.sessionId },
+          context,
+        )
+      ).data.version,
+    ).toBe(ready.data.version);
+  });
+
   it("persists each answer, proposes a budget, and hands approval into maintenance", async () => {
     const now = () => new Date("2026-08-23T20:00:00Z");
     const planning = createProfileBudgetService({ db: database.db, now });

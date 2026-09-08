@@ -89,7 +89,7 @@ export function financeAgentAccessCapability(
       support === "executable_rules"
         ? "This deployment publishes Finance guidance, signed-in review, and Finance-owned executable rules."
         : "Finance setup can learn guidance, inspect account-source health, and prepare work for signed-in review. It does not grant transaction-edit authority.",
-    setupPrompt: `Use ${invocation} to set up my Finances in Ilo. Inspect account-source health without exposing unnecessary balances, ask the shortest useful guidance interview, save a draft profile, and clearly route required decisions to signed-in Finance review${support === "executable_rules" ? " while using only the Finance-owned rules this deployment publishes" : ""}.`,
+    setupPrompt: `Use ${invocation} to set up my Finances in nohmi. Inspect account-source health without exposing unnecessary balances, ask the shortest useful guidance interview, save a draft profile, and clearly route required decisions to signed-in Finance review${support === "executable_rules" ? " while using only the Finance-owned rules this deployment publishes" : ""}.`,
     title:
       support === "executable_rules"
         ? "Finance guidance, review, and rules"

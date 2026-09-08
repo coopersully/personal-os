@@ -112,6 +112,41 @@ describe.sequential("trusted Finance mutation context", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("holds shared semantic locks before running an idempotent mutation", async () => {
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "ordered-locks",
+    });
+    const lockIdentity = `finance-budget-buckets:${userId}`;
+
+    await expect(
+      executeFinanceIdempotently(
+        database.db,
+        context,
+        {
+          idempotencyKey: "ordered-locks",
+          lockIdentities: [lockIdentity, lockIdentity],
+          operation: "finance.bucket-lock-order",
+          payload: {},
+        },
+        async () => {
+          const competing = await database.pool.query<{ acquired: boolean }>(
+            "select pg_try_advisory_xact_lock(hashtextextended($1, 0)) as acquired",
+            [lockIdentity],
+          );
+          expect(competing.rows[0]?.acquired).toBe(false);
+          return { ordered: true };
+        },
+      ),
+    ).resolves.toEqual({ ordered: true });
+  });
+
   it("bounds a unique-claim retry to one additional transaction attempt", async () => {
     const retryResult = { retried: true };
     const transaction = vi

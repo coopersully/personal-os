@@ -32,6 +32,7 @@ import {
   type FinanceMutationContext,
   requireFinanceMutation,
 } from "./context.js";
+import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 
 type Options = { db: Database; now: () => Date };
@@ -458,13 +459,15 @@ export function createProfileBudgetService({ db, now }: Options) {
           : eq(financeBudgetVersions.userId, userId),
       });
       const data = row ? await budgetValue(row) : null;
-      return result({
-        data,
-        disclosures: data ? budgetDisclosures(data) : [],
-        headline: data
-          ? `Budget version ${data.version} is ${data.status}.`
-          : "No budget exists yet.",
-      });
+      return withFinanceBudgetPresentation(
+        result({
+          data,
+          disclosures: data ? budgetDisclosures(data) : [],
+          headline: data
+            ? `Budget version ${data.version} is ${data.status}.`
+            : "No budget exists yet.",
+        }),
+      );
     },
 
     async createFinanceBudget(
@@ -481,19 +484,21 @@ export function createProfileBudgetService({ db, now }: Options) {
         },
         async (tx) => {
           const data = await insertBudgetVersion(tx, input, context);
-          return result({
-            changes: [
-              {
-                affectedEntityId: data.id,
-                description: `Created proposed budget version ${data.version}.`,
-                reversible: true,
-                type: "budget_proposed",
-              },
-            ],
-            data,
-            disclosures: budgetDisclosures(data),
-            headline: "I created a balanced budget proposal.",
-          });
+          return withFinanceBudgetPresentation(
+            result({
+              changes: [
+                {
+                  affectedEntityId: data.id,
+                  description: `Created proposed budget version ${data.version}.`,
+                  reversible: true,
+                  type: "budget_proposed",
+                },
+              ],
+              data,
+              disclosures: budgetDisclosures(data),
+              headline: "I created a balanced budget proposal.",
+            }),
+          );
         },
       );
     },
@@ -529,19 +534,21 @@ export function createProfileBudgetService({ db, now }: Options) {
             id: plan.id,
             latestVersion: latest.version,
           });
-          return result({
-            changes: [
-              {
-                affectedEntityId: data.id,
-                description: `Created budget revision ${data.version}.`,
-                reversible: true,
-                type: "budget_revised",
-              },
-            ],
-            data,
-            disclosures: budgetDisclosures(data),
-            headline: "I revised the budget and kept it balanced.",
-          });
+          return withFinanceBudgetPresentation(
+            result({
+              changes: [
+                {
+                  affectedEntityId: data.id,
+                  description: `Created budget revision ${data.version}.`,
+                  reversible: true,
+                  type: "budget_revised",
+                },
+              ],
+              data,
+              disclosures: budgetDisclosures(data),
+              headline: "I revised the budget and kept it balanced.",
+            }),
+          );
         },
       );
     },
@@ -614,19 +621,21 @@ export function createProfileBudgetService({ db, now }: Options) {
             return active;
           })();
           const data = await budgetValue(row, tx);
-          return result({
-            changes: [
-              {
-                affectedEntityId: data.id,
-                description: `Activated budget version ${data.version}.`,
-                reversible: true,
-                type: "budget_approved",
-              },
-            ],
-            data,
-            disclosures: budgetDisclosures(data),
-            headline: "The balanced budget is now active.",
-          });
+          return withFinanceBudgetPresentation(
+            result({
+              changes: [
+                {
+                  affectedEntityId: data.id,
+                  description: `Activated budget version ${data.version}.`,
+                  reversible: true,
+                  type: "budget_approved",
+                },
+              ],
+              data,
+              disclosures: budgetDisclosures(data),
+              headline: "The balanced budget is now active.",
+            }),
+          );
         },
       );
     },
@@ -640,11 +649,13 @@ export function createProfileBudgetService({ db, now }: Options) {
         ),
       });
       const data = row ? await budgetValue(row) : null;
-      return result({
-        data,
-        disclosures: data ? budgetDisclosures(data) : [],
-        headline: data ? "Your active budget is balanced." : "There is no active budget.",
-      });
+      return withFinanceBudgetPresentation(
+        result({
+          data,
+          disclosures: data ? budgetDisclosures(data) : [],
+          headline: data ? "Your active budget is balanced." : "There is no active budget.",
+        }),
+      );
     },
 
     async listFinanceGoals(userId: string) {

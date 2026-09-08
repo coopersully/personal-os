@@ -1,4 +1,8 @@
-import { type AccessScope, accessScopeSchema } from "@personal-os/domain";
+import {
+  type AccessScope,
+  accessScopeSchema,
+  type FinancePresentationKind,
+} from "@personal-os/domain";
 
 export const iloToolStages = [
   "context",
@@ -20,10 +24,11 @@ export type IloToolDefinition = {
   idempotent?: boolean;
   openWorld?: boolean;
   policy: IloToolPolicy;
+  presentation?: FinancePresentationKind;
   readOnly: boolean;
   requiredScopes: readonly AccessScope[];
+  scopeMatch?: "any" | "all";
   stage: IloToolStage;
-  ui?: boolean;
 };
 
 const allScopes = accessScopeSchema.options;
@@ -41,7 +46,7 @@ function read(
   domain: string,
   requiredScopes: readonly AccessScope[],
   stage: IloToolStage = "inspect",
-  options: Pick<IloToolDefinition, "openWorld" | "ui"> = {},
+  options: Pick<IloToolDefinition, "openWorld" | "presentation"> = {},
 ): IloToolDefinition {
   return { domain, policy: "read_only", readOnly: true, requiredScopes, stage, ...options };
 }
@@ -49,7 +54,7 @@ function read(
 function preview(
   domain: string,
   requiredScopes: readonly AccessScope[],
-  options: Pick<IloToolDefinition, "openWorld" | "ui"> = {},
+  options: Pick<IloToolDefinition, "openWorld" | "presentation"> = {},
 ): IloToolDefinition {
   return {
     domain,
@@ -66,7 +71,10 @@ function write(
   domain: string,
   requiredScopes: readonly AccessScope[],
   options: Partial<
-    Pick<IloToolDefinition, "destructive" | "idempotent" | "openWorld" | "policy" | "stage" | "ui">
+    Pick<
+      IloToolDefinition,
+      "destructive" | "idempotent" | "openWorld" | "policy" | "presentation" | "stage"
+    >
   > = {},
 ): IloToolDefinition {
   return {
@@ -78,17 +86,17 @@ function write(
     ...(options.destructive === undefined ? {} : { destructive: options.destructive }),
     ...(options.idempotent === undefined ? {} : { idempotent: options.idempotent }),
     ...(options.openWorld === undefined ? {} : { openWorld: options.openWorld }),
-    ...(options.ui === undefined ? {} : { ui: options.ui }),
+    ...(options.presentation === undefined ? {} : { presentation: options.presentation }),
   };
 }
 
 /**
- * The single discoverability and safety registry for Ilo's MCP surface.
+ * The single discoverability and safety registry for Nomi's MCP surface.
  * Feature modules own behavior; this catalog owns how that behavior is exposed.
  */
 export const iloToolCatalog = {
-  get_ilo_context: read("assistant", [], "context", { ui: true }),
-  get_ilo_setup: read("assistant", [], "context", { ui: true }),
+  get_ilo_context: read("assistant", [], "context"),
+  get_ilo_setup: read("assistant", [], "context"),
   get_agent_setup_status: { ...read("assistant", [], "context"), compatibility: true },
   get_domain_profile: read("assistant", domainReadScopes),
   save_domain_profile: write("assistant", domainWriteScopes),
@@ -96,25 +104,44 @@ export const iloToolCatalog = {
   create_attention_item: write("assistant", domainWriteScopes),
   update_attention_item: write("assistant", domainWriteScopes),
 
+  list_task_lists: read("tasks", ["tasks:read"]),
+  get_task_list: read("tasks", ["tasks:read"]),
+  create_task_list: write("tasks", ["tasks:write"], { idempotent: true }),
+  update_task_list: write("tasks", ["tasks:write"]),
+  archive_task_list: write("tasks", ["tasks:write"], { destructive: true }),
+  list_task_projects: read("tasks", ["tasks:read"]),
+  get_task_project: read("tasks", ["tasks:read"]),
+  create_task_project: write("tasks", ["tasks:write"], { idempotent: true }),
+  update_task_project: write("tasks", ["tasks:write"]),
+  complete_task_project: write("tasks", ["tasks:write"]),
+  cancel_task_project: write("tasks", ["tasks:write"]),
+  archive_task_project: write("tasks", ["tasks:write"], { destructive: true }),
+  preview_task_project_move: preview("tasks", ["tasks:read"]),
+  move_task_project: write("tasks", ["tasks:write"], { destructive: true }),
   list_tasks: read("tasks", ["tasks:read"]),
-  create_task: write("tasks", ["tasks:write"]),
-  update_task: write("tasks", ["tasks:write"], { idempotent: true }),
-  complete_task: write("tasks", ["tasks:write"], { idempotent: true }),
-  delete_task: write("tasks", ["tasks:write"], { destructive: true, idempotent: true }),
+  list_task_workspace: { ...read("tasks", ["tasks:read", "reminders:read"]), scopeMatch: "all" },
+  get_task: read("tasks", ["tasks:read"]),
+  create_task: write("tasks", ["tasks:write"], { idempotent: true }),
+  update_task: write("tasks", ["tasks:write"]),
+  complete_task: write("tasks", ["tasks:write"]),
+  reopen_task: write("tasks", ["tasks:write"]),
+  cancel_task: write("tasks", ["tasks:write"]),
+  trash_task: write("tasks", ["tasks:write"], { destructive: true }),
+  restore_task: write("tasks", ["tasks:write"]),
+  preview_task_move: preview("tasks", ["tasks:read"]),
+  move_task: write("tasks", ["tasks:write"], { destructive: true }),
   list_goals: read("goals", ["goals:read"]),
   create_goal: write("goals", ["goals:write"]),
   update_goal: write("goals", ["goals:write"]),
   list_motives: read("goals", ["goals:read"]),
   create_motive: write("goals", ["goals:write"]),
   list_activity: read("activity", ["audit:read"], "verify"),
-  get_daily_brief: read("today", ["automations:read"], "context", { ui: true }),
+  get_daily_brief: read("today", ["automations:read"], "context"),
 
   list_calendars: read("calendar", ["calendar:read"]),
   list_events: read("calendar", ["calendar:read"]),
   get_event: read("calendar", ["calendar:read"]),
-  preview_calendar_commitment: preview("calendar", ["calendar:read"], {
-    ui: true,
-  }),
+  preview_calendar_commitment: preview("calendar", ["calendar:read"]),
   create_event: write("calendar", ["calendar:write"], { openWorld: true }),
   update_event: write("calendar", ["calendar:write"], { openWorld: true }),
   block_event: write("calendar", ["calendar:write"], { openWorld: true }),
@@ -135,8 +162,8 @@ export const iloToolCatalog = {
   list_mail: read("mail", ["mail:read"]),
   read_mail: read("mail", ["mail:read"]),
   list_mail_rules: read("mail", ["mail:read"]),
-  preview_mail_rule: preview("mail", ["mail:read"], { ui: true }),
-  review_mail_rule: read("mail", ["mail:read"], "verify", { ui: true }),
+  preview_mail_rule: preview("mail", ["mail:read"]),
+  review_mail_rule: read("mail", ["mail:read"], "verify"),
   update_mail: write("mail", ["mail:write"], { openWorld: true }),
   bulk_update_mail: write("mail", ["mail:write"], { openWorld: true }),
   snooze_mail: write("mail", ["mail:write"]),
@@ -157,7 +184,7 @@ export const iloToolCatalog = {
 
   list_reminders: read("reminders", ["reminders:read"]),
   get_reminder: read("reminders", ["reminders:read"]),
-  preview_overdue_reminder_deferral: preview("reminders", ["reminders:read"], { ui: true }),
+  preview_overdue_reminder_deferral: preview("reminders", ["reminders:read"]),
   create_reminder: write("reminders", ["reminders:write"]),
   create_reminder_attention_item: write("reminders", ["reminders:write"]),
   update_reminder: write("reminders", ["reminders:write"]),
@@ -167,7 +194,8 @@ export const iloToolCatalog = {
   }),
   restore_reminder: write("reminders", ["reminders:write"]),
 
-  get_finance_guided_setup: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_guided_setup: read("finances", ["finances:read"], "context"),
+  get_finance_playbook: read("finances", ["finances:read"], "context"),
   get_finance_automation_settings: read("finances", ["finances:read"]),
   get_finance_status: {
     ...read("finances", ["finances:read"]),
@@ -195,15 +223,18 @@ export const iloToolCatalog = {
     policy: "approved_rule",
     stage: "commit",
   }),
-  get_finance_period_review: read("finances", ["finances:read"], "inspect", { ui: true }),
+  get_finance_period_review: read("finances", ["finances:read"], "inspect", {
+    presentation: "finance_period_verification",
+  }),
   get_finance_wealth_summary: read("finances", ["finances:read"]),
   get_finance_cashflow: read("finances", ["finances:read"]),
   get_finance_ledger_health: read("finances", ["finances:read"]),
+  review_finance_receipt: read("finances", ["finances:read"]),
   list_finance_transactions: read("finances", ["finances:read"]),
   get_finance_categories: read("finances", ["finances:read"]),
   get_finance_budget_status: read("finances", ["finances:read"]),
   list_finance_merchants: read("finances", ["finances:read"]),
-  get_finance_review_queue: read("finances", ["finances:read"], "inspect", { ui: true }),
+  get_finance_review_queue: read("finances", ["finances:read"], "inspect"),
   propose_finance_categorizations: preview("finances", ["finances:read"]),
   apply_finance_categorizations: write("finances", ["finances:write"], {
     policy: "approved_rule",
@@ -226,6 +257,7 @@ export const iloToolCatalog = {
   update_finance_merchant: write("finances", ["finances:write"], { policy: "approved_rule" }),
   merge_finance_merchants: write("finances", ["finances:write"], { policy: "approved_rule" }),
   create_finance_budget: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  manage_finance_budget_bucket: write("finances", ["finances:write"], { policy: "approved_rule" }),
   update_finance_transaction: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),
@@ -236,7 +268,7 @@ export const iloToolCatalog = {
   refresh_finance_insights: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),
-  get_finance_overview: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_overview: read("finances", ["finances:read"], "context"),
   create_finance_attention_item: write("finances", ["finances:write"]),
   setup_finances: write("finances", ["finances:write"], { policy: "approved_rule" }),
   get_finance_maintenance_history: read("finances", ["finances:read"]),
@@ -245,7 +277,9 @@ export const iloToolCatalog = {
     idempotent: true,
     policy: "approved_rule",
   }),
-  get_finance_budget: read("finances", ["finances:read"]),
+  get_finance_budget: read("finances", ["finances:read"], "inspect", {
+    presentation: "finance_budget",
+  }),
   revise_finance_budget: write("finances", ["finances:write"], {
     idempotent: true,
     policy: "approved_rule",
@@ -259,14 +293,19 @@ export const iloToolCatalog = {
     idempotent: true,
     policy: "approved_rule",
   }),
-  get_finance_inbox: read("finances", ["finances:read"], "inspect", { ui: true }),
+  get_finance_inbox: read("finances", ["finances:read"], "inspect", {
+    presentation: "finance_review",
+  }),
   answer_finance_review: write("finances", ["finances:write"], {
     idempotent: true,
     policy: "approved_rule",
   }),
-  get_finance_snapshot: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_snapshot: read("finances", ["finances:read"], "context", {
+    presentation: "finance_snapshot",
+  }),
   export_finance_data: read("finances", ["finances:read"]),
   list_finance_accounts: read("finances", ["finances:read"]),
+  list_finance_budget_buckets: read("finances", ["finances:read"]),
   start_finance_account_connection: write("finances", ["finances:write"], {
     idempotent: true,
     openWorld: true,
@@ -343,6 +382,8 @@ export function canDiscoverTool(
   if (definition.compatibility && !includeCompatibility) return false;
   if (readOnly && !definition.readOnly) return false;
   if (definition.requiredScopes.length === 0) return true;
+  if (definition.scopeMatch === "all")
+    return definition.requiredScopes.every((scope) => scopes.has(scope));
   return definition.requiredScopes.some((scope) => scopes.has(scope));
 }
 

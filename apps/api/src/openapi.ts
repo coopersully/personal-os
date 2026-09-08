@@ -1,8 +1,45 @@
+import { taskWorkspacePageSchema } from "@personal-os/domain";
+import { z } from "zod";
+
 export function createOpenApiDocument(apiBaseUrl: string) {
   const security = [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }];
+  const taskReadScope = ["tasks:read"];
+  const taskWriteScope = ["tasks:write"];
+  const taskIdParameter = {
+    in: "path",
+    name: "id",
+    required: true,
+    schema: { format: "uuid", type: "string" },
+  };
+  const queryParameter = (name: string, schema: Record<string, unknown>) => ({
+    in: "query",
+    name,
+    required: false,
+    schema,
+  });
+  const paginationParameters = [
+    queryParameter("cursor", { minLength: 1, type: "string" }),
+    queryParameter("limit", { maximum: 100, minimum: 1, type: "integer" }),
+  ];
+  const jsonRequest = (schema: string, required = true) => ({
+    content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } },
+    required,
+  });
+  const taskRead = (description: string) => ({
+    security,
+    responses: { 200: { description } },
+    "x-required-scopes": taskReadScope,
+  });
+  const taskWrite = (description: string, schema?: string, status: 200 | 201 | 204 = 200) => ({
+    ...(schema ? { requestBody: jsonRequest(schema) } : {}),
+    security,
+    responses: { [status]: { description } },
+    "x-required-scopes": taskWriteScope,
+  });
   return {
     components: {
       schemas: {
+        TaskWorkspacePage: z.toJSONSchema(taskWorkspacePageSchema, { io: "input" }),
         FinanceMaintenanceRequest: {
           properties: {
             scope: { $ref: "#/components/schemas/MaintenanceScope" },
@@ -102,32 +139,211 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           type: "object",
         },
         MaintenanceScope: {
-          discriminator: { propertyName: "type" },
+          discriminator: {
+            mapping: {
+              all_outstanding: "#/components/schemas/MaintenanceScopeAllOutstanding",
+              target: "#/components/schemas/MaintenanceScopeTarget",
+              window: "#/components/schemas/MaintenanceScopeWindow",
+            },
+            propertyName: "type",
+          },
           oneOf: [
-            {
-              properties: { type: { const: "all_outstanding" } },
-              required: ["type"],
-              type: "object",
-            },
-            {
-              properties: {
-                end: { format: "date", type: "string" },
-                start: { format: "date", type: "string" },
-                type: { const: "window" },
-              },
-              required: ["type", "start", "end"],
-              type: "object",
-            },
-            {
-              properties: {
-                entityType: { type: "string" },
-                id: { format: "uuid", type: "string" },
-                type: { const: "target" },
-              },
-              required: ["type", "entityType", "id"],
-              type: "object",
-            },
+            { $ref: "#/components/schemas/MaintenanceScopeAllOutstanding" },
+            { $ref: "#/components/schemas/MaintenanceScopeWindow" },
+            { $ref: "#/components/schemas/MaintenanceScopeTarget" },
           ],
+        },
+        MaintenanceScopeAllOutstanding: {
+          properties: { type: { const: "all_outstanding" } },
+          required: ["type"],
+          type: "object",
+        },
+        MaintenanceScopeTarget: {
+          properties: {
+            entityType: { type: "string" },
+            id: { format: "uuid", type: "string" },
+            type: { const: "target" },
+          },
+          required: ["type", "entityType", "id"],
+          type: "object",
+        },
+        MaintenanceScopeWindow: {
+          properties: {
+            end: { format: "date", type: "string" },
+            start: { format: "date", type: "string" },
+            type: { const: "window" },
+          },
+          required: ["type", "start", "end"],
+          type: "object",
+        },
+        TaskListArchiveInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+            resolution: {
+              enum: ["move_active_contents", "archive_contents_together", "cancel"],
+              type: "string",
+            },
+          },
+          type: "object",
+        },
+        TaskListCreateInput: {
+          additionalProperties: false,
+          properties: {
+            color: { type: ["string", "null"] },
+            description: { type: ["string", "null"] },
+            idempotencyKey: { format: "uuid", type: "string" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+        TaskListUpdateInput: {
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            color: { type: ["string", "null"] },
+            description: { type: ["string", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+          },
+          type: "object",
+        },
+        TaskProjectArchiveInput: {
+          additionalProperties: false,
+          properties: { expectedRevision: { minimum: 1, type: "integer" } },
+          type: "object",
+        },
+        TaskProjectCancelInput: {
+          additionalProperties: false,
+          properties: { expectedRevision: { minimum: 1, type: "integer" } },
+          type: "object",
+        },
+        TaskProjectCompleteInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            destinationProjectId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+            resolution: {
+              enum: [
+                "complete_open_tasks",
+                "cancel_open_tasks",
+                "move_open_tasks",
+                "keep_project_open",
+              ],
+              type: "string",
+            },
+          },
+          type: "object",
+        },
+        TaskProjectCreateInput: {
+          additionalProperties: false,
+          properties: {
+            idempotencyKey: { format: "uuid", type: "string" },
+            listId: { format: "uuid", type: "string" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+            notes: { type: ["string", "null"] },
+            targetDate: { format: "date", type: ["string", "null"] },
+            why: { type: ["string", "null"] },
+          },
+          required: ["listId", "name"],
+          type: "object",
+        },
+        TaskProjectMoveInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+            previewToken: { maxLength: 512, minLength: 1, type: "string" },
+          },
+          required: ["destinationListId", "previewToken"],
+          type: "object",
+        },
+        TaskProjectMovePreviewInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+          },
+          required: ["destinationListId"],
+          type: "object",
+        },
+        TaskProjectUpdateInput: {
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            expectedRevision: { minimum: 1, type: "integer" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+            notes: { type: ["string", "null"] },
+            targetDate: { format: "date", type: ["string", "null"] },
+            why: { type: ["string", "null"] },
+          },
+          type: "object",
+        },
+        TaskCreateInput: {
+          additionalProperties: false,
+          properties: {
+            dueAt: { format: "date-time", type: ["string", "null"] },
+            estimateMinutes: { maximum: 1440, minimum: 5, type: ["integer", "null"] },
+            idempotencyKey: { format: "uuid", type: "string" },
+            lifecycle: { enum: ["open", "completed", "cancelled"], type: "string" },
+            listId: { format: "uuid", type: "string" },
+            notes: { type: ["string", "null"] },
+            priority: { enum: ["low", "medium", "high"], type: "string" },
+            projectId: { format: "uuid", type: "string" },
+            scheduledAt: { format: "date-time", type: ["string", "null"] },
+            tags: { items: { type: "string" }, maxItems: 20, type: "array" },
+            timezone: { type: ["string", "null"] },
+            title: { maxLength: 240, minLength: 1, type: "string" },
+            why: { type: ["string", "null"] },
+          },
+          required: ["title"],
+          type: "object",
+        },
+        TaskMoveInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            destinationProjectId: { format: "uuid", type: ["string", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+            previewToken: { maxLength: 512, minLength: 1, type: "string" },
+          },
+          required: ["destinationListId", "previewToken"],
+          type: "object",
+        },
+        TaskMovePreviewInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            destinationProjectId: { format: "uuid", type: ["string", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+          },
+          required: ["destinationListId"],
+          type: "object",
+        },
+        TaskRevisionInput: {
+          additionalProperties: false,
+          properties: { expectedRevision: { minimum: 1, type: "integer" } },
+          type: "object",
+        },
+        TaskUpdateInput: {
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            dueAt: { format: "date-time", type: ["string", "null"] },
+            estimateMinutes: { maximum: 1440, minimum: 5, type: ["integer", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+            notes: { type: ["string", "null"] },
+            priority: { enum: ["low", "medium", "high"], type: "string" },
+            scheduledAt: { format: "date-time", type: ["string", "null"] },
+            tags: { items: { type: "string" }, maxItems: 20, type: "array" },
+            timezone: { type: ["string", "null"] },
+            title: { maxLength: 240, minLength: 1, type: "string" },
+            why: { type: ["string", "null"] },
+          },
+          type: "object",
         },
       },
       securitySchemes: {
@@ -144,7 +360,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     info: {
       description:
         "The shared reminders, calendar, mail, finance, and assistant data plane for people and agents.",
-      title: "ilo API",
+      title: "nohmi API",
       version: "0.1.0",
     },
     openapi: "3.1.0",
@@ -393,20 +609,220 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           },
         },
       },
+      "/v1/task-lists": {
+        get: { ...taskRead("Task Lists"), parameters: paginationParameters },
+        post: taskWrite("Task List created", "TaskListCreateInput", 201),
+      },
+      "/v1/task-lists/{id}": {
+        get: { ...taskRead("Task List"), parameters: [taskIdParameter] },
+        patch: {
+          ...taskWrite("Task List updated", "TaskListUpdateInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-lists/{id}/archive": {
+        post: {
+          ...taskWrite("Task List archived", "TaskListArchiveInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects": {
+        get: { ...taskRead("Task Projects"), parameters: paginationParameters },
+        post: taskWrite("Task Project created", "TaskProjectCreateInput", 201),
+      },
+      "/v1/task-projects/{id}": {
+        get: { ...taskRead("Task Project"), parameters: [taskIdParameter] },
+        patch: {
+          ...taskWrite("Task Project updated", "TaskProjectUpdateInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/complete": {
+        post: {
+          ...taskWrite("Task Project completed", "TaskProjectCompleteInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/cancel": {
+        post: {
+          ...taskWrite("Task Project cancelled", "TaskProjectCancelInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/archive": {
+        post: {
+          ...taskWrite("Task Project archived", "TaskProjectArchiveInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/move/preview": {
+        post: {
+          ...taskRead("Exact read-only Task Project move preview"),
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("TaskProjectMovePreviewInput"),
+        },
+      },
+      "/v1/task-projects/{id}/move": {
+        post: {
+          ...taskWrite("Task Project and its Tasks moved", "TaskProjectMoveInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-workspace": {
+        get: {
+          security,
+          description:
+            "Read a globally filtered, grouped and sorted mixed Tasks/Reminders page. Both read scopes are required by default. kind=task requires only tasks:read; kind=reminder requires only reminders:read. Omitted status means open for All/Today/Upcoming and all for History/Trash. History includes terminal records or unavailable containers. readOnly marks unavailable containers outside Trash; Trash permits guarded restoration including Inbox fallback. deletedAt is independent. Today uses the user's planning timezone; Upcoming starts after today. Exact due/scheduled bounds are inclusive. Date groupKey is YYYY-MM-DD in that timezone; container keys are IDs; missing or ungrouped keys are none. Cursor is signed and bound to user, timezone and filters; it freezes the clock, not concurrent record changes. total is the matching count before cursor pagination.",
+          "x-required-scopes": ["tasks:read", "reminders:read"],
+          "x-required-scopes-by-kind": { task: ["tasks:read"], reminder: ["reminders:read"] },
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", {
+              type: "string",
+              enum: ["all", "task", "reminder"],
+              default: "all",
+            }),
+            queryParameter("view", {
+              type: "string",
+              enum: ["all", "today", "upcoming", "history", "trash"],
+              default: "all",
+            }),
+            queryParameter("status", {
+              type: "string",
+              enum: ["all", "open", "completed", "cancelled", "archived"],
+            }),
+            queryParameter("listId", { format: "uuid", type: "string" }),
+            queryParameter("projectId", { format: "uuid", type: "string" }),
+            queryParameter("query", { minLength: 1, maxLength: 200, type: "string" }),
+            queryParameter("priority", { type: "string", enum: ["low", "medium", "high"] }),
+            queryParameter("tag", { minLength: 1, maxLength: 60, type: "string" }),
+            queryParameter("due", {
+              type: "string",
+              enum: ["any", "overdue", "none", "dated"],
+              default: "any",
+            }),
+            queryParameter("reserved", {
+              type: "string",
+              enum: ["any", "none", "scheduled"],
+              default: "any",
+            }),
+            ...["dueAfter", "dueBefore", "scheduledAfter", "scheduledBefore"].map((name) =>
+              queryParameter(name, { format: "date-time", type: "string" }),
+            ),
+            queryParameter("sort", {
+              type: "string",
+              enum: [
+                "default",
+                "date",
+                "reserved",
+                "priority",
+                "newest",
+                "oldest",
+                "title",
+                "estimate",
+              ],
+              default: "default",
+            }),
+            queryParameter("group", {
+              type: "string",
+              enum: ["none", "date", "list", "project"],
+              default: "none",
+            }),
+          ],
+          responses: {
+            200: {
+              description: "Task workspace page",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/TaskWorkspacePage" } },
+              },
+            },
+            400: { description: "Invalid query, date bounds, or mismatched cursor" },
+            403: { description: "Required task/reminder read scope missing" },
+          },
+        },
+      },
       "/v1/tasks": {
-        get: { security, responses: { 200: { description: "Task page" } } },
-        post: { security, responses: { 201: { description: "Task created" } } },
+        get: {
+          ...taskRead("Task page"),
+          parameters: [
+            ...paginationParameters,
+            queryParameter("lifecycle", {
+              enum: ["open", "completed", "cancelled"],
+              type: "string",
+            }),
+            queryParameter("listId", { format: "uuid", type: "string" }),
+            queryParameter("projectId", { format: "uuid", type: "string" }),
+            queryParameter("view", {
+              enum: ["today", "upcoming", "scheduled", "completed", "cancelled", "trash"],
+              type: "string",
+            }),
+            queryParameter("query", { maxLength: 200, minLength: 1, type: "string" }),
+            queryParameter("dueAfter", { format: "date-time", type: "string" }),
+            queryParameter("dueBefore", { format: "date-time", type: "string" }),
+            queryParameter("scheduledAfter", { format: "date-time", type: "string" }),
+            queryParameter("scheduledBefore", { format: "date-time", type: "string" }),
+          ],
+        },
+        post: taskWrite("Task created", "TaskCreateInput", 201),
       },
       "/v1/tasks/{id}": {
-        delete: { security, responses: { 204: { description: "Task deleted" } } },
-        get: { security, responses: { 200: { description: "Task" } } },
-        patch: { security, responses: { 200: { description: "Task updated" } } },
+        delete: {
+          ...taskWrite("Task moved to Trash", "TaskRevisionInput", 204),
+          deprecated: true,
+          description:
+            "Deprecated compatibility alias that moves the Task to recoverable Trash. Use the focused trash operation instead.",
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("TaskRevisionInput", false),
+          "x-successor-operation": "POST /v1/tasks/{id}/trash",
+        },
+        get: { ...taskRead("Task"), parameters: [taskIdParameter] },
+        patch: {
+          ...taskWrite("Task updated", "TaskUpdateInput"),
+          parameters: [taskIdParameter],
+        },
       },
       "/v1/tasks/{id}/complete": {
-        post: { security, responses: { 200: { description: "Task completed or reopened" } } },
+        post: {
+          ...taskWrite("Task completed", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/cancel": {
+        post: {
+          ...taskWrite("Task cancelled", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/reopen": {
+        post: {
+          ...taskWrite("Task reopened", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/trash": {
+        post: {
+          ...taskWrite("Task moved to recoverable Trash", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
       },
       "/v1/tasks/{id}/restore": {
-        post: { security, responses: { 200: { description: "Task restored" } } },
+        post: {
+          ...taskWrite("Task restored", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/move/preview": {
+        post: {
+          ...taskRead("Exact read-only Task move preview"),
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("TaskMovePreviewInput"),
+        },
+      },
+      "/v1/tasks/{id}/move": {
+        post: {
+          ...taskWrite("Task moved", "TaskMoveInput"),
+          parameters: [taskIdParameter],
+        },
       },
       "/v1/calendars": {
         get: { security, responses: { 200: { description: "Calendars" } } },
@@ -613,7 +1029,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/assistant/context": {
         get: {
           security,
-          responses: { 200: { description: "Authenticated Ilo agent context" } },
+          responses: { 200: { description: "Authenticated nohmi agent context" } },
         },
       },
       "/v1/assistant/setup-plan": {

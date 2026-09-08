@@ -10,11 +10,11 @@ import {
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
-const id = idSchema.describe("ilo reminder identifier");
+const id = idSchema.describe("Nomi reminder identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
 const timeZone = reminderTimeZoneSchema.describe("IANA time zone, for example America/New_York");
 const directMutation =
-  "This is a direct, audited mutation. Ilo's API scopes and scoped-agent policy decision are authoritative; profile preferences and MCP annotations do not grant access.";
+  "This is a direct, audited mutation. Nomi's API scopes and scoped-agent policy decision are authoritative; profile preferences and MCP annotations do not grant access.";
 
 const annotations = {
   create: {
@@ -116,7 +116,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
     {
       annotations: annotations.create,
       description:
-        "Create or refresh one open important, upcoming, or follow-up item for an owned active Reminder. Ilo locks and validates the Reminder, derives its local source and current revision, and deduplicates the open Reminder/kind pair.",
+        "Create or refresh one open important, upcoming, or follow-up item for an owned active Reminder. Nomi locks and validates the Reminder, derives its local source and current revision, and deduplicates the open Reminder/kind pair.",
       inputSchema: z.object({
         ...upsertReminderAttentionItemInputSchema.shape,
         reminderId: id,

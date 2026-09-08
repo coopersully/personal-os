@@ -63,11 +63,11 @@ function renderCalendar(calendars: Calendar[] = [localCalendar, googleCalendar])
   );
 }
 
-async function openConferenceMenu(browser: ReturnType<typeof userEvent.setup>) {
-  const trigger =
-    screen.queryByRole("button", { name: "Choose conferencing" }) ??
-    screen.getByRole("button", { name: "Add conferencing" });
-  await browser.click(trigger);
+async function openConferenceMenu(
+  browser: ReturnType<typeof userEvent.setup>,
+  name: "Add conferencing" | "Choose conferencing",
+) {
+  await browser.click(screen.getByRole("button", { name }));
 }
 
 describe("Calendar floating navigation edge states", () => {
@@ -111,19 +111,18 @@ describe("Calendar floating navigation edge states", () => {
     await browser.click(screen.getByRole("button", { name: "Calendar: Personal" }));
     await browser.click(screen.getByRole("button", { name: "Google" }));
     await browser.click(screen.getByRole("button", { name: "Add conferencing" }));
-    await openConferenceMenu(browser);
+    await openConferenceMenu(browser, "Choose conferencing");
     await browser.click(screen.getByRole("menuitemradio", { name: "Generate Google Meet" }));
     await browser.click(screen.getByRole("button", { name: "Calendar: Google" }));
     await browser.click(screen.getByRole("button", { name: "Personal" }));
-    await openConferenceMenu(browser);
+    await openConferenceMenu(browser, "Choose conferencing");
     await browser.click(screen.getByRole("menuitemradio", { name: "Paste meeting link" }));
     await browser.type(screen.getByRole("textbox", { name: "Meeting link" }), "https://meet.test");
     await browser.click(screen.getByRole("button", { name: "Add link" }));
     await browser.type(screen.getByRole("textbox", { name: "Link" }), "https://example.test");
     await browser.click(screen.getByRole("switch", { name: "All day" }));
     await browser.type(screen.getByRole("textbox", { name: "Title" }), "Planning day");
-    const addLocation = screen.queryByRole("button", { name: "Add location" });
-    if (addLocation) await browser.click(addLocation);
+    await browser.click(screen.getByRole("button", { name: "Add location" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Location" }), {
       target: { value: "Nowhere" },
     });

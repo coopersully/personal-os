@@ -32,7 +32,7 @@ const stateCopy: Record<MailStatus["state"], { label: string; description: strin
     label: "Clean",
   },
   needs_input: {
-    description: "Ilo preserved material uncertainty as a bounded question instead of guessing.",
+    description: "nohmi preserved material uncertainty as a bounded question instead of guessing.",
     label: "Needs your input",
   },
   needs_work: {
@@ -104,13 +104,13 @@ export function MailStewardshipPage() {
             </Link>
           </Button>
           <div>
-            <p className="text-sm font-medium text-muted-foreground">Mail Ilo</p>
+            <p className="text-sm font-medium text-muted-foreground">Evidence and authority</p>
             <h1 className="font-heading text-2xl font-medium tracking-tight">
               Workspace stewardship
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Evidence-bound maintenance of obligations, decisions, rules, questions, and reviews.
-              Ilo never sends email.
+              Agents and automation never send email.
             </p>
           </div>
         </div>
@@ -233,9 +233,7 @@ export function MailStewardshipPage() {
         ) : (
           questions.map((question) => (
             <Card
-              className={
-                question.id === focusedQuestion ? "border-foreground bg-muted/30" : undefined
-              }
+              className={question.id === focusedQuestion ? "bg-muted" : undefined}
               key={question.id}
             >
               <CardHeader>
@@ -355,7 +353,7 @@ function AuthorityPanel({ status }: { status: MailStatus }) {
           Authority boundaries
         </h2>
         <p className="text-sm text-muted-foreground">
-          Transmission is permanently outside Ilo’s authority.
+          Sending requires the signed-in person; agents and automation cannot transmit email.
         </p>
       </div>
       <div className="grid gap-3 md:grid-cols-2">

@@ -20,6 +20,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import { withFinanceInboxPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
 
@@ -47,6 +48,7 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
   if (!row.economicEventId)
     throw new AppError("internal_error", "A Finance Inbox case lost its event.");
   return {
+    transactionId: row.transactionId,
     economicEventId: row.economicEventId,
     evidence: row.evidence,
     firstSeenAt: row.firstSeenAt.toISOString(),
@@ -95,7 +97,7 @@ function inboxResult(
   changes: FinanceChange[] = [],
 ): FinanceToolResult<FinanceInboxCase[]> {
   const first = rows[0];
-  return {
+  return withFinanceInboxPresentation({
     changes,
     communication: {
       headline,
@@ -109,7 +111,7 @@ function inboxResult(
     outcome: first ? "user_input_required" : "completed",
     remainingWork: { categories: first ? ["finance_inbox"] : [], count: rows.length },
     schemaVersion: 1,
-  };
+  });
 }
 
 export function createInboxService({ db, now }: Options) {

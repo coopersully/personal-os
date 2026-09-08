@@ -41,6 +41,16 @@ icon = "check"
 command = "bash ./.codex/scripts/environment.sh logs"
 
 [[actions]]
+name = "GC Dry Run"
+icon = "check"
+command = "bash ./.codex/scripts/environment.sh gc --dry-run"
+
+[[actions]]
+name = "Destroy Worktree Runtime"
+icon = "run"
+command = "bash ./.codex/scripts/environment.sh purge --acknowledge-data-loss"
+
+[[actions]]
 name = "Test"
 icon = "test"
 command = "bash ./.codex/scripts/environment.sh test"

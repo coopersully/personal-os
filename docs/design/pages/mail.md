@@ -9,7 +9,7 @@ remain available under a collapsed Accounts disclosure for troubleshooting and d
 single-source review, not as the normal way to use Mail.
 
 Signed-in people may compose, reply, forward, and send plain-text messages. Every message is an
-Ilo-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
+nohmi-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
 stewardship have no send capability.
 
 ## Connection health
@@ -17,7 +17,7 @@ stewardship have no send capability.
 - Mail uses the shared connected-account health contract; it does not interpret provider errors.
 - A Mail-enabled account in `reconnect` produces one warning that names the affected account and
   links directly to Settings → Connections.
-- Automatic retry and ilo-owned service attention keep the last synchronized material available.
+- Automatic retry and nohmi-owned service attention keep the last synchronized material available.
   They do not claim the password is wrong and do not display raw provider responses.
 - Connector health refreshes every 30 seconds while Mail is visible. Provider synchronization is
   owned by the server's five-minute scheduler, not browser polling.
@@ -25,7 +25,7 @@ stewardship have no send capability.
 ## Persistent expert steward
 
 Mail’s default objective is to keep known obligations explicit, current, and reviewable. An
-approved user profile may replace that objective; otherwise Ilo does not invent goals from message
+approved user profile may replace that objective; otherwise nohmi does not invent goals from message
 prose. The durable ledger contains owner-scoped obligations, versioned thread dispositions,
 deduplicated questions, explicit rule proposals, review feedback, and immutable reviews. Provider
 messages remain source material rather than becoming another mutable ledger.
@@ -42,12 +42,12 @@ The `mail-playbook-v1` release combines six bounded professional perspectives:
 Its research registry records review dates and renewal intervals for UK correspondence guidance,
 NARA electronic-message records guidance, NIST email-security guidance, CISA phishing guidance,
 and Gmail label semantics. Those sources bound the rubric; they do not override the user’s goals or
-grant Ilo legal, security, relationship, retention, or transmission authority.
+grant nohmi legal, security, relationship, retention, or transmission authority.
 
 ## Maintenance turn and status
 
 One server-owned maintenance turn executes a fixed, checkpointed sequence: refresh sources,
-capture a repeatable-read snapshot, assess it, reconcile the Ilo ledger, dispatch only already
+capture a repeatable-read snapshot, assess it, reconcile the nohmi ledger, dispatch only already
 approved exact rule work, publish an immutable review, and verify the result. Durable leases,
 idempotent step records, retry timing, and honest failure states allow recovery without replaying a
 completed snapshot. The in-app server scheduler may resume work; there is no external client
@@ -70,7 +70,7 @@ poll, sequence steps, retry effects, or decide completion.
 
 | Boundary | Authority |
 | --- | --- |
-| Automatic | Inspect; refresh/snapshot; reconcile Ilo-owned state; deduplicate questions; calculate status; publish reviews |
+| Automatic | Inspect; refresh/snapshot; reconcile nohmi-owned state; deduplicate questions; calculate status; publish reviews |
 | Approved rule | Mark read/unread, star/unstar, archive, or move only through an active exact rule |
 | Individual approval | Trash and rule activation |
 | Signed-in person | Compose, edit drafts, reply, forward, explicitly confirm send, and reconcile uncertain delivery |
@@ -100,7 +100,7 @@ result. It owns no playbook, memory, batching, confidence threshold, sequencing,
 approval, learning, status inference, or completion decision. Existing surgical read/update and
 approved-rule preview tools remain typed API adapters.
 
-In v1, Ilo does not infer intent from prose and does not use model judgment for assessment. It asks
+In v1, nohmi does not infer intent from prose and does not use model judgment for assessment. It asks
 a bounded question when explicit evidence is absent. Only the signed-in human Mail surface can
 initiate delivery.
 

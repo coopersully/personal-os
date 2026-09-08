@@ -2,7 +2,7 @@
 
 ## User job
 
-**Make ilo useful by connecting the sources I choose, without trapping me in
+**Make nohmi useful by connecting the sources I choose, without trapping me in
 setup or asking me to understand the whole product first.**
 
 Setup is a short guided path, not a product tour. It asks one consequential
@@ -20,15 +20,14 @@ an immediate route into Today.
   opening Today, so the person is never bounced back into the flow.
 - Finishing persists `complete` before opening Today.
 - Existing accounts migrate as `dismissed`; setup never interrupts a person who
-  already uses ilo.
+  already uses nohmi.
 - Setup remains available from the account menu after dismissal or completion.
 
 ## Information hierarchy
 
 ```text
 Orientation
-├── ilo identity
-├── current step and total progress
+├── current progress
 └── persistent Exit setup action
 
 Current decision
@@ -40,20 +39,21 @@ Existing material
 └── already-connected account rows, when present
 
 Movement
-├── Back
-└── Continue, Skip, or Open Today
+├── floating Back arrow, when a previous step exists
+├── floating Continue arrow, except on Ready
+└── full-width destination actions on Ready
 ```
 
 ## Sequence
 
-1. **Welcome** introduces ilo, user control, and the single setup promise.
+1. **Welcome** introduces nohmi, user control, and the single setup promise.
 2. **Workspaces** asks which areas are useful now. This shapes the remaining
    path; it does not disable product areas.
 3. **Verify email** appears before provider setup when Calendar or Mail was
-   selected and the ilo address is not yet verified. Google and Apple content
+   selected and the nohmi address is not yet verified. Google and Apple content
    must not render until verification succeeds.
 4. **Google** appears when Calendar or Mail was selected. The person selects
-   Calendar, Mail, or both before OAuth, and ilo requests only those scopes.
+   Calendar, Mail, or both before OAuth, and nohmi requests only those scopes.
 5. **Apple** appears for the same workspace conditions and accepts a real
    app-specific password connection.
 6. **Finances** appears when Finances was selected and launches the existing
@@ -69,12 +69,12 @@ may skip every provider and still complete setup.
 
 | Block | Content and rules | Empty or unavailable state |
 | --- | --- | --- |
-| `orientation` | Compact wordmark, saved progress, and Exit setup. It remains stable across the sequence. | Progress still names the current step when conditional steps are omitted. |
-| `choice` | Workspace and provider-service selections share one whole-card checkbox pattern with stable geometry. The full card toggles the control. | Continue is disabled only when no workspace is selected. |
-| `connection` | One bounded card contains provider context, the real connection action, and no speculative account preview. | The forward action says “Skip …” when no account is connected. |
-| `sequence` | Connected sources render as compact material rows above the add-another action. | Omit the list; never render placeholder accounts. |
+| `orientation` | Saved progress and Exit Setup share one compact row. Setup has no persistent wordmark or step-count copy. | The progressbar still exposes its numeric current and total values to assistive technology. |
+| `choice` | Workspace selection uses a two-column mobile bento grid with visually hidden native checkboxes. The full workspace-colored card toggles the control without changing geometry. | Continue is disabled only when no workspace is selected. |
+| `connection` | Connected accounts or institutions render as a compact list. A full-width plus action opens the real connection form in a Dialog on desktop or Drawer on mobile. | Show concise empty copy and retain the plus action; never render placeholder accounts or automatically open the form. |
+| `sequence` | Connected rows show the official provider mark, account identity, and enabled workspaces or institution. | Continuing with no connection opens an explicit provider-specific confirmation. |
 | `attention` | Email verification is a dedicated prerequisite step, not an inline provider warning. Provider failures appear beside the connection they affect. | A working recovery action is shown when available. |
-| `summary` | The ready step reports selected workspaces, source count, and agent-access posture, then offers Today and Connect an agent. | “None yet” is explicit and points to later setup. |
+| `summary` | The ready step reports selected workspaces, source count, and agent-access posture, then ends with full-width **Today at a Glance** and **Connect an Agent** actions. It keeps the floating Back arrow and has no forward arrow. | “None yet” is explicit and points to later setup. |
 
 ## Provider handoff contract
 
@@ -90,10 +90,11 @@ may skip every provider and still complete setup.
 
 ## Responsive and accessibility contract
 
-- Desktop uses one centered reading column with a bounded choice grid. Narrow
-  layouts collapse choices and footer actions into a single vertical sequence.
-  Back and the forward action remain in a compact fixed action surface so a
-  long provider form never hides the next decision.
+- Desktop uses one centered reading column with a bounded choice grid. Mobile
+  begins at 320 px and keeps ordinary step content within or close to one
+  viewport. Back and Continue are 44 px circular arrow controls at the lower
+  corners. A page-colored edge fade may sit beneath them solely to preserve
+  legibility over scrolling content; it is not a glass or elevated footer.
 - The primary action follows the content in DOM order. Back never becomes the
   visually dominant action.
 - Step changes return the document to the top and move programmatic focus to
@@ -106,7 +107,7 @@ may skip every provider and still complete setup.
   `prefers-reduced-motion`.
 - Pending mutations disable the affected movement so duplicate provider starts
   and conflicting progress writes cannot be submitted.
-- Provider credential fields must not reuse or expose the ilo sign-in password.
+- Provider credential fields must not reuse or expose the nohmi sign-in password.
   Apple setup suppresses current-password autofill and begins with blank fields.
 - Third-party connection scripts load only after the corresponding provider is
   configured and the person reaches its actionable surface.
@@ -127,7 +128,7 @@ may skip every provider and still complete setup.
 7. Return from Google OAuth and confirm the setup route and real connected
    account are restored.
 8. Complete without connections and with multiple connections.
-9. Choose **Connect an agent** from Ready and confirm setup is completed before
+9. Choose **Connect an Agent** from Ready and confirm setup is completed before
    Settings opens the agent-access section.
 10. Verify keyboard operation, heading focus and scroll reset, reduced motion,
    error recovery, blank provider credentials, 320 px layout, and normal

@@ -22,7 +22,7 @@ Use a TypeScript monorepo with the following boundaries:
 - `packages/database`: PostgreSQL schema, migrations, and repositories.
 - `packages/connectors`: provider-neutral contract and Google implementation.
 - `packages/api-client`: typed client shared by web, MCP, and tests.
-- `packages/ui`: reusable visual primitives and product components.
+- `apps/web/src/components/ui`: local shadcn primitives and product compositions.
 
 The API is the product boundary. MCP contains no business rules. Interactive
 clients never call provider APIs directly.

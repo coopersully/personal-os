@@ -46,7 +46,7 @@ export function reminderAgentAccessReadiness({
             complete: true,
             description:
               reminders.data.items.length > 0
-                ? `${reminders.data.items.length}${reminders.data.nextCursor ? "+" : ""} open Reminder${reminders.data.items.length === 1 ? "" : "s"} in Ilo.`
+                ? `${reminders.data.items.length}${reminders.data.nextCursor ? "+" : ""} open Reminder${reminders.data.items.length === 1 ? "" : "s"} in nohmi.`
                 : "No open Reminders. Local capture is available whenever you need it.",
             title: "Reminder material",
           };
@@ -56,7 +56,7 @@ export function reminderAgentAccessReadiness({
     {
       complete: true,
       description:
-        "Ilo supports bounded single-item Reminder actions and exact overdue-deferral previews. Guided setup does not install notifications.",
+        "nohmi supports bounded single-item Reminder actions and exact overdue-deferral previews. Guided setup does not install notifications.",
       title: "Reminder workflow",
     },
     attentionReadiness("Reminders", attention),
@@ -77,12 +77,12 @@ export function reminderAgentAccessCapability(
     ],
     approvalRequired: ["Approve profile guidance", "Approve any published Reminder-owned rule"],
     sourceScope:
-      "Reminder permission applies to the Ilo Reminder workspace; per-list credentials are not available.",
+      "Reminder permission applies to the nohmi Reminder workspace; per-list credentials are not available.",
     description:
       support === "executable_rules"
         ? "This deployment publishes Reminder preferences, bounded actions, previews, and Reminder-owned executable rules. Setup does not install notifications."
         : "Reminder setup can learn preferences, use bounded single-item actions, and preview exact overdue deferrals. Setup does not install notifications.",
-    setupPrompt: `Use ${invocation} to set up my Reminders in Ilo. Inspect the bounded open page, ask the shortest useful preference interview, save a draft profile, and distinguish direct single-item actions from exact overdue-deferral previews. Do not claim notification delivery${support === "executable_rules" ? " or rules beyond the Reminder-owned behavior this deployment publishes" : ""}.`,
+    setupPrompt: `Use ${invocation} to set up my Reminders in nohmi. Inspect the bounded open page, ask the shortest useful preference interview, save a draft profile, and distinguish direct single-item actions from exact overdue-deferral previews. Do not claim notification delivery${support === "executable_rules" ? " or rules beyond the Reminder-owned behavior this deployment publishes" : ""}.`,
     title:
       support === "executable_rules"
         ? "Reminder preferences, actions, and rules"

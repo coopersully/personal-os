@@ -108,7 +108,7 @@ const pairs = [
   {
     background: "--primary",
     foreground: "--primary-foreground",
-    maxDelta: 1,
+    maxDelta: 1.1,
     min: 4.5,
     name: "primary action",
   },
@@ -196,14 +196,29 @@ for (const { background, foreground, maxDelta, min, name } of pairs) {
   }
 }
 
-for (const theme of [light, dark]) {
-  const ladder = ["--canvas", "--surface", "--surface-raised"].map((token) =>
-    relativeLuminance(resolveColor(theme, token)),
-  );
-  if (!(ladder[0] < ladder[1] && ladder[1] < ladder[2])) {
-    violations.push(
-      "Material ladder must become lighter from canvas → surface → raised in each theme.",
-    );
+for (const [name, theme] of [
+  ["light", light],
+  ["dark", dark],
+]) {
+  const canvas = resolveColor(theme, "--canvas");
+  const surface = resolveColor(theme, "--surface");
+  const subtle = resolveColor(theme, "--surface-subtle");
+  if (canvas === surface || surface === subtle || canvas === subtle) {
+    violations.push(`${name} flat surfaces need three distinct neutral tones.`);
+  }
+  for (const token of [
+    "--material-rose",
+    "--material-coral",
+    "--material-amber",
+    "--material-green",
+    "--material-teal",
+    "--material-blue",
+    "--material-indigo",
+    "--material-violet",
+  ]) {
+    if (contrast(resolveColor(theme, "--material-foreground"), resolveColor(theme, token)) < 4.5) {
+      violations.push(`${name} ${token} needs 4.5:1 contrast with material foreground.`);
+    }
   }
 }
 

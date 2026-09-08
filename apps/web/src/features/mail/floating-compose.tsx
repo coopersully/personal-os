@@ -1,18 +1,21 @@
 import type { MailDraft, MailRecipientInput, MailSetupAccount } from "@personal-os/domain";
-import { Button } from "@personal-os/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MailIcon, PlusIcon, XIcon } from "@/components/icons";
-import { Button as IconButton } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveDialog,
+  ResponsiveDialogActions,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
@@ -228,94 +231,112 @@ export function FloatingMailComposer({
         >
           <CardHeader className="mail-floating-compose__header">
             <CardTitle>New message</CardTitle>
-            <IconButton
+            <Button
               aria-label="Close composer"
               onClick={() => void close()}
               size="icon"
               variant="ghost"
             >
               <XIcon aria-hidden="true" />
-            </IconButton>
+            </Button>
           </CardHeader>
           <CardContent className="mail-floating-compose__fields">
-            <label htmlFor="mail-compose-from">
-              <span>From</span>
-              <NativeSelect
-                aria-label="From"
-                id="mail-compose-from"
-                onChange={(event) => {
-                  setAccountId(event.target.value);
-                  editVersionRef.current += 1;
-                  setDirty(true);
-                }}
-                value={accountId}
-              >
-                {accounts.map((account) => (
-                  <NativeSelectOption
-                    disabled={account.sendCapability !== "available"}
-                    key={account.accountId}
-                    value={account.accountId}
-                  >
-                    {account.label}
-                    {account.email ? ` · ${account.email}` : ""}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </label>
-            <label htmlFor="mail-compose-to">
-              <span>To</span>
-              <Input
-                aria-label="To"
-                id="mail-compose-to"
-                onChange={(event) => change(setTo, event.target.value)}
-                placeholder="name@example.com"
-                ref={toRef}
-                value={to}
-              />
-              {!showCc ? (
-                <button
-                  className="mail-floating-compose__cc-toggle"
-                  onClick={() => setShowCc(true)}
-                  type="button"
+            <FieldGroup>
+              <Field orientation="horizontal">
+                <FieldLabel htmlFor="mail-compose-from">From</FieldLabel>
+                <NativeSelect
+                  aria-label="From"
+                  id="mail-compose-from"
+                  name="from"
+                  onChange={(event) => {
+                    setAccountId(event.target.value);
+                    editVersionRef.current += 1;
+                    setDirty(true);
+                  }}
+                  value={accountId}
                 >
-                  Cc
-                </button>
+                  {accounts.map((account) => (
+                    <NativeSelectOption
+                      disabled={account.sendCapability !== "available"}
+                      key={account.accountId}
+                      value={account.accountId}
+                    >
+                      {account.label}
+                      {account.email ? ` · ${account.email}` : ""}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Field orientation="horizontal">
+                <FieldLabel htmlFor="mail-compose-to">To</FieldLabel>
+                <div className="mail-floating-compose__recipient-field">
+                  <Input
+                    aria-label="To"
+                    autoComplete="email"
+                    id="mail-compose-to"
+                    multiple
+                    name="to"
+                    onChange={(event) => change(setTo, event.target.value)}
+                    placeholder="name@example.com"
+                    ref={toRef}
+                    spellCheck={false}
+                    type="email"
+                    value={to}
+                  />
+                  {!showCc ? (
+                    <Button onClick={() => setShowCc(true)} size="xs" type="button" variant="ghost">
+                      Cc
+                    </Button>
+                  ) : null}
+                </div>
+              </Field>
+              {showCc ? (
+                <Field orientation="horizontal">
+                  <FieldLabel htmlFor="mail-compose-cc">Cc</FieldLabel>
+                  <Input
+                    aria-label="Cc"
+                    autoComplete="email"
+                    id="mail-compose-cc"
+                    multiple
+                    name="cc"
+                    onChange={(event) => change(setCc, event.target.value)}
+                    spellCheck={false}
+                    type="email"
+                    value={cc}
+                  />
+                </Field>
               ) : null}
-            </label>
-            {showCc ? (
-              <label htmlFor="mail-compose-cc">
-                <span>Cc</span>
+              <Field orientation="horizontal">
+                <FieldLabel htmlFor="mail-compose-subject">Subject</FieldLabel>
                 <Input
-                  aria-label="Cc"
-                  id="mail-compose-cc"
-                  onChange={(event) => change(setCc, event.target.value)}
-                  value={cc}
+                  aria-label="Subject"
+                  id="mail-compose-subject"
+                  name="subject"
+                  onChange={(event) => change(setSubject, event.target.value)}
+                  value={subject}
                 />
-              </label>
-            ) : null}
-            <label htmlFor="mail-compose-subject">
-              <span>Subject</span>
-              <Input
-                aria-label="Subject"
-                id="mail-compose-subject"
-                onChange={(event) => change(setSubject, event.target.value)}
-                value={subject}
-              />
-            </label>
-            <label className="mail-floating-compose__message" htmlFor="mail-compose-message">
-              <span className="sr-only">Message</span>
-              <Textarea
-                aria-label="Message"
-                id="mail-compose-message"
-                onChange={(event) => change(setBody, event.target.value)}
-                placeholder="Write a message…"
-                value={body}
-              />
-            </label>
+              </Field>
+              <Field className="mail-floating-compose__message">
+                <FieldLabel className="sr-only" htmlFor="mail-compose-message">
+                  Message
+                </FieldLabel>
+                <Textarea
+                  aria-label="Message"
+                  id="mail-compose-message"
+                  name="message"
+                  onChange={(event) => change(setBody, event.target.value)}
+                  placeholder="Write a message…"
+                  value={body}
+                />
+              </Field>
+            </FieldGroup>
             {selectedAccount?.sendCapability === "reconnect" ? (
-              <p className="mail-floating-compose__warning" role="alert">
-                Reconnect this account before sending. Your draft will remain saved.
-              </p>
+              <Alert variant="warning">
+                <AlertTitle>Reconnect required</AlertTitle>
+                <AlertDescription>
+                  Reconnect this account before sending. Your draft will remain saved.
+                </AlertDescription>
+              </Alert>
             ) : null}
             {error ? <InlineError error={error} /> : null}
           </CardContent>
@@ -335,7 +356,7 @@ export function FloatingMailComposer({
           </CardFooter>
         </Card>
       ) : (
-        <IconButton
+        <Button
           aria-label="Compose a message"
           className="mail-floating-compose__trigger"
           onClick={() => openComposer()}
@@ -343,55 +364,62 @@ export function FloatingMailComposer({
           size="icon-lg"
         >
           <PlusIcon aria-hidden="true" />
-        </IconButton>
+        </Button>
       )}
-      <Dialog onOpenChange={(next) => !next && setConfirmation(null)} open={Boolean(confirmation)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Send this message?</DialogTitle>
-            <DialogDescription>
+      <ResponsiveDialog
+        onOpenChange={(next) => !next && setConfirmation(null)}
+        open={Boolean(confirmation)}
+      >
+        <ResponsiveDialogContent>
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle>Send this message?</ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               This sends from {selectedAccount?.email ?? selectedAccount?.label} to {to}.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mail-floating-compose__confirmation">
-            <MailIcon aria-hidden="true" />
-            <div>
-              <strong>{subject || "(No subject)"}</strong>
-              <span>{to}</span>
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody>
+            <div className="mail-floating-compose__confirmation">
+              <MailIcon aria-hidden="true" />
+              <div>
+                <strong>{subject || "(No subject)"}</strong>
+                <span>{to}</span>
+              </div>
             </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setConfirmation(null)} tone="ghost">
-              Keep editing
-            </Button>
-            <Button
-              disabled={sending}
-              onClick={() => {
-                if (!confirmation) return;
-                setSending(true);
-                void api
-                  .sendMailDraft({
-                    confirmedUpdatedAt: confirmation.updatedAt,
-                    draftId: confirmation.id,
-                  })
-                  .then(async () => {
-                    await client.invalidateQueries({ queryKey: ["mail-drafts"] });
-                    setSending(false);
-                    void close(true);
-                  })
-                  .catch(async (caught) => {
-                    await client.invalidateQueries({ queryKey: ["mail-drafts"] });
-                    setError(caught);
-                    setSending(false);
-                    setConfirmation(null);
-                  });
-              }}
-            >
-              Send message
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
+            <ResponsiveDialogActions>
+              <Button onClick={() => setConfirmation(null)} variant="ghost">
+                Keep editing
+              </Button>
+              <Button
+                disabled={sending}
+                onClick={() => {
+                  if (!confirmation) return;
+                  setSending(true);
+                  void api
+                    .sendMailDraft({
+                      confirmedUpdatedAt: confirmation.updatedAt,
+                      draftId: confirmation.id,
+                    })
+                    .then(async () => {
+                      await client.invalidateQueries({ queryKey: ["mail-drafts"] });
+                      setSending(false);
+                      void close(true);
+                    })
+                    .catch(async (caught) => {
+                      await client.invalidateQueries({ queryKey: ["mail-drafts"] });
+                      setError(caught);
+                      setSending(false);
+                      setConfirmation(null);
+                    });
+                }}
+              >
+                Send message
+              </Button>
+            </ResponsiveDialogActions>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
     </div>
   );
 }

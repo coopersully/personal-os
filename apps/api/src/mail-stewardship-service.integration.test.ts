@@ -687,12 +687,12 @@ describe.sequential("Mail stewardship service", () => {
       factsToAddress: ["Confirm the recorded decision."],
       materialsNeeded: ["Decision record"],
       openQuestions: ["Who owns the next step?"],
-      purpose: "Prepare for a response outside Ilo.",
+      purpose: "Prepare for a response outside nohmi.",
       toneConsiderations: ["Direct"],
     });
 
     expect(brief).toMatchObject({
-      purpose: "Prepare for a response outside Ilo.",
+      purpose: "Prepare for a response outside nohmi.",
       sourceThreadRevision: threadUpdatedAt,
       transmittable: false,
     });
@@ -930,7 +930,7 @@ describe.sequential("Mail stewardship service", () => {
         kind: "reply",
         nextReviewAt: null,
         owner: { kind: "user" },
-        rationale: "Reply outside Ilo and record the linked decision.",
+        rationale: "Reply outside nohmi and record the linked decision.",
         sourceMessageId: null,
         sourceThreadRevision: threadUpdatedAt,
       },

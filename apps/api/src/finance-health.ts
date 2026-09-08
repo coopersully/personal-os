@@ -57,7 +57,8 @@ function uniqueMissing(...inputs: Array<string | false>): string[] {
 export function assessFinanceHealth(input: FinanceHealthInput, now: Date): FinanceHealth {
   const plaidAccounts = input.accounts.filter((account) => account.provider === "plaid");
   const usableAccounts = input.accounts.filter(
-    (account) => account.synchronizationState !== "blocked" && account.balance !== null,
+    (account): account is FinanceHealthInput["accounts"][number] & { balance: number } =>
+      account.synchronizationState !== "blocked" && account.balance !== null,
   );
   const allPlaidBlocked =
     plaidAccounts.length > 0 &&
@@ -114,7 +115,7 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
 
   const cash = usableAccounts
     .filter((account) => account.kind === "cash")
-    .reduce((sum, account) => sum + (account.balance ?? 0), 0);
+    .reduce((sum, account) => sum + account.balance, 0);
   const reserveTarget =
     input.profile?.emergencyReserveTargetMonths ??
     defaultFinanceHealthPolicy.emergencyReserveTargetMonths;

@@ -1,12 +1,24 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { FinancesPage } from "./page.js";
+import {
+  BudgetMetricCard,
+  FinanceBudgetAllocationChart,
+  FinanceBudgetDetailDialog,
+  FinanceReviewItems,
+  FinancesPage,
+  SubscriptionsPanel,
+  TransactionDetails,
+} from "./page.js";
 
 const api = vi.hoisted(() => ({
+  createFinanceAccount: vi.fn(),
+  createFinanceBudget: vi.fn(),
+  createFinanceTransaction: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceBudgetStatus: vi.fn(),
   getFinanceCategories: vi.fn(),
@@ -15,10 +27,13 @@ const api = vi.hoisted(() => ({
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForAccounts: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
+  getFinancePlaybook: vi.fn(),
   getFinanceReviewQueue: vi.fn(),
   getFinanceStatus: vi.fn(),
   getFinanceWealthSummary: vi.fn(),
   getPlaidStatus: vi.fn(),
+  exportFinanceData: vi.fn(),
+  importFinanceCsv: vi.fn(),
   listFinanceActionReviews: vi.fn(),
   listFinanceAlerts: vi.fn(),
   listFinanceIncomeStreams: vi.fn(),
@@ -27,6 +42,11 @@ const api = vi.hoisted(() => ({
   listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
   resolveFinanceReview: vi.fn(),
+  resolveFinanceAlert: vi.fn(),
+  refreshFinanceInsights: vi.fn(),
+  syncFinanceAccount: vi.fn(),
+  updateFinanceIncomeStream: vi.fn(),
+  updateFinanceRecurringObligation: vi.fn(),
   updateFinanceTransaction: vi.fn(),
 }));
 
@@ -61,7 +81,17 @@ beforeEach(() => {
   api.getFinanceOverview.mockResolvedValue(overview);
   api.getFinanceOverviewForMonth.mockResolvedValue(overview);
   api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
+  api.getFinancePlaybook.mockResolvedValue({
+    assessment: { blockers: [], nextActions: [], readiness: "on_track", uncertainty: [] },
+    playbook: { steps: [], version: "1.0.0" },
+  });
   api.getPlaidStatus.mockResolvedValue({ available: false, items: [] });
+  api.exportFinanceData.mockResolvedValue({
+    accounts: [{ id: "account", name: "Checking" }],
+    budgets: [{ category: "Dining", limit: 200 }],
+    categories: [{ id: "dining", name: "Dining" }],
+    transactions: [{ id: "transaction", merchant: 'Cafe, "North"', notes: null }],
+  });
   api.getFinanceWealthSummary.mockResolvedValue({
     annualIncome: 0,
     cash: 0,
@@ -116,10 +146,205 @@ beforeEach(() => {
   api.listFinanceReimbursements.mockResolvedValue({ reimbursements: [], unmatchedCredits: [] });
   api.listFinanceTransactions.mockResolvedValue({ items: [], nextCursor: null });
   api.resolveFinanceReview.mockResolvedValue({});
+  api.createFinanceAccount.mockResolvedValue({});
+  api.createFinanceBudget.mockResolvedValue({});
+  api.createFinanceTransaction.mockResolvedValue({});
+  api.importFinanceCsv.mockResolvedValue({ imported: 1, skipped: 0 });
+  api.refreshFinanceInsights.mockResolvedValue({});
+  api.resolveFinanceAlert.mockResolvedValue({});
+  api.syncFinanceAccount.mockResolvedValue({});
+  api.updateFinanceIncomeStream.mockResolvedValue({});
+  api.updateFinanceRecurringObligation.mockResolvedValue({});
   api.updateFinanceTransaction.mockResolvedValue({});
 });
 
 describe("Finance section states", () => {
+  it("renders the boundary states of reusable Finance summaries", () => {
+    render(<BudgetMetricCard label="Observed" tone="success" value="$0.00" />);
+    expect(screen.getByText("Observed")).toBeVisible();
+    cleanup();
+
+    render(<FinanceBudgetAllocationChart budgets={[]} />);
+    expect(screen.getByText("No planned categories")).toBeVisible();
+    cleanup();
+
+    render(<SubscriptionsPanel items={[]} onUpdate={vi.fn()} />);
+    expect(screen.getByText("No subscriptions detected")).toBeVisible();
+    cleanup();
+
+    render(
+      <FinanceReviewItems
+        cases={[]}
+        isPending={false}
+        onApprove={vi.fn()}
+        onCategorize={vi.fn()}
+        onConfirmTransfer={vi.fn()}
+        onDefer={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Nothing needs your judgment")).toBeVisible();
+  });
+
+  it("renders budget and transaction detail alternatives conservatively", () => {
+    const transaction = {
+      accountId: "checking",
+      amount: 25,
+      category: null,
+      categoryConfidence: null,
+      categorySource: null,
+      createdAt: "2026-09-01T12:00:00.000Z",
+      date: "2026-09-01",
+      direction: "income",
+      id: "refund",
+      merchant: "Refund",
+      merchantId: null,
+      needsReview: false,
+      notes: null,
+      pending: false,
+      rawMerchant: null,
+      updatedAt: "2026-09-01T12:00:00.000Z",
+    };
+    render(
+      <TransactionDetails
+        isCategorizing={false}
+        onBreakdown={vi.fn()}
+        onCategorize={vi.fn()}
+        transaction={transaction as never}
+      />,
+    );
+    expect(screen.getByText("Not categorized")).toBeVisible();
+    expect(screen.queryByText("Notes")).not.toBeInTheDocument();
+    cleanup();
+
+    render(
+      <FinanceBudgetDetailDialog
+        budgets={[]}
+        detail={{ category: "Dining", kind: "category" }}
+        month="2026-09"
+        onOpenChange={vi.fn()}
+        statuses={undefined}
+        transactions={[transaction as never]}
+      />,
+    );
+    expect(screen.getByRole("dialog", { name: "Dining activity" })).toBeVisible();
+    expect(screen.getByText("No expense transactions match this view yet.")).toBeVisible();
+    cleanup();
+
+    render(
+      <FinanceBudgetDetailDialog
+        budgets={[]}
+        detail={{ kind: "overages" }}
+        month="2026-09"
+        onOpenChange={vi.fn()}
+        transactions={[transaction as never]}
+      />,
+    );
+    expect(screen.getByText("No categories are over plan.")).toBeVisible();
+    cleanup();
+
+    const expense = {
+      ...transaction,
+      amount: 20,
+      category: "Dining",
+      direction: "expense",
+      id: "dining-expense",
+      merchant: "Cafe",
+      needsReview: true,
+      notes: "Lunch",
+      rawMerchant: "SQ CAFE",
+    } as never;
+    render(
+      <FinanceBudgetDetailDialog
+        budgets={[{ category: "Dining", limit: 10, month: "2026-09" }]}
+        detail={{ kind: "overages" }}
+        month="2026-09"
+        onOpenChange={vi.fn()}
+        statuses={[]}
+        transactions={[expense, transaction as never]}
+      />,
+    );
+    expect(screen.getByText("$10.00 over")).toBeVisible();
+    expect(screen.getByText("Needs category review")).toBeInTheDocument();
+    expect(screen.getByText("−$20.00")).toBeVisible();
+  });
+
+  it("distinguishes actionable review evidence and transfer decisions", async () => {
+    const user = userEvent.setup();
+    const onApprove = vi.fn();
+    const onCategorize = vi.fn();
+    const onConfirmTransfer = vi.fn();
+    const onDefer = vi.fn();
+    const baseTransaction = {
+      accountId: "checking",
+      amount: 12,
+      category: "Dining",
+      categoryId: "dining",
+      categoryConfidence: 0.8,
+      categorySource: "provider",
+      createdAt: "2026-09-01T12:00:00.000Z",
+      date: "2026-09-01",
+      direction: "expense",
+      merchant: "Cafe",
+      merchantId: "merchant",
+      needsReview: true,
+      notes: null,
+      pending: false,
+      rawMerchant: "SQ CAFE",
+      updatedAt: "2026-09-01T12:00:00.000Z",
+    };
+    const review = (id: string, reason: string, transaction: Record<string, unknown>) =>
+      ({
+        createdAt: "2026-09-01T12:00:00.000Z",
+        id,
+        rationale: id === "category" ? "Merchant history supports Dining." : null,
+        reason,
+        status: "pending",
+        transaction,
+        updatedAt: "2026-09-01T12:00:00.000Z",
+      }) as never;
+    render(
+      <FinanceReviewItems
+        cases={[
+          review("category", "low_confidence", baseTransaction),
+          review("transfer", "possible_transfer", {
+            ...baseTransaction,
+            category: null,
+            categoryId: null,
+            id: "transfer-transaction",
+          }),
+          review("unknown", "missing_category", {
+            ...baseTransaction,
+            category: null,
+            categoryId: null,
+            id: "unknown-transaction",
+            rawMerchant: null,
+          }),
+        ]}
+        isPending={false}
+        onApprove={onApprove}
+        onCategorize={onCategorize}
+        onConfirmTransfer={onConfirmTransfer}
+        onDefer={onDefer}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Confirm transfer" }));
+    await user.click(screen.getAllByRole("button", { name: "Change" })[0] as HTMLElement);
+    await user.click(screen.getAllByRole("button", { name: "Set aside" })[0] as HTMLElement);
+    expect(onApprove).toHaveBeenCalledOnce();
+    expect(onConfirmTransfer).toHaveBeenCalledOnce();
+    expect(onCategorize).toHaveBeenCalledOnce();
+    expect(onDefer).toHaveBeenCalledOnce();
+  });
+  it("shows a playbook load failure without rendering an empty playbook", async () => {
+    api.getFinancePlaybook.mockRejectedValueOnce(new Error("Playbook unavailable"));
+
+    renderPage("/finances");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Playbook unavailable");
+    expect(screen.queryByText("Wealth-building priorities")).not.toBeInTheDocument();
+  });
+
   it("renders the empty but usable overview", async () => {
     renderPage("/finances");
     expect(await screen.findByText("Financial position")).toBeVisible();
@@ -612,6 +837,170 @@ describe("Finance section states", () => {
     review.unmount();
   });
 
+  it("supports every retained review-queue decision without hiding its evidence", async () => {
+    const transaction = {
+      accountId: "checking",
+      amount: 42,
+      category: "Dining",
+      categoryConfidence: 0.8,
+      categoryId: "dining",
+      categorySource: "model",
+      createdAt: "2026-08-23T12:00:00.000Z",
+      date: "2026-08-23",
+      direction: "expense",
+      id: "meal",
+      merchant: "Cafe",
+      merchantId: "cafe",
+      needsReview: true,
+      notes: null,
+      pending: false,
+      providerDirection: "expense",
+      rawMerchant: "SQ CAFE",
+      updatedAt: "2026-08-23T12:00:00.000Z",
+    };
+    api.getFinanceCategories.mockResolvedValue([
+      {
+        color: null,
+        group: "Spending",
+        id: "dining",
+        isSystem: true,
+        name: "Dining",
+        slug: "dining",
+      },
+    ]);
+    api.getFinanceReviewQueue.mockResolvedValue([
+      {
+        createdAt: transaction.createdAt,
+        id: "category-review",
+        rationale: "The merchant matches prior meals.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategory: "Dining",
+        transaction,
+      },
+      {
+        createdAt: transaction.createdAt,
+        id: "transfer-review",
+        rationale: "Another owned account may be involved.",
+        reason: "possible_transfer",
+        status: "open",
+        suggestedCategory: null,
+        transaction: {
+          ...transaction,
+          category: null,
+          categoryId: null,
+          id: "movement",
+          merchant: "Account movement",
+        },
+      },
+    ]);
+
+    renderPage("/finances/review/legacy");
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
+    for (const button of screen.getAllByRole("button", { name: "Set aside" }))
+      fireEvent.click(button);
+    await waitFor(() => {
+      expect(api.resolveFinanceReview).toHaveBeenCalledWith(
+        "category-review",
+        expect.objectContaining({ action: "approve" }),
+      );
+      expect(api.resolveFinanceReview).toHaveBeenCalledWith(
+        "transfer-review",
+        expect.objectContaining({ action: "confirm_transfer" }),
+      );
+      expect(api.resolveFinanceReview).toHaveBeenCalledWith(
+        "category-review",
+        expect.objectContaining({ action: "defer" }),
+      );
+    });
+
+    const changeCategory = screen.getAllByRole("button", { name: "Change" }).at(0);
+    if (!changeCategory) throw new Error("Expected a category change action.");
+    fireEvent.click(changeCategory);
+    expect(await screen.findByRole("dialog", { name: /Categorize Cafe/ })).toBeVisible();
+    const reviewCategory = document.getElementById("finance-review-category");
+    if (!(reviewCategory instanceof HTMLInputElement))
+      throw new Error("Expected the review category input.");
+    fireEvent.change(reviewCategory, { target: { value: "Dining" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "View all" }));
+    expect(await screen.findByRole("button", { name: "Review queue" })).toBeVisible();
+  });
+
+  it("sorts, expands, categorizes, splits, pages, and exports the transaction ledger", async () => {
+    const browser = userEvent.setup();
+    const transaction = {
+      accountId: "checking",
+      amount: 18.5,
+      category: null,
+      categoryConfidence: null,
+      categoryId: null,
+      categorySource: null,
+      createdAt: "2026-08-23T12:00:00.000Z",
+      date: "2026-08-23",
+      direction: "expense",
+      id: "meal",
+      merchant: "Cafe",
+      merchantId: null,
+      needsReview: true,
+      notes: "Lunch",
+      pending: false,
+      rawMerchant: "SQ CAFE",
+      updatedAt: "2026-08-23T12:00:00.000Z",
+    };
+    api.listFinanceTransactions.mockResolvedValue({
+      items: [transaction],
+      nextCursor: "next-ledger-page",
+    });
+    api.getFinanceCategories.mockResolvedValue([
+      {
+        color: null,
+        group: "Spending",
+        id: "dining",
+        isSystem: true,
+        name: "Dining",
+        slug: "dining",
+      },
+    ]);
+    const createObjectUrl = vi.fn().mockReturnValue("blob:finance");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
+    const linkClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    renderPage("/finances/transactions");
+    await screen.findByRole("table", { name: "Transactions" });
+    for (const label of ["date", "merchant", "amount", "date"]) {
+      fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
+      await screen.findByRole("table", { name: "Transactions" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText("SQ CAFE")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
+    expect(await screen.findByRole("dialog", { name: /Categorize Cafe/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Split purchase" }));
+    expect(await screen.findByRole("dialog", { name: /Split Cafe/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: "next-ledger-page" }),
+      ),
+    );
+    for (const item of ["Transactions", "Accounts", "Budget plan", "Categories"]) {
+      await browser.click(screen.getByRole("button", { name: "Export data" }));
+      await browser.click(await screen.findByRole("menuitem", { name: item }));
+    }
+    await waitFor(() => expect(api.exportFinanceData).toHaveBeenCalledTimes(4));
+    expect(createObjectUrl).toHaveBeenCalledTimes(4);
+    expect(revokeObjectUrl).toHaveBeenCalledTimes(4);
+    expect(linkClick).toHaveBeenCalledTimes(4);
+  });
+
   it("renders null evidence, cash scoping, and empty budget drill-downs conservatively", async () => {
     const currentMonth = new Date().toISOString().slice(0, 7);
     const uncategorized = {
@@ -729,4 +1118,170 @@ describe("Finance section states", () => {
     expect((await screen.findAllByText("Uncategorized")).length).toBeGreaterThan(0);
     budgets.unmount();
   });
+
+  it("executes the legacy Finance controls that remain available from compatibility routes", async () => {
+    const account = {
+      balance: 400,
+      createdAt: "2026-08-01T12:00:00.000Z",
+      id: "checking",
+      institution: "Local Bank",
+      kind: "cash",
+      lastSyncedAt: "2026-08-23T12:00:00.000Z",
+      name: "Checking",
+      provider: "plaid",
+      status: "connected",
+      updatedAt: "2026-08-23T12:00:00.000Z",
+    };
+    const overview = {
+      accounts: [account],
+      budgets: [],
+      pendingSpendThisMonth: 0,
+      refundCreditsThisMonth: 0,
+      reviewCount: 2,
+      spendingThisMonth: 0,
+      transactions: [],
+    };
+    api.getFinanceOverview.mockResolvedValue(overview);
+    api.getFinanceOverviewForMonth.mockResolvedValue(overview);
+    api.listFinanceIncomeStreams.mockResolvedValue([
+      {
+        confidence: 0.7,
+        displayName: "Contract work",
+        expectedAmount: 400,
+        id: "contract",
+        nextExpectedDate: null,
+        status: "needs_review",
+      },
+    ]);
+    api.listFinanceRecurringObligations.mockResolvedValue([
+      {
+        cadence: "monthly",
+        confidence: 0.8,
+        displayName: "Gym",
+        expectedAmount: 40,
+        id: "gym",
+        kind: "subscription",
+        nextExpectedDate: null,
+        status: "needs_review",
+      },
+      {
+        cadence: "monthly",
+        confidence: 0.9,
+        displayName: "Music",
+        expectedAmount: 12,
+        id: "music",
+        kind: "subscription",
+        nextExpectedDate: null,
+        status: "active",
+      },
+      {
+        cadence: "monthly",
+        confidence: 0.9,
+        displayName: "Video",
+        expectedAmount: 15,
+        id: "video",
+        kind: "subscription",
+        nextExpectedDate: null,
+        status: "paused",
+      },
+    ]);
+    api.listFinanceAlerts.mockResolvedValue([
+      { body: "Review the new pattern.", id: "alert", severity: "info", title: "New pattern" },
+    ]);
+
+    const cashflow = renderPage("/finances/cashflow");
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh patterns" }));
+    for (const button of screen.getAllByRole("button", { name: "Confirm" }))
+      fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => {
+      expect(api.refreshFinanceInsights).toHaveBeenCalled();
+      expect(api.updateFinanceIncomeStream).toHaveBeenCalledWith("contract", { status: "active" });
+      expect(api.updateFinanceRecurringObligation).toHaveBeenCalledWith("gym", {
+        status: "active",
+      });
+      expect(api.resolveFinanceAlert).toHaveBeenCalledWith("alert", {
+        action: "resolve",
+        rationale: null,
+      });
+    });
+    cashflow.unmount();
+
+    const subscriptions = renderPage("/finances/subscriptions");
+    await screen.findByText("Music");
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    const cancelSubscription = screen.getAllByRole("button", { name: "Cancel" }).at(0);
+    if (!cancelSubscription) throw new Error("Expected a subscription cancellation action.");
+    fireEvent.click(cancelSubscription);
+    await waitFor(() => {
+      expect(api.updateFinanceRecurringObligation).toHaveBeenCalledWith("music", {
+        status: "paused",
+      });
+      expect(api.updateFinanceRecurringObligation).toHaveBeenCalledWith("video", {
+        status: "active",
+      });
+      expect(api.updateFinanceRecurringObligation).toHaveBeenCalledWith("gym", {
+        status: "cancelled",
+      });
+    });
+    subscriptions.unmount();
+
+    const accounts = renderPage("/finances/accounts");
+    fireEvent.click(await screen.findByRole("button", { name: "Sync" }));
+    fireEvent.click(screen.getByRole("button", { name: "Track account" }));
+    fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Cash Box" } });
+    fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Wallet" } });
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "venmo" } });
+    fireEvent.change(screen.getByLabelText("Account type"), { target: { value: "other" } });
+    fireEvent.change(screen.getByLabelText("Current balance"), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    await waitFor(() => {
+      expect(api.syncFinanceAccount).toHaveBeenCalledWith("checking");
+      expect(api.createFinanceAccount).toHaveBeenCalledWith({
+        balance: 25,
+        institution: "Cash Box",
+        kind: "other",
+        name: "Wallet",
+        provider: "venmo",
+      });
+    });
+    accounts.unmount();
+
+    const transactions = renderPage("/finances/transactions");
+    fireEvent.click(await screen.findByRole("button", { name: "New transaction" }));
+    const transactionAccount = document.getElementById("finance-account-select");
+    if (!(transactionAccount instanceof HTMLSelectElement))
+      throw new Error("Expected the transaction account select.");
+    fireEvent.change(transactionAccount, { target: { value: "checking" } });
+    fireEvent.change(screen.getByLabelText("Merchant"), { target: { value: "Cafe" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "8.5" } });
+    fireEvent.change(screen.getByLabelText("Category (optional)"), {
+      target: { value: "Dining" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add transaction" }));
+    await waitFor(() =>
+      expect(api.createFinanceTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: "checking",
+          amount: 8.5,
+          category: "Dining",
+          merchant: "Cafe",
+        }),
+      ),
+    );
+    transactions.unmount();
+
+    const budget = renderPage("/finances/budgets");
+    fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+    fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+    await waitFor(() =>
+      expect(api.createFinanceBudget).toHaveBeenCalledWith(
+        expect.objectContaining({ category: "Dining", limit: 125 }),
+      ),
+    );
+    budget.unmount();
+  }, 10_000);
 });

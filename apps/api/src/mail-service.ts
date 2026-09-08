@@ -44,7 +44,7 @@ import {
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import {
   type ConnectedMailGateway,
@@ -436,6 +436,51 @@ export function createMailService({
   }
 
   return {
+    async searchReceiptCandidates(
+      userId: string,
+      input: { amount: number; from: string; merchant: string; to: string },
+    ) {
+      const pattern = `%${input.merchant.replace(/[\\%_]/g, "\\$&")}%`;
+      const amount = input.amount.toFixed(2);
+      const rows = await db
+        .select({
+          id: mailThreads.id,
+          receivedAt: mailThreads.receivedAt,
+          bodyText: mailThreads.bodyText,
+          snippet: mailThreads.snippet,
+        })
+        .from(mailThreads)
+        .innerJoin(
+          calendarAccounts,
+          and(
+            eq(calendarAccounts.id, mailThreads.accountId),
+            eq(calendarAccounts.mailEnabled, true),
+          ),
+        )
+        .where(
+          and(
+            eq(mailThreads.userId, userId),
+            isNull(mailThreads.deletedAt),
+            gte(mailThreads.receivedAt, new Date(`${input.from}T00:00:00.000Z`)),
+            lte(mailThreads.receivedAt, new Date(`${input.to}T23:59:59.999Z`)),
+            or(ilike(mailThreads.bodyText, pattern), ilike(mailThreads.snippet, pattern)),
+          ),
+        )
+        .orderBy(desc(mailThreads.receivedAt), desc(mailThreads.id))
+        .limit(20);
+      return rows
+        .map((row) => ({
+          date: row.receivedAt.toISOString().slice(0, 10),
+          fields: ["merchant", "amount"] as Array<"merchant" | "amount" | "date">,
+          sourceId: row.id,
+        }))
+        .filter((match) =>
+          new RegExp(
+            `(?:\\$|USD\\s*)${amount.replace(".", "[.]?\\s*")}(?:\\b|$)|\\b${amount}\\b`,
+            "i",
+          ).test(rows.find((row) => row.id === match.sourceId)?.bodyText ?? ""),
+        );
+    },
     async validateProfileSources(
       transaction: MailSourceExecutor,
       userId: string,
@@ -609,8 +654,33 @@ export function createMailService({
         .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
         .limit(1);
       if (!draft) throw new AppError("not_found", "The Mail draft was not found.");
-      if (draft.sendStatus !== "draft" || draft.sentAt) {
-        throw new AppError("conflict", "This draft is already sending, uncertain, or sent.");
+      if (draft.sentAt || draft.sendStatus === "sent") {
+        throw new AppError(
+          "conflict",
+          "This Mail draft was already sent. Do not retry it as a new send.",
+        );
+      }
+      const staleSending =
+        draft.sendStatus === "sending" &&
+        draft.sendClaimedAt !== null &&
+        draft.sendClaimedAt.getTime() <= now().getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
+      if (draft.sendStatus === "reconcile" || staleSending) {
+        throw draftNeedsSentMailReconciliation(
+          draft.accountId,
+          draft.id,
+          staleSending ? "stale_claim" : "ambiguous_send",
+        );
+      }
+      if (draft.sendStatus !== "draft") {
+        throw new AppError(
+          "conflict",
+          "This Mail draft already has a send in progress. Wait for it to finish; if it remains in progress, inspect Sent Mail and reconcile the draft before retrying.",
+          {
+            draftId: draft.id,
+            sendClaimedAt: draft.sendClaimedAt?.toISOString() ?? null,
+            sendStatus: draft.sendStatus,
+          },
+        );
       }
       if (draft.updatedAt.toISOString() !== input.confirmedUpdatedAt) {
         throw new AppError("conflict", "This draft changed after confirmation. Review it again.");
@@ -672,15 +742,46 @@ export function createMailService({
           to: draft.to,
         });
       } catch (error) {
+        const structuredProviderEffect =
+          error instanceof AppError &&
+          typeof error.details === "object" &&
+          error.details !== null &&
+          "partialEffect" in error.details &&
+          error.details.partialEffect === true;
+        const credentialPersistenceMayHaveFailed =
+          structuredProviderEffect &&
+          (error.details as Record<string, unknown>).credentialPersistenceMayHaveFailed === true;
+        const knownPreAcceptanceFailure =
+          error instanceof MailProviderRejectedError ||
+          (error instanceof AppError && !structuredProviderEffect);
+        if (knownPreAcceptanceFailure) {
+          const release = await transitionOwnedDraftClaim(
+            db,
+            draft.id,
+            userId,
+            claimId,
+            now(),
+            "draft",
+          );
+          if (release === "failed") throw draftClaimReleaseFailed(draft.accountId, draft.id);
+          if (release === "lost") {
+            throw draftSendClaimOwnershipLost(draft.accountId, draft.id, false);
+          }
+        }
         if (error instanceof MailProviderRejectedError) {
-          await transitionOwnedDraftClaim(db, draft.id, userId, claimId, now(), "draft");
           throw new AppError(
             "service_unavailable",
-            "The provider rejected the message before accepting it. The draft is safe to retry.",
-            { partialEffect: false, providerAcceptance: "rejected", retrySafe: true },
+            "The Mail provider rejected the message before accepting it. The draft remains safe to retry.",
+            {
+              draftId: draft.id,
+              partialEffect: false,
+              providerAcceptance: "rejected",
+              retrySafe: true,
+            },
           );
         }
-        const transition = await transitionOwnedDraftClaim(
+        if (error instanceof AppError && !structuredProviderEffect) throw error;
+        const reconciliation = await transitionOwnedDraftClaim(
           db,
           draft.id,
           userId,
@@ -688,63 +789,87 @@ export function createMailService({
           now(),
           "reconcile",
         );
-        const partialEffect = mailProviderPartialEffectError({
+        if (reconciliation === "lost") {
+          throw draftSendClaimOwnershipLost(draft.accountId, draft.id, true);
+        }
+        throw draftProviderPartialEffectError({
+          accountId: draft.accountId,
+          cause: error,
+          credentialsPersisted: !credentialPersistenceMayHaveFailed,
+          draftId: draft.id,
+          draftReconciliationStatePersisted: reconciliation === "updated",
+          ...(remoteThreadId ? { remoteThreadId } : {}),
+          ...(draft.threadId ? { threadId: draft.threadId } : {}),
+        });
+      }
+      try {
+        await db.transaction(async (transaction) => {
+          const [sent] = await transaction
+            .update(mailDrafts)
+            .set({
+              sendClaimedAt: null,
+              sendClaimId: null,
+              sendStatus: "sent",
+              sentAt: now(),
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(mailDrafts.id, draft.id),
+                eq(mailDrafts.userId, userId),
+                eq(mailDrafts.sendClaimId, claimId),
+                eq(mailDrafts.sendStatus, "sending"),
+                isNull(mailDrafts.sentAt),
+              ),
+            )
+            .returning({ id: mailDrafts.id });
+          if (!sent) {
+            throw new AppError(
+              "not_found",
+              "The Mail draft was not found after the provider send.",
+            );
+          }
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "mail.sent",
+              after: {
+                accountId: draft.accountId,
+                ccCount: draft.cc.length,
+                draftId: draft.id,
+                hasThread: draft.threadId !== null,
+                recipientCount: draft.to.length,
+                threadId: draft.threadId,
+              },
+              before: null,
+              entityId: draft.id,
+              entityType: "mail_send",
+              principal: { ...context.principal, userId },
+              requestId: context.requestId,
+            }),
+          );
+        });
+      } catch (error) {
+        const reconciliation = await transitionOwnedDraftClaim(
+          db,
+          draft.id,
+          userId,
+          claimId,
+          now(),
+          "reconcile",
+        );
+        if (reconciliation === "lost") {
+          throw draftSendClaimOwnershipLost(draft.accountId, draft.id, true);
+        }
+        throw draftProviderPartialEffectError({
           accountId: draft.accountId,
           cause: error,
           credentialsPersisted: true,
           draftId: draft.id,
-          operation: "send",
+          draftReconciliationStatePersisted: reconciliation === "updated",
           ...(remoteThreadId ? { remoteThreadId } : {}),
           ...(draft.threadId ? { threadId: draft.threadId } : {}),
         });
-        throw new AppError(partialEffect.code, partialEffect.message, {
-          ...(partialEffect.details as Record<string, unknown>),
-          reconciliationPersisted: transition === "updated",
-        });
       }
-      await db.transaction(async (transaction) => {
-        const [sent] = await transaction
-          .update(mailDrafts)
-          .set({
-            sendClaimedAt: null,
-            sendClaimId: null,
-            sendStatus: "sent",
-            sentAt: now(),
-            updatedAt: now(),
-          })
-          .where(
-            and(
-              eq(mailDrafts.id, draft.id),
-              eq(mailDrafts.userId, userId),
-              eq(mailDrafts.sendClaimId, claimId),
-              eq(mailDrafts.sendStatus, "sending"),
-            ),
-          )
-          .returning({ id: mailDrafts.id });
-        if (!sent)
-          throw new AppError(
-            "conflict",
-            "The provider sent this draft, but its Ilo claim changed.",
-          );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "mail.sent",
-            after: {
-              accountId: draft.accountId,
-              ccCount: draft.cc.length,
-              draftId: draft.id,
-              hasThread: draft.threadId !== null,
-              recipientCount: draft.to.length,
-              threadId: draft.threadId,
-            },
-            before: null,
-            entityId: draft.id,
-            entityType: "mail_send",
-            principal: { ...context.principal, userId },
-            requestId: context.requestId,
-          }),
-        );
-      });
     },
 
     async reconcileDraft(
@@ -1785,6 +1910,115 @@ export function createMailService({
       return applyThreadUpdate(userId, id, input, principal, requestId);
     },
   };
+}
+
+function draftNeedsSentMailReconciliation(
+  accountId: string,
+  draftId: string,
+  reason: "ambiguous_send" | "stale_claim",
+): AppError {
+  return new AppError(
+    "conflict",
+    "nohmi cannot prove whether this draft was accepted by the provider. Inspect the provider's Sent Mail before any retry, then reconcile the draft in nohmi.",
+    {
+      accountId,
+      draftId,
+      partialEffect: true,
+      reason,
+      repairAction: "verify_sent_mail_then_reconcile_draft",
+      userAction:
+        "Inspect the provider's Sent Mail before any retry. Then mark the draft as sent or not sent in nohmi Mail.",
+      userActionDestination: "Provider Sent Mail; then nohmi Mail",
+      userActionRequired: true,
+    },
+  );
+}
+
+function draftSendClaimOwnershipLost(
+  accountId: string,
+  draftId: string,
+  providerEffectPossible: boolean,
+): AppError {
+  return new AppError(
+    "conflict",
+    providerEffectPossible
+      ? "This send no longer owns the draft claim, and the provider may have accepted the message. Inspect Sent Mail and the draft's current nohmi state before any retry."
+      : "This send no longer owns the draft claim. Do not retry while another draft send or reconciliation is current.",
+    {
+      accountId,
+      claimOwnershipLost: true,
+      draftReconciliationStatePersisted: false,
+      draftId,
+      partialEffect: providerEffectPossible,
+      repairAction: providerEffectPossible
+        ? "verify_sent_mail_then_reconcile_draft"
+        : "review_current_draft_state",
+      userAction: providerEffectPossible
+        ? "Inspect the provider's Sent Mail and the draft's current nohmi state before any retry."
+        : "Review the draft's current state in nohmi Mail before taking another action.",
+      userActionDestination: providerEffectPossible
+        ? "Provider Sent Mail; then nohmi Mail"
+        : "nohmi Mail",
+      userActionRequired: true,
+    },
+  );
+}
+
+function draftClaimReleaseFailed(accountId: string, draftId: string): AppError {
+  return new AppError(
+    "service_unavailable",
+    "The provider rejected the message before accepting it, but nohmi could not safely release the draft claim. The message was not sent; review the current draft state before retrying.",
+    {
+      accountId,
+      draftClaimReleasePersisted: false,
+      draftId,
+      partialEffect: false,
+      providerAcceptance: "rejected",
+      repairAction: "review_current_draft_state",
+      retrySafe: false,
+      userAction: "Review the draft's current state in nohmi Mail before retrying.",
+      userActionDestination: "nohmi Mail",
+      userActionRequired: true,
+    },
+  );
+}
+
+function draftProviderPartialEffectError({
+  accountId,
+  cause,
+  credentialsPersisted,
+  draftId,
+  draftReconciliationStatePersisted,
+  remoteThreadId,
+  threadId,
+}: {
+  accountId: string;
+  cause: unknown;
+  credentialsPersisted: boolean;
+  draftId: string;
+  draftReconciliationStatePersisted: boolean;
+  remoteThreadId?: string;
+  threadId?: string;
+}): AppError {
+  const base = mailProviderPartialEffectError({
+    accountId,
+    cause,
+    credentialsPersisted,
+    draftId,
+    operation: "send",
+    ...(remoteThreadId ? { remoteThreadId } : {}),
+    ...(threadId ? { threadId } : {}),
+  });
+  return new AppError(base.code, base.message, {
+    ...(base.details as Record<string, unknown>),
+    draftId,
+    draftReconciliationStatePersisted,
+    repairAction: "verify_sent_mail_then_reconcile_draft",
+    userAction:
+      "Inspect the provider's Sent Mail before any retry. Then use the recovery panel in nohmi Mail to mark the draft as sent or not sent.",
+    userActionDestination: "Provider Sent Mail; then nohmi Mail",
+    userActionRequired: true,
+  });
 }
 
 async function transitionOwnedDraftClaim(

@@ -13,7 +13,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
@@ -148,7 +151,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       <header>
         <p className="eyebrow">Persistent stewardship</p>
         <h3>Thread ledger</h3>
-        <p>Private guidance and exact, version-checked controls. Ilo never sends email.</p>
+        <p>Private guidance and exact, version-checked controls. Agents never send email.</p>
       </header>
       {disposition.isError ||
       createObligation.isError ||
@@ -235,27 +238,32 @@ function DispositionControl({
             save(value, rationale);
           }}
         >
-          <label>
-            Disposition
-            <select
-              onChange={(event) => setValue(event.currentTarget.value as MailDispositionKind)}
-              value={value}
-            >
-              {dispositions.map((item) => (
-                <option key={item} value={item}>
-                  {label(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label htmlFor="mail-disposition-rationale">
-            Rationale
-            <Input
-              id="mail-disposition-rationale"
-              onChange={(event) => setRationale(event.currentTarget.value)}
-              value={rationale}
-            />
-          </label>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mail-disposition">Disposition</FieldLabel>
+              <NativeSelect
+                id="mail-disposition"
+                name="disposition"
+                onChange={(event) => setValue(event.currentTarget.value as MailDispositionKind)}
+                value={value}
+              >
+                {dispositions.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {label(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-disposition-rationale">Rationale</FieldLabel>
+              <Input
+                id="mail-disposition-rationale"
+                name="rationale"
+                onChange={(event) => setRationale(event.currentTarget.value)}
+                value={rationale}
+              />
+            </Field>
+          </FieldGroup>
           <Button disabled={pending} size="sm" type="submit">
             Save disposition
           </Button>
@@ -296,26 +304,24 @@ function ObligationControl({
                 <strong>{label(obligation.kind)}</strong>
                 <p>{obligation.rationale}</p>
               </div>
-              <label>
-                <span className="sr-only">State for {label(obligation.kind)}</span>
-                <select
-                  disabled={pending}
-                  onChange={(event) =>
-                    setState(
-                      obligation.id,
-                      obligation.version,
-                      event.currentTarget.value as MailObligationState,
-                    )
-                  }
-                  value={obligation.state}
-                >
-                  {obligationStates.map((state) => (
-                    <option key={state} value={state}>
-                      {label(state)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <NativeSelect
+                aria-label={`State for ${label(obligation.kind)}`}
+                disabled={pending}
+                onChange={(event) =>
+                  setState(
+                    obligation.id,
+                    obligation.version,
+                    event.currentTarget.value as MailObligationState,
+                  )
+                }
+                value={obligation.state}
+              >
+                {obligationStates.map((state) => (
+                  <NativeSelectOption key={state} value={state}>
+                    {label(state)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
             </div>
           ))
         )}
@@ -326,27 +332,32 @@ function ObligationControl({
             if (rationale.trim()) create(kind, rationale.trim());
           }}
         >
-          <label>
-            New obligation
-            <select
-              onChange={(event) => setKind(event.currentTarget.value as MailObligationKind)}
-              value={kind}
-            >
-              {obligationKinds.map((item) => (
-                <option key={item} value={item}>
-                  {label(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label htmlFor="mail-obligation-rationale">
-            Why this is explicit
-            <Input
-              id="mail-obligation-rationale"
-              onChange={(event) => setRationale(event.currentTarget.value)}
-              value={rationale}
-            />
-          </label>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mail-obligation-kind">New obligation</FieldLabel>
+              <NativeSelect
+                id="mail-obligation-kind"
+                name="obligation"
+                onChange={(event) => setKind(event.currentTarget.value as MailObligationKind)}
+                value={kind}
+              >
+                {obligationKinds.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {label(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-obligation-rationale">Why this is explicit</FieldLabel>
+              <Input
+                id="mail-obligation-rationale"
+                name="rationale"
+                onChange={(event) => setRationale(event.currentTarget.value)}
+                value={rationale}
+              />
+            </Field>
+          </FieldGroup>
           <Button disabled={pending || !rationale.trim()} size="sm" type="submit">
             Record obligation
           </Button>
@@ -398,14 +409,16 @@ function QuestionControl({
           ))
         )}
         {questions.length > 0 ? (
-          <label className="flex items-center gap-2 text-sm">
-            <input
+          <Field orientation="horizontal">
+            <Checkbox
               checked={generalize}
-              onChange={(event) => setGeneralize(event.currentTarget.checked)}
-              type="checkbox"
+              id="mail-generalize-answer"
+              onCheckedChange={(checked) => setGeneralize(checked === true)}
             />
-            Propose this answer as a reusable rule
-          </label>
+            <FieldLabel htmlFor="mail-generalize-answer">
+              Propose this answer as a reusable rule
+            </FieldLabel>
+          </Field>
         ) : null}
       </CardContent>
     </Card>
@@ -439,21 +452,22 @@ function ResponseBriefControl({
             if (purpose.trim()) preview(purpose.trim());
           }}
         >
-          <label htmlFor="mail-response-purpose">
-            Purpose
+          <Field>
+            <FieldLabel htmlFor="mail-response-purpose">Purpose</FieldLabel>
             <Input
               id="mail-response-purpose"
+              name="purpose"
               onChange={(event) => setPurpose(event.currentTarget.value)}
               placeholder="What must a response accomplish?"
               value={purpose}
             />
-          </label>
+          </Field>
           <Button disabled={pending || !purpose.trim()} size="sm" type="submit">
             Preview private brief
           </Button>
         </form>
         {brief ? (
-          <section aria-label="Private response brief" className="rounded-lg border p-3">
+          <section aria-label="Private response brief" className="rounded-lg bg-muted p-3">
             <Badge variant="outline">Not transmittable</Badge>
             <h4 className="mt-2 font-medium">{brief.purpose}</h4>
             <Checklist label="Facts to address" values={brief.factsToAddress} />
@@ -495,29 +509,34 @@ function FeedbackControl({
             if (comment.trim()) submit(currentDispositionId, kind, comment.trim());
           }}
         >
-          <label>
-            Feedback
-            <select
-              onChange={(event) =>
-                setKind(event.currentTarget.value as MailStewardshipFeedbackKind)
-              }
-              value={kind}
-            >
-              {["correct", "incorrect", "outdated", "exception"].map((item) => (
-                <option key={item} value={item}>
-                  {label(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label htmlFor="mail-feedback-comment">
-            Comment
-            <Textarea
-              id="mail-feedback-comment"
-              onChange={(event) => setComment(event.currentTarget.value)}
-              value={comment}
-            />
-          </label>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mail-feedback-kind">Feedback</FieldLabel>
+              <NativeSelect
+                id="mail-feedback-kind"
+                name="feedback"
+                onChange={(event) =>
+                  setKind(event.currentTarget.value as MailStewardshipFeedbackKind)
+                }
+                value={kind}
+              >
+                {["correct", "incorrect", "outdated", "exception"].map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {label(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-feedback-comment">Comment</FieldLabel>
+              <Textarea
+                id="mail-feedback-comment"
+                name="comment"
+                onChange={(event) => setComment(event.currentTarget.value)}
+                value={comment}
+              />
+            </Field>
+          </FieldGroup>
           <Button disabled={pending || !comment.trim()} size="sm" type="submit">
             <ShieldCheckIcon aria-hidden="true" data-icon="inline-start" />
             Record feedback

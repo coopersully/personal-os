@@ -14,7 +14,12 @@ function printAccounts(): void {
 
 function requireSafeDatabase(databaseUrl: string): void {
   const url = new URL(databaseUrl);
-  const local = ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  const loopbackHosts = ["127.0.0.1", "localhost", "::1"];
+  const localDockerPostgres =
+    url.hostname === "postgres" &&
+    url.port === "5432" &&
+    process.env.QA_FIXTURES_DOCKER_LOCAL === "true";
+  const local = loopbackHosts.includes(url.hostname) || localDockerPostgres;
   if (!local && process.env.QA_FIXTURES_ALLOW_REMOTE !== "true") {
     throw new Error(
       "Refusing to load QA fixtures into a remote database. Set QA_FIXTURES_ALLOW_REMOTE=true only for an intentional disposable QA environment.",

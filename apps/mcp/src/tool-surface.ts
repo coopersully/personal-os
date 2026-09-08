@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { AccessScope } from "@personal-os/domain";
 import { z } from "zod";
 import { createIloAppLinks } from "./app-links.js";
+import { financePresentationResourceUris } from "./presentation-resources.js";
 import {
   canDiscoverTool,
   type IloToolDefinition,
@@ -101,7 +102,9 @@ export function createIloToolSurface(server: McpServer, options: IloToolSurfaceO
               "ilo/domain": definition.domain,
               "ilo/policy": definition.policy,
               "ilo/stage": definition.stage,
-              ...(definition.ui ? { ui: { resourceUri: "ui://ilo/work-surface" } } : {}),
+              ...(definition.presentation
+                ? { ui: { resourceUri: financePresentationResourceUris[definition.presentation] } }
+                : {}),
             },
             annotations: {
               destructiveHint:
@@ -132,7 +135,7 @@ export function createIloToolSurface(server: McpServer, options: IloToolSurfaceO
 function getToolDefinition(name: string): IloToolDefinition {
   const definition = iloToolCatalog[name as IloToolName];
   if (!definition) {
-    throw new Error(`MCP tool ${name} is missing from the Ilo tool catalog.`);
+    throw new Error(`MCP tool ${name} is missing from the Nomi tool catalog.`);
   }
   return definition;
 }

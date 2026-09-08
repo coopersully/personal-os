@@ -1137,7 +1137,7 @@ export function createMailStewardshipService({ db, now }: Options) {
                 .values({
                   createdAt: now(),
                   disposition: transition.disposition,
-                  rationale: "Derived from an active Ilo snooze.",
+                  rationale: "Derived from an active nohmi snooze.",
                   sourceThreadRevision: thread.updatedAt,
                   threadId: thread.id,
                   userId,

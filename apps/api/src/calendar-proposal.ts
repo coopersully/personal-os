@@ -114,7 +114,7 @@ export function buildCalendarCommitmentProposal(
   }
   if (destination.provider !== "local")
     warnings.push(
-      "Creating this candidate through an interactive Calendar action would write to the connected provider before Ilo commits its projection.",
+      "Creating this candidate through an interactive Calendar action would write to the connected provider before nohmi commits its projection.",
     );
   if (destination.provider !== "local" && !providerProjectionReady)
     warnings.push(

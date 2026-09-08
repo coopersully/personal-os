@@ -10,7 +10,7 @@ describe("WorkspaceSearch", () => {
   it("keeps the search term in the linkable q parameter", async () => {
     const browser = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/tasks?view=next"]}>
+      <MemoryRouter initialEntries={["/tasks?view=upcoming"]}>
         <WorkspaceSearch label="Search tasks" />
         <CurrentSearch />
       </MemoryRouter>,
@@ -18,11 +18,13 @@ describe("WorkspaceSearch", () => {
 
     const search = screen.getByRole("searchbox", { name: "Search tasks" });
     await browser.type(search, "weekly brief");
-    expect(screen.getByTestId("location-search")).toHaveTextContent("?view=next&q=weekly+brief");
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      "?view=upcoming&q=weekly+brief",
+    );
     expect(search).toHaveValue("weekly brief");
 
     await browser.clear(search);
-    expect(screen.getByTestId("location-search")).toHaveTextContent("?view=next");
+    expect(screen.getByTestId("location-search")).toHaveTextContent("?view=upcoming");
   });
 });
 

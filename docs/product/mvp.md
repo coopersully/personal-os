@@ -69,7 +69,7 @@ provider internals.
   consent, semantic setup steps, observed completion evidence, core-domain
   readiness, explicit per-workspace authority boundaries, an optional immutable skill reference,
   revocation, and advanced personal-token fallback.
-- A Today-owned Reviews destination for paginated, filterable review and attention work.
+- A Settings-owned Reviews destination for paginated, filterable review and attention work.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected

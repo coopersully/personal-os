@@ -16,6 +16,10 @@ import type {
   Motive,
   Reminder,
   Task,
+  TaskList,
+  TaskMovePreview,
+  TaskProject,
+  TaskProjectMovePreview,
   User,
 } from "@personal-os/domain";
 import {
@@ -190,6 +194,8 @@ const reminder: Reminder = {
   updatedAt: now,
 };
 const task: Task = {
+  cancelledAt: null,
+  completedAt: null,
   id,
   title: "Plan task",
   notes: null,
@@ -199,10 +205,90 @@ const task: Task = {
   priority: "medium",
   estimateMinutes: 30,
   tags: ["planning"],
-  status: "scheduled",
-  completedAt: null,
+  why: null,
+  legacyStatus: "scheduled",
+  lifecycle: "open",
+  listId: id,
+  projectId: null,
+  revision: 1,
+  deletedAt: null,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task",
+  },
   createdAt: now,
   updatedAt: now,
+};
+const taskList: TaskList = {
+  archivedAt: null,
+  availability: "active",
+  color: null,
+  createdAt: now,
+  deletedAt: null,
+  description: null,
+  icon: "list",
+  id,
+  kind: "standard",
+  name: "Personal",
+  revision: 1,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task_list",
+  },
+  updatedAt: now,
+};
+const taskProject: TaskProject = {
+  archivedAt: null,
+  availability: "active",
+  cancelledAt: null,
+  completedAt: null,
+  createdAt: now,
+  deletedAt: null,
+  id,
+  lifecycle: "open",
+  listId: id,
+  name: "Home refresh",
+  notes: null,
+  revision: 1,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task_project",
+  },
+  targetDate: null,
+  updatedAt: now,
+  why: null,
+};
+const taskMovePreview: TaskMovePreview = {
+  destinationListId: accountId,
+  destinationListRevision: 2,
+  destinationProjectId: null,
+  destinationProjectRevision: null,
+  detachedProjectId: null,
+  previewToken: "task-move-preview",
+  sourceListId: id,
+  sourceListRevision: 1,
+  sourceProjectId: null,
+  taskId: id,
+  taskRevision: 1,
+};
+const taskProjectMovePreview: TaskProjectMovePreview = {
+  affectedTaskCount: 2,
+  destinationListId: accountId,
+  destinationListRevision: 2,
+  previewToken: "task-project-move-preview",
+  sourceListId: id,
+  sourceListRevision: 1,
+  taskProjectId: id,
+  taskProjectRevision: 1,
 };
 const calendar: Calendar = {
   id,
@@ -424,11 +510,17 @@ const financeAccount: FinanceAccount = {
   createdAt: now,
   currencyCode: null,
   id,
+  includeInPlanning: true,
   institution: "Test bank",
   kind: "cash",
+  kindSource: "user",
   lastSyncedAt: null,
   name: "Checking",
+  ownershipShare: 1,
+  ownershipType: "individual",
   provider: "manual",
+  providerSubtype: null,
+  providerType: null,
   status: "manual",
   synchronization: {
     failureCode: null,
@@ -971,6 +1063,17 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/plaid/exchange") return json({ accounts: [financeAccount] });
     if (url.pathname === "/v1/finances/account-connections")
       return json(financeEnvelope({ connectionId: id, status: "pending" }));
+    if (url.pathname === "/v1/finances/accounts" && method === "GET")
+      return json({
+        accounts: [financeAccount],
+        accountSemantics: {
+          excludedAccountIds: [],
+          possibleDuplicateGroups: [],
+          trustworthy: true,
+          unresolvedOwnershipAccountIds: [],
+        },
+        totals: { cash: 1200, debt: 0, investments: 0, netWorth: 1200, otherAssets: 0 },
+      });
     if (url.pathname === `/v1/finances/account-connections/${id}`)
       return json(financeEnvelope({ id, status: "connected" }));
     if (url.pathname === `/v1/finances/accounts/${id}` && method === "PATCH")
@@ -1178,12 +1281,12 @@ function apiFetch() {
           ],
           mcpUrl: "https://mcp.example.com/mcp",
           skill: {
-            displayName: "Ilo Guided Setup",
-            installPrompt: "Install the Ilo skill.",
+            displayName: "nohmi Guided Setup",
+            installPrompt: "Install the nohmi skill.",
             invocation: "$ilo-setup",
             name: "ilo-setup",
             revision: "release-0.1.0",
-            setupPrompt: "Set up Ilo.",
+            setupPrompt: "Set up nohmi.",
             sourceUrl: "https://example.com/ilo-setup",
             version: "0.1.0",
           },
@@ -1324,6 +1427,7 @@ function apiFetch() {
       return json({ event });
     if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/trash"))
       return json({ reminder });
+    if (url.pathname.includes("/tasks/") && url.pathname.endsWith("/trash")) return json({ task });
     if (url.pathname.endsWith("/trash"))
       return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
     if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
@@ -1354,14 +1458,256 @@ function apiFetch() {
     if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/attention"))
       return json({ item: attentionItem });
     if (url.pathname.includes("/reminders/")) return json({ reminder });
+    if (url.pathname === "/v1/task-lists" && method === "POST") return json({ taskList }, 201);
+    if (url.pathname === "/v1/task-lists") return json({ items: [taskList], nextCursor: null });
+    if (url.pathname.includes("/task-lists/")) return json({ taskList });
+    if (url.pathname === "/v1/task-projects" && method === "POST")
+      return json({ taskProject }, 201);
+    if (url.pathname === "/v1/task-projects")
+      return json({ items: [taskProject], nextCursor: null });
+    if (url.pathname.includes("/task-projects/") && url.pathname.endsWith("/move/preview"))
+      return json({ preview: taskProjectMovePreview });
+    if (url.pathname.includes("/task-projects/")) return json({ taskProject });
     if (url.pathname === "/v1/tasks" && method === "POST") return json({ task }, 201);
     if (url.pathname === "/v1/tasks") return json({ items: [task], nextCursor: null });
+    if (url.pathname.includes("/tasks/") && url.pathname.endsWith("/move/preview"))
+      return json({ preview: taskMovePreview });
     if (url.pathname.includes("/tasks/")) return json({ task });
     throw new Error(`Unhandled ${method} ${url.pathname}`);
   });
 }
 
 describe("ilo API client", () => {
+  it("uses canonical task organization HTTP transport", async () => {
+    const fetch = apiFetch();
+    const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
+    const createTaskInput = {
+      dueAt: null,
+      estimateMinutes: null,
+      idempotencyKey: "33333333-3333-4333-8333-333333333333",
+      lifecycle: "open" as const,
+      listId: id,
+      notes: null,
+      priority: "medium" as const,
+      scheduledAt: null,
+      tags: [],
+      timezone: null,
+      title: "Plan task",
+      why: null,
+    };
+    const createTaskListInput = {
+      color: null,
+      description: null,
+      icon: "list" as const,
+      idempotencyKey: "44444444-4444-4444-8444-444444444444",
+      name: "Personal",
+    };
+    const createTaskProjectInput = {
+      idempotencyKey: "55555555-5555-4555-8555-555555555555",
+      listId: id,
+      name: "Home refresh",
+      notes: null,
+      targetDate: null,
+      why: null,
+    };
+
+    await api.listTasks({ lifecycle: "open", limit: 2 });
+    await api.createTask(createTaskInput);
+    await api.getTask(id);
+    await api.updateTask(id, { expectedRevision: 1, title: "Plan today" });
+    await api.completeTask(id, { expectedRevision: 1 });
+    await api.cancelTask(id, { expectedRevision: 1 });
+    await api.reopenTask(id, { expectedRevision: 1 });
+    await api.trashTask(id, { expectedRevision: 1 });
+    await api.restoreTask(id, { expectedRevision: 1 });
+    await api.previewTaskMove(id, {
+      destinationListId: accountId,
+      destinationProjectId: null,
+      expectedRevision: 1,
+    });
+    await api.moveTask(id, {
+      destinationListId: accountId,
+      destinationProjectId: null,
+      expectedRevision: 1,
+      previewToken: "task-move-preview",
+    });
+    await api.listTaskLists({ cursor: "next", limit: 2 });
+    await api.createTaskList(createTaskListInput);
+    await api.getTaskList(id);
+    await api.updateTaskList(id, { expectedRevision: 1, name: "Home" });
+    await api.archiveTaskList(id, { expectedRevision: 1 });
+    await api.listTaskProjects({ cursor: "next", limit: 2 });
+    await api.createTaskProject(createTaskProjectInput);
+    await api.getTaskProject(id);
+    await api.updateTaskProject(id, { expectedRevision: 1, name: "Bedroom refresh" });
+    await api.completeTaskProject(id, { expectedRevision: 1 });
+    await api.cancelTaskProject(id, { expectedRevision: 1 });
+    await api.archiveTaskProject(id, { expectedRevision: 1 });
+    await api.previewTaskProjectMove(id, { destinationListId: accountId, expectedRevision: 1 });
+    await api.moveTaskProject(id, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+      previewToken: "task-project-move-preview",
+    });
+
+    expect(
+      fetch.mock.calls.map(([url, init]) => ({
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        method: init?.method ?? "GET",
+        path: `${new URL(String(url)).pathname}${new URL(String(url)).search}`,
+      })),
+    ).toEqual([
+      { method: "GET", path: "/v1/tasks?lifecycle=open&limit=2" },
+      { body: createTaskInput, method: "POST", path: "/v1/tasks" },
+      { method: "GET", path: `/v1/tasks/${id}` },
+      {
+        body: { expectedRevision: 1, title: "Plan today" },
+        method: "PATCH",
+        path: `/v1/tasks/${id}`,
+      },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/complete` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/cancel` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/reopen` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/trash` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/restore` },
+      {
+        body: { destinationListId: accountId, destinationProjectId: null, expectedRevision: 1 },
+        method: "POST",
+        path: `/v1/tasks/${id}/move/preview`,
+      },
+      {
+        body: {
+          destinationListId: accountId,
+          destinationProjectId: null,
+          expectedRevision: 1,
+          previewToken: "task-move-preview",
+        },
+        method: "POST",
+        path: `/v1/tasks/${id}/move`,
+      },
+      { method: "GET", path: "/v1/task-lists?cursor=next&limit=2" },
+      { body: createTaskListInput, method: "POST", path: "/v1/task-lists" },
+      { method: "GET", path: `/v1/task-lists/${id}` },
+      {
+        body: { expectedRevision: 1, name: "Home" },
+        method: "PATCH",
+        path: `/v1/task-lists/${id}`,
+      },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-lists/${id}/archive` },
+      { method: "GET", path: "/v1/task-projects?cursor=next&limit=2" },
+      { body: createTaskProjectInput, method: "POST", path: "/v1/task-projects" },
+      { method: "GET", path: `/v1/task-projects/${id}` },
+      {
+        body: { expectedRevision: 1, name: "Bedroom refresh" },
+        method: "PATCH",
+        path: `/v1/task-projects/${id}`,
+      },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-projects/${id}/complete` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-projects/${id}/cancel` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-projects/${id}/archive` },
+      {
+        body: { destinationListId: accountId, expectedRevision: 1 },
+        method: "POST",
+        path: `/v1/task-projects/${id}/move/preview`,
+      },
+      {
+        body: {
+          destinationListId: accountId,
+          expectedRevision: 1,
+          previewToken: "task-project-move-preview",
+        },
+        method: "POST",
+        path: `/v1/task-projects/${id}/move`,
+      },
+    ]);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+  });
+
+  it("serializes budget bucket routes with and without a month", async () => {
+    const requests: Array<{ body: unknown; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        const method = init?.method ?? "GET";
+        requests.push({
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+          method,
+          path: url.pathname + url.search,
+        });
+        return json(method === "GET" ? { taxonomy: { buckets: [] } } : { buckets: [] });
+      },
+    });
+
+    await expect(api.listFinanceBudgetBuckets()).resolves.toEqual({ taxonomy: { buckets: [] } });
+    await expect(api.listFinanceBudgetBuckets("2026-08")).resolves.toEqual({
+      taxonomy: { buckets: [] },
+    });
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create",
+        name: "Care",
+      }),
+    ).resolves.toEqual({ buckets: [] });
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        description: null,
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update",
+      }),
+    ).resolves.toEqual({ buckets: [] });
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/budget-buckets" },
+      {
+        body: null,
+        method: "GET",
+        path: "/v1/finances/budget-buckets?month=2026-08",
+      },
+      {
+        body: { description: null, idempotencyKey: "bucket-create", name: "Care" },
+        method: "POST",
+        path: "/v1/finances/budget-buckets",
+      },
+      {
+        body: {
+          categoryIds: [],
+          description: null,
+          expectedVersion: 1,
+          idempotencyKey: "bucket-update",
+        },
+        method: "PATCH",
+        path: "/v1/finances/budget-buckets/bucket-1",
+      },
+    ]);
+  });
+
+  it("preserves agent dispositions for budget bucket mutations", async () => {
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose categories." }, status: "needs_input" };
+    const responses = [pending, needsInput];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(responses.shift()),
+    });
+
+    await expect(
+      api.createFinanceBudgetBucket({
+        description: null,
+        idempotencyKey: "bucket-create-agent",
+        name: "Care",
+      }),
+    ).resolves.toEqual(pending);
+    await expect(
+      api.updateFinanceBudgetBucket("bucket-1", {
+        categoryIds: [],
+        expectedVersion: 1,
+        idempotencyKey: "bucket-update-agent",
+      }),
+    ).resolves.toEqual(needsInput);
+  });
+
   it("uses typed Finance status and durable-maintenance routes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const api = createApiClient({
@@ -1833,6 +2179,107 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it("uses the complete Finance review, reimbursement, and maintenance transport", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const revision = `sha256:${"b".repeat(64)}`;
+    const challenge = {
+      candidateId: accountId,
+      candidateRevision: revision,
+      createdAt: now,
+      cutoff: now,
+      id,
+      rubricVersion: "finance-ledger-challenge-v1" as const,
+      runId: accountId,
+      state: "prepared" as const,
+      submittedAt: null,
+      submittingAgentId: null,
+      updatedAt: now,
+      userId: id,
+    };
+    const review = {
+      challenge: { checked: [], findings: 0, observations: 0 },
+      closeReadiness: financeStatus.details.closeReadiness,
+      createdAt: now,
+      cutoff: now,
+      goalsAndDebt: { activeGoals: 0, debt: 0, netWorth: 1000 },
+      id,
+      income: 5000,
+      monitoring: { href: "/finances", responsibility: "Review the next statement." },
+      period: { end: "2026-07-31", start: "2026-07-01" },
+      position: { cashLowPoint: 500, closing: 1000, opening: 750 },
+      recommendations: [],
+      reimbursements: financeStatus.details.reimbursements,
+      runId: accountId,
+      sourceIds: [],
+      spending: { budgetVariance: 20, gross: 500, personal: 450, savings: 50 },
+      status: "completed" as const,
+      userId: id,
+      work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 0 },
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname.endsWith("/receipt-review")) return json({ review: { reviewed: true } });
+        if (url.pathname === "/v1/finances/snapshot") return json(financeEnvelope({ asOf: now }));
+        if (url.pathname === "/v1/finances/reimbursements")
+          return json({ reimbursements: { reimbursements: [], unmatchedCredits: [] } });
+        if (url.pathname === "/v1/finances/reimbursements/reconcile")
+          return json({ reimbursement: { id } });
+        if (url.pathname === `/v1/finances/maintenance/challenges/${id}`)
+          return json({ page: { challenge, checks: [], items: [], nextCursor: null } });
+        if (url.pathname === `/v1/finances/maintenance/challenges/${id}/submit`)
+          return json({ challenge: { ...challenge, state: "submitted", submittedAt: now } });
+        if (url.pathname === `/v1/finances/period-reviews/${id}`) return json({ review });
+        if (url.pathname === `/v1/finances/period-reviews/${id}/presentation`)
+          return json(financeEnvelope(review));
+        if (url.pathname === "/v1/finances/playbook") return json({ version: "1" });
+        if (url.pathname === "/v1/finances/maintenance/protocol" && init?.method === "POST")
+          return json(financeEnvelope({ id }));
+        if (url.pathname === "/v1/finances/maintenance")
+          return json({ items: [], nextCursor: null });
+        if (url.pathname === `/v1/finances/maintenance/protocol/${id}`) return json({ id });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.reviewFinanceReceipt(id, { decision: "accept" } as never)).resolves.toEqual({
+      reviewed: true,
+    });
+    await expect(api.getFinanceSnapshot()).resolves.toEqual(financeEnvelope({ asOf: now }));
+    await expect(api.listFinanceReimbursements()).resolves.toEqual({
+      reimbursements: [],
+      unmatchedCredits: [],
+    });
+    await expect(
+      api.reconcileFinanceReimbursement({ operation: "match" } as never),
+    ).resolves.toEqual({ id });
+    await expect(api.getFinanceLedgerChallenge(id)).resolves.toMatchObject({ challenge });
+    await expect(
+      api.submitFinanceLedgerChallenge({ challengeId: id } as never),
+    ).resolves.toMatchObject({ state: "submitted" });
+    await expect(api.getFinancePeriodReview(id)).resolves.toEqual(review);
+    await expect(api.getFinancePeriodReviewPresentation(id)).resolves.toEqual(
+      financeEnvelope(review),
+    );
+    await expect(api.getFinancePlaybook()).resolves.toEqual({ version: "1" });
+    await expect(api.maintainFinances({ operation: "inspect" } as never)).resolves.toEqual(
+      financeEnvelope({ id }),
+    );
+    await expect(api.getFinanceMaintenanceHistory({ limit: 25 })).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    await expect(api.getFinanceMaintenanceRun(id)).resolves.toEqual({ id });
+
+    expect(requests.map((request) => request.path)).toContain("/v1/finances/maintenance?limit=25");
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({
@@ -1960,7 +2407,7 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.deleteReminder(id);
-    await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
+    await expect(api.listTasks({ lifecycle: "open", limit: 10 })).resolves.toEqual({
       items: [task],
       nextCursor: null,
     });
@@ -1973,14 +2420,79 @@ describe("ilo API client", () => {
         timezone: "UTC",
         priority: "medium",
         estimateMinutes: 30,
+        lifecycle: "open",
         tags: ["planning"],
-        status: "scheduled",
+        why: null,
       }),
     ).resolves.toEqual(task);
-    await expect(api.updateTask(id, { status: "next" })).resolves.toEqual(task);
-    await expect(api.completeTask(id, true)).resolves.toEqual(task);
-    await expect(api.restoreTask(id)).resolves.toEqual(task);
-    await api.deleteTask(id);
+    await expect(api.getTask(id)).resolves.toEqual(task);
+    await expect(api.updateTask(id, { expectedRevision: 1, title: "Plan today" })).resolves.toEqual(
+      task,
+    );
+    await expect(api.completeTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.cancelTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.reopenTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.trashTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.restoreTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(
+      api.previewTaskMove(id, {
+        destinationListId: accountId,
+        destinationProjectId: null,
+        expectedRevision: 1,
+      }),
+    ).resolves.toEqual(taskMovePreview);
+    await expect(
+      api.moveTask(id, {
+        destinationListId: accountId,
+        destinationProjectId: null,
+        expectedRevision: 1,
+        previewToken: "task-move-preview",
+      }),
+    ).resolves.toEqual(task);
+    await expect(api.listTaskLists({ limit: 10 })).resolves.toEqual({
+      items: [taskList],
+      nextCursor: null,
+    });
+    await expect(
+      api.createTaskList({ color: null, description: null, icon: "list", name: "Personal" }),
+    ).resolves.toEqual(taskList);
+    await expect(api.getTaskList(id)).resolves.toEqual(taskList);
+    await expect(api.updateTaskList(id, { expectedRevision: 1, name: "Home" })).resolves.toEqual(
+      taskList,
+    );
+    await expect(api.archiveTaskList(id, { expectedRevision: 1 })).resolves.toEqual(taskList);
+    await expect(api.listTaskProjects({ limit: 10 })).resolves.toEqual({
+      items: [taskProject],
+      nextCursor: null,
+    });
+    await expect(
+      api.createTaskProject({
+        listId: id,
+        name: "Home refresh",
+        notes: null,
+        targetDate: null,
+        why: null,
+      }),
+    ).resolves.toEqual(taskProject);
+    await expect(api.getTaskProject(id)).resolves.toEqual(taskProject);
+    await expect(
+      api.updateTaskProject(id, { expectedRevision: 1, name: "Bedroom refresh" }),
+    ).resolves.toEqual(taskProject);
+    await expect(api.completeTaskProject(id, { expectedRevision: 1 })).resolves.toEqual(
+      taskProject,
+    );
+    await expect(api.cancelTaskProject(id, { expectedRevision: 1 })).resolves.toEqual(taskProject);
+    await expect(api.archiveTaskProject(id, { expectedRevision: 1 })).resolves.toEqual(taskProject);
+    await expect(
+      api.previewTaskProjectMove(id, { destinationListId: accountId, expectedRevision: 1 }),
+    ).resolves.toEqual(taskProjectMovePreview);
+    await expect(
+      api.moveTaskProject(id, {
+        destinationListId: accountId,
+        expectedRevision: 1,
+        previewToken: "task-project-move-preview",
+      }),
+    ).resolves.toEqual(taskProject);
     await expect(api.listActivity(25)).resolves.toHaveLength(1);
     await expect(api.getDailyBrief()).resolves.toEqual(brief);
     await expect(api.getWeather({ latitude: 40.7, longitude: -74 })).resolves.toEqual({
@@ -2227,6 +2739,9 @@ describe("ilo API client", () => {
     await expect(api.getFinanceAccountConnection(id)).resolves.toMatchObject({
       data: { status: "connected" },
     });
+    await expect(
+      api.listFinanceAccounts({ includeExcluded: false, kind: "cash", query: "Checking" }),
+    ).resolves.toMatchObject({ accounts: [financeAccount], totals: { netWorth: 1200 } });
     await expect(
       api.updateFinanceAccount(id, { idempotencyKey: "account-1", name: "Primary" }),
     ).resolves.toMatchObject({ data: financeAccount });

@@ -250,7 +250,7 @@ git commit -m "feat: define texting contracts and scopes"
 
 **Files:**
 - Modify: `packages/database/src/schema.ts`
-- Create: `packages/database/migrations/0037_texting.sql`
+- Create: `packages/database/migrations/0072_texting.sql`
 - Create: `packages/database/migrations/meta/0037_snapshot.json`
 - Modify: `packages/database/migrations/meta/_journal.json`
 - Create: `packages/database/src/texting-schema.test.ts`
@@ -329,7 +329,7 @@ fingerprint, mask, country, verification, and consent values. The TypeScript
 
 Run: `pnpm --filter @personal-os/database db:generate -- --name texting`
 
-Expected: `0037_texting.sql`, its snapshot, and one journal entry. Inspect SQL for five creates, foreign-key order, partial uniqueness, no table rewrite/backfill, and no destructive statement.
+Expected: `0072_texting.sql`, its snapshot, and one journal entry. Inspect SQL for five creates, foreign-key order, partial uniqueness, no table rewrite/backfill, and no destructive statement.
 
 - [ ] **Step 5: Run the migration test against a fresh PostgreSQL instance**
 

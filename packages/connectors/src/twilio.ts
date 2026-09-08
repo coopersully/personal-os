@@ -23,10 +23,12 @@ export type TwilioConnector = {
     statusCallback?: string;
     to: string;
   }) => Promise<TwilioMessage>;
+  getMessageOccurredAt: (messageSid: string) => Promise<Date>;
   startVerification: (to: string) => Promise<{ sid: string; status: string }>;
   validateWebhook: (signature: string, url: string, parameters: Record<string, string>) => boolean;
 };
 
+/** Create the bounded Twilio Verify and Programmable Messaging adapter used by the API. */
 export function createTwilioConnector(config: TwilioConfig): TwilioConnector {
   const client = twilio(config.accountSid, config.authToken, { timeout: 15_000 });
   return {
@@ -47,6 +49,10 @@ export function createTwilioConnector(config: TwilioConfig): TwilioConnector {
         ...(input.statusCallback ? { statusCallback: input.statusCallback } : {}),
         to: input.to,
       });
+    },
+    async getMessageOccurredAt(messageSid) {
+      const message = await client.messages(messageSid).fetch();
+      return message.dateCreated;
     },
     async startVerification(to) {
       const verification = await client.verify.v2

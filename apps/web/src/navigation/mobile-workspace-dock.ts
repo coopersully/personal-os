@@ -1,21 +1,19 @@
 import {
-  ActivityIcon,
   BankIcon,
   CalendarIcon,
   CircleCheckIcon,
   ClockIcon,
-  CompassIcon,
   DollarIcon,
   HouseIcon,
   type Icon,
   InboxIcon,
-  ListChecksIcon,
   ListTodoIcon,
   MailIcon,
   ReceiptIcon,
   ShieldCheckIcon,
-  TargetIcon,
+  TrashIcon,
   WalletIcon,
+  XIcon,
 } from "../components/icons.js";
 import type { WorkspaceId } from "./manifest.js";
 
@@ -27,19 +25,16 @@ export type MobileWorkspacePage = {
 };
 
 const mobileWorkspacePagesByWorkspace: Record<WorkspaceId, MobileWorkspacePage[]> = {
-  today: [
-    { icon: HouseIcon, label: "Today", path: "/today" },
-    { icon: ShieldCheckIcon, label: "Reviews", path: "/reviews" },
-    { icon: TargetIcon, label: "Goals", path: "/goals" },
-    { icon: CompassIcon, label: "Motives", path: "/motives" },
-    { icon: ActivityIcon, label: "Activity", path: "/activity" },
-  ],
+  today: [{ icon: HouseIcon, label: "Today", path: "/today" }],
   calendar: [{ icon: CalendarIcon, label: "Calendar", path: "/calendar" }],
   tasks: [
     { icon: InboxIcon, label: "Inbox", path: "/tasks" },
-    { icon: ListChecksIcon, label: "Next", path: "/tasks?view=next" },
+    { icon: CalendarIcon, label: "Today", path: "/tasks?view=today" },
+    { icon: ClockIcon, label: "Upcoming", path: "/tasks?view=upcoming" },
     { icon: ClockIcon, label: "Scheduled", path: "/tasks?view=scheduled" },
     { icon: CircleCheckIcon, label: "Completed", path: "/tasks?view=completed" },
+    { icon: XIcon, label: "Cancelled", path: "/tasks?view=cancelled" },
+    { icon: TrashIcon, label: "Trash", path: "/tasks?view=trash" },
     { icon: ListTodoIcon, label: "Reminders", path: "/reminders" },
   ],
   mail: [{ icon: MailIcon, label: "Mail", path: "/mail" }],

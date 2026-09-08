@@ -1,6 +1,5 @@
 import type { CalendarAccount } from "@personal-os/api-client";
 import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
-import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -23,6 +22,8 @@ import {
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
+import { Badge } from "../../components/ui/badge.js";
+import { Button } from "../../components/ui/button.js";
 import {
   Collapsible,
   CollapsibleContent,
@@ -35,6 +36,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../../components/ui/empty.js";
 import {
   InputGroup,
   InputGroupAddon,
@@ -495,9 +504,22 @@ export function MailPage({ user }: { user: User }) {
       <div className="mail-page">
         <div className="narrow-page">
           <h1>Inbox</h1>
-          <EmptyState icon={<InboxIcon />} title="Connect a mailbox">
-            Enable Mail on a connected Google account or add iCloud from Settings.
-          </EmptyState>
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <InboxIcon aria-hidden="true" />
+              </EmptyMedia>
+              <EmptyTitle>Connect a mailbox</EmptyTitle>
+              <EmptyDescription>
+                Enable Mail on a connected Google account or add iCloud from Settings.
+              </EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button asChild>
+                <Link to="/settings?section=connections">Connect a mailbox</Link>
+              </Button>
+            </EmptyContent>
+          </Empty>
         </div>
       </div>
     );
@@ -546,9 +568,15 @@ export function MailPage({ user }: { user: User }) {
             ) : threads.isError ? (
               <InlineError error={threads.error} />
             ) : threads.data?.length === 0 ? (
-              <EmptyState icon={<MailIcon />} title="Nothing here">
-                Try another mailbox or a broader search.
-              </EmptyState>
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <MailIcon aria-hidden="true" />
+                  </EmptyMedia>
+                  <EmptyTitle>Nothing here</EmptyTitle>
+                  <EmptyDescription>Try another mailbox or a broader search.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               threads.data?.map((thread) => (
                 <ThreadRow
@@ -623,9 +651,17 @@ export function MailPage({ user }: { user: User }) {
             ) : selectedId && loaded.isPending ? (
               <PageLoading />
             ) : (
-              <EmptyState icon={<MailIcon />} title="Select a conversation">
-                Open a conversation to read every synced message and manage it.
-              </EmptyState>
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <MailIcon aria-hidden="true" />
+                  </EmptyMedia>
+                  <EmptyTitle>Select a conversation</EmptyTitle>
+                  <EmptyDescription>
+                    Open a conversation to read every synced message and manage it.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             )}
           </section>
         </ResizablePanel>
@@ -654,9 +690,15 @@ function MailDraftList({
 }) {
   if (!drafts.length)
     return (
-      <EmptyState icon={<MailIcon />} title="No drafts">
-        Messages you start will be saved here automatically.
-      </EmptyState>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <MailIcon aria-hidden="true" />
+          </EmptyMedia>
+          <EmptyTitle>No drafts</EmptyTitle>
+          <EmptyDescription>Messages you start will be saved here automatically.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   return drafts.map((draft) => (
     <article className="mail-draft-row" key={draft.id}>
@@ -671,15 +713,15 @@ function MailDraftList({
       <div className="mail-draft-row__actions">
         {draft.sendStatus === "reconcile" ? (
           <>
-            <Button onClick={() => reconcile(draft.id, "sent")} tone="ghost">
+            <Button onClick={() => reconcile(draft.id, "sent")} size="sm" variant="ghost">
               Mark sent
             </Button>
-            <Button onClick={() => reconcile(draft.id, "not_sent")} tone="ghost">
+            <Button onClick={() => reconcile(draft.id, "not_sent")} size="sm" variant="ghost">
               Not sent
             </Button>
           </>
         ) : (
-          <Button onClick={() => remove(draft.id)} tone="ghost">
+          <Button onClick={() => remove(draft.id)} size="sm" variant="ghost">
             Discard
           </Button>
         )}
@@ -712,64 +754,65 @@ function MailSecondaryNavigation({
   trash: () => void;
 }) {
   return (
-    <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+    <WorkspaceSecondaryAppBar
+      aria-label="Conversation actions"
+      className="mail-secondary-nav"
+      placement="inline"
+    >
       <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
-        <Button aria-label="Back to inbox" onClick={back} tone="ghost" type="button">
+        <Button aria-label="Back to inbox" onClick={back} type="button" variant="ghost">
           <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
           <span>Inbox</span>
         </Button>
       </WorkspaceSecondaryAppBarLeading>
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
-        <Button aria-label="Reply" onClick={reply} tone="ghost">
-          <ReplyIcon aria-hidden="true" className="size-4" />
+        <Button aria-label="Reply" onClick={reply} variant="ghost">
+          <ReplyIcon aria-hidden="true" data-icon="inline-start" />
           <span>Reply</span>
         </Button>
-        <Button aria-label="Forward" onClick={forward} tone="ghost">
-          <ForwardIcon aria-hidden="true" className="size-4" />
+        <Button aria-label="Forward" onClick={forward} variant="ghost">
+          <ForwardIcon aria-hidden="true" data-icon="inline-start" />
           <span>Forward</span>
         </Button>
-        <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
-          <ArchiveIcon aria-hidden="true" className="size-4" />
+        <Button
+          aria-label="Archive conversation"
+          disabled={pending}
+          onClick={archive}
+          variant="ghost"
+        >
+          <ArchiveIcon aria-hidden="true" data-icon="inline-start" />
           <span>Archive</span>
         </Button>
         <Button
           aria-label="Snooze conversation until tomorrow"
           className="mail-secondary-nav__compact-action"
           onClick={snooze}
-          tone="ghost"
+          variant="ghost"
         >
-          <ClockIcon aria-hidden="true" className="size-4" />
+          <ClockIcon aria-hidden="true" />
         </Button>
         <Button
           aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
           className="mail-secondary-nav__compact-action"
           disabled={pending}
           onClick={toggleStar}
-          tone="ghost"
+          variant="ghost"
         >
-          <StarIcon
-            aria-hidden="true"
-            className="size-4"
-            weight={selected.starred ? "Filled" : "Outline"}
-          />
+          <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
         </Button>
         <Button
           aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
           className="mail-secondary-nav__compact-action"
           disabled={pending}
           onClick={toggleUnread}
-          tone="ghost"
+          variant="ghost"
         >
-          {selected.unread ? (
-            <EyeIcon aria-hidden="true" className="size-4" />
-          ) : (
-            <EyeOffIcon aria-hidden="true" className="size-4" />
-          )}
+          {selected.unread ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button aria-label="More conversation actions" disabled={pending} tone="ghost">
-              <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+            <Button aria-label="More conversation actions" disabled={pending} variant="ghost">
+              <MoreHorizontalIcon aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -980,7 +1023,8 @@ function ThreadRow({
 }) {
   return (
     <button
-      aria-pressed={active}
+      aria-label={`${thread.from.name || thread.from.address || "Unknown sender"}: ${thread.subject}`}
+      aria-current={active ? "true" : undefined}
       className={`mail-thread-row${active ? " is-active" : ""}${thread.unread ? " is-unread" : ""}`}
       onClick={select}
       type="button"

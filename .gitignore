@@ -37,3 +37,5 @@ backend.hcl
 *.tfvars
 !*.tfvars.example
 crash.log
+# Local design previews and implementation ledgers
+.superpowers/

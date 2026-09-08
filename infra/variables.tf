@@ -146,8 +146,11 @@ variable "twilio_phone_number" {
   default     = ""
 
   validation {
-    condition     = var.twilio_phone_number == "" || can(regex("^\\+[1-9][0-9]{7,14}$", var.twilio_phone_number))
-    error_message = "twilio_phone_number must be blank or a valid E.164 number."
+    condition = (
+      (!var.texting_enabled && var.twilio_phone_number == "") ||
+      can(regex("^\\+[1-9][0-9]{7,14}$", var.twilio_phone_number))
+    )
+    error_message = "twilio_phone_number must be a valid E.164 number when texting_enabled is true; it may be blank only while texting is disabled."
   }
 }
 

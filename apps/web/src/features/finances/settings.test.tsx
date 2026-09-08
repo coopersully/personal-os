@@ -105,6 +105,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceGuidedSetup: vi.fn(),
   getFinanceOverview: vi.fn(),
   getFinanceProfile: vi.fn(),
+  getFinancialProfile: vi.fn(),
   updateFinanceProfile: vi.fn(),
   updateFinanceAutomationSettings: vi.fn(),
   upsertDomainProfile: vi.fn(),
@@ -143,6 +144,7 @@ describe("Finance settings", () => {
       transactions: [],
     });
     mocks.getFinanceProfile.mockResolvedValue(null);
+    mocks.getFinancialProfile.mockResolvedValue({ outcome: "completed", data: null });
     mocks.updateFinanceProfile.mockResolvedValue(savedFinanceProfile);
     mocks.updateFinanceAutomationSettings.mockImplementation(async (settings) => {
       mocks.getFinanceAutomationSettings.mockResolvedValue(settings);
@@ -247,7 +249,9 @@ describe("Finance settings", () => {
     renderSettings();
     const browser = userEvent.setup();
     expect(await screen.findByText("Active approved guidance")).toBeVisible();
-    expect(screen.getByText("Consequential finance actions stay in Finance.")).toBeVisible();
+    expect(
+      screen.getByText("Manage your financial records and decisions directly in Finance."),
+    ).toBeVisible();
     expect(screen.queryByText("Monthly review guidance")).not.toBeInTheDocument();
 
     await browser.type(screen.getByRole("textbox", { name: "Employer" }), "nohmi Labs");

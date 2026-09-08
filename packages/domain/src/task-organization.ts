@@ -11,6 +11,18 @@ export type TaskContainerAvailability = z.infer<typeof taskContainerAvailability
 export const taskListKindSchema = z.enum(["inbox", "standard"]);
 export type TaskListKind = z.infer<typeof taskListKindSchema>;
 
+export const taskListIconSchema = z.enum([
+  "list",
+  "home",
+  "star",
+  "target",
+  "calendar",
+  "wallet",
+  "people",
+  "receipt",
+]);
+export type TaskListIcon = z.infer<typeof taskListIconSchema>;
+
 export const taskSystemViewSchema = z.enum([
   "today",
   "upcoming",
@@ -53,6 +65,7 @@ const optionalIdempotencyKeySchema = z.uuid().optional();
 const taskListFieldsSchema = z.object({
   description: nullableTaskContainerTextSchema,
   color: nullableTaskContainerColorSchema,
+  icon: taskListIconSchema,
   name: taskContainerNameSchema,
 });
 
@@ -73,6 +86,7 @@ export const createTaskListInputSchema = taskListFieldsSchema
   .extend({
     description: nullableTaskContainerTextSchema.default(null),
     color: nullableTaskContainerColorSchema.default(null),
+    icon: taskListIconSchema.default("list"),
     idempotencyKey: optionalIdempotencyKeySchema,
   })
   .strict();

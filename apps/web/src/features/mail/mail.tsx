@@ -700,7 +700,11 @@ function MailSecondaryNavigation({
   trash: () => void;
 }) {
   return (
-    <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+    <WorkspaceSecondaryAppBar
+      aria-label="Conversation actions"
+      className="mail-secondary-nav"
+      placement="inline"
+    >
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
         <Button onClick={reply} tone="ghost">
           <ReplyIcon aria-hidden="true" className="size-4" />

@@ -76,11 +76,13 @@ import {
 } from "./routes/support.js";
 import { registerTaskListRoutes } from "./routes/task-lists.js";
 import { registerTaskProjectRoutes } from "./routes/task-projects.js";
+import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
+import { createTaskWorkspaceService } from "./task-workspace-service.js";
 import { createTextingService } from "./texting-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
@@ -242,6 +244,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       resendApiKey: dependencies.config.resendApiKey,
     });
   const reminders = createReminderService({ db: dependencies.db, now });
+  const taskWorkspace = createTaskWorkspaceService({
+    db: dependencies.db,
+    now,
+    cursorSecret: dependencies.config.encryptionKey,
+  });
   const taskLists = createTaskListService({ db: dependencies.db, now });
   const taskProjects = createTaskProjectService({
     db: dependencies.db,
@@ -901,6 +908,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/task-projects", authenticate);
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
+  app.use("/v1/task-workspace", authenticate);
   app.use("/v1/texting/*", authenticate);
   app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1191,6 +1199,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   registerTaskProjectRoutes({ app, mutationContext, taskProjects });
 
   registerTaskRoutes({ app, mutationContext, tasks });
+  registerTaskWorkspaceRoutes({ app, taskWorkspace });
 
   registerCalendarRoutes({
     app,

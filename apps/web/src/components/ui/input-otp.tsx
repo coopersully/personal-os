@@ -68,11 +68,11 @@ function InputOTPSlot({
   )
 }
 
-function InputOTPSeparator({ ...props }: React.ComponentProps<"div">) {
+function InputOTPSeparator({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="input-otp-separator"
-      className="flex items-center [&_svg:not([class*='size-'])]:size-4"
+      className={cn("flex items-center px-1 text-muted-foreground [&_svg:not([class*='size-'])]:size-2", className)}
       role="separator"
       {...props}
     >

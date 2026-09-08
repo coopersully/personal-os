@@ -48,6 +48,7 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
   if (!row.economicEventId)
     throw new AppError("internal_error", "A Finance Inbox case lost its event.");
   return {
+    transactionId: row.transactionId,
     economicEventId: row.economicEventId,
     evidence: row.evidence,
     firstSeenAt: row.firstSeenAt.toISOString(),

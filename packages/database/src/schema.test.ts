@@ -286,6 +286,7 @@ describe("database schema contracts", () => {
       "0073_finance_account_semantics_recovery",
       "0074_finance_budget_buckets",
       "0075_finance_ownership_constraint",
+      "0076_task_list_icons",
     ]);
   });
 
@@ -436,7 +437,7 @@ describe("database schema contracts", () => {
     expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
   });
 
-  it("enforces Task List and Project ownership, names, lifecycle, and idempotency", () => {
+  it("enforces Task List and Project ownership, names, lifecycle, and idempotency", async () => {
     const lists = getTableConfig(requiredTable("taskLists"));
     const projects = getTableConfig(requiredTable("taskProjects"));
 
@@ -449,6 +450,7 @@ describe("database schema contracts", () => {
         "normalized_name",
         "description",
         "color",
+        "icon",
         "availability",
         "revision",
         "create_idempotency_key",
@@ -469,11 +471,20 @@ describe("database schema contracts", () => {
     expect(lists.checks.map((candidate) => candidate.name)).toEqual(
       expect.arrayContaining([
         "task_lists_kind_check",
+        "task_lists_icon_check",
         "task_lists_availability_check",
         "task_lists_revision_check",
         "task_lists_create_idempotency_check",
       ]),
     );
+
+    const taskListIconMigration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0076_task_list_icons.sql"),
+      "utf8",
+    );
+    expect(taskListIconMigration).toContain("ADD COLUMN \"icon\" text DEFAULT 'list' NOT NULL");
+    expect(taskListIconMigration).toContain('ADD CONSTRAINT "task_lists_icon_check"');
+    expect(taskListIconMigration).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
 
     expect(projects.columns.map((column) => column.name)).toEqual(
       expect.arrayContaining([

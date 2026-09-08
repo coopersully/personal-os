@@ -1,8 +1,14 @@
 import type * as React from "react";
+import { useContext } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
+import { WorkspaceSecondarySlotContext } from "./workspace-layout.js";
 
 type WorkspaceSecondaryAppBarProps = Omit<React.ComponentProps<"nav">, "aria-label"> & {
   "aria-label": string;
+  enabled?: boolean;
+  /** Spatial headers stay inside their grid's scrolling coordinate system. */
+  placement?: "layout" | "inline";
 };
 
 /**
@@ -10,14 +16,23 @@ type WorkspaceSecondaryAppBarProps = Omit<React.ComponentProps<"nav">, "aria-lab
  * app bar. Features supply meaning and controls; this component owns the
  * landmark, slot order, surface, and responsive geometry.
  */
-export function WorkspaceSecondaryAppBar({ className, ...props }: WorkspaceSecondaryAppBarProps) {
-  return (
+export function WorkspaceSecondaryAppBar({
+  className,
+  enabled = true,
+  placement = "layout",
+  ...props
+}: WorkspaceSecondaryAppBarProps) {
+  const target = useContext(WorkspaceSecondarySlotContext);
+  if (!enabled) return null;
+  const bar = (
     <nav
       className={cn("workspace-secondary-app-bar", className)}
       data-slot="workspace-secondary-app-bar"
       {...props}
     />
   );
+  if (placement === "inline" || target === undefined) return bar;
+  return target ? createPortal(bar, target) : null;
 }
 
 export function WorkspaceSecondaryAppBarLeading({

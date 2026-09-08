@@ -52,6 +52,7 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
         JSON.stringify({
           color: input.color,
           description: input.description,
+          icon: input.icon,
           name: normalizedName,
         }),
       )
@@ -486,6 +487,7 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
                   createIdempotencyFingerprint: input.idempotencyKey ? createFingerprint : null,
                   createIdempotencyKey: input.idempotencyKey ?? null,
                   description: input.description,
+                  icon: input.icon,
                   kind: "standard",
                   name: input.name,
                   normalizedName,
@@ -575,6 +577,7 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
               .set({
                 ...(input.color === undefined ? {} : { color: input.color }),
                 ...(input.description === undefined ? {} : { description: input.description }),
+                ...(input.icon === undefined ? {} : { icon: input.icon }),
                 ...(input.name === undefined ? {} : { name: input.name, normalizedName }),
                 revision: before.revision + 1,
                 updatedAt: now(),

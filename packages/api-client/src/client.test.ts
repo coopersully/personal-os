@@ -229,6 +229,7 @@ const taskList: TaskList = {
   createdAt: now,
   deletedAt: null,
   description: null,
+  icon: "list",
   id,
   kind: "standard",
   name: "Personal",
@@ -1502,6 +1503,7 @@ describe("ilo API client", () => {
     const createTaskListInput = {
       color: null,
       description: null,
+      icon: "list" as const,
       idempotencyKey: "44444444-4444-4444-8444-444444444444",
       name: "Personal",
     };
@@ -2028,6 +2030,107 @@ describe("ilo API client", () => {
     });
   });
 
+  it("uses the complete Finance review, reimbursement, and maintenance transport", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const revision = `sha256:${"b".repeat(64)}`;
+    const challenge = {
+      candidateId: accountId,
+      candidateRevision: revision,
+      createdAt: now,
+      cutoff: now,
+      id,
+      rubricVersion: "finance-ledger-challenge-v1" as const,
+      runId: accountId,
+      state: "prepared" as const,
+      submittedAt: null,
+      submittingAgentId: null,
+      updatedAt: now,
+      userId: id,
+    };
+    const review = {
+      challenge: { checked: [], findings: 0, observations: 0 },
+      closeReadiness: financeStatus.details.closeReadiness,
+      createdAt: now,
+      cutoff: now,
+      goalsAndDebt: { activeGoals: 0, debt: 0, netWorth: 1000 },
+      id,
+      income: 5000,
+      monitoring: { href: "/finances", responsibility: "Review the next statement." },
+      period: { end: "2026-07-31", start: "2026-07-01" },
+      position: { cashLowPoint: 500, closing: 1000, opening: 750 },
+      recommendations: [],
+      reimbursements: financeStatus.details.reimbursements,
+      runId: accountId,
+      sourceIds: [],
+      spending: { budgetVariance: 20, gross: 500, personal: 450, savings: 50 },
+      status: "completed" as const,
+      userId: id,
+      work: { approvals: 0, exceptions: 0, questions: 0, rulesAndActions: 0 },
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname.endsWith("/receipt-review")) return json({ review: { reviewed: true } });
+        if (url.pathname === "/v1/finances/snapshot") return json(financeEnvelope({ asOf: now }));
+        if (url.pathname === "/v1/finances/reimbursements")
+          return json({ reimbursements: { reimbursements: [], unmatchedCredits: [] } });
+        if (url.pathname === "/v1/finances/reimbursements/reconcile")
+          return json({ reimbursement: { id } });
+        if (url.pathname === `/v1/finances/maintenance/challenges/${id}`)
+          return json({ page: { challenge, checks: [], items: [], nextCursor: null } });
+        if (url.pathname === `/v1/finances/maintenance/challenges/${id}/submit`)
+          return json({ challenge: { ...challenge, state: "submitted", submittedAt: now } });
+        if (url.pathname === `/v1/finances/period-reviews/${id}`) return json({ review });
+        if (url.pathname === `/v1/finances/period-reviews/${id}/presentation`)
+          return json(financeEnvelope(review));
+        if (url.pathname === "/v1/finances/playbook") return json({ version: "1" });
+        if (url.pathname === "/v1/finances/maintenance/protocol" && init?.method === "POST")
+          return json(financeEnvelope({ id }));
+        if (url.pathname === "/v1/finances/maintenance")
+          return json({ items: [], nextCursor: null });
+        if (url.pathname === `/v1/finances/maintenance/protocol/${id}`) return json({ id });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.reviewFinanceReceipt(id, { decision: "accept" } as never)).resolves.toEqual({
+      reviewed: true,
+    });
+    await expect(api.getFinanceSnapshot()).resolves.toEqual(financeEnvelope({ asOf: now }));
+    await expect(api.listFinanceReimbursements()).resolves.toEqual({
+      reimbursements: [],
+      unmatchedCredits: [],
+    });
+    await expect(
+      api.reconcileFinanceReimbursement({ operation: "match" } as never),
+    ).resolves.toEqual({ id });
+    await expect(api.getFinanceLedgerChallenge(id)).resolves.toMatchObject({ challenge });
+    await expect(
+      api.submitFinanceLedgerChallenge({ challengeId: id } as never),
+    ).resolves.toMatchObject({ state: "submitted" });
+    await expect(api.getFinancePeriodReview(id)).resolves.toEqual(review);
+    await expect(api.getFinancePeriodReviewPresentation(id)).resolves.toEqual(
+      financeEnvelope(review),
+    );
+    await expect(api.getFinancePlaybook()).resolves.toEqual({ version: "1" });
+    await expect(api.maintainFinances({ operation: "inspect" } as never)).resolves.toEqual(
+      financeEnvelope({ id }),
+    );
+    await expect(api.getFinanceMaintenanceHistory({ limit: 25 })).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    await expect(api.getFinanceMaintenanceRun(id)).resolves.toEqual({ id });
+
+    expect(requests.map((request) => request.path)).toContain("/v1/finances/maintenance?limit=25");
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({
@@ -2201,7 +2304,7 @@ describe("ilo API client", () => {
       nextCursor: null,
     });
     await expect(
-      api.createTaskList({ color: null, description: null, name: "Personal" }),
+      api.createTaskList({ color: null, description: null, icon: "list", name: "Personal" }),
     ).resolves.toEqual(taskList);
     await expect(api.getTaskList(id)).resolves.toEqual(taskList);
     await expect(api.updateTaskList(id, { expectedRevision: 1, name: "Home" })).resolves.toEqual(

@@ -99,7 +99,22 @@ import {
   localDateAt,
   toCents,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  like,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -2483,6 +2498,14 @@ export function createFinanceService({
     const sortDirection = query.sortDirection ?? "desc";
     if (query.accountId) conditions.push(eq(financeTransactions.accountId, query.accountId));
     if (query.categoryId) conditions.push(eq(financeTransactions.categoryId, query.categoryId));
+    if (query.search) {
+      const literal = `%${query.search.replace(/[\\%_]/g, "\\$&")}%`;
+      const match = or(
+        ilike(financeTransactions.merchant, literal),
+        ilike(financeTransactions.notes, literal),
+      );
+      if (match) conditions.push(match);
+    }
     if (query.from) conditions.push(gte(financeTransactions.transactionDate, query.from));
     if (query.to) conditions.push(lte(financeTransactions.transactionDate, query.to));
     if (query.pending !== undefined)

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, errorMessage } from "../../api.js";
+import { Alert, AlertDescription } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import {
   Card,
@@ -10,8 +11,15 @@ import {
   CardTitle,
 } from "../../components/ui/card.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
-import { Field, FieldGroup, FieldLabel } from "../../components/ui/field.js";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
+import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
 
 export function TextingSettings() {
   const queryClient = useQueryClient();
@@ -53,13 +61,17 @@ export function TextingSettings() {
           Agent texting
         </CardTitle>
         <CardDescription>
-          Let authorized agents communicate with you through ilo&apos;s shared Twilio number.
+          Let authorized agents text you through nohmi’s shared number.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        {error ? <p role="alert">{errorMessage(error)}</p> : null}
+      <CardContent className="flex flex-col gap-5">
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{errorMessage(error)}</AlertDescription>
+          </Alert>
+        ) : null}
         {current?.id && current.state !== "disconnected" ? (
-          <div className="settings-form">
+          <FieldGroup>
             <p>
               <strong>{current.maskedPhoneNumber}</strong> ·{" "}
               {current.state === "active"
@@ -68,98 +80,116 @@ export function TextingSettings() {
                   ? "Blocked by Twilio opt-out"
                   : current.state}
             </p>
-            <p>
-              Messages come from {current.senderPhoneNumber ?? "ilo's shared number"}. Reply STOP to
-              block texts. Only a later START reply can restore delivery after a Twilio opt-out.
-            </p>
-            <Button
-              disabled={disconnect.isPending}
-              onClick={() => disconnect.mutate()}
-              type="button"
-              variant="outline"
-            >
-              Disconnect number
-            </Button>
-          </div>
+            <FieldDescription>
+              Messages come from {current.senderPhoneNumber ?? "nohmi’s shared number"}. Reply STOP
+              to block texts. Only a later START reply can restore delivery after a Twilio opt-out.
+            </FieldDescription>
+            <Field orientation="horizontal">
+              <Button
+                disabled={disconnect.isPending}
+                onClick={() => disconnect.mutate()}
+                type="button"
+                variant="outline"
+              >
+                Disconnect number
+              </Button>
+            </Field>
+          </FieldGroup>
         ) : challengeId ? (
           <form
-            className="settings-form"
             onSubmit={(event) => {
               event.preventDefault();
               verify.mutate();
             }}
           >
-            <Field>
-              <FieldLabel htmlFor="texting-code">Verification code</FieldLabel>
-              <Input
-                autoComplete="one-time-code"
-                id="texting-code"
-                inputMode="numeric"
-                onChange={(event) => setCode(event.target.value)}
-                value={code}
-              />
-            </Field>
-            <Button disabled={verify.isPending || code.length < 4} type="submit">
-              Verify and connect
-            </Button>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="texting-code">Verification code</FieldLabel>
+                <Input
+                  autoComplete="one-time-code"
+                  id="texting-code"
+                  inputMode="numeric"
+                  onChange={(event) => setCode(event.target.value)}
+                  value={code}
+                />
+              </Field>
+              <Field orientation="horizontal">
+                <Button disabled={verify.isPending || code.length < 4} type="submit">
+                  Verify and connect
+                </Button>
+              </Field>
+            </FieldGroup>
           </form>
         ) : (
           <form
-            className="settings-form"
             onSubmit={(event) => {
               event.preventDefault();
               if (consentAccepted) start.mutate();
             }}
           >
             <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="texting-country">Country</FieldLabel>
-                <select
-                  id="texting-country"
-                  onChange={(event) => setCountry(event.target.value as "US" | "CA")}
-                  value={country}
-                >
-                  <option value="US">United States</option>
-                  <option value="CA">Canada</option>
-                </select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="texting-phone">Mobile number</FieldLabel>
-                <Input
-                  autoComplete="tel"
-                  id="texting-phone"
-                  onChange={(event) => setPhoneNumber(event.target.value)}
-                  placeholder="(555) 555-0123"
-                  type="tel"
-                  value={phoneNumber}
+              <FieldGroup className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="texting-country">Country</FieldLabel>
+                  <NativeSelect
+                    className="w-full"
+                    id="texting-country"
+                    onChange={(event) => setCountry(event.target.value as "US" | "CA")}
+                    value={country}
+                  >
+                    <NativeSelectOption value="US">United States</NativeSelectOption>
+                    <NativeSelectOption value="CA">Canada</NativeSelectOption>
+                  </NativeSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="texting-phone">Mobile number</FieldLabel>
+                  <Input
+                    autoComplete="tel"
+                    id="texting-phone"
+                    onChange={(event) => setPhoneNumber(event.target.value)}
+                    placeholder="(555) 555-0123"
+                    type="tel"
+                    value={phoneNumber}
+                  />
+                </Field>
+              </FieldGroup>
+              <Field orientation="horizontal">
+                <Checkbox
+                  aria-describedby="texting-consent-description"
+                  checked={consentAccepted}
+                  id="texting-consent"
+                  onCheckedChange={(value) => setConsentAccepted(value === true)}
                 />
+                <FieldContent>
+                  <FieldLabel htmlFor="texting-consent">Allow agent text messages</FieldLabel>
+                  <FieldDescription id="texting-consent-description">
+                    I agree to receive conversational texts from nohmi and understand message/data
+                    rates may apply. Consent is recorded with my account; I can reply STOP at any
+                    time.
+                  </FieldDescription>
+                </FieldContent>
+              </Field>
+              {current?.providerReady === false ? (
+                <Alert role="status">
+                  <AlertDescription>
+                    Texting is not available on this nohmi deployment yet.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              <Field orientation="horizontal">
+                <Button
+                  disabled={
+                    !consentAccepted ||
+                    !phoneNumber ||
+                    start.isPending ||
+                    current?.providerReady === false
+                  }
+                  type="submit"
+                >
+                  Send verification code
+                </Button>
               </Field>
             </FieldGroup>
-            <label className="flex items-start gap-2" htmlFor="texting-consent">
-              <Checkbox
-                checked={consentAccepted}
-                id="texting-consent"
-                onCheckedChange={(value) => setConsentAccepted(value === true)}
-              />
-              <span>
-                I agree to receive conversational texts from ilo and understand message/data rates
-                may apply. Consent is recorded with my account; I can reply STOP at any time.
-              </span>
-            </label>
-            <Button
-              disabled={
-                !consentAccepted ||
-                !phoneNumber ||
-                start.isPending ||
-                current?.providerReady === false
-              }
-              type="submit"
-            >
-              Send verification code
-            </Button>
-            {current?.providerReady === false ? (
-              <p>Texting is not configured on this ilo deployment.</p>
-            ) : null}
           </form>
         )}
       </CardContent>

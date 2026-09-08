@@ -74,6 +74,7 @@ const taskList: TaskList = {
   createdAt: now,
   deletedAt: null,
   description: "Personal commitments.",
+  icon: "list",
   id: accountId,
   kind: "standard",
   name: "Personal",
@@ -1247,6 +1248,7 @@ describe("ilo MCP server", () => {
     expect(api.createTaskList).toHaveBeenCalledWith({
       color: null,
       description: null,
+      icon: "list",
       idempotencyKey: id,
       name: "Personal",
     });

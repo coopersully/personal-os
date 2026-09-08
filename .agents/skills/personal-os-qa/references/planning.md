@@ -64,11 +64,23 @@ Verify the fixture across the Tasks workspace Views:
 | `/tasks?view=trash` | Compare desk lamps |
 | `/reminders` | Send launch review agenda and Call Mom |
 
-Confirm Views, Lists, and Projects are separate sidebar groups. Inbox is the default `/tasks`
-selection and never puts its generated ID in the URL. Select Personal, Work, and Shopping Lists and
-confirm the URL uses `list`. Under Personal and Work, confirm the duplicate Project name
+Confirm Inbox, Today, Upcoming, All, History, and Trash are directly reachable; Scheduled is a
+reserved-time filter, Reminders a type filter, and Completed/Cancelled are History filters.
+Inbox is the default `/tasks` selection and never
+puts its generated ID in the URL. Select Personal, Work, and Shopping Lists and confirm the URL
+uses `list`. Every project remains visible without a disclosure toggle, including after a view
+change and reload. Under Personal and Work, confirm the duplicate Project name
 **Quarterly reset** resolves within the selected List. Select a Project and confirm the canonical
-URL contains both `list` and `project` and survives refresh.
+URL contains both `list` and `project` and survives refresh. Only its destination link is current.
+Use the Lists header plus and List/Project menus for organization. Verify Archive list asks for
+confirmation before writing, and Inbox has no edit/archive action. On narrow screens the same
+actions remain accessible in the workspace sheet and contextual secondary bar.
+
+Check Today/Tomorrow/Next 7 days presets, Advanced exact ranges, and removable filter chips. Search
+and scope survive individual filter removal. Task rows keep notes/tags in the inspector and expose
+trash through a confirmed menu action with recovery in Trash. Verify server-backed Sort and Display
+grouping across pages. Select explicit rows and confirm mixed selections expose only compatible
+actions, with per-item failures retained rather than an all-success message.
 
 Create/edit a Task with independent deadline and reserved-time fields; there must be no Next or
 status selector. Exercise complete/reopen, cancel/reopen, trash/restore, Task move detachment

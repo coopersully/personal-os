@@ -51,7 +51,10 @@ describe("Texting settings", () => {
     renderSettings();
 
     await user.type(await screen.findByLabelText("Mobile number"), "5555550123");
-    await user.click(screen.getByRole("checkbox"));
+    expect(screen.getByLabelText("Country")).toHaveAttribute("data-slot", "native-select");
+    const consent = screen.getByRole("checkbox", { name: "Allow agent text messages" });
+    expect(consent).toHaveAccessibleDescription(/I can reply STOP at any time/);
+    await user.click(consent);
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
     expect(await screen.findByLabelText("Verification code")).toBeInTheDocument();
 
@@ -97,14 +100,14 @@ describe("Texting settings", () => {
     });
     renderSettings();
     expect(await screen.findByText(/Blocked by Twilio opt-out/)).toBeInTheDocument();
-    expect(screen.getByText(/ilo's shared number/)).toBeInTheDocument();
+    expect(screen.getByText(/Messages come from nohmi’s shared number/)).toBeInTheDocument();
   });
 
   it("explains when texting is unavailable", async () => {
     mocks.getTextingConnection.mockResolvedValueOnce({ id: null, providerReady: false });
     renderSettings();
     expect(
-      await screen.findByText("Texting is not configured on this ilo deployment."),
+      await screen.findByText("Texting is not available on this nohmi deployment yet."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send verification code" })).toBeDisabled();
   });

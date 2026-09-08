@@ -66,6 +66,7 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0073_finance_account_semantics_recovery",
         "0074_finance_budget_buckets",
         "0075_finance_ownership_constraint",
+        "0076_task_list_icons",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);

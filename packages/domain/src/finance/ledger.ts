@@ -112,6 +112,7 @@ export type StartFinanceAccountConnectionInput = z.infer<
 
 export const updateFinanceAccountInputSchema = z
   .object({
+    expectedUpdatedAt: isoDateTimeSchema.optional(),
     balance: z.number().finite().nullable().optional(),
     includeInPlanning: z.boolean().optional(),
     institution: z.string().trim().min(1).max(160).optional(),

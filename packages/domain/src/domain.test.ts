@@ -1495,6 +1495,10 @@ describe("domain schemas", () => {
         name: "Personal",
       }).success,
     ).toBe(false);
+    expect(createTaskListInputSchema.parse({ name: "Personal" }).icon).toBe("list");
+    expect(
+      createTaskListInputSchema.safeParse({ icon: "not-an-icon", name: "Personal" }).success,
+    ).toBe(false);
     expect(
       createTaskListInputSchema.safeParse({
         name: "Local only",
@@ -1530,6 +1534,7 @@ describe("domain schemas", () => {
     expect(updateTaskInputSchema.safeParse({ expectedRevision: 1 }).success).toBe(false);
     expect(updateTaskInputSchema.safeParse({ title: undefined }).success).toBe(false);
     expect(updateTaskListInputSchema.safeParse({ description: undefined }).success).toBe(false);
+    expect(updateTaskListInputSchema.parse({ icon: "home" })).toEqual({ icon: "home" });
     expect(updateTaskProjectInputSchema.safeParse({ why: undefined }).success).toBe(false);
     expect(
       updateTaskInputSchema.safeParse({ expectedRevision: 0, title: "Invalid revision" }).success,
@@ -1596,6 +1601,7 @@ describe("domain schemas", () => {
       createdAt: start,
       deletedAt: null,
       description: null,
+      icon: "list",
       id: listId,
       kind: "inbox",
       name: "Inbox",

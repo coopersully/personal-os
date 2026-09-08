@@ -1,6 +1,7 @@
 import {
   type TaskList,
   type TaskListArchiveConflict,
+  type TaskListIcon,
   taskListArchiveConflictSchema,
 } from "@personal-os/domain";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,19 +18,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { taskListIconOptions } from "./task-list-icons";
 
 export function TaskListDialog({
+  archiveOnly = false,
   close,
   list,
   lists,
 }: {
+  archiveOnly?: boolean;
   close: () => void;
   list: TaskList | undefined;
   lists: TaskList[];
@@ -37,6 +42,7 @@ export function TaskListDialog({
   const queryClient = useQueryClient();
   const [conflict, setConflict] = useState<TaskListArchiveConflict | null>(null);
   const [destinationListId, setDestinationListId] = useState("");
+  const [icon, setIcon] = useState<TaskListIcon>(list?.icon ?? "list");
   const protectedInbox = list?.kind === "inbox";
   const finish = async (message: string) => {
     toast.success(message);
@@ -48,7 +54,7 @@ export function TaskListDialog({
     close();
   };
   const save = useMutation({
-    mutationFn: (input: { description: string | null; name: string }) =>
+    mutationFn: (input: { description: string | null; icon: TaskListIcon; name: string }) =>
       list
         ? api.updateTaskList(list.id, { ...input, expectedRevision: list.revision })
         : api.createTaskList({ ...input, color: null }),
@@ -84,6 +90,7 @@ export function TaskListDialog({
     const form = new FormData(event.currentTarget);
     save.mutate({
       description: nullable(form.get("description")),
+      icon,
       name: String(form.get("name") ?? ""),
     });
   };
@@ -93,9 +100,17 @@ export function TaskListDialog({
     <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{list ? `Manage ${list.name}` : "Create a List"}</DialogTitle>
+          <DialogTitle>
+            {archiveOnly && list
+              ? `Archive ${list.name}?`
+              : list
+                ? `Manage ${list.name}`
+                : "Create a List"}
+          </DialogTitle>
           <DialogDescription>
-            Lists are stable areas for related Tasks and Projects. System View names are reserved.
+            {archiveOnly
+              ? "This list will move to Archive. If it has active contents, you’ll choose what happens to them next."
+              : "Lists are stable areas for related Tasks and Projects. System View names are reserved."}
           </DialogDescription>
         </DialogHeader>
         {conflict ? (
@@ -108,6 +123,19 @@ export function TaskListDialog({
             onResolve={(resolution) => archive.mutate(resolution)}
             pending={archive.isPending}
           />
+        ) : archiveOnly ? (
+          <DialogFooter>
+            <Button onClick={close} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={archive.isPending}
+              onClick={() => archive.mutate(undefined)}
+              variant="destructive"
+            >
+              Archive List
+            </Button>
+          </DialogFooter>
         ) : (
           <>
             <form onSubmit={submit}>
@@ -131,6 +159,30 @@ export function TaskListDialog({
                     rows={3}
                   />
                 </Field>
+                <FieldSet>
+                  <FieldLegend variant="label">Icon</FieldLegend>
+                  <RadioGroup
+                    aria-label="List icon"
+                    className="grid-cols-2 sm:grid-cols-4"
+                    onValueChange={(value) => setIcon(value as TaskListIcon)}
+                    value={icon}
+                  >
+                    {taskListIconOptions.map((option) => {
+                      const OptionIcon = option.icon;
+                      return (
+                        <RadioGroupItem
+                          aria-label={option.label}
+                          className="h-9 w-full gap-2 rounded-md bg-muted px-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground data-checked:bg-primary data-checked:text-primary-foreground [&>[data-slot=radio-group-indicator]]:hidden [&>svg]:size-4"
+                          key={option.value}
+                          value={option.value}
+                        >
+                          <OptionIcon aria-hidden="true" />
+                          <span className="truncate text-xs">{option.label}</span>
+                        </RadioGroupItem>
+                      );
+                    })}
+                  </RadioGroup>
+                </FieldSet>
               </FieldGroup>
               {save.isError ? <InlineError error={save.error} /> : null}
               <DialogFooter className="mt-5">

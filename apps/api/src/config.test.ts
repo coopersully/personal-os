@@ -61,6 +61,10 @@ describe("API configuration", () => {
       xClientSecret: "",
       xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
     });
+
+    expect(loadConfig({ ...required, AGENT_SKILL_SOURCE_URL: "" }).agentSkillSourceUrl).toBe(
+      `https://app.example.com${officialAgentSkill.sourcePath}`,
+    );
   });
 
   it("allows an explicitly empty local email sender outside production", () => {

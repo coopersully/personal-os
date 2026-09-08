@@ -10,13 +10,9 @@ describe("OfflineState", () => {
   it("keeps local environment instructions out of the production outage page", () => {
     render(<OfflineState development={false} onRetry={() => undefined} />);
 
-    expect(screen.getByRole("img", { name: "nohmi" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "We can’t reach nohmi right now." }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "This is usually temporary. Try again in a moment.",
-    );
+    expect(screen.queryByRole("img", { name: "nohmi" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Can’t connect" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Check your connection, then try again.");
     expect(screen.getByRole("alert")).not.toHaveTextContent(/environment/i);
   });
 

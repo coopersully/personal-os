@@ -27,6 +27,38 @@ function taskOperation(path: string, method: string): OpenApiOperation {
 }
 
 describe("canonical Tasks OpenAPI surface", () => {
+  it("describes the read-only shared projection with all query axes and scope variants", () => {
+    const operation = taskOperation("/v1/task-workspace", "get");
+    expect(operation["x-required-scopes"]).toEqual(["tasks:read", "reminders:read"]);
+    expect(operation.parameters?.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        "cursor",
+        "limit",
+        "kind",
+        "view",
+        "status",
+        "listId",
+        "projectId",
+        "query",
+        "priority",
+        "tag",
+        "due",
+        "reserved",
+        "dueAfter",
+        "dueBefore",
+        "scheduledAfter",
+        "scheduledBefore",
+        "sort",
+        "group",
+      ]),
+    );
+    expect(operation.description).toContain("kind=reminder");
+    expect(operation.responses?.[200]).toMatchObject({
+      content: {
+        "application/json": { schema: { $ref: "#/components/schemas/TaskWorkspacePage" } },
+      },
+    });
+  });
   it("publishes every shipped Task List, Project, and Task route with the correct verb", () => {
     const document = createOpenApiDocument("https://api.example.com");
     const paths = document.paths as unknown as Record<string, Record<string, unknown>>;

@@ -8,6 +8,7 @@ import {
   financeEventTransactions,
   financeMaintenanceJudgments,
   financeMaintenanceRuns,
+  financeSetupSessions,
   financeTransactionRelationships,
   financeTransactionRevisions,
   financeTransactions,
@@ -21,7 +22,7 @@ import type {
   FinanceToolResult,
 } from "@personal-os/domain";
 import { ILO_FINANCE_PLAYBOOK } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
   executeFinanceIdempotently,
@@ -161,6 +162,51 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
 
   async function openReviewCount(userId: string, executor: FinanceExecutor = db) {
     return (await inbox.getFinanceInbox(userId, executor)).remainingWork.count;
+  }
+
+  async function reconcileInitialSetup(
+    run: typeof financeMaintenanceRuns.$inferSelect,
+    executor: FinanceExecutor,
+  ) {
+    // A completed unrelated run cannot satisfy a later setup session. Only active
+    // full-ledger work may acquire a link; settlement follows that exact link.
+    if (run.scope.type !== "all_outstanding") return run;
+    const [current] = await executor
+      .select()
+      .from(financeMaintenanceRuns)
+      .where(
+        and(eq(financeMaintenanceRuns.id, run.id), eq(financeMaintenanceRuns.userId, run.userId)),
+      )
+      .for("update");
+    if (!current) throw new AppError("not_found", "That Finance maintenance run was not found.");
+    const sessionConditions = [
+      eq(financeSetupSessions.userId, current.userId),
+      eq(financeSetupSessions.status, "initial_maintenance"),
+    ];
+    if (current.stage !== "settled" && current.stage !== "failed") {
+      await executor
+        .update(financeSetupSessions)
+        .set({
+          maintenanceRunId: current.id,
+          updatedAt: now(),
+          version: sql`${financeSetupSessions.version} + 1`,
+        })
+        .where(and(...sessionConditions, isNull(financeSetupSessions.maintenanceRunId)));
+    } else if (
+      current.stage === "settled" &&
+      (await openReviewCount(current.userId, executor)) === 0
+    ) {
+      await executor
+        .update(financeSetupSessions)
+        .set({
+          status: "settled",
+          currentQuestionKey: null,
+          updatedAt: now(),
+          version: sql`${financeSetupSessions.version} + 1`,
+        })
+        .where(and(...sessionConditions, eq(financeSetupSessions.maintenanceRunId, current.id)));
+    }
+    return current;
   }
 
   async function reasoningBatch(
@@ -443,7 +489,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
               ]),
             ),
           });
-          if (existing) return existing;
+          if (existing) return reconcileInitialSetup(existing, tx);
           const [created] = await tx
             .insert(financeMaintenanceRuns)
             .values({
@@ -453,13 +499,14 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
             })
             .returning();
           if (!created) throw new AppError("internal_error", "Maintenance did not start.");
-          return created;
+          return reconcileInitialSetup(created, tx);
         });
         const advanced = await continuePreparation(run);
         return maintenanceResult(await payloadFor(advanced), await openReviewCount(context.userId));
       }
       if (input.operation === "resume") {
-        const run = await continuePreparation(await ownedRun(context.userId, input.runId));
+        const prepared = await continuePreparation(await ownedRun(context.userId, input.runId));
+        const run = await db.transaction((tx) => reconcileInitialSetup(prepared, tx));
         return maintenanceResult(await payloadFor(run), await openReviewCount(context.userId));
       }
       return executeFinanceIdempotently(
@@ -545,6 +592,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
             )
             .returning();
           if (!updated) throw new AppError("conflict", "Maintenance advanced in another request.");
+          await reconcileInitialSetup(updated, tx);
           return maintenanceResult(
             await payloadFor(updated, tx),
             await openReviewCount(context.userId, tx),

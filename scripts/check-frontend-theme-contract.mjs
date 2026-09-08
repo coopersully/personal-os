@@ -34,6 +34,12 @@ const forbiddenPatterns = [
 
 const stylesheet = await readFile(resolve(root, "styles.css"), "utf8");
 const stylesheetForDecorativeChecks = stylesheet
+  // A flat autofill repaint masks the browser's forced background, not elevation.
+  // Allow only this exact declaration within the autofill selector.
+  .replace(
+    /(input:is\(:autofill, :-webkit-autofill\)\s*\{[^}]*?)box-shadow: inset 0 0 0 1000px var\(--autofill-surface\);/g,
+    "$1",
+  )
   .replace(
     /\/\* theme-contract-allow-start: functional-calendar-grid \*\/[\s\S]*?\/\* theme-contract-allow-end: functional-calendar-grid \*\//g,
     "",

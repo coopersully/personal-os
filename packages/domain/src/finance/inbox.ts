@@ -19,6 +19,7 @@ export const financeReviewReasonSchema = z.enum([
 export type FinanceReviewReason = z.infer<typeof financeReviewReasonSchema>;
 
 export const financeInboxCaseSchema = z.object({
+  transactionId: idSchema.optional(),
   economicEventId: idSchema,
   evidence: z.record(z.string(), z.unknown()),
   firstSeenAt: isoDateTimeSchema,

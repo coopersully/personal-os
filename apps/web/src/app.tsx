@@ -1,4 +1,9 @@
-import type { CalendarAccount, Session, XBookmarkAccount } from "@personal-os/api-client";
+import {
+  ApiClientError,
+  type CalendarAccount,
+  type Session,
+  type XBookmarkAccount,
+} from "@personal-os/api-client";
 import type {
   Calendar,
   CalendarEvent,
@@ -67,7 +72,9 @@ import {
   TextField,
 } from "@/components/auth-fields";
 import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
+import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
+import { ErrorPage } from "@/components/error-page";
 import {
   EventCard,
   EventCardBody,
@@ -237,7 +244,6 @@ import {
 import { ScrollArea as ShadcnScrollArea } from "@/components/ui/scroll-area";
 import {
   SidebarContent as ShadcnSidebarContent,
-  SidebarFooter as ShadcnSidebarFooter,
   SidebarGroup as ShadcnSidebarGroup,
   SidebarGroupContent as ShadcnSidebarGroupContent,
   SidebarGroupLabel as ShadcnSidebarGroupLabel,
@@ -257,6 +263,7 @@ import {
   ToggleGroupItem as ShadcnToggleGroupItem,
 } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import { api, errorMessage, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
@@ -287,7 +294,6 @@ import {
   FinanceSidebarNavigation,
   financeSectionFromPath,
 } from "./features/finances/navigation.js";
-import { FinancesPage } from "./features/finances/page.js";
 import { FinanceSettings } from "./features/finances/settings.js";
 import {
   MailPage as MailFeaturePage,
@@ -297,7 +303,6 @@ import {
 import {
   ReminderRow,
   RemindersCreateButton,
-  RemindersPage,
   RemindersTopbarControls,
 } from "./features/reminders/page.js";
 import { ReviewsPage } from "./features/reviews/page.js";
@@ -308,15 +313,14 @@ import {
   WorkspaceSettings,
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
-import { settingsNavigationItem } from "./features/settings/manifest.js";
 import {
   TaskRow,
   TasksCreateButton,
-  TasksPage,
   TasksSidebar,
   TasksTopbarControls,
 } from "./features/tasks/page.js";
 import { TaskDialog } from "./features/tasks/task-dialog.js";
+import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
@@ -372,6 +376,14 @@ const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> =
 ];
 
 const RichEventNotes = lazy(() => import("./rich-event-notes.js"));
+const FinanceWorkspacePage = lazy(() =>
+  import("./features/finances/workspace-page.js").then((module) => ({
+    default: module.FinanceWorkspacePage,
+  })),
+);
+const ErrorPagePreview = import.meta.env.DEV
+  ? lazy(() => import("./components/error-page-preview.js"))
+  : null;
 const SetupPage = lazy(() =>
   import("./features/setup/page.js").then((module) => ({ default: module.SetupPage })),
 );
@@ -400,16 +412,11 @@ type WorkspaceTransitionDirection = "down" | "none" | "up";
 
 const workspaceShortcuts: WorkspaceDefinition[] = workspaceDefinitions;
 
-const accountNavigationItems: NavigationItemDefinition[] = [
-  { icon: SparklesIcon, label: "Setup", path: "/setup" },
-  settingsNavigationItem,
-];
-
 function workspaceForPath(pathname: string): WorkspaceDefinition | undefined {
   return workspaceForLocation(pathname);
 }
 
-function normalizeShellPathname(pathname: string): string {
+export function normalizeShellPathname(pathname: string): string {
   return pathname.replace(/\/+$/, "") || "/";
 }
 
@@ -447,6 +454,24 @@ export function selectTodayTasks(
   return { overdue, today: relevantToday };
 }
 export function App() {
+  const location = useLocation();
+  if (ErrorPagePreview && location.pathname === "/dev/errors") {
+    return (
+      <Suspense
+        fallback={
+          <main className="center-screen">
+            <Spinner label="Opening preview" />
+          </main>
+        }
+      >
+        <ErrorPagePreview />
+      </Suspense>
+    );
+  }
+  return <SessionApp />;
+}
+
+function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   if (me.isPending) {
     return (
@@ -653,142 +678,135 @@ function CredentialsScreen() {
     setMode(nextMode);
   };
   return (
-    <main className="auth-shell">
-      <div className="auth-crest">
-        <NohmiBrandMark auth />
-      </div>
-      <section className="auth-form-wrap">
-        <form className="auth-form" onSubmit={submit}>
-          <div className="auth-form__heading">
-            <h2>
-              {mode === "login"
-                ? "Login"
-                : mode === "recovery"
-                  ? "Reset your password"
-                  : "Redeem Invite Code"}
-            </h2>
-            {mode !== "login" ? (
-              <p>
-                {mode === "recovery"
-                  ? "We’ll send a reset link if this address has an account."
-                  : "Welcome to the closed alpha. Thanks for trying nohmi—it’s early, experimental, and a little buggy."}
-              </p>
-            ) : null}
-          </div>
-          {mode === "register" && (
-            <>
-              <InviteCodeField
-                error={invitationError}
-                onBlur={() => {
-                  setInviteBlurred(true);
-                  if (credentials.inviteCode.length === 8) {
-                    invitationValidation.mutate(credentials.inviteCode);
-                  } else {
-                    invitationValidation.reset();
-                  }
-                }}
-                onChange={(inviteCode) => {
+    <AuthLayout>
+      <form className="auth-form" onSubmit={submit}>
+        <div className="auth-form__heading">
+          <h2>
+            {mode === "login"
+              ? "Login"
+              : mode === "recovery"
+                ? "Reset your password"
+                : "Redeem Invite Code"}
+          </h2>
+          {mode !== "login" ? (
+            <p>
+              {mode === "recovery"
+                ? "We’ll send a reset link if this address has an account."
+                : "Welcome to the closed alpha. Thanks for trying nohmi—it’s early, experimental, and a little buggy."}
+            </p>
+          ) : null}
+        </div>
+        {mode === "register" && (
+          <>
+            <InviteCodeField
+              error={invitationError}
+              onBlur={() => {
+                setInviteBlurred(true);
+                if (credentials.inviteCode.length === 8) {
+                  invitationValidation.mutate(credentials.inviteCode);
+                } else {
                   invitationValidation.reset();
-                  setInviteBlurred(false);
-                  setCredentials((current) => ({ ...current, inviteCode }));
-                }}
-                status={invitationStatus}
-                value={credentials.inviteCode}
-              />
-              <TextField
-                autoComplete="name"
-                label="Name"
-                name="displayName"
-                onChange={(event) =>
-                  setCredentials((current) => ({ ...current, displayName: event.target.value }))
                 }
-                placeholder="Sam Rivera"
-                required
-                value={credentials.displayName}
-              />
-            </>
-          )}
-          <EmailField
-            autoComplete="email"
-            name="email"
-            onChange={(event) =>
-              setCredentials((current) => ({ ...current, email: event.target.value }))
-            }
-            required
-            value={credentials.email}
-          />
-          {mode !== "recovery" ? (
-            <PasswordFields
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              confirmValue={mode === "register" ? credentials.confirmPassword : undefined}
-              error={
-                mode === "register" && credentials.confirmPassword.length > 0 && !passwordsMatch
-                  ? "Passwords must match."
-                  : undefined
-              }
-              labelAction={
-                mode === "login" ? (
-                  <button
-                    className="text-button"
-                    onClick={() => selectMode("recovery")}
-                    type="button"
-                  >
-                    Forgot?
-                  </button>
-                ) : undefined
-              }
-              onConfirmValueChange={(confirmPassword) =>
-                setCredentials((current) => ({ ...current, confirmPassword }))
-              }
-              onValueChange={(password) => setCredentials((current) => ({ ...current, password }))}
-              showRequirements={mode === "register"}
-              value={credentials.password}
+              }}
+              onChange={(inviteCode) => {
+                invitationValidation.reset();
+                setInviteBlurred(false);
+                setCredentials((current) => ({ ...current, inviteCode }));
+              }}
+              status={invitationStatus}
+              value={credentials.inviteCode}
             />
-          ) : null}
-          {mutation.isError && (
-            <p className="form-error" role="alert">
-              {errorMessage(mutation.error)}
-            </p>
-          )}
-          {mutation.isSuccess && mode === "recovery" ? (
-            <p className="form-success" role="status">
-              If an account exists for that email, a password-reset link is on its way.
-            </p>
-          ) : null}
-          <ShadcnButton
-            className="button--wide"
-            disabled={mutation.isPending || !canSubmit}
-            type="submit"
-          >
-            {mutation.isPending ? (
-              <Spinner label="Signing in" />
-            ) : mode === "login" ? (
-              "Log in"
-            ) : mode === "recovery" ? (
-              "Send reset link"
-            ) : (
-              "Create account"
-            )}
-          </ShadcnButton>
-          {mode === "login" ? (
-            <button
-              aria-label="Have an invite? Create an account"
-              className="text-button auth-invite-link"
-              type="button"
-              onClick={() => selectMode("register")}
-            >
-              <span>Have an invite?</span>
-              <MailIcon aria-hidden="true" />
-              <span>Create an account</span>
-            </button>
+            <TextField
+              autoComplete="name"
+              label="Name"
+              name="displayName"
+              onChange={(event) =>
+                setCredentials((current) => ({ ...current, displayName: event.target.value }))
+              }
+              placeholder="Sam Rivera"
+              required
+              value={credentials.displayName}
+            />
+          </>
+        )}
+        <EmailField
+          autoComplete="email"
+          name="email"
+          onChange={(event) =>
+            setCredentials((current) => ({ ...current, email: event.target.value }))
+          }
+          required
+          value={credentials.email}
+        />
+        {mode !== "recovery" ? (
+          <PasswordFields
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            confirmValue={mode === "register" ? credentials.confirmPassword : undefined}
+            error={
+              mode === "register" && credentials.confirmPassword.length > 0 && !passwordsMatch
+                ? "Passwords must match."
+                : undefined
+            }
+            labelAction={
+              mode === "login" ? (
+                <button
+                  className="text-button auth-field-action"
+                  onClick={() => selectMode("recovery")}
+                  type="button"
+                >
+                  Forgot?
+                </button>
+              ) : undefined
+            }
+            onConfirmValueChange={(confirmPassword) =>
+              setCredentials((current) => ({ ...current, confirmPassword }))
+            }
+            onValueChange={(password) => setCredentials((current) => ({ ...current, password }))}
+            showRequirements={mode === "register"}
+            value={credentials.password}
+          />
+        ) : null}
+        {mutation.isError && (
+          <p className="form-error" role="alert">
+            {errorMessage(mutation.error)}
+          </p>
+        )}
+        {mutation.isSuccess && mode === "recovery" ? (
+          <p className="form-success" role="status">
+            If an account exists for that email, a password-reset link is on its way.
+          </p>
+        ) : null}
+        <ShadcnButton
+          className="button--wide"
+          disabled={mutation.isPending || !canSubmit}
+          type="submit"
+        >
+          {mutation.isPending ? (
+            <Spinner label="Signing in" />
+          ) : mode === "login" ? (
+            "Log in"
+          ) : mode === "recovery" ? (
+            "Send reset link"
           ) : (
-            <button className="text-button" type="button" onClick={() => selectMode("login")}>
-              {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
-            </button>
+            "Create account"
           )}
-        </form>
-      </section>
-    </main>
+        </ShadcnButton>
+        {mode === "login" ? (
+          <button
+            aria-label="Have an invite? Create an account"
+            className="text-button"
+            type="button"
+            onClick={() => selectMode("register")}
+          >
+            Have an invite? Create an account
+          </button>
+        ) : (
+          <button className="text-button" type="button" onClick={() => selectMode("login")}>
+            {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
+          </button>
+        )}
+      </form>
+    </AuthLayout>
   );
 }
 
@@ -799,8 +817,10 @@ function EmailVerificationScreen({ token }: { token: string }) {
     onSuccess: (user) => queryClient.setQueryData(["me"], user),
   });
   return (
-    <AuthActionShell title="Confirm your email">
-      <p>Confirm the email address for this nohmi account.</p>
+    <AuthActionShell
+      description="Confirm the email address for this nohmi account."
+      title="Confirm your email"
+    >
       {verification.isError ? (
         <p className="form-error">{errorMessage(verification.error)}</p>
       ) : null}
@@ -870,21 +890,48 @@ function PasswordResetScreen({ token }: { token: string }) {
   );
 }
 
-function AuthActionShell({ children, title }: { children: ReactNode; title: string }) {
+function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <main className="auth-shell">
-      <div className="auth-crest">
-        <NohmiBrandMark auth />
-      </div>
-      <section className="auth-form-wrap">
-        <div className="auth-form">
-          <div className="auth-form__heading">
-            <h2>{title}</h2>
+      <div className="auth-entry">
+        <header className="auth-header">
+          <div className="auth-header__brand">
+            <span aria-hidden="true" className="auth-header__symbol">
+              <NohmiBrandMark symbol />
+            </span>
+            <NohmiBrandMark />
           </div>
-          {children}
-        </div>
-      </section>
+        </header>
+        <section className="auth-form-wrap">{children}</section>
+      </div>
+      <ShadcnCard aria-hidden="true" className="auth-brand-panel">
+        <ShadcnCardContent>
+          <BrandPattern />
+        </ShadcnCardContent>
+      </ShadcnCard>
     </main>
+  );
+}
+
+function AuthActionShell({
+  children,
+  description,
+  title,
+}: {
+  children: ReactNode;
+  description?: string;
+  title: string;
+}) {
+  return (
+    <AuthLayout>
+      <div className="auth-form auth-action-content">
+        <div className="auth-form__heading">
+          <h2>{title}</h2>
+          {description ? <p>{description}</p> : null}
+        </div>
+        {children}
+      </div>
+    </AuthLayout>
   );
 }
 
@@ -947,10 +994,10 @@ function AuthenticatedApp({ user }: { user: User }) {
   const activeSettingsSection = settingsSectionFromSearch(location.search);
   const pageTitle = workspaceTitleForLocation(shellPathname, location.search);
   const activeFinanceSection = financeSectionFromPath(location.pathname);
-  const currentFinanceMonth = new Date().toISOString().slice(0, 7);
-  const financeOverview = useQuery({
-    queryFn: api.getFinanceOverview,
-    queryKey: ["finance-overview", currentFinanceMonth],
+  const financeInbox = useQuery({
+    enabled: sidebarMode === "finances",
+    queryFn: api.getFinanceInbox,
+    queryKey: ["finance-inbox"],
   });
 
   useEffect(() => {
@@ -1044,7 +1091,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               ) : sidebarMode === "finances" ? (
                 <FinanceSidebarNavigation
                   onNavigate={closeMobileMenu}
-                  reviewCount={financeOverview.data?.reviewCount ?? 0}
+                  reviewCount={financeInbox.data?.remainingWork.count ?? 0}
                   section={activeFinanceSection}
                 />
               ) : sidebarMode === "tasks" ? (
@@ -1053,11 +1100,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
             </ShadcnSidebarContent>
-            {sidebarMode !== "settings" ? (
-              <ShadcnSidebarFooter className="sidebar__footer">
-                <AccountMenu onNavigate={closeMobileMenu} user={user} />
-              </ShadcnSidebarFooter>
-            ) : null}
           </aside>
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
@@ -1082,41 +1124,40 @@ function AuthenticatedApp({ user }: { user: User }) {
             weather={weather.data}
           />
         ) : null}
-        <div className="workspace">
-          {!online && (
-            <div className="offline-banner">
-              <WifiOffIcon className="size-[15px]" /> Offline — changes are paused until you
-              reconnect.
-            </div>
-          )}
-          <WorkspaceAppBarForRoute
-            accountMenu={
-              isTodayWorkspace && !isMobileWorkspaceDock ? (
-                <AccountMenu onNavigate={closeMobileMenu} placement="topbar" user={user} />
-              ) : null
-            }
-            activeSettingsSection={activeSettingsSection}
-            workspaceSwitcher={
-              isCalendarWorkspace || (isTodayWorkspace && !isMobileWorkspaceDock) ? (
-                <WorkspaceSwitcher
-                  onNavigate={closeMobileMenu}
-                  pathname={location.pathname}
-                  user={user}
-                  weather={weather.data}
-                />
-              ) : null
-            }
-            onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
-            pageTitle={pageTitle}
-            pathname={shellPathname}
-            pinned={pinned}
-            setEditor={setEditor}
-            todayBrief={todayBrief.data}
-            togglePin={togglePin}
-            user={user}
-            weather={weather.data}
-          />
-
+        <WorkspaceLayout
+          banner={
+            !online && (
+              <div className="offline-banner">
+                <WifiOffIcon className="size-[15px]" /> Offline — changes are paused until you
+                reconnect.
+              </div>
+            )
+          }
+          primaryNavigation={
+            <WorkspaceAppBarForRoute
+              activeSettingsSection={activeSettingsSection}
+              workspaceSwitcher={
+                isCalendarWorkspace || (isTodayWorkspace && !isMobileWorkspaceDock) ? (
+                  <WorkspaceSwitcher
+                    onNavigate={closeMobileMenu}
+                    pathname={location.pathname}
+                    user={user}
+                    weather={weather.data}
+                  />
+                ) : null
+              }
+              onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
+              pageTitle={pageTitle}
+              pathname={shellPathname}
+              pinned={pinned}
+              setEditor={setEditor}
+              todayBrief={todayBrief.data}
+              togglePin={togglePin}
+              user={user}
+              weather={weather.data}
+            />
+          }
+        >
           <main
             className={`content${isSpatialCalendar ? " content--calendar" : sidebarMode === "mail" ? " content--mail" : ""}`}
             id="main-content"
@@ -1142,7 +1183,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               </div>
             </div>
           </main>
-        </div>
+        </WorkspaceLayout>
         {editor?.kind === "reminder" && (
           <ReminderDialog close={() => setEditor(null)} reminder={editor.reminder} user={user} />
         )}
@@ -1224,8 +1265,9 @@ function WorkspaceRoutes({
       <Route
         path="/reminders"
         element={
-          <RemindersPage
-            onEdit={(reminder) => setEditor({ kind: "reminder", reminder })}
+          <TasksWorkspacePage
+            onEdit={(task) => setEditor({ kind: "task", task })}
+            onEditReminder={(reminder) => setEditor({ kind: "reminder", reminder })}
             timeZone={user.planningTimezone}
           />
         }
@@ -1233,8 +1275,9 @@ function WorkspaceRoutes({
       <Route
         path="/tasks"
         element={
-          <TasksPage
+          <TasksWorkspacePage
             onEdit={(task) => setEditor({ kind: "task", task })}
+            onEditReminder={(reminder) => setEditor({ kind: "reminder", reminder })}
             timeZone={user.planningTimezone}
           />
         }
@@ -1252,7 +1295,14 @@ function WorkspaceRoutes({
         path="/finances/profile"
         element={<Navigate replace to="/settings?section=finances#guidance" />}
       />
-      <Route path="/finances/*" element={<FinancesPage />} />
+      <Route
+        path="/finances/*"
+        element={
+          <Suspense fallback={<PageLoading workspace="finances" />}>
+            <FinanceWorkspacePage />
+          </Suspense>
+        }
+      />
       <Route path="/settings" element={<SettingsPage setEditor={setEditor} user={user} />} />
       <Route path="*" element={<Navigate replace to="/today" />} />
     </Routes>
@@ -1347,7 +1397,6 @@ function NavigationIcon({
 }
 
 function WorkspaceAppBarForRoute({
-  accountMenu,
   activeSettingsSection,
   onCalendarToday,
   pageTitle,
@@ -1360,7 +1409,6 @@ function WorkspaceAppBarForRoute({
   weather,
   workspaceSwitcher,
 }: {
-  accountMenu: ReactNode;
   activeSettingsSection: SettingsSectionId;
   onCalendarToday: () => void;
   pageTitle: string | null;
@@ -1434,18 +1482,18 @@ function WorkspaceAppBarForRoute({
           {pathname === "/reminders" ? (
             <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
           ) : workspace === "tasks" ? (
-            <TasksCreateButton onCreate={() => setEditor({ kind: "task" })} />
+            <TasksCreateButton
+              onCreate={() => setEditor({ kind: "task" })}
+              onCreateReminder={() => setEditor({ kind: "reminder" })}
+            />
           ) : workspace === "calendar" ? null : workspace === "mail" ? (
             <>
               <MailSyncButton />
               <MailComposeButton />
             </>
-          ) : workspace === "finances" ? (
-            <FinanceAddTransactionButton />
-          ) : workspace === "account" ? null : (
+          ) : workspace === "finances" || workspace === "account" ? null : (
             <CreateMenu setEditor={setEditor} />
           )}
-          {accountMenu}
         </>
       }
       context={context}
@@ -1583,93 +1631,6 @@ function WorkspaceMenuItem({
   );
 }
 
-function AccountMenu({
-  onNavigate,
-  placement = "sidebar",
-  user,
-}: {
-  onNavigate: () => void;
-  placement?: "sidebar" | "topbar";
-  user: User;
-}) {
-  const queryClient = useQueryClient();
-  const accountName = user.displayName.trim() || user.email;
-  const logout = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => {
-      queryClient.clear();
-      window.location.assign("/");
-    },
-  });
-
-  const menu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <ShadcnButton aria-label="Account menu" size="icon" variant="ghost">
-          {placement === "topbar" ? (
-            <ShadcnAvatar size="sm">
-              <ShadcnAvatarFallback>{initials(accountName)}</ShadcnAvatarFallback>
-            </ShadcnAvatar>
-          ) : (
-            <SettingsIcon aria-hidden="true" />
-          )}
-        </ShadcnButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="w-56"
-        side={placement === "topbar" ? "bottom" : "top"}
-      >
-        <DropdownMenuLabel>
-          <span className="block truncate">{accountName}</span>
-          <span className="block truncate font-normal">{user.email}</span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          {accountNavigationItems.map(({ icon: Icon, label, path }) => (
-            <DropdownMenuItem asChild key={path}>
-              <NavLink onClick={onNavigate} to={path}>
-                <Icon aria-hidden="true" />
-                <span>{label}</span>
-              </NavLink>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          disabled={logout.isPending}
-          onSelect={(event) => {
-            event.preventDefault();
-            logout.mutate();
-          }}
-          variant="destructive"
-        >
-          <LogOutIcon aria-hidden="true" />
-          <span>{logout.isPending ? "Signing out…" : "Log out"}</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-
-  if (placement === "topbar") return menu;
-
-  return (
-    <ShadcnSidebarMenu>
-      <ShadcnSidebarMenuItem>
-        <div className="sidebar__account-trigger flex min-h-9 items-center gap-2 px-2">
-          <ShadcnAvatar className="sidebar__account-avatar" size="sm">
-            <ShadcnAvatarFallback>{initials(accountName)}</ShadcnAvatarFallback>
-          </ShadcnAvatar>
-          <span className="sidebar__account-name min-w-0 flex-1 truncate text-sm font-medium">
-            {accountName}
-          </span>
-          {menu}
-        </div>
-      </ShadcnSidebarMenuItem>
-    </ShadcnSidebarMenu>
-  );
-}
-
 function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
   return (
     <DropdownMenu>
@@ -1692,21 +1653,6 @@ function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function FinanceAddTransactionButton({ onSelect }: { onSelect?: () => void }) {
-  return (
-    <ShadcnButton
-      aria-label="Add transaction"
-      onClick={() => {
-        onSelect?.();
-        window.location.hash = "finance-add-transaction";
-      }}
-      size="sm"
-    >
-      <PlusIcon aria-hidden="true" data-icon="inline-start" /> <span>Add transaction</span>
-    </ShadcnButton>
   );
 }
 
@@ -2422,11 +2368,15 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/motives") return "Motives";
   if (pathname === "/finances") return "Finances";
   if (pathname === "/finances/accounts") return "Accounts";
-  if (pathname === "/finances/budgets") return "Budgets";
+  if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Plan";
+  if (pathname === "/finances/wealth") return "Wealth";
+  if (pathname === "/finances/setup") return "Financial setup";
+  if (pathname.startsWith("/finances/reviews/")) return "Financial review";
   if (pathname === "/finances/cashflow") return "Cash flow";
   if (pathname === "/finances/health") return "Ledger health";
   if (pathname === "/finances/imports") return "Import history";
-  if (pathname === "/finances/review") return "Review queue";
+  if (pathname === "/finances/review") return "Review";
+  if (pathname === "/finances/review/legacy") return "Earlier transaction reviews";
   if (pathname === "/finances/subscriptions") return "Subscriptions";
   if (pathname === "/finances/transactions") return "Transactions";
   if (pathname === "/activity") return "Activity";
@@ -3197,6 +3147,7 @@ function DayCalendarView({
     <section className={`calendar-day-view${isToday ? " is-today" : ""}`}>
       <WorkspaceSecondaryAppBar
         aria-label="Calendar day navigation"
+        placement="inline"
         className="calendar-secondary-app-bar calendar-secondary-app-bar--day"
       >
         <WorkspaceSecondaryAppBarContent>
@@ -3401,6 +3352,7 @@ function WeekCalendarView({
       >
         <WorkspaceSecondaryAppBar
           aria-label="Calendar week navigation"
+          placement="inline"
           className="calendar-secondary-app-bar calendar-secondary-app-bar--week"
         >
           <WorkspaceSecondaryAppBarContent
@@ -4173,6 +4125,7 @@ function MonthCalendarView({
     <div className="month-calendar" ref={scrollContainer}>
       <WorkspaceSecondaryAppBar
         aria-label="Calendar month navigation"
+        placement="inline"
         className="calendar-secondary-app-bar calendar-secondary-app-bar--month"
       >
         <WorkspaceSecondaryAppBarContent className="month-weekdays" aria-hidden="true">
@@ -7038,7 +6991,7 @@ function TaskGroup({
   );
 }
 
-function TodayEventCard({
+export function TodayEventCard({
   calendarColor,
   currentTime,
   density,
@@ -7158,14 +7111,14 @@ type TodayTimelineItem = TimelinePositionable & {
   material: { event: CalendarEvent; kind: "event" } | { kind: "task"; task: Task };
 };
 
-function scheduledTaskEndsAt(task: Task): Date {
+export function scheduledTaskEndsAt(task: Task): Date {
   return new Date(
     new Date(task.scheduledAt as string).getTime() +
       Math.max(15, task.estimateMinutes ?? 30) * 60_000,
   );
 }
 
-function TodayTaskTimelineCard({
+export function TodayTaskTimelineCard({
   currentTime,
   density,
   item,
@@ -7374,7 +7327,7 @@ function TodayTimeline({
   );
 }
 
-function TodayAllDayEventCard({
+export function TodayAllDayEventCard({
   calendarColor,
   event,
   onEdit,
@@ -7424,7 +7377,10 @@ function ReminderDialog({
       priority: "low" | "medium" | "high";
       timezone: string | null;
       title: string;
-    }) => (reminder ? api.updateReminder(reminder.id, input) : api.createReminder(input)),
+    }) =>
+      reminder
+        ? api.updateReminder(reminder.id, { ...input, expectedUpdatedAt: reminder.updatedAt })
+        : api.createReminder(input),
     onSuccess: async () => {
       await invalidateMaterial(queryClient);
       close();
@@ -8160,18 +8116,18 @@ function Field({
   );
 }
 
-function FatalState({ error }: { error: unknown }) {
+export function FatalState({ error }: { error: unknown }) {
   if (error instanceof TypeError) {
     return <OfflineState />;
   }
+  const status = error instanceof ApiClientError ? error.status : 500;
   return (
-    <main className="center-screen">
-      <InlineError error={error} />
-      <Button onClick={() => window.location.reload()}>Try again</Button>
-    </main>
+    <ErrorPage
+      kind={status === 403 ? "403" : status === 404 ? "404" : status === 503 ? "503" : "500"}
+    />
   );
 }
-function initials(name: string) {
+export function initials(name: string) {
   return name
     .split(/\s+/)
     .slice(0, 2)
@@ -8180,15 +8136,15 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function workspaceOwnerName(user: User): string {
+export function workspaceOwnerName(user: User): string {
   const firstName = user.displayName.trim().split(/\s+/)[0];
   return firstName || user.email.split("@")[0] || "Your";
 }
-function nullable(value: FormDataEntryValue | null): string | null {
+export function nullable(value: FormDataEntryValue | null): string | null {
   const text = String(value ?? "").trim();
   return text || null;
 }
-function toDateTimeLocal(
+export function toDateTimeLocal(
   value: string | null | undefined,
   timeZone: string,
   hoursFromNow?: number,
@@ -8212,7 +8168,7 @@ function toDateTimeLocal(
   );
   return `${parts.year}-${parts.month}-${parts.day}T${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}`;
 }
-function dateTimeLocalToIso(value: string, timeZone: string): string {
+export function dateTimeLocalToIso(value: string, timeZone: string): string {
   const [dateValue, timeValue] = value.split("T");
   const date = parseLocalDate(dateValue as string);
   const [hour, minute] = (timeValue as string).split(":").map(Number);
@@ -8256,7 +8212,7 @@ function weatherMapEmbedUrl(coordinates: WeatherCoordinates) {
   return `https://www.openstreetmap.org/export/embed.html?${parameters.toString()}`;
 }
 
-function weatherSkyPeriod(observedAt: string, timeZone: string) {
+export function weatherSkyPeriod(observedAt: string, timeZone: string) {
   const hour = Number(
     new Intl.DateTimeFormat("en", { hour: "numeric", hourCycle: "h23", timeZone }).format(
       new Date(observedAt),
@@ -8267,7 +8223,7 @@ function weatherSkyPeriod(observedAt: string, timeZone: string) {
   if (hour >= 17 && hour < 21) return "evening";
   return "night";
 }
-function formatEventRange(event: CalendarEvent, timeZone: string): string {
+export function formatEventRange(event: CalendarEvent, timeZone: string): string {
   const start = new Date(event.startsAt);
   const end = new Date(event.endsAt);
   const startDay = localDateAt(start, timeZone);
@@ -8292,14 +8248,14 @@ function formatEventRange(event: CalendarEvent, timeZone: string): string {
   return `${formatMaterialDateTime(event.startsAt, timeZone, { includeYear })} – ${formatMaterialDateTime(event.endsAt, timeZone, { includeYear })}`;
 }
 const formatRelative = formatRelativeTime;
-function formatMinutes(value: number) {
+export function formatMinutes(value: number) {
   if (value === 0) return "No time";
   const hours = Math.floor(value / 60);
   const minutes = value % 60;
   if (hours === 0) return `${minutes} min`;
   return minutes === 0 ? `${hours} hr` : `${hours} hr ${minutes} min`;
 }
-function minuteToTime(value: number) {
+export function minuteToTime(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -8318,7 +8274,7 @@ function localDateKey(date: LocalDate): string {
   return localDateToIso(date);
 }
 
-function startCalendarDrag(
+export function startCalendarDrag(
   dragEvent: ReactDragEvent<HTMLButtonElement>,
   event: CalendarEvent,
   setDraggedEventId: (id: string | null) => void,
@@ -8368,14 +8324,14 @@ function allowCalendarDrop(dragEvent: ReactDragEvent<HTMLElement>, draggedEventI
   dragEvent.dataTransfer.dropEffect = "move";
 }
 
-function calendarDragGrabOffset(dataTransfer: DataTransfer, eventId: string) {
+export function calendarDragGrabOffset(dataTransfer: DataTransfer, eventId: string) {
   const storedOffset = calendarDragOffsets.get(eventId);
   if (storedOffset !== undefined) return storedOffset;
   const offset = Number(dataTransfer.getData(calendarDragOffsetType));
   return Number.isFinite(offset) ? Math.max(0, offset) : 0;
 }
 
-function timelineMinuteAtPointer(
+export function timelineMinuteAtPointer(
   pointerEvent: { clientY: number },
   timeline: HTMLElement,
   grabOffsetY = 0,
@@ -8388,7 +8344,10 @@ function timelineMinuteAtPointer(
   return Math.min(23 * 60 + 45, Math.max(0, Math.round(unsnappedMinute / 15) * 15));
 }
 
-function createRangeMinuteAtPointer(pointerEvent: { clientY: number }, timeline: HTMLElement) {
+export function createRangeMinuteAtPointer(
+  pointerEvent: { clientY: number },
+  timeline: HTMLElement,
+) {
   const bounds = timeline.getBoundingClientRect();
   const relativeY = Math.min(
     calendarTimelineHeight,

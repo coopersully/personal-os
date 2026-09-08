@@ -12,7 +12,7 @@ describe("PasswordInput", () => {
     const group = input.closest('[data-slot="input-group"]');
     const button = screen.getByRole("button", { name: "Show password" });
 
-    expect(group).toHaveClass("rounded-lg", "border", "border-transparent", "bg-input/60");
+    expect(group).toHaveClass("rounded-lg", "border", "border-transparent", "bg-input-surface");
     expect(input).toHaveClass("rounded-none", "border-0", "bg-transparent");
     expect(button).toHaveClass("size-6", "rounded-[min(var(--radius-md),10px)]");
   });

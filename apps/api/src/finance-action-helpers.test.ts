@@ -72,6 +72,12 @@ describe("Finance action deterministic helpers", () => {
       }),
     ).toEqual(["reimbursement:reimbursement"]);
     expect(semanticTargetKeys("categorization", {})).toEqual([]);
+    expect(semanticTargetKeys("budget_plan", { bucketId: "bucket" })).toEqual([
+      "budget-bucket:bucket",
+    ]);
+    expect(semanticTargetKeys("budget_plan", { userId: "user" })).toEqual([
+      "finance-budget-buckets:user",
+    ]);
     expect(semanticTargetKeys("merchant", { id: "merchant", targetMerchantId: "ignored" })).toEqual(
       ["merchant:merchant"],
     );
@@ -112,6 +118,30 @@ describe("Finance action deterministic helpers", () => {
         reserveTargetMonths: null,
       }),
     ).toContain("pay account selected account → unset");
+    expect(
+      profileProjection(
+        {
+          employer: null,
+          expectedNetPay: null,
+          payAccountId: null,
+          reserveTargetMonths: null,
+        } as never,
+        {
+          effectiveDate: "2026-08-01",
+          employer: null,
+          expectedNetPay: null,
+          payAccountId: "account",
+          reserveTargetMonths: 6,
+        },
+      ),
+    ).toContain("pay account unset → selected account; reserve target unset → 6 months");
+    expect(
+      profileProjection({ householdSize: 2, grossAnnualIncome: 100_000_00 } as never, {
+        effectiveDate: "2026-08-01",
+        grossAnnualIncome: 100000,
+        householdSize: 2,
+      }),
+    ).toBe("Update profile effective 2026-08-01.");
   });
 
   it("validates scalar and structured question answer values", () => {

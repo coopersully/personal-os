@@ -23,17 +23,33 @@ unrelated cards, or an AI chat surface.
 - **Wordmark:** the lowercase text wordmark is primary. The compact `n` mark is
   for constrained app-icon and navigation contexts. Neither uses a gradient,
   glow, outline, or decorative symbol.
-- **Auth mark:** authentication may place the favicon glyph inside one opaque
-  tonal tile. It has no resting effect or supporting label. Hovering the centered
-  crest alone reveals the promise twice on one closed circular path, with equal
-  spacing and two opposing star delimiters. The complete ring begins from a fixed
-  position before it rotates subtly; reduced-motion mode reveals it without
-  rotation. This is the only decorative glow-like motion in product chrome.
+- **Auth decoration:** the desktop-only neutral card may tile the static favicon
+  glyph at low opacity. Tiles pulse independently with stable randomized delays
+  and slow durations; no hover behavior, orbit, glow, or rapid flashing. Reduced
+  motion shows a still pattern. A small static logo and wordmark may sit in the
+  auth page header, separate from form content. This is a
+  contained decorative-opacity exception, not a general product motion pattern.
 - **Voice:** use plain verbs, short clauses, and concrete nouns. Sound calm and
   useful, never cute, breathless, mystical, or artificially intimate.
+- **Full-page errors:** use the default canvas with a centered short,
+  large title, description, and recovery actions, without a foreground logo. The shared fading tile
+  pattern may fill the background at subdued opacity; omit navigation branding
+  and the dashed border used for in-page empty states. See
+  [error pages](pages/errors.md).
 - **Password fields:** use the shared input-group control with an end-aligned,
   accessible visibility toggle. Recovery belongs in the label row as a concise
   action, not beneath the form or inside the input.
+- **Field labels:** use the secondary foreground token and a consistent 6 px
+  vertical gap before the control. Inline label actions must not increase that
+  row's height. Validation keeps its semantic error color.
+- **Placeholders:** use the shared `input-placeholder` token, quieter than labels
+  and entered values. Hover and focus restore secondary text contrast against
+  the stronger control surface; placeholders never replace persistent labels.
+- **Input surfaces:** shared Input, Textarea, and InputGroup use the same opaque
+  semantic fill in empty, typed, and autofilled states. The group owns its fill;
+  its inner control stays transparent, including on hover. Browser autofill may
+  use a flat inset repaint to mask the browser's forced color—never elevation
+  or a focus shadow. Clip autofill to text only inside a filled InputGroup.
 
 ## Working principles
 
@@ -83,6 +99,15 @@ ordinary route bodies use that same inset so their leading and trailing edges
 align across navigation and material. Spatial workspaces that intentionally run
 edge to edge, such as Calendar and Mail, may opt out at their workspace frame;
 individual pages must not recreate the shell inset with local padding.
+
+`WorkspaceLayout` owns an optional secondary-navigation slot directly below
+the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
+`Leading`, `Content`, and `Actions` slots; React context and a portal keep the
+controls owned by the feature while placing them in the shared frame. Omit the
+bar or set `enabled={false}` to leave no empty row. Its default layout placement
+stays pinned below the primary bar and shares the body inset. Spatial Calendar
+headers and Mail reader actions use `placement="inline"` to retain their own
+scroll/column alignment, using the same slot anatomy and neutral surface.
 
 ### Blocks
 
@@ -221,6 +246,15 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   unless omitting it creates ambiguity.
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
+- Workspace-switcher triggers show the workspace glyph without its frame,
+  including the mobile dock. Keep framed workspace icons inside the picker;
+  preserve the same glyph and workspace color in both contexts.
+- Desktop account actions live in Settings, reached from the workspace picker.
+  Do not duplicate them with an account avatar in the top bar or an account
+  footer in workspace sidebars.
+- Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
+  primitives. Consent uses a horizontal checkbox field with a separate label
+  and description; availability and errors use shared alerts.
 - Connected providers use their recognizable service mark when one exists. Do
   not substitute a raw provider identifier; any necessary fallback name uses
   the provider's correct capitalization.

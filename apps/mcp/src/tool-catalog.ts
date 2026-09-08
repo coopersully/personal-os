@@ -27,6 +27,7 @@ export type IloToolDefinition = {
   presentation?: FinancePresentationKind;
   readOnly: boolean;
   requiredScopes: readonly AccessScope[];
+  scopeMatch?: "any" | "all";
   stage: IloToolStage;
 };
 
@@ -118,6 +119,7 @@ export const iloToolCatalog = {
   preview_task_project_move: preview("tasks", ["tasks:read"]),
   move_task_project: write("tasks", ["tasks:write"], { destructive: true }),
   list_tasks: read("tasks", ["tasks:read"]),
+  list_task_workspace: { ...read("tasks", ["tasks:read", "reminders:read"]), scopeMatch: "all" },
   get_task: read("tasks", ["tasks:read"]),
   create_task: write("tasks", ["tasks:write"], { idempotent: true }),
   update_task: write("tasks", ["tasks:write"]),
@@ -371,6 +373,8 @@ export function canDiscoverTool(
   if (definition.compatibility && !includeCompatibility) return false;
   if (readOnly && !definition.readOnly) return false;
   if (definition.requiredScopes.length === 0) return true;
+  if (definition.scopeMatch === "all")
+    return definition.requiredScopes.every((scope) => scopes.has(scope));
   return definition.requiredScopes.some((scope) => scopes.has(scope));
 }
 

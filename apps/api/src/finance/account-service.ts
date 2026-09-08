@@ -17,6 +17,7 @@ import { accountMatchesQuery, summarizeFinanceAccounts } from "./account-semanti
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 
 type AccountChange = {
+  expectedUpdatedAt?: string | undefined;
   balance?: number | null | undefined;
   includeInPlanning?: boolean | undefined;
   institution?: string | undefined;
@@ -120,6 +121,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
       .select()
       .from(financeAccounts)
       .where(and(eq(financeAccounts.id, id), eq(financeAccounts.userId, userId)))
+      .for("update")
       .limit(1);
     if (!row) throw new AppError("not_found", "The financial account was not found.");
     return row;
@@ -169,6 +171,15 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
         },
         async (tx) => {
           const before = await owned(tx, context.userId, id);
+          if (
+            change.expectedUpdatedAt &&
+            before.updatedAt.toISOString() !== change.expectedUpdatedAt
+          ) {
+            throw new AppError(
+              "conflict",
+              "This account changed. Reload it before saving your changes.",
+            );
+          }
           const ownershipType = change.ownershipType ?? before.ownershipType;
           const ownershipShareBps =
             change.ownershipShare === undefined
@@ -199,12 +210,15 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               name: change.name,
               ownershipShareBps,
               ownershipType,
-              updatedAt: now(),
+              updatedAt: new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1)),
             })
             .where(eq(financeAccounts.id, before.id))
             .returning();
           if (!updated)
-            throw new AppError("internal_error", "The financial account could not be updated.");
+            throw new AppError(
+              "conflict",
+              "This account changed. Reload it before saving your changes.",
+            );
           await tx.insert(auditEvents).values({
             action: "finance.account_updated",
             actorId: context.actorId,

@@ -111,6 +111,7 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     const inbox = await service.getFinanceInbox(userId);
     expect(inbox.communication.nextQuestion?.id).toBe(first.id);
     expect(inbox.remainingWork.count).toBe(2);
+    expect(inbox.data[0]).toMatchObject({ transactionId: transactions[0].id });
 
     const principal: Principal = {
       actorId: "agent",

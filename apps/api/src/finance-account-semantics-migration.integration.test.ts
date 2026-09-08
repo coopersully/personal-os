@@ -22,6 +22,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
         "0073_finance_account_semantics_recovery",
         "0074_finance_budget_buckets",
         "0075_finance_ownership_constraint",
+        "0076_task_list_icons",
       ],
     );
 

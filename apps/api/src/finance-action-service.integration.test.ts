@@ -7459,4 +7459,32 @@ describe.sequential("finance action service", () => {
       ).resolves.toMatchObject({ status: "applied" });
     }
   });
+
+  it("keeps review and question boundary failures explicit for every caller", async () => {
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const service = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const missingId = crypto.randomUUID();
+    const userContext = { principal: user(userId), requestId: "missing-review-boundaries" };
+    const agentContext = { principal: agent(userId), requestId: "agent-review-boundaries" };
+
+    await expect(service.approve(missingId, agentContext)).rejects.toThrow(
+      "Only an interactive user",
+    );
+    await expect(service.approve(missingId, userContext)).rejects.toThrow("review was not found");
+    await expect(service.dismiss(missingId, agentContext)).rejects.toThrow(
+      "Only an interactive user",
+    );
+    await expect(service.dismiss(missingId, userContext)).rejects.toThrow("review was not found");
+    await expect(service.answerQuestion(missingId, "", userContext)).rejects.toThrow(
+      "Provide a bounded",
+    );
+    await expect(service.answerQuestion(missingId, "x".repeat(4_001), userContext)).rejects.toThrow(
+      "Provide a bounded",
+    );
+    await expect(service.answerQuestion(missingId, "not json", userContext)).rejects.toThrow(
+      "question was not found",
+    );
+    await expect(service.listReviews(userId)).resolves.toEqual(expect.any(Array));
+    await expect(service.listQuestions(userId)).resolves.toEqual(expect.any(Array));
+  });
 });

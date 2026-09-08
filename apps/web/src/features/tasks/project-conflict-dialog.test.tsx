@@ -14,6 +14,7 @@ const destinationList: TaskList = {
   createdAt: now,
   deletedAt: null,
   description: null,
+  icon: "list",
   id: "11111111-1111-4111-8111-111111111111",
   kind: "standard",
   name: "Home",

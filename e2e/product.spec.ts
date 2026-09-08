@@ -158,7 +158,10 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByLabel("Notes").fill("Created from the direct manipulation surface.");
   await page.getByRole("button", { name: "Create reminder" }).click();
   await openWorkspace("Tasks");
-  await openWorkspacePage("Tasks", "Reminders");
+  await openWorkspacePage("Tasks", "All");
+  await page.getByRole("button", { name: "Filters" }).click();
+  await page.getByLabel("Type").selectOption("reminder");
+  await page.getByRole("button", { name: "Apply filters" }).click();
   await expect(page.getByText(reminderTitle)).toBeVisible();
 
   await returnToApp();
@@ -210,13 +213,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByRole("button", { name: "Today", exact: true }).click();
 
   await returnToApp();
-  if (mobile) {
-    await page.getByRole("button", { name: "Workspace actions" }).click();
-    await page.getByRole("button", { name: /account$/ }).click();
-  } else {
-    await page.getByRole("button", { name: "Account menu" }).click();
-  }
-  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await openWorkspace("Settings");
   // The account utility is a tenant of the shell: same app bar, its own
   // navigation in the sidebar on desktop and in the dock sheet when narrow.
   const settingsSidebar = page.getByRole("complementary", {

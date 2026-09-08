@@ -172,6 +172,42 @@ describe.sequential("canonical Finance account and ledger mutations", () => {
     expect(disconnected).toMatchObject({ encryptedCredentials: null, providerItemId: null });
   });
 
+  it("rejects stale account edits and advances the revision even within one clock tick", async () => {
+    const instant = new Date("2026-09-03T10:00:00.000Z");
+    const service = createFinanceAccountService({ db: database.db, now: () => instant });
+    const [row] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Revision Bank",
+        name: "Checking",
+        provider: "manual",
+        userId,
+        updatedAt: instant,
+      })
+      .returning();
+    if (!row) throw new Error("Missing account");
+    const input = {
+      expectedUpdatedAt: row.updatedAt.toISOString(),
+      idempotencyKey: "revision-first",
+      name: "Bills",
+    };
+    const saved = await service.update(row.id, input, context);
+    expect(saved.data.updatedAt).not.toBe(input.expectedUpdatedAt);
+    await expect(
+      service.update(
+        row.id,
+        { ...input, idempotencyKey: "revision-stale", name: "Stale" },
+        context,
+      ),
+    ).rejects.toThrow("changed");
+    expect(
+      (await service.list(userId, { includeExcluded: true })).accounts.find(
+        (item) => item.id === row.id,
+      )?.name,
+    ).toBe("Bills");
+    await expect(service.update(row.id, input, context)).resolves.toMatchObject(saved);
+  });
+
   it("classifies, links, splits, reads, and safely removes ledger activity", async () => {
     const now = () => new Date("2026-08-24T20:00:00Z");
     const service = createFinanceLedgerService({ db: database.db, now });

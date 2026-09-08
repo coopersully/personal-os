@@ -147,20 +147,32 @@ returns a Task to `open` and does not invent a legacy queue status. Today, Upcom
 Completed, Cancelled, and Trash are derived system Views rather than stored Lists. `trash_task` is
 recoverable and destructive for host UX; permanent Task deletion is not exposed.
 
-Finance includes read tools for ledger context and the current automation setting, plus
-`finances:write` tools that mutate the accounting ledger, profile and income data, and budget
-plans. Budgets are not human-only. Only a signed-in user can enable the single Finance review
-bypass; MCP cannot change that setting, connect institutions, import transactions, administer
-accounts, approve or dismiss action reviews, or execute external financial activity. Each
-supported semantic mutation, including insight refresh, returns `applied`, `pending_review`, or
-`needs_input`. The API derives that disposition from evidence, confidence and ambiguity checks,
-ownership, revisions, policy, and the persisted app-only bypass setting. Bypass chooses only
-whether a fully prepared action queues or applies; it never overrides confidence, ambiguity, or
-evidence requirements. The signed-in app's **Finances → Review** routes are the only
-approval/dismissal path. Its human-only question list returns bounded public descriptors; an
-answer may supply only the requested bounded fields, is scoped to the originating agent when an
-agent answers, merges into the stored action, and prepares it again. It therefore cannot approve
-a queued action or change bypass. The deprecated `resolve_finance_review` alias safely translates
+`list_task_workspace` reads the shared Tasks workspace without merging the underlying Task and
+Reminder records. It supports Today, Upcoming, All, History, and Trash, with server-side filters,
+sorting, grouping, totals, and query-bound cursor pagination. Mixed reads require both `tasks:read`
+and `reminders:read`; this combined MCP tool is discoverable only with both scopes. Existing
+single-domain read tools remain available to agents with narrower access. Results identify each
+record's kind and read-only state; mutations still use the owning domain's guarded tools. A
+reserved time is a Task schedule, not a new notification or autonomous execution guarantee.
+
+Finance exposes the same canonical records and mutations as the portal. Read operations
+require `finances:read`; canonical setup, maintenance, ledger, financial-profile, complete-budget,
+Inbox, and goal mutations require `finances:write`. Budgets can be created, revised, and approved
+through MCP. `approve_finance_budget` accepts explicit person approval as `user_instruction`;
+`agent_self_approval` additionally requires the persisted Finance bypass setting. Only the
+signed-in person can change that setting. Connection handoffs, synchronization, account
+corrections/disconnection, and transaction import have scoped tools; provider authentication
+and consent may still require the person. Money movement, bill payment, trading, and external
+subscription cancellation are not supported Finance effects.
+
+The canonical Inbox (`get_finance_inbox`, `answer_finance_review`) and complete budget
+(`get_finance_budget`, `create_finance_budget`, `revise_finance_budget`, `approve_finance_budget`)
+are shared with **Finances → Review** and **Plan**. Canonical results report their outcome,
+changes, remaining work, disclosures, and next question or action. Older stewardship action
+APIs retain `applied`, `pending_review`, and `needs_input` dispositions; their queued
+approval/dismissal controls remain in the portal's **Older questions and approvals** disclosure.
+Legacy `answer_finance_question` supplies only the requested bounded evidence and never approves
+a queued action or changes bypass. Its deprecated `resolve_finance_review` alias translates
 legacy categorization answers only.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
@@ -249,37 +261,60 @@ matching behavior changes, and connector sync executes only enabled `approved_ru
 MCP annotations remain untrusted UX hints. The API and durable scheduler remain authoritative;
 Mail-to-Calendar intake does not use experimental MCP task execution.
 
-Finance tools are an adapter over the same Finance API used by the web app. The preferred
-complete-workspace operations are `get_finance_status` and `maintain_finances`. Status reports the
-authoritative readiness, freshness, outstanding work, open questions, and recoverable run state;
-maintenance durably starts, resumes, or verifies one Ilo-owned turn for all outstanding work, a
-bounded window, or an exact target. No-argument maintenance means all outstanding work. MCP does
-not poll, schedule, or sequence this work: the API owns its durable lifecycle, questions,
-approvals, recovery, and terminal result.
-When status reports `awaiting_agent_challenge`, the agent calls
-`get_finance_ledger_challenge` until its opaque cursor is exhausted, checks all
-twelve versioned rubric areas, and calls `submit_finance_ledger_challenge` with
-complete item coverage and structured findings. The API resumes that same run;
-the agent does not call individual mutation tools to reproduce the candidate.
-After verification, `latestReview` links to the immutable artifact readable with
-`get_finance_period_review`.
-`get_finance_status` requires `finances:read`; `maintain_finances` requires the separately
-consented `finances:maintain` scope. Existing `finances:write` grants remain limited to Finance
-guidance drafts and do not gain maintenance authority. Grant `finances:maintain` through an
-explicit new local-token or OAuth consent flow; ilo does not migrate or revoke existing grants.
-`get_finance_guided_setup` is the entry point for a short Finance interview: it
-returns the shared durable profile together with owned account sources, review
-and ledger readiness, human-only boundaries, and suggested workflows. The
-remaining tools include transactions, categories, budgets, merchants, review
-work, wealth, cash flow, recurring obligations, and alerts. Agents should read
-ledger health and the relevant transactions before offering a budget or
-cash-flow recommendation.
+### Shared Finance workspace
+
+Finance tools are an adapter over the same Finance API used by the seven portal destinations:
+Overview, Review, Transactions, Plan, Cash flow, Wealth, and Accounts. Financial setup and
+Finance settings are secondary entry points. An agent-created plan, Inbox answer, ownership
+correction, or goal is visible through the same records in the portal; neither client maintains
+an independent financial model. Unknown amounts remain unavailable and API-owned evidence,
+classification, ownership, freshness, and totals govern financial interpretation.
+
+Start a financial interview with `get_finance_playbook` and `setup_finances` using
+`operation: start`. The API resumes an active session and returns one question. Persist each
+answer with its session ID, question ID, expected session version, and idempotency key. Resume
+on conflicts or interruptions. When setup requests budget approval, read `get_finance_budget`,
+show all resources, allocations, rationale, and assumptions, and approve the matching
+`budgetVersionId`. Setup approval uses the setup session version; direct
+`approve_finance_budget` uses the budget version. The portal follows this same protocol without
+asking the person to copy instructions into an agent.
+
+`get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
+the latest complete plan and `get_finance_budget_status` the active plan. Creation and revision
+retain resource/allocation identities and relationships, balance to the cent, and create
+versioned proposals. `get_finance_inbox` returns transaction-backed cases and the exact next
+question. `answer_finance_review` submits a typed classification, relationship, profile update,
+clarification, or dismissal; it returns the next authoritative Inbox state. The portal offers
+bounded classification, relationship, clarification, and dismissal forms. Older questions and
+approvals remain available separately and are not added to the canonical Inbox count.
+
+`maintain_finances` uses the canonical `finances:write` protocol. Call it with
+`operation: start` and an all-outstanding, account, or since-date scope; `resume` uses the run ID.
+The API runs deterministic processing and returns bounded reasoning or audit work immediately.
+The caller must inspect that evidence and submit `submit_judgments` or `submit_audit` with the
+run's expected version and an idempotency key, then continue from the returned state. A saved
+run, profile, approved budget, or access grant does not start a scheduled worker or guarantee
+completion. `agent_reasoning`, `agent_audit`, failed, and remaining-work results must stay
+explicit. `get_finance_maintenance_history` and exact-run API reads expose saved progress. The
+portal can start/resume initial maintenance and disclose its stage; it does not synthesize
+agent judgments or audit findings.
+
+`get_finance_status` and the advanced stewardship tools still expose compatibility readiness,
+freshness, questions, and recoverable maintenance state. Compatibility challenge work reported
+as `awaiting_agent_challenge` uses `get_finance_ledger_challenge` through the final cursor and
+`submit_finance_ledger_challenge` with complete structured coverage. That older maintenance and
+challenge path retains `finances:maintain`; this scope does not replace the canonical protocol's
+`finances:write` requirement. Immutable period artifacts remain readable with
+`get_finance_period_review`. `get_finance_guided_setup` supplies compatibility domain-guidance,
+source, readiness, and workflow context; it does not replace the canonical setup interview.
+Agents should inspect ledger health and relevant exact transactions before giving budget or
+cash-flow guidance.
+
 `list_finance_accounts` accepts optional account text, kind, status, and inclusion filters. Its
 structured result includes planning totals plus excluded-account, unresolved-ownership, and
 possible-duplicate disclosures calculated by the Finance API; the MCP adapter only forwards the
 typed query and response.
-`create_finance_attention_item` is the bounded exception to the otherwise read/proposal Finance
-surface: it locks one owned transaction, derives provider/account/remote/revision attribution
+`create_finance_attention_item` is the bounded transaction-linked attention operation: it locks one owned transaction, derives provider/account/remote/revision attribution
 server-side, deduplicates the same open transaction/kind item, and writes a redacted audit in the
 same transaction. The audit carries `approved_rule` policy and privacy-safe source attribution
 without merchant, amount, title, or summary content. Categorization proposals carry that same
@@ -292,12 +327,12 @@ the transaction's exact cents and explicitly distinguish personal and
 reimbursable treatment. Reimbursement tools track expected money and posted
 credits inside the ledger. They do not request, send, or move money.
 
-Categorization is intentionally proposal-first:
+The compatibility categorization flow remains proposal-first:
 `propose_finance_categorizations` uses the Finance read scope on both `GET` and
 the compatibility `POST` and does not mutate anything. Proposal pages return
 an opaque `nextCursor`, and hosts can continue without making read calls mutate
-the ledger. `finances:write` tools may submit the ledger, profile, and budget
-mutations described above and receive `applied`, `pending_review`, or
+the ledger. Compatibility `finances:write` action tools may submit ledger, profile, and
+budget changes and receive `applied`, `pending_review`, or
 `needs_input`. The API derives the disposition from the signed-in user's
 persisted app-only review bypass and current evidence; this includes the Finance
 insight refresh mutation. Agents cannot toggle bypass or approve/dismiss action
@@ -314,9 +349,10 @@ ordinary agent answer remains limited to its originating agent. Reimbursement
 questions use a typed answer and may conditionally classify allocations or
 create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
-compatibility alias only translates legacy categorization answers. Provider
-administration, account connection and import, ambiguous transfer confirmation,
-and action-review approval/dismissal remain human-only and unavailable to MCP.
+compatibility alias only translates legacy categorization answers. Legacy action-review
+approval/dismissal remains a signed-in control. Canonical connection,
+import, account correction, and typed transaction-relationship tools have their own scoped API
+contracts and are available to authorized MCP callers; no relationship operation moves money.
 
 The categorization batch API predates this guided-setup work and
 commits each decision independently. Its bounded workers and per-item results
@@ -328,7 +364,7 @@ other Finance actions.
 
 The shared `save_domain_profile` tool may save a Finance guidance draft with
 `finances:write`. It cannot activate that draft: activation is a signed-in
-action in **Finances → Profile**, requires an owned account source, and uses
+action in **Finance settings → Profile**, requires an owned account source, and uses
 the profile version guard. `get_finance_guided_setup` exposes active guidance
 separately from a draft proposal. Draft text is explicitly untrusted and
 non-operative until that signed-in activation; hosts must not inject it as
@@ -468,7 +504,9 @@ a fresh receipt from a preceding read, so the agent sees the current thread and
 timestamps first. It defaults to one concise bubble; only structured or
 explicitly requested large content should use a 2–3 message series.
 
-Only a token hash is stored. Revoke a host without ending human sessions or affecting another host. Connector and account administration remain human-only.
+Only a token hash is stored. Revoke a host without ending human sessions or affecting another
+host. Token administration and provider authentication remain signed-in controls; domain-scoped
+Finance connection and account tools follow the boundaries described above.
 ## Receipt-aware Finance review
 
 `review_finance_receipt` is a read-only, explicit opt-in lookup for one

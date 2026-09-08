@@ -42,7 +42,7 @@ jobs:
           test -n "$APPLE_PASSWORD"
           test -n "$APPLE_SIGNING_IDENTITY"
           test -n "$APPLE_TEAM_ID"
-      - name: Build signed and notarized DMG
+      - name: Build signed and notarized app, widgets, and DMG
         working-directory: apps/desktop
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -52,7 +52,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-        run: pnpm exec tauri build --bundles dmg --ci
+          ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
+          ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
+          ILO_KEYCHAIN_ACCESS_GROUP: ${{ vars.ILO_KEYCHAIN_ACCESS_GROUP }}
+        run: bash macos/scripts/release.sh
       - uses: actions/upload-artifact@v7
         with:
           name: macos-installer

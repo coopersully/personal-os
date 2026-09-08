@@ -1,4 +1,5 @@
 import type {
+  CalendarEvent,
   CreateEventInput,
   MailAddress,
   MailAttachment,
@@ -118,6 +119,7 @@ export type NormalizedRemoteMailThread = {
     bodyText: string;
     cc: MailAddress[];
     from: MailAddress;
+    /** Message-level membership; thread labels can include other received or sent messages. */
     mailboxIds?: string[];
     providerRevision?: string | null;
     receivedAt: Date;
@@ -137,6 +139,7 @@ export type NormalizedRemoteMailThread = {
 
 export type NormalizedRemoteEvent = {
   allDay: boolean;
+  attendees?: CalendarEvent["attendees"];
   conferenceStatus?: "failure" | "pending" | "success" | null;
   conferenceUrl: string | null;
   endsAt: Date;

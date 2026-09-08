@@ -2918,6 +2918,12 @@ describe("ilo API client", () => {
     await api.resendEmailVerification();
     await expect(api.getPinterestWallpaperSettings()).resolves.toMatchObject({ enabled: true });
     await expect(api.listPinterestPins()).resolves.toHaveLength(1);
+    await expect(api.listPinterestPins(12, "2026-09-08")).resolves.toHaveLength(1);
+    expect(
+      fetch.mock.calls.some(([url]) =>
+        String(url).endsWith("/v1/pinterest/pins?limit=12&planningDate=2026-09-08"),
+      ),
+    ).toBe(true);
     await expect(
       api.updatePinterestWallpaperSettings({ backgroundMode: "matched" }),
     ).resolves.toMatchObject({ enabled: true });

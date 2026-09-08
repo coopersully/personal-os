@@ -1,6 +1,27 @@
 import { z } from "zod";
 import { isoDateTimeSchema } from "./common.js";
 
+export const pinterestBoardUrlSchema = z
+  .url()
+  .max(2048)
+  .refine((value) => {
+    if (!URL.canParse(value)) return false;
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      (!url.port || url.port === "443") &&
+      !url.username &&
+      !url.password &&
+      (url.hostname === "pinterest.com" || url.hostname.endsWith(".pinterest.com")) &&
+      url.pathname.split("/").filter(Boolean).length >= 2
+    );
+  }, "Provide an HTTPS public Pinterest board URL.");
+
+export const pinterestPinsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(4).max(20).default(12),
+  planningDate: z.iso.date().optional(),
+});
+
 export const pinterestPinSchema = z.object({
   id: z.string().min(1),
   imageUrl: z.url(),
@@ -50,14 +71,7 @@ export type PinterestWallpaperSettings = z.infer<typeof pinterestWallpaperSettin
 export const updatePinterestWallpaperSettingsInputSchema = z.object({
   backgroundColor: wallpaperColorSchema.optional(),
   backgroundMode: pinterestWallpaperBackgroundModeSchema.optional(),
-  boardUrl: z
-    .url()
-    .refine((value) => {
-      const host = new URL(value).hostname;
-      return host === "pinterest.com" || host.endsWith(".pinterest.com");
-    }, "Provide a public Pinterest board URL.")
-    .nullable()
-    .optional(),
+  boardUrl: pinterestBoardUrlSchema.nullable().optional(),
   cornerRadius: z.number().int().min(0).max(80).optional(),
   enabled: z.boolean().optional(),
   frameSpacing: z.number().int().min(0).max(72).optional(),

@@ -4,6 +4,7 @@ export * from "./http.js";
 export * from "./icloud.js";
 export * from "./plaid.js";
 export * from "./twilio.js";
+export * from "./pinterest.js";
 export * from "./types.js";
 export * from "./types.js";
 export * from "./x.js";

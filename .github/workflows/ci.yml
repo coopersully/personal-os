@@ -183,6 +183,16 @@ jobs:
       - name: Compile native overlay
         working-directory: apps/desktop
         run: pnpm exec tauri build --debug --no-bundle
+      - name: Test native desktop contracts
+        working-directory: apps/desktop
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Test macOS companion and compile WidgetKit extension
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop
+        run: |
+          swift test --package-path macos
+          bash macos/scripts/build-widgets.sh
+          python3 -m unittest discover -s macos/scripts -p 'test_*.py'
 
   required:
     name: CI required

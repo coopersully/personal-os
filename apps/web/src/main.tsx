@@ -13,7 +13,7 @@ const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)").matches 
 document.documentElement.classList.toggle("dark", systemTheme === "dark");
 document.documentElement.style.colorScheme = systemTheme;
 
-if (import.meta.env.PROD) {
+if (import.meta.env.PROD && !("__TAURI_INTERNALS__" in window)) {
   registerSW({ immediate: true });
 } else {
   void clearDevelopmentPwaState();

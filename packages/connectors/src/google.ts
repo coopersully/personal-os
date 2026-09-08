@@ -71,6 +71,18 @@ const eventDateSchema = z.object({
 });
 
 const eventSchema = z.object({
+  attendees: z
+    .array(
+      z.object({
+        email: z.email(),
+        displayName: z.string().optional(),
+        organizer: z.boolean().default(false),
+        responseStatus: z
+          .enum(["needsAction", "accepted", "declined", "tentative"])
+          .default("needsAction"),
+      }),
+    )
+    .default([]),
   conferenceData: z
     .object({
       createRequest: z
@@ -1078,6 +1090,13 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
     extractConferenceUrl(event.location);
   return {
     allDay,
+    attendees: event.attendees.map((attendee) => ({
+      email: attendee.email,
+      name: attendee.displayName ?? null,
+      isOrganizer: attendee.organizer,
+      response:
+        attendee.responseStatus === "needsAction" ? "needs_action" : attendee.responseStatus,
+    })),
     conferenceStatus:
       event.conferenceData?.createRequest?.status.statusCode ?? (conferenceUrl ? "success" : null),
     conferenceUrl,

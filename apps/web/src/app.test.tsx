@@ -8194,6 +8194,19 @@ describe("ilo web app", () => {
     expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledWith(id);
   });
 
+  it("returns to sign-in after native logout without detaching the app window", async () => {
+    const browser = userEvent.setup();
+    mocks.isTauri.mockReturnValue(true);
+    setup("/settings?section=profile");
+    await screen.findByRole("button", { name: "Log out" });
+    mocks.logout.mockImplementationOnce(async () => {
+      mocks.getMe.mockRejectedValue(new Error("unauthorized"));
+    });
+    await browser.click(screen.getByRole("button", { name: "Log out" }));
+    expect(await screen.findByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
+  });
+
   it("opens Google authorization in the system browser on desktop", async () => {
     const authorizationUrl = "https://accounts.google.com/o/oauth2/v2/auth?client_id=test";
     mocks.isTauri.mockReturnValue(true);
@@ -8765,7 +8778,7 @@ describe("ilo web app", () => {
       cornerRadius: 0,
       enabled: false,
       frameSpacing: 16,
-      lastAppliedAt: null,
+      lastAppliedAt: "2026-07-10T12:00:00.000Z",
       layout: "grid" as const,
       mosaicFit: "preserve" as const,
       paddingBottom: 16,
@@ -8807,6 +8820,12 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("radio", { name: "Fill the rectangular frame" }));
     await browser.click(screen.getByRole("radio", { name: "Color-matched backdrop" }));
     await browser.click(screen.getByRole("radio", { name: "Daily random backdrop" }));
+    expect(
+      view.container
+        .querySelector<HTMLElement>(".pinterest-wallpaper-preview__canvas")
+        ?.style.getPropertyValue("--wallpaper-background"),
+    ).toBe("#E9DFD0");
+
     await browser.click(screen.getByRole("radio", { name: "Custom backdrop" }));
     const color = await screen.findByLabelText("Custom backdrop color");
     fireEvent.change(color, { target: { value: "#123456" } });

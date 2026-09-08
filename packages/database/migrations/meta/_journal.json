@@ -582,6 +582,13 @@
       "when": 1788746185000,
       "tag": "0076_task_list_icons",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1788868800000,
+      "tag": "0077_desktop_mail_activity",
+      "breakpoints": true
     }
   ]
 }

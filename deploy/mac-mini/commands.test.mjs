@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { run, stop } from "./commands.mjs";
+import { execute, run, stop } from "./commands.mjs";
 import { writePrivate } from "./safety.mjs";
 
 test("stop works without release images, environment files or gateway config", async () => {
@@ -58,4 +58,33 @@ test("command output is complete and failures never reveal stderr", async () => 
     run(process.execPath, ["-e", "setInterval(()=>{},1000)"], { timeout: 50 }),
     /failed/,
   );
+});
+
+test("explicit stop records maintenance even while a controller owns the operation lock", async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "nohmi-maintenance-test-")));
+  const root = join(directory, "nohmi-production");
+  mkdirSync(root, { mode: 0o700 });
+  try {
+    const image = `sha256:${"a".repeat(64)}`;
+    const configPath = join(root, "config.json");
+    writePrivate(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        root,
+        revision: "b".repeat(40),
+        postgresMajor: 17,
+        backupRecipient: "age1example",
+        dockerHost: "unix:///Users/nohmi-production/.colima/nohmi-production/docker.sock",
+        images: Object.fromEntries(
+          ["api", "mcp", "web", "postgres", "gateway", "tunnel"].map((name) => [name, image]),
+        ),
+      }),
+    );
+    mkdirSync(join(root, "operation.lock"));
+    await assert.rejects(execute("stop", configPath), /locked/);
+    assert.ok(existsSync(join(root, "maintenance.json")));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

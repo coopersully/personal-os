@@ -9,10 +9,22 @@ import { writePrivate } from "./safety.mjs";
 process.umask(0o077);
 let temporary;
 try {
-  const [revision, output] = process.argv.slice(2);
+  const [revision, output, ...options] = process.argv.slice(2);
   if (!/^[a-f0-9]{40}$/.test(revision) || !output || existsSync(output))
     throw new Error("Supply a full existing commit and a new private image-manifest path.");
-  const repository = resolve(new URL("../..", import.meta.url).pathname);
+  if (
+    options.length &&
+    (options.length !== 4 || options[0] !== "--repository" || options[2] !== "--docker-host")
+  )
+    throw new Error(
+      "Optional arguments must be --repository ABSOLUTE_PATH --docker-host DEDICATED_SOCKET.",
+    );
+  const repository = resolve(options[1] ?? new URL("../..", import.meta.url).pathname);
+  const dockerHost = options[3] ?? process.env.DOCKER_HOST;
+  if (!/^unix:\/\/\/[^\s]+\/\.colima\/nohmi-production\/docker\.sock$/.test(dockerHost ?? ""))
+    throw new Error("Build requires the explicit dedicated nohmi-production Docker socket.");
+  const env = { ...process.env, DOCKER_HOST: dockerHost };
+  delete env.DOCKER_CONTEXT;
   if ((await run("git", ["-C", repository, "rev-parse", `${revision}^{commit}`])) !== revision)
     throw new Error("Release must resolve to the exact supplied commit.");
   temporary = mkdtempSync(join(tmpdir(), "ilo-release-build-"));
@@ -30,6 +42,8 @@ try {
     await run(
       "docker",
       [
+        "--host",
+        dockerHost,
         "build",
         "--platform",
         "linux/arm64",
@@ -43,9 +57,13 @@ try {
         tag,
         source,
       ],
-      { timeout: 3_600_000 },
+      { env, timeout: 3_600_000 },
     );
-    images[name] = await run("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]);
+    images[name] = await run(
+      "docker",
+      ["--host", dockerHost, "image", "inspect", tag, "--format", "{{.Id}}"],
+      { env },
+    );
   }
   writePrivate(
     resolve(output),

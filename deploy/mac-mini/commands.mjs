@@ -505,6 +505,11 @@ export async function stop(runtime) {
 export async function execute(action, configPath, args = []) {
   const runtime = loadRuntime(configPath);
   if (action === "status") return runtime.compose(["ps", "--format", "json"]);
+  // Signal intent before contending with a running build. If the lock is busy,
+  // the operator retries stop after it exits; the controller cannot publish it.
+  const maintenance = join(runtime.root, "maintenance.json");
+  if (action === "stop")
+    writePrivate(maintenance, JSON.stringify({ requestedAt: new Date().toISOString() }));
   return withLock(runtime.root, async () => {
     if (action === "stop") return stop(runtime);
     if (action === "prepare") {
@@ -530,11 +535,13 @@ export async function execute(action, configPath, args = []) {
         return "Skipped task reconciliation checked/applied on the restored Mac database; application remains stopped.";
       case "start":
         await start(runtime);
+        if (existsSync(maintenance)) rmSync(maintenance);
         return "Activated application started.";
       case "publish":
         privateFile(join(runtime.root, "tunnel-token"));
         await start(runtime);
         await runtime.compose(["up", "-d", "tunnel"]);
+        if (existsSync(maintenance)) rmSync(maintenance);
         return "Tunnel started. Verify all public routes separately.";
       case "backup":
         return backup(runtime);

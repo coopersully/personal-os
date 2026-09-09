@@ -35,7 +35,7 @@ export function registerTextingTools(
       description:
         "Send an SMS only after reading and understanding the conversation. Texting should convey the answer quickly: use one concise, information-dense bubble by default. Use 2–3 messages only for structured lists/data or large content the user explicitly requested. Three SMS segments require necessity; 4–6 require explicit length review; 7–10 are exceptional; over 10 is rejected. Avoid greetings, throat-clearing, repetition, markdown tables, and splitting one idea across bubbles. A provider timeout can leave a queued message with uncertain delivery; reread the conversation and do not resend it until the user or delivery status resolves the uncertainty.",
       inputSchema: {
-        body: z.string().min(1).max(1600).describe("Final concise text, without an ilo prefix."),
+        body: z.string().min(1).max(1600).describe("Final concise text, without a nohmi prefix."),
         contentKind: z
           .enum([
             "concise",

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>me.coopersully.nohmi.continuous</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/sudo</string>
+    <string>-n</string><string>-H</string><string>-u</string><string>nohmi-production</string>
+    <string>/usr/bin/env</string>
+    <string>PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/nohmi-production/controller/deploy/mac-mini/continuous-cli.mjs</string>
+    <string>run</string>
+    <string>/Users/nohmi-production/nohmi-production/config.json</string>
+    <string>/Users/nohmi-production/releases/continuous.git</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>ExitTimeOut</key><integer>120</integer>
+  <key>WorkingDirectory</key><string>/Users/anchor</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
+</dict>
+</plist>

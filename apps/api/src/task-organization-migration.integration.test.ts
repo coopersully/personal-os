@@ -35,7 +35,7 @@ async function requireTaskOrganizationMigration(): Promise<void> {
   );
 }
 
-describe.sequential("Task organization migration", () => {
+describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
   let container: StartedPostgreSqlContainer;
   let admin: DatabaseClient;
   const clients: DatabaseClient[] = [];

@@ -78,7 +78,7 @@ const protectedResourceMetadata = {
   authorization_servers: [authorizationServer],
   resource: resourceUrl.href,
   resource_documentation: appLinks.agentAccess,
-  resource_name: "ilo",
+  resource_name: "nohmi",
   scopes_supported: [
     "tasks:read",
     "tasks:write",

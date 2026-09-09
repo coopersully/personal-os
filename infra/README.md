@@ -1,4 +1,13 @@
-# ilo AWS infrastructure
+# Historical ilo AWS infrastructure
+
+**Retired production baseline.** Production moved to the Mac Mini as nohmi on
+September 9, 2026. See [`deploy/mac-mini/README.md`](../deploy/mac-mini/README.md)
+and its continuous-deployment runbook. The owner authorized deletion of the AWS
+workload and nohmi-created account-wide services/audit storage. Do not run ordinary
+`terraform apply` against this directory: it would recreate retired resources and
+can conflict with the live Cloudflare sender and nohmi routing records. The remote
+state is being retired; a historical private state copy is retained outside Git.
+The declarations below document the former deployment, not the live source of truth.
 
 This directory defines an AWS deployment baseline in `us-east-1`:
 

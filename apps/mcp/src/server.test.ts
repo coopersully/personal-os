@@ -902,6 +902,25 @@ function mockApi() {
 }
 
 describe("ilo MCP server", () => {
+  it("introduces nohmi to connected hosts while preserving existing tool names", async () => {
+    const server = createPersonalOsMcpServer({
+      api: mockApi() as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      expect(client.getServerVersion()).toMatchObject({ name: "ilo", title: "nohmi" });
+      expect((await client.listTools()).tools.some((tool) => tool.name === "get_ilo_context")).toBe(
+        true,
+      );
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("preserves every Finance budget-plan disposition through the MCP tool", async () => {
     const api = mockApi();
     const outcomes = [

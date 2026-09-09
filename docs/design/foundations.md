@@ -1,12 +1,12 @@
-# ilo brand and experience foundations
+# nohmi brand and experience foundations
 
 - Status: Working foundation
-- Audience: Product, design, engineering, and agents contributing to ilo
+- Audience: Product, design, engineering, and agents contributing to nohmi
 - Scope: The product experience and its expression; not company or campaign branding
 
 ## Brand idea
 
-**Calm agency.** ilo makes a person's real commitments tangible and gives them
+**Calm agency.** nohmi makes a person's real commitments tangible and gives them
 clear control over what happens next, including work proposed or performed by an
 agent.
 
@@ -16,7 +16,7 @@ product better than the alternatives.
 
 ## Product promise
 
-At any moment, ilo shows what matters next, what is actively happening, what is
+At any moment, nohmi shows what matters next, what is actively happening, what is
 realistically possible, and what a person or authorized agent changed or
 proposes to change.
 
@@ -34,7 +34,7 @@ The promise has four parts:
 Use these traits as paired constraints. The second term names the failure mode,
 not an opposite style to be eliminated at any cost.
 
-| ilo is | ilo is not | What this changes |
+| nohmi is | nohmi is not | What this changes |
 | --- | --- | --- |
 | Calm | Passive | Reduce competition while keeping consequential state visible. |
 | Direct | Abrupt | Name the action and consequence without filler or blame. |
@@ -67,7 +67,7 @@ not an opposite style to be eliminated at any cost.
 
 ## Voice and language
 
-ilo speaks like a clear, observant collaborator. It does not impersonate a
+nohmi speaks like a clear, observant collaborator. It does not impersonate a
 person, hide uncertainty, or narrate ordinary interface mechanics.
 
 ### Voice rules
@@ -134,7 +134,7 @@ unrelated tools.
 
 ### Workspace identity
 
-- Treat Calendar, Tasks, Mail, and Finances as sub-apps inside ilo. Each has one
+- Treat Calendar, Tasks, Mail, and Finances as sub-apps inside nohmi. Each has one
   established glyph, label, route, and light/dark palette in the shared
   workspace identity registry.
 - Use the framed `WorkspaceIcon` whenever the whole workspace is represented:
@@ -146,7 +146,7 @@ unrelated tools.
   never communicates readiness, selection, warning, or completion. Each accent
   must remain immediately distinguishable at peripheral glance in both themes;
   muddy, gray-shifted variants are not a calmer substitute for workspace identity.
-- Today is ilo's neutral daily workspace. It owns only the current-day operating
+- Today is nohmi's neutral daily workspace. It owns only the current-day operating
   surface while summarizing the other workspaces. Goals, Motives, Reviews, and
   Activity are personal account utilities in Settings. Reminders belong within
   Tasks and do not receive a separate workspace palette.
@@ -188,17 +188,12 @@ unrelated tools.
 
 ### Product mark and name
 
-- Write the product name as lower-case **ilo** in product prose and the wordmark.
-- The application mark is the reicon `SideProfile` glyph, filled, inside a
-  rounded-square frame. A person in profile suits a workspace built around one
-  person's commitments. Treat it as a provisional implementation asset, not an
-  approved brand system. Do not derive illustrations, campaign graphics, or new
-  marks from it until the mark, clear space, minimum size, and accessible
-  variants are deliberately approved.
-- The mark uses the Filled weight at every size; the Outline variant is not an
-  approved substitute. At the smallest raster targets, inspect the generated
-  Filled mark for legibility and raise the minimum supported size if its shape
-  breaks down rather than switching weights.
+- Write the product name as lower-case **nohmi** in product prose and the wordmark.
+- The lowercase text wordmark is primary. Use the compact `n` mark for app icons
+  and constrained navigation, following the current brand foundation in
+  [`system.md`](system.md#brand-foundation). The previous provisional
+  `SideProfile` mark is retired. Do not introduce a new glyph or regenerate
+  artwork as part of a hostname or packaging-name change.
 - `apps/web/public/icon.svg` and `icon-maskable.svg` are the authored masters.
   Every raster form — web, PWA, and the desktop `.icns`/`.ico` sets — is
   regenerated from them by `node scripts/generate-app-mark.mjs`. Never hand-edit
@@ -236,6 +231,6 @@ Before approving a visible change, ask:
   requires us to label stakeholder opinions and untested design claims as
   assumptions until research supports them.
 - The [Design Tokens Format Module](https://www.w3.org/community/reports/design-tokens/CG-FINAL-format-20251028/)
-  supports platform-agnostic, named design decisions and aliases. ilo currently
+  supports platform-agnostic, named design decisions and aliases. nohmi currently
   implements semantic CSS variables; adopting a token interchange file is a
   future tooling decision, not a prerequisite for sound token ownership.

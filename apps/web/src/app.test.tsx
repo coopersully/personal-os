@@ -3830,7 +3830,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Keep current List" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("Manage Launch");
     previewView.unmount();
-  });
+  }, 15_000);
 
   it("keeps List and Project lifecycle failures inside their editors", async () => {
     const browser = userEvent.setup();

@@ -25,8 +25,10 @@ were also present in the frozen AWS source, while Plaid synced from the Mac.
 AWS retirement was authorized after the Mac recovery checks. ECS, autoscaling,
 EC2, ALB/WAF, CloudFront, ECR, application parameters, backup recovery points and
 legacy public DNS have been removed; RDS deletion was requested without a retained
-AWS snapshot. RDS remains in `deleting`; its subnet group, VPC and four subnets
-await that completion. The owner-authorized removal of the nohmi-created account-wide
+AWS snapshot. RDS deletion and dependent network cleanup completed at 17:11:51 UTC
+on September 9. Fresh inventory confirmed the source database, automated snapshots,
+RDS-managed secret, subnet group, four subnets and dedicated VPC are gone.
+The owner-authorized removal of the nohmi-created account-wide
 security/audit services and storage is complete. The final frozen database dump, credentials
 and historical Terraform state are preserved privately on the Mac. Live sender
 DNS and unrelated account resources remain intact. The legacy hosted-deploy and
@@ -51,6 +53,10 @@ running LaunchAgent performed the switch; the one-use initial squash authorizati
 was consumed. Public app/API/MCP health passed, PostgreSQL identity and user count
 matched, and all three environment files, gateway config and tunnel token retained
 their pre-deployment fingerprints. Unrelated Docker Desktop services remained up.
+The next normal main update to `34e31e0fe31b8f9242931c75e026f948f08da401`
+completed unattended at 17:08:54 UTC after push CI run `34380016971`, with the same
+health, database identity/user-count and configuration-fingerprint checks passing.
+It required no bootstrap exception or manual deployment.
 Offsite backups and backup alerts
 were explicitly deferred by the sole user for this cutover; no new storage
 subscription was activated. Local migration copies do not protect against loss

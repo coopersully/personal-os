@@ -46,9 +46,23 @@ not race an orphan build/deploy, nor silently repeat a failed write-boundary act
   full physical reboot.
 - [ ] Verify static LAN reservation separately, without guessing
   an unused address or disturbing unrelated services.
-- [ ] Inventory exact AWS resources, privately preserve configuration/state and the
+- [x] Inventory exact AWS resources, privately preserve configuration/state and the
   final data copies, and retire only confirmed nohmi resources in dependency order.
   Preserve Cloudflare email/DKIM/SPF/DMARC records, provider applications, the live
   nohmi tunnel/DNS, and shared/account-wide resources absent separate authority.
-- [ ] Verify remaining AWS resources and ongoing charges honestly; update current
+- [x] Verify remaining AWS resources and ongoing charges honestly; update current
   deployment docs and the operating runbook with evidence and any residual actions.
+
+## Completion evidence
+
+The ordinary unattended main update completed at 17:08:54 UTC on September 9,
+preserving database identity, user count and private configuration fingerprints.
+The final RDS/network cleanup completed at 17:11:51 UTC with no pending retirement
+resources; the former automated snapshots and managed database secret were also
+absent. The final frozen source dump and historical state remain private on the Mac.
+Unrelated AWS resources and live sender DNS were preserved. This scoped inventory
+is not a claim that the entire personal AWS account has a zero bill.
+
+Router-reservation verification still requires owner router access. A physical
+host reboot was not exercised because this Mac runs other services; nohmi VM and
+process recovery were exercised. Neither limitation prevents outbound tunnel access.

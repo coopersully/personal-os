@@ -103,6 +103,50 @@ other services running. Use the console's normal privileged setup when required;
 do not weaken account permissions to automate it. Record disk headroom and test
 restart after logout/reboot with the intended login arrangement before cutover.
 
+### Host startup and operator access
+
+The attended host uses the existing `anchor` login to supervise Colima, which runs
+as the non-admin `nohmi-production` account. The owner-approved sudoers rule grants
+`anchor` password-free commands **only as `nohmi-production`**, not root or other
+accounts. Verify with `sudo -n -H -u nohmi-production id`; `-H` selects the actual
+production account home. Never place a macOS password in scripts or environment files.
+
+`me.coopersully.nohmi.colima.plist` is the checked-in LaunchAgent configuration.
+Install it in `/Users/anchor/Library/LaunchAgents/` and create its private log
+directory `/Users/anchor/Library/Logs/nohmi-production` first. It starts the named
+profile in the foreground with 2 CPUs, 4 GiB RAM, and a 24 GiB container-data disk.
+Only `/Users/nohmi-production/nohmi-production` is mounted into the VM; SSH-agent
+forwarding, host port forwarding, and automatic context switching stay disabled.
+Release code and migration inputs live outside that mount, in the production
+account's private `releases/` and `migration/` directories.
+
+The Docker **client and Compose plugin** come from the already installed Docker
+application; nohmi connects only to its Colima socket, never the Docker Desktop
+engine. `docker-client.json` configures the plugin path in the new production
+account's `.docker/config.json`. Do not overwrite an existing client configuration
+or change the operator's shared Docker context. Keep `/usr/local/bin` in the
+operator command PATH along with `/opt/homebrew/bin`.
+
+Operate the supervisor as `anchor`:
+
+```sh
+launchctl bootstrap gui/501 /Users/anchor/Library/LaunchAgents/me.coopersully.nohmi.colima.plist
+launchctl print gui/501/me.coopersully.nohmi.colima
+launchctl bootout gui/501/me.coopersully.nohmi.colima
+```
+
+Verify the operator UID rather than assuming `501` on another host. Before
+maintenance, unload the LaunchAgent and wait for Colima to stop; do not fight the
+loaded supervisor by repeatedly stopping its VM. Unloading retains PostgreSQL's
+Linux volume. Re-bootstrap to start it again. Already activated application
+containers then follow their Docker restart policies.
+
+This is **startup after operator login**, not a pre-login system daemon. A power
+cycle still requires normal FileVault unlock and operator login. A tested
+LaunchAgent stop/start is evidence of service recovery, not proof of a full host
+reboot; record the full reboot/login rehearsal separately without interrupting
+the Mac's unrelated services unannounced.
+
 Build API/MCP/web from one recorded, clean full Git commit using the checked-in
 Dockerfile and production `VITE_API_BASE_URL=https://nohmi-api.coopersully.me`. Label
 images `org.opencontainers.image.revision` with that commit. `build.mjs FULL_COMMIT

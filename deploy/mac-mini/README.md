@@ -9,8 +9,10 @@ Public app, API readiness, MCP liveness, OAuth discovery, and unauthenticated
 access rejection are verified over HTTPS. Authenticated browser acceptance is
 still pending; the local network initially cached negative API/MCP DNS responses.
 AWS retirement followed the verified VM/process recovery exercises. Former app
-compute/edge services and owner-approved account-wide services/storage were removed;
-RDS remains deleting; its subnet group, VPC and four subnets await that completion.
+compute/edge services and owner-approved account-wide services/storage were removed.
+RDS deletion and final network cleanup completed at 17:11:51 UTC: the source
+database, automated snapshots, RDS-managed secret, subnet group, four subnets and
+dedicated VPC are gone. Fresh scoped inventory found no pending retirement resources.
 Legacy deploy/health workflows remain disabled. Historical
 source exports, the final frozen dump and Terraform state are preserved privately.
 Do not use the historical source-access steps below against a recreated AWS stack.

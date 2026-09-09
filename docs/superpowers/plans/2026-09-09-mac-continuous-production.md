@@ -29,21 +29,22 @@ not race an orphan build/deploy, nor silently repeat a failed write-boundary act
 
 ## Execution
 
-- [ ] Add behavior tests for exact-main/successful-push-CI eligibility, no downgrade,
+- [x] Add behavior tests for exact-main/successful-push-CI eligibility, no downgrade,
   stale candidate rejection, build failure leaving the old release running,
   serialized writes, preserved secrets/DB, interrupted switch recovery, maintenance,
   and bounded unhealthy-container recovery.
-- [ ] Implement and test the controller in `deploy/mac-mini`, using existing
+- [x] Implement and test the controller in `deploy/mac-mini`, using existing
   `commands.mjs`, `compose.mjs`, `safety.mjs` and `build.mjs` rather than a second
   production runtime. Install stable controller code outside the user's checkout.
-- [ ] Add a supervised LaunchAgent using the existing scoped `sudo -u nohmi-production`
+- [x] Add a supervised LaunchAgent using the existing scoped `sudo -u nohmi-production`
   access. Poll at most once per minute; GitHub CI checks must avoid anonymous rate
   limits, back off on failures, and never execute pull-request code.
-- [ ] Run focused tests, `pnpm verify`, and an independent code review. Publish via
+- [x] Run focused tests, `pnpm verify`, and an independent code review. Publish via
   a PR; never push directly to main. Exercise a real successful main-CI deployment.
-- [ ] Verify live public endpoints, process recovery, and PostgreSQL identity/data
+- [x] Verify live public endpoints, process recovery, and PostgreSQL identity/data
   retention. Record the distinction between tested service recovery and an untested
-  full physical reboot. Verify static LAN reservation separately, without guessing
+  full physical reboot.
+- [ ] Verify static LAN reservation separately, without guessing
   an unused address or disturbing unrelated services.
 - [ ] Inventory exact AWS resources, privately preserve configuration/state and the
   final data copies, and retire only confirmed nohmi resources in dependency order.

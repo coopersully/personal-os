@@ -8,8 +8,13 @@ verified. The rehearsed skipped-task repair was applied before activation.
 Public app, API readiness, MCP liveness, OAuth discovery, and unauthenticated
 access rejection are verified over HTTPS. Authenticated browser acceptance is
 still pending; the local network initially cached negative API/MCP DNS responses.
-AWS writers and their autoscaling are stopped/suspended, and legacy deploy/health
-workflows are disabled. AWS resources remain retained, not deleted.
+AWS retirement followed the verified VM/process recovery exercises. The workload
+and owner-approved account-wide services/storage are being removed; the source RDS
+deletion is in progress. Legacy deploy/health workflows remain disabled. Historical
+source exports, the final frozen dump and Terraform state are preserved privately.
+Do not use the historical source-access steps below against a recreated AWS stack.
+See [continuous production](continuous.md) for CI-gated main updates, maintenance,
+installation and recovery; the initial cutover steps below remain historical evidence.
 Follow the September 8 execution plan and September 9 scope update in `docs/superpowers/plans/`.
 Do not use the August unattended-controller plan as the initial release gate.
 
@@ -47,8 +52,8 @@ application. The approved public origins are `https://nohmi.coopersully.me`,
 `https://nohmi-api.coopersully.me`, and `https://nohmi-mcp.coopersully.me`.
 These single-level names fit the zone's free Universal SSL wildcard; no Advanced
 Certificate Manager subscription is needed. Verify actual TLS after provisioning
-the new proxied tunnel CNAMEs. Preserve the old AWS DNS records for recovery; do
-not claim old HTTPS URLs redirect to nohmi, because their multi-level names are
+the new proxied tunnel CNAMEs. The retired AWS DNS records were removed after
+cutover; live sender verification records remain. Do not claim old HTTPS URLs redirect to nohmi, because their multi-level names are
 not covered by the free Cloudflare certificate.
 
 `prepare` rewrites only the known old public origins in URL configuration and
@@ -152,11 +157,19 @@ loaded supervisor by repeatedly stopping its VM. Unloading retains PostgreSQL's
 Linux volume. Re-bootstrap to start it again. Already activated application
 containers then follow their Docker restart policies.
 
-This is **startup after operator login**, not a pre-login system daemon. A power
-cycle still requires normal FileVault unlock and operator login. A tested
-LaunchAgent stop/start is evidence of service recovery, not proof of a full host
-reboot; record the full reboot/login rehearsal separately without interrupting
-the Mac's unrelated services unannounced.
+This is **startup after operator login**, not a pre-login system daemon. The
+September 9 audit found FileVault off, automatic login set to `anchor`, sleep
+disabled and power-failure restart enabled. If those login settings change, startup
+may require an attended login. LaunchAgent/VM stop/start restored all six containers
+with the same PostgreSQL identity and one user; a real API process exit also
+recovered through Docker's restart policy. This is not proof of a full physical
+reboot, which remains untested to avoid interrupting unrelated services.
+
+The active Wi-Fi interface currently uses DHCP. Reserve its actual lease MAC in
+the router after owner login; do not invent a static address or assume the Ethernet
+hardware address is the active Wi-Fi lease identity. A reservation is not yet
+verified. Cloudflare Tunnel uses outbound connections and does not depend on a
+fixed LAN/public IP or router port forwarding.
 
 Build API/MCP/web from one recorded, clean full Git commit using the checked-in
 Dockerfile and production `VITE_API_BASE_URL=https://nohmi-api.coopersully.me`. Label

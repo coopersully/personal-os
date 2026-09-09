@@ -22,19 +22,32 @@ negative DNS answers for the new API/MCP names; authenticated browser acceptance
 is not yet recorded. Existing Google authorization and iCloud transport failures
 were also present in the frozen AWS source, while Plaid synced from the Mac.
 
-AWS API/MCP desired and running task counts are zero, both autoscaling targets
-are suspended, and the legacy hosted-deploy and production-health GitHub workflows
-are disabled. RDS and other AWS resources remain preserved, not retired; retaining
-them can still incur AWS charges. Do not restart the stale AWS database's writers
-or use the legacy live-RDS development mode below. Recovery after Mac activation
-must preserve subsequent Mac writes. The AWS operational sections below describe
-the retained source infrastructure, not the active Mac deployment.
+AWS retirement was authorized after the Mac recovery checks. ECS, autoscaling,
+EC2, ALB/WAF, CloudFront, ECR, application parameters, backup recovery points and
+legacy public DNS have been removed; RDS deletion was requested without a retained
+AWS snapshot. The owner also authorized removal of the nohmi-created account-wide
+security/audit services and storage. The final frozen database dump, credentials
+and historical Terraform state are preserved privately on the Mac. Live sender
+DNS and unrelated account resources remain intact. The legacy hosted-deploy and
+production-health workflows remain disabled. Never apply the historical AWS stack
+or use the legacy live-RDS development mode below. Recovery must preserve subsequent
+Mac writes. The AWS operational sections below are historical reference only.
 
-Deployments are attended via the Mac runbook. Offsite backups and backup alerts
+The [continuous deployment controller](../deploy/mac-mini/continuous.md) accepts
+only successful exact-main push CI, builds against the dedicated production engine,
+and switches with a local encrypted backup and durable recovery state. Installation
+and first-main adoption are attended; application updates then require no GitHub
+credential or inbound port. Controller/configuration upgrades remain attended.
+Offsite backups and backup alerts
 were explicitly deferred by the sole user for this cutover; no new storage
 subscription was activated. Local migration copies do not protect against loss
-of the Mac. Startup is after the operator's login; a full host reboot remains
-untested, although the LaunchAgent/VM and PostgreSQL stop/start were exercised.
+of the Mac. Startup is after the operator's login. The September 9 host audit found
+sleep disabled, power-failure restart enabled, FileVault off and automatic login
+configured for the existing operator. The LaunchAgent/VM restart and application
+process-exit recovery were exercised with the same PostgreSQL identity and user
+data. A physical host reboot remains untested. The active Wi-Fi address is DHCP;
+a router reservation is not yet verified. The outbound tunnel does not require a
+static LAN or public IP.
 
 ## Required configuration
 

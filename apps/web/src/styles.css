@@ -576,26 +576,52 @@ p {
   width: auto;
 }
 .desktop,
-.desktop body {
-  background: transparent;
+.desktop body,
+.desktop #root {
+  height: 100%;
+  min-height: 0;
 }
 .desktop body {
-  padding: 10px;
+  background: var(--app-shell-background);
+  overflow: hidden;
+  padding: 0;
 }
 .desktop .app-shell {
   background: var(--app-shell-background);
-  border-radius: calc(var(--radius) * 1.4);
-  min-height: calc(100vh - 20px);
-  /* Fixed navigation/popovers must escape the shell's rounded rectangle in WKWebView. */
-  overflow: visible;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 .desktop .sidebar {
   background: var(--sidebar);
-  height: calc(100vh - 20px);
-  top: 10px;
+  height: 100%;
+  top: 0;
 }
 .desktop .workspace-app-bar {
-  top: 10px;
+  top: 0;
+}
+.desktop .workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.desktop .content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  width: 100%;
+}
+.desktop .sidebar__content {
+  scrollbar-width: none;
+}
+.desktop .sidebar__content::-webkit-scrollbar {
+  display: none;
+}
+.desktop .workspace-stage,
+.desktop .workspace-route {
+  min-height: 100%;
 }
 /* Resident WKWebView can pause entrance animations when the window loses focus.
    Desktop navigation must remain visible without an animation completing. */

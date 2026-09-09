@@ -4,6 +4,7 @@ import Foundation
 import ServiceManagement
 
 private var hostCallback: (@convention(c) (UnsafePointer<CChar>?) -> Void)?
+func petShouldBeVisible(enabled: Bool, hasSnapshot _: Bool) -> Bool { enabled }
 @_cdecl("ilo_native_set_callback")
 public func iloNativeSetCallback(
   _ callback: @escaping @convention(c) (UnsafePointer<CChar>?) -> Void
@@ -88,10 +89,7 @@ final class NativeCompanion {
     notifications.clear(preservingColdResponses: preservingColdResponses)
     SharedSnapshotStore.clear()
     UserDefaults.standard.removeObject(forKey: "ilo.native.identityFingerprint")
-    if var s = settings {
-      s.petEnabled = false
-      pet.configure(s)
-    }
+    if let settings { pet.configure(settings) }
   }
   func dispatch(_ object: [String: Any]) throws -> [String: Any] {
     guard let op = object["op"] as? String else {
@@ -126,7 +124,8 @@ final class NativeCompanion {
         loginError = nil
       } catch { loginError = error.localizedDescription }
       var visibleSettings = s
-      visibleSettings.petEnabled = s.petEnabled && snapshot != nil
+      visibleSettings.petEnabled = petShouldBeVisible(
+        enabled: s.petEnabled, hasSnapshot: snapshot != nil)
       pet.configure(visibleSettings)
       if let snapshot { publish(snapshot) }
       return status()

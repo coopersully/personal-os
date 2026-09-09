@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
-export const hostedServer = "https://api.ilo.coopersully.me";
+export const hostedServer = "https://nohmi-api.coopersully.me";
 export type NotificationSettings = {
   enabled: boolean;
   tasks: boolean;

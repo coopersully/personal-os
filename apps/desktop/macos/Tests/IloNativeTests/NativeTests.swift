@@ -135,6 +135,10 @@ final class NativeTests: XCTestCase {
         NSPoint(x: 2000, y: -30), to: frame, size: NSSize(width: 72, height: 72)),
       NSPoint(x: -72, y: 0))
   }
+  func testEnabledPetDoesNotRequireAnAuthenticatedSnapshot() {
+    XCTAssertTrue(petShouldBeVisible(enabled: true, hasSnapshot: false))
+    XCTAssertFalse(petShouldBeVisible(enabled: false, hasSnapshot: true))
+  }
   func testEventDeduplicationAcrossGroups() {
     var s = snapshot()
     let e = CalendarItem(

@@ -6447,6 +6447,17 @@ describe("ilo web app", () => {
     );
   });
 
+  it("gives the desktop shell one fixed viewport and one content scroller", () => {
+    const stylesheet = readFileSync("apps/web/src/styles.css", "utf8");
+
+    expect(stylesheet).toMatch(
+      /\.desktop body \{[^}]*background: var\(--app-shell-background\);[^}]*overflow: hidden;[^}]*padding: 0;/u,
+    );
+    expect(stylesheet).toMatch(/\.desktop \.app-shell \{[^}]*height: 100%;[^}]*overflow: hidden;/u);
+    expect(stylesheet).toMatch(/\.desktop \.content \{[^}]*overflow-y: auto;/u);
+    expect(stylesheet).toMatch(/\.desktop \.sidebar__content \{[^}]*scrollbar-width: none;/u);
+  });
+
   it("draws a snapped time range and opens the event composer with that schedule", async () => {
     mocks.listEvents.mockResolvedValue([]);
     setup("/calendar?date=2026-07-13&view=week");

@@ -148,7 +148,10 @@ jobs:
           cache: pnpm
           node-version: 22
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install Playwright browser
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - if: failure()
         uses: actions/upload-artifact@v7

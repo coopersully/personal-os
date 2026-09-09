@@ -63,6 +63,15 @@
       ]
     },
     {
+      "Sid": "SuspendNohmiSourceWriterAutoscaling",
+      "Effect": "Allow",
+      "Action": "application-autoscaling:RegisterScalableTarget",
+      "Resource": [
+        "arn:aws:application-autoscaling:us-east-1:686584420666:scalable-target/0ec583a7583fb1b94f5a8848bfac92b73284",
+        "arn:aws:application-autoscaling:us-east-1:686584420666:scalable-target/0ec542f494416e6a4601acd22b47f5520f20"
+      ]
+    },
+    {
       "Sid": "DatabaseTunnelOnly",
       "Effect": "Allow",
       "Action": "ssm:StartSession",

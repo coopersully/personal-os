@@ -1,18 +1,40 @@
 # Deployment
 
-## Mac migration in progress
+## Current production: nohmi on the Mac Mini
 
 The attended Mac Mini production migration is documented in
 [`deploy/mac-mini/README.md`](../deploy/mac-mini/README.md). It preserves the RDS
-database and provider/encryption configuration while deploying current code. Its
-commands do not mean the public cutover has happened; AWS remains the source until
-the final writer freeze, verified transfer, and activation are recorded.
+database and provider/encryption configuration while deploying current code.
+The attended cutover was executed on September 9, 2026. The Mac became the
+authoritative writer at 14:56:22 UTC, running application revision
+`fba5bc5c39f291f792bdda85fcb3d519a06c05b0`. Frozen-source counts matched all 89
+relations (88 application tables plus the migration ledger); all 27 encrypted
+provider records decrypted successfully before application activation.
 
 The Mac target uses `nohmi.coopersully.me` (app), `nohmi-api.coopersully.me`
 (API), and `nohmi-mcp.coopersully.me` (MCP). These names use free Cloudflare
 Tunnel and Universal SSL. The old `*.ilo.coopersully.me` AWS addresses are source
 configuration, not the Mac target. Provider callbacks must be registered for the
 new addresses before cutover; the migration preserves provider secrets and data.
+The three new DNS records are published, with public HTTPS app, API readiness,
+MCP liveness and OAuth discovery verified. The local network initially cached
+negative DNS answers for the new API/MCP names; authenticated browser acceptance
+is not yet recorded. Existing Google authorization and iCloud transport failures
+were also present in the frozen AWS source, while Plaid synced from the Mac.
+
+AWS API/MCP desired and running task counts are zero, both autoscaling targets
+are suspended, and the legacy hosted-deploy and production-health GitHub workflows
+are disabled. RDS and other AWS resources remain preserved, not retired; retaining
+them can still incur AWS charges. Do not restart the stale AWS database's writers
+or use the legacy live-RDS development mode below. Recovery after Mac activation
+must preserve subsequent Mac writes. The AWS operational sections below describe
+the retained source infrastructure, not the active Mac deployment.
+
+Deployments are attended via the Mac runbook. Offsite backups and backup alerts
+were explicitly deferred by the sole user for this cutover; no new storage
+subscription was activated. Local migration copies do not protect against loss
+of the Mac. Startup is after the operator's login; a full host reboot remains
+untested, although the LaunchAgent/VM and PostgreSQL stop/start were exercised.
 
 ## Required configuration
 

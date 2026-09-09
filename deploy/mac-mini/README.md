@@ -1,7 +1,16 @@
 # Attended nohmi Mac production cutover
 
-Status: implementation and rehearsal in progress; this is **not a record of a live
-cutover**. Follow the September 8 execution plan in `docs/superpowers/plans/`.
+Status: the attended public cutover was executed September 9, 2026. The Mac is
+the authoritative writer from 14:56:22 UTC, using application revision
+`fba5bc5c39f291f792bdda85fcb3d519a06c05b0`. All 89 frozen-source relation counts
+and the migration ledger matched on restore; 27 encrypted provider records were
+verified. The rehearsed skipped-task repair was applied before activation.
+Public app, API readiness, MCP liveness, OAuth discovery, and unauthenticated
+access rejection are verified over HTTPS. Authenticated browser acceptance is
+still pending; the local network initially cached negative API/MCP DNS responses.
+AWS writers and their autoscaling are stopped/suspended, and legacy deploy/health
+workflows are disabled. AWS resources remain retained, not deleted.
+Follow the September 8 execution plan and September 9 scope update in `docs/superpowers/plans/`.
 Do not use the August unattended-controller plan as the initial release gate.
 
 ## What runs where
@@ -17,7 +26,9 @@ migrations and schedulers; starting API permits writes immediately.
 The operator credential is the `personal-os-migration` AWS CLI profile, backed by
 the non-root `personal-os-mac-migration` IAM user. Its managed policy is checked in
 as `migration-operator-policy.json`. It has no IAM management or resource deletion
-permission. Its access key does not automatically expire; revoke it after AWS
+permission. It can suspend/resume only the two inspected source service autoscaling
+targets, so the freeze does not depend on an expiring administrator login.
+Its access key does not automatically expire; revoke it after AWS
 retirement. Keep it out of application environment files and production containers.
 The Mac's default profile delegates to it; the separate `personal-os-bootstrap`
 profile retains the expiring administrative login for provisioning only.
@@ -221,9 +232,12 @@ home-network path; a health endpoint cannot prove those capabilities.
 5. `cli.mjs publish /PRIVATE/config.json`; provision the three new Cloudflare routes/DNS
    records as prepared. Verify actual TLS and routing, login/session, an attended
    create/edit/read operation, connectors, and public MCP. Record results privately.
-6. Schedule encrypted offsite backups and missed-backup alerts, verify upload bytes,
-   decrypt/restore an offsite copy, and test service restart. Keep AWS for at least
-   72 healthy hours. No AWS deletion is implemented by these commands.
+6. Verify service restart. On September 9 the sole user explicitly deferred offsite
+   backups and their alerts to prioritize the attended cutover. Keep the local
+   migration dump and provider configuration; these do not protect against loss
+   of this Mac. Offsite storage is not a prerequisite for this approved cutover.
+   Preserve AWS recovery resources during the switch; no AWS deletion is
+   implemented by these commands.
 
 If a check fails before API activation, keep the Mac app stopped and restore the
 recorded AWS writer/routing configuration. After activation, stop ingress/API/MCP,
@@ -257,7 +271,8 @@ images. It retains the database. `backup` accepts an activated or successfully
 restored database and creates an age-encrypted custom-format dump and hash manifest,
 removing its temporary plaintext dump. It currently creates a **local** backup only.
 Offsite upload, retention, key escrow, hourly scheduling, missed-backup alerting,
-and an offsite restore are still operational gates, not completed capabilities.
+and an offsite restore are deferred by the owner, not completed capabilities or
+gates for this initial cutover.
 Escrow the age private key and an encrypted provider-configuration export outside
 this Mac; the database alone cannot recover encrypted OAuth credentials.
 

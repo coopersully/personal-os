@@ -150,7 +150,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
+            | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - if: failure()

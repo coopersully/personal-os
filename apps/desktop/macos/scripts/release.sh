@@ -33,7 +33,7 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain
 cd "$desktop"
 # The initial bundle is ad-hoc; embedding signs the complete bundle exactly once with Developer ID.
 env -u APPLE_CERTIFICATE -u APPLE_CERTIFICATE_PASSWORD -u APPLE_SIGNING_IDENTITY -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID pnpm exec tauri build --bundles app --ci
-app="$desktop/src-tauri/target/release/bundle/macos/Nomi.app"
+app="$desktop/src-tauri/target/release/bundle/macos/nohmi.app"
 export ILO_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" ILO_SIGNING_KEYCHAIN="$keychain"
 export ILO_HOST_ENTITLEMENTS="$root/Widgets/Host.entitlements"
 export ILO_HOST_PROVISIONING_PROFILE="$workspace/host.provisionprofile"
@@ -45,7 +45,7 @@ xcrun stapler staple "$app"
 xcrun stapler validate "$app"
 spctl --assess --type execute --verbose=2 "$app"
 mkdir -p "$workspace/image" "$desktop/src-tauri/target/release/bundle/dmg"
-ditto "$app" "$workspace/image/Nomi.app"
+ditto "$app" "$workspace/image/nohmi.app"
 ln -s /Applications "$workspace/image/Applications"
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
 image="$desktop/src-tauri/target/release/bundle/dmg/nohmi_${version}_$(uname -m).dmg"

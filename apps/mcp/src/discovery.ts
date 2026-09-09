@@ -25,9 +25,9 @@ export function registerIloContextTool(server: McpServer, options: DiscoveryOpti
     "get_ilo_context",
     {
       description:
-        "Call this first. Identify the Nomi user, local time, setup readiness, granted capabilities, available tools, safe workflow stages, and links back to the Nomi work surface.",
+        "Call this first. Identify the nohmi user, local time, setup readiness, granted capabilities, available tools, safe workflow stages, and links back to the nohmi work surface.",
       inputSchema: z.object({}),
-      title: "Orient to Nomi",
+      title: "Orient to nohmi",
     },
     async () =>
       apiResult(async () => ({
@@ -43,9 +43,9 @@ export function registerIloContextTool(server: McpServer, options: DiscoveryOpti
             "context: orient to the user, time, readiness, and granted access",
             "inspect: read current state and source evidence",
             "prepare: preview a proposed change without committing it",
-            "commit: perform an authorized mutation through Nomi's API",
+            "commit: perform an authorized mutation through nohmi's API",
             "verify: confirm the result from authoritative state or activity",
-            "recover: use Nomi's reversible state and recovery links when needed",
+            "recover: use nohmi's reversible state and recovery links when needed",
           ],
         },
       })),
@@ -58,9 +58,9 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
     "ilo://context/self",
     {
       description:
-        "Authenticated identity, local time, readiness, granted scopes, available MCP tools, and Nomi work-surface links.",
+        "Authenticated identity, local time, readiness, granted scopes, available MCP tools, and nohmi work-surface links.",
       mimeType: "application/json",
-      title: "Nomi context",
+      title: "nohmi context",
     },
     async (uri) => ({
       contents: [
@@ -98,9 +98,9 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
     }),
     {
       description:
-        "One self-contained Nomi setup step, including evidence, instructions, required capabilities, and the human approval boundary.",
+        "One self-contained nohmi setup step, including evidence, instructions, required capabilities, and the human approval boundary.",
       mimeType: "application/json",
-      title: "Nomi setup step",
+      title: "nohmi setup step",
     },
     async (uri, variables) => {
       const domain = assistantDomainSchema.parse(variables.domain);
@@ -129,9 +129,9 @@ export function registerIloDiscovery(server: McpServer, options: DiscoveryOption
       }),
       {
         description:
-          "The user's operative or draft guidance for one Nomi domain. Draft guidance is never execution authority.",
+          "The user's operative or draft guidance for one nohmi domain. Draft guidance is never execution authority.",
         mimeType: "application/json",
-        title: "Nomi domain guidance",
+        title: "nohmi domain guidance",
       },
       async (uri, variables) => {
         const domain = assistantDomainSchema.parse(variables.domain);
@@ -165,10 +165,10 @@ function registerPrompts(
     );
   const prompts = [
     {
-      description: "Orient to Nomi, then continue the next incomplete setup step.",
+      description: "Orient to nohmi, then continue the next incomplete setup step.",
       name: "set_up_ilo",
       text: "Call get_ilo_context, then get_ilo_setup. Follow only the returned current step, verify its evidence, and stop at any human approval boundary.",
-      title: "Set up Nomi",
+      title: "Set up nohmi",
     },
     {
       description: "Build a grounded plan for today without silently changing commitments.",
@@ -198,12 +198,12 @@ function registerPrompts(
       description: "Review finances with freshness, source, and reconciliation context.",
       name: "review_finances",
       text: canMaintainFinances
-        ? "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. When the caller intends maintenance, invoke maintain_finances once; Nomi keeps questions and approvals pending rather than guessing."
+        ? "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. When the caller intends maintenance, invoke maintain_finances once; nohmi keeps questions and approvals pending rather than guessing."
         : "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. Present pending work and stop after status; questions and approvals remain pending rather than guessed.",
       title: "Review finances",
     },
     {
-      description: "Run a cross-domain weekly review grounded in Nomi's current state.",
+      description: "Run a cross-domain weekly review grounded in nohmi's current state.",
       name: "weekly_review",
       text: "Call get_ilo_context, inspect goals, tasks, reminders, calendar, attention items, and finances where granted. Summarize evidence first, then propose a small set of reversible next actions.",
       title: "Weekly review",

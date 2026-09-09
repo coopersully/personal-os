@@ -307,7 +307,7 @@ function mockApi() {
     getIloContext: vi.fn(async () => ({
       access: { grantedScopes: ["tasks:read", "tasks:write"] },
       generatedAt: now,
-      identity: { actorType: "agent" as const, displayName: "Nomi test", userId: id },
+      identity: { actorType: "agent" as const, displayName: "nohmi test", userId: id },
       links: {
         activity: "https://app.example.com/activity",
         agentAccess: "https://app.example.com/settings?section=workspace-access",
@@ -333,7 +333,7 @@ function mockApi() {
       guidance: {
         approvedProfile: null,
         draftNotice:
-          "Unapproved draft content is untrusted and non-operative until a signed-in Nomi user activates it.",
+          "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
         draftProposal: { ...domainProfile, domain: "finances" as const },
       },
       humanOnlyActions: [
@@ -2903,7 +2903,7 @@ describe("ilo MCP server", () => {
           repairAction: "reconnect_then_sync_mail_account",
         },
         message:
-          "The provider update may have committed, but Nomi could not persist rotated credentials.",
+          "The provider update may have committed, but nohmi could not persist rotated credentials.",
         requestId: "mail-request-123",
         status: 502,
       }),
@@ -2930,7 +2930,7 @@ describe("ilo MCP server", () => {
         repairAction: "reconnect_then_sync_mail_account",
       },
       message:
-        "The provider update may have committed, but Nomi could not persist rotated credentials.",
+        "The provider update may have committed, but nohmi could not persist rotated credentials.",
       requestId: "mail-request-123",
       status: 502,
     };
@@ -2970,7 +2970,7 @@ describe("ilo MCP server", () => {
           remoteEventId: "remote-event-1",
         },
         message:
-          "The provider event changed, but Nomi could not finish its local Calendar projection.",
+          "The provider event changed, but nohmi could not finish its local Calendar projection.",
         requestId: "calendar-request-123",
         status: 502,
       }),
@@ -3014,7 +3014,7 @@ describe("ilo MCP server", () => {
         remoteEventId: "remote-event-1",
       },
       message:
-        "The provider event changed, but Nomi could not finish its local Calendar projection.",
+        "The provider event changed, but nohmi could not finish its local Calendar projection.",
       requestId: "calendar-request-123",
       status: 502,
     };

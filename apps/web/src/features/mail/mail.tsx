@@ -1,17 +1,18 @@
-import type { CalendarAccount } from "@personal-os/api-client";
-import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
+import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
-  ChevronDownIcon,
   ClockIcon,
+  EditIcon,
   EyeIcon,
   EyeOffIcon,
+  FileTextIcon,
   ForwardIcon,
   InboxIcon,
+  ListChecksIcon,
   MailIcon,
   MoreHorizontalIcon,
   ReplyIcon,
@@ -22,13 +23,9 @@ import {
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
+import { Avatar, AvatarFallback } from "../../components/ui/avatar.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "../../components/ui/collapsible.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,12 +41,9 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../../components/ui/empty.js";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "../../components/ui/input-group.js";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../components/ui/hover-card.js";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -57,9 +51,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
 } from "../../components/ui/sidebar.js";
 import {
   WorkspaceSecondaryAppBar,
@@ -70,9 +61,7 @@ import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
-import { ThreadStewardship } from "./thread-stewardship.js";
 
-type MailboxSection = "categories" | "labels" | "more" | "primary";
 export const mailListScopes = ["all", "unread", "starred", "snoozed", "sent", "drafts"] as const;
 export type MailListScope = (typeof mailListScopes)[number];
 
@@ -103,86 +92,34 @@ export function mailListScopeQuery(scope: MailListScope) {
   return {};
 }
 
-const googleMailboxNames: Record<string, string> = {
-  ALL: "All mail",
-  CATEGORY_FORUMS: "Forums",
-  CATEGORY_PERSONAL: "Primary",
-  CATEGORY_PROMOTIONS: "Promotions",
-  CATEGORY_SOCIAL: "Social",
-  CATEGORY_UPDATES: "Updates",
-  CHAT: "Chats",
-  DRAFT: "Drafts",
-  IMPORTANT: "Important",
-  INBOX: "Inbox",
-  SENT: "Sent",
-  SPAM: "Spam",
-  STARRED: "Starred",
-  TRASH: "Trash",
-  UNREAD: "Unread",
-  YELLOW_STAR: "Yellow star",
-};
-
-function mailboxToken(mailbox: Mailbox) {
-  return mailbox.name.trim().replaceAll(" ", "_").toUpperCase();
-}
-function mailboxDisplayName(mailbox: Mailbox) {
-  const token = mailboxToken(mailbox);
-  if (mailbox.provider === "google" && googleMailboxNames[token]) return googleMailboxNames[token];
-  const roles: Partial<Record<Mailbox["role"], string>> = {
-    archive: "Archive",
-    drafts: "Drafts",
-    inbox: "Inbox",
-    sent: "Sent",
-    spam: "Spam",
-    trash: "Trash",
-  };
-  return (
-    roles[mailbox.role] ??
-    mailbox.name.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
-  );
-}
-function mailboxSection(mailbox: Mailbox): MailboxSection {
-  const token = mailboxToken(mailbox);
-  if (token.startsWith("CATEGORY_")) return "categories";
-  if (["spam", "trash"].includes(mailbox.role) || ["CHAT", "UNREAD", "YELLOW_STAR"].includes(token))
-    return "more";
-  if (
-    ["inbox", "sent", "drafts", "archive"].includes(mailbox.role) ||
-    ["IMPORTANT", "STARRED"].includes(token)
-  )
-    return "primary";
-  return "labels";
-}
-function sortMailboxes(items: Mailbox[]) {
-  const order = [
-    "INBOX",
-    "CATEGORY_PERSONAL",
-    "STARRED",
-    "IMPORTANT",
-    "SENT",
-    "DRAFT",
-    "ALL",
-    "CATEGORY_SOCIAL",
-    "CATEGORY_PROMOTIONS",
-    "CATEGORY_UPDATES",
-    "CATEGORY_FORUMS",
-    "SPAM",
-    "TRASH",
-  ];
-  return items.toSorted(
-    (left, right) =>
-      (order.indexOf(mailboxToken(left)) + 1 || order.length + 1) -
-        (order.indexOf(mailboxToken(right)) + 1 || order.length + 1) ||
-      mailboxDisplayName(left).localeCompare(mailboxDisplayName(right)),
-  );
-}
-function inboxUnreadCount(items: Mailbox[]) {
+function inboxUnreadCount(items: Array<{ role: string; unreadCount: number }>) {
   return items
     .filter((mailbox) => mailbox.role === "inbox")
     .reduce((sum, mailbox) => sum + mailbox.unreadCount, 0);
 }
 export const relative = formatRelativeTime;
 const mailReaderLayoutStorageKey = "ilo.mail.reader-layout.v1";
+const mailListDensityStorageKey = "ilo.mail.list-density.v1";
+export const mailListDensities = ["compact", "comfortable", "expanded"] as const;
+export type MailListDensity = (typeof mailListDensities)[number];
+
+export function storedMailListDensity(): MailListDensity {
+  try {
+    if (typeof window === "undefined") return "comfortable";
+    const value = window.localStorage.getItem(mailListDensityStorageKey);
+    return mailListDensities.find((density) => density === value) ?? "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
+
+export function persistMailListDensity(density: MailListDensity) {
+  try {
+    window.localStorage.setItem(mailListDensityStorageKey, density);
+  } catch {
+    // A browser storage restriction must not prevent changing list density.
+  }
+}
 
 export function storedMailReaderLayout() {
   try {
@@ -278,11 +215,6 @@ export function MailTopbarSearch({
           type="search"
           value={draft}
         />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton aria-label="Search messages" size="icon-xs" type="submit">
-            <SearchIcon aria-hidden="true" />
-          </InputGroupButton>
-        </InputGroupAddon>
       </InputGroup>
     </form>
   );
@@ -297,7 +229,7 @@ function mailDate(value: string, timeZone: string) {
 }
 
 export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const accounts = useQuery({
     queryFn: api.listConnectors,
     queryKey: ["connectors"],
@@ -308,39 +240,13 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
     queryKey: ["mailboxes"],
     refetchInterval: 60_000,
   });
-  const accountId = params.get("account");
-  const mailboxId = params.get("mailbox");
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
   );
-  const selectedMailbox = mailboxes.data?.find((mailbox) => mailbox.id === mailboxId);
-  const activeAccountId = selectedMailbox?.accountId ?? accountId;
   const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
-  const [expanded, setExpanded] = useState<string[]>([]);
-  const [accountsExpanded, setAccountsExpanded] = useState(Boolean(activeAccountId));
   const listScope = mailListScopeFromSearch(params);
-  useEffect(() => {
-    if (!activeAccountId) return;
-    setAccountsExpanded(true);
-    setExpanded((current) =>
-      current.includes(activeAccountId) ? current : [...current, activeAccountId],
-    );
-  }, [activeAccountId]);
-  const select = (updates: Record<string, string | null>) => {
-    setParams((current) => {
-      const next = new URLSearchParams(current);
-      for (const [key, value] of Object.entries({
-        account: null,
-        mailbox: null,
-        thread: null,
-        ...updates,
-      }))
-        value ? next.set(key, value) : next.delete(key);
-      return next;
-    });
-    onNavigate();
-  };
+  const selectedAccountIds = params.getAll("account");
   return (
     <SidebarGroup className="context-sidebar__mailboxes">
       <SidebarGroupLabel>Mailboxes</SidebarGroupLabel>
@@ -355,47 +261,11 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
           ) : (
             <SidebarMenu className="mail-sidebar__menu">
               <UnifiedMailDestinations
-                activeAccountId={activeAccountId}
                 listScope={listScope}
                 onNavigate={onNavigate}
+                selectedAccountIds={selectedAccountIds}
                 unreadCount={totalInboxUnread}
               />
-              <Collapsible asChild onOpenChange={setAccountsExpanded} open={accountsExpanded}>
-                <SidebarMenuItem className="mail-sidebar__accounts">
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton aria-label="Accounts">
-                      <MailIcon aria-hidden="true" />
-                      <span>Accounts</span>
-                      <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenu>
-                      {enabled.map((account) => (
-                        <MailboxAccount
-                          account={account}
-                          activeAccountId={activeAccountId}
-                          activeMailboxId={mailboxId}
-                          expanded={expanded.includes(account.id)}
-                          key={account.id}
-                          mailboxes={mailboxes.data.filter(
-                            (mailbox) => mailbox.accountId === account.id,
-                          )}
-                          selectAccount={() => select({ account: account.id })}
-                          selectMailbox={(id) => select({ mailbox: id })}
-                          toggle={() =>
-                            setExpanded((current) =>
-                              current.includes(account.id)
-                                ? current.filter((id) => id !== account.id)
-                                : [...current, account.id],
-                            )
-                          }
-                        />
-                      ))}
-                    </SidebarMenu>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
             </SidebarMenu>
           )}
         </nav>
@@ -419,11 +289,12 @@ export function MailPage({ user }: { user: User }) {
     refetchInterval: 60_000,
   });
   const mailboxId = params.get("mailbox");
-  const accountId = params.get("account");
+  const accountIds = params.getAll("account");
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
   const listScope = mailListScopeFromSearch(params);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
+  const [density, setDensity] = useState<MailListDensity>(storedMailListDensity);
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -439,12 +310,12 @@ export function MailPage({ user }: { user: User }) {
     enabled: listScope !== "drafts",
     queryFn: () =>
       api.listMailThreads({
-        ...(accountId && !mailboxId ? { accountIds: [accountId] } : {}),
+        ...(accountIds.length && !mailboxId ? { accountIds } : {}),
         ...(mailboxId ? { mailboxId } : {}),
         ...(search ? { query: search } : {}),
         ...mailListScopeQuery(listScope),
       }),
-    queryKey: ["mail-threads", accountId, mailboxId, search, listScope],
+    queryKey: ["mail-threads", accountIds, mailboxId, search, listScope],
     refetchInterval: 60_000,
   });
   const setup = useQuery({
@@ -525,155 +396,156 @@ export function MailPage({ user }: { user: User }) {
     );
   if (listScope !== "drafts" && threads.isPending) return <WorkspaceSkeleton kind="mail" />;
   return (
-    <div className="mail-page">
-      <ResizablePanelGroup
-        className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
-        defaultLayout={readerLayout}
-        id="mail-reader-layout"
-        onLayoutChanged={(layout, metadata) => {
-          if (metadata.isUserInteraction) persistMailReaderLayout(layout);
+    <>
+      <MailSecondaryNavigation
+        archive={() => {
+          if (!selected) return;
+          updateThread.mutate({
+            id: selected.id,
+            mailboxIds: selected.mailboxIds.filter(
+              (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
+            ),
+          });
         }}
-        orientation="horizontal"
-      >
-        <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
-          <section aria-label="Conversations" className="mail-thread-list">
-            <ConnectionRecoveryAlert accounts={enabled} />
-            <div className="mail-thread-list__toolbar">
-              <MailTopbarSearch
-                onSearch={(query) => update({ q: query || null, thread: null })}
-                search={search}
-              />
-              <div className="mail-thread-list__summary">
-                <span>
-                  {listScope === "drafts"
-                    ? `${drafts.data?.length ?? 0} drafts`
-                    : `${threads.data?.length ?? 0} conversations`}
-                </span>
-                {listScope === "all" ? null : <Badge>{listScope}</Badge>}
-              </div>
-            </div>
-            {listScope === "drafts" ? (
-              drafts.isPending ? (
-                <PageLoading />
-              ) : drafts.isError ? (
-                <InlineError error={drafts.error} />
+        back={() => update({ thread: null })}
+        countLabel={
+          listScope === "drafts"
+            ? `${drafts.data?.length ?? 0} drafts`
+            : `${threads.data?.length ?? 0} conversations`
+        }
+        density={density}
+        forward={() => {
+          if (!selected) return;
+          setComposeIntent({
+            accountId: selected.accountId,
+            body: `\n\n---------- Forwarded message ----------\nFrom: ${selected.from.name || selected.from.address} <${selected.from.address}>\nSubject: ${selected.subject}\n\n${selected.bodyText}`,
+            subject: selected.subject.startsWith("Fwd:")
+              ? selected.subject
+              : `Fwd: ${selected.subject}`,
+          });
+        }}
+        listScope={listScope}
+        pending={updateThread.isPending}
+        reply={() => {
+          if (!selected) return;
+          setComposeIntent({
+            accountId: selected.accountId,
+            subject: selected.subject.startsWith("Re:")
+              ? selected.subject
+              : `Re: ${selected.subject}`,
+            threadId: selected.id,
+            to: selected.from.address,
+          });
+        }}
+        selected={selected}
+        setDensity={(nextDensity) => {
+          setDensity(nextDensity);
+          persistMailListDensity(nextDensity);
+        }}
+        snooze={() => {
+          if (selected) snoozeThread.mutate(selected.id);
+        }}
+        toggleStar={() => {
+          if (selected) updateThread.mutate({ id: selected.id, starred: !selected.starred });
+        }}
+        toggleUnread={() => {
+          if (selected) updateThread.mutate({ id: selected.id, unread: !selected.unread });
+        }}
+        trash={() => {
+          if (!selected) return;
+          const trash = mailboxes.data.find(
+            (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
+          );
+          if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
+        }}
+      />
+      <div className="mail-page">
+        <ResizablePanelGroup
+          className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
+          defaultLayout={readerLayout}
+          id="mail-reader-layout"
+          onLayoutChanged={(layout, metadata) => {
+            if (metadata.isUserInteraction) persistMailReaderLayout(layout);
+          }}
+          orientation="horizontal"
+        >
+          <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
+            <section aria-label="Conversations" className="mail-thread-list">
+              <ConnectionRecoveryAlert accounts={enabled} />
+              {listScope === "drafts" ? (
+                drafts.isPending ? (
+                  <PageLoading />
+                ) : drafts.isError ? (
+                  <InlineError error={drafts.error} />
+                ) : (
+                  <MailDraftList
+                    drafts={(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent")}
+                    openDraft={setComposeIntent}
+                    reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
+                    remove={(id) => deleteDraft.mutate(id)}
+                  />
+                )
+              ) : threads.isError ? (
+                <InlineError error={threads.error} />
+              ) : threads.data?.length === 0 ? (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <MailIcon aria-hidden="true" />
+                    </EmptyMedia>
+                    <EmptyTitle>Nothing here</EmptyTitle>
+                    <EmptyDescription>Try another mailbox or a broader search.</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               ) : (
-                <MailDraftList
-                  drafts={(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent")}
-                  openDraft={setComposeIntent}
-                  reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
-                  remove={(id) => deleteDraft.mutate(id)}
-                />
-              )
-            ) : threads.isError ? (
-              <InlineError error={threads.error} />
-            ) : threads.data?.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <MailIcon aria-hidden="true" />
-                  </EmptyMedia>
-                  <EmptyTitle>Nothing here</EmptyTitle>
-                  <EmptyDescription>Try another mailbox or a broader search.</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : (
-              threads.data?.map((thread) => (
-                <ThreadRow
-                  active={selected?.id === thread.id}
-                  key={thread.id}
-                  select={() => update({ thread: thread.id })}
-                  thread={thread}
-                />
-              ))
-            )}
-          </section>
-        </ResizablePanel>
-        <ResizableHandle aria-label="Resize conversation list" withHandle />
-        <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
-          <section aria-label="Message reader" className="mail-reader">
-            {selected ? (
-              <>
-                <MailSecondaryNavigation
-                  archive={() =>
-                    updateThread.mutate({
-                      id: selected.id,
-                      mailboxIds: selected.mailboxIds.filter(
-                        (id) =>
-                          mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
-                      ),
-                    })
-                  }
-                  back={() => update({ thread: null })}
-                  pending={updateThread.isPending}
-                  forward={() =>
-                    setComposeIntent({
-                      accountId: selected.accountId,
-                      body: `\n\n---------- Forwarded message ----------\nFrom: ${selected.from.name || selected.from.address} <${selected.from.address}>\nSubject: ${selected.subject}\n\n${selected.bodyText}`,
-                      subject: selected.subject.startsWith("Fwd:")
-                        ? selected.subject
-                        : `Fwd: ${selected.subject}`,
-                    })
-                  }
-                  reply={() =>
-                    setComposeIntent({
-                      accountId: selected.accountId,
-                      subject: selected.subject.startsWith("Re:")
-                        ? selected.subject
-                        : `Re: ${selected.subject}`,
-                      threadId: selected.id,
-                      to: selected.from.address,
-                    })
-                  }
-                  selected={selected}
-                  snooze={() => snoozeThread.mutate(selected.id)}
-                  toggleStar={() =>
-                    updateThread.mutate({ id: selected.id, starred: !selected.starred })
-                  }
-                  toggleUnread={() =>
-                    updateThread.mutate({ id: selected.id, unread: !selected.unread })
-                  }
-                  trash={() => {
-                    const trash = mailboxes.data.find(
-                      (mailbox) =>
-                        mailbox.accountId === selected.accountId && mailbox.role === "trash",
-                    );
-                    if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
-                  }}
-                />
+                threads.data?.map((thread) => (
+                  <ThreadRow
+                    active={selected?.id === thread.id}
+                    density={density}
+                    key={thread.id}
+                    select={() => update({ thread: thread.id })}
+                    thread={thread}
+                  />
+                ))
+              )}
+            </section>
+          </ResizablePanel>
+          <ResizableHandle aria-label="Resize conversation list" withHandle />
+          <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
+            <section aria-label="Message reader" className="mail-reader">
+              {selected ? (
                 <Reader
                   messages={messages.data ?? []}
                   thread={selected}
                   timeZone={user.planningTimezone}
                 />
-                <ThreadStewardship threadId={selected.id} />
-              </>
-            ) : selectedId && loaded.isPending ? (
-              <PageLoading />
-            ) : (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <MailIcon aria-hidden="true" />
-                  </EmptyMedia>
-                  <EmptyTitle>Select a conversation</EmptyTitle>
-                  <EmptyDescription>
-                    Open a conversation to read every synced message and manage it.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            )}
-          </section>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-      {setup.data ? (
-        <FloatingMailComposer
-          accounts={setup.data.accounts}
-          intent={composeIntent}
-          onIntentHandled={() => setComposeIntent(null)}
-        />
-      ) : null}
-    </div>
+              ) : selectedId && loaded.isPending ? (
+                <PageLoading />
+              ) : (
+                <Empty className="mail-reader__empty">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <MailIcon aria-hidden="true" />
+                    </EmptyMedia>
+                    <EmptyTitle>Select a conversation</EmptyTitle>
+                    <EmptyDescription>
+                      Open a conversation to read every synced message and manage it.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </section>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+        {setup.data ? (
+          <FloatingMailComposer
+            accounts={setup.data.accounts}
+            intent={composeIntent}
+            onIntentHandled={() => setComposeIntent(null)}
+          />
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -733,10 +605,14 @@ function MailDraftList({
 function MailSecondaryNavigation({
   archive,
   back,
+  countLabel,
+  density,
   pending,
   forward,
+  listScope,
   reply,
   selected,
+  setDensity,
   snooze,
   toggleStar,
   toggleUnread,
@@ -744,114 +620,185 @@ function MailSecondaryNavigation({
 }: {
   archive: () => void;
   back: () => void;
+  countLabel: string;
+  density: MailListDensity;
   pending: boolean;
   forward: () => void;
+  listScope: MailListScope;
   reply: () => void;
-  selected: MailThread;
+  selected: MailThread | undefined;
+  setDensity: (density: MailListDensity) => void;
   snooze: () => void;
   toggleStar: () => void;
   toggleUnread: () => void;
   trash: () => void;
 }) {
+  const [densityOpen, setDensityOpen] = useState(false);
+
   return (
-    <WorkspaceSecondaryAppBar
-      aria-label="Conversation actions"
-      className="mail-secondary-nav"
-      placement="inline"
-    >
+    <WorkspaceSecondaryAppBar aria-label="Mail controls" className="mail-secondary-nav">
       <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
-        <Button aria-label="Back to inbox" onClick={back} type="button" variant="ghost">
-          <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
-          <span>Inbox</span>
-        </Button>
+        <span>{countLabel}</span>
+        {listScope === "all" ? null : <Badge>{listScope}</Badge>}
       </WorkspaceSecondaryAppBarLeading>
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
-        <Button aria-label="Reply" onClick={reply} variant="ghost">
-          <ReplyIcon aria-hidden="true" data-icon="inline-start" />
-          <span>Reply</span>
-        </Button>
-        <Button aria-label="Forward" onClick={forward} variant="ghost">
-          <ForwardIcon aria-hidden="true" data-icon="inline-start" />
-          <span>Forward</span>
-        </Button>
-        <Button
-          aria-label="Archive conversation"
-          disabled={pending}
-          onClick={archive}
-          variant="ghost"
-        >
-          <ArchiveIcon aria-hidden="true" data-icon="inline-start" />
-          <span>Archive</span>
-        </Button>
-        <Button
-          aria-label="Snooze conversation until tomorrow"
-          className="mail-secondary-nav__compact-action"
-          onClick={snooze}
-          variant="ghost"
-        >
-          <ClockIcon aria-hidden="true" />
-        </Button>
-        <Button
-          aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
-          className="mail-secondary-nav__compact-action"
-          disabled={pending}
-          onClick={toggleStar}
-          variant="ghost"
-        >
-          <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
-        </Button>
-        <Button
-          aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
-          className="mail-secondary-nav__compact-action"
-          disabled={pending}
-          onClick={toggleUnread}
-          variant="ghost"
-        >
-          {selected.unread ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button aria-label="More conversation actions" disabled={pending} variant="ghost">
-              <MoreHorizontalIcon aria-hidden="true" />
+        <Popover onOpenChange={setDensityOpen} open={densityOpen}>
+          <PopoverTrigger asChild>
+            <Button aria-label="Message list layout" variant="ghost">
+              <ListChecksIcon aria-hidden="true" data-icon="inline-start" />
+              <span>{density.charAt(0).toUpperCase() + density.slice(1)}</span>
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={snooze}>
-              <ClockIcon aria-hidden="true" />
-              Snooze until tomorrow
-            </DropdownMenuItem>
-            <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={toggleStar}>
-              <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
-              {selected.starred ? "Unstar" : "Star"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="mail-secondary-nav__overflow-action"
-              onSelect={toggleUnread}
-            >
-              {selected.unread ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
-              {selected.unread ? "Mark read" : "Mark unread"}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="mail-secondary-nav__overflow-separator" />
-            <DropdownMenuItem onSelect={trash} variant="destructive">
-              <TrashIcon aria-hidden="true" />
-              Delete conversation
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="mail-density-popover">
+            <fieldset>
+              <legend>Message list layout</legend>
+              {mailListDensities.map((option) => (
+                <Button
+                  aria-pressed={density === option}
+                  key={option}
+                  onClick={() => {
+                    setDensity(option);
+                    setDensityOpen(false);
+                  }}
+                  variant="ghost"
+                >
+                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                </Button>
+              ))}
+            </fieldset>
+          </PopoverContent>
+        </Popover>
+        <div
+          aria-hidden={selected ? undefined : "true"}
+          className="mail-secondary-nav__conversation-actions"
+          data-visible={selected ? "true" : "false"}
+        >
+          <Button
+            aria-label="Back to inbox"
+            disabled={!selected}
+            onClick={back}
+            tabIndex={selected ? undefined : -1}
+            type="button"
+            variant="ghost"
+          >
+            <ArrowLeftIcon aria-hidden="true" />
+          </Button>
+          <Button
+            aria-label="Reply"
+            disabled={!selected}
+            onClick={reply}
+            tabIndex={selected ? undefined : -1}
+            variant="ghost"
+          >
+            <ReplyIcon aria-hidden="true" data-icon="inline-start" />
+            <span>Reply</span>
+          </Button>
+          <Button
+            aria-label="Forward"
+            disabled={!selected}
+            onClick={forward}
+            tabIndex={selected ? undefined : -1}
+            variant="ghost"
+          >
+            <ForwardIcon aria-hidden="true" data-icon="inline-start" />
+            <span>Forward</span>
+          </Button>
+          <Button
+            aria-label="Archive conversation"
+            disabled={!selected || pending}
+            onClick={archive}
+            tabIndex={selected ? undefined : -1}
+            variant="ghost"
+          >
+            <ArchiveIcon aria-hidden="true" data-icon="inline-start" />
+            <span>Archive</span>
+          </Button>
+          <Button
+            aria-label="Snooze conversation until tomorrow"
+            className="mail-secondary-nav__compact-action"
+            disabled={!selected}
+            onClick={snooze}
+            tabIndex={selected ? undefined : -1}
+            variant="ghost"
+          >
+            <ClockIcon aria-hidden="true" />
+          </Button>
+          <Button
+            aria-label={selected?.starred ? "Unstar conversation" : "Star conversation"}
+            className="mail-secondary-nav__compact-action"
+            disabled={!selected || pending}
+            onClick={toggleStar}
+            tabIndex={selected ? undefined : -1}
+            variant="ghost"
+          >
+            <StarIcon aria-hidden="true" weight={selected?.starred ? "Filled" : "Outline"} />
+          </Button>
+          <Button
+            aria-label={selected?.unread ? "Mark conversation read" : "Mark conversation unread"}
+            className="mail-secondary-nav__compact-action"
+            disabled={!selected || pending}
+            onClick={toggleUnread}
+            tabIndex={selected ? undefined : -1}
+            variant="ghost"
+          >
+            {selected?.unread ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label="More conversation actions"
+                disabled={!selected || pending}
+                tabIndex={selected ? undefined : -1}
+                variant="ghost"
+              >
+                <MoreHorizontalIcon aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={snooze}>
+                <ClockIcon aria-hidden="true" />
+                Snooze until tomorrow
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="mail-secondary-nav__overflow-action"
+                onSelect={toggleStar}
+              >
+                <StarIcon aria-hidden="true" weight={selected?.starred ? "Filled" : "Outline"} />
+                {selected?.starred ? "Unstar" : "Star"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="mail-secondary-nav__overflow-action"
+                onSelect={toggleUnread}
+              >
+                {selected?.unread ? (
+                  <EyeIcon aria-hidden="true" />
+                ) : (
+                  <EyeOffIcon aria-hidden="true" />
+                )}
+                {selected?.unread ? "Mark read" : "Mark unread"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="mail-secondary-nav__overflow-separator" />
+              <DropdownMenuItem onSelect={trash} variant="destructive">
+                <TrashIcon aria-hidden="true" />
+                Delete conversation
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </WorkspaceSecondaryAppBarActions>
     </WorkspaceSecondaryAppBar>
   );
 }
 
 function UnifiedMailDestinations({
-  activeAccountId,
   listScope,
   onNavigate,
+  selectedAccountIds,
   unreadCount,
 }: {
-  activeAccountId: string | null | undefined;
   listScope: MailListScope;
   onNavigate: () => void;
+  selectedAccountIds: string[];
   unreadCount: number;
 }) {
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
@@ -859,8 +806,8 @@ function UnifiedMailDestinations({
     { icon: EyeIcon, label: "Unread", value: "unread" },
     { icon: StarIcon, label: "Starred", value: "starred" },
     { icon: ClockIcon, label: "Snoozed", value: "snoozed" },
-    { icon: MailIcon, label: "Sent", value: "sent" },
-    { icon: MailIcon, label: "Drafts", value: "drafts" },
+    { icon: ForwardIcon, label: "Sent", value: "sent" },
+    { icon: EditIcon, label: "Drafts", value: "drafts" },
   ];
 
   return (
@@ -870,12 +817,17 @@ function UnifiedMailDestinations({
         const params = mailListScopeParams(value);
         if (params.unread) query.set("unread", params.unread);
         if (params.view) query.set("view", params.view);
+        for (const accountId of selectedAccountIds) query.append("account", accountId);
         const suffix = query.size ? `?${query.toString()}` : "";
         return (
           <SidebarMenuItem key={value}>
-            <SidebarMenuButton asChild isActive={!activeAccountId && listScope === value}>
-              <Link onClick={onNavigate} to={`/mail${suffix}`}>
-                <Icon aria-hidden="true" />
+            <SidebarMenuButton asChild isActive={listScope === value} tooltip={label}>
+              <Link
+                aria-label={value === "all" && unreadCount > 0 ? `${label} ${unreadCount}` : label}
+                onClick={onNavigate}
+                to={`/mail${suffix}`}
+              >
+                <Icon aria-hidden="true" weight={listScope === value ? "Filled" : "Outline"} />
                 <span>{label}</span>
                 {value === "all" && unreadCount > 0 ? <b>{unreadCount}</b> : null}
               </Link>
@@ -886,138 +838,15 @@ function UnifiedMailDestinations({
     </>
   );
 }
-
 /* v8 ignore stop */
-function MailboxAccount({
-  account,
-  activeAccountId,
-  activeMailboxId,
-  expanded,
-  mailboxes,
-  selectAccount,
-  selectMailbox,
-  toggle,
-}: {
-  account: CalendarAccount;
-  activeAccountId: string | null | undefined;
-  activeMailboxId: string | null;
-  expanded: boolean;
-  mailboxes: Mailbox[];
-  selectAccount: () => void;
-  selectMailbox: (id: string) => void;
-  toggle: () => void;
-}) {
-  const grouped = Map.groupBy(sortMailboxes(mailboxes), mailboxSection);
-  const label = account.label || account.email || "Connected account";
-  const panelId = `mailbox-account-${account.id}`;
-  const unreadCount = inboxUnreadCount(mailboxes);
-  const links = (section: MailboxSection) =>
-    (grouped.get(section) ?? []).map((mailbox) => (
-      <SidebarMenuSubItem key={mailbox.id}>
-        <SidebarMenuSubButton asChild isActive={mailbox.id === activeMailboxId}>
-          <button
-            aria-pressed={mailbox.id === activeMailboxId}
-            className="mail-sidebar__mailbox-link"
-            onClick={() => selectMailbox(mailbox.id)}
-            type="button"
-          >
-            <span>{mailboxDisplayName(mailbox)}</span>
-            {mailbox.unreadCount > 0 ? <b>{mailbox.unreadCount}</b> : null}
-          </button>
-        </SidebarMenuSubButton>
-      </SidebarMenuSubItem>
-    ));
-  return (
-    <Collapsible asChild onOpenChange={toggle} open={expanded}>
-      <SidebarMenuItem className="mail-sidebar__account">
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton
-            aria-controls={panelId}
-            aria-label={`Toggle ${label} ${account.provider === "google" ? "Google Mail" : "iCloud Mail"} mailboxes`}
-            className="mail-sidebar__account-trigger"
-            size="lg"
-          >
-            <span className={`provider-icon provider-icon--${account.provider}`}>
-              {account.provider === "google" ? "G" : "i"}
-            </span>
-            <span className="mail-sidebar__account-copy">
-              <span className="mail-sidebar__account-name">{label}</span>
-              <span className="mail-sidebar__account-email">
-                {account.provider === "google" ? "Google Mail" : "iCloud Mail"}
-              </span>
-            </span>
-            {unreadCount > 0 ? (
-              <span className="mail-sidebar__account-count">{unreadCount}</span>
-            ) : null}
-            <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
-        <CollapsibleContent id={panelId}>
-          <SidebarMenuSub className="mail-sidebar__account-body">
-            <SidebarMenuSubItem>
-              <SidebarMenuSubButton
-                asChild
-                isActive={activeAccountId === account.id && !activeMailboxId}
-              >
-                <button
-                  aria-pressed={activeAccountId === account.id && !activeMailboxId}
-                  className="mail-sidebar__mailbox-link"
-                  onClick={selectAccount}
-                  type="button"
-                >
-                  <span>All mail</span>
-                </button>
-              </SidebarMenuSubButton>
-            </SidebarMenuSubItem>
-            {links("primary")}
-            {(grouped.get("categories")?.length ?? 0) > 0 ? (
-              <>
-                <SidebarMenuSubItem aria-hidden="true" className="mail-sidebar__subgroup-label">
-                  Categories
-                </SidebarMenuSubItem>
-                {links("categories")}
-              </>
-            ) : null}
-            {(["labels", "more"] as const).map((section) =>
-              (grouped.get(section)?.length ?? 0) > 0 ? (
-                <Collapsible
-                  asChild
-                  defaultOpen={
-                    grouped.get(section)?.some((mailbox) => mailbox.id === activeMailboxId) ?? false
-                  }
-                  key={section}
-                >
-                  <SidebarMenuSubItem className="mail-sidebar__subgroup">
-                    <CollapsibleTrigger asChild>
-                      <SidebarMenuSubButton asChild>
-                        <button className="mail-sidebar__subgroup-trigger" type="button">
-                          <ChevronDownIcon aria-hidden="true" />
-                          <span>{section === "labels" ? "Labels" : "More"}</span>
-                          <small>{grouped.get(section)?.length}</small>
-                        </button>
-                      </SidebarMenuSubButton>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <SidebarMenuSub className="mail-sidebar__nested-list">
-                        {links(section)}
-                      </SidebarMenuSub>
-                    </CollapsibleContent>
-                  </SidebarMenuSubItem>
-                </Collapsible>
-              ) : null,
-            )}
-          </SidebarMenuSub>
-        </CollapsibleContent>
-      </SidebarMenuItem>
-    </Collapsible>
-  );
-}
 function ThreadRow({
   active,
+  density,
   select,
   thread,
 }: {
   active: boolean;
+  density: MailListDensity;
   select: () => void;
   thread: MailThread;
 }) {
@@ -1026,11 +855,17 @@ function ThreadRow({
       aria-label={`${thread.from.name || thread.from.address || "Unknown sender"}: ${thread.subject}`}
       aria-current={active ? "true" : undefined}
       className={`mail-thread-row${active ? " is-active" : ""}${thread.unread ? " is-unread" : ""}`}
+      data-density={density}
       onClick={select}
       type="button"
     >
       <span className="mail-thread-row__sender">
-        {thread.from.name || thread.from.address || "Unknown sender"}
+        <Avatar className="mail-thread-row__avatar" size="sm">
+          <AvatarFallback>
+            {initials(thread.from.name || thread.from.address || "?")}
+          </AvatarFallback>
+        </Avatar>
+        <span>{thread.from.name || thread.from.address || "Unknown sender"}</span>
       </span>
       <time>{relative(thread.receivedAt)}</time>
       <strong>{thread.subject}</strong>
@@ -1053,6 +888,7 @@ function Reader({
   thread: MailThread;
   timeZone: string;
 }) {
+  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(() => new Set());
   const fallbackMessage: MailMessage = {
     attachments: [],
     bodyText: thread.bodyText,
@@ -1069,68 +905,127 @@ function Reader({
       : [fallbackMessage, ...messages]
     : [fallbackMessage];
 
+  function toggleMessage(messageId: string) {
+    setCollapsedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }
+
   return (
     <article className="mail-reader__article">
-      <header>
-        <p className="eyebrow">{thread.provider === "google" ? "Google Mail" : "iCloud Mail"}</p>
+      <header className="mail-reader__subject">
         <h2>{thread.subject}</h2>
-        <div className="mail-reader__address">
-          <span className="avatar">{initials(thread.from.name || thread.from.address || "?")}</span>
-          <div>
-            <strong>{thread.from.name || thread.from.address || "Unknown sender"}</strong>
-            <small>
-              {thread.from.address} · {mailDate(thread.receivedAt, timeZone)}
-            </small>
-          </div>
-        </div>
-        <details className="mail-reader__details">
-          <summary>Message details</summary>
-          <dl>
-            <div>
-              <dt>From</dt>
-              <dd>{thread.from.address || "Unknown sender"}</dd>
-            </div>
-            <div>
-              <dt>To</dt>
-              <dd>
-                {thread.to
-                  .map((recipient) => recipient.address)
-                  .filter(Boolean)
-                  .join(", ") || "You"}
-              </dd>
-            </div>
-            <div>
-              <dt>Received</dt>
-              <dd>{mailDate(thread.receivedAt, timeZone)}</dd>
-            </div>
-          </dl>
-        </details>
       </header>
-      {displayedMessages.map((message) => (
-        <section className="mail-reader__message" key={message.id}>
-          <div className="mail-reader__address">
-            <span className="avatar">
-              {initials(message.from.name || message.from.address || "?")}
-            </span>
-            <div>
-              <strong>{message.from.name || message.from.address || "Unknown sender"}</strong>
-              <small>
-                {message.from.address} · {mailDate(message.receivedAt, timeZone)}
-              </small>
-            </div>
-          </div>
-          <pre>{message.bodyText || "This message has no plain-text body."}</pre>
-          {message.attachments.length ? (
-            <ul aria-label="Attachments" className="mail-reader__attachments">
-              {message.attachments.map((attachment) => (
-                <li key={attachment.id}>
-                  {attachment.filename} · {attachment.contentType}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-      ))}
+      {displayedMessages.map((message) => {
+        const collapsed = collapsedMessageIds.has(message.id);
+        const senderName = message.from.name || message.from.address || "Unknown sender";
+        return (
+          <section className="mail-reader__message" data-collapsed={collapsed} key={message.id}>
+            <header className="mail-reader__message-header">
+              <button
+                aria-expanded={!collapsed}
+                aria-label={`${collapsed ? "Expand" : "Collapse"} message from ${senderName}`}
+                className="mail-reader__message-toggle"
+                onClick={() => toggleMessage(message.id)}
+                type="button"
+              />
+              <Avatar className="mail-reader__sender-avatar">
+                <AvatarFallback>
+                  {initials(message.from.name || message.from.address || "?")}
+                </AvatarFallback>
+              </Avatar>
+              <div className="mail-reader__message-meta">
+                <div className="mail-reader__sender-line">
+                  <strong>
+                    <MailContactHoverCard address={message.from} />
+                  </strong>
+                  <time dateTime={message.receivedAt}>
+                    {mailDate(message.receivedAt, timeZone)}
+                  </time>
+                </div>
+                <div className="mail-reader__recipients">
+                  <span>to</span>
+                  {message.to.length ? (
+                    message.to.map((recipient, index) => (
+                      <span key={`to-${recipient.address}-${recipient.name}`}>
+                        {index ? ", " : null}
+                        <MailContactHoverCard address={recipient} />
+                      </span>
+                    ))
+                  ) : (
+                    <span>undisclosed recipients</span>
+                  )}
+                  {message.cc.length ? <span className="mail-reader__cc">cc</span> : null}
+                  {message.cc.map((recipient, index) => (
+                    <span key={`cc-${recipient.address}-${recipient.name}`}>
+                      {index ? ", " : null}
+                      <MailContactHoverCard address={recipient} />
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </header>
+            {!collapsed ? (
+              <div className="mail-reader__message-content">
+                <pre>{message.bodyText || "This message has no plain-text body."}</pre>
+                {message.attachments.length ? (
+                  <ul aria-label="Attachments" className="mail-reader__attachments">
+                    {message.attachments.map((attachment) => (
+                      <li key={attachment.id}>
+                        <FileTextIcon aria-hidden="true" />
+                        <span>
+                          <strong>{attachment.filename || "Attachment"}</strong>
+                          <small>
+                            {attachment.contentType}
+                            {attachment.size ? ` · ${formatAttachmentSize(attachment.size)}` : ""}
+                          </small>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
     </article>
   );
+}
+
+function MailContactHoverCard({ address }: { address: MailAddress }) {
+  const label = address.name || address.address || "Unknown contact";
+  return (
+    <HoverCard>
+      <HoverCardTrigger asChild>
+        <button
+          aria-label={`Contact details for ${label}`}
+          className="mail-reader__contact-trigger"
+          type="button"
+        >
+          {label}
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent align="start">
+        <div className="mail-reader__contact-card">
+          <Avatar>
+            <AvatarFallback>{initials(label)}</AvatarFallback>
+          </Avatar>
+          <div>
+            <strong>{label}</strong>
+            <span>{address.address || "No email address available"}</span>
+          </div>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+function formatAttachmentSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

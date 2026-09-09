@@ -64,6 +64,11 @@ import {
 } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  AccountSelectionPopoverContent,
+  AccountSelectionTrigger,
+  reconnectAccountsLabel,
+} from "@/components/account-selection-trigger";
+import {
   EmailField,
   InviteCodeField,
   isValidEmailAddress,
@@ -74,6 +79,7 @@ import {
 import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
+import { ConnectionCard } from "@/components/connection-card";
 import { ErrorPage } from "@/components/error-page";
 import {
   EventCard,
@@ -86,6 +92,7 @@ import {
 } from "@/components/event-card";
 import {
   ActivityIcon,
+  AlertTriangleIcon,
   BankIcon,
   CalendarIcon,
   CalendarPlusIcon,
@@ -155,7 +162,6 @@ import {
   Avatar as ShadcnAvatar,
   AvatarBadge as ShadcnAvatarBadge,
   AvatarFallback as ShadcnAvatarFallback,
-  AvatarGroup as ShadcnAvatarGroup,
   AvatarImage as ShadcnAvatarImage,
 } from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
@@ -298,6 +304,7 @@ import { FinanceSettings } from "./features/finances/settings.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
+  MailTopbarSearch,
 } from "./features/mail/mail.js";
 import { MailStewardshipPage } from "./features/mail/stewardship-page.js";
 import {
@@ -324,6 +331,7 @@ import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
+import { notifyError, useErrorNotification } from "./lib/error-notification.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { cn } from "./lib/utils.js";
@@ -892,24 +900,29 @@ function PasswordResetScreen({ token }: { token: string }) {
 
 function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <main className="auth-shell">
-      <div className="auth-entry">
-        <header className="auth-header">
-          <div className="auth-header__brand">
-            <span aria-hidden="true" className="auth-header__symbol">
-              <NohmiBrandMark symbol />
-            </span>
-            <NohmiBrandMark />
-          </div>
-        </header>
-        <section className="auth-form-wrap">{children}</section>
-      </div>
-      <ShadcnCard aria-hidden="true" className="auth-brand-panel">
-        <ShadcnCardContent>
-          <BrandPattern />
-        </ShadcnCardContent>
-      </ShadcnCard>
-    </main>
+    <>
+      <main className="auth-shell">
+        <div className="auth-entry">
+          <header className="auth-header">
+            <div className="auth-header__brand">
+              <span aria-hidden="true" className="auth-header__symbol">
+                <NohmiBrandMark symbol />
+              </span>
+              <NohmiBrandMark />
+            </div>
+          </header>
+          <section className="auth-form-wrap">{children}</section>
+        </div>
+        <ShadcnCard aria-hidden="true" className="auth-brand-panel">
+          <ShadcnCardContent>
+            <BrandPattern />
+          </ShadcnCardContent>
+        </ShadcnCard>
+      </main>
+      {typeof window.matchMedia === "function" ? (
+        <Toaster position="bottom-right" theme="system" />
+      ) : null}
+    </>
   );
 }
 
@@ -936,12 +949,19 @@ function AuthActionShell({
 }
 
 const mailSidebarWidthStorageKey = "ilo.mail.sidebar-width.v1";
+const collapsedMailSidebarWidth = 48;
 const defaultMailSidebarWidth = 256;
 const minimumMailSidebarWidth = 208;
 const maximumMailSidebarWidth = 360;
 
-function clampMailSidebarWidth(width: number) {
+function clampExpandedMailSidebarWidth(width: number) {
   return Math.min(maximumMailSidebarWidth, Math.max(minimumMailSidebarWidth, width));
+}
+
+function normalizeMailSidebarWidth(width: number) {
+  return width <= collapsedMailSidebarWidth
+    ? collapsedMailSidebarWidth
+    : clampExpandedMailSidebarWidth(width);
 }
 
 function storedMailSidebarWidth() {
@@ -949,7 +969,7 @@ function storedMailSidebarWidth() {
     if (typeof window === "undefined") return defaultMailSidebarWidth;
     const stored = Number(window.localStorage.getItem(mailSidebarWidthStorageKey));
     return Number.isFinite(stored) && stored > 0
-      ? clampMailSidebarWidth(stored)
+      ? normalizeMailSidebarWidth(stored)
       : defaultMailSidebarWidth;
   } catch {
     return defaultMailSidebarWidth;
@@ -974,17 +994,21 @@ function MailNavigationResizeHandle({
   const resizeFromKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const next =
       event.key === "Home"
-        ? minimumMailSidebarWidth
+        ? collapsedMailSidebarWidth
         : event.key === "End"
           ? maximumMailSidebarWidth
           : event.key === "ArrowLeft"
-            ? width - 16
+            ? width <= minimumMailSidebarWidth
+              ? collapsedMailSidebarWidth
+              : width - 16
             : event.key === "ArrowRight"
-              ? width + 16
+              ? width === collapsedMailSidebarWidth
+                ? minimumMailSidebarWidth
+                : width + 16
               : null;
     if (next === null) return;
     event.preventDefault();
-    onResize(clampMailSidebarWidth(next), true);
+    onResize(next, true);
   };
 
   return (
@@ -992,28 +1016,44 @@ function MailNavigationResizeHandle({
       aria-label="Resize mail navigation"
       aria-orientation="vertical"
       aria-valuemax={maximumMailSidebarWidth}
-      aria-valuemin={minimumMailSidebarWidth}
+      aria-valuemin={collapsedMailSidebarWidth}
       aria-valuenow={width}
       className="mail-sidebar-resize-handle"
       onDoubleClick={() => onResize(defaultMailSidebarWidth, true)}
       onKeyDown={resizeFromKeyboard}
       onPointerDown={(event) => {
+        event.preventDefault();
+        const handle = event.currentTarget;
+        const pointerId = event.pointerId;
         const startX = event.clientX;
         const startWidth = width;
         let finalWidth = width;
+        let finished = false;
         const move = (moveEvent: PointerEvent) => {
-          finalWidth = clampMailSidebarWidth(startWidth + moveEvent.clientX - startX);
+          finalWidth = Math.min(
+            maximumMailSidebarWidth,
+            Math.max(collapsedMailSidebarWidth, startWidth + moveEvent.clientX - startX),
+          );
           onResize(finalWidth, false);
         };
         const finish = () => {
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", finish);
-          window.removeEventListener("pointercancel", finish);
+          if (finished) return;
+          finished = true;
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", finish);
+          handle.removeEventListener("pointercancel", finish);
+          handle.removeEventListener("lostpointercapture", finish);
+          window.removeEventListener("blur", finish);
+          if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
           onResize(finalWidth, true);
+          handle.blur();
         };
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", finish, { once: true });
-        window.addEventListener("pointercancel", finish, { once: true });
+        handle.setPointerCapture(pointerId);
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", finish, { once: true });
+        handle.addEventListener("pointercancel", finish, { once: true });
+        handle.addEventListener("lostpointercapture", finish, { once: true });
+        window.addEventListener("blur", finish, { once: true });
       }}
       tabIndex={0}
     />
@@ -1026,6 +1066,8 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
   const [mailSidebarWidth, setMailSidebarWidth] = useState(storedMailSidebarWidth);
+  const mailSidebarState =
+    mailSidebarWidth === collapsedMailSidebarWidth ? "collapsed" : "expanded";
   const location = useLocation();
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
@@ -1136,6 +1178,7 @@ function AuthenticatedApp({ user }: { user: User }) {
     <>
       <div
         className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        data-sidebar-state={sidebarMode === "mail" ? mailSidebarState : undefined}
         style={
           sidebarMode === "mail"
             ? ({ "--mail-sidebar-width": `${mailSidebarWidth}px` } as CSSProperties)
@@ -1156,7 +1199,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   : "Today Sidebar"
             }
             className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
-            data-state="expanded"
+            data-state={sidebarMode === "mail" ? mailSidebarState : "expanded"}
             id="app-sidebar"
           >
             <ShadcnSidebarHeader className="sidebar__header">
@@ -1196,8 +1239,9 @@ function AuthenticatedApp({ user }: { user: User }) {
         {!isMobileWorkspaceDock && sidebarMode === "mail" ? (
           <MailNavigationResizeHandle
             onResize={(width, persist) => {
-              setMailSidebarWidth(width);
-              if (persist) persistMailSidebarWidth(width);
+              const normalized = normalizeMailSidebarWidth(width);
+              setMailSidebarWidth(normalized);
+              if (persist) persistMailSidebarWidth(normalized);
             }}
             width={mailSidebarWidth}
           />
@@ -1538,6 +1582,10 @@ function WorkspaceAppBarForRoute({
         <span className="workspace-app-bar__title">Today</span>
       )}
     </div>
+  ) : workspace === "mail" ? (
+    <div className="mail-app-bar__identity-cluster">
+      <span className="workspace-app-bar__title">Mail</span>
+    </div>
   ) : (
     <span className="workspace-app-bar__title">
       {/* Account routes always supply a page title, so the workspace registry
@@ -1556,6 +1604,8 @@ function WorkspaceAppBarForRoute({
     <RemindersTopbarControls />
   ) : pathname === "/tasks" ? (
     <TasksTopbarControls />
+  ) : workspace === "mail" ? (
+    <MailAppBarControls />
   ) : null;
 
   return (
@@ -1586,7 +1636,7 @@ function WorkspaceAppBarForRoute({
               onCreateReminder={() => setEditor({ kind: "reminder" })}
             />
           ) : workspace === "calendar" ? null : workspace === "mail" ? (
-            <MailSyncButton />
+            <MailAccountsControl />
           ) : workspace === "finances" ? (
             <FinanceAddTransactionButton />
           ) : workspace === "account" ? null : (
@@ -3019,33 +3069,47 @@ function CalendarAccountsControl() {
   const records = calendars.data ?? [];
   const selectedCount = records.filter((calendar) => calendar.isSelected).length;
   const label = `${selectedCount} of ${records.length} calendars`;
+  const attentionCount = enabledAccounts.filter(
+    (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
+  ).length;
+  const needsAttention = attentionCount > 0;
+  const triggerLabel = `${label}${needsAttention ? ", attention required" : ""}`;
   return (
     <ShadcnPopover>
       <ShadcnPopoverTrigger asChild>
-        <ShadcnButton
-          aria-label={label}
+        <AccountSelectionTrigger
+          ariaLabel={triggerLabel}
           className="calendar-accounts-trigger"
-          size="sm"
-          variant="ghost"
-        >
-          <ShadcnAvatarGroup className="calendar-accounts-trigger__avatars">
-            {enabledAccounts.map((account) => (
-              <ShadcnAvatar key={account.id} size="sm">
-                {account.avatarUrl ? <ShadcnAvatarImage alt="" src={account.avatarUrl} /> : null}
-                <ShadcnAvatarFallback>
-                  {initials(account.label ?? account.email ?? account.provider)}
-                </ShadcnAvatarFallback>
-              </ShadcnAvatar>
-            ))}
-          </ShadcnAvatarGroup>
-          <span>{label}</span>
-        </ShadcnButton>
+          disabled={accounts.isPending || records.length === 0}
+          identities={enabledAccounts.map((account) => ({
+            avatarUrl: account.avatarUrl,
+            fallback: initials(account.label ?? account.email ?? account.provider),
+            id: account.id,
+          }))}
+          needsAttention={needsAttention}
+          selectedCount={selectedCount}
+          totalCount={records.length}
+        />
       </ShadcnPopoverTrigger>
-      <ShadcnPopoverContent align="end" className="calendar-accounts-popover">
-        <ShadcnPopoverHeader>
-          <ShadcnPopoverTitle>Calendars</ShadcnPopoverTitle>
-          <ShadcnPopoverDescription>{label}</ShadcnPopoverDescription>
-        </ShadcnPopoverHeader>
+      <AccountSelectionPopoverContent
+        className="calendar-accounts-popover"
+        description={label}
+        primaryAction={
+          needsAttention ? (
+            <ShadcnButton asChild className="w-full">
+              <Link to="/settings?section=connections">
+                {reconnectAccountsLabel(attentionCount)}
+              </Link>
+            </ShadcnButton>
+          ) : null
+        }
+        secondaryAction={
+          <ShadcnButton asChild className="w-full justify-start" size="sm" variant="ghost">
+            <Link to="/calendar/review">Schedule health</Link>
+          </ShadcnButton>
+        }
+        title="Calendars"
+      >
         {records.length === 0 ? (
           <p className="calendar-accounts-popover__empty">No calendars are available.</p>
         ) : (
@@ -3057,10 +3121,7 @@ function CalendarAccountsControl() {
             )}
           </ShadcnFieldGroup>
         )}
-        <ShadcnButton asChild className="w-full justify-start" size="sm" variant="ghost">
-          <Link to="/calendar/review">Schedule health</Link>
-        </ShadcnButton>
-      </ShadcnPopoverContent>
+      </AccountSelectionPopoverContent>
     </ShadcnPopover>
   );
 }
@@ -4630,6 +4691,171 @@ function MotivesPage() {
   );
 }
 
+function MailAppBarControls() {
+  const [params, setParams] = useSearchParams();
+  return (
+    <div className="mail-app-bar__controls">
+      <MailTopbarSearch
+        onSearch={(query) =>
+          setParams((current) => {
+            const next = new URLSearchParams(current);
+            query ? next.set("q", query) : next.delete("q");
+            next.delete("thread");
+            return next;
+          })
+        }
+        search={params.get("q")?.trim() ?? ""}
+      />
+      <MailSyncButton />
+    </div>
+  );
+}
+
+function MailAccountsControl() {
+  const [params, setParams] = useSearchParams();
+  const accounts = useQuery({
+    queryFn: api.listConnectors,
+    queryKey: ["connectors"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
+  const enabledAccounts = (accounts.data ?? []).filter((account) => account.mailEnabled);
+  const availableIds = new Set(enabledAccounts.map((account) => account.id));
+  const requestedIds = params.getAll("account").filter((id) => availableIds.has(id));
+  const selectedIds = requestedIds.length
+    ? new Set(requestedIds)
+    : new Set(enabledAccounts.map((account) => account.id));
+  const label = `${selectedIds.size} of ${enabledAccounts.length} mail accounts`;
+  const attentionCount = enabledAccounts.filter(
+    (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
+  ).length;
+  const needsAttention = attentionCount > 0;
+  const triggerLabel = `${label}${needsAttention ? ", attention required" : ""}`;
+  const setAccountVisible = (accountId: string, visible: boolean) => {
+    const nextIds = new Set(selectedIds);
+    visible ? nextIds.add(accountId) : nextIds.delete(accountId);
+    if (nextIds.size === 0) return;
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("account");
+      next.delete("mailbox");
+      next.delete("thread");
+      if (nextIds.size !== enabledAccounts.length) {
+        for (const id of enabledAccounts.map((account) => account.id)) {
+          if (nextIds.has(id)) next.append("account", id);
+        }
+      }
+      return next;
+    });
+  };
+
+  return (
+    <ShadcnPopover>
+      <ShadcnPopoverTrigger asChild>
+        <AccountSelectionTrigger
+          ariaLabel={triggerLabel}
+          className="mail-accounts-trigger"
+          disabled={accounts.isPending || enabledAccounts.length === 0}
+          identities={enabledAccounts.map((account) => ({
+            avatarUrl: account.avatarUrl,
+            fallback: initials(account.label || account.email || account.provider),
+            id: account.id,
+          }))}
+          needsAttention={needsAttention}
+          selectedCount={selectedIds.size}
+          totalCount={enabledAccounts.length}
+        />
+      </ShadcnPopoverTrigger>
+      <AccountSelectionPopoverContent
+        className="mail-accounts-popover"
+        description={label}
+        primaryAction={
+          needsAttention ? (
+            <ShadcnButton asChild className="w-full">
+              <Link to="/settings?section=connections">
+                {reconnectAccountsLabel(attentionCount)}
+              </Link>
+            </ShadcnButton>
+          ) : null
+        }
+        title="Mail accounts"
+      >
+        <ShadcnFieldGroup className="mail-accounts-popover__list">
+          {enabledAccounts.map((account) => {
+            const health = connectionHealth(account);
+            const accountLabel = account.label || account.email || "Connected account";
+            const selected = selectedIds.has(account.id);
+            return (
+              <ShadcnField
+                className="mail-account-visibility"
+                key={account.id}
+                orientation="horizontal"
+              >
+                <ShadcnCheckbox
+                  aria-label={`${selected ? "Hide" : "Show"} ${accountLabel}`}
+                  checked={selected}
+                  disabled={selected && selectedIds.size === 1}
+                  id={`mail-account-${account.id}`}
+                  onCheckedChange={(checked) => setAccountVisible(account.id, checked === true)}
+                />
+                <ShadcnFieldLabel htmlFor={`mail-account-${account.id}`}>
+                  <ShadcnAvatar size="sm">
+                    {account.avatarUrl ? (
+                      <ShadcnAvatarImage alt="" src={account.avatarUrl} />
+                    ) : null}
+                    <ShadcnAvatarFallback>{initials(accountLabel)}</ShadcnAvatarFallback>
+                  </ShadcnAvatar>
+                  <span className="mail-account-visibility__copy">
+                    <strong>{accountLabel}</strong>
+                    <small>
+                      {account.email || brandTitle(account.provider) || account.provider}
+                    </small>
+                  </span>
+                </ShadcnFieldLabel>
+                <MailAccountHealthIndicator
+                  accountLabel={brandTitle(account.provider) || accountLabel}
+                  health={health}
+                />
+              </ShadcnField>
+            );
+          })}
+        </ShadcnFieldGroup>
+      </AccountSelectionPopoverContent>
+    </ShadcnPopover>
+  );
+}
+
+function MailAccountHealthIndicator({
+  accountLabel,
+  health,
+}: {
+  accountLabel: string;
+  health: ReturnType<typeof connectionHealth>;
+}) {
+  if (health.state === "syncing" || health.state === "retrying") {
+    return (
+      <span
+        aria-label={`${accountLabel} account is syncing`}
+        className="mail-account-visibility__health"
+        data-state="syncing"
+        role="img"
+      >
+        <RefreshIcon aria-hidden="true" className="spin" />
+      </span>
+    );
+  }
+  if (health.state === "ready") return null;
+  return (
+    <span
+      aria-label={`${accountLabel} account needs attention`}
+      className="mail-account-visibility__health"
+      data-state="attention"
+      role="img"
+    >
+      <AlertTriangleIcon aria-hidden="true" />
+    </span>
+  );
+}
+
 function MailSyncButton({
   onSelect,
   variant = "outline",
@@ -4643,8 +4869,28 @@ function MailSyncButton({
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
   );
+  const lastSyncedAt = enabledAccounts
+    .map((account) => account.lastSyncedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
+  const nextSyncAt = enabledAccounts
+    .map((account) => account.nextSyncAt ?? connectionHealth(account).nextSyncAt)
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0];
+  const syncPaused = enabledAccounts.some((account) =>
+    ["reconnect", "service_attention"].includes(connectionHealth(account).state),
+  );
+  const lastSyncLabel = lastSyncedAt
+    ? `Last synced ${formatRelative(lastSyncedAt)}`
+    : "Not synced yet";
+  const nextSyncLabel = syncPaused
+    ? "Sync paused"
+    : nextSyncAt
+      ? `Next ${formatRelative(nextSyncAt)}`
+      : "Next sync not scheduled";
   const sync = useMutation({
     mutationFn: () => Promise.all(enabledAccounts.map((account) => api.syncConnector(account.id))),
+    onError: notifyError,
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
@@ -4654,12 +4900,13 @@ function MailSyncButton({
   });
 
   return (
-    <>
-      {sync.isError ? (
-        <span className="text-destructive text-sm" role="alert">
-          {errorMessage(sync.error)}
-        </span>
-      ) : null}
+    <div className="mail-sync-control">
+      {accounts.isPending || enabledAccounts.length === 0 ? null : (
+        <small className="mail-sync-control__timing">
+          <span>{lastSyncLabel}</span>
+          <span>{nextSyncLabel}</span>
+        </small>
+      )}
       <ShadcnButton
         aria-label="Sync all mail accounts"
         disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
@@ -4673,7 +4920,7 @@ function MailSyncButton({
         <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
         <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
       </ShadcnButton>
-    </>
+    </div>
   );
 }
 
@@ -6269,61 +6516,91 @@ function ConnectorRow({
 }) {
   const health = connectionHealth(account);
   return (
-    <ShadcnItem className="connector-row" size="sm">
-      <ShadcnItemMedia variant="default">
+    <ConnectionCard
+      actions={
+        <>
+          {reconnect ? (
+            <ShadcnButton onClick={reconnect} size="sm" type="button">
+              Reconnect
+            </ShadcnButton>
+          ) : null}
+          <ShadcnButton
+            aria-label={`Sync ${account.label}`}
+            disabled={syncing}
+            onClick={sync}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <RefreshIcon aria-hidden="true" className={syncing ? "spin" : ""} />
+            {syncing ? "Syncing" : "Sync now"}
+          </ShadcnButton>
+          <ShadcnButton
+            aria-label={`Disconnect ${account.label}`}
+            onClick={disconnect}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <TrashIcon aria-hidden="true" />
+            Remove
+          </ShadcnButton>
+        </>
+      }
+      capabilities={
+        <>
+          <span className="connection-card__capabilities-label">Available in</span>
+          <div className="capability-badges">
+            <ConnectorCapabilityBadge enabled={account.calendarEnabled} label="Calendar" />
+            <ConnectorCapabilityBadge
+              enabled={account.mailEnabled}
+              label="Mail"
+              {...(enableMail
+                ? { onEnable: enableMail, onEnableLabel: `Enable Mail for ${account.label}` }
+                : {})}
+            />
+          </div>
+        </>
+      }
+      identity={
         <ConnectedAccountIdentity
           avatarUrl={account.avatarUrl}
           label={account.label}
           provider={account.provider}
           size="default"
         />
-      </ShadcnItemMedia>
-      <ShadcnItemContent>
-        <ShadcnItemTitle>{account.label}</ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {account.email ?? "Connected account"} ·{" "}
-          <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
-        </ShadcnItemDescription>
-        <div className="capability-badges">
-          <ConnectorCapabilityBadge enabled={account.calendarEnabled} label="Calendar" />
-          <ConnectorCapabilityBadge
-            enabled={account.mailEnabled}
-            label="Mail"
-            {...(enableMail
-              ? { onEnable: enableMail, onEnableLabel: `Enable Mail for ${account.label}` }
-              : {})}
-          />
-        </div>
-      </ShadcnItemContent>
-      <ShadcnItemActions>
-        <ConnectionHealthBadge health={health} />
-        {reconnect ? (
-          <ShadcnButton onClick={reconnect} size="sm" type="button" variant="outline">
-            Reconnect
-          </ShadcnButton>
-        ) : null}
-        <ShadcnButton
-          aria-label={`Sync ${account.label}`}
-          disabled={syncing}
-          onClick={sync}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshIcon className={syncing ? "spin" : ""} />
-        </ShadcnButton>
-        <ShadcnButton
-          aria-label={`Disconnect ${account.label}`}
-          onClick={disconnect}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <TrashIcon />
-        </ShadcnButton>
-      </ShadcnItemActions>
-    </ShadcnItem>
+      }
+      state={health.state}
+      status={<ConnectionHealthBadge health={health} />}
+      subtitle={account.email ?? "Connected account"}
+      summary={
+        <>
+          <strong>{connectionHealthTitle(health.state)}</strong>
+          <span>
+            <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
+          </span>
+          <small>{connectionHealthGuidance(health.state)}</small>
+        </>
+      }
+      title={account.label}
+    />
   );
+}
+
+function connectionHealthTitle(state: ReturnType<typeof connectionHealth>["state"]) {
+  if (state === "syncing") return "Syncing now";
+  if (state === "retrying") return "Sync delayed";
+  if (state === "reconnect") return "Reconnect this account";
+  if (state === "service_attention") return "Connection temporarily unavailable";
+  return "Connected and ready";
+}
+
+function connectionHealthGuidance(state: ReturnType<typeof connectionHealth>["state"]) {
+  if (state === "syncing") return "New information will appear when this sync finishes.";
+  if (state === "retrying") return "No action is needed while automatic retries continue.";
+  if (state === "reconnect") return "Use Reconnect below to restore access.";
+  if (state === "service_attention") return "No action is needed. We’ll keep retrying.";
+  return "You can sync now whenever you want to check for new information.";
 }
 
 function ConnectorCapabilityBadge({
@@ -7001,6 +7278,7 @@ function SettingsSection({
 }
 
 function SettingsError({ error }: { error: unknown }) {
+  useErrorNotification(error);
   return (
     <ShadcnAlert variant="destructive">
       <XIcon />
@@ -8174,6 +8452,7 @@ function FormActions({
   pending: boolean;
   submitLabel: string;
 }) {
+  useErrorNotification(error);
   return (
     <>
       {error && (

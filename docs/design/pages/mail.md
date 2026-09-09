@@ -5,8 +5,8 @@
 Read and act on one unified mailbox while retaining clear source-account and provider authority.
 
 The combined Inbox is the default and visually primary destination. Individual provider accounts
-remain available under a collapsed Accounts disclosure for troubleshooting and deliberate
-single-source review, not as the normal way to use Mail.
+remain available as an app-bar visibility filter for troubleshooting and deliberate single-source
+review, not as sidebar destinations or the normal way to use Mail.
 
 Signed-in people may compose, reply, forward, and send plain-text messages. Every message is an
 nohmi-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
@@ -110,30 +110,38 @@ initiate delivery.
   available shell height like Calendar, rather than sitting in a capped card or
   narrow page column.
 - Inbox, Unread, Starred, Snoozed, Sent, and Drafts are direct unified destinations.
-- Accounts is collapsed by default. Opening an account is a secondary choice and never changes the
-  combined Inbox default.
-- Mail keeps the global app bar for workspace identity and Sync. Search belongs
-  to the conversation-list pane so its scope remains clear while a message is
-  open.
-- On desktop, the contextual Mail navigation and the conversation-list/reader
-  boundary are independently resizable by pointer or keyboard. Both choices
-  persist on the current device. The navigation rail stays within useful
-  minimum and maximum widths; double-clicking its boundary restores the default.
-- Conversation actions live at the top of the reader pane instead of spanning
-  the entire workspace: Archive retains its label; Snooze, Star, and read state
-  are icon controls; Delete stays in the More menu. The bar uses the shared
-  neutral surface rather than a Mail-specific color.
+- The sidebar contains destinations only. A compact app-bar avatar control filters the unified view
+  by source account, defaults to every account, preserves at least one visible account, and exposes
+  account health plus a direct Settings repair path.
+- Mail keeps workspace identity, search, and Sync together at the start of the primary app bar.
+  Search remains available while reading and changing it returns to the conversation list. The
+  account filter occupies the far edge of the same bar.
+- On desktop, the Mail sidebar and the conversation-list/reader boundary are independently
+  resizable by pointer or keyboard. Both choices persist on the current device. The navigation rail
+  also collapses into a standard icon-only rail with accessible tooltips; double-clicking its
+  boundary restores the default width.
+- Conversation count, list density, and reader actions share one full-workspace
+  `WorkspaceSecondaryAppBar`: Archive retains its label; Snooze, Star, and read state are icon
+  controls; Delete stays in the More menu. The bar uses the shared neutral surface rather than a
+  Mail-specific color.
+- The conversation list defaults to Comfortable and offers Compact and Expanded device-local
+  layouts. Comfortable and Expanded show a sender avatar before the sender name; Compact minimizes
+  vertical detail without removing the sender, subject, or received time.
 - At narrow widths, Mail presents one focused surface at a time. Selecting a
   conversation opens the reader, Back to inbox restores the list, and compact
   actions move into More rather than overflowing horizontally.
-- Unified and account mailbox navigation remains usable with stale synchronized material.
+- Unified navigation and account visibility filters remain usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
-- The reconnect warning sits above the conversation list so cached mail stays visible and useful.
+- The reconnect warning is visible on the account control and beside its affected account so cached
+  mail stays visible and useful.
 - The end-justified floating plus opens a plain-text composer with From, To, optional Cc, Subject,
   and Message. Drafts autosave, Escape restores focus, and the final send confirmation names the
   sender and recipients.
 - Reply and Forward live with the reader controls. Drafts exposes editable drafts and explicit
   reconciliation for delivery whose provider acceptance is uncertain.
+- Each message header toggles that message between its expanded and collapsed state. Sender and
+  recipient names expose their available identity details on hover or keyboard focus; the reader
+  does not duplicate From, To, or Date metadata in a separate disclosure.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.
 - No provider response body, token-shaped value, socket message, or exception reaches the Mail UI.
 - The exact-thread stewardship panel exposes disposition, obligation state, question answers,

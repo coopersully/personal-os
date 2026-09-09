@@ -2,11 +2,11 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
 import { SidebarProvider } from "../../components/ui/sidebar.js";
+import { TooltipProvider } from "../../components/ui/tooltip.js";
 import {
   isMailListScope,
   MailSidebar,
@@ -14,7 +14,9 @@ import {
   mailListScopeFromSearch,
   mailListScopeParams,
   mailListScopeQuery,
+  persistMailListDensity,
   persistMailReaderLayout,
+  storedMailListDensity,
   storedMailReaderLayout,
 } from "./mail.js";
 
@@ -77,7 +79,7 @@ describe("Mail workspace helpers", () => {
     ]);
   });
 
-  it("makes the combined Inbox primary and keeps account navigation collapsed", async () => {
+  it("makes the combined Inbox primary and keeps sources out of navigation", async () => {
     vi.spyOn(api, "listConnectors").mockResolvedValue([
       {
         calendarEnabled: false,
@@ -115,9 +117,11 @@ describe("Mail workspace helpers", () => {
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={["/mail"]}>
-          <SidebarProvider>
-            <MailSidebar onNavigate={vi.fn()} />
-          </SidebarProvider>
+          <TooltipProvider>
+            <SidebarProvider defaultOpen={false}>
+              <MailSidebar onNavigate={vi.fn()} />
+            </SidebarProvider>
+          </TooltipProvider>
         </MemoryRouter>
       </QueryClientProvider>,
     );
@@ -128,9 +132,7 @@ describe("Mail workspace helpers", () => {
     expect(screen.queryByText("Unified inbox")).not.toBeInTheDocument();
     expect(screen.queryByText("Stewardship review")).not.toBeInTheDocument();
     expect(screen.queryByText("Personal Google")).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Accounts" }));
-    expect(screen.getByText("Personal Google")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
   });
 
   it("accepts only a complete numeric reader layout and tolerates unavailable storage", () => {
@@ -159,6 +161,26 @@ describe("Mail workspace helpers", () => {
     expect(storedMailReaderLayout()).toBeUndefined();
   });
 
+  it("defaults list density safely when its device preference is missing or unavailable", () => {
+    expect(storedMailListDensity()).toBe("comfortable");
+    window.localStorage.setItem("ilo.mail.list-density.v1", "compact");
+    expect(storedMailListDensity()).toBe("compact");
+    window.localStorage.setItem("ilo.mail.list-density.v1", "unsupported");
+    expect(storedMailListDensity()).toBe("comfortable");
+
+    vi.spyOn(window.localStorage, "getItem").mockImplementationOnce(() => {
+      throw new Error("storage blocked");
+    });
+    expect(storedMailListDensity()).toBe("comfortable");
+    vi.spyOn(window.localStorage, "setItem").mockImplementationOnce(() => {
+      throw new Error("storage blocked");
+    });
+    expect(() => persistMailListDensity("expanded")).not.toThrow();
+
+    vi.stubGlobal("window", undefined);
+    expect(storedMailListDensity()).toBe("comfortable");
+  });
+
   it("replaces and clears pending debounced Mail searches", () => {
     const onSearch = vi.fn();
     const view = render(<MailTopbarSearch onSearch={onSearch} search="" />);
@@ -167,6 +189,13 @@ describe("Mail workspace helpers", () => {
     fireEvent.change(input, { target: { value: "ab" } });
     view.unmount();
     expect(onSearch).not.toHaveBeenCalled();
+  });
+
+  it("commits an unchanged Mail search without retaining a pending URL value", () => {
+    const onSearch = vi.fn();
+    render(<MailTopbarSearch onSearch={onSearch} search="Project update" />);
+    fireEvent.submit(screen.getByRole("searchbox", { name: "Search mail" }));
+    expect(onSearch).toHaveBeenLastCalledWith("Project update");
   });
 
   it("preserves typing entered while a committed search reaches the URL", () => {
@@ -181,5 +210,14 @@ describe("Mail workspace helpers", () => {
     view.rerender(<MailTopbarSearch onSearch={onSearch} search="project" />);
 
     expect(input).toHaveValue("project update");
+  });
+
+  it("can resubmit the current trimmed Mail search", () => {
+    const onSearch = vi.fn();
+    render(<MailTopbarSearch onSearch={onSearch} search="Project update" />);
+
+    fireEvent.submit(screen.getByRole("searchbox", { name: "Search mail" }));
+
+    expect(onSearch).toHaveBeenCalledWith("Project update");
   });
 });

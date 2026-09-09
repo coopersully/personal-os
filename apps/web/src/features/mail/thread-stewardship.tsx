@@ -20,6 +20,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
+import { useErrorNotification } from "../../lib/error-notification.js";
 
 const dispositions: MailDispositionKind[] = [
   "active",
@@ -135,6 +136,14 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       }),
     onError: refresh,
   });
+  useErrorNotification(stewardship.error);
+  useErrorNotification(
+    disposition.error ??
+      createObligation.error ??
+      updateObligation.error ??
+      answer.error ??
+      brief.error,
+  );
 
   if (stewardship.isPending)
     return <Skeleton aria-label="Loading thread stewardship" className="m-6 h-48" />;

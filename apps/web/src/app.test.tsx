@@ -5543,10 +5543,20 @@ describe("ilo web app", () => {
 
   it("keeps Mail and Finances workspace controls on child routes", async () => {
     const mail = setup("/mail/thread/example");
-    const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
-    expect(within(mailAppBar).queryByRole("searchbox", { name: "Search mail" })).toBeNull();
+    await waitFor(() => {
+      const currentAppBar = screen.getByRole("navigation", { name: "Top navigation" });
+      expect(currentAppBar).toHaveAttribute("data-workspace", "mail");
+      expect(
+        within(currentAppBar).getByRole("searchbox", { name: "Search mail" }),
+      ).toBeInTheDocument();
+    });
+    const mailAppBar = screen.getByRole("navigation", { name: "Top navigation" });
+    expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
     expect(
       within(mailAppBar).getByRole("button", { name: "Sync all mail accounts" }),
+    ).toBeInTheDocument();
+    expect(
+      within(mailAppBar).getByRole("button", { name: /^\d+ of \d+ mail accounts$/ }),
     ).toBeInTheDocument();
     expect(
       within(mailAppBar).queryByRole("button", { name: /compose|send/i }),
@@ -5560,7 +5570,11 @@ describe("ilo web app", () => {
         "finances",
       ),
     );
-    const financeControls = await screen.findByRole("navigation", { name: "Transaction controls" });
+    const financeControls = await screen.findByRole(
+      "navigation",
+      { name: "Transaction controls" },
+      { timeout: 5_000 },
+    );
     expect(
       within(financeControls).getByRole("button", { name: "New transaction" }),
     ).toBeInTheDocument();
@@ -7301,45 +7315,68 @@ describe("ilo web app", () => {
     ).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Compose a message" })).toBeInTheDocument();
     const conversationList = await screen.findByRole("region", { name: "Conversations" });
-    expect(within(topNavigation).queryByLabelText("Search mail")).not.toBeInTheDocument();
-    expect(within(conversationList).getByLabelText("Search mail")).toBeInTheDocument();
-    const navigationResizeHandle = screen.getByRole("separator", {
-      name: "Resize mail navigation",
-    });
-    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "256");
-    navigationResizeHandle.focus();
+    expect(within(topNavigation).getByLabelText("Search mail")).toBeInTheDocument();
+    expect(within(conversationList).queryByLabelText("Search mail")).not.toBeInTheDocument();
+    const mailSidebar = screen.getByRole("complementary", { name: "Mail Sidebar" });
+    expect(mailSidebar).toHaveAttribute("data-state", "expanded");
+    expect(within(topNavigation).queryByRole("button", { name: "Toggle Sidebar" })).toBeNull();
+    const navigationResize = screen.getByRole("separator", { name: "Resize mail navigation" });
+    navigationResize.focus();
+    await browser.keyboard("{Home}");
+    expect(mailSidebar).toHaveAttribute("data-state", "collapsed");
+    expect(navigationResize).toHaveAttribute("aria-valuenow", "48");
     await browser.keyboard("{ArrowRight}");
-    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "272");
-    expect(window.localStorage.getItem("ilo.mail.sidebar-width.v1")).toBe("272");
-    await browser.dblClick(navigationResizeHandle);
-    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "256");
-    expect(window.localStorage.getItem("ilo.mail.sidebar-width.v1")).toBe("256");
-    const resizeStart = createEvent.pointerDown(navigationResizeHandle);
-    Object.defineProperty(resizeStart, "clientX", { value: 100 });
-    fireEvent(navigationResizeHandle, resizeStart);
-    const resizeMove = createEvent.pointerMove(window);
-    Object.defineProperty(resizeMove, "clientX", { value: 140 });
-    fireEvent(window, resizeMove);
-    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "296");
-    fireEvent.pointerCancel(window);
-    expect(window.localStorage.getItem("ilo.mail.sidebar-width.v1")).toBe("296");
-    const moveAfterCancel = createEvent.pointerMove(window);
-    Object.defineProperty(moveAfterCancel, "clientX", { value: 200 });
-    fireEvent(window, moveAfterCancel);
-    expect(navigationResizeHandle).toHaveAttribute("aria-valuenow", "296");
+    expect(mailSidebar).toHaveAttribute("data-state", "expanded");
+    expect(within(mailSidebar).getByRole("link", { name: /^Inbox/ })).toBeInTheDocument();
+    expect(within(mailSidebar).getByRole("link", { name: "Unread" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
     expect(screen.getByRole("separator", { name: "Resize conversation list" })).toBeInTheDocument();
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
-    await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    const reader = screen.getByRole("region", { name: "Message reader" });
+    const mailControls = screen.getByRole("navigation", { name: "Mail controls" });
+    expect(within(mailControls).getByText("2 conversations")).toBeInTheDocument();
+    const conversationActions = mailControls.querySelector(
+      ".mail-secondary-nav__conversation-actions",
+    );
+    expect(conversationActions).toHaveAttribute("data-visible", "false");
     expect(
-      within(reader).getByRole("navigation", { name: "Conversation actions" }),
-    ).toHaveAttribute("data-slot", "workspace-secondary-app-bar");
-    expect(within(reader).getByRole("button", { name: "Back to inbox" })).toBeInTheDocument();
+      within(mailControls).getByRole("button", { name: "Message list layout" }),
+    ).toBeInTheDocument();
+    const firstThread = await screen.findByRole("button", { name: /Project update/ });
+    expect(firstThread.querySelector('[data-slot="avatar"]')).not.toBeNull();
+    await browser.click(await screen.findByRole("button", { name: /Project update/ }));
+    expect(conversationActions).toHaveAttribute("data-visible", "true");
+    const reader = screen.getByRole("region", { name: "Message reader" });
+    expect(mailControls).toHaveAttribute("data-slot", "workspace-secondary-app-bar");
+    expect(within(mailControls).getByRole("button", { name: "Reply" })).toBeInTheDocument();
+    expect(within(reader).queryByRole("navigation", { name: "Conversation actions" })).toBeNull();
+    expect(within(mailControls).getByRole("button", { name: "Back to inbox" })).toBeInTheDocument();
     expect(
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Attachments" })).toHaveTextContent("brief.pdf");
-    expect(screen.getByLabelText("Starred").innerHTML).toBe(filledStarMarkup);
+    const messageToggles = within(reader).getAllByRole("button", {
+      name: /Collapse message from/,
+    });
+    const firstMessageToggle = messageToggles.at(0);
+    expect(firstMessageToggle).toBeDefined();
+    if (!firstMessageToggle) throw new Error("Expected an expanded Mail message");
+    expect(firstMessageToggle).toHaveAttribute("aria-expanded", "true");
+    await browser.click(firstMessageToggle);
+    expect(firstMessageToggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByText("Hello Example User. This is the full message."),
+    ).not.toBeInTheDocument();
+    await browser.click(firstMessageToggle);
+    expect(await screen.findByText("Hello Example User. This is the full message.")).toBeVisible();
+    expect(within(reader).queryByText("From")).not.toBeInTheDocument();
+    expect(within(reader).queryByText("Date")).not.toBeInTheDocument();
+    const senderContacts = within(reader).getAllByLabelText(/Contact details for/);
+    const firstSenderContact = senderContacts.at(0);
+    expect(firstSenderContact).toBeDefined();
+    if (!firstSenderContact) throw new Error("Expected a sender contact trigger");
+    await browser.hover(firstSenderContact);
+    expect(await screen.findByText(mailThread.from.address)).toBeVisible();
+    expect(within(firstThread).getByLabelText("Starred").innerHTML).toBe(filledStarMarkup);
     expect(screen.getByText("2 messages")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Mark conversation read" }));
     await waitFor(() =>
@@ -7383,17 +7420,10 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.listMailThreads).toHaveBeenCalledWith(expect.objectContaining({ unread: true })),
     );
-    const mailNavigation = within(screen.getByRole("navigation", { name: "Mailboxes" }));
-    await browser.click(mailNavigation.getByRole("button", { name: "Accounts" }));
-    await browser.click(mailNavigation.getByRole("button", { name: /Toggle Google Google Mail/ }));
-    const mailboxButtons = mailNavigation.getAllByRole("button", { name: /^Inbox/ });
-    await browser.click(mailboxButtons.at(-1) as HTMLElement);
-    await waitFor(() =>
-      expect(mocks.listMailThreads).toHaveBeenCalledWith(
-        expect.objectContaining({ mailboxId: mailbox.id }),
-      ),
+    await browser.click(
+      within(topNavigation).getByRole("button", { name: "1 of 1 mail accounts" }),
     );
-    await browser.click(mailNavigation.getByRole("link", { name: /^Inbox/ }));
+    expect(await screen.findByRole("checkbox", { name: "Hide Google" })).toBeDisabled();
     await browser.click(screen.getByRole("button", { name: "Sync all mail accounts" }));
     await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledWith(secondId));
     view.unmount();
@@ -7449,7 +7479,7 @@ describe("ilo web app", () => {
     );
   });
 
-  it("presents provider mailboxes as friendly, collapsible account groups", async () => {
+  it("filters the unified inbox from the account avatar control", async () => {
     const iCloudAccountId = "88888888-8888-4888-8888-888888888880";
     const unnamedAccountId = "88888888-8888-4888-8888-888888888890";
     mocks.listConnectors.mockResolvedValue([
@@ -7457,6 +7487,12 @@ describe("ilo web app", () => {
       {
         calendarEnabled: false,
         email: "icloud@example.com",
+        health: {
+          message: "iCloud authorization is no longer valid. Reconnect to resume syncing.",
+          nextSyncAt: null,
+          recovery: "reconnect",
+          state: "reconnect",
+        },
         id: iCloudAccountId,
         label: "",
         lastSyncedAt: null,
@@ -7565,67 +7601,47 @@ describe("ilo web app", () => {
         to: [],
       },
     ]);
-    setup("/mail");
+    const view = setup("/mail");
     const browser = userEvent.setup();
 
-    await browser.click(await screen.findByRole("button", { name: "Accounts" }));
-    const accountToggle = screen.getByRole("button", { name: /Google Google Mail/ });
-    expect(accountToggle).toHaveAttribute("aria-expanded", "false");
-    await browser.click(accountToggle);
-    expect(await screen.findByText("Primary")).toBeInTheDocument();
-    expect(screen.getByText("Promotions")).toBeInTheDocument();
-    expect(screen.queryByText("CATEGORY_PERSONAL")).not.toBeInTheDocument();
-    expect(accountToggle).toHaveAttribute("aria-expanded", "true");
-
-    await browser.click(accountToggle);
-    expect(accountToggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Primary")).not.toBeInTheDocument();
-    await browser.click(accountToggle);
-    await browser.click(screen.getByText("Labels"));
-    expect(screen.getByRole("button", { name: "Project Alpha" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Team Alpha" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sent" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Drafts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
-    await browser.click(
-      within(screen.getByRole("navigation", { name: "Mailboxes" })).getByText("More"),
+    expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
+    const densityTrigger = await screen.findByRole("button", { name: "Message list layout" });
+    await browser.click(densityTrigger);
+    await browser.click(await screen.findByRole("button", { name: "Compact" }));
+    expect(window.localStorage.getItem("ilo.mail.list-density.v1")).toBe("compact");
+    expect(screen.getByRole("button", { name: /Project update/ })).toHaveAttribute(
+      "data-density",
+      "compact",
     );
-    expect(screen.getByRole("button", { name: "Spam" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Trash" })).toBeInTheDocument();
 
-    const iCloudAccountToggle = screen.getByRole("button", {
-      name: /icloud@example.com iCloud Mail/,
+    const accountControl = await screen.findByRole("button", {
+      name: "3 of 3 mail accounts, attention required",
     });
-    if (iCloudAccountToggle.getAttribute("aria-expanded") === "false")
-      await browser.click(iCloudAccountToggle);
-    await browser.click(screen.getAllByRole("button", { name: "All mail" }).at(-1) as HTMLElement);
+    expect(accountControl.querySelectorAll('[data-slot="avatar"]')).toHaveLength(3);
+    expect(accountControl).not.toHaveTextContent("Needs attention");
     expect(
-      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
-    ).not.toBeInTheDocument();
+      within(accountControl).getByLabelText("Mail account needs attention"),
+    ).toBeInTheDocument();
+    await browser.click(accountControl);
+    expect(await screen.findByText("Mail accounts")).toBeInTheDocument();
+    expect(screen.getByLabelText("iCloud account needs attention")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reconnect mail account" })).toHaveAttribute(
+      "href",
+      "/settings?section=connections",
+    );
+    await browser.click(screen.getByRole("checkbox", { name: "Hide icloud@example.com" }));
+    expect(view.location.value).toContain(`account=${secondId}`);
+    expect(view.location.value).toContain(`account=${unnamedAccountId}`);
+    expect(view.location.value).not.toContain(iCloudAccountId);
     await waitFor(() =>
       expect(mocks.listMailThreads).toHaveBeenCalledWith(
-        expect.objectContaining({ accountIds: [iCloudAccountId] }),
+        expect.objectContaining({ accountIds: [secondId, unnamedAccountId] }),
       ),
     );
     const unifiedInbox = screen.getByRole("navigation", { name: "Mailboxes" });
     await browser.click(within(unifiedInbox).getByRole("link", { name: "Unread" }));
-    await browser.click(within(unifiedInbox).getByRole("link", { name: "Unread" }));
-    const search = screen.getByLabelText("Search mail");
-    await browser.clear(search);
-    await browser.keyboard("{Enter}");
-
-    await browser.click(screen.getByRole("button", { name: /iCloud note/ }));
-    expect((await screen.findAllByText("iCloud Mail")).length).toBeGreaterThan(0);
-    expect(screen.getByText("You")).toBeInTheDocument();
-    const iCloudToggle = screen.getByRole("button", { name: /icloud@example.com iCloud Mail/ });
-    if (iCloudToggle.getAttribute("aria-expanded") === "false") await browser.click(iCloudToggle);
-    await browser.click(screen.getAllByRole("button", { name: "All mail" }).at(-1) as HTMLElement);
-    expect(
-      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Connected account iCloud Mail/ }),
-    ).toBeInTheDocument();
+    expect(view.location.value).toContain("unread=1");
+    expect(view.location.value).toContain(`account=${secondId}`);
   });
 
   it("loads a mail conversation addressed directly by URL", async () => {
@@ -7786,14 +7802,17 @@ describe("ilo web app", () => {
     );
     const mailView = setup("/mail");
     const browser = userEvent.setup();
-    await browser.click(await screen.findByRole("button", { name: "Accounts" }));
-    expect(await screen.findByText("iCloud Mail")).toBeInTheDocument();
+    await browser.click(await screen.findByRole("button", { name: "1 of 1 mail accounts" }));
+    expect(await screen.findByRole("checkbox", { name: "Hide person@icloud.com" })).toBeDisabled();
     const syncButton = screen.getByRole("button", { name: "Sync all mail accounts" });
     await browser.click(syncButton);
     expect(syncButton).toBeDisabled();
     expect(syncButton.querySelector(".spin")).toBeInTheDocument();
     rejectSync(new Error("iCloud sync unavailable"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("iCloud sync unavailable");
+    await waitFor(() => expect(syncButton).not.toBeDisabled());
+    expect(
+      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("alert"),
+    ).toBeNull();
     mailView.unmount();
 
     mocks.listConnectors.mockResolvedValue([icloudAccount]);

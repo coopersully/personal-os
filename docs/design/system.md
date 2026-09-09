@@ -106,8 +106,9 @@ the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
 controls owned by the feature while placing them in the shared frame. Omit the
 bar or set `enabled={false}` to leave no empty row. Its default layout placement
 stays pinned below the primary bar and shares the body inset. Spatial Calendar
-headers and Mail reader actions use `placement="inline"` to retain their own
-scroll/column alignment, using the same slot anatomy and neutral surface.
+headers may use `placement="inline"` to retain their own scroll/column alignment.
+Controls that govern multiple workspace panes, such as Mail count, density, and
+reader actions, use the default shared full-width slot.
 
 ### Blocks
 
@@ -249,9 +250,24 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - Workspace-switcher triggers show the workspace glyph without its frame,
   including the mobile dock. Keep framed workspace icons inside the picker;
   preserve the same glyph and workspace color in both contexts.
-- Desktop account actions live in Settings, reached from the workspace picker.
-  Do not duplicate them with an account avatar in the top bar or an account
-  footer in workspace sidebars.
+- Desktop account-management actions live in Settings, reached from the workspace picker. A
+  workspace may use compact account avatars in its app bar only as a source-visibility filter; that
+  filter must surface health and link to Settings for repair rather than duplicating management.
+- App-bar source filters use the shared `AccountSelectionTrigger`: show compact provider identities,
+  expose the full scope in its accessible name, and use plain inherited typography for the concise
+  visible label (`selected/total accounts`). When a source needs attention, place the shared
+  disconnected glyph immediately before the avatar stack without a badge, border, or shadow; do not
+  recolor or outline the complete trigger. Popovers use `AccountSelectionPopoverContent` action
+  slots, with reconnection rendered as the primary action and labeled with the affected source count.
+- Unified workspaces keep destination navigation separate from source filters: destinations belong
+  in the sidebar, while the less-prominent source filter defaults to all connected sources.
+- Connection management uses the shared `ConnectionCard` slots for identity, status, health
+  summary, capabilities, and actions. Keep account identity separate from operational status; state
+  the user impact and whether action is required in the summary; keep capabilities grouped; and use
+  explicit text labels for sync, reconnect, and removal actions instead of unexplained icon buttons.
+- Device-local density controls change presentation only. Keep the comfortable view as the
+  information-rich default, preserve essential identity and time in compact views, and do not let a
+  density choice change query scope or stored domain data.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
   and description; availability and errors use shared alerts.

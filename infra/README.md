@@ -6,7 +6,7 @@ and its continuous-deployment runbook. The owner authorized deletion of the AWS
 workload and nohmi-created account-wide services/audit storage. Do not run ordinary
 `terraform apply` against this directory: it would recreate retired resources and
 can conflict with the live Cloudflare sender and nohmi routing records. The remote
-state is being retired; a historical private state copy is retained outside Git.
+state bucket was deleted; a historical private state copy is retained outside Git.
 The declarations below document the former deployment, not the live source of truth.
 
 This directory defines an AWS deployment baseline in `us-east-1`:

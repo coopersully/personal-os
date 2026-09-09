@@ -25,8 +25,9 @@ were also present in the frozen AWS source, while Plaid synced from the Mac.
 AWS retirement was authorized after the Mac recovery checks. ECS, autoscaling,
 EC2, ALB/WAF, CloudFront, ECR, application parameters, backup recovery points and
 legacy public DNS have been removed; RDS deletion was requested without a retained
-AWS snapshot. The owner also authorized removal of the nohmi-created account-wide
-security/audit services and storage. The final frozen database dump, credentials
+AWS snapshot. RDS remains in `deleting`; its subnet group, VPC and four subnets
+await that completion. The owner-authorized removal of the nohmi-created account-wide
+security/audit services and storage is complete. The final frozen database dump, credentials
 and historical Terraform state are preserved privately on the Mac. Live sender
 DNS and unrelated account resources remain intact. The legacy hosted-deploy and
 production-health workflows remain disabled. Never apply the historical AWS stack
@@ -38,6 +39,18 @@ only successful exact-main push CI, builds against the dedicated production engi
 and switches with a local encrypted backup and durable recovery state. Installation
 and first-main adoption are attended; application updates then require no GitHub
 credential or inbound port. Controller/configuration upgrades remain attended.
+The controller is installed under the dedicated production account and supervised
+by `me.coopersully.nohmi.continuous`. Read its live revision, phase and maintenance
+state using the private `continuous-cli.mjs status` command in the runbook; the
+initial cutover revision above is historical, not a pin on later releases.
+The temporary AWS migration access key/user/policy and local CLI delegation have
+been removed. The Mac runtime has no AWS credential dependency.
+The first CI-gated main deployment completed September 9 at 16:27:47 UTC, moving
+to `49d87e257ba7922814d6a0945fbea189dc1677cf` after its successful push CI. The
+running LaunchAgent performed the switch; the one-use initial squash authorization
+was consumed. Public app/API/MCP health passed, PostgreSQL identity and user count
+matched, and all three environment files, gateway config and tunnel token retained
+their pre-deployment fingerprints. Unrelated Docker Desktop services remained up.
 Offsite backups and backup alerts
 were explicitly deferred by the sole user for this cutover; no new storage
 subscription was activated. Local migration copies do not protect against loss

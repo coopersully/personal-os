@@ -1,16 +1,17 @@
 # Attended nohmi Mac production cutover
 
 Status: the attended public cutover was executed September 9, 2026. The Mac is
-the authoritative writer from 14:56:22 UTC, using application revision
+the authoritative writer from 14:56:22 UTC, initially using application revision
 `fba5bc5c39f291f792bdda85fcb3d519a06c05b0`. All 89 frozen-source relation counts
 and the migration ledger matched on restore; 27 encrypted provider records were
 verified. The rehearsed skipped-task repair was applied before activation.
 Public app, API readiness, MCP liveness, OAuth discovery, and unauthenticated
 access rejection are verified over HTTPS. Authenticated browser acceptance is
 still pending; the local network initially cached negative API/MCP DNS responses.
-AWS retirement followed the verified VM/process recovery exercises. The workload
-and owner-approved account-wide services/storage are being removed; the source RDS
-deletion is in progress. Legacy deploy/health workflows remain disabled. Historical
+AWS retirement followed the verified VM/process recovery exercises. Former app
+compute/edge services and owner-approved account-wide services/storage were removed;
+RDS remains deleting; its subnet group, VPC and four subnets await that completion.
+Legacy deploy/health workflows remain disabled. Historical
 source exports, the final frozen dump and Terraform state are preserved privately.
 Do not use the historical source-access steps below against a recreated AWS stack.
 See [continuous production](continuous.md) for CI-gated main updates, maintenance,
@@ -28,15 +29,13 @@ gateway routes the new nohmi app/API/MCP hostnames. PostgreSQL is on an internal
 network and a named Linux volume. Application containers retain their existing
 migrations and schedulers; starting API permits writes immediately.
 
-The operator credential is the `personal-os-migration` AWS CLI profile, backed by
-the non-root `personal-os-mac-migration` IAM user. Its managed policy is checked in
-as `migration-operator-policy.json`. It has no IAM management or resource deletion
-permission. It can suspend/resume only the two inspected source service autoscaling
-targets, so the freeze does not depend on an expiring administrator login.
-Its access key does not automatically expire; revoke it after AWS
-retirement. Keep it out of application environment files and production containers.
-The Mac's default profile delegates to it; the separate `personal-os-bootstrap`
-profile retains the expiring administrative login for provisioning only.
+The attended migration used the non-root `personal-os-mac-migration` IAM user and
+`personal-os-migration` CLI profile, with the policy retained as historical source
+in `migration-operator-policy.json`. After retirement its access key, exclusive
+user/policy, local credentials and default-profile delegation were removed. The
+separate `personal-os-bootstrap` profile retains the owner's expiring personal AWS
+login for attended account administration. The active application and continuous
+controller require no AWS credentials and no GitHub token.
 
 Cloudflare operator access uses the official `cloudflared tunnel login` flow and
 the operator account's owner-only `~/.cloudflared/cert.pem`. This long-lived

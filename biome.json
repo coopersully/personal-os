@@ -14,7 +14,10 @@
       "!apps/desktop/src-tauri/gen",
       "!apps/web/dev-dist",
       "!apps/web/src/components/ui",
-      "!apps/web/src/styles.css"
+      "!apps/web/src/styles.css",
+      "!**/macos/.build",
+      "!**/macos/build",
+      "!.codex/run"
     ]
   },
   "formatter": {

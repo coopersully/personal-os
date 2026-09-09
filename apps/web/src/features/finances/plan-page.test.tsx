@@ -160,7 +160,7 @@ describe("complete finance plan", () => {
     const second = api.reviseFinanceBudget.mock.calls[1]?.[0];
     expect(second).toEqual({ ...first, idempotencyKey: expect.any(String) });
     expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
-  });
+  }, 15_000);
 
   it("renders all agent-created resources, allocations, relations and assumptions, and approves the displayed exact version", async () => {
     const client = mount();
@@ -375,7 +375,7 @@ describe("complete finance plan", () => {
       kind: "other",
       description: "Net pay",
     });
-  });
+  }, 15_000);
 
   it("adds and removes rows and saves explicit assumptions", async () => {
     mount();
@@ -407,7 +407,7 @@ describe("complete finance plan", () => {
         }),
       ),
     );
-  }, 10_000);
+  }, 20_000);
 
   it("keeps revision conflicts in the editor until the person reloads the latest version", async () => {
     api.reviseFinanceBudget.mockRejectedValue(

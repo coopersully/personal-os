@@ -118,6 +118,40 @@ describe("Google Calendar connector", () => {
     expect(JSON.stringify(overflow)).not.toContain(oversizedIdentifier.partId);
   });
 
+  it("preserves attendee responses separately from the event confirmation status", async () => {
+    const google = connector(
+      queued(
+        response({
+          items: [
+            {
+              ...timedEvent,
+              attendees: [
+                { email: "cooper@example.com", displayName: "Cooper", responseStatus: "declined" },
+                { email: "host@example.com", responseStatus: "accepted", organizer: true },
+                { email: "maybe@example.com", responseStatus: "tentative" },
+                { email: "new@example.com" },
+              ],
+            },
+          ],
+          nextSyncToken: "next",
+        }),
+      ),
+    );
+    const result = await google.syncCalendar(fresh, "primary", null);
+    expect(result.value.changes[0]).toMatchObject({
+      kind: "upsert",
+      event: {
+        status: "confirmed",
+        attendees: [
+          { email: "cooper@example.com", name: "Cooper", response: "declined", isOrganizer: false },
+          { email: "host@example.com", name: null, response: "accepted", isOrganizer: true },
+          { email: "maybe@example.com", name: null, response: "tentative", isOrganizer: false },
+          { email: "new@example.com", name: null, response: "needs_action", isOrganizer: false },
+        ],
+      },
+    });
+  });
+
   it("builds authorization and exchanges an offline code", async () => {
     const fetch = queued(
       response({ access_token: "new", expires_in: 3600, refresh_token: "offline" }),
@@ -504,7 +538,7 @@ describe("Google Calendar connector", () => {
             historyId: "history-2",
             id: "m2",
             internalDate: "1783958460000",
-            labelIds: ["INBOX"],
+            labelIds: ["SENT"],
             payload: {
               headers: [
                 { name: "Subject", value: "Project update" },
@@ -604,7 +638,7 @@ describe("Google Calendar connector", () => {
     expect(result.value.threads[0]).toMatchObject({
       bodyText: "Plain body",
       from: { address: "ada@example.com", name: "Ada Lovelace" },
-      mailboxIds: ["INBOX", "UNREAD", "STARRED"],
+      mailboxIds: ["INBOX", "UNREAD", "STARRED", "SENT"],
       messagesComplete: true,
       messageCount: 2,
       remoteThreadId: "thread/1",
@@ -643,9 +677,14 @@ describe("Google Calendar connector", () => {
       },
     ]);
     expect(result.value.threads[0]?.messages?.[1]).toMatchObject({
-      mailboxIds: ["INBOX"],
       providerRevision: "history-2",
     });
+    expect(result.value.threads[0]?.messages?.[0]?.mailboxIds).toEqual([
+      "INBOX",
+      "UNREAD",
+      "STARRED",
+    ]);
+    expect(result.value.threads[0]?.messages?.[1]?.mailboxIds).toEqual(["SENT"]);
     expect(result.value.threads[1]).toMatchObject({
       bodyText: "Fallback body",
       receivedAt: new Date(0),

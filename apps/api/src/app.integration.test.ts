@@ -6353,6 +6353,20 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(403);
 
+    const anonymous = await request("/v1/desktop/activity", { auth: "none" });
+    expect(anonymous.status).toBe(401);
+    const agent = await request("/v1/desktop/activity", { auth: "agent" });
+    expect(agent.status).toBe(403);
+    const human = await request("/v1/desktop/activity");
+    expect(human.status).toBe(200);
+    expect(await human.json()).toMatchObject({
+      events: [],
+      cursor: expect.any(String),
+      hasMore: false,
+    });
+    const invalid = await request("/v1/desktop/activity?cursor=invalid");
+    expect(invalid.status).toBe(400);
+
     const fullAgentToken = agentToken;
     const auditOnlyToken = await payload(
       await request("/v1/access-tokens", {

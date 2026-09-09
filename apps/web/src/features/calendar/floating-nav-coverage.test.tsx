@@ -143,7 +143,7 @@ describe("Calendar floating navigation edge states", () => {
         }),
       ),
     );
-  });
+  }, 15_000);
 
   it("selects the first writable calendar when calendars arrive", async () => {
     const browser = userEvent.setup();

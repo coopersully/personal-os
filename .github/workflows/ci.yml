@@ -148,7 +148,11 @@ jobs:
           cache: pnpm
           node-version: 22
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install Playwright browser
+        run: |
+          grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
+            | xargs -r sudo rm -f
+          pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - if: failure()
         uses: actions/upload-artifact@v7
@@ -183,6 +187,16 @@ jobs:
       - name: Compile native overlay
         working-directory: apps/desktop
         run: pnpm exec tauri build --debug --no-bundle
+      - name: Test native desktop contracts
+        working-directory: apps/desktop
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Test macOS companion and compile WidgetKit extension
+        if: runner.os == 'macOS'
+        working-directory: apps/desktop
+        run: |
+          swift test --package-path macos
+          bash macos/scripts/build-widgets.sh
+          python3 -m unittest discover -s macos/scripts -p 'test_*.py'
 
   required:
     name: CI required

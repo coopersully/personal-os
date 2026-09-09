@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type {
   GoogleConnector,
   GoogleCredentials,
@@ -74,6 +75,7 @@ import {
   connectorSyncAppError,
 } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
+import { recordDesktopMailSync } from "./desktop-activity-service.js";
 import { AppError } from "./errors.js";
 import {
   invalidateMailCalendarCommitmentIntakes,
@@ -1102,7 +1104,13 @@ export function createConnectorService({
           ),
         )
         .limit(1);
-      if (before?.remoteEtag === change.event.etag && !before.deletedAt) continue;
+      if (
+        before?.remoteEtag === change.event.etag &&
+        !before.deletedAt &&
+        (change.event.attendees === undefined ||
+          isDeepStrictEqual(before.attendees, change.event.attendees))
+      )
+        continue;
       const values = remoteEventValues(userId, calendar.id, calendar.provider, change.event, now());
       const [after] = before
         ? await transaction
@@ -1940,6 +1948,7 @@ export function createConnectorService({
         }),
       );
     });
+    await recordDesktopMailSync(db, account.userId, account.id, value.threads, now());
     return {
       changed: value.mailboxes.length + value.threads.length,
       credentials: initialGoogleCredentials,
@@ -3879,6 +3888,7 @@ function remoteEventValues(
 ): typeof calendarEvents.$inferInsert {
   return {
     allDay: event.allDay,
+    ...(event.attendees === undefined ? {} : { attendees: event.attendees }),
     calendarId,
     conferenceUrl: event.conferenceUrl,
     deletedAt: null,

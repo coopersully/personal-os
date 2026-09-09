@@ -11,7 +11,7 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https:; font-src 'self' data:; img-src 'self' asset: data: https://lh3.googleusercontent.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https:; font-src 'self' data:; img-src 'self' asset: data: https://lh3.googleusercontent.com https://i.pinimg.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
     },
     "windows": [
       {
@@ -19,7 +19,7 @@
         "center": true,
         "decorations": true,
         "fullscreen": false,
-        "height": 760,
+        "height": 800,
         "label": "main",
         "minHeight": 560,
         "minWidth": 360,
@@ -27,7 +27,7 @@
         "transparent": false,
         "title": "nohmi",
         "visible": true,
-        "width": 460
+        "width": 1100
       }
     ]
   },
@@ -44,6 +44,16 @@
     ],
     "longDescription": "A transparent coordination layer for reminders and calendars, shared by people and their authorized agents.",
     "shortDescription": "Your day, made tangible.",
-    "targets": "all"
+    "targets": "all",
+    "macOS": {
+      "minimumSystemVersion": "14.0"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["ilo"]
+      }
+    }
   }
 }

@@ -1,4 +1,4 @@
-// Regenerates every raster form of the ilo application mark from the authored SVG masters in
+// Regenerates every raster form of the nohmi application mark from the authored SVG masters in
 // apps/web/public. Run after changing icon.svg or icon-maskable.svg:
 //
 //   node scripts/generate-app-mark.mjs
@@ -15,7 +15,7 @@ import { chromium } from "@playwright/test";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const publicDirectory = resolve(repositoryRoot, "apps", "web", "public");
-const staging = await mkdtemp(resolve(tmpdir(), "ilo-app-mark-"));
+const staging = await mkdtemp(resolve(tmpdir(), "nohmi-app-mark-"));
 
 const targets = [
   { source: "icon.svg", directory: publicDirectory, output: "favicon-32.png", size: 32 },

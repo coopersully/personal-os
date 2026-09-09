@@ -586,15 +586,35 @@ p {
   background: var(--app-shell-background);
   border-radius: calc(var(--radius) * 1.4);
   min-height: calc(100vh - 20px);
-  overflow: clip;
+  /* Fixed navigation/popovers must escape the shell's rounded rectangle in WKWebView. */
+  overflow: visible;
 }
 .desktop .sidebar {
-  background: var(--desktop-sidebar-background);
+  background: var(--sidebar);
   height: calc(100vh - 20px);
   top: 10px;
 }
 .desktop .workspace-app-bar {
   top: 10px;
+}
+/* Resident WKWebView can pause entrance animations when the window loses focus.
+   Desktop navigation must remain visible without an animation completing. */
+.desktop .settings-page,
+.desktop .settings-panel,
+.desktop .sidebar__content {
+  animation: none;
+}
+
+.desktop .auth-form-wrap {
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.desktop .auth-form-wrap > section {
+  width: min(100%, 380px);
+}
+.desktop .sidebar {
+  transition: none;
 }
 @media (prefers-contrast: more) {
   .desktop .app-shell {

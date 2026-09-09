@@ -2,7 +2,12 @@
 
 ## Repository Purpose
 
-This repository is the ilo monorepo and also stores personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
+This repository is the nohmi monorepo and also stores personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
+
+## Product Spelling
+
+- The current product name is `nohmi`, always lowercase, including at the start of a sentence.
+- Never spell the product `nomi`, `Nomi`, or `Nohmi`. Preserve `ilo` only in compatibility identifiers, historical references, and existing tool or protocol names that have not been migrated.
 
 ## Codex Local Environment
 

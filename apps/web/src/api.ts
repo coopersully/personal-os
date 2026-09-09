@@ -1,29 +1,21 @@
 import { ApiClientError, createApiClient } from "@personal-os/api-client";
 
-const desktop = "__TAURI_INTERNALS__" in window;
-const desktopSessionKey = "personal-os.desktop-session";
+import { desktopFetch, hostedServer, isDesktop } from "./features/desktop/bridge.js";
 
-export function apiBaseUrl(configuredBaseUrl: string | undefined, isDesktop: boolean) {
-  if (configuredBaseUrl) return configuredBaseUrl;
-  return isDesktop ? "http://localhost:8788" : window.location.origin;
+export function apiBaseUrl(configuredBaseUrl: string | undefined, desktop: boolean) {
+  if (desktop) return hostedServer;
+  return configuredBaseUrl || window.location.origin;
 }
 
-const baseUrl = apiBaseUrl(import.meta.env.VITE_API_BASE_URL, desktop);
+// Older desktop builds stored tokens in web storage. Require a fresh Keychain-backed sign-in.
+if (isDesktop()) localStorage.removeItem("personal-os.desktop-session");
 
-export const api = createApiClient(
-  desktop
-    ? {
-        baseUrl,
-        onSessionToken: (token) => {
-          if (token) localStorage.setItem(desktopSessionKey, token);
-          else localStorage.removeItem(desktopSessionKey);
-        },
-        ...(localStorage.getItem(desktopSessionKey)
-          ? { sessionToken: localStorage.getItem(desktopSessionKey) as string }
-          : {}),
-      }
-    : { baseUrl },
-);
+// The desktop transport resolves the selected server and attaches Keychain credentials.
+// Never persist or pass a human session token through the renderer.
+export const api = createApiClient({
+  baseUrl: apiBaseUrl(import.meta.env.VITE_API_BASE_URL, isDesktop()),
+  ...(isDesktop() ? { fetch: desktopFetch } : {}),
+});
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";

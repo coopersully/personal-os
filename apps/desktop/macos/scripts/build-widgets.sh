@@ -30,11 +30,23 @@ xcrun swiftc -swift-version 5 -parse-as-library -application-extension -O -whole
   "${sources[@]}" -o "$bundle/Contents/MacOS/IloWidgets"
 printf '%s\n' "${sources[@]}" > "$output/sources.txt"
 printf '%s\n' "$output/IloWidgets.swiftconstvalues" > "$output/const-values.txt"
-xcrun appintentsmetadataprocessor --output "$bundle/Contents/Resources" \
-  --toolchain-dir "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain" \
-  --module-name IloWidgets --sdk-root "$sdk" --xcode-version "$(xcodebuild -version | awk '/Build version/{print $3}')" \
-  --platform-family macOS --deployment-target 14.0 --target-triple "$arch-apple-macosx14.0" \
-  --source-file-list "$output/sources.txt" --swift-const-vals-list "$output/const-values.txt"
+metadata_args=(
+  --output "$bundle/Contents/Resources"
+  --toolchain-dir "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain"
+  --module-name IloWidgets
+  --sdk-root "$sdk"
+  --xcode-version "$(xcodebuild -version | awk '/Build version/{print $3}')"
+  --platform-family macOS
+  --deployment-target 14.0
+  --target-triple "$arch-apple-macosx14.0"
+  --source-file-list "$output/sources.txt"
+  --swift-const-vals-list "$output/const-values.txt"
+)
+metadata_help="$(xcrun appintentsmetadataprocessor --help 2>&1 || true)"
+if grep -Fq -- '--binary-file' <<< "$metadata_help"; then
+  metadata_args+=(--binary-file "$bundle/Contents/MacOS/IloWidgets")
+fi
+xcrun appintentsmetadataprocessor "${metadata_args[@]}"
 plutil -lint "$bundle/Contents/Info.plist" "$output/IloWidgets.entitlements"
 if [[ -n "${ILO_WIDGET_PROVISIONING_PROFILE:-}" ]]; then cp "$ILO_WIDGET_PROVISIONING_PROFILE" "$bundle/Contents/embedded.provisionprofile"; fi
 if [[ -n "${ILO_SIGNING_IDENTITY:-}" ]]; then

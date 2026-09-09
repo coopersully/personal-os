@@ -235,7 +235,10 @@ export async function tick(configPath, io, now = Date.now()) {
         if (!maintenance()) {
           await io.start(runtime);
           if (maintenance()) await io.stop(runtime);
-          else await io.publish(runtime);
+          else {
+            await io.publish(runtime);
+            if (maintenance()) await io.stop(runtime);
+          }
         }
         state.phase = "idle";
         save();
@@ -257,6 +260,10 @@ export async function tick(configPath, io, now = Date.now()) {
       await io.start(runtime);
       if (maintenance()) throw new Error("Maintenance requested during startup.");
       await io.publish(runtime);
+      // A manual stop can signal maintenance while publication owns the lock.
+      // Honor it before completion; the successfully installed revision stays
+      // recorded, but its writers and ingress are intentionally stopped.
+      if (maintenance()) await io.stop(runtime);
       state.deployed = candidate;
       if (state.adoption) {
         state.bootstrapConsumed = true;

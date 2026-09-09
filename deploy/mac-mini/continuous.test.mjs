@@ -338,6 +338,46 @@ test("maintenance during backup keeps the untouched old release intentionally st
   assert.equal(f.state().phase, "idle");
 });
 
+for (const resumingPrevious of [false, true]) {
+  test(`maintenance during ${resumingPrevious ? "old-release resumption" : "new-release publication"} stops writers under the held lock`, async (t) => {
+    const f = fixture(t);
+    let running = true;
+    const stoppedRevisions = [];
+    f.io.stop = async (runtime) => {
+      assert.equal(existsSync(join(f.root, "operation.lock")), true);
+      stoppedRevisions.push(runtime.config.revision);
+      running = false;
+    };
+    f.io.start = async () => {
+      running = true;
+    };
+    f.io.publish = async () => {
+      writePrivate(join(f.root, "maintenance.json"), "{}");
+      await assert.rejects(
+        withLock(f.root, async () => {}),
+        /locked/,
+      );
+    };
+    if (resumingPrevious) {
+      let reads = 0;
+      f.io.main = async () => (++reads <= 2 ? candidate : "e".repeat(40));
+    }
+    await tick(f.configPath, f.io, 1_000_000);
+    assert.equal(running, false);
+    assert.deepEqual(stoppedRevisions, [old, resumingPrevious ? old : candidate]);
+    assert.equal(f.state().phase, "idle");
+    assert.equal(f.state().deployed, resumingPrevious ? old : candidate);
+    assert.equal(
+      JSON.parse(privateFile(f.configPath)).revision,
+      resumingPrevious ? old : candidate,
+    );
+    assert.equal(existsSync(join(f.root, "maintenance.json")), true);
+    await tick(f.configPath, f.io, 2_000_000);
+    assert.equal(running, false);
+    assert.equal(stoppedRevisions.length, 2);
+  });
+}
+
 test("attended squash adoption permits only one exact reviewed main SHA and retains truthful deployment state", async (t) => {
   const f = fixture(t);
   f.io.history = async () => false;

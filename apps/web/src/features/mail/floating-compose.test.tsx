@@ -50,19 +50,25 @@ const draft: MailDraft = {
 
 function renderComposer({
   accounts = [account],
+  accountsState,
   intent,
   onIntentHandled,
+  onRetryAccounts,
 }: {
   accounts?: MailSetupAccount[];
+  accountsState?: Parameters<typeof FloatingMailComposer>[0]["accountsState"];
   intent?: Parameters<typeof FloatingMailComposer>[0]["intent"];
   onIntentHandled?: () => void;
+  onRetryAccounts?: () => void;
 } = {}) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
       <FloatingMailComposer
         accounts={accounts}
+        {...(accountsState === undefined ? {} : { accountsState })}
         {...(intent === undefined ? {} : { intent })}
         {...(onIntentHandled === undefined ? {} : { onIntentHandled })}
+        {...(onRetryAccounts === undefined ? {} : { onRetryAccounts })}
       />
     </QueryClientProvider>,
   );
@@ -209,6 +215,44 @@ describe("FloatingMailComposer", () => {
 
     expect(screen.getByLabelText("From")).toHaveTextContent("Personalme@example.com");
     expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
+  });
+
+  it("keeps account setup failures recoverable without dropping the compose action", async () => {
+    const retry = vi.fn();
+    renderComposer({ accounts: [], accountsState: "error", onRetryAccounts: retry });
+
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
+  });
+
+  it("continues a later queued autosave after an earlier save fails", async () => {
+    let rejectFirst: (reason: Error) => void = () => undefined;
+    const firstSave = new Promise<MailDraft>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    const create = vi
+      .spyOn(api, "createMailDraft")
+      .mockReturnValueOnce(firstSave)
+      .mockResolvedValueOnce({ ...draft, subject: "First updated" });
+    const errorToast = vi.spyOn(toast, "error");
+    renderComposer();
+
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.type(screen.getByLabelText("Subject"), "First");
+    await waitFor(() => expect(create).toHaveBeenCalledOnce(), { timeout: 2_000 });
+    await userEvent.type(screen.getByLabelText("Subject"), " updated");
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+    rejectFirst(new Error("Temporary draft failure"));
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]?.[0]).toMatchObject({ subject: "First updated" });
+    expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
+      description: "Temporary draft failure",
+    });
   });
 
   it("prefills and saves a new reply or forward intent", async () => {

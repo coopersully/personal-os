@@ -560,33 +560,59 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/mail/maintenance/{id}": {
         get: {
+          parameters: [taskIdParameter],
           security,
           responses: { 200: { description: "Owned Mail maintenance run" } },
         },
       },
       "/v1/mail/reviews/{id}": {
-        get: { security, responses: { 200: { description: "Immutable Mail review artifact" } } },
+        get: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Immutable Mail review artifact" } },
+        },
       },
       "/v1/mail/threads/{id}/stewardship": {
-        get: { security, responses: { 200: { description: "Exact-thread stewardship ledger" } } },
+        get: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Exact-thread stewardship ledger" } },
+        },
       },
       "/v1/mail/threads/{id}/disposition": {
-        put: { security, responses: { 200: { description: "Revision-checked disposition" } } },
+        put: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Revision-checked disposition" } },
+        },
       },
       "/v1/mail/threads/{id}/obligations": {
-        post: { security, responses: { 201: { description: "Revision-bound Mail obligation" } } },
+        post: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 201: { description: "Revision-bound Mail obligation" } },
+        },
       },
       "/v1/mail/threads/{id}/response-brief/preview": {
         post: {
+          parameters: [taskIdParameter],
           security,
           responses: { 200: { description: "Private non-transmittable response checklist" } },
         },
       },
       "/v1/mail/obligations/{id}": {
-        patch: { security, responses: { 200: { description: "Version-checked obligation" } } },
+        patch: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Version-checked obligation" } },
+        },
       },
       "/v1/mail/questions/{id}/answer": {
-        post: { security, responses: { 200: { description: "Version-checked Mail answer" } } },
+        post: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Version-checked Mail answer" } },
+        },
       },
       "/v1/mail/feedback": {
         post: {

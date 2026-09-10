@@ -234,10 +234,9 @@ Mail is the first executable implementation:
 - `create_mail_attention_item` derives source attribution from an owned conversation and
   serializes same-thread/kind updates so important mail uses the shared attention envelope without
   duplicate open records.
-- agent sending is draft-first: `create_mail_draft` records a durable local draft, and `send_mail`
-  requires that draft ID plus an exact field match. A database claim permits only one provider
-  attempt at a time. Ambiguous and stale attempts remain blocked until the signed-in person checks
-  provider Sent Mail and resolves the draft in the Mail recovery panel.
+- agent sending is unavailable: `create_mail_draft` and `send_mail` are not registered MCP tools.
+  Durable drafts, exact confirmation, provider delivery, and ambiguous-send reconciliation belong
+  exclusively to the signed-in human Mail surface.
 - proposed rules preview against a dated, bounded window of at most 200 recent cached
   conversations. The response names the window and reports when it may be truncated.
 - previously observed threads are retained when a provider returns its capped recent page; absence

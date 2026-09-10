@@ -61,6 +61,7 @@ import {
   WorkspaceSecondaryAppBarLeading,
 } from "../../components/workspace-secondary-app-bar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
+import { useErrorNotification } from "../../lib/error-notification.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
@@ -326,6 +327,7 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-setup-context"],
     refetchInterval: visibleConnectorRefreshInterval,
   });
+  useErrorNotification(!setup.data && setup.isError ? setup.error : null);
   const drafts = useQuery({
     enabled: listScope === "drafts",
     queryFn: api.listMailDrafts,
@@ -540,13 +542,13 @@ export function MailPage({ user }: { user: User }) {
             </section>
           </ResizablePanel>
         </ResizablePanelGroup>
-        {setup.data ? (
-          <FloatingMailComposer
-            accounts={setup.data.accounts}
-            intent={composeIntent}
-            onIntentHandled={() => setComposeIntent(null)}
-          />
-        ) : null}
+        <FloatingMailComposer
+          accounts={setup.data?.accounts ?? []}
+          accountsState={setup.data ? "ready" : setup.isError ? "error" : "loading"}
+          intent={composeIntent}
+          onIntentHandled={() => setComposeIntent(null)}
+          onRetryAccounts={() => void setup.refetch()}
+        />
       </div>
     </>
   );

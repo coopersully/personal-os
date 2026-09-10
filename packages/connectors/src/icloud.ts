@@ -3,7 +3,7 @@ import type { CreateEventInput, MailAddress, UpdateEventInput } from "@personal-
 import ICAL from "ical.js";
 import { ImapFlow } from "imapflow";
 import { type AddressObject, simpleParser } from "mailparser";
-import nodemailer from "nodemailer";
+import nodemailer, { type SendMailOptions } from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject, type DAVResponse } from "tsdav";
 import { z } from "zod";
 import { ConnectorError, classifyICloudError } from "./failures.js";
@@ -54,9 +54,25 @@ type ICloudConnectorOptions = {
   createImapClient?: (credentials: ICloudCredentials) => ImapClient;
   createSmtpTransport?: (credentials: ICloudCredentials) => {
     close: () => void;
-    sendMail: (input: unknown) => Promise<unknown>;
+    sendMail: (input: SendMailOptions) => Promise<unknown>;
   };
 };
+
+export function createICloudSmtpTransport(
+  credentials: ICloudCredentials,
+  endpoint: { host?: string; port?: number } = {},
+) {
+  return nodemailer.createTransport({
+    auth: { pass: credentials.appSpecificPassword, user: credentials.email },
+    connectionTimeout: PROVIDER_REQUEST_TIMEOUT_MS,
+    greetingTimeout: 10_000,
+    host: endpoint.host ?? "smtp.mail.me.com",
+    port: endpoint.port ?? 587,
+    requireTLS: true,
+    secure: false,
+    socketTimeout: 45_000,
+  });
+}
 
 const MAX_CALDAV_SYNC_PAGES = 10;
 const MAX_CALDAV_SYNC_RESOURCES = 500;
@@ -518,16 +534,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     async sendMail(credentials, input) {
       const transport = (
         options.createSmtpTransport ??
-        ((smtpCredentials: ICloudCredentials) =>
-          nodemailer.createTransport({
-            auth: { pass: smtpCredentials.appSpecificPassword, user: smtpCredentials.email },
-            connectionTimeout: PROVIDER_REQUEST_TIMEOUT_MS,
-            greetingTimeout: 10_000,
-            host: "smtp.mail.me.com",
-            port: 587,
-            secure: false,
-            socketTimeout: 45_000,
-          }))
+        ((smtpCredentials: ICloudCredentials) => createICloudSmtpTransport(smtpCredentials))
       )(credentials);
       try {
         await transport.sendMail({

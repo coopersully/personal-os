@@ -22,6 +22,7 @@ const fresh: GoogleCredentials = {
   tokenType: "Bearer",
 };
 const expired: GoogleCredentials = { ...fresh, expiresAt: "2026-07-13T11:00:00.000Z" };
+const credentialsWith = (scope: string): GoogleCredentials => ({ ...fresh, scope });
 const timedEvent = {
   conferenceData: {
     createRequest: { status: { statusCode: "success" } },
@@ -212,7 +213,6 @@ describe("Google Calendar connector", () => {
   });
 
   it("derives enabled services only from the complete granted scope set", () => {
-    const credentialsWith = (scope: string): GoogleCredentials => ({ ...fresh, scope });
     expect(
       googleGrantedServices(
         credentialsWith(
@@ -300,19 +300,42 @@ describe("Google Calendar connector", () => {
     expect(Buffer.from(body.raw, "base64url").toString()).toContain("person@example.com");
   });
 
-  it("classifies credential failure before provider submission as known non-acceptance", async () => {
-    const fetch = queued(response({ error: "invalid_grant" }, 400));
+  it("rejects Mail delivery before provider submission when send authority is absent", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
     const google = connector(fetch);
     if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
 
     await expect(
-      google.sendMail(expired, {
+      google.sendMail(credentialsWith("https://www.googleapis.com/auth/gmail.modify"), {
         body: "Prepared response",
         cc: [],
         from: "sender@example.com",
         subject: "Follow up",
         to: [{ address: "person@example.com", name: null }],
       }),
+    ).rejects.toMatchObject({ name: "MailSendPreAcceptanceError" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("classifies credential failure before provider submission as known non-acceptance", async () => {
+    const fetch = queued(response({ error: "invalid_grant" }, 400));
+    const google = connector(fetch);
+    if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
+
+    await expect(
+      google.sendMail(
+        {
+          ...expired,
+          scope: "https://www.googleapis.com/auth/gmail.send",
+        },
+        {
+          body: "Prepared response",
+          cc: [],
+          from: "sender@example.com",
+          subject: "Follow up",
+          to: [{ address: "person@example.com", name: null }],
+        },
+      ),
     ).rejects.toMatchObject({ name: "MailSendPreAcceptanceError" });
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/token");
     expect(fetch).toHaveBeenCalledOnce();

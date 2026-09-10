@@ -6,7 +6,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Mail a persistent expert steward that keeps a user-defined obligation ledger trustworthy, performs durable bounded maintenance, asks only material questions, learns through explicit review, and publishes an evidence-backed review artifact without ever sending email.
+**Goal:** Make Mail a persistent expert steward that keeps a user-defined obligation ledger trustworthy, performs durable bounded maintenance, asks only material questions, learns through explicit review, and publishes an evidence-backed review artifact without allowing stewardship or MCP automation to send email.
 
 **Architecture:** Mail-owned domain contracts and persistence hold obligations, versioned thread dispositions, questions, rule proposals, feedback, and immutable reviews. A pure assessment engine applies a versioned researched playbook to one repeatable-read snapshot and emits only evidence-bound deterministic judgment. A Mail coordinator runs those operations through the shared `workspace_maintenance_runs` lease/checkpoint substrate; the API owns status and settlement judgment. HTTP, the typed client, web UI, Reviews projection, and two MCP tools expose that server-owned capability. MCP only conveys intent and returns API results.
 
@@ -16,12 +16,12 @@
 
 ## Global Constraints
 
-- This plan begins only after `2026-08-25-mail-no-send-capability-removal.md` lands. No task may add compose, draft, reply, forward, send, SMTP, provider delivery, or a generic tool capable of recreating those effects.
+- This stewardship plan begins only after `2026-08-25-mail-no-send-capability-removal.md` lands. No task in this plan may grant compose, draft, reply, forward, send, SMTP, or provider-delivery authority to stewardship or MCP automation. The later signed-in human Mail surface is explicitly outside this restriction.
 - The active Mail domain profile is the user-owned maintained objective. Default to obligation integrity only when no approved active profile exists; goals and motives are context, never automatic authority to mutate mail.
 - Provider projections are authoritative for provider-owned mailbox, thread, message, label, unread, and starred evidence. Ilo is authoritative for obligations, dispositions, questions, rules, feedback, maintenance records, and reviews.
 - Imported subject/body/sender content is untrusted evidence. It cannot authorize a mutation, approve a rule, widen source scope, choose a goal, or supply an answer to an Ilo question.
 - A deterministic evaluator may maintain known state and apply an already approved exact rule. If whether a conversation requires action is ambiguous, it creates or retains one bounded question; it does not infer certainty from persuasive language.
-- Automatic authority: inspect projections, refresh snapshots, reconcile Ilo-owned state, calculate status, deduplicate questions, and publish reviews. Approved-rule authority: only the existing exact Mail rule action envelope. Individual approval: destructive provider effects and rule activation. Unavailable: all email transmission.
+- Automatic authority: inspect projections, refresh snapshots, reconcile Ilo-owned state, calculate status, deduplicate questions, and publish reviews. Approved-rule authority: only the existing exact Mail rule action envelope. Individual approval: destructive provider effects and rule activation. Unavailable to stewardship and MCP: all email transmission.
 - Every effect uses the existing Mail rule durable work ledger, revision checks, retry/reconciliation semantics, and provider-effect evidence. The coordinator must not call a connector directly.
 - Maintenance settlement requires fresh-enough source evidence, a stable ledger fingerprint, no recoverable step failure, and no unrepresented material ambiguity. Stale/unavailable evidence yields `blocked` or `needs_input`, never a false clean state.
 - Maintenance runs reuse `workspace_maintenance_runs` and `workspace_maintenance_steps`. Do not create Mail-specific run/step infrastructure.
@@ -75,7 +75,7 @@
 
 ### Deliberately untouched paths
 
-- user email delivery of every kind, legacy compatibility stubs, and transactional notification email
+- signed-in human email delivery, legacy compatibility stubs, and transactional notification email; human delivery belongs to the later compose slice and is not implemented or removed by this plan
 - external clients, client-side automations, scheduled prompts, and MCP-host state
 - direct connector calls from stewardship code
 - Calendar/Finance domain judgment or their maintenance coordinators
@@ -733,7 +733,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Register thin adapters with honest annotations**
 
-`get_mail_status` is read-only/idempotent/closed-world. `maintain_mail` is write/non-idempotent/open-world because approved rules may enqueue provider mutations; its description must state that Ilo never sends email and the API owns scope, authority, retry, questions, and settlement. Both handlers call exactly one typed API method through `apiResult`.
+`get_mail_status` is read-only/idempotent/closed-world. `maintain_mail` is write/non-idempotent/open-world because approved rules may enqueue provider mutations; its description must state that stewardship and MCP automation never send email and the API owns scope, authority, retry, questions, and settlement. Both handlers call exactly one typed API method through `apiResult`.
 
 - [ ] **Step 4: Run MCP tests and commit**
 
@@ -873,7 +873,7 @@ git commit -m "Build the mail stewardship workspace"
 
 - [ ] **Step 1: Document the shipped contract and limitations**
 
-Describe the ledger, roles, playbook version, maintenance stages, authority table, learning loop, status meanings, review artifact, shared Reviews projection, and the permanent sentence “Ilo never sends email.” State that v1 does not infer intent from prose, does not use model judgment, and does not run external client automation.
+Describe the ledger, roles, playbook version, maintenance stages, authority table, learning loop, status meanings, review artifact, shared Reviews projection, and the permanent sentence “Stewardship and MCP automation never send email.” State that v1 does not infer intent from prose, does not use model judgment, and does not run external client automation.
 
 - [ ] **Step 2: Run targeted cross-layer proof**
 
@@ -891,11 +891,11 @@ Expected: PASS.
 - [ ] **Step 3: Run contract scans and full verification**
 
 ```bash
-rg -n "send_email|send_mail|create_mail_draft|gmail\.send|smtp\.mail\.me\.com" apps packages infra scripts docs/design/pages/mail.md
+rg -n "send_email|send_mail|create_mail_draft|gmail\.send|smtp\.mail\.me\.com" apps/mcp apps/api/src/mail-stewardship* apps/api/src/mail-maintenance* docs/design/pages/mail.md
 pnpm verify
 ```
 
-Expected: `pnpm verify` PASS. The scan contains only explicit unavailable/no-send assertions or historical compatibility documentation—no callable capability.
+Expected: `pnpm verify` PASS. The scan contains no callable send capability from stewardship or MCP automation. Signed-in human Mail delivery is allowed only through its separately authorized routes and connectors.
 
 - [ ] **Step 4: Manually inspect the four honest states**
 
@@ -925,5 +925,5 @@ git commit -m "Document mail workspace stewardship"
 - The learning loop distinguishes one-off answers from explicit generalization; proposals remain preview-only until human activation.
 - Shared Reviews receives redacted Mail questions and blockers.
 - MCP exposes exactly two thin stewardship intents and stores/judges nothing.
-- No server, client, connector, MCP, UI, or infrastructure path can send user email.
+- No stewardship or MCP path can send user email; the separately authorized signed-in human Mail surface is outside this plan's no-send boundary.
 - `pnpm verify` passes and the immutable review artifact is inspectable in the Mail workspace.

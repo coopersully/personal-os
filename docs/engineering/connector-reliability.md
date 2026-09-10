@@ -98,9 +98,10 @@ change signals only; they never replace the authoritative five-minute reconcilia
 | iCloud Mail human-confirmed delivery | `smtp.mail.me.com` | SMTP submission with STARTTLS | TCP 587 |
 
 The signed-in Mail workspace may submit a durable, human-confirmed plain-text draft. Google uses
-Gmail HTTPS with explicit `gmail.send`; iCloud uses bounded authenticated SMTP submission. MCP and
-autonomous maintenance cannot invoke either delivery path. An ambiguous provider result is never
-automatically retried and must become a visible human reconciliation state.
+Gmail HTTPS with explicit `gmail.send`; iCloud requires STARTTLS before authentication and uses
+bounded authenticated SMTP submission. MCP and autonomous maintenance cannot invoke either
+delivery path. An ambiguous provider result is never automatically retried and must become a
+visible human reconciliation state.
 
 Adding or changing a non-HTTPS transport requires the infrastructure change in the same pull
 request. `scripts/check-provider-network-contract.mjs`, run by `pnpm lint`, checks that connector

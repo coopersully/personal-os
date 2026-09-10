@@ -7773,6 +7773,16 @@ describe("ilo web app", () => {
     expect(await screen.findByText("Nothing here")).toBeInTheDocument();
     expect(screen.getByText("Select a conversation")).toBeInTheDocument();
     noThreadsView.unmount();
+
+    mocks.getMailSetupContext.mockRejectedValueOnce(new Error("mail setup unavailable"));
+    const setupErrorView = setup("/mail");
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole("button", { name: "Compose a message" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
+    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByLabelText("From")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
+    setupErrorView.unmount();
   });
 
   it("renders iCloud mail and calendar states while connector work is pending or fails", async () => {

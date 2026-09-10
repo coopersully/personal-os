@@ -591,6 +591,16 @@ describe.sequential("connector service", () => {
     await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
       "reconnect",
     );
+    vi.mocked(google.sendMail).mockClear();
+    await expect(
+      service.mailGateway.send(userId, account.id, {
+        body: "Blocked without send scope",
+        cc: [],
+        subject: "Blocked",
+        to: [{ address: "recipient@example.com", name: null }],
+      }),
+    ).rejects.toBeInstanceOf(MailProviderRejectedError);
+    expect(google.sendMail).not.toHaveBeenCalled();
 
     await database.db
       .update(calendarAccounts)

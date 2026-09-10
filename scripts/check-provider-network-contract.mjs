@@ -90,10 +90,21 @@ requireApplicationEgress(993, "iCloud Mail IMAP over TLS");
 if (!/gmail\.send/.test(google)) {
   throw new Error("Google Mail delivery must request explicit Gmail send authority.");
 }
-if (!/host:\s*"smtp\.mail\.me\.com"[\s\S]*?port:\s*587[\s\S]*?secure:\s*false/.test(icloud)) {
+const smtpTransportOptions = icloud.match(
+  /export function createICloudSmtpTransport[\s\S]*?nodemailer\.createTransport\(\{(?<options>[\s\S]*?)\n\s*\}\);/,
+)?.groups?.options;
+if (
+  !smtpTransportOptions ||
+  !/"smtp\.mail\.me\.com"/.test(smtpTransportOptions) ||
+  !/\b587\b/.test(smtpTransportOptions) ||
+  !/secure:\s*false/.test(smtpTransportOptions)
+) {
   throw new Error("iCloud Mail delivery must declare STARTTLS SMTP submission on port 587.");
 }
-if (!/connectionTimeout:\s*PROVIDER_REQUEST_TIMEOUT_MS/.test(icloud)) {
+if (!/requireTLS:\s*true/.test(smtpTransportOptions)) {
+  throw new Error("iCloud Mail delivery must require STARTTLS before SMTP authentication.");
+}
+if (!/connectionTimeout:\s*PROVIDER_REQUEST_TIMEOUT_MS/.test(smtpTransportOptions)) {
   throw new Error("iCloud SMTP must use the shared provider connection timeout.");
 }
 requireApplicationEgress(587, "iCloud Mail SMTP submission");

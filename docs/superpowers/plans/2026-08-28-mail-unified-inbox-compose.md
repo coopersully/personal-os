@@ -312,7 +312,8 @@ Create incomplete drafts only for owned Mail-enabled accounts. Validate thread/a
 6. settle `sent` and write redacted `mail.sent` audit metadata; or
 7. release to `draft` only for proven pre-acceptance rejection, otherwise move to `reconcile`.
 
-Retain the existing 30-minute stale-claim threshold. Never automatically resubmit a stale or ambiguous draft.
+Use the two-minute stale-claim threshold defined by `MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS`. Never
+automatically resubmit a stale or ambiguous draft; route it to human Sent Mail reconciliation.
 
 - [ ] **Step 6: Replace compatibility stubs with authenticated human routes**
 

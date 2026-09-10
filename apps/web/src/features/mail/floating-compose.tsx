@@ -57,12 +57,16 @@ function accountInitials(account: MailSetupAccount) {
 
 export function FloatingMailComposer({
   accounts,
+  accountsState = "ready",
   intent,
   onIntentHandled,
+  onRetryAccounts,
 }: {
   accounts: MailSetupAccount[];
+  accountsState?: "error" | "loading" | "ready";
   intent?: ComposeIntent | null;
   onIntentHandled?: () => void;
+  onRetryAccounts?: () => void;
 }) {
   const client = useQueryClient();
   const available = useMemo(
@@ -94,12 +98,20 @@ export function FloatingMailComposer({
   const restoreFocusRef = useRef(false);
 
   useEffect(() => {
-    if (open) toRef.current?.focus();
+    setAccountId((current) =>
+      available.some((account) => account.accountId === current)
+        ? current
+        : (available[0]?.accountId ?? ""),
+    );
+  }, [available]);
+
+  useEffect(() => {
+    if (open && accountsState === "ready" && available.length) toRef.current?.focus();
     else if (restoreFocusRef.current) {
       restoreFocusRef.current = false;
       triggerRef.current?.focus();
     }
-  }, [open]);
+  }, [accountsState, available.length, open]);
 
   const reset = useCallback(() => {
     draftRef.current = null;
@@ -186,7 +198,7 @@ export function FloatingMailComposer({
   const persist = useCallback((): Promise<MailDraft> => {
     const payload = snapshot();
     const requestedVersion = editVersionRef.current;
-    const operation = persistQueueRef.current.then(async () => {
+    const run = async () => {
       const existing = draftRef.current;
       const saved = existing
         ? await api.updateMailDraft(existing.id, {
@@ -201,7 +213,8 @@ export function FloatingMailComposer({
       }
       await client.invalidateQueries({ queryKey: ["mail-drafts"] });
       return saved;
-    });
+    };
+    const operation = persistQueueRef.current.then(run, run);
     persistQueueRef.current = operation.then(
       () => undefined,
       () => undefined,
@@ -268,7 +281,30 @@ export function FloatingMailComposer({
             </ResponsiveDialogDescription>
           </ResponsiveDialogHeader>
           <ResponsiveDialogBody className="mail-floating-compose__fields">
-            {!available.length ? (
+            {accountsState === "loading" ? (
+              <Alert>
+                <MailIcon aria-hidden="true" />
+                <AlertTitle>Loading mail accounts…</AlertTitle>
+                <AlertDescription>
+                  Checking which connected accounts can send this message.
+                </AlertDescription>
+              </Alert>
+            ) : accountsState === "error" ? (
+              <Alert variant="destructive">
+                <PlugIcon aria-hidden="true" />
+                <AlertTitle>Mail accounts are unavailable</AlertTitle>
+                <AlertDescription>
+                  Try loading your account connections again before composing.
+                </AlertDescription>
+                {onRetryAccounts ? (
+                  <AlertAction>
+                    <Button onClick={onRetryAccounts} size="sm">
+                      Try again
+                    </Button>
+                  </AlertAction>
+                ) : null}
+              </Alert>
+            ) : !available.length ? (
               <Alert variant="warning">
                 <PlugIcon aria-hidden="true" />
                 <AlertTitle>
@@ -432,7 +468,7 @@ export function FloatingMailComposer({
             </span>
             <ResponsiveDialogActions>
               <Button
-                disabled={!accountId || saveState === "saving"}
+                disabled={accountsState !== "ready" || !accountId || saveState === "saving"}
                 onClick={() => {
                   setSaveState("saving");
                   void persist()

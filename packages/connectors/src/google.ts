@@ -810,6 +810,12 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     async sendMail(credentials, input) {
+      if (!googleMailSendGranted(credentials)) {
+        throw new MailSendPreAcceptanceError(
+          "Google Mail send authority is missing. Reconnect the account before sending.",
+          undefined,
+        );
+      }
       let currentCredentials: GoogleCredentials;
       let raw: Buffer;
       try {

@@ -668,12 +668,16 @@ export function createConnectorService({
       if (account.provider !== "google" || !google.sendMail) {
         throw new AppError("service_unavailable", "This mail provider cannot send messages.");
       }
+      const googleCredentials = credentials<GoogleCredentials>(account);
+      if (!googleMailSendGranted(googleCredentials)) {
+        throw new MailProviderRejectedError(
+          "The Google account must be reconnected with Mail send access before sending.",
+          undefined,
+        );
+      }
       let updatedCredentials: GoogleCredentials;
       try {
-        updatedCredentials = await google.sendMail(
-          credentials<GoogleCredentials>(account),
-          providerInput,
-        );
+        updatedCredentials = await google.sendMail(googleCredentials, providerInput);
       } catch (error) {
         if (error instanceof MailSendPreAcceptanceError) {
           throw new MailProviderRejectedError(

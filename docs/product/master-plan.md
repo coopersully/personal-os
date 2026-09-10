@@ -118,7 +118,7 @@ flowchart TD
 
 - Migrate reminders into a commitment model while retaining existing IDs/API compatibility.
 - Add task fields: project, long-lived organizational container, status, priority, estimate, due versus scheduled time, recurrence/exception, subtasks/checklists, tags, notes, attachments, energy/context, sources, goals/motives, defer/complete history.
-- Add projects, long-lived organizational containers, task inbox, upcoming/someday/completed/custom filters, list/board/calendar/timeline/focus views, bulk actions, search, quick capture, natural-language parse confirmation, and keyboard commands. Choose the final user-facing container name through product review rather than assuming “Areas.”
+- Add projects, long-lived organizational containers, task inbox, upcoming/someday/completed/custom filters, list/board/calendar/timeline/focus views, bulk actions, search, quick capture, natural-language parse confirmation, and keyboard commands. Retain **Lists** as the provisional label, do not assume **Areas**, and allow a later product review to change the label without changing the hierarchy.
 - Import tasks from external providers and make nohmi the authoritative working workspace after
   import. Preserve bidirectional multi-provider synchronization as a possible future extension, not
   a current delivery requirement.
@@ -240,6 +240,9 @@ flowchart TD
 - Add Plaid Link, encrypted access credential handling, webhooks/Transactions sync, source/account selection, data freshness, connection repair, duplicate detection, manual accounts/transactions, data deletion/export. Keep manual, CSV, and OFX imports as first-class no-connector paths; show connector freshness and applicable production-cost state rather than implying that Plaid is free or universally available.
 - Normalize balances, pending/posted transactions, merchant/location, category/confidence, transfer matching, recurring streams, account/investment/liability data, and financial source links.
 - Build finance review queue and transaction inspector: categorize, split, tag, ignore/exclude, match transfer, edit merchant, rule creation, bulk bounded review, confidence and provenance. Pending transactions remain provisional and cannot create a durable rule or final safe-to-spend/budget assertion until posting/reconciliation.
+- Add explainable over- and under-plan pacing signals. Tie each material variance to obligations,
+  goals, needs, and user-selected quality-of-life priorities instead of assuming that lower spending
+  is always better.
 - Build rule engine with deterministic merchant/amount/account/date conditions plus agent suggestion, dry-run and approval requirements.
 - Build budget/cash-flow/targets/rollovers/envelope option/recurring bills/income/safe-to-spend/net worth/investments/subscriptions/watchlists/reports/goals.
 - Add finance-specific scopes/policies and prohibit money movement/trading/bill-pay; implement privacy/notification/agent-context warnings.
@@ -274,6 +277,13 @@ External schedulers—including ChatGPT or Codex scheduled tasks, Claude recurri
 Gemini scheduled actions or headless automation, and operating-system schedulers—may invoke these
 intents. nohmi owns their expertise, context retrieval, durable state, policy, recovery, questions,
 reviews, and completion truth.
+
+Each workspace also needs a domain-owned guided setup flow that lets the person describe an ideal
+workflow in ordinary language, converts it into explicit proposed source meanings, configuration,
+review cadence, notifications, and rules, and keeps consequential approvals human-owned. Setup and
+maintenance create durable typed questions, approvals, reviews, recovery steps, follow-ups, and
+completed-work summaries; later runs reuse their resolutions and reinforced knowledge to reduce
+unnecessary questions.
 
 | Workflow | Inputs | Outputs/actions |
 | --- | --- | --- |

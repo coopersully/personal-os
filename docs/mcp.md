@@ -42,16 +42,24 @@ Adding a tool without a catalog record fails while the server is being construct
 
 ### Workspace stewardship intent surface
 
-For a mature workspace steward, prefer a small high-level intent pair:
+For a mature workspace steward, prefer a small, predictable high-level intent surface:
 
+- `setup_<workspace>` or the shared setup plan starts or resumes a domain-owned interview when the
+  person needs to define source meanings, goals, constraints, review preferences, or their desired
+  workflow.
 - `get_<workspace>_status` reports setup readiness, source freshness, maintained-state checks,
   backlog, active or recoverable work, open questions, and the latest review.
 - `maintain_<workspace>` starts, resumes, or verifies the domain-owned maintenance turn for `all`,
   a bounded time window, or an exact target.
 
 These names are a product convention, not a claim that every workspace already advertises both
-tools. `get_ilo_context` remains the authority for what the current connection can use. Granular
-tools remain available for useful surgical inspection, previews, and exact authorized actions.
+maintenance operations or a dedicated setup tool. `get_ilo_context` remains the authority for what
+the current connection can use. Granular tools remain available for useful surgical inspection,
+previews, and exact authorized actions.
+
+The normalized tool vocabulary is intentionally low entropy: provider-specific identifiers and
+capabilities remain available as evidence, but an agent should learn one Mail, Tasks, Calendar,
+Finances, and User Knowledge contract rather than a separate workflow for every provider.
 
 Maintenance is not batch CRUD and the MCP host does not provide the sequence. The workspace API
 owns its expert playbook, knowledge contract, rulebook, orchestration, durable run state, question/learning loop,

@@ -29,6 +29,11 @@ Workspace records must not be copied into User Knowledge merely to make them sea
 notes remain annotations on their exact records; a durable meaning is promoted into User Knowledge
 only when it is expected to matter beyond that one record or decision.
 
+Questions, approvals, reviews, recovery steps, follow-ups, and completed-work summaries are durable
+work nodes, not memory by themselves. Resolving one may create or reinforce a separate typed
+knowledge proposal with the node and its source material as evidence; the original work node keeps
+its own lifecycle and resolution history.
+
 Knowledge never grants authority. A fact or preference may change a recommendation, while an
 approved domain policy determines whether nohmi may act automatically.
 

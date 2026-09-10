@@ -239,9 +239,10 @@ editing, Prompt persistence, time-block synchronization, and focus mode remain f
 
 The target product imports tasks from external providers and then treats nohmi as the authoritative
 working workspace. Bidirectional synchronization with multiple task providers remains an open
-future option, not a current goal. The user-facing name for the long-lived container above Projects
-is intentionally unresolved; the distinction between a durable responsibility/context and a finite
-Project is required regardless of its label.
+future option, not a current goal. Keep **Lists** as the provisional user-facing name for the
+long-lived container above Projects because it is familiar and already shipped; do not adopt
+**Areas** by default. The naming decision can change later without changing the settled distinction
+between a durable responsibility/context and a finite Project.
 
 Reminders remain a separate lightweight compatibility domain and `/reminders` surface today. The
 approved target is to model a reminder as delivery behavior attached to a Task or Tracking
@@ -275,6 +276,9 @@ Knowledge rather than a separate top-level workspace.
 - The daily finance queue is: new/uncategorized, low-confidence, split-needed, suspected transfer, recurring/subscription change, unusual spend, bills due, and review-complete. It is never mixed into Today unless it requires a decision.
 - Categorization uses provider categories, deterministic merchant rules, and agent suggestions. The user can correct one transaction, apply a rule to matching future items, split transactions, exclude/transfers, tag projects, and review all changed history.
 - Budgets support category, flexible, envelope/zero-based optional modes, rollovers, targets, recurring bills/income, cash-flow forecast, safe-to-spend/left-this-month, savings goals, watchlists, net worth, investments, subscriptions, and reports.
+- Budget pacing identifies material spending above and below the approved plan. The product
+  explains whether the variance threatens an obligation or leaves a stated goal, need, or
+  quality-of-life priority unfunded, then lets the person choose what to change.
 - The agent may explain and propose categorization/review work under a finance-read scope. The
   Finance steward may provide evidence-backed informational planning, budget, savings, investment, and
   market-context recommendations within the product's approved advisory model. It cannot transfer

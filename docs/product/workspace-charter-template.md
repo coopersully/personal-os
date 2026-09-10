@@ -47,6 +47,10 @@ Inventory the narrow operations needed to inspect, preview, annotate, correct, a
 and verify one exact item. For every mutation, state its policy (`preview`, `approve_each`, or
 `approved_rule`), revision guard, idempotency identity, audit evidence, and recovery path.
 
+Before implementation, define the guided setup interview: what it learns about the person's goals,
+sources, constraints, preferred workflow, review cadence, and notifications; which configuration or
+rules it may propose; and which approvals remain human-owned.
+
 ## 6. Maintenance turn
 
 Describe the domain-owned sequence for `all`, a bounded time window, and an exact target:
@@ -56,7 +60,8 @@ Describe the domain-owned sequence for `all`, a bounded time window, and an exac
 3. retrieve the bounded context pack required by the knowledge contract;
 4. reconcile and deduplicate;
 5. apply rules and authorized operations;
-6. queue questions;
+6. queue typed work nodes for questions, approvals, reviews, recovery, follow-up, and completed-work
+   summaries;
 7. recalculate models and health;
 8. record proposed or reinforced knowledge;
 9. advise;
@@ -76,6 +81,7 @@ concurrent-run behavior. Name what can remain outstanding without misreporting s
 - What is the workspace's required, optional, and prohibited User Knowledge?
 - Which earlier records are re-evaluated when knowledge, an answer, or a rule changes?
 - How does the steward avoid asking the same resolved question again?
+- Which domain-specific labels should the UI use instead of exposing “node” as a generic term?
 
 ## 8. Analysis, advice, and review artifact
 
@@ -100,7 +106,8 @@ Design the API/domain behavior first. Then map it to:
 - workspace UI for inspection, questions, approvals, recovery, and reviews;
 - typed API-client contracts;
 - a small MCP intent surface, normally `get_<workspace>_status` and
-  `maintain_<workspace>`; and
+  `maintain_<workspace>`, plus `setup_<workspace>` or the shared setup plan when onboarding is
+  nontrivial; and
 - granular MCP tools only for useful surgical operations.
 
 Keep expert judgment and orchestration in the domain/API. Keep MCP stateless. List every

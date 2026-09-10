@@ -27,12 +27,16 @@ Define all of the following before naming MCP tools:
 
 - the living ledger, evidence, freshness, provenance, and reconciliation rules;
 - the professional disciplines, researched/versioned playbook, and hard limits;
+- a resumable guided setup that translates the person's goals, source meanings, constraints,
+  desired workflow, review cadence, and notifications into proposed configuration and rules;
 - observable maintained, maintained-with-questions, blocked, and failed states;
 - the required, optional, and prohibited User Knowledge plus purpose, freshness, and sensitivity;
 - surgical reads, previews, annotations, corrections, approvals, and recovery;
 - a durable maintenance turn for all outstanding work, a time window, and an exact target;
-- the rulebook, bounded questions, one-off answers, proposed knowledge, reinforcement, and safe
-  promotion boundaries;
+- the rulebook and typed work nodes for questions, approvals, reviews, recovery, follow-up, and
+  completed-work summaries, including how answers create or reinforce proposed knowledge;
+- reinforcement and safe promotion boundaries plus how later runs avoid repeating resolved
+  questions;
 - health analysis, recommendations, goals/preferences, and confidence/evidence boundaries; and
 - the durable review artifact explaining work, state, uncertainty, advice, and next actions.
 
@@ -40,7 +44,8 @@ Define all of the following before naming MCP tools:
 
 Keep expertise, sequencing, learning, and completion decisions in domain/API code. Share only
 mechanical run infrastructure. Keep MCP stateless: normally expose `get_<workspace>_status`,
-`maintain_<workspace>`, and useful surgical tools as thin typed-API adapters.
+`maintain_<workspace>`, useful surgical tools, and `setup_<workspace>` or the shared setup plan when
+onboarding is nontrivial, all as thin typed-API adapters.
 
 Every mutation retains least privilege, source evidence, policy, revision/idempotency controls,
 audit, and recovery. User Knowledge may become active through manual promotion or safe repeated

@@ -14,6 +14,11 @@ Each workspace combines a familiar application, a trustworthy ledger, an expert 
 maintenance workflow, and narrow tools. The UI, public API, and MCP operate on the same records and
 policy boundaries; none of them keeps a separate interpretation of the person's life.
 
+Provider differences are normalized into small, stable, workspace-native concepts so an agent can
+learn the nohmi contract once instead of repeatedly interpreting Gmail, iCloud, Plaid, or another
+provider's incidental vocabulary. Normalization reduces entropy for models without discarding the
+provider identity, capability, revision, or evidence needed for faithful reconciliation.
+
 Today is the cross-workspace operating surface, not a fifth workspace. It presents the small set of
 commitments, decisions, exceptions, and completed work that matter now without flattening the four
 workspace models into one generic record type.
@@ -35,10 +40,11 @@ Every workspace should expose the following interfaces over one domain-owned sou
 | --- | --- | --- |
 | App, web, desktop, and future mobile UI | Make the workspace immediately familiar and calm. | Let the person use nohmi as their normal mail client, task manager, calendar, or financial dashboard while progressively disclosing intelligence, provenance, policy, errors, and recovery. |
 | Public API | Provide the authoritative product boundary. | Enforce identity, ownership, policy, revisions, idempotency, audit, connector behavior, and durable workflow state for every caller. |
+| Guided setup and workflow definition | Learn how this person wants the workspace to operate. | Interview for goals, source meanings, constraints, preferred reviews, notification boundaries, and the person's ideal workflow; propose configuration and rules for approval instead of requiring them to translate their needs into settings. |
 | MCP orientation and status | Let an unfamiliar agent understand the workspace quickly. | Report capabilities, freshness, health, active guidance, outstanding work, applicable knowledge, missing context, and the next safe action. |
 | MCP maintenance intent | Let an external scheduler or person invoke a complete domain workflow with a small instruction. | Start or resume the domain-owned maintenance turn without requiring the client to reproduce expertise or orchestration. |
 | MCP surgical tools | Give agents precise access to exact records and decisions. | Support free-form questions and narrowly scoped reads, previews, corrections, and authorized actions such as reading a balance or inspecting one event. |
-| Questions and reviews | Preserve human judgment without blocking unrelated work. | Show what nohmi did, what it could not safely decide, the evidence behind the question, and the consequence of each answer. |
+| Questions and reviews | Preserve human judgment without blocking unrelated work. | Persist the work nodes created by setup and maintenance: what nohmi did, what it could not safely decide, the evidence behind each question, and the consequence of each answer. |
 | Settings and recovery | Make control and degraded state obvious. | Expose sources, synchronization, permissions, agent access, guidance, rules, connector failures, retries, exports, and deletion. |
 
 ## Mail
@@ -59,6 +65,8 @@ inbox while always preserving account identity, provider capabilities, and sourc
 
 ### Agent interface
 
+- Run guided setup to learn account roles, important relationships, communication boundaries,
+  review preferences, and the person's desired triage workflow; propose rules for approval.
 - Orient with mailbox inventory, capabilities, freshness, active guidance, and unresolved work.
 - Search and read exact conversations without exposing provider credentials.
 - Triage communication into needs-reply, informational, invitation, receipt, newsletter, and other
@@ -90,12 +98,16 @@ capability, not a current product commitment.
   same meaning: Tasks owns what and why; Calendar owns when.
 - A full planning and completion interface that remains useful without an agent.
 
-The final user-facing name for long-lived organizational containers is intentionally unresolved.
 The product distinction is settled: a Project is a finite outcome, while the higher container is a
-durable responsibility or context that can contain many projects and standalone tasks.
+durable responsibility or context that can contain many projects and standalone tasks. Keep
+**Lists** as the provisional user-facing label because it is already shipped and familiar; do not
+introduce **Areas** as the default. A later product review may choose a clearer label without
+changing this underlying model.
 
 ### Agent interface
 
+- Run guided setup to import existing commitments, learn planning conventions and review cadence,
+  and translate the person's preferred workflow into proposed organization and rules.
 - Orient with active goals, priorities, capacity, stale commitments, imports, and unresolved Inbox
   material.
 - Capture, clarify, organize, estimate, prioritize, split, schedule, defer, complete, and review
@@ -128,6 +140,8 @@ without obscuring provider truth.
 
 ### Agent interface
 
+- Run guided setup to learn calendar meanings, writable destinations, privacy, work hours, buffers,
+  travel, protected time, and the person's desired scheduling workflow.
 - Orient with time zone, work patterns, protected time, selected calendars, source meanings,
   freshness, and current conflicts.
 - Inspect exact events and availability, prepare commitments, manage invitations, and propose
@@ -156,6 +170,9 @@ investment analysis, auditing, and coaching without claiming professional creden
   ownership, exclusions, and rules.
 - Budget creation and refinement grounded in actual income, obligations, goals, reserves, debt,
   risk, and user-selected priorities.
+- Explainable pacing signals for spending materially above or below the approved plan. Both can be
+  meaningful: overspending can threaten obligations, while persistent underspending can indicate
+  that a stated goal, need, or quality-of-life priority is not actually being served.
 - Visible data freshness, missing evidence, connector failures, material risks, and review state.
 
 ### Agent interface
@@ -163,7 +180,8 @@ investment analysis, auditing, and coaching without claiming professional creden
 - Orient with the expert playbook, profile readiness, accounts, balances, budget, goals, freshness,
   questions, and authority.
 - Run an interview-driven setup that learns the person's circumstances, proposes a complete budget,
-  obtains the required approval, and resolves recent unexplained activity.
+  obtains the required approval, resolves recent unexplained activity, and configures the person's
+  preferred review and maintenance workflow.
 - Answer free-form financial questions through narrow account, balance, transaction, connection,
   plan, and health tools.
 - Maintain Finances by reconciling and classifying outstanding activity, updating the financial

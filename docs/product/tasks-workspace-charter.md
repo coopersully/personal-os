@@ -49,9 +49,22 @@ remains an intentionally open future option rather than a current goal; any prov
 define authority, freshness, reconciliation, degraded state, and source-selection privacy before it
 enters the ledger.
 
-The long-lived organizational container above Projects remains required, but its user-facing name
-is unresolved. A Project is a finite outcome; the higher container represents a durable
-responsibility or context and may contain multiple Projects and standalone Tasks.
+The long-lived organizational container above Projects remains required. A Project is a finite
+outcome; the higher container represents a durable responsibility or context and may contain
+multiple Projects and standalone Tasks.
+
+The naming question concerns only that container's user-facing label, not whether the layer exists:
+
+| Candidate | Benefit | Cost |
+| --- | --- | --- |
+| Lists | Familiar, flexible, and already shipped | Describes a collection more than its long-lived meaning |
+| Spaces | Friendly and clearly broader than a Project | Can imply collaboration or a general content hub |
+| Categories | Immediately understandable | Can be confused with tags and does not strongly convey ownership |
+| Domains | Semantically precise for an enduring part of life | Sounds technical and clinical |
+
+**Lists** remains the provisional label because it avoids a premature migration and is familiar in
+task applications. **Areas** is not the default; a later product review may choose a better label
+without changing the required hierarchy or source-of-truth contract.
 
 ## 3. Expert playbook
 
@@ -106,6 +119,12 @@ A future Tasks maintenance turn may inspect `all`, a bounded time window, or an 
 or Task. It must establish an evidence cutoff, inspect the ledger, detect invalid or stale planning
 assumptions, retrieve a purpose-bound User Knowledge context pack, apply only approved rules, queue
 genuine questions, recompute workload/advice, publish a review, and verify the resulting state.
+
+Before that loop, guided setup should import supported external commitments, learn how the person
+wants to capture, group, prioritize, schedule, and review work, then propose an initial
+organization and rulebook. nohmi becomes the authoritative working workspace after import;
+bidirectional provider synchronization remains a possible future extension rather than a setup
+promise.
 
 That workflow is not implemented. Tasks has no durable maintenance run/step persistence, leases,
 fencing, resume/cancel behavior, retry budget, status endpoint, or `maintain_tasks` MCP tool. Those

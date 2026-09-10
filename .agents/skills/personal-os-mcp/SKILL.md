@@ -25,13 +25,16 @@ For personal context or semantic retrieval, also read `docs/product/user-knowled
 ## Expose workspace intent without moving intelligence
 
 - For a mature workspace, prefer `get_<workspace>_status` and `maintain_<workspace>` as the small
-  high-level intent surface, plus granular tools for useful surgical operations.
+  high-level intent surface, plus `setup_<workspace>` or the shared setup plan when onboarding is
+  nontrivial and granular tools for useful surgical operations.
 - Treat maintenance as one domain-owned, durable stewardship turn—not a batch endpoint or a
   client-authored sequence of tool calls.
 - Return readiness, freshness, backlog, questions, run state, review, advice, and recovery links
   from API-owned contracts. Do not calculate maintained state in MCP.
 - Never embed the expert playbook, rulebook, retry order, learning behavior, or completion criteria
   in tool descriptions, prompts, or host-specific instructions.
+- Keep workspace vocabulary normalized and low entropy. Preserve provider identity, capability,
+  revision, and evidence, but do not make agents learn a separate workflow for each provider.
 - Do not claim the conventional intent tools exist unless current discovery and tests prove they
   are shipped for that workspace.
 

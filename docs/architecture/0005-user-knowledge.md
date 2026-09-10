@@ -30,6 +30,8 @@ Adopt a hybrid model:
    relational source of truth.
 5. Purpose-bound context assembly produces small versioned context packs for tools and workflows.
 6. Consequential runs record the exact knowledge revisions used.
+7. Workspace work nodes remain operational records. Their resolutions may source or reinforce a
+   separate typed knowledge proposal, but a question, approval, or review is not itself memory.
 
 The product contract and learning lifecycle are defined in
 [`docs/product/user-knowledge.md`](../product/user-knowledge.md).

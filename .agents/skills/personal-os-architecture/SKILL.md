@@ -27,8 +27,9 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
 
 ## Model a workspace steward
 
-- Keep the domain's ledger, expert playbook, rulebook, surgical operations, maintenance turn,
-  question/learning loop, advice, review artifact, and status semantically domain-owned.
+- Keep the domain's ledger, expert playbook, guided setup, rulebook, surgical operations,
+  maintenance turn, typed work nodes, learning loop, advice, review artifact, and status
+  semantically domain-owned.
 - Share only mechanical execution infrastructure such as run/step persistence, leases, fencing,
   retry history, and terminal settlement.
 - Put runtime expertise and User Knowledge in versioned domain/API data and contracts, never in an

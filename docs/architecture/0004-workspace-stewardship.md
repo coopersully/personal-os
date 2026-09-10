@@ -28,15 +28,20 @@ Implement each workspace steward as these layered, domain-owned contracts:
    boundaries, and research provenance.
 3. **Rulebook:** active preferences, approved rules, exceptions, confidence policy, source scope,
    and action authority.
-4. **Surgical operations:** small idempotent or revision-guarded domain operations with audit and
+4. **Guided setup:** a resumable, domain-owned interview that translates the person's goals,
+   source meanings, constraints, and desired workflow into explicit proposed configuration and
+   rules.
+5. **Surgical operations:** small idempotent or revision-guarded domain operations with audit and
    recovery behavior.
-5. **Maintenance coordinator:** a durable run composed of named steps that can claim, resume,
+6. **Maintenance coordinator:** a durable run composed of named steps that can claim, resume,
    retry, settle, and report work over `all`, a time window, or an exact target.
-6. **Knowledge contract:** required, optional, and prohibited User Knowledge plus the purpose,
+7. **Knowledge contract:** required, optional, and prohibited User Knowledge plus the purpose,
    sensitivity, freshness, and missing-context behavior for every workflow.
-7. **Question and proposal model:** evidence-linked uncertainty that can resolve one case, propose
-   knowledge, reinforce an existing belief, or propose a reusable rule subject to its action policy.
-8. **Status and review model:** readiness, freshness, backlog, health, recommendations, terminal
+8. **Work-node model:** typed, evidence-linked questions, approvals, reviews, recovery steps,
+   follow-ups, and completed-work summaries with durable lifecycle and resolution history. A
+   resolution can settle one case, propose knowledge, reinforce an existing belief, or propose a
+   reusable rule subject to its action policy.
+9. **Status and review model:** readiness, freshness, backlog, health, recommendations, terminal
    run state, and a durable period narrative.
 
 The generic maintenance substrate may own run/step identifiers, leases, fencing, idempotency,
@@ -69,8 +74,10 @@ for an MCP host.
 
 ## MCP shape
 
-Prefer two high-level operations per mature workspace:
+Prefer a small, predictable high-level surface per mature workspace:
 
+- `setup_<workspace>` or the shared setup plan runs or resumes guided setup when the workspace
+  requires a nontrivial interview and configuration flow.
 - `get_<workspace>_status` returns readiness, source freshness, maintenance backlog, open questions,
   latest review, and safe next intent.
 - `maintain_<workspace>` starts, resumes, or verifies a domain-owned maintenance turn for a bounded
@@ -90,7 +97,7 @@ setting, verifies the committed result, and publishes the period review.
 ## Reliability and observation
 
 A maintenance run records its requested scope, purpose, evidence cutoff, playbook/rulebook and User
-Knowledge revisions, steps, claims, effects, questions, failures, review artifact, and terminal status. External effects follow
+Knowledge revisions, steps, claims, effects, work nodes, failures, review artifact, and terminal status. External effects follow
 the connector reliability contract. Process loss resumes from durable state; concurrent requests
 coalesce or fence; ambiguous effects reconcile before replay. Status and review surfaces must
 distinguish queued, active, maintained, maintained-with-questions, blocked, and failed work.

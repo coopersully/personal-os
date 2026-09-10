@@ -10,6 +10,11 @@ that workspace's living ledger, applies approved domain knowledge and rules, com
 work, isolates questions that require human judgment, learns from answers and safe reinforced
 patterns, and produces an evidence-backed review of the current state and how to improve it.
 
+The person may describe how they want the workspace to operate in ordinary language. Guided setup
+turns that intent into explicit source meanings, preferences, review cadence, notifications, and
+proposed rules, shows the consequences, and asks for the approvals that the resulting behavior
+requires.
+
 The steward is not an MCP prompt, scheduled client automation, batch-cleanup endpoint, or separate
 agent persona. It is nohmi product behavior owned by the domain and available consistently to the
 app, API, MCP clients, desktop client, and future first-party callers. A client should be able to
@@ -32,19 +37,21 @@ Each workspace defines these domain-specific capabilities:
    incomplete, and blocked states.
 4. **Knowledge contract.** The required, optional, and prohibited User Knowledge for each workflow,
    including freshness, sensitivity, missing-data behavior, and allowed learning outputs.
-5. **Surgical operations.** Narrow reads, previews, annotations, corrections, and approved actions
+5. **Guided setup.** A resumable interview that learns the person's goals, source meanings,
+   constraints, desired workflow, and review preferences, then proposes configuration and rules.
+6. **Surgical operations.** Narrow reads, previews, annotations, corrections, and approved actions
    for one exact record or decision.
-6. **Maintenance turn.** A durable, resumable workflow that brings all outstanding work—or a named
+7. **Maintenance turn.** A durable, resumable workflow that brings all outstanding work—or a named
    time window or exact target—as close to maintained as current evidence and authority permit.
-7. **Rulebook and authority.** Versioned domain rules, source meanings, thresholds, action policy,
+8. **Rulebook and authority.** Versioned domain rules, source meanings, thresholds, action policy,
    and explicit boundaries between automatic, proposed, approved, and unavailable behavior.
-8. **Question and learning loop.** Bounded questions with the evidence and choices needed to answer
+9. **Question and learning loop.** Bounded questions with the evidence and choices needed to answer
    them. Answers resolve the present case and may create or reinforce User Knowledge; reusable
    action rules remain subject to their domain approval policy.
-9. **Analysis and advice.** A continuing interpretation of what the ledger means, what is changing,
+10. **Analysis and advice.** A continuing interpretation of what the ledger means, what is changing,
    what the person appears to value, and what options would improve the position. Advice cites its
    evidence, assumptions, time horizon, confidence, and unresolved risks.
-10. **Review artifact.** A durable period write-up that explains what was examined, changed,
+11. **Review artifact.** A durable period write-up that explains what was examined, changed,
     learned, left outstanding, and recommended next. It links back to source material, the User
     Knowledge revisions used, and the activity trail.
 
@@ -69,6 +76,19 @@ claim completion merely because a process ran. Work that outlives a request uses
 state, leases, idempotency, and recovery. Repeating the same intent must resume or verify prior work
 rather than duplicate it.
 
+## Durable work nodes
+
+“Node” is the conceptual name for an evidence-linked unit that setup or maintenance leaves for the
+person or a later run. The product should present concrete domain language—question, approval,
+review, recovery step, follow-up, or completed-work summary—rather than expose a generic graph or
+database term.
+
+Every node has an owning workspace, type, lifecycle, source evidence, reason, consequence, related
+records, and resolution history. Answering a node resolves the immediate case and may propose or
+reinforce User Knowledge or a domain rule; it does not automatically turn the answer into authority.
+Later runs must reuse resolved answers and active knowledge so repeated maintenance creates fewer
+unnecessary nodes while still surfacing genuinely new uncertainty.
+
 ## Two operating modes
 
 Every workspace supports the same conceptual pair:
@@ -82,6 +102,11 @@ MCP should normally expose a small orientation/status tool and one maintenance-i
 workspace, while retaining granular tools when callers need surgical control. Those tools are an
 intent surface, not the place where expert judgment, context assembly, or workflow sequencing
 lives.
+
+Where onboarding is nontrivial, the same surface also exposes a setup intent or shared setup plan.
+Across workspaces the vocabulary should remain predictable: setup defines how the workspace should
+work, status explains its current state, maintain performs the durable stewardship turn, and
+surgical tools inspect or change one exact thing.
 
 ## Scheduling boundary
 
@@ -119,6 +144,11 @@ the budget; update recurring, cash-flow, savings, investment, liability, and net
 separate one-off decisions from reusable rules; score financial health against an explainable
 rubric; and publish a write-up of changes, budget position, outstanding questions, risks, and
 recommended next steps.
+
+Budget health includes pacing above and below the person's approved plan. The steward should warn
+when spending threatens obligations or goals and also notice persistent underspending when it means
+the person is not funding a stated need, goal, or quality-of-life priority; it informs the tradeoff
+and lets the person decide what to value.
 
 The current implementation realizes part of that turn as prepare → agent challenge → settle →
 verify → period review. Preparation is read/project only. The agent reviews the entire candidate

@@ -48,4 +48,9 @@ grep -Eq '^## Work map$' .github/pull_request_template.md &&
   exit 1
 }
 
+grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .github/workflows/ci.yml || {
+  echo "CI must revalidate the PR Work map whenever pull request metadata changes" >&2
+  exit 1
+}
+
 echo "Codex repository check passed."

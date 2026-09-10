@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [edited, opened, ready_for_review, reopened, synchronize]
   push:
     branches: [main, "feature/**"]
 

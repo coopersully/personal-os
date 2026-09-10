@@ -320,7 +320,36 @@ an invocation mechanism, not the source of workflow logic or completion truth.
 
 The Activity view filters by material, actor, source, result, date, and reversible state. Every event links to the affected material and source evidence.
 
-### 6.9 Desktop overlay, widgets, notifications, and mobile
+### 6.9 Texting: the general nohmi inbox
+
+Texting is a shared conversational channel rather than a fifth workspace. One durable conversation
+accepts free-form requests, exact answers, and reversible reviews; its coordinator routes work to
+Mail, Tasks, Calendar, Finances, or shared services and combines linked child results into one
+coherent response without reproducing domain expertise.
+
+- Inbound messages promptly enqueue durable processing; `maintain_texting` is the manual or scheduled
+  catch-up and recovery intent for unprocessed messages, interrupted child work, and uncertain
+  delivery.
+- Workspace maintenance publishes typed notification intents. Texting applies global and
+  per-workspace policy and sends one outcome sentence, at most one available question or exact
+  review, and a useful first-party link.
+- A global review-bypass setting applies to every channel. When enabled, policy-authorized
+  reversible work may execute directly; when disabled, it enters exact review, which may be
+  approved by a bound, unexpired SMS response.
+- Bypass never widens scopes or permits missing, ambiguous, blocked, unsupported, irreversible,
+  credential, scope-changing, or recipient-changing effects.
+- Messages are privacy-safe by default. Detailed financial, Mail, Calendar, or other sensitive
+  content requires explicit channel and workspace disclosure preferences.
+- Per-workspace settings govern inbound routing, maintenance messages, reply behavior, content
+  detail, links, quiet hours, and maintenance guidance. Guidance applies consistently across app,
+  API, MCP, scheduled, and SMS-initiated runs.
+
+The target product and architecture contracts are
+[`texting and SMS`](texting-operations.md) and
+[`ADR 0006`](../architecture/0006-texting-inbox.md). The current transport foundation does not yet
+ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
+
+### 6.10 Desktop overlay, widgets, notifications, and mobile
 
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
 - The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
@@ -338,6 +367,11 @@ The Activity view filters by material, actor, source, result, date, and reversib
 - **Approve batch:** require confirmation of a bounded homogeneous set.
 - **Rule-authorized:** execute only when a user-created rule, conditions, sources, and confidence floor match.
 - **Blocked:** neither human shortcut nor agent token may perform it through that route.
+
+Global review bypass is a settlement preference, not another policy tier. It allows an otherwise
+policy-authorized reversible action to execute instead of entering review; it cannot alter scopes,
+source selection, provider capability, reversibility, evidence requirements, or a stronger
+approval boundary.
 
 Policies are evaluated by API/domain service, not by web or MCP clients. The policy decision, matching rule, and current scope are audited for every attempted action.
 

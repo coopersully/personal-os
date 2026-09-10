@@ -1,0 +1,102 @@
+# nohmi per-workspace settings
+
+- Status: Living target product contract; decisions are being refined
+- Last reconciled: 2026-09-10
+
+## Purpose
+
+Each workspace needs one understandable place to define how its sources, steward, maintenance
+turns, agent access, notifications, questions, and recovery should behave. Settings should let the
+person describe their preferred workflow in ordinary language and inspect the explicit
+configuration and proposed rules nohmi derives from it.
+
+Per-workspace settings change how a workspace operates; they do not create a separate version of
+its data, expertise, policy engine, or User Knowledge. The same settings apply whether work begins
+in the first-party app, public API, MCP, an external scheduled task, or the general SMS inbox.
+
+## Settings layers
+
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| Global account | Review bypass, default notification schedule, connected agents, security, and privacy defaults | Domain meanings or workspace-specific instructions |
+| Workspace | Sources, source meanings, maintenance behavior, channel participation, workspace privacy, and active guidance | Global identity, agent scopes, or hard safety limits |
+| Rule | One explicit reusable condition, action, sources, exceptions, and policy | General personal context or broad prose instructions |
+| User Knowledge | Goals, priorities, relationships, preferences, constraints, habits, and learned patterns | Action authority or external mutation rules |
+
+## Shared workspace sections
+
+Every Mail, Tasks, Calendar, and Finances settings surface should use the same conceptual sections
+while presenting domain-specific controls:
+
+- **Sources and synchronization:** connected providers, selected sources, meanings, destinations,
+  capabilities, freshness, failures, retries, and removal.
+- **Maintain:** whether maintenance is enabled, its bounded scope and review cadence, the current
+  definition of maintained, and custom maintenance guidance.
+- **Questions and reviews:** open work nodes, answer behavior, review history, and the inherited
+  global review-bypass state.
+- **Texting and notifications:** whether this workspace participates in the general SMS inbox,
+  which maintenance outcomes it sends, reply behavior, content detail, links, quiet hours, and
+  other supported channels.
+- **Rules and learned behavior:** active rules, proposals, exceptions, recent learning, confidence,
+  provenance, promotion, disablement, and rollback.
+- **Privacy and agent access:** allowed purposes, sensitive content, cross-workspace disclosure,
+  connected-agent visibility, and links to the global scope controls.
+- **Recovery and data:** connector repair, failed or interrupted runs, exports, retention, and
+  deletion or disconnection consequences.
+
+## Maintenance guidance
+
+The person may add natural-language instructions for each workspace, such as “prioritize
+reimbursements,” “do not send routine completion summaries,” or “ask before moving meetings outside
+work hours.” Guided setup should help turn stable parts into typed preferences or proposed rules
+while retaining the original instruction, provenance, version, and effective scope.
+
+Guidance applies to all setup, status, maintenance, and advisory surfaces. A channel-specific copy
+must not drift into a separate SMS behavior, and prose guidance cannot bypass scopes, global review
+policy, domain rules, or hard product limits.
+
+## Approved SMS controls
+
+For each workspace, the person can configure:
+
+- inbound SMS routing into that workspace: enabled or disabled;
+- maintenance SMS: off, questions only, actionable results, or every completed run;
+- whether replies may answer that workspace's questions;
+- whether replies may approve exact reversible proposals when global review bypass is off;
+- privacy-safe or explicitly detailed message content;
+- inclusion of first-party review and recovery links; and
+- inherited global quiet hours or a workspace-specific schedule.
+
+These controls affect communication and routing only. The global review-bypass setting decides
+whether an otherwise policy-authorized reversible action executes directly or enters review.
+
+## Resolution order
+
+Settings resolve in this order:
+
+1. hard product and provider limits;
+2. authenticated actor scopes and selected-source access;
+3. global security, privacy, review-bypass, and notification policy;
+4. workspace source, maintenance, privacy, and channel settings;
+5. active domain rules and versioned maintenance guidance; and
+6. purpose-bound User Knowledge used for interpretation and recommendations.
+
+A lower layer cannot widen a higher layer. Missing or contradictory requirements produce a bounded
+question or blocked result rather than an inferred permission.
+
+## Current implementation boundary
+
+Current settings are distributed across account settings, connections, workspace access, domain
+profiles, Finance settings, Texting, and feature-specific pages. Finances has a workspace-specific
+review-bypass control, while the approved target is one global review-bypass policy. The complete
+shared per-workspace structure, maintenance guidance model, and SMS controls above are target
+behavior and must not be presented as shipped.
+
+## Open design questions
+
+- Whether global defaults may be overridden independently for every notification channel or only
+  for SMS initially.
+- Whether maintenance cadence is configured in nohmi, delegated entirely to external schedulers,
+  or represented only as an expected-check-in contract.
+- How much rule generation guided setup may propose before requiring a dedicated preview.
+- Which settings belong inline inside each workspace and which also appear in centralized Settings.

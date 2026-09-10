@@ -27,6 +27,11 @@ the public API, and MCP:
 Today is the calm cross-workspace operating surface. It shows what matters now, what requires a
 decision, and what nohmi completed without replacing the native models owned by each workspace.
 
+Texting is the shared general inbox rather than a fifth workspace. A person can send a free-form
+request that nohmi routes to the owning workspaces, answer exact questions or reversible reviews,
+and receive concise maintenance results and first-party links according to global and per-workspace
+settings.
+
 Every workspace provides narrow surgical tools plus a domain-owned setup, status, and maintenance
 workflow. External platforms such as ChatGPT, Codex, Claude, Gemini, or an operating-system
 scheduler may choose when to invoke maintenance; nohmi owns the expertise, User Knowledge retrieval,
@@ -40,9 +45,12 @@ authority; the person can always inspect, correct, promote, restrict, export, or
 The complete target is documented in:
 
 - [Master product and experience design](docs/product/master-design.md)
+- [Naming contract](docs/product/naming.md)
 - [Workspace purposes and interfaces](docs/product/workspaces.md)
 - [Workspace stewardship](docs/product/workspace-stewardship.md)
+- [Per-workspace settings](docs/product/workspace-settings.md)
 - [User Knowledge](docs/product/user-knowledge.md)
+- [Texting and SMS](docs/product/texting-operations.md)
 - [External automation hosts](docs/product/automation-hosts.md)
 - [Master delivery plan](docs/product/master-plan.md)
 - [MCP integration](docs/mcp.md)

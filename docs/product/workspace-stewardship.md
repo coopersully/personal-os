@@ -120,6 +120,12 @@ The scheduler owns when to call. nohmi owns what the intent means, the knowledge
 requires, durable execution, policy, idempotency, questions, review, recovery, and the verified
 terminal result. Scheduled prompts must stay small and must not duplicate the domain workflow.
 
+A steward may publish a typed notification intent when maintenance completes, needs input, or
+requires recovery. The shared Texting service—not the workspace—applies channel settings, renders
+concise SMS, routes replies back to exact work nodes, and preserves delivery state. General inbound
+texts are dispatched through the shared Texting coordinator; the workspace retains all domain
+judgment and terminal truth.
+
 ## Learning and promotion
 
 User-authored knowledge may become active immediately when unambiguous. Agent-inferred knowledge

@@ -142,6 +142,11 @@ Examples:
 | Maintain Tasks | Active priorities, goals, capacity, work patterns, obligations, planning preferences | Ask which competing commitment matters or leave scheduling unset |
 | Maintain Calendar | Time zone, work hours, protected time, travel and buffer preferences, relationship context | Surface a conflict or request the missing boundary |
 | Maintain Finances | Household circumstances, jurisdiction, income stability, obligations, goals, reserves, risk tolerance | Ask for required evidence and avoid high-impact guidance until answered |
+| Process a general text | Communication preferences plus only the knowledge contracts required by the routed intents | Ask which record, workspace, person, or meaning the request refers to before dispatching |
+
+The Texting coordinator may use enough shared knowledge to route a request, but it does not receive
+the union of every possible child workspace's context. Each routed child intent retrieves its own
+purpose-bound context after workspace access and disclosure policy are established.
 
 ## Agent tools
 

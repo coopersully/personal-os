@@ -79,6 +79,31 @@ result distinguishes maintained, maintained-with-questions, blocked, and failed 
 to the workspace's review and recovery surfaces. See
 [`ADR 0004`](architecture/0004-workspace-stewardship.md).
 
+### Target Texting intent surface
+
+Texting is a shared general inbox, not a fifth workspace. Its target high-level tools are:
+
+- `get_texting_status` for connection, consent, conversation backlog, active child intents,
+  awaiting replies, delivery uncertainty, and valid recovery actions; and
+- `maintain_texting` for claiming unprocessed inbound messages, routing free-form and
+  cross-workspace requests, resuming child work, resolving bound answers or reviews, composing a
+  concise reply, and reconciling uncertain delivery.
+
+The API-owned Texting coordinator dispatches only to domain-owned operations available under the
+caller's scopes and global/per-workspace settings. It does not place multi-domain logic in MCP.
+Workspace maintenance publishes typed notification intents; Texting renders and sends them without
+letting a workspace call Twilio or read the shared conversation.
+
+The global review-bypass setting applies to every channel. Policy-authorized reversible work may
+execute directly when bypass is enabled; otherwise it becomes an exact review, which a verified
+SMS reply may approve only when bound to the current unexpired proposal. See
+[`texting and SMS`](product/texting-operations.md) and
+[`ADR 0006`](architecture/0006-texting-inbox.md).
+
+The existing `read_text_conversation` and `send_text_message` tools are surgical transport tools,
+not this general-inbox coordinator. The high-level Texting tools and dispatch behavior are target
+contracts and must not be advertised until current discovery and tests prove they ship.
+
 ### Target User Knowledge surface
 
 High-level workspace tools retrieve purpose-bound context internally. The target shared surgical

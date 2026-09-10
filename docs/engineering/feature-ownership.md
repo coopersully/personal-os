@@ -37,7 +37,7 @@ parallel worktree ownership. It complements the system boundary in
 | User Knowledge (planned) | future `apps/web/src/features/knowledge`, User Knowledge route/service modules, `packages/domain` knowledge and context contracts, typed client and MCP adapters | Workspace ledgers, domain playbooks, action policy, provider records |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
-| Texting | `apps/web/src/features/texting`, `apps/api/src/routes/texting.ts`, `apps/api/src/texting-*`, `packages/domain/src/texting.ts`, `packages/connectors/src/twilio.ts`, `packages/api-client/src/features/texting.ts`, `apps/mcp/src/tools/texting.ts` | Account authentication, global navigation, migration journal |
+| Texting | `apps/web/src/features/texting`, `apps/api/src/routes/texting.ts`, `apps/api/src/texting-*`, `packages/domain/src/texting.ts`, `packages/connectors/src/twilio.ts`, `packages/api-client/src/features/texting.ts`, `apps/mcp/src/tools/texting.ts` | Workspace ledgers/playbooks, domain policy decisions, account authentication, global navigation, migration journal |
 | Integration | app/API/MCP composition roots, global navigation, Today, Reviews composition, shared shadcn primitives, shared style tokens, migration journal | Feature-specific implementation details owned above |
 
 The following are Integration-owned until they are reduced to thin registries:
@@ -119,6 +119,11 @@ User Knowledge owns shared personal facts, relationships, goals, priorities, mot
 constraints, routines, decisions, reinforcement, promotion, provenance, and purpose-bound context
 assembly. Workspace owners declare what knowledge a workflow requires and remain responsible for
 their own action rules; shared knowledge never becomes an Integration-owned domain decision.
+
+Texting owns the shared conversation, consent, delivery, inbound claims, intent routing, child-run
+coordination, channel settings, and response composition. A workspace owns every routed operation,
+work node, policy decision, and terminal result. Workspace maintainers publish typed notification
+intents rather than rendered SMS and never call Twilio or consume the shared conversation directly.
 
 ## Required seams
 

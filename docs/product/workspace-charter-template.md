@@ -110,6 +110,11 @@ Design the API/domain behavior first. Then map it to:
   nontrivial; and
 - granular MCP tools only for useful surgical operations.
 
+Define which setup, maintenance, question, review, completion, or recovery outcomes may publish a
+typed notification intent. List the workspace's per-channel settings, safe-summary fields,
+sensitive fields, allowed reply vocabulary, review-bypass behavior, and first-party deep link.
+Never put provider delivery or general-inbox dispatch inside the workspace.
+
 Keep expert judgment and orchestration in the domain/API. Keep MCP stateless. List every
 Integration-owned composition-root or shared-infrastructure change separately so parallel branches
 can land the domain slice without repeatedly conflicting.

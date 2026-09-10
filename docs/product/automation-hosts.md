@@ -53,6 +53,10 @@ The tool may create nohmi questions and reviews that outlive the host session. T
 them in the app or through an authorized agent, and later maintenance uses those answers and
 reinforced knowledge to reduce unnecessary questions.
 
+`maintain_texting` is a valid scheduled catch-up and recovery intent for the general SMS inbox, but
+normal inbound messages should enqueue the same durable coordinator at webhook arrival. A schedule
+must not become the only mechanism for replying to the person.
+
 ## Platform references
 
 - [OpenAI Codex automations](https://developers.openai.com/codex/app/automations)

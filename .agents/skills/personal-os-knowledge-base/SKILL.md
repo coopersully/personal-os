@@ -20,9 +20,12 @@ code names, an old PR, or a historical plan when a current document exists.
 | Workspace stewardship architecture | `docs/architecture/0004-workspace-stewardship.md` |
 | User Knowledge product contract | `docs/product/user-knowledge.md` |
 | User Knowledge architecture | `docs/architecture/0005-user-knowledge.md` |
+| General SMS inbox and workspace notifications | `docs/product/texting-operations.md`, `docs/architecture/0006-texting-inbox.md` |
+| Per-workspace settings and maintenance guidance | `docs/product/workspace-settings.md` |
 | External agent scheduling | `docs/product/automation-hosts.md`, then `docs/mcp.md` |
 | Product scope and acceptance | `docs/product/mvp.md`, then the relevant master-plan section |
 | Product model and interaction contract | `docs/product/master-design.md`, `experience-standards.md` |
+| Product and internal naming | `docs/product/naming.md` |
 | Challenged assumptions and safety gates | `docs/product/assumptions-audit.md` |
 | Current delivery record | `docs/product/implementation-log.md` |
 | Brand and experience principles | `docs/design/foundations.md` |

@@ -12,6 +12,8 @@ For a workspace status or maintenance surface, also read
 `docs/architecture/0004-workspace-stewardship.md`.
 For personal context or semantic retrieval, also read `docs/product/user-knowledge.md` and
 `docs/architecture/0005-user-knowledge.md`.
+For the general SMS inbox, workspace notification intents, or Texting maintenance, also read
+`docs/product/texting-operations.md` and `docs/architecture/0006-texting-inbox.md`.
 
 ## Preserve the adapter boundary
 
@@ -37,6 +39,8 @@ For personal context or semantic retrieval, also read `docs/product/user-knowled
   revision, and evidence, but do not make agents learn a separate workflow for each provider.
 - Do not claim the conventional intent tools exist unless current discovery and tests prove they
   are shipped for that workspace.
+- Treat `get_texting_status` and `maintain_texting` as target high-level general-inbox tools, not
+  workspace tools. Keep routing and child-intent coordination in the API; MCP remains an adapter.
 
 ## Add a tool safely
 

@@ -37,6 +37,9 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
   not grant action authority.
 - Complete `docs/product/workspace-charter-template.md` before splitting a new workspace across
   parallel branches. List composition-root and shared migration work as Integration handoffs.
+- Keep Texting a shared channel and coordinator rather than a fifth workspace. Texting owns
+  conversation, delivery, routing, and response composition; routed work retains workspace-owned
+  expertise, policy, work nodes, and terminal truth.
 
 ## Model User Knowledge
 

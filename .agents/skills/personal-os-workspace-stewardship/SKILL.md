@@ -37,6 +37,8 @@ Define all of the following before naming MCP tools:
   completed-work summaries, including how answers create or reinforce proposed knowledge;
 - reinforcement and safe promotion boundaries plus how later runs avoid repeating resolved
   questions;
+- typed notification intents, per-workspace channel settings, safe summaries, reply vocabulary,
+  and first-party review or recovery links;
 - health analysis, recommendations, goals/preferences, and confidence/evidence boundaries; and
 - the durable review artifact explaining work, state, uncertainty, advice, and next actions.
 
@@ -52,6 +54,11 @@ audit, and recovery. User Knowledge may become active through manual promotion o
 reinforcement, but it never grants action authority or activates a mutation rule. Never
 guess missing facts, replay ambiguous external effects, hide outstanding questions in a success
 count, or treat a finished process as proof that the workspace is maintained.
+
+Workspaces publish notification intents but never call Twilio, read the shared SMS conversation, or
+route general-inbox requests. Read `docs/product/texting-operations.md` and
+`docs/architecture/0006-texting-inbox.md` when a steward sends or receives Texting work. The global
+review-bypass policy applies across channels; workspace settings cannot widen it.
 
 ## Verify the delivered slice
 

@@ -1,0 +1,67 @@
+# ADR 0006: General texting inbox and workspace dispatch
+
+- Status: Accepted target architecture; implementation pending
+- Date: 2026-09-10
+
+## Context
+
+nohmi already has a hardened one-to-one SMS transport, but current reads and sends are generic
+manual tools. The target product needs every workspace maintenance flow to send concise results and
+questions, and it needs the person to use the same conversation for free-form requests spanning
+Mail, Tasks, Calendar, Finances, and shared services.
+
+Putting SMS processing inside each workspace would create competing consumers, duplicate transport
+logic, make cross-workspace messages ambiguous, and fragment one human conversation. Treating
+Texting as a fifth workspace would incorrectly give it ownership of domain records and expertise.
+
+## Decision
+
+Texting is a shared channel with a domain-owned coordinator, not a core workspace. It owns:
+
+- consent, connection, conversation, delivery, and uncertain-send reconciliation;
+- durable inbound claims and event-driven processing;
+- classification into existing-work-node answers, reviews, or new intents;
+- routing and linked child-intent coordination across workspaces;
+- application of global and per-workspace channel settings; and
+- concise response composition over domain-owned results.
+
+Each workspace owns the operation, evidence, policy decision, work nodes, and terminal truth for
+its child intent. Texting cannot call providers on a workspace's behalf, embed workspace playbooks,
+reinterpret a domain result, or grant action authority.
+
+`maintain_texting` is the recovery and catch-up intent for unprocessed messages, interrupted child
+work, unresolved delivery, and missing replies. Inbound webhook arrival should durably enqueue the
+same coordinator promptly; the maintenance intent and event-driven path share one source of truth.
+
+Workspace stewards publish typed notification intents rather than rendered SMS. Texting applies
+channel policy and renders one result, one available question or exact review action, and an
+optional first-party deep link.
+
+## Authority
+
+One global review-bypass policy applies across app, API, MCP, scheduled, and SMS callers. With
+bypass enabled, policy-authorized reversible actions may execute directly. With bypass disabled,
+they become exact reviews; a verified SMS answer may approve an unexpired, revision-bound,
+reversible proposal.
+
+Bypass does not widen scopes or permit blocked, unsupported, irreversible, scope-changing,
+recipient-changing, credential, or ambiguous effects. Every routed intent preserves the SMS actor,
+conversation message, child run, source evidence, policy, approval, effect, and recovery chain.
+
+## Reliability
+
+- Each inbound message has one durable claim and an idempotent routing identity.
+- Child intents have stable identities and can resume without replaying completed effects.
+- A cross-workspace reply waits for honest child states and never reports partial work as complete.
+- Ambiguous routing asks one clarification and leaves unrelated work available.
+- An uncertain outbound provider result reconciles before identical content can be sent again.
+- STOP, disconnect, feature disablement, or workspace SMS disablement stops new sends and routing
+  while preserving prior audit and recovery state.
+
+## Consequences
+
+- The person gets one continuous general nohmi inbox without creating a fifth workspace.
+- Workspaces can use SMS without depending on Twilio or reading the shared conversation.
+- General requests can span domains while retaining domain ownership and least privilege.
+- The current transport can be retained, but durable routing, child intents, notification intents,
+  global review bypass, per-workspace controls, and SMS approvals require new target work.

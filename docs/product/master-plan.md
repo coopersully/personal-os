@@ -64,6 +64,10 @@ flowchart TD
 **Implement**
 
 - Create a capability inventory for every current route, endpoint, connector operation, MCP tool, data table, and deferred item in `mvp.md`.
+- Execute the repository-wide naming hard cutover defined in [`naming.md`](naming.md): use
+  `personal-os` for internal implementation identifiers, lowercase `nohmi` for the product and
+  public agent surface, remove every former-name occurrence without compatibility aliases, and
+  coordinate deployed domains, callbacks, protocols, infrastructure, clients, skills, and rollback.
 - Adopt `master-design.md` as the source of future UX/architecture decisions; update ADRs when a decision changes accepted system shape.
 - Finish the shared shadcn component registry and remove bespoke controls from settings and new surfaces. Add app-level layout blocks: global sidebar/top bar, command header, context sidebar, material list, inspector, editor, approval row, run row, source badge, sync state, empty/error/offline states.
 - Formalize semantic tokens, Plus Jakarta Sans/DM Mono typography, color-theme propagation, grid/spacing, desktop/mobile breakpoints, and visual regression baselines.
@@ -74,6 +78,8 @@ flowchart TD
 - Every new control has a generated shadcn primitive and every shared page state is reusable.
 - Design QA confirms that sidebar geometry and action columns do not change with selected content.
 - The capability inventory has a row for every design requirement in the master design and a future owner epic.
+- A case-insensitive scan of tracked and generated repository files reports zero former-name
+  occurrences, and production evidence confirms the coordinated cutover is healthy.
 
 ### Epic 1 — Trust platform: identity, access, policy, audit, and privacy
 
@@ -262,6 +268,15 @@ flowchart TD
 - Build docked sprite/pet overlay with accessible states, count/error/pending behavior, reduced motion, click/shortcut toggle, privacy-safe compact panel, and no click-through ambiguity.
 - Build platform-specific widget adapters with configurable Today/calendar/reminder/mail/finance/habit blocks and privacy levels: a native Apple WidgetKit extension with shared-container/timeline/push behavior, and a Windows widget-provider/PWA adapter using the platform's Adaptive Card model. Treat widgets as glanceable/deep-link surfaces, not mini-apps.
 - Build unified notification service: device registration, domain rules, quiet hours, escalation, deduplication, local timezone, action deep links, calendar/reminder installs, and audit delivery state.
+- Evolve the existing hardened SMS transport into the general nohmi inbox: durable inbound claims,
+  event-driven processing, work-node answer matching, free-form intent routing, linked
+  cross-workspace child intents, concise response composition, and uncertain-send reconciliation.
+- Add typed workspace notification intents and per-workspace SMS settings for inbound routing,
+  maintenance outcomes, replies, sensitive detail, links, and quiet hours. Workspaces never call
+  Twilio or read the shared conversation directly.
+- Promote Finance's current review-bypass control into one global policy used consistently by app,
+  API, MCP, scheduled, and SMS work. Bind SMS approvals to one exact, reversible, unexpired proposal
+  and retain stronger boundaries for unsupported or higher-impact effects.
 
 **Done when**
 
@@ -297,6 +312,12 @@ unnecessary questions.
 | Finance categorizer | new transactions/rules | high-confidence categories, uncertain-review queue, recurring/subscription changes. |
 | Weekly review | selected consented domains | completed work, time allocation, goals/habits, inbox/finance open loops, next-week plan. |
 | Monthly finance close | financial data/budget | uncategorized reconciliation, recurring changes, budget/cash-flow report, review queue. |
+| General texting inbox | inbound conversation, work nodes, settings, scopes | route free-form and cross-workspace requests, collect durable child results, answer or request clarification, and reconcile delivery. |
+
+`maintain_texting` is the catch-up and recovery intent for unprocessed inbound messages,
+interrupted child work, unresolved replies, and uncertain outbound delivery. Webhook arrival should
+enqueue the same durable coordinator promptly; an external schedule is a fallback rather than the
+primary response mechanism.
 
 **Done when** each workflow has an explicit domain owner, source/schema/policy docs, preview tests where it proposes mutations, failure/recovery behavior, activity evidence, and deterministic end-to-end coverage. A workflow that does not need durable execution remains an ordinary view or action.
 

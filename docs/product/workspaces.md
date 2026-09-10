@@ -47,6 +47,13 @@ Every workspace should expose the following interfaces over one domain-owned sou
 | Questions and reviews | Preserve human judgment without blocking unrelated work. | Persist the work nodes created by setup and maintenance: what nohmi did, what it could not safely decide, the evidence behind each question, and the consequence of each answer. |
 | Settings and recovery | Make control and degraded state obvious. | Expose sources, synchronization, permissions, agent access, guidance, rules, connector failures, retries, exports, and deletion. |
 
+Texting is a shared general inbox across these interfaces, not another workspace. It routes each
+free-form request, answer, or exact review to its owning workspace; workspace maintenance may
+publish concise SMS results and questions through Texting according to the person's global and
+per-workspace settings. The complete contracts are
+[`texting and SMS`](texting-operations.md) and
+[`per-workspace settings`](workspace-settings.md).
+
 ## Mail
 
 ### Goal

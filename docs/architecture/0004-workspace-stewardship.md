@@ -87,6 +87,11 @@ Retain granular tools for surgical inspection, previews, and exact authorized ac
 the high-level operation a synchronous loop of client-authored calls. Consequential authority stays
 at each underlying operation, and a maintenance request cannot widen the caller's scopes or policy.
 
+Workspace stewards may publish typed notification intents that reference their run, work nodes,
+safe summary, sensitivity, and first-party destination. The shared Texting coordinator owns channel
+policy, rendering, delivery, and reply routing; it cannot own or reinterpret the workspace's
+domain operation. General-inbox dispatch follows [`ADR 0006`](0006-texting-inbox.md).
+
 Finance adds a deliberate agent-challenge boundary between preparation and
 settlement. `maintain_finances` owns the durable run and prepares the candidate;
 `get_finance_ledger_challenge` pages its complete public evidence;

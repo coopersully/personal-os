@@ -16,6 +16,8 @@ high-confidence actions only when its saved prompt explicitly authorizes writes.
   If that Project is missing or ambiguous, stop without writes.
 - Limit writes to a missing structured GitHub link or a status that clearly trails PR/branch
   evidence. Report a missing or incorrect PR Work map as GitHub-side drift; do not edit GitHub.
+- Scheduled status writes are limited to `Todo` to `In Progress`. A transition to `Done` always
+  requires issue-specific completion evidence and explicit confirmation in chat.
 - Do not create issues or taxonomy; do not change assignee, priority, project, cycle, or scope.
 - Do not post GitHub comments or unrelated Linear comments.
 - No active cycle is normal in the current Nohmi workspace. Use recently updated, non-completed
@@ -74,8 +76,9 @@ high-confidence actions.
 ```text
 Use $linear-janitor as a scheduled automation for Nohmi. Run one conservative hygiene pass over
 recent issues in the `Nohmi` Linear Project and this repository's linked GitHub branches or PRs.
-Paginate Linear reads. Apply only high-confidence missing-link and clearly stale-status repairs; report
-ambiguity without guessing. Never read another Project into the candidate set or mutate its issues.
+Paginate Linear reads. Apply only high-confidence missing-link repairs and `Todo` to `In Progress`
+status repairs. Report proposed `Done` transitions and ambiguity without guessing. Never read another
+Project into the candidate set or mutate its issues.
 Do not create issues or taxonomy, change owners/priorities/projects/cycles/scope, or post to GitHub.
 Append the audit ledger and stay quiet when no actionable change or failure exists.
 ```

@@ -51,7 +51,7 @@ Report only actionable, evidence-backed findings:
 - priority `P0`–`P3`;
 - tight file/line anchor when possible;
 - concrete failure or future defect;
-- why it matters in ilo;
+- why it matters in Nohmi;
 - smallest sound remediation.
 
 Block only for correctness, security/privacy, data loss, architecture, accessibility, broken

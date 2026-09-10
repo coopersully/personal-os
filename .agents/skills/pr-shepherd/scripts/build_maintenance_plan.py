@@ -80,6 +80,12 @@ def plan(state, feedback):
     elif state.get("worktree", {}).get("dirty"):
         action = "ESCALATE"
         evidence.append("working tree contains local changes")
+    elif (issue_keys := linear_work_map_issue_keys(state.get("body") or "")) is None:
+        action = "AUDIT_TRACKER"
+        evidence.append("PR lacks a complete Nohmi Linear Work map")
+    elif not linear_coverage_complete(state, issue_keys):
+        action = "AUDIT_TRACKER"
+        evidence.append("PR Work map is not reconciled with live Nohmi Linear coverage")
     elif actionable_feedback(feedback):
         action = "ADDRESS_FEEDBACK"
         evidence.append("actionable review feedback remains")
@@ -96,12 +102,6 @@ def plan(state, feedback):
         elif pending:
             action = "WAIT"
             evidence.append(f"{len(pending)} check(s) pending")
-        elif (issue_keys := linear_work_map_issue_keys(state.get("body") or "")) is None:
-            action = "AUDIT_TRACKER"
-            evidence.append("PR lacks a complete Nohmi Linear Work map")
-        elif not linear_coverage_complete(state, issue_keys):
-            action = "AUDIT_TRACKER"
-            evidence.append("PR Work map is not reconciled with live Nohmi Linear coverage")
         elif state.get("missingBodySections"):
             action = "UPDATE_METADATA"
             evidence.append("PR body is missing rubric sections")

@@ -5,6 +5,7 @@
 | Explicit PR number has one match and the issue lacks a link | Propose the exact PR link. |
 | Unique recent branch exists with no PR | Propose the branch link and `In Progress` when currently unstarted. |
 | PR merged but issue-specific completion evidence is incomplete | Report for review; do not mark `Done`. |
+| Scheduled run finds a merged PR with complete issue evidence | Report the proposed `Done` transition for chat confirmation; do not apply it. |
 | Two PRs plausibly match | Do not write. |
 | Completed issue links an open PR | Do not reopen automatically. |
 | Query has another page | Fetch it before reporting counts or changes. |

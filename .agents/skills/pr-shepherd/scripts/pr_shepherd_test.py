@@ -73,6 +73,37 @@ class ShepherdTest(unittest.TestCase):
         result = plan(state(linearCoverage={"verified": False}), {"items": []})
         self.assertEqual(result["nextAction"]["kind"], "AUDIT_TRACKER")
 
+    def test_invalid_tracker_coverage_precedes_nonterminal_actions(self):
+        cases = {
+            "feedback": (
+                state(linearCoverage={"verified": False}),
+                {"items": [{"kind": "review_thread", "isResolved": False}]},
+            ),
+            "failed CI": (
+                state(
+                    linearCoverage={"verified": False},
+                    statusCheckRollup=[{"conclusion": "FAILURE"}],
+                ),
+                {"items": []},
+            ),
+            "conflict": (
+                state(linearCoverage={"verified": False}, mergeable="CONFLICTING"),
+                {"items": []},
+            ),
+            "pending CI": (
+                state(
+                    linearCoverage={"verified": False},
+                    statusCheckRollup=[{"status": "IN_PROGRESS"}],
+                ),
+                {"items": []},
+            ),
+        }
+
+        for name, (pr_state, feedback) in cases.items():
+            with self.subTest(name=name):
+                result = plan(pr_state, feedback)
+                self.assertEqual(result["nextAction"]["kind"], "AUDIT_TRACKER")
+
     def test_wrong_linear_issue_routes_to_tracker_audit(self):
         result = plan(
             state(

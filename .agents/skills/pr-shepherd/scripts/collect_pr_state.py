@@ -46,6 +46,7 @@ def collect(pr=None):
     status = run(["git", "status", "--porcelain"]).splitlines()
     required_sections = [
         "## Overview",
+        "## Work map",
         "## Why this change",
         "## What changed",
         "## Documentation",
@@ -54,6 +55,7 @@ def collect(pr=None):
     data["worktree"] = {"dirty": bool(status), "entries": status}
     data["changedPaths"] = paths
     data["protectedPaths"] = [path for path in paths if protected_path(path)]
+    data["linearCoverage"] = {"verified": False}
     data["missingBodySections"] = [
         section for section in required_sections if section not in (data.get("body") or "")
     ]

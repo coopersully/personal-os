@@ -1,5 +1,6 @@
 import {
   type Database,
+  financeAccounts,
   financeCategories,
   financeClassificationDecisions,
   financeEventTransactions,
@@ -49,6 +50,7 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
     throw new AppError("internal_error", "A Finance Inbox case lost its event.");
   return {
     transactionId: row.transactionId,
+    prompt: prompt(row),
     economicEventId: row.economicEventId,
     evidence: row.evidence,
     firstSeenAt: row.firstSeenAt.toISOString(),
@@ -95,8 +97,11 @@ function inboxResult(
   rows: Array<typeof financeReviewCases.$inferSelect>,
   headline: string,
   changes: FinanceChange[] = [],
+  contexts: Map<string, NonNullable<FinanceInboxCase["context"]>> = new Map(),
 ): FinanceToolResult<FinanceInboxCase[]> {
-  const first = rows[0];
+  const first = rows.find(
+    (row) => row.resolution?.type !== "clarify" && typeof row.evidence.clarification !== "string",
+  );
   return withFinanceInboxPresentation({
     changes,
     communication: {
@@ -107,9 +112,9 @@ function inboxResult(
       optionalDetails: [],
       requiredDisclosures: [],
     },
-    data: rows.map(caseValue),
-    outcome: first ? "user_input_required" : "completed",
-    remainingWork: { categories: first ? ["finance_inbox"] : [], count: rows.length },
+    data: rows.map((row) => ({ ...caseValue(row), context: contexts.get(row.transactionId) })),
+    outcome: first ? "user_input_required" : rows.length ? "work_remaining" : "completed",
+    remainingWork: { categories: rows.length ? ["finance_inbox"] : [], count: rows.length },
     schemaVersion: 1,
   });
 }
@@ -129,6 +134,47 @@ export function createInboxService({ db, now }: Options) {
       .orderBy(desc(financeReviewCases.impactAmount), asc(financeReviewCases.firstSeenAt));
   }
 
+  async function transactionContexts(
+    userId: string,
+    rows: Array<typeof financeReviewCases.$inferSelect>,
+    executor: FinanceExecutor,
+  ) {
+    if (!rows.length) return new Map<string, NonNullable<FinanceInboxCase["context"]>>();
+    const records = await executor
+      .select({
+        id: financeTransactions.id,
+        accountId: financeAccounts.id,
+        accountName: financeAccounts.name,
+        institution: financeAccounts.institution,
+        merchant: financeTransactions.merchant,
+        date: financeTransactions.transactionDate,
+        amount: financeTransactions.amount,
+        currencyCode: financeTransactions.currencyCode,
+        direction: financeTransactions.direction,
+        pending: financeTransactions.pending,
+      })
+      .from(financeTransactions)
+      .innerJoin(
+        financeAccounts,
+        and(
+          eq(financeAccounts.id, financeTransactions.accountId),
+          eq(financeAccounts.userId, userId),
+        ),
+      )
+      .where(
+        and(
+          eq(financeTransactions.userId, userId),
+          inArray(
+            financeTransactions.id,
+            rows.map((row) => row.transactionId),
+          ),
+        ),
+      );
+    return new Map(
+      records.map(({ id, ...record }) => [id, { ...record, amount: fromCents(record.amount) }]),
+    );
+  }
+
   return {
     async upsertFinanceReview(input: ReviewFinding, executor: FinanceExecutor = db) {
       const stableKey = `${input.economicEventId}:${input.reason}`;
@@ -143,7 +189,12 @@ export function createInboxService({ db, now }: Options) {
         const [updated] = await executor
           .update(financeReviewCases)
           .set({
-            evidence: input.evidence,
+            evidence: {
+              ...input.evidence,
+              ...(typeof existing.evidence.clarification === "string"
+                ? { clarification: existing.evidence.clarification }
+                : {}),
+            },
             impactAmount: toCents(input.impactAmount),
             lastSeenAt: now(),
             proposedResolution: input.proposedResolution ?? null,
@@ -204,6 +255,8 @@ export function createInboxService({ db, now }: Options) {
           : rows.length === 1
             ? "1 transaction needs review."
             : `${rows.length} transactions need review.`,
+        [],
+        await transactionContexts(userId, rows, executor),
       );
     },
 
@@ -222,24 +275,40 @@ export function createInboxService({ db, now }: Options) {
         },
         async (tx) => {
           const change = await (async () => {
-            const review = await tx.query.financeReviewCases.findFirst({
-              where: and(
-                eq(financeReviewCases.id, caseId),
-                eq(financeReviewCases.userId, context.userId),
-              ),
-            });
+            const [review] = await tx
+              .select()
+              .from(financeReviewCases)
+              .where(
+                and(
+                  eq(financeReviewCases.id, caseId),
+                  eq(financeReviewCases.userId, context.userId),
+                ),
+              );
             if (!review) throw new AppError("not_found", "That Finance Inbox case was not found.");
             if (review.status === "resolved")
               throw new AppError("conflict", "That Finance Inbox case is already resolved.");
             if (input.resolution.type === "clarify") {
-              await tx
+              const [saved] = await tx
                 .update(financeReviewCases)
                 .set({
-                  evidence: { ...review.evidence, clarification: input.resolution.clarification },
+                  resolution: { answer: input.answer, ...input.resolution },
+                  resolutionProvenance: {
+                    actorId: context.actorId,
+                    actorType: context.actorType,
+                    requestId: context.requestId,
+                  },
                   lastSeenAt: now(),
                   updatedAt: now(),
                 })
-                .where(eq(financeReviewCases.id, review.id));
+                .where(
+                  and(
+                    eq(financeReviewCases.id, review.id),
+                    inArray(financeReviewCases.status, ["open", "deferred"]),
+                  ),
+                )
+                .returning({ id: financeReviewCases.id });
+              if (!saved)
+                throw new AppError("conflict", "That Finance Inbox case is already resolved.");
               return null;
             }
             if (
@@ -389,7 +458,7 @@ export function createInboxService({ db, now }: Options) {
               if (!profile)
                 throw new AppError("internal_error", "The financial profile was not updated.");
             }
-            await tx
+            const [resolved] = await tx
               .update(financeReviewCases)
               .set({
                 resolution: { answer: input.answer, ...input.resolution },
@@ -404,7 +473,15 @@ export function createInboxService({ db, now }: Options) {
                 status: "resolved",
                 updatedAt: now(),
               })
-              .where(eq(financeReviewCases.id, review.id));
+              .where(
+                and(
+                  eq(financeReviewCases.id, review.id),
+                  inArray(financeReviewCases.status, ["open", "deferred"]),
+                ),
+              )
+              .returning({ id: financeReviewCases.id });
+            if (!resolved)
+              throw new AppError("conflict", "That Finance Inbox case is already resolved.");
             return {
               affectedEntityId: review.id,
               description: "Applied the answer and resolved the Finance Inbox case.",
@@ -417,8 +494,9 @@ export function createInboxService({ db, now }: Options) {
             rows,
             change
               ? "I applied that answer."
-              : "I need one clarification before applying a change.",
+              : "Your note is saved for the next maintenance pass. This item remains open.",
             change ? [change] : [],
+            await transactionContexts(context.userId, rows, tx),
           );
         },
       );

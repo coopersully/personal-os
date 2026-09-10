@@ -341,3 +341,46 @@ it("reloads failed inbox and category sources and renews a confirmed failed answ
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(api.answerFinanceReview.mock.calls[1]?.[1].idempotencyKey).not.toBe(first);
 });
+
+it("keeps saved notes inspectable when no unanswered question remains", async () => {
+  const data = response([
+    {
+      ...review(),
+      prompt: "Where did this money go?",
+      resolution: { type: "clarify", clarification: "A savings transfer" },
+    },
+  ]);
+  delete data.communication.nextQuestion;
+  data.outcome = "work_remaining";
+  api.getFinanceInbox.mockResolvedValue(data);
+  mount();
+  expect(await screen.findByText("Note saved · awaiting maintenance")).toBeVisible();
+  expect(screen.getByText("A savings transfer")).toBeVisible();
+  expect(screen.queryByText("Review question unavailable")).not.toBeInTheDocument();
+  expect(screen.queryByText("No open Inbox questions")).not.toBeInTheDocument();
+});
+
+it("lets the user choose a later case using its own server-authored question", async () => {
+  const later = {
+    ...review(nextId),
+    prompt: "Was this a gift?",
+    context: {
+      accountId: transactionId,
+      accountName: "Checking",
+      institution: "Bank",
+      date: "2026-09-03",
+      amount: 63,
+      currencyCode: "USD",
+      direction: "income" as const,
+      pending: false,
+      merchant: "Transfer",
+    },
+  };
+  api.getFinanceInbox.mockResolvedValue(response([review(), later]));
+  mount();
+  await userEvent.selectOptions(await screen.findByLabelText("Outstanding items"), nextId);
+  expect(screen.getByRole("heading", { name: "Was this a gift?" })).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).not.toBeInTheDocument();
+});

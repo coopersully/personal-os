@@ -4,6 +4,7 @@ import {
   type DatabaseClient,
   financeAccounts,
   financeCategories,
+  financeCategoryRules,
   financeEconomicEvents,
   financeProfileVersions,
   financeTransactions,
@@ -15,6 +16,7 @@ import { eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createInboxService } from "./inbox-service.js";
+import { createMaintenanceService } from "./maintenance-service.js";
 
 describe.sequential("transaction-backed Finance Inbox", () => {
   let container: StartedPostgreSqlContainer;
@@ -111,7 +113,20 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     const inbox = await service.getFinanceInbox(userId);
     expect(inbox.communication.nextQuestion?.id).toBe(first.id);
     expect(inbox.remainingWork.count).toBe(2);
-    expect(inbox.data[0]).toMatchObject({ transactionId: transactions[0].id });
+    expect(inbox.data[0]).toMatchObject({
+      transactionId: transactions[0].id,
+      context: {
+        accountId: account.id,
+        accountName: "Checking",
+        institution: "Bank",
+        date: "2026-08-22",
+        amount: 500,
+        merchant: "Large",
+        direction: "expense",
+        pending: false,
+      },
+    });
+    expect((await service.getFinanceInbox(crypto.randomUUID())).data).toEqual([]);
 
     const principal: Principal = {
       actorId: "agent",
@@ -124,15 +139,24 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       principal,
       requestId: "answer",
     });
-    const answered = await service.answerFinanceReview(
-      first.id,
-      {
-        answer: "This purchase is legitimate.",
-        idempotencyKey: "answer-1",
-        resolution: { rationale: "User confirmed it.", type: "dismiss" },
-      },
-      context,
+    const attempts = await Promise.allSettled(
+      ["answer-1", "answer-2"].map((idempotencyKey) =>
+        service.answerFinanceReview(
+          first.id,
+          {
+            answer: "This purchase is legitimate.",
+            idempotencyKey,
+            resolution: { rationale: "User confirmed it.", type: "dismiss" },
+          },
+          context,
+        ),
+      ),
     );
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    const completed = attempts.find((attempt) => attempt.status === "fulfilled");
+    if (completed?.status !== "fulfilled") throw new Error("No successful answer.");
+    const answered = completed.value;
     expect(answered.communication.nextQuestion?.id).not.toBe(first.id);
     expect(answered.remainingWork.count).toBe(1);
     expect(answered.communication.headline).toBe("I applied that answer.");
@@ -175,8 +199,70 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       ),
     ).resolves.toMatchObject({
       changes: [],
-      communication: { nextQuestion: { id: reviewId } },
+      outcome: "work_remaining",
+      remainingWork: { count: 1, categories: ["finance_inbox"] },
     });
+    const saved = (await service.getFinanceInbox(userId)).data.find((item) => item.id === reviewId);
+    if (!saved?.transactionId) throw new Error("Saved review missing.");
+    expect((await service.getFinanceInbox(userId)).communication.nextQuestion).toBeUndefined();
+    await service.upsertFinanceReview({
+      economicEventId: saved.economicEventId,
+      transactionId: saved.transactionId,
+      evidence: { merchant: "Updated provider label" },
+      impactAmount: saved.impactAmount,
+      reason: saved.reason,
+      userId,
+    });
+    const refreshed = (await service.getFinanceInbox(userId)).data.find(
+      (item) => item.id === reviewId,
+    );
+    expect(refreshed).toMatchObject({
+      status: "open",
+      resolution: {
+        type: "clarify",
+        answer: "I need the merchant name.",
+        clarification: "Which location was this?",
+      },
+      evidence: { merchant: "Updated provider label" },
+    });
+    const maintenance = createMaintenanceService({ db: database.db, now, inbox: service });
+    const nextPass = await maintenance.maintainFinances(
+      { operation: "start", scope: { type: "since", from: "2026-09-01" } },
+      context,
+    );
+    expect(nextPass.data.inboxCases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: reviewId, resolution: refreshed?.resolution }),
+      ]),
+    );
+    await maintenance.maintainFinances(
+      {
+        operation: "submit_audit",
+        runId: nextPass.data.runId,
+        expectedVersion: nextPass.data.version,
+        idempotencyKey: "notes-audit",
+        findings: [],
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ needsReview: true })
+      .where(eq(financeTransactions.id, saved.transactionId));
+    await database.db
+      .insert(financeCategoryRules)
+      .values({ userId, merchantNormalized: "small", category: "Dining" });
+    const withRule = await maintenance.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      context,
+    );
+    expect(withRule.data.reasoningBatch).toEqual(
+      expect.arrayContaining([expect.objectContaining({ transactionId: saved.transactionId })]),
+    );
+    const beforeAnswer = await database.db.query.financeTransactions.findFirst({
+      where: eq(financeTransactions.id, saved.transactionId),
+    });
+    expect(beforeAnswer?.needsReview).toBe(true);
     await expect(
       service.answerFinanceReview(
         reviewId,

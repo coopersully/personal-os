@@ -354,11 +354,8 @@ describe("Finance position pages", () => {
       nextCursor: null,
     });
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Was this transfer yours?")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Answer next question" })).toHaveAttribute(
-      "href",
-      "/finances/review",
-    );
+    expect(await screen.findByText("Outstanding (2)")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Review item" })).toHaveLength(2);
     expect(screen.getByText("Active · Version 4")).toBeVisible();
     expect(screen.getByText("Automate savings")).toBeVisible();
     expect(screen.getByRole("link", { name: "Open review" })).toHaveAttribute(

@@ -4890,18 +4890,21 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("prioritizes canonical Finance position, proposals, and the next Inbox question", async () => {
+  it("prioritizes canonical Finance position, proposals, and selectable outstanding work", async () => {
     configureFinanceWorkspace();
     const view = setup("/finances");
-    const position = await screen.findByRole("region", { name: "Financial position" });
+    const position = await screen.findByRole(
+      "region",
+      { name: "Financial position" },
+      { timeout: 10_000 },
+    );
     expect(within(position).getByText("$250.00")).toBeInTheDocument();
     expect(within(position).getByText("$42.50")).toBeInTheDocument();
     expect(within(position).getByText("$300.00")).toBeInTheDocument();
     expect(await screen.findByText("Proposed · Version 4")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Answer next question" })).toHaveAttribute(
-      "href",
-      "/finances/review",
-    );
+    const outstanding = screen.getByRole("region", { name: "Outstanding finance items" });
+    expect(within(outstanding).getByText("Outstanding (1)")).toBeInTheDocument();
+    expect(within(outstanding).getByRole("button", { name: "Review item" })).toBeEnabled();
     const sidebar = screen.getByRole("complementary", { name: "Finances Sidebar" });
     expect(within(sidebar).getByRole("link", { name: "Review 1" })).toHaveAttribute(
       "href",

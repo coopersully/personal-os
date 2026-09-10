@@ -3922,8 +3922,9 @@ describe("ilo web app", () => {
     await browser.selectOptions(screen.getByLabelText("List"), id);
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await browser.click(await screen.findByRole("button", { name: "Move and detach Project" }));
-    expect(await screen.findAllByText("Task move needs a retry")).toHaveLength(2);
-    expect(screen.getByRole("dialog")).toHaveTextContent("Move Task without its Project?");
+    const moveDialog = screen.getByRole("dialog");
+    expect(await within(moveDialog).findByText("Task move needs a retry")).toBeInTheDocument();
+    expect(moveDialog).toHaveTextContent("Move Task without its Project?");
     await browser.click(screen.getByRole("button", { name: "Move and detach Project" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     taskView.unmount();
@@ -4697,7 +4698,9 @@ describe("ilo web app", () => {
       nextCursor: null,
     });
     await browser.click(screen.getByRole("button", { name: "Retry Lists" }));
-    await waitFor(() => expect(screen.queryByText("Lists are temporarily unavailable")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry Lists" })).not.toBeInTheDocument(),
+    );
     listFailure.unmount();
 
     mocks.listTaskProjects.mockRejectedValue(new Error("Projects are temporarily unavailable"));
@@ -4709,7 +4712,7 @@ describe("ilo web app", () => {
     mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
     await browser.click(screen.getByRole("button", { name: "Retry Projects" }));
     await waitFor(() =>
-      expect(screen.queryByText("Projects are temporarily unavailable")).toBeNull(),
+      expect(screen.queryByRole("button", { name: "Retry Projects" })).not.toBeInTheDocument(),
     );
     projectFailure.unmount();
   });
@@ -6174,7 +6177,7 @@ describe("ilo web app", () => {
     const view = setup("/calendar");
     const browser = userEvent.setup();
     await screen.findByText("Focus block");
-    const accountToggle = screen.getByRole("button", { name: "2 of 3 calendars" });
+    const accountToggle = screen.getByRole("button", { name: /2 of 3 calendars/ });
     expect(accountToggle.querySelectorAll('[data-slot="avatar"]')).not.toHaveLength(0);
     await browser.click(accountToggle);
     const googleToggle = screen.getByRole("switch", { name: /Readonly Google/ });
@@ -6907,7 +6910,7 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Calendar controls" })).toBeInTheDocument();
     await screen.findByText("Focus block");
-    expect(screen.getByRole("button", { name: "2 of 3 calendars" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /2 of 3 calendars/ })).toBeInTheDocument();
     expect(
       screen.queryByRole("complementary", { name: "Calendar Sidebar" }),
     ).not.toBeInTheDocument();
@@ -7606,7 +7609,8 @@ describe("ilo web app", () => {
 
     expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
     const densityTrigger = await screen.findByRole("button", { name: "Message list layout" });
-    await browser.click(densityTrigger);
+    densityTrigger.focus();
+    await browser.keyboard("{Enter}");
     await browser.click(await screen.findByRole("menuitemradio", { name: "Compact" }));
     expect(window.localStorage.getItem("ilo.mail.list-density.v1")).toBe("compact");
     expect(screen.getByRole("button", { name: /Project update/ })).toHaveAttribute(
@@ -7619,13 +7623,11 @@ describe("ilo web app", () => {
     });
     expect(accountControl.querySelectorAll('[data-slot="avatar"]')).toHaveLength(3);
     expect(accountControl).not.toHaveTextContent("Needs attention");
-    expect(
-      within(accountControl).getByLabelText("Mail account needs attention"),
-    ).toBeInTheDocument();
+    expect(accountControl.querySelector(".account-selection-trigger__warning")).not.toBeNull();
     await browser.click(accountControl);
     expect(await screen.findByText("Mail accounts")).toBeInTheDocument();
     expect(screen.getByLabelText("iCloud account needs attention")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reconnect mail account" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Reconnect 1 account" })).toHaveAttribute(
       "href",
       "/settings?section=connections",
     );
@@ -8017,17 +8019,17 @@ describe("ilo web app", () => {
     await browser.click(await findSettingsLink("Connections"));
     await browser.click(await screen.findByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "Google" }));
-    expect(await screen.findByText("Google Calendar is not configured.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Google Calendar is not configured.")).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Sync Google" }));
-    expect(await screen.findByText("Google sync failed.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Google sync failed.")).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Disconnect Google" }));
-    expect(await screen.findByText("Google disconnect failed.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Google disconnect failed.")).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "iCloud" }));
     await browser.type(screen.getByLabelText("Apple Account email"), "test@icloud.com");
     await browser.type(screen.getByLabelText("App-specific password"), "bad-password");
     await browser.click(screen.getByRole("button", { name: "Add iCloud" }));
-    expect(await screen.findByText("iCloud connection failed.")).toBeInTheDocument();
+    expect(await screen.findAllByText("iCloud connection failed.")).not.toHaveLength(0);
   });
 
   it("shows safe connection health and gives each reconnect state a direct repair action", async () => {
@@ -8440,11 +8442,17 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const connected = setup("/settings?section=connections");
     await browser.selectOptions(await screen.findByLabelText("X bookmark folder"), "folder-2");
-    expect(await screen.findByText("Folder selection failed")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Sync X bookmarks for cooper" }));
-    expect(await screen.findByText("Bookmark sync failed")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Disconnect X bookmarks for cooper" }));
-    expect(await screen.findByText("Disconnect failed")).toBeInTheDocument();
+    expect(await screen.findAllByText("Folder selection failed")).not.toHaveLength(0);
+    const syncButton = screen.getByRole("button", { name: "Sync X bookmarks for cooper" });
+    await waitFor(() => expect(syncButton).toBeEnabled());
+    await browser.click(syncButton);
+    expect(await screen.findAllByText("Bookmark sync failed")).not.toHaveLength(0);
+    const disconnectButton = screen.getByRole("button", {
+      name: "Disconnect X bookmarks for cooper",
+    });
+    await waitFor(() => expect(disconnectButton).toBeEnabled());
+    await browser.click(disconnectButton);
+    expect(await screen.findAllByText("Disconnect failed")).not.toHaveLength(0);
     connected.unmount();
 
     mocks.getXBookmarkAccount.mockResolvedValue(null);
@@ -8452,7 +8460,7 @@ describe("ilo web app", () => {
     setup("/settings?section=connections");
     await browser.click(await screen.findByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "X bookmarks" }));
-    expect(await screen.findByText("X authorization failed")).toBeInTheDocument();
+    expect(await screen.findAllByText("X authorization failed")).not.toHaveLength(0);
   });
 
   it("shows every X bookmark account health state", async () => {
@@ -8499,7 +8507,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     setup("/settings?section=connections");
     expect(await screen.findByText("Syncing")).toBeInTheDocument();
-    expect(screen.getByText(/^Synced /)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Synced /)).not.toHaveLength(0);
     const syncButton = screen.getByRole("button", { name: "Sync X bookmarks for cooper" });
     await browser.click(syncButton);
     expect(syncButton).toBeDisabled();

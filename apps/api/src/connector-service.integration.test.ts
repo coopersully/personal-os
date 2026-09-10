@@ -1422,6 +1422,18 @@ describe.sequential("connector service", () => {
       .from(calendarAccounts)
       .where(eq(calendarAccounts.providerAccountId, "google-person"));
     if (!googleAccount) throw new Error("Google account fixture is missing.");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          {
+            ...credentials,
+            scope: `${googleCalendarAndMailScope} https://www.googleapis.com/auth/gmail.send`,
+          },
+          encryptionKey,
+        ),
+      })
+      .where(eq(calendarAccounts.id, googleAccount.id));
     const sendGoogle = google.sendMail;
     const sendICloud = icloud.sendMail;
     if (!sendGoogle || !sendICloud) throw new Error("Mail send fixtures are unavailable.");
@@ -1484,6 +1496,18 @@ describe.sequential("connector service", () => {
       .from(calendarAccounts)
       .where(eq(calendarAccounts.providerAccountId, "google-person"));
     if (!account) throw new Error("Google account fixture is missing.");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          {
+            ...credentials,
+            scope: `${googleCalendarAndMailScope} https://www.googleapis.com/auth/gmail.send`,
+          },
+          encryptionKey,
+        ),
+      })
+      .where(eq(calendarAccounts.id, account.id));
     const mail = createMailService({
       db: database.db,
       gateway: service.mailGateway,

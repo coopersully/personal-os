@@ -38,6 +38,11 @@ jobs:
           cache: pnpm
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      - name: Validate PR Work map
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./.codex/scripts/check-pr-body.sh
       - run: pnpm lint
 
   quality:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nohmi Linear Janitor"
+  short_description: "Audit Nohmi issue and PR hygiene"
+  default_prompt: "Use $linear-janitor to dry-run one conservative Nohmi Linear and GitHub hygiene pass."

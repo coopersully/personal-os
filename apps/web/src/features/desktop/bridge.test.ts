@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { desktopFetch, resetDesktopConnection } from "./bridge.js";
+import { desktopFetch, isDesktop, resetDesktopConnection } from "./bridge.js";
 
 beforeEach(() => {
   invoke.mockReset();
@@ -53,5 +53,38 @@ describe("desktop API transport", () => {
       desktopFetch("https://api.test/v1/me", { signal: AbortSignal.abort() }),
     ).rejects.toThrow("Request cancelled");
     expect(invoke).toHaveBeenCalledTimes(2);
+  });
+  it("recognizes the native runtime and forwards Request bodies", async () => {
+    expect(isDesktop()).toBe(false);
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    expect(isDesktop()).toBe(true);
+    invoke
+      .mockResolvedValueOnce({ settings: { serverUrl: "https://api.test" } })
+      .mockResolvedValueOnce({ status: 200, body: '{"ok":true}' });
+    await desktopFetch(
+      new Request("https://api.test/v1/tasks", { body: '{"title":"Test"}', method: "POST" }),
+      { body: '{"title":"Test"}', method: "POST" },
+    );
+    expect(invoke).toHaveBeenLastCalledWith("desktop_request", {
+      request: {
+        serverUrl: "https://api.test",
+        path: "/v1/tasks",
+        method: "POST",
+        body: '{"title":"Test"}',
+      },
+    });
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+  });
+  it("honors cancellation while a native request is in flight", async () => {
+    const controller = new AbortController();
+    invoke
+      .mockResolvedValueOnce({ settings: { serverUrl: "https://api.test" } })
+      .mockImplementationOnce(async () => {
+        controller.abort();
+        return { status: 200, body: '{"ok":true}' };
+      });
+    await expect(
+      desktopFetch("https://api.test/v1/tasks", { signal: controller.signal }),
+    ).rejects.toThrow("Request cancelled");
   });
 });

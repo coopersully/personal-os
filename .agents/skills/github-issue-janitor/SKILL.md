@@ -1,12 +1,15 @@
 ---
 name: github-issue-janitor
-description: Audit ilo GitHub issue and pull request hygiene, including missing links, stale open issues, merged work, duplicate candidates, branch evidence, milestones, assignees, and labels. Use for a bounded GitHub work-tracking cleanup or scheduled hygiene pass.
+description: Use when explicitly auditing or cleaning up legacy nohmi GitHub issues and their pull-request evidence.
 ---
 
 # GitHub issue janitor
 
 Run one bounded reconciliation pass. Interactive runs are dry-run by default and require
 `c` or `confirm` before GitHub writes.
+
+GitHub issues are legacy/source evidence. Use `linear-janitor` for the canonical Nohmi delivery
+graph and never infer current delivery state from GitHub issue state alone.
 
 ## Boundaries
 

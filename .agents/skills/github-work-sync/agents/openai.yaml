@@ -1,4 +1,4 @@
 interface:
   display_name: "GitHub Work Sync"
-  short_description: "Sync branches and PRs to GitHub Issues."
-  default_prompt: "Use $github-work-sync to create or update GitHub issue coverage for the current work."
+  short_description: "Reconcile legacy GitHub issue evidence."
+  default_prompt: "Use $github-work-sync to audit or migrate legacy GitHub issue evidence for current nohmi work."

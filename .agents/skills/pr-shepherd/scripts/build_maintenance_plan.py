@@ -7,8 +7,14 @@ from pathlib import Path
 
 FAILED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE"}
 PENDING = {"QUEUED", "IN_PROGRESS", "PENDING", "WAITING"}
-ISSUE_LINK = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#\d+\b", re.IGNORECASE
+NOHMI_PROJECT_LINK = re.compile(
+    r"^- Project: \[Nohmi\]\(https://linear\.app/coopersully/project/nohmi-6799e74a853f\) — \S.+$",
+    re.MULTILINE,
+)
+LINEAR_TASK_LINK = re.compile(
+    r"^- Task: \[(COO-[1-9][0-9]*)\]"
+    r"\(https://linear\.app/coopersully/issue/(COO-[1-9][0-9]*)(?:/[^)]*)?\) — \S.+$",
+    re.MULTILINE,
 )
 
 
@@ -29,6 +35,43 @@ def actionable_feedback(feedback):
     return False
 
 
+def work_map_section(body):
+    lines = body.splitlines()
+    try:
+        start = lines.index("## Work map") + 1
+    except ValueError:
+        return ""
+    end = next((index for index in range(start, len(lines)) if lines[index].startswith("## ")), len(lines))
+    return "\n".join(lines[start:end])
+
+
+def linear_work_map_issue_keys(body):
+    work_map = work_map_section(body)
+    project_lines = [line for line in work_map.splitlines() if line.startswith("- Project:")]
+    task_lines = [line for line in work_map.splitlines() if line.startswith("- Task:")]
+    if len(project_lines) != 1 or not NOHMI_PROJECT_LINK.fullmatch(project_lines[0]) or not task_lines:
+        return None
+
+    issue_keys = set()
+    for line in task_lines:
+        match = LINEAR_TASK_LINK.fullmatch(line)
+        if not match or match.group(1) != match.group(2):
+            return None
+        issue_keys.add(match.group(1))
+    return issue_keys
+
+
+def linear_coverage_complete(state, issue_keys):
+    coverage = state.get("linearCoverage") or {}
+    return (
+        coverage.get("verified") is True
+        and coverage.get("project") == "Nohmi"
+        and set(coverage.get("directIssueKeys") or []) == issue_keys
+        and coverage.get("structuredBacklinksComplete") is True
+        and coverage.get("statusesCompatible") is True
+    )
+
+
 def plan(state, feedback):
     evidence = []
     if state.get("state") != "OPEN":
@@ -37,6 +80,12 @@ def plan(state, feedback):
     elif state.get("worktree", {}).get("dirty"):
         action = "ESCALATE"
         evidence.append("working tree contains local changes")
+    elif (issue_keys := linear_work_map_issue_keys(state.get("body") or "")) is None:
+        action = "AUDIT_TRACKER"
+        evidence.append("PR lacks a complete Nohmi Linear Work map")
+    elif not linear_coverage_complete(state, issue_keys):
+        action = "AUDIT_TRACKER"
+        evidence.append("PR Work map is not reconciled with live Nohmi Linear coverage")
     elif actionable_feedback(feedback):
         action = "ADDRESS_FEEDBACK"
         evidence.append("actionable review feedback remains")
@@ -56,9 +105,6 @@ def plan(state, feedback):
         elif state.get("missingBodySections"):
             action = "UPDATE_METADATA"
             evidence.append("PR body is missing rubric sections")
-        elif not ISSUE_LINK.search(state.get("body") or "") and len(state.get("changedPaths", [])) > 3:
-            action = "AUDIT_TRACKER"
-            evidence.append("non-trivial PR has no explicit issue relationship")
         elif state.get("reviewDecision") == "APPROVED":
             action = "NOOP"
             evidence.append("approved head has no known maintenance action")

@@ -1,17 +1,22 @@
 ---
 name: github-work-sync
-description: Create, update, link, close, or audit ilo GitHub Issues from a request, branch, commit, pull request, review, or code changelist. Use for GitHub-native task creation, task status updates, duplicate checks, PR issue coverage, and work-tracking synchronization.
+description: Use when explicitly auditing, migrating, closing, or annotating legacy nohmi GitHub issues as source evidence.
 ---
 
 # GitHub work sync
 
-Synchronize real delivery work to GitHub Issues in one bounded, auditable pass.
+Reconcile legacy GitHub issue evidence without creating a parallel delivery graph. Current delivery
+work belongs in the live `Nohmi` Linear Project through `linear-work-sync`.
 
 ## Ground rules
 
 - Read `../github-work-context/SKILL.md` before any issue write.
-- Write only when the user explicitly asks to update work tracking or a calling skill grants the
-  bounded write.
+- Read `../linear-context/SKILL.md` and `../linear-work-sync/SKILL.md` before mapping GitHub evidence
+  to current work.
+- Write only when the user explicitly asks for the exact legacy GitHub issue mutation. No PR skill
+  grants GitHub issue write authority.
+- Never create a new GitHub issue for repository delivery work. Resolve or create the corresponding
+  Nohmi Linear issue instead.
 - Prefer a confident existing issue over creating a duplicate.
 - Create an issue only when the work is concrete, durable, independently shippable, and useful to
   discover outside its PR.
@@ -36,9 +41,8 @@ Synchronize real delivery work to GitHub Issues in one bounded, auditable pass.
    - open issues first, then recently closed issues.
 5. Build a write plan with source, proposed action, issue/PR target, confidence, title, body or
    changed fields, label, assignee, milestone/Project placement, relationship, and comment.
-6. Execute high-confidence rows only:
+6. Execute explicitly authorized high-confidence legacy rows only:
    - preserve existing metadata unless evidence shows it is stale;
-   - create with the issue template in `github-work-context`;
    - use one supported type label when a live exact match exists;
    - set assignee or milestone only with confident ownership/placement;
    - add `Closes #N` only when the PR fully completes the issue, otherwise `Refs #N`;
@@ -57,17 +61,11 @@ Synchronize real delivery work to GitHub Issues in one bounded, auditable pass.
 
 Never merge separate work items into one issue merely because they touch the same feature.
 
-## Creation gate
+## Creation boundary
 
-Create missing coverage automatically for a PR only when at least one is true:
-
-- it introduces or materially changes user-facing capability;
-- it fixes a non-trivial bug, security, privacy, data-integrity, or operational problem;
-- it has acceptance criteria or follow-up value beyond the current diff; or
-- the user explicitly asked to track it.
-
-Do not auto-create for routine dependencies, generated changes, formatting, copy-only edits, or a
-self-contained docs/skill maintenance PR. Record the reason instead.
+GitHub issue creation is disabled for repository delivery work. If durable coverage is missing, use
+`linear-work-sync` and record the GitHub issue as optional source evidence only when one already
+exists.
 
 ## Material comments
 
@@ -89,4 +87,5 @@ logs, private reasoning, secrets, or PII.
 | <title> | [#123](url) | Closes / open | updated |
 ```
 
-Include skipped ambiguities, reasons no issue was needed, tool failures, and the audit ledger path.
+Include the canonical Nohmi Linear issue when known, skipped ambiguities, tool failures, and the
+legacy GitHub audit ledger path.

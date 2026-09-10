@@ -70,6 +70,22 @@ For each workspace, the person can configure:
 These controls affect communication and routing only. The global review-bypass setting decides
 whether an otherwise policy-authorized reversible action executes directly or enters review.
 
+## Proposed inheritance boundary
+
+The inheritance question applies only to settings for which an account-wide preference is useful.
+It does not mean that every workspace setting should have a global equivalent.
+
+| Setting class | Examples | Proposed behavior |
+| --- | --- | --- |
+| Global-only | Review bypass, Texting connection and consent, account security, connected-agent scopes, and hard privacy limits | One account value; a workspace cannot override it |
+| Global default with workspace override | Maintenance notification mode, quiet hours, inbound SMS routing, reply handling, safe content detail, and first-party links | Inherit the account preference until the person deliberately changes that workspace |
+| Workspace-only | Connected sources, source meanings, definition of maintained, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; no global value is implied |
+
+For example, the person could set “send only actionable maintenance texts, use privacy-safe detail,
+and stay quiet overnight” once, then let Mail inherit it while allowing Finances to send questions
+only and Calendar to send nothing. The override changes communication for that workspace; it does
+not create a separate security policy or review-bypass value.
+
 ## Resolution order
 
 Settings resolve in this order:
@@ -94,8 +110,9 @@ behavior and must not be presented as shipped.
 
 ## Open design questions
 
-- Whether global defaults may be overridden independently for every notification channel or only
-  for SMS initially.
+- Whether the proposed global-default/workspace-override model above is the desired interaction.
+- Whether notification overrides eventually apply independently to every channel or only to SMS
+  initially.
 - Whether maintenance cadence is configured in nohmi, delegated entirely to external schedulers,
   or represented only as an expected-check-in contract.
 - How much rule generation guided setup may propose before requiring a dedicated preview.

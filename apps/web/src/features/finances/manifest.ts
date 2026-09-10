@@ -1,8 +1,4 @@
-import { Landmark } from "lucide-react";
+import { workspaceIdentities } from "@/components/workspace-identity";
 
 /** Finances-owned navigation metadata. The shell decides placement. */
-export const financesNavigationItem = {
-  icon: Landmark,
-  label: "Finances",
-  path: "/finances",
-};
+export const financesNavigationItem = workspaceIdentities.finances;

@@ -1,3 +1,4 @@
+import { providerFetch } from "@personal-os/connectors";
 import { AppError } from "./errors.js";
 
 export type EmailMessage = {
@@ -29,7 +30,7 @@ export function createEmailDelivery(options: EmailDeliveryOptions): EmailDeliver
         });
         return;
       }
-      const response = await fetch("https://api.resend.com/emails", {
+      const response = await providerFetch(globalThis.fetch, "https://api.resend.com/emails", {
         body: JSON.stringify({
           from: options.from,
           html: message.html,

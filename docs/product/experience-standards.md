@@ -1,8 +1,8 @@
-# ilo experience standards
+# nohmi experience standards
 
 ## Purpose
 
-ilo should feel like one shared work surface for a person and their
+nohmi should feel like one shared work surface for a person and their
 agents. Pages may expose different material, but they should not invent a new
 information hierarchy or a new location for common actions each time.
 
@@ -131,6 +131,14 @@ planning baseline prefers stated income when available and names that basis. A b
 shows monthly income, already planned limits, and remaining capacity when income is
 available; otherwise it says that income cannot yet be inferred. Agents use the same wealth
 summary through MCP.
+
+Account planning keeps provider evidence separate from user decisions. Plaid type and subtype
+classify a provider account initially, while an explicit user kind override remains authoritative
+across later synchronization. Only accounts included in planning affect wealth totals. Individual
+accounts use a 100% share, joint accounts use their confirmed share, and unknown ownership uses the
+full visible balance conservatively while making the wealth summary untrustworthy. Account reads
+disclose excluded IDs, unresolved ownership, and normalized possible duplicates rather than
+silently presenting an incomplete net worth as settled.
 
 Budget spending excludes transfers. Moves between a linked account and its vaults, provider
 transactions explicitly classified as transfers, and matched cash-to-credit-card payments are

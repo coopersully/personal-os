@@ -1,0 +1,4 @@
+interface:
+  display_name: "ilo Product QA"
+  short_description: "Run fixture-backed browser QA for ilo"
+  default_prompt: "Use $personal-os-qa to refresh fixtures and QA the affected ilo product areas in the in-app browser."

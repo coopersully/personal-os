@@ -1,13 +1,24 @@
-import type { LucideIcon } from "lucide-react";
-import {
-  BadgeDollarSign,
-  Landmark,
-  ReceiptText,
-  ShieldCheck,
-  SlidersHorizontal,
-  WalletCards,
-} from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  BankIcon,
+  DollarIcon,
+  GridIcon,
+  type Icon,
+  ListChecksIcon,
+  ReceiptIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  TargetIcon,
+  WalletIcon,
+} from "@/components/icons";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 
 export type FinanceSection =
   | "accounts"
@@ -16,24 +27,26 @@ export type FinanceSection =
   | "health"
   | "imports"
   | "overview"
-  | "profile"
+  | "plan"
+  | "wealth"
+  | "setup"
   | "review"
   | "subscriptions"
   | "transactions";
 
 const navigation: Array<{
-  items: Array<{ icon: LucideIcon; id: FinanceSection; label: string }>;
+  items: Array<{ icon: Icon; id: FinanceSection; label: string }>;
   label: string;
 }> = [
   {
     items: [
-      { icon: Landmark, id: "overview", label: "Overview" },
-      { icon: BadgeDollarSign, id: "cashflow", label: "Cash flow" },
-      { icon: ReceiptText, id: "transactions", label: "Transactions" },
-      { icon: WalletCards, id: "budgets", label: "Budgets" },
-      { icon: ReceiptText, id: "subscriptions", label: "Subscriptions" },
-      { icon: ShieldCheck, id: "health", label: "Ledger health" },
-      { icon: SlidersHorizontal, id: "profile", label: "Financial profile" },
+      { icon: GridIcon, id: "overview", label: "Overview" },
+      { icon: ListChecksIcon, id: "review", label: "Review" },
+      { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
+      { icon: WalletIcon, id: "plan", label: "Plan" },
+      { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
+      { icon: TargetIcon, id: "wealth", label: "Wealth" },
+      { icon: BankIcon, id: "accounts", label: "Accounts" },
     ],
     label: "Finances",
   },
@@ -41,6 +54,8 @@ const navigation: Array<{
 
 export function financeSectionFromPath(pathname: string): FinanceSection {
   const section = pathname.split("/")[2];
+  if (section === "budgets") return "plan";
+  if (section === "reviews") return "overview";
   return (
     [
       "accounts",
@@ -49,7 +64,9 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
       "health",
       "imports",
       "overview",
-      "profile",
+      "plan",
+      "wealth",
+      "setup",
       "review",
       "subscriptions",
       "transactions",
@@ -57,6 +74,14 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   ).some((item) => item === section)
     ? (section as FinanceSection)
     : "overview";
+}
+
+function financeNavigationActive(section: FinanceSection, destination: FinanceSection) {
+  return (
+    section === destination ||
+    (destination === "cashflow" && section === "subscriptions") ||
+    (destination === "accounts" && (section === "imports" || section === "health"))
+  );
 }
 
 export function FinanceSidebarNavigation({
@@ -68,29 +93,57 @@ export function FinanceSidebarNavigation({
   reviewCount: number;
   section: FinanceSection;
 }) {
-  return (
-    <>
-      <p className="sidebar__mode-label">Finances</p>
-      {navigation.map((group) => (
-        <nav aria-label={group.label} className="sidebar-group" key={group.label}>
-          <p className="sidebar-group__label">{group.label}</p>
-          <div className="nav-list">
+  return navigation.map((group) => (
+    <SidebarGroup key={group.label}>
+      <SidebarGroupContent>
+        <nav aria-label={group.label}>
+          <SidebarMenu>
             {group.items.map(({ icon: Icon, id, label }) => (
-              <Link
-                aria-current={section === id ? "page" : undefined}
-                className={`nav-item${section === id ? " nav-item--active" : ""}`}
-                key={id}
-                onClick={onNavigate}
-                to={id === "overview" ? "/finances" : `/finances/${id}`}
-              >
-                <Icon aria-hidden="true" size={19} />
-                <span>{label}</span>
-                {id === "review" && reviewCount > 0 ? <b>{reviewCount}</b> : null}
-              </Link>
+              <SidebarMenuItem key={id}>
+                <SidebarMenuButton asChild isActive={financeNavigationActive(section, id)}>
+                  <Link
+                    aria-current={financeNavigationActive(section, id) ? "page" : undefined}
+                    aria-label={
+                      id === "review" && reviewCount > 0 ? `${label} ${reviewCount}` : label
+                    }
+                    onClick={onNavigate}
+                    to={id === "overview" ? "/finances" : `/finances/${id}`}
+                  >
+                    <Icon
+                      aria-hidden="true"
+                      weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
+                    />
+                    <span>{label}</span>
+                  </Link>
+                </SidebarMenuButton>
+                {id === "review" && reviewCount > 0 ? (
+                  <SidebarMenuBadge aria-hidden="true">{reviewCount}</SidebarMenuBadge>
+                ) : null}
+              </SidebarMenuItem>
             ))}
-          </div>
+          </SidebarMenu>
         </nav>
-      ))}
-    </>
-  );
+        <SidebarMenu className="mt-6">
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={section === "setup"}>
+              <Link
+                aria-current={section === "setup" ? "page" : undefined}
+                onClick={onNavigate}
+                to="/finances/setup"
+              >
+                <ShieldCheckIcon /> <span>Financial setup</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild>
+              <Link onClick={onNavigate} to="/settings?section=finances">
+                <SettingsIcon /> <span>Finance settings</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  ));
 }

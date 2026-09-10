@@ -1,0 +1,4 @@
+interface:
+  display_name: "ilo Deploy Status"
+  short_description: "Check ilo production deployment and health."
+  default_prompt: "Use $ilo-deploy-status to verify whether the latest ilo release is healthy and live."

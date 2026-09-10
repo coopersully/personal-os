@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Work Sync"
+  short_description: "Reconcile legacy GitHub issue evidence."
+  default_prompt: "Use $github-work-sync to audit or migrate legacy GitHub issue evidence for current nohmi work."

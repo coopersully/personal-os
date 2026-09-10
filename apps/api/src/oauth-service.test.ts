@@ -9,32 +9,134 @@ const serviceOptions = {
 };
 
 describe("OAuth authorized clients", () => {
+  it("orders never-used clients by the refresh grant expiry", async () => {
+    const db = {
+      select: () => ({
+        from: () => ({
+          innerJoin: () => ({
+            innerJoin: () => ({
+              where: async () => [
+                {
+                  client: { id: "older", name: "Older grant", redirectUris: [] },
+                  refresh: {
+                    expiresAt: new Date("2026-08-20T12:00:00.000Z"),
+                    replacedAt: null,
+                  },
+                  token: { lastUsedAt: null, scopes: ["mail:read"] },
+                },
+                {
+                  client: { id: "newer", name: "Newer grant", redirectUris: [] },
+                  refresh: {
+                    expiresAt: new Date("2026-08-22T12:00:00.000Z"),
+                    replacedAt: null,
+                  },
+                  token: { lastUsedAt: null, scopes: ["calendar:read"] },
+                },
+              ],
+            }),
+          }),
+        }),
+      }),
+    } as unknown as Database;
+    const service = createOAuthService({ db, ...serviceOptions });
+
+    await expect(service.listAuthorizedClients("user-1")).resolves.toEqual([
+      {
+        id: "newer",
+        lastUsedAt: null,
+        name: "Newer grant",
+        redirectUris: [],
+        scopes: ["calendar:read"],
+      },
+      {
+        id: "older",
+        lastUsedAt: null,
+        name: "Older grant",
+        redirectUris: [],
+        scopes: ["mail:read"],
+      },
+    ]);
+  });
+
   it("lists each active client once with its latest token details", async () => {
     const client = {
       id: "mcp-client",
       name: "Codex",
       redirectUris: ["http://127.0.0.1/callback"],
     };
+    const refreshOnlyClient = {
+      id: "refresh-only-client",
+      name: "Claude",
+      redirectUris: ["https://claude.example/callback"],
+    };
     const db = {
       select: () => ({
         from: () => ({
           innerJoin: () => ({
-            where: async () => [
-              {
-                client,
-                token: {
-                  lastUsedAt: null,
-                  scopes: ["calendar:read"],
+            innerJoin: () => ({
+              where: async () => [
+                {
+                  client,
+                  refresh: {
+                    expiresAt: new Date("2026-08-21T12:00:00.000Z"),
+                    replacedAt: null,
+                  },
+                  token: {
+                    expiresAt: new Date("2026-07-21T11:00:00.000Z"),
+                    lastUsedAt: null,
+                    scopes: ["calendar:read", "mail:read"],
+                  },
                 },
-              },
-              {
-                client,
-                token: {
-                  lastUsedAt: new Date("2026-07-21T12:00:00.000Z"),
-                  scopes: ["calendar:read", "tasks:read"],
+                {
+                  client: refreshOnlyClient,
+                  refresh: {
+                    expiresAt: new Date("2026-08-20T12:00:00.000Z"),
+                    replacedAt: null,
+                  },
+                  token: {
+                    expiresAt: new Date("2026-07-21T11:00:00.000Z"),
+                    lastUsedAt: new Date("2026-07-21T12:00:00.000Z"),
+                    scopes: ["mail:read"],
+                  },
                 },
-              },
-            ],
+                {
+                  client: refreshOnlyClient,
+                  refresh: {
+                    expiresAt: new Date("2026-08-23T12:00:00.000Z"),
+                    replacedAt: new Date("2026-07-21T11:30:00.000Z"),
+                  },
+                  token: {
+                    expiresAt: new Date("2026-07-21T14:00:00.000Z"),
+                    lastUsedAt: new Date("2026-07-21T12:30:00.000Z"),
+                    scopes: ["mail:write"],
+                  },
+                },
+                {
+                  client,
+                  refresh: {
+                    expiresAt: new Date("2026-08-22T12:00:00.000Z"),
+                    replacedAt: null,
+                  },
+                  token: {
+                    expiresAt: new Date("2026-07-21T14:00:00.000Z"),
+                    lastUsedAt: new Date("2026-07-21T12:00:00.000Z"),
+                    scopes: ["calendar:read", "tasks:read"],
+                  },
+                },
+                {
+                  client,
+                  refresh: {
+                    expiresAt: new Date("2026-07-21T11:00:00.000Z"),
+                    replacedAt: null,
+                  },
+                  token: {
+                    expiresAt: new Date("2026-07-21T11:00:00.000Z"),
+                    lastUsedAt: new Date("2026-07-21T12:30:00.000Z"),
+                    scopes: ["mail:write"],
+                  },
+                },
+              ],
+            }),
           }),
         }),
       }),
@@ -50,7 +152,14 @@ describe("OAuth authorized clients", () => {
         lastUsedAt: "2026-07-21T12:00:00.000Z",
         name: "Codex",
         redirectUris: ["http://127.0.0.1/callback"],
-        scopes: ["calendar:read", "tasks:read"],
+        scopes: ["calendar:read", "tasks:read", "mail:read"],
+      },
+      {
+        id: "refresh-only-client",
+        lastUsedAt: "2026-07-21T12:00:00.000Z",
+        name: "Claude",
+        redirectUris: ["https://claude.example/callback"],
+        scopes: ["mail:read"],
       },
     ]);
   });
@@ -81,13 +190,21 @@ describe("OAuth authorized clients", () => {
   it("parses defaults, removes duplicates, and rejects empty or unsupported scopes", () => {
     const service = createOAuthService({ db: {} as Database, ...serviceOptions });
 
+    expect(service.parseScopes(undefined)).toContain("bookmarks:read");
+    expect(service.parseScopes(undefined)).toContain("mail:write");
+    expect(service.parseScopes(undefined)).not.toContain("finances:maintain");
     expect(service.parseScopes(undefined)).toContain("tasks:read");
+    expect(service.parseScopes(undefined)).not.toContain("automations:write");
     expect(service.parseScopes("tasks:read  tasks:read calendar:read")).toEqual([
       "tasks:read",
       "calendar:read",
     ]);
+    expect(service.parseScopes("finances:maintain")).toEqual(["finances:maintain"]);
     expect(() => service.parseScopes("")).toThrow("requested scopes are not supported");
     expect(() => service.parseScopes("tasks:read unknown:read")).toThrow(
+      "requested scopes are not supported",
+    );
+    expect(() => service.parseScopes("automations:write")).toThrow(
       "requested scopes are not supported",
     );
   });

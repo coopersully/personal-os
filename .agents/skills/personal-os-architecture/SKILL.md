@@ -7,6 +7,8 @@ description: Keep ilo changes within the established monorepo boundaries and dom
 
 Treat `docs/architecture/0001-system-shape.md` as the system boundary and
 `docs/engineering/feature-ownership.md` as the path-ownership authority.
+For workspace stewardship, also read `docs/product/ilo-workspace-stewardship.md` and
+`docs/architecture/0004-workspace-ilo-stewardship.md`.
 
 ## Place work by responsibility
 
@@ -22,6 +24,17 @@ Treat `docs/architecture/0001-system-shape.md` as the system boundary and
   business rules there.
 - Keep `apps/*/src/app.*`, `apps/mcp/src/server.ts`, and shared registries thin;
   they are Integration-owned composition roots.
+
+## Model a workspace Ilo
+
+- Keep the domain's ledger, expert playbook, rulebook, surgical operations, maintenance turn,
+  question/learning loop, advice, review artifact, and status semantically domain-owned.
+- Share only mechanical execution infrastructure such as run/step persistence, leases, fencing,
+  retry history, and terminal settlement.
+- Put runtime expertise and user memory in versioned domain/API data and contracts, never in an MCP
+  host prompt or repository coding-agent skill.
+- Complete `docs/product/workspace-ilo-charter-template.md` before splitting a new workspace across
+  parallel branches. List composition-root and shared migration work as Integration handoffs.
 
 ## Deliver a vertical feature
 

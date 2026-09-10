@@ -1,8 +1,12 @@
 import type {
+  AttentionItem,
   CreateReminderInput,
   Reminder,
+  ReminderDeferralPreview,
+  ReminderDeferralPreviewInput,
   ReminderListQuery,
   UpdateReminderInput,
+  UpsertReminderAttentionItemInput,
 } from "@personal-os/domain";
 
 export type ReminderApiRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -13,9 +17,13 @@ export function createReminderApiClient(
   toQuery: (query: object) => string,
 ) {
   return {
-    async completeReminder(id: string, completed: boolean): Promise<Reminder> {
+    async completeReminder(
+      id: string,
+      completed: boolean,
+      expectedUpdatedAt?: string,
+    ): Promise<Reminder> {
       const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/complete`, {
-        body: JSON.stringify({ completed }),
+        body: JSON.stringify({ completed, expectedUpdatedAt }),
         method: "POST",
       });
       return response.reminder;
@@ -30,14 +38,34 @@ export function createReminderApiClient(
     async deleteReminder(id: string): Promise<void> {
       await request<void>(`/v1/reminders/${id}`, { method: "DELETE" });
     },
+    async getReminder(id: string): Promise<Reminder> {
+      const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}`);
+      return response.reminder;
+    },
     async listReminders(query: Partial<ReminderListQuery> = {}): Promise<{
       items: Reminder[];
       nextCursor: string | null;
     }> {
       return request(`/v1/reminders?${toQuery(query)}`);
     },
-    async restoreReminder(id: string): Promise<Reminder> {
+    async previewOverdueReminderDeferral(
+      input: ReminderDeferralPreviewInput,
+    ): Promise<ReminderDeferralPreview> {
+      const response = await request<{ preview: ReminderDeferralPreview }>(
+        `/v1/reminders/overdue-deferral-preview?${toQuery(input)}`,
+      );
+      return response.preview;
+    },
+    async restoreReminder(id: string, expectedUpdatedAt?: string): Promise<Reminder> {
       const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/restore`, {
+        body: JSON.stringify({ expectedUpdatedAt }),
+        method: "POST",
+      });
+      return response.reminder;
+    },
+    async trashReminder(id: string, expectedUpdatedAt: string): Promise<Reminder> {
+      const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/trash`, {
+        body: JSON.stringify({ expectedUpdatedAt }),
         method: "POST",
       });
       return response.reminder;
@@ -48,6 +76,19 @@ export function createReminderApiClient(
         method: "PATCH",
       });
       return response.reminder;
+    },
+    async upsertReminderAttentionItem(
+      reminderId: string,
+      input: UpsertReminderAttentionItemInput,
+    ): Promise<AttentionItem> {
+      const response = await request<{ item: AttentionItem }>(
+        `/v1/reminders/${reminderId}/attention`,
+        {
+          body: JSON.stringify(input),
+          method: "PUT",
+        },
+      );
+      return response.item;
     },
   };
 }

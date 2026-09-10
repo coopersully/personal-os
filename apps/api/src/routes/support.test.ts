@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
-import { assertAgentMutationAllowed, requireFeatureAccess } from "./support.js";
+import { assertAgentMutationAllowed, parseOptionalBody, requireFeatureAccess } from "./support.js";
 
 function principal(
   scopes: Principal["scopes"],
@@ -11,6 +12,22 @@ function principal(
 }
 
 describe("agent mutation policy", () => {
+  it("parses optional JSON bodies consistently", async () => {
+    const schema = z.object({ expectedUpdatedAt: z.string().optional() });
+    await expect(
+      parseOptionalBody({ req: { text: async () => "" } } as never, schema),
+    ).resolves.toEqual({});
+    await expect(
+      parseOptionalBody(
+        { req: { text: async () => '{"expectedUpdatedAt":"revision"}' } } as never,
+        schema,
+      ),
+    ).resolves.toEqual({ expectedUpdatedAt: "revision" });
+    await expect(
+      parseOptionalBody({ req: { text: async () => "{" } } as never, schema),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("allows a scoped agent to run a bounded approved rule", () => {
     expect(() => assertAgentMutationAllowed("agent", false, "approved_rule")).not.toThrow();
   });
@@ -41,6 +58,18 @@ describe("agent mutation policy", () => {
       next,
     );
     expect(next).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a Finance agent choose the operation while enforcing the Finance write scope", async () => {
+    const next = vi.fn();
+    await requireFeatureAccess("finances")(
+      {
+        get: () => principal(new Set(["finances:write"])),
+        req: { method: "POST" },
+      } as never,
+      next,
+    );
+    expect(next).toHaveBeenCalledOnce();
   });
 
   it("rejects a request that lacks the feature's selected scope", async () => {

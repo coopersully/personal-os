@@ -25,6 +25,27 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    id     = "version-retention"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.web]
+}
+
 resource "aws_cloudfront_origin_access_control" "web" {
   name                              = "${local.name}-web"
   description                       = "CloudFront-only S3 access for ilo web assets"
@@ -77,6 +98,24 @@ resource "aws_cloudfront_distribution" "web" {
     domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
     origin_id                = "web-assets"
     origin_access_control_id = aws_cloudfront_origin_access_control.web.id
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "skills/*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id = "web-assets"
+
+    forwarded_values {
+      query_string = false
+      cookies { forward = "none" }
+    }
+
+    viewer_protocol_policy     = "redirect-to-https"
+    min_ttl                    = 31536000
+    default_ttl                = 31536000
+    max_ttl                    = 31536000
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
   }
 
   default_cache_behavior {

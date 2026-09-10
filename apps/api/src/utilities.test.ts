@@ -7,6 +7,7 @@ import { decodeCursor, encodeCursor } from "./pagination.js";
 import {
   decryptJson,
   encryptJson,
+  generateInvitationCode,
   generateToken,
   hashPassword,
   hashToken,
@@ -25,6 +26,7 @@ describe("security utilities", () => {
       await expect(verifyPassword("x", malformed)).resolves.toBe(false);
     }
     expect(generateToken("pos")).toMatch(/^pos_[A-Za-z0-9_-]{43}$/);
+    expect(generateInvitationCode()).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
     expect(hashToken("same")).toBe(hashToken("same"));
     expect(hashToken("same")).not.toBe(hashToken("other"));
   });
@@ -47,14 +49,20 @@ describe("pagination, errors, and OpenAPI", () => {
   });
 
   it("round-trips valid cursors and rejects every malformed shape", () => {
-    const cursor = { createdAt: new Date("2026-07-13T12:00:00Z"), id: "abc" };
+    const cursor = {
+      createdAt: new Date("2026-07-13T12:00:00Z"),
+      id: "11111111-1111-4111-8111-111111111111",
+    };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
     for (const value of [
       "",
-      Buffer.from("not-a-date|id").toString("base64url"),
+      Buffer.from("not-a-date|11111111-1111-4111-8111-111111111111").toString("base64url"),
       Buffer.from("date-only").toString("base64url"),
       Buffer.from("2026-07-13T12:00:00Z||").toString("base64url"),
-      Buffer.from("2026-07-13T12:00:00Z|id|extra").toString("base64url"),
+      Buffer.from("2026-07-13T12:00:00Z|not-a-uuid").toString("base64url"),
+      Buffer.from("2026-07-13T12:00:00Z|11111111-1111-4111-8111-111111111111|extra").toString(
+        "base64url",
+      ),
     ]) {
       expect(() => decodeCursor(value)).toThrow("pagination cursor is invalid");
     }
@@ -63,6 +71,18 @@ describe("pagination, errors, and OpenAPI", () => {
   it("classifies unique violations", () => {
     expect(isUniqueViolation({ code: "23505" })).toBe(true);
     expect(isUniqueViolation({ cause: { code: "23505" } })).toBe(true);
+    expect(
+      isUniqueViolation(
+        { cause: { code: "23505", constraint: "domain_profiles_user_domain_idx" } },
+        "domain_profiles_user_domain_idx",
+      ),
+    ).toBe(true);
+    expect(
+      isUniqueViolation(
+        { code: "23505", constraint: "unrelated_idx" },
+        "domain_profiles_user_domain_idx",
+      ),
+    ).toBe(false);
     const cyclic: { cause?: unknown } = {};
     cyclic.cause = cyclic;
     expect(isUniqueViolation(cyclic)).toBe(false);
@@ -108,10 +128,92 @@ describe("pagination, errors, and OpenAPI", () => {
   it("publishes the configured API surface", () => {
     const document = createOpenApiDocument("https://api.example.com");
     expect(document.openapi).toBe("3.1.0");
+    expect(document.paths["/v1/assistant/setup-plan"].get.responses[200].description).toBe(
+      "Current server-owned agent setup plan",
+    );
     expect(document.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(Object.keys(document.paths)).toContain("/v1/connectors/{id}/sync");
+    expect(document.paths["/v1/finances/maintenance"].post).toMatchObject({
+      requestBody: {
+        content: {
+          "application/json": {
+            examples: {
+              allOutstanding: { value: { scope: { type: "all_outstanding" } } },
+            },
+          },
+        },
+      },
+      responses: {
+        202: { description: "Finance maintenance run durably accepted for background work" },
+        403: { description: "The caller lacks finances:maintain" },
+        409: { description: "A conflicting Finance maintenance run or rulebook is active" },
+      },
+    });
+    expect(document.paths["/v1/finances/status"].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ in: "query", name: "start", required: false }),
+        expect.objectContaining({ in: "query", name: "end", required: false }),
+        expect.objectContaining({ in: "query", name: "entityType", required: false }),
+        expect.objectContaining({ in: "query", name: "targetId", required: false }),
+      ]),
+    );
+    expect(document.paths["/v1/finances/maintenance/{id}"].get.responses).toMatchObject({
+      200: {
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+          },
+        },
+        description: "Owned Finance maintenance run",
+      },
+      404: { description: "Finance maintenance run not found for this user" },
+    });
+    expect(document.components.schemas.FinanceMaintenanceResult).toMatchObject({
+      properties: {
+        health: {
+          properties: {
+            applicability: { enum: ["not_run", "applied", "skipped_scoped"], type: "string" },
+            refreshed: { type: "boolean" },
+          },
+          required: ["applicability", "confidence", "refreshed"],
+        },
+      },
+    });
+    expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Calendar commitment proposal preview" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/attention"]).toEqual({
+      put: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Calendar event attention item created or refreshed" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/trash"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Event trashed with restorable revisions" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/blocks/{blockId}/trash"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Linked calendar block removed with revision guards" } },
+      },
+    });
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining(["/v1/goals", "/v1/goals/{id}", "/v1/motives", "/v1/motives/{id}"]),
     );
+    expect(document.paths["/v1/reminders/{id}"].delete.responses).toEqual({
+      204: { description: "Reminder moved to trash" },
+    });
+    expect(document.paths["/v1/reminders/{id}/trash"].post.responses).toEqual({
+      200: { description: expect.stringContaining("Guarded recoverable") },
+    });
+    expect(document.paths["/v1/reminders/{id}/attention"].put.responses).toEqual({
+      200: { description: expect.stringContaining("attention item") },
+    });
   });
 });

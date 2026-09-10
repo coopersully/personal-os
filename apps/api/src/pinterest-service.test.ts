@@ -181,9 +181,14 @@ describe("Pinterest wallpaper service", () => {
 
     const pins = await service.pins("user-1", 12);
 
-    expect(fetch).toHaveBeenCalledWith("https://www.pinterest.com/example/mindset/", {
-      headers: { "user-agent": "ilo wallpaper/1.0" },
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://www.pinterest.com/example/mindset/",
+      expect.objectContaining({
+        headers: { "user-agent": "nohmi wallpaper/1.0" },
+        redirect: "manual",
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(pins).toHaveLength(12);
     expect(new Set(pins.map((pin) => pin.id)).size).toBe(12);
     expect(new Set(pins.map((pin) => pin.imageUrl))).toEqual(
@@ -301,5 +306,25 @@ describe("Pinterest wallpaper service", () => {
     await expect(createPinterestService({ db }).settings("user-1")).resolves.toMatchObject({
       lastAppliedAt: null,
     });
+  });
+  it("uses the device planning date for daily selection across UTC midnight", async () => {
+    const page = Array.from({ length: 20 }, (_, i) => `"https://i.pinimg.com/236x/${i}.jpg"`).join(
+      " ",
+    );
+    const fetch = vi.fn().mockImplementation(async () => new Response(page));
+    const db = databaseWithBoard("https://www.pinterest.com/example/board/");
+    const afterMidnight = createPinterestService({
+      db,
+      fetch,
+      now: () => new Date("2026-07-22T01:00:00Z"),
+    });
+    const previousDay = createPinterestService({
+      db,
+      fetch,
+      now: () => new Date("2026-07-21T12:00:00Z"),
+    });
+    const local = await afterMidnight.pins("u", 12, "2026-07-21");
+    expect(local).toEqual(await previousDay.pins("u", 12));
+    expect(local).not.toEqual(await afterMidnight.pins("u", 12));
   });
 });

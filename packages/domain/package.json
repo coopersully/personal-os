@@ -8,12 +8,14 @@
     "./auth": "./src/auth.ts",
     "./calendar": "./src/calendar.ts",
     "./common": "./src/common.ts",
-    "./reminder": "./src/reminder.ts"
+    "./reminder": "./src/reminder.ts",
+    "./texting": "./src/texting.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "libphonenumber-js": "^1.13.12",
     "zod": "^4.0.5"
   }
 }

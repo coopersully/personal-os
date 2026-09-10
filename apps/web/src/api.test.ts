@@ -4,6 +4,14 @@ const user = {
   accentColor: "#c7d23c",
   emailVerified: true,
   id: "11111111-1111-4111-8111-111111111111",
+  setup: {
+    completedAt: "2026-07-13T12:00:00.000Z",
+    currentStep: "ready",
+    dismissedAt: null,
+    selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+    startedAt: "2026-07-13T12:00:00.000Z",
+    status: "complete",
+  },
   displayName: "Test User",
   email: "test@example.com",
   theme: "system",
@@ -61,7 +69,7 @@ describe("web API adapter", () => {
     ).toBe(false);
     expect(isUnauthorized(new Error("unauthorized"))).toBe(false);
     expect(apiBaseUrl(undefined, false)).toBe(window.location.origin);
-    expect(apiBaseUrl(undefined, true)).toBe("http://localhost:8787");
+    expect(apiBaseUrl(undefined, true)).toBe("https://api.ilo.coopersully.me");
     expect(apiBaseUrl("https://configured.test", false)).toBe("https://configured.test");
   });
 
@@ -77,39 +85,32 @@ describe("web API adapter", () => {
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://api.personal-os.test/v1/me");
   });
 
-  it("persists and clears the native desktop session", async () => {
+  it("uses native transport without renderer credentials", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
-    localStorage.setItem("personal-os.desktop-session", "sess_existing");
-    const fetch = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
-      const path = new URL(String(input)).pathname;
-      if (path === "/v1/me") return Response.json({ user });
-      if (path === "/v1/auth/login")
-        return Response.json({ sessionToken: "sess_replacement", user });
-      if (path === "/v1/auth/logout") return new Response(null, { status: 204 });
-      throw new Error(`Unexpected ${path}`);
+    const invoke = vi.fn(async (command: string, args?: unknown) => {
+      if (command === "desktop_settings") return { settings: { serverUrl: "https://custom.test" } };
+      const request = (args as { request: { path: string } }).request;
+      return {
+        status: request.path === "/v1/auth/logout" ? 204 : 200,
+        body: JSON.stringify({ user }),
+      };
     });
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const { api } = await import("./api.js");
-
-    await expect(api.getMe()).resolves.toEqual(user);
-    expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
-      "Session sess_existing",
-    );
     await api.login({ email: user.email, password: "LocalTestOnly123!" });
-    expect(localStorage.getItem("personal-os.desktop-session")).toBe("sess_replacement");
-    await api.logout();
-    expect(localStorage.getItem("personal-os.desktop-session")).toBeNull();
-  });
-
-  it("starts a native desktop session without a stored credential", async () => {
-    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
-    const fetch = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-      Response.json({ user }),
-    );
-    vi.stubGlobal("fetch", fetch);
-    const { api } = await import("./api.js");
-
     await api.getMe();
-    expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).has("authorization")).toBe(false);
+    await api.logout();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
+    expect(invoke).toHaveBeenCalledWith("desktop_request", {
+      request: {
+        serverUrl: "https://custom.test",
+        path: "/v1/me",
+        method: "GET",
+        body: null,
+      },
+    });
   });
 });

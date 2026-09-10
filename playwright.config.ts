@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const e2eWebPort = process.env.ILO_E2E_WEB_PORT ?? "5174";
+const e2eWebUrl = `http://127.0.0.1:${e2eWebPort}`;
+
 export default defineConfig({
   expect: { timeout: 10_000 },
   forbidOnly: Boolean(process.env.CI),
@@ -17,7 +20,7 @@ export default defineConfig({
   testDir: "e2e",
   timeout: 45_000,
   use: {
-    baseURL: "http://127.0.0.1:5174",
+    baseURL: e2eWebUrl,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
@@ -25,7 +28,7 @@ export default defineConfig({
     command: "pnpm exec tsx e2e/serve.ts",
     reuseExistingServer: false,
     timeout: 120_000,
-    url: "http://127.0.0.1:5174",
+    url: e2eWebUrl,
   },
   workers: 1,
 });

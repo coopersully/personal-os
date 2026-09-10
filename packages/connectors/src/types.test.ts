@@ -9,6 +9,9 @@ describe("extractConferenceUrl", () => {
     expect(extractConferenceUrl("Join https://subdomain.teams.microsoft.com/l/meetup-join")).toBe(
       "https://subdomain.teams.microsoft.com/l/meetup-join",
     );
+    expect(extractConferenceUrl("Join https://meet.jit.si/ilo-demo")).toBe(
+      "https://meet.jit.si/ilo-demo",
+    );
     expect(extractConferenceUrl("Bad https://[not-a-host and ordinary text")).toBeNull();
   });
 });

@@ -1,12 +1,16 @@
 import type {
+  attentionItems,
   calendarEvents,
   calendars,
   mailboxes,
   mailThreads,
   reminders,
+  taskLists,
+  taskProjects,
   users,
 } from "@personal-os/database";
 import type {
+  AttentionItem,
   Calendar,
   CalendarEvent,
   CalendarEventBlock,
@@ -14,11 +18,16 @@ import type {
   MailThread,
   Reminder,
   Task,
+  TaskList,
+  TaskProject,
   User,
 } from "@personal-os/domain";
 
 type UserRow = typeof users.$inferSelect;
+type AttentionItemRow = typeof attentionItems.$inferSelect;
 type ReminderRow = typeof reminders.$inferSelect;
+type TaskListRow = typeof taskLists.$inferSelect;
+type TaskProjectRow = typeof taskProjects.$inferSelect;
 type CalendarEventRow = typeof calendarEvents.$inferSelect;
 type CalendarRow = typeof calendars.$inferSelect;
 type MailboxRow = typeof mailboxes.$inferSelect;
@@ -32,12 +41,40 @@ export function serializeUser(row: UserRow): User {
     email: row.email,
     emailVerified: row.emailVerifiedAt !== null,
     id: row.id,
+    setup: {
+      completedAt: row.setupCompletedAt?.toISOString() ?? null,
+      currentStep: row.setupCurrentStep,
+      dismissedAt: row.setupDismissedAt?.toISOString() ?? null,
+      selectedWorkspaces: row.setupSelectedWorkspaces,
+      startedAt: row.setupStartedAt?.toISOString() ?? null,
+      status: row.setupStatus,
+    },
     theme: row.theme,
     planningTimezone: row.planningTimezone,
     homeLocation: row.homeLocation,
     workdayEndMinute: row.workdayEndMinute,
     workdayStartMinute: row.workdayStartMinute,
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializeAttentionItem(row: AttentionItemRow): AttentionItem {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    domain: row.domain,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    id: row.id,
+    importance: row.importance,
+    kind: row.kind,
+    occursAt: row.occursAt?.toISOString() ?? null,
+    relatedEntityId: row.relatedEntityId,
+    relatedEntityType: row.relatedEntityType,
+    source: row.source,
+    status: row.status,
+    summary: row.summary,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 
@@ -49,6 +86,13 @@ export function serializeReminder(row: ReminderRow): Reminder {
     id: row.id,
     notes: row.notes,
     priority: row.priority,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: row.updatedAt.toISOString(),
+      sourceType: "reminder",
+    },
     timezone: row.timezone,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
@@ -56,20 +100,88 @@ export function serializeReminder(row: ReminderRow): Reminder {
 }
 
 export function serializeTask(row: ReminderRow): Task {
+  if (row.taskLifecycle === null || row.taskListId === null || row.taskRevision === null) {
+    throw new Error("Cannot serialize a Task without canonical lifecycle, List, and revision.");
+  }
   return {
+    cancelledAt: row.taskCancelledAt?.toISOString() ?? null,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
     dueAt: row.dueAt?.toISOString() ?? null,
     estimateMinutes: row.estimateMinutes,
     id: row.id,
+    legacyStatus: row.status,
+    lifecycle: row.taskLifecycle,
+    listId: row.taskListId,
     notes: row.notes,
     priority: row.priority,
+    projectId: row.taskProjectId,
+    revision: row.taskRevision,
     scheduledAt: row.scheduledAt?.toISOString() ?? null,
-    status: row.status,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.taskRevision),
+      sourceType: "task",
+    },
     tags: row.tags,
     timezone: row.timezone,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
+    why: row.taskWhy,
+  };
+}
+
+export function serializeTaskList(row: TaskListRow): TaskList {
+  return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    availability: row.availability,
+    color: row.color,
+    createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    description: row.description,
+    icon: row.icon,
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    revision: row.revision,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.revision),
+      sourceType: "task_list",
+    },
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTaskProject(row: TaskProjectRow): TaskProject {
+  return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    availability: row.availability,
+    cancelledAt: row.cancelledAt?.toISOString() ?? null,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    id: row.id,
+    lifecycle: row.lifecycle,
+    listId: row.listId,
+    name: row.name,
+    notes: row.notes,
+    revision: row.revision,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.revision),
+      sourceType: "task_project",
+    },
+    targetDate: row.targetDate,
+    updatedAt: row.updatedAt.toISOString(),
+    why: row.why,
   };
 }
 
@@ -91,6 +203,7 @@ export function serializeCalendar(row: CalendarRow): Calendar {
 export function serializeEvent(
   row: CalendarEventRow,
   blocks: CalendarEventBlock[] = [],
+  accountId: string | null = null,
 ): CalendarEvent {
   return {
     allDay: row.allDay,
@@ -99,6 +212,7 @@ export function serializeEvent(
     blocks,
     blockSourceEventId: row.blockSourceEventId,
     calendarId: row.calendarId,
+    conferenceStatus: calendarConferenceStatus(row),
     conferenceUrl: row.conferenceUrl,
     createdAt: row.createdAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
@@ -106,10 +220,18 @@ export function serializeEvent(
     id: row.id,
     location: row.location,
     notes: row.notes,
+    url: row.url,
     provider: row.provider,
     recurrence: row.recurrence,
     reminders: row.reminders,
     remoteEventId: row.remoteEventId,
+    source: {
+      accountId,
+      provider: row.provider,
+      remoteId: row.remoteEventId ?? (row.provider === "local" ? row.id : null),
+      revision: row.remoteEtag ?? row.updatedAt.toISOString(),
+      sourceType: "calendar_event",
+    },
     startsAt: row.startsAt.toISOString(),
     status: row.status,
     transparency: row.transparency,
@@ -118,6 +240,20 @@ export function serializeEvent(
     updatedAt: row.updatedAt.toISOString(),
     visibility: row.visibility,
   };
+}
+
+function calendarConferenceStatus(row: CalendarEventRow): "failure" | "pending" | "success" | null {
+  if (row.conferenceUrl) return "success";
+  const conferenceData = row.raw?.conferenceData;
+  if (!conferenceData || typeof conferenceData !== "object") return null;
+  const createRequest = (conferenceData as Record<string, unknown>).createRequest;
+  if (!createRequest || typeof createRequest !== "object") return null;
+  const status = (createRequest as Record<string, unknown>).status;
+  if (!status || typeof status !== "object") return null;
+  const statusCode = (status as Record<string, unknown>).statusCode;
+  return statusCode === "failure" || statusCode === "pending" || statusCode === "success"
+    ? statusCode
+    : null;
 }
 
 export function serializeMailbox(row: MailboxRow): Mailbox {
@@ -154,6 +290,7 @@ export function serializeMailThread(
     subject: row.subject,
     to: row.to,
     unread: row.unread,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -161,6 +298,133 @@ export function auditSnapshot(value: object | null): Record<string, unknown> | n
   return value === null
     ? null
     : (redactAuditValue(JSON.parse(JSON.stringify(value))) as Record<string, unknown>);
+}
+
+type DomainProfileAuditValue = {
+  categories: unknown[];
+  domain: string;
+  instructions: unknown[];
+  preferences: Record<string, unknown>;
+  sourceContexts: unknown[];
+  status: string;
+  version: number;
+};
+
+type AttentionItemAuditValue = {
+  domain: string;
+  importance: string;
+  kind: string;
+  relatedEntityType: string | null;
+  status: string;
+  version: number;
+};
+
+type MailRuleAuditValue = {
+  actions: Array<{ type: string }> | null;
+  condition: { field: string; operator: string } | null;
+  enabled: boolean;
+  legacyAction: string;
+  policy: string;
+  sourceAccountIds: string[];
+  version: number;
+};
+
+const domainProfileMutableFields = [
+  "categories",
+  "instructions",
+  "objective",
+  "preferences",
+  "sourceContexts",
+  "status",
+  "summary",
+] as const;
+
+/**
+ * Return only accountability metadata for shared profile audit records.
+ * Domain profile content requires its domain read scope and must not leak to
+ * principals that can read the audit log alone.
+ */
+export function auditDomainProfileMetadata(
+  value: DomainProfileAuditValue | null,
+  changedFields: string[],
+): Record<string, unknown> | null {
+  if (!value) return null;
+  return {
+    categoryCount: value.categories.length,
+    changedFields,
+    domain: value.domain,
+    instructionCount: value.instructions.length,
+    preferenceCount: Object.keys(value.preferences).length,
+    sourceCount: value.sourceContexts.length,
+    status: value.status,
+    version: value.version,
+  };
+}
+
+export function domainProfileChangedFields(before: object | null, after: object): string[] {
+  const beforeRecord = before as Record<string, unknown> | null;
+  const afterRecord = after as Record<string, unknown>;
+  return domainProfileMutableFields.filter(
+    (field) => JSON.stringify(beforeRecord?.[field]) !== JSON.stringify(afterRecord[field]),
+  );
+}
+
+const mailRuleMutableFields = [
+  "actions",
+  "condition",
+  "confidenceThreshold",
+  "description",
+  "enabled",
+  "name",
+  "policy",
+  "profileId",
+  "sourceAccountIds",
+] as const;
+
+export function mailRuleChangedFields(before: object | null, after: object): string[] {
+  const beforeRecord = before as Record<string, unknown> | null;
+  const afterRecord = after as Record<string, unknown>;
+  return mailRuleMutableFields.filter(
+    (field) => JSON.stringify(beforeRecord?.[field]) !== JSON.stringify(afterRecord[field]),
+  );
+}
+
+/** Mail rule content and source topology require mail:read; audits expose metadata only. */
+export function auditMailRuleMetadata(
+  value: MailRuleAuditValue | null,
+  changedFields: string[],
+): Record<string, unknown> | null {
+  if (!value) return null;
+  const actionTypes = value.actions?.map((action) => action.type) ?? [value.legacyAction];
+  return {
+    actionCount: actionTypes.length,
+    actionTypes: [...new Set(actionTypes)].sort(),
+    changedFields,
+    conditionField: value.condition?.field ?? "any",
+    conditionOperator: value.condition?.operator ?? "contains",
+    enabled: value.enabled,
+    policy: value.policy,
+    sourceCount: value.sourceAccountIds.length,
+    version: value.version,
+  };
+}
+
+/**
+ * Attention audit records deliberately omit titles, summaries, entity IDs,
+ * source references, remote IDs, and timing details.
+ */
+export function auditAttentionItemMetadata(
+  value: AttentionItemAuditValue | null,
+): Record<string, unknown> | null {
+  if (!value) return null;
+  return {
+    domain: value.domain,
+    importance: value.importance,
+    kind: value.kind,
+    relatedEntityType: value.relatedEntityType,
+    status: value.status,
+    version: value.version,
+  };
 }
 
 const sensitiveAuditFields = new Set([
@@ -178,15 +442,19 @@ const sensitiveAuditFields = new Set([
   "from",
   "location",
   "merchant",
+  "name",
   "notes",
+  "url",
   "passwordHash",
   "raw",
   "refreshToken",
   "snippet",
   "subject",
+  "summary",
   "title",
   "to",
   "tokenHash",
+  "why",
 ]);
 
 function redactAuditValue(value: unknown): unknown {

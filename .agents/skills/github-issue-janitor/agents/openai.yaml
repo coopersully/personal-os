@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue Janitor"
+  short_description: "Audit legacy GitHub issue and PR evidence."
+  default_prompt: "Use $github-issue-janitor to dry-run a conservative legacy GitHub issue hygiene pass."

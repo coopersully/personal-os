@@ -6,18 +6,58 @@ on:
     branches: [main]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Existing 40-character commit SHA to redeploy; defaults to current main
+        required: false
+        type: string
 
 permissions:
   contents: read
   id-token: write
+  issues: write
+  statuses: write
 
 concurrency:
   group: production-deployment
   cancel-in-progress: false
 
 jobs:
+  announce:
+    name: Mark production deployment pending
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Select release commit
+        id: release
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Release SHA must be a full lowercase commit SHA."
+            exit 1
+          fi
+          echo "sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish pending commit status
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${RELEASE_SHA}" \
+            -f state=pending \
+            -f context=production/ilo \
+            -f description="Production deployment is queued" \
+            -f target_url="$RUN_URL"
+
   deploy:
     name: Deploy production
+    needs: announce
     if: >-
       (github.event_name == 'workflow_run' &&
         github.event.workflow_run.conclusion == 'success') ||
@@ -25,7 +65,9 @@ jobs:
         github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: production
+    environment:
+      name: production
+      url: ${{ vars.APP_URL }}
     env:
       API_ECR_REPOSITORY: ${{ vars.API_ECR_REPOSITORY }}
       API_SERVICE: ${{ vars.API_SERVICE }}
@@ -53,15 +95,15 @@ jobs:
             }
           done
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.announce.outputs.release_sha }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           cache: pnpm
           node-version: 22
@@ -69,13 +111,16 @@ jobs:
       - name: Select immutable release tag
         id: release
         env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          HEAD_SHA: ${{ needs.announce.outputs.release_sha }}
         run: echo "tag=sha-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
+
+      - name: Verify connector observability contract
+        run: node .github/scripts/check-connector-observability.mjs
 
       - uses: aws-actions/amazon-ecr-login@v2
 
@@ -83,6 +128,29 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
+          image_exists() {
+            local repository_url="$1"
+            local repository_name="${repository_url##*/}"
+            aws ecr describe-images \
+              --repository-name "$repository_name" \
+              --image-ids imageTag="$RELEASE_TAG" \
+              >/dev/null 2>&1
+          }
+
+          api_exists=false
+          mcp_exists=false
+          if image_exists "$API_ECR_REPOSITORY"; then api_exists=true; fi
+          if image_exists "$MCP_ECR_REPOSITORY"; then mcp_exists=true; fi
+
+          if [ "$api_exists" = true ] && [ "$mcp_exists" = true ]; then
+            echo "Reusing existing immutable API and MCP images for ${RELEASE_TAG}."
+            exit 0
+          fi
+          if [ "$api_exists" != "$mcp_exists" ]; then
+            echo "::error::Only one immutable image exists for ${RELEASE_TAG}; refusing a partial release."
+            exit 1
+          fi
+
           docker build \
             --platform linux/amd64 \
             --target api \
@@ -96,6 +164,63 @@ jobs:
           docker push "${API_ECR_REPOSITORY}:${RELEASE_TAG}"
           docker push "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}"
 
+      - name: Reject vulnerable container images
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          check_image() {
+            local repository_url="$1"
+            local repository_name="${repository_url##*/}"
+            local findings
+            local scan_status
+            local critical
+            local high
+
+            # A scan-on-push result is not always registered by the time the
+            # push command returns. The AWS waiter treats that short
+            # ScanNotFound window as terminal, so poll until ECR exposes a
+            # completed result instead.
+            for attempt in {1..30}; do
+              if findings="$(
+                aws ecr describe-image-scan-findings \
+                  --repository-name "$repository_name" \
+                  --image-id imageTag="$RELEASE_TAG" \
+                  --output json 2>/dev/null
+              )"; then
+                scan_status="$(
+                  jq -r '.imageScanStatus.status // "UNKNOWN"' <<<"$findings"
+                )"
+                if [ "$scan_status" = "COMPLETE" ]; then
+                  break
+                fi
+                if [ "$scan_status" = "FAILED" ]; then
+                  echo "${repository_name}: image scan failed" >&2
+                  return 1
+                fi
+              fi
+
+              if [ "$attempt" -eq 30 ]; then
+                echo "${repository_name}: image scan did not complete" >&2
+                return 1
+              fi
+              sleep 10
+            done
+            critical="$(
+              jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0' \
+                <<<"$findings"
+            )"
+            high="$(
+              jq -r '.imageScanFindings.findingSeverityCounts.HIGH // 0' \
+                <<<"$findings"
+            )"
+            echo "${repository_name}: ${critical} critical, ${high} high"
+            test "$critical" -eq 0
+            test "$high" -eq 0
+          }
+
+          check_image "$API_ECR_REPOSITORY"
+          check_image "$MCP_ECR_REPOSITORY"
+
       - run: pnpm install --frozen-lockfile
 
       - name: Build web application
@@ -108,24 +233,175 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
+          api_scaling_resource="service/${ECS_CLUSTER}/${API_SERVICE}"
+          api_latest_definition="$(
+            aws ecs describe-task-definition \
+              --task-definition "$API_SERVICE" \
+              --query taskDefinition \
+              --output json
+          )"
+          api_latest_definition_arn="$(
+            jq -er '.taskDefinitionArn | select(type == "string" and length > 0)' \
+              <<<"$api_latest_definition"
+          )"
+          node .github/scripts/check-runtime-task-definition.mjs <<<"$api_latest_definition"
+          api_previous_restore_state="$(
+            jq -r '
+              .containerDefinitions[]
+              | select(.name == "api")
+              | [.environment[]? | select(.name == "ILO_DEPLOYMENT_RESTORE_STATE") | .value][0] // ""
+            ' <<<"$api_latest_definition"
+          )"
+          api_previous_recovery_marker="$(
+            jq -r '
+              .containerDefinitions[]
+              | select(.name == "api")
+              | [.environment[]? | select(.name == "ILO_DEPLOYMENT_RECOVERY_MARKER") | .value][0] // ""
+            ' <<<"$api_latest_definition"
+          )"
+          api_live_service="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" \
+              --query 'services[0]' \
+              --output json
+          )"
+          api_live_scaling="$(
+            aws application-autoscaling describe-scalable-targets \
+              --service-namespace ecs \
+              --resource-ids "$api_scaling_resource" \
+              --scalable-dimension ecs:service:DesiredCount \
+              --query 'ScalableTargets[0].SuspendedState' \
+              --output json
+          )"
+          api_all_suspended='{"DynamicScalingInSuspended":true,"DynamicScalingOutSuspended":true,"ScheduledScalingSuspended":true}'
+          api_is_emergency="$(
+            jq -nr \
+              --argjson service "$api_live_service" \
+              --argjson scaling "$api_live_scaling" \
+              --argjson allSuspended "$api_all_suspended" \
+              '(
+                $service.desiredCount == 0 and
+                $service.runningCount == 0 and
+                $service.pendingCount == 0 and
+                (($scaling // {}) + {
+                  DynamicScalingInSuspended: (($scaling // {}).DynamicScalingInSuspended // false),
+                  DynamicScalingOutSuspended: (($scaling // {}).DynamicScalingOutSuspended // false),
+                  ScheduledScalingSuspended: (($scaling // {}).ScheduledScalingSuspended // false)
+                }) == $allSuspended
+              )'
+          )"
+          if test "$api_is_emergency" = "true"; then
+            if {
+              test -z "$api_previous_restore_state" ||
+                test -z "$api_latest_definition_arn" ||
+                test -z "$api_previous_recovery_marker"
+            }; then
+              echo "::error::The API is zero/all-suspended without an explicit failed-rollout recovery marker; preserving the intentional/manual stop."
+              exit 1
+            fi
+            api_failed_definition_arn="$(
+              jq -Rcer '
+                fromjson |
+                select(
+                  .version == 1 and
+                  (.failedTaskDefinitionArn | type) == "string" and
+                  (.failedTaskDefinitionArn | length) > 0
+                ) |
+                .failedTaskDefinitionArn
+              ' <<<"$api_previous_recovery_marker"
+            )" || {
+              echo "::error::The fail-closed API recovery marker is malformed."
+              exit 1
+            }
+            api_candidate_recovery_marker="$api_previous_recovery_marker"
+            api_restore_state="$(
+              jq -Rce \
+                --arg priorDefinition "$api_failed_definition_arn" \
+                '
+                  fromjson |
+                  .postDrainTaskDefinitionArns = (
+                    ((.postDrainTaskDefinitionArns // []) + [$priorDefinition]) |
+                    unique
+                  ) |
+                  .recoveryAuthorized = true |
+                  select(
+                    (.postDrainTaskDefinitionArns | length) <= 100 and
+                    all(.postDrainTaskDefinitionArns[]; type == "string" and length > 0)
+                  )
+                ' <<<"$api_previous_restore_state"
+            )" || {
+              echo "::error::The fail-closed API recovery task-definition history is malformed or exceeds 100 entries."
+              exit 1
+            }
+          else
+            api_candidate_recovery_marker=""
+            api_restore_state="$(
+              jq -nc \
+                --argjson desired "$(jq -r '.desiredCount' <<<"$api_live_service")" \
+                --argjson suspended "$api_live_scaling" \
+                '{
+                  desiredCount: $desired,
+                  suspendedState: {
+                    DynamicScalingInSuspended: ($suspended.DynamicScalingInSuspended // false),
+                    DynamicScalingOutSuspended: ($suspended.DynamicScalingOutSuspended // false),
+                    ScheduledScalingSuspended: ($suspended.ScheduledScalingSuspended // false)
+                  },
+                  postDrainTaskDefinitionArns: [],
+                  recoveryAuthorized: false
+                }'
+            )"
+          fi
+
           register_task() {
             local family="$1"
             local container="$2"
             local image="$3"
             local output_name="$4"
+            local source_definition="${5:-$family}"
             local task_file
             local registered_arn
             task_file="$(mktemp)"
 
             aws ecs describe-task-definition \
-              --task-definition "$family" \
+              --task-definition "$source_definition" \
               --output json |
               jq \
                 --arg container "$container" \
                 --arg image "$image" \
+                --arg app_url "$APP_URL" \
+                --arg api_restore_state "$api_restore_state" \
+                --arg api_recovery_marker "$api_candidate_recovery_marker" \
                 '.taskDefinition
                 | .containerDefinitions |= map(
-                    if .name == $container then .image = $image else . end
+                    if .name == $container then
+                      .image = $image
+                      | if $container == "mcp" then
+                          .environment = (
+                            [.environment[]? | select(.name != "APP_BASE_URL")] +
+                            [{name: "APP_BASE_URL", value: $app_url}]
+                          )
+                        elif $container == "api" then
+                          .environment = (
+                              [
+                                .environment[]?
+                                | select(
+                                    .name != "ILO_DEPLOYMENT_RESTORE_STATE" and
+                                    .name != "ILO_DEPLOYMENT_RECOVERY_MARKER"
+                                  )
+                              ] +
+                              [
+                                {name: "ILO_DEPLOYMENT_RESTORE_STATE", value: $api_restore_state}
+                              ] +
+                              if $api_recovery_marker == "" then
+                                []
+                              else
+                                [{name: "ILO_DEPLOYMENT_RECOVERY_MARKER", value: $api_recovery_marker}]
+                              end
+                            )
+                        else .
+                        end
+                    else . end
                   )
                 | del(
                     .compatibilities,
@@ -137,6 +413,23 @@ jobs:
                     .taskDefinitionArn
                   )' > "$task_file"
 
+            if test "$container" = "mcp"; then
+              jq -e \
+                --arg app_url "$APP_URL" \
+                '([
+                  .containerDefinitions[]
+                  | select(.name == "mcp")
+                  | .environment[]?
+                  | select(.name == "APP_BASE_URL")
+                ] as $app_base_urls
+                | ($app_base_urls | length) == 1
+                  and $app_base_urls[0].value == $app_url)' \
+                "$task_file" >/dev/null || {
+                  echo "::error::Rendered MCP task definition must contain exactly one canonical APP_BASE_URL."
+                  exit 1
+                }
+            fi
+
             registered_arn="$(
               aws ecs register-task-definition \
                 --cli-input-json "file://${task_file}" \
@@ -147,29 +440,21 @@ jobs:
           }
 
           register_task \
-            "$API_SERVICE" \
-            api \
-            "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
-            api_task_definition
-          register_task \
             "$MCP_SERVICE" \
             mcp \
             "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}" \
             mcp_task_definition
+          register_task \
+            "$API_SERVICE" \
+            api \
+            "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
+            api_task_definition \
+            "$api_latest_definition_arn"
 
       - name: Deploy migration-capable API serially
         env:
           API_TASK_DEFINITION: ${{ steps.tasks.outputs.api_task_definition }}
-        run: |
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$API_SERVICE" \
-            --task-definition "$API_TASK_DEFINITION" \
-            --desired-count 1 \
-            >/dev/null
-          aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER" \
-            --services "$API_SERVICE"
+        run: bash .github/scripts/deploy-api.sh
 
       - name: Deploy MCP after the API is healthy
         env:
@@ -198,10 +483,16 @@ jobs:
             --cache-control "no-cache" \
             --delete \
             --exclude "assets/*"
-          aws cloudfront create-invalidation \
+          invalidation_id="$(
+            aws cloudfront create-invalidation \
+              --distribution-id "$WEB_DISTRIBUTION_ID" \
+              --paths "/*" \
+              --query Invalidation.Id \
+              --output text
+          )"
+          aws cloudfront wait invalidation-completed \
             --distribution-id "$WEB_DISTRIBUTION_ID" \
-            --paths "/*" \
-            >/dev/null
+            --id "$invalidation_id"
 
       - name: Verify public health
         run: |
@@ -211,3 +502,94 @@ jobs:
             "${MCP_URL%/mcp}/health/live"
           curl --fail --retry 12 --retry-all-errors --retry-delay 5 \
             "$APP_URL"
+
+  report:
+    name: Report production deployment
+    needs: [announce, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine deployment outcome
+        id: outcome
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_run" && "$CI_CONCLUSION" != "success" ]]; then
+            echo "state=error" >> "$GITHUB_OUTPUT"
+            echo "description=CI failed; production was not deployed" >> "$GITHUB_OUTPUT"
+          elif [[ "$DEPLOY_RESULT" == "success" ]]; then
+            echo "state=success" >> "$GITHUB_OUTPUT"
+            echo "description=Production deployment succeeded" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=failure" >> "$GITHUB_OUTPUT"
+            echo "description=Production deployment failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish final commit status
+        env:
+          DESCRIPTION: ${{ steps.outcome.outputs.description }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.announce.outputs.release_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATE: ${{ steps.outcome.outputs.state }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${RELEASE_SHA}" \
+            -f state="$STATE" \
+            -f context=production/ilo \
+            -f description="$DESCRIPTION" \
+            -f target_url="$RUN_URL"
+          {
+            echo "## ilo production"
+            echo
+            echo "- Commit: \`${RELEASE_SHA}\`"
+            echo "- Result: **${STATE}**"
+            echo "- Detail: ${DESCRIPTION}"
+            echo "- Run: ${RUN_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or resolve the production incident
+        continue-on-error: true
+        env:
+          DESCRIPTION: ${{ steps.outcome.outputs.description }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.announce.outputs.release_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATE: ${{ steps.outcome.outputs.state }}
+        run: |
+          issue_number="$(
+            gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --search '"Production deployment is failing" in:title' \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [[ "$STATE" == "success" ]]; then
+            if [[ -n "$issue_number" ]]; then
+              gh issue comment "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --body "Recovered with \`${RELEASE_SHA}\`. ${RUN_URL}"
+              gh issue close "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --reason completed
+            fi
+          elif [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "${DESCRIPTION} for \`${RELEASE_SHA}\`. ${RUN_URL}"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Production deployment is failing" \
+              --body "${DESCRIPTION} for \`${RELEASE_SHA}\`.
+
+          Workflow: ${RUN_URL}"
+          fi
+
+      - name: Preserve the failed workflow conclusion
+        if: steps.outcome.outputs.state != 'success'
+        run: exit 1

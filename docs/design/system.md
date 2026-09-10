@@ -1,15 +1,55 @@
-# ilo design system
+# nohmi design system
 
 ## Purpose
 
-ilo helps one person see, decide, and act across their commitments
+nohmi helps one person see, decide, and act across their commitments
 without hiding where information came from or asking them to surrender control
 to an agent. The interface should feel like a well-made personal instrument:
 quiet by default, direct when needed, and detailed only at the point of use.
 
-The visual character is soft neutral paper, soft charcoal, modest elevation, and a
-monochrome primary scale. It is not a generic dashboard, a collection of
+The visual character is soft neutral paper, soft charcoal, flat tonal grouping, and a
+monochrome product-chrome scale. It is not a generic dashboard, a collection of
 unrelated cards, or an AI chat surface.
+
+## Brand foundation
+
+- **Name:** `nohmi`, always lowercase in product and prose.
+- **Pronunciation:** “know me.” This is meaning, not a visual gimmick; never split,
+  capitalize, or decorate the name to explain the wordplay.
+- **Promise:** “know what matters.” Use it sparingly at brand entry points, not as
+  a repeated page subtitle.
+- **Posture:** neutral, capable, soft, and direct. nohmi is unafraid of color but
+  unopinionated in its use: the product has no signature hue.
+- **Wordmark:** the lowercase text wordmark is primary. The compact `n` mark is
+  for constrained app-icon and navigation contexts. Neither uses a gradient,
+  glow, outline, or decorative symbol.
+- **Auth decoration:** the desktop-only neutral card may tile the static favicon
+  glyph at low opacity. Tiles pulse independently with stable randomized delays
+  and slow durations; no hover behavior, orbit, glow, or rapid flashing. Reduced
+  motion shows a still pattern. A small static logo and wordmark may sit in the
+  auth page header, separate from form content. This is a
+  contained decorative-opacity exception, not a general product motion pattern.
+- **Voice:** use plain verbs, short clauses, and concrete nouns. Sound calm and
+  useful, never cute, breathless, mystical, or artificially intimate.
+- **Full-page errors:** use the default canvas with a centered short,
+  large title, description, and recovery actions, without a foreground logo. The shared fading tile
+  pattern may fill the background at subdued opacity; omit navigation branding
+  and the dashed border used for in-page empty states. See
+  [error pages](pages/errors.md).
+- **Password fields:** use the shared input-group control with an end-aligned,
+  accessible visibility toggle. Recovery belongs in the label row as a concise
+  action, not beneath the form or inside the input.
+- **Field labels:** use the secondary foreground token and a consistent 6 px
+  vertical gap before the control. Inline label actions must not increase that
+  row's height. Validation keeps its semantic error color.
+- **Placeholders:** use the shared `input-placeholder` token, quieter than labels
+  and entered values. Hover and focus restore secondary text contrast against
+  the stronger control surface; placeholders never replace persistent labels.
+- **Input surfaces:** shared Input, Textarea, and InputGroup use the same opaque
+  semantic fill in empty, typed, and autofilled states. The group owns its fill;
+  its inner control stays transparent, including on hover. Browser autofill may
+  use a flat inset repaint to mask the browser's forced color—never elevation
+  or a focus shadow. Clip autofill to text only inside a filled InputGroup.
 
 ## Working principles
 
@@ -54,6 +94,21 @@ Every product page has these layers, in order:
 | Detail | What do I need to inspect or change? | Open an inspector, sheet, popover, or a labelled disclosure from the affected item. |
 | History | What happened before? | Collapse by default unless it changes the immediate decision. |
 
+The shell owns one responsive inline page inset. Standard app-bar content and
+ordinary route bodies use that same inset so their leading and trailing edges
+align across navigation and material. Spatial workspaces that intentionally run
+edge to edge, such as Calendar and Mail, may opt out at their workspace frame;
+individual pages must not recreate the shell inset with local padding.
+
+`WorkspaceLayout` owns an optional secondary-navigation slot directly below
+the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
+`Leading`, `Content`, and `Actions` slots; React context and a portal keep the
+controls owned by the feature while placing them in the shared frame. Omit the
+bar or set `enabled={false}` to leave no empty row. Its default layout placement
+stays pinned below the primary bar and shares the body inset. Spatial Calendar
+headers and Mail reader actions use `placement="inline"` to retain their own
+scroll/column alignment, using the same slot anatomy and neutral surface.
+
 ### Blocks
 
 A block is a named product pattern with a stable purpose, not merely a rounded
@@ -61,11 +116,12 @@ rectangle. Use one of these forms before creating a new container.
 
 | Block | Use for | Default visibility | Surface |
 | --- | --- | --- | --- |
-| `moment` | The single time-bound thing happening or next | Always open | Raised card, highest contrast |
+| `moment` | The single time-bound thing happening or next | Always open | Flat tonal field, highest contrast |
 | `sequence` | Ordered events or material that follows the moment | Always open when non-empty | Open page surface with compact material rows |
 | `queue` | A bounded list of choices or commitments | Always open when actionable | Quiet rail with separators |
 | `summary` | Capacity, count, freshness, or contextual fact | Inline with its owning block | Text or badge; never a dashboard tile by itself |
 | `attention` | A persistent blocker, capability, or safety condition | Open while relevant | Semantic `Alert` beside its affected work |
+| `empty` | The deliberate absence of expected material | Only while the owning collection or schedule has no material | Transparent container with one quiet, widely spaced dashed semantic border; never a tonal fill |
 | `detail` | Infrequent controls, provenance, scope, or raw metadata | Closed until requested | `Collapsible`, Popover, or inspector |
 | `history` | Completed, revoked, or past material | Closed by default | Labelled `Collapsible` with a count |
 | `choice` | A small set of mutually exclusive, previewable preferences | Always open | Shared `ChoiceCardGroup`; the entire card selects the option |
@@ -81,6 +137,11 @@ Rules:
   separate live material from its surroundings.
 - A `summary` belongs inside the block that gives it meaning. Counts and badges
   do not become standalone metrics.
+- An `empty` block uses the shared shadcn `Empty` composition whenever its
+  content fits that structure. Its transparent, dashed container is the stable
+  visual signal for absence across the app. A reflective `QuoteCard` may carry
+  the same treatment when it replaces an empty schedule; populated cards never
+  inherit it.
 - `detail` is progressive disclosure, not a dumping ground. Its trigger names
   the content it reveals, and its closed state still exposes the resulting
   setting or count when that affects the person.
@@ -108,6 +169,22 @@ of visual options:
 - Use the same control family for choices of the same kind. Do not mix pills,
   radios, and cards for equivalent preference decisions on one surface.
 
+### Responsive modal disclosure
+
+Use the shared `ResponsiveDialog` composition for a modal task that must remain
+comfortable across app widths. It presents the same content as a centered
+shadcn Dialog at desktop widths and a bottom shadcn Drawer below 768 px. Do not
+build feature-level media-query branches or maintain separate mobile and
+desktop modal content.
+
+Compose its named slots in document order: `Trigger`, `Content`, `Header`,
+`Title` and optional `Description`, `Body`, `Footer`, and `Actions`. `Close` may
+wrap a secondary action anywhere inside the content. The body owns overflow;
+the header, footer, actions, accessible title, focus behavior, dismissal, and
+mobile safe-area spacing remain stable. A feature may adjust layout through
+slot `className` values, but must not replace the responsive presentation,
+overlay behavior, or semantic anatomy.
+
 ### Honest capability and feedback states
 
 - Do not surface a navigation item or settings surface to a person who cannot
@@ -134,14 +211,23 @@ colors, raw color utilities, or a second spacing scale.
 
 | Concern | Contract |
 | --- | --- |
-| Type | Plus Jakarta Sans is UI text. DM Mono is only compact time, date, count, identifier, or source metadata. |
+| Type | Geist is the single product typeface, including compact time, date, count, identifier, and source metadata. |
 | Text | Default UI text is 14 px. Secondary metadata is 12 px or smaller only when it is not required to complete the primary task. |
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A canvas-colored edge fade is allowed only when it keeps fixed navigation legible over scrolling content, as in Setup. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
+
+### Tonal separation
+
+Ordinary surfaces and controls separate through opaque semantic tone, not a
+visible resting border. Shared primitives may reserve transparent border
+geometry so focus, invalid, increased-contrast, or functional data boundaries
+can become visible without layout shift. A legacy `outline` variant names an
+interaction hierarchy, not a requirement to draw an outline.
 
 ### Interface copy
 
@@ -160,6 +246,15 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   unless omitting it creates ambiguity.
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
+- Workspace-switcher triggers show the workspace glyph without its frame,
+  including the mobile dock. Keep framed workspace icons inside the picker;
+  preserve the same glyph and workspace color in both contexts.
+- Desktop account actions live in Settings, reached from the workspace picker.
+  Do not duplicate them with an account avatar in the top bar or an account
+  footer in workspace sidebars.
+- Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
+  primitives. Consent uses a horizontal checkbox field with a separate label
+  and description; availability and errors use shared alerts.
 - Connected providers use their recognizable service mark when one exists. Do
   not substitute a raw provider identifier; any necessary fallback name uses
   the provider's correct capitalization.
@@ -170,7 +265,7 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   detail; do not create duplicate popovers for the combined attributes.
 - A live environmental detail surface may use an informative visual header
   when the material itself benefits from it. Weather uses a time-of-day sky
-  gradient with condition, temperature, and at most two live facts overlaid;
+  flat tonal field with condition, temperature, and at most two live facts overlaid;
   the simple explanation stays below. This is a material treatment, not a
   decorative hero applied to ordinary settings.
 - A compact location control opens an in-app map preview first. The map’s
@@ -199,16 +294,37 @@ carry visual explanation; helper copy must earn its place; unavailable actions
 are not offered; and permanent alerts are reserved for persistent, actionable
 conditions.
 
+### Visual entrypoint truthfulness
+
+Advertising a visual entrypoint promises a designed, task-specific view. Ordinary
+reads stay in chat; raw structured output is never the default user-facing visual.
+Every advertised MCP App has a typed presentation contract, a useful text fallback,
+an explicit malformed-result fallback, and focused narrow-width, theme, keyboard,
+and lifecycle coverage. Removing visual metadata is the correct incomplete state;
+a generic JSON inspector is not a product preview.
+
+### Agent-owned setup invariant
+
+Once an agent has authenticated, the product must stop treating the person as
+an instruction transport. A server-owned plan exposes the current semantic
+step, observed evidence, exact authority, required tools, and approval boundary.
+The agent performs discovery and draft work, then re-reads the plan after every
+state change. The person sees and performs only connection, unresolved choices,
+and consequential approval. Hosted skills, copied prompts, and documentation
+may explain the protocol, but they never become required setup steps or a
+parallel source of completion state.
 ### Theme equivalence contract
 
 Light and dark are two calibrated expressions of the same interface—not a
 light palette with a separate set of dark overrides. `apps/web/src/styles.css`
 defines the roles below in both themes. Components consume roles; they do not
 choose a color because it happens to look acceptable on their current page.
+Dark mode uses lifted charcoal fields rather than near-black planes so tonal
+separation remains visible without borders or decorative elevation.
 
 | Role | Purpose | Contrast band |
 | --- | --- | --- |
-| `canvas` → `surface` → `surface-raised` | The three-step material ladder. Each step is lighter than the previous step in both themes. | Separation, not text contrast |
+| `canvas`, `surface`, `surface-subtle` | Three distinct neutral flat fields. Their relative luminance may invert by theme. | Separation, not text contrast |
 | `content-primary` | Essential reading and active controls | At least 12:1 against `canvas` |
 | `content-secondary` | Supporting explanation and metadata needed to act | At least 4.5:1 against `surface` |
 | `content-tertiary` | Decorative, disabled, or nonessential metadata | Never the only way to convey state |
@@ -222,12 +338,13 @@ allows the material to remain calm while preserving the same reading hierarchy.
 `pnpm lint`. It also rejects raw hex and `rgba()` colors outside the two theme
 blocks, so feature work must name a semantic role before introducing a color.
 
-`accentColor` remains a stored compatibility field, but it has no visible effect
-and is not exposed as a setting during the monochrome phase. The legacy
-`accent` aliases resolve to the monochrome primary scale so existing components
-remain coherent. Reintroduce user color only with a documented token contract,
-an explicit setting, and contrast coverage for every primary role. Do not set
-`--accent`, `--primary`, or `--ring` independently in feature code.
+`accentColor` remains a stored compatibility field, but it does not tint product
+chrome. The legacy `accent` aliases resolve to the monochrome primary scale so
+existing components remain coherent. Color belongs to semantic state or to
+user/provider-owned material. The equal-weight material spectrum—rose, coral,
+amber, green, teal, blue, indigo, and violet—may distinguish that material, but
+no hue becomes nohmi's brand accent. Do not set `--accent`, `--primary`, or
+`--ring` independently in feature code.
 
 ## Deterministic agent protocol
 

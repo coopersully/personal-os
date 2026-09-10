@@ -1,6 +1,6 @@
-# Contributing to ilo
+# Contributing to nohmi
 
-Thanks for helping improve ilo. Please use a focused branch and pull
+Thanks for helping improve nohmi. Please use a focused branch and pull
 request for each change, explain the user impact, and include focused tests.
 
 ## Before opening a pull request

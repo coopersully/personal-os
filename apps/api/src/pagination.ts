@@ -1,3 +1,4 @@
+import { idSchema } from "@personal-os/domain";
 import { AppError } from "./errors.js";
 
 export type Cursor = {
@@ -12,8 +13,14 @@ export function encodeCursor(value: Cursor): string {
 export function decodeCursor(value: string): Cursor {
   const [createdAtValue, id, extra] = Buffer.from(value, "base64url").toString("utf8").split("|");
   const createdAt = new Date(String(createdAtValue));
-  if (!createdAtValue || !id || extra !== undefined || Number.isNaN(createdAt.getTime())) {
+  const parsedId = idSchema.safeParse(id);
+  if (
+    !createdAtValue ||
+    !parsedId.success ||
+    extra !== undefined ||
+    Number.isNaN(createdAt.getTime())
+  ) {
     throw new AppError("invalid_request", "The pagination cursor is invalid.");
   }
-  return { createdAt, id };
+  return { createdAt, id: parsedId.data };
 }

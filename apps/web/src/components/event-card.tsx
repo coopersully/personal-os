@@ -98,6 +98,7 @@ function EventCardPrimaryAction({
 }: React.ComponentProps<typeof Button>) {
   return (
     <Button
+      data-event-card-primary-action=""
       data-slot="event-card-primary-action"
       type={type}
       variant="ghost"

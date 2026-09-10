@@ -4934,7 +4934,7 @@ describe.sequential("ilo API", () => {
         .from(reminders)
         .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
     ]);
-    expect(events).toHaveLength(9);
+    expect(events).toHaveLength(12);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
     expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));

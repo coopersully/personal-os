@@ -3215,19 +3215,15 @@ function DayCalendarView({
                   <CalendarDropPreview preview={dragPreview} />
                 ) : null}
                 {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
-                {timelineEvents.map((layout) => (
-                  <TimelineEvent
-                    blockColors={eventBlockColors(layout.event, calendarsById)}
-                    calendar={calendarsById.get(layout.event.calendarId)}
-                    isDragging={draggedEventId === layout.event.id}
-                    key={layout.event.id}
-                    layout={layout}
-                    onEdit={() => setEditor({ event: layout.event, kind: "event" })}
-                    onDragEnd={clearDrag}
-                    setDraggedEventId={setDraggedEventId}
-                    timeZone={timeZone}
-                  />
-                ))}
+                <TimelineEventCollection
+                  calendarsById={calendarsById}
+                  draggedEventId={draggedEventId}
+                  layouts={timelineEvents}
+                  onDragEnd={clearDrag}
+                  setDraggedEventId={setDraggedEventId}
+                  setEditor={setEditor}
+                  timeZone={timeZone}
+                />
               </section>
             </ContextMenuTrigger>
             <CalendarBlankContextMenu
@@ -3309,6 +3305,10 @@ function WeekCalendarView({
       ),
     [eventsByDay],
   );
+  const allDayLayouts = useMemo(
+    () => positionWeekAllDayEvents(days, eventsByDay),
+    [days, eventsByDay],
+  );
   const scrollContainer = useRef<HTMLDivElement>(null);
   const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const includesToday = days.some((day) => sameLocalDate(day, today));
@@ -3379,9 +3379,8 @@ function WeekCalendarView({
             }}
           >
             <div className="week-time-corner">All day</div>
+            <div aria-hidden="true" className="week-all-day-corner" />
             {days.map((day) => {
-              const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
-              const allDayEvents = dayEvents.filter((event) => event.allDay);
               const isToday = sameLocalDate(day, today);
               return (
                 <header
@@ -3405,15 +3404,16 @@ function WeekCalendarView({
                       {day.day}
                     </button>
                   </div>
-                  <AllDayEvents
-                    calendarsById={calendarsById}
-                    compact
-                    events={allDayEvents}
-                    setEditor={setEditor}
-                  />
                 </header>
               );
             })}
+            <WeekAllDayEvents
+              calendarsById={calendarsById}
+              days={days}
+              layouts={allDayLayouts}
+              setEditor={setEditor}
+              today={today}
+            />
           </WorkspaceSecondaryAppBarContent>
         </WorkspaceSecondaryAppBar>
         <TimeAxis />
@@ -3462,20 +3462,16 @@ function WeekCalendarView({
                   timeZone={timeZone}
                 />
               ) : null}
-              {layouts.map((layout) => (
-                <TimelineEvent
-                  blockColors={eventBlockColors(layout.event, calendarsById)}
-                  calendar={calendarsById.get(layout.event.calendarId)}
-                  compact
-                  isDragging={draggedEventId === layout.event.id}
-                  key={layout.event.id}
-                  layout={layout}
-                  onEdit={() => setEditor({ event: layout.event, kind: "event" })}
-                  onDragEnd={clearDrag}
-                  setDraggedEventId={setDraggedEventId}
-                  timeZone={timeZone}
-                />
-              ))}
+              <TimelineEventCollection
+                calendarsById={calendarsById}
+                compact
+                draggedEventId={draggedEventId}
+                layouts={layouts}
+                onDragEnd={clearDrag}
+                setDraggedEventId={setDraggedEventId}
+                setEditor={setEditor}
+                timeZone={timeZone}
+              />
             </section>
           );
         })}
@@ -3498,6 +3494,30 @@ type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> = {
   event: T;
   startMinute: number;
 };
+
+type TimelineEventCluster = {
+  endMinute: number;
+  layouts: TimelineEventLayout[];
+  startMinute: number;
+};
+
+function groupTimelineEventLayouts(layouts: TimelineEventLayout[]): TimelineEventCluster[] {
+  const clusters: TimelineEventCluster[] = [];
+  for (const layout of layouts) {
+    const cluster = clusters.at(-1);
+    if (!cluster || layout.startMinute >= cluster.endMinute) {
+      clusters.push({
+        endMinute: layout.endMinute,
+        layouts: [layout],
+        startMinute: layout.startMinute,
+      });
+      continue;
+    }
+    cluster.layouts.push(layout);
+    cluster.endMinute = Math.max(cluster.endMinute, layout.endMinute);
+  }
+  return clusters;
+}
 
 function TimeAxis() {
   return (
@@ -3651,7 +3671,13 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
   };
   const start = (event: ReactPointerEvent<HTMLElement>, day: LocalDate) => {
     if (event.button !== 0 || event.pointerType === "touch") return;
-    if ((event.target as Element).closest(".calendar-timeline-event")) return;
+    if (
+      (event.target as Element).closest(
+        ".calendar-timeline-event, .calendar-overlap-cluster__toggle",
+      )
+    ) {
+      return;
+    }
     const minute = createRangeMinuteAtPointer(event, event.currentTarget);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     updateSelection({
@@ -3756,6 +3782,180 @@ function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): Eve
   });
 }
 
+function overlapOrbitPoint(index: number, total: number) {
+  if (total === 2) {
+    return { rotation: index === 0 ? -4 : 4, x: index === 0 ? -76 : 76, y: 0 };
+  }
+  const radius = Math.min(92, 58 + total * 6);
+  const angle = Math.PI + (index * Math.PI * 2) / total;
+  return {
+    rotation: Math.round(Math.sin(angle) * 8),
+    x: Math.round(Math.cos(angle) * radius),
+    y: Math.round(Math.sin(angle) * radius),
+  };
+}
+
+function TimelineEventCollection({
+  calendarsById,
+  compact = false,
+  draggedEventId,
+  layouts,
+  onDragEnd,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+}: {
+  calendarsById: CalendarMap;
+  compact?: boolean;
+  draggedEventId: string | null;
+  layouts: TimelineEventLayout[];
+  onDragEnd: () => void;
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  return groupTimelineEventLayouts(layouts).map((cluster) => {
+    const shared = {
+      calendarsById,
+      compact,
+      draggedEventId,
+      onDragEnd,
+      setDraggedEventId,
+      setEditor,
+      timeZone,
+    };
+    if (cluster.layouts.length === 1) {
+      const layout = cluster.layouts[0] as TimelineEventLayout;
+      return <TimelineEventItem {...shared} key={layout.event.id} layout={layout} />;
+    }
+    return (
+      <TimelineOverlapCluster
+        {...shared}
+        cluster={cluster}
+        key={cluster.layouts.map((layout) => layout.event.id).join(":")}
+      />
+    );
+  });
+}
+
+function TimelineEventItem({
+  calendarsById,
+  compact,
+  draggedEventId,
+  layout,
+  onDragEnd,
+  orbit,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+  topOffsetMinute,
+}: {
+  calendarsById: CalendarMap;
+  compact: boolean;
+  draggedEventId: string | null;
+  layout: TimelineEventLayout;
+  onDragEnd: () => void;
+  orbit?: { index: number; total: number };
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+  topOffsetMinute?: number;
+}) {
+  return (
+    <TimelineEvent
+      blockColors={eventBlockColors(layout.event, calendarsById)}
+      calendar={calendarsById.get(layout.event.calendarId)}
+      compact={compact}
+      isDragging={draggedEventId === layout.event.id}
+      layout={layout}
+      onEdit={() => setEditor({ event: layout.event, kind: "event" })}
+      onDragEnd={onDragEnd}
+      setDraggedEventId={setDraggedEventId}
+      timeZone={timeZone}
+      {...(orbit ? { orbit } : {})}
+      {...(topOffsetMinute === undefined ? {} : { topOffsetMinute })}
+    />
+  );
+}
+
+function TimelineOverlapCluster({
+  calendarsById,
+  cluster,
+  compact,
+  draggedEventId,
+  onDragEnd,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+}: {
+  calendarsById: CalendarMap;
+  cluster: TimelineEventCluster;
+  compact: boolean;
+  draggedEventId: string | null;
+  onDragEnd: () => void;
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const clusterId = useId();
+  const count = cluster.layouts.length;
+  return (
+    <fieldset
+      aria-label={`${count} overlapping events`}
+      className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
+      id={clusterId}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        setExpanded(false);
+        toggle.current?.focus();
+      }}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") setHovered(true);
+      }}
+      onPointerLeave={() => setHovered(false)}
+      style={{
+        height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
+        top: minuteToTimelinePixels(cluster.startMinute),
+      }}
+    >
+      <span aria-hidden="true" className="calendar-overlap-cluster__hit-area" />
+      <button
+        aria-controls={clusterId}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Spread"} ${count} overlapping events`}
+        className="calendar-overlap-cluster__toggle"
+        onClick={(event) => {
+          event.stopPropagation();
+          setExpanded((current) => !current);
+        }}
+        ref={toggle}
+        type="button"
+      >
+        <span className="calendar-overlap-cluster__pin-head">{count}</span>
+      </button>
+      {cluster.layouts.map((layout, index) => (
+        <TimelineEventItem
+          calendarsById={calendarsById}
+          compact={compact}
+          draggedEventId={draggedEventId}
+          key={layout.event.id}
+          layout={layout}
+          onDragEnd={onDragEnd}
+          orbit={{ index, total: count }}
+          setDraggedEventId={setDraggedEventId}
+          setEditor={setEditor}
+          timeZone={timeZone}
+          topOffsetMinute={cluster.startMinute}
+        />
+      ))}
+    </fieldset>
+  );
+}
+
 function TimelineEvent({
   blockColors,
   calendar,
@@ -3763,9 +3963,11 @@ function TimelineEvent({
   layout,
   onEdit,
   onDragEnd,
+  orbit,
   setDraggedEventId,
   isDragging = false,
   timeZone,
+  topOffsetMinute = 0,
 }: {
   blockColors: EventBlockColor[];
   calendar: Calendar | undefined;
@@ -3773,9 +3975,11 @@ function TimelineEvent({
   layout: TimelineEventLayout;
   onEdit: () => void;
   onDragEnd: () => void;
+  orbit?: { index: number; total: number };
   setDraggedEventId: (id: string | null) => void;
   isDragging?: boolean;
   timeZone: string;
+  topOffsetMinute?: number;
 }) {
   const { column, endMinute, event, startMinute } = layout;
   const writable = calendar?.isWritable ?? false;
@@ -3786,6 +3990,8 @@ function TimelineEvent({
   const blockedMessage = calendar
     ? `${calendar.name} is read-only, so this event can’t be moved.`
     : "This event is read-only and can’t be moved.";
+  const orbitPoint = orbit ? overlapOrbitPoint(orbit.index, orbit.total) : null;
+  const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
     window.clearTimeout(blockedHoldTimer.current);
@@ -3847,14 +4053,24 @@ function TimelineEvent({
           blockedHoldTriggered.current = false;
         }}
         onPointerUp={clearBlockedHoldTimer}
-        style={{
-          ...calendarEventColorStyle(calendar?.color),
-          height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 18),
-          left: 3 + column * 12,
-          top: minuteToTimelinePixels(startMinute),
-          width: `calc(100% - ${6 + column * 12}px)`,
-          zIndex: 2 + column,
-        }}
+        style={
+          {
+            ...calendarEventColorStyle(calendar?.color),
+            "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
+            "--calendar-event-left": orbit
+              ? `calc(${(column / laneCount) * 100}% + 2px)`
+              : `${3 + column * 12}px`,
+            "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
+            "--calendar-event-width": orbit
+              ? `calc(${100 / laneCount}% - 4px)`
+              : `calc(100% - ${6 + column * 12}px)`,
+            "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
+            "--overlap-orbit-width": "calc(100% - 6px)",
+            "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
+            "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
+            zIndex: 2 + column,
+          } as CSSProperties
+        }
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
         type="button"
       >
@@ -4082,6 +4298,129 @@ function AllDayEvents({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+type WeekAllDayEventLayout = {
+  endColumn: number;
+  event: CalendarEvent;
+  row: number;
+  startColumn: number;
+};
+
+function positionWeekAllDayEvents(
+  days: LocalDate[],
+  eventsByDay: Map<string, CalendarEvent[]>,
+): WeekAllDayEventLayout[] {
+  const spans = new Map<string, Omit<WeekAllDayEventLayout, "row">>();
+  days.forEach((day, dayIndex) => {
+    for (const event of eventsByDay.get(localDateKey(day)) ?? []) {
+      if (!event.allDay) continue;
+      const current = spans.get(event.id);
+      spans.set(event.id, {
+        endColumn: dayIndex + 2,
+        event,
+        startColumn: current?.startColumn ?? dayIndex + 1,
+      });
+    }
+  });
+  const rowEnds: number[] = [];
+  return [...spans.values()]
+    .toSorted(
+      (left, right) =>
+        left.startColumn - right.startColumn ||
+        right.endColumn - right.startColumn - (left.endColumn - left.startColumn),
+    )
+    .map((span) => {
+      let row = rowEnds.findIndex((endColumn) => endColumn <= span.startColumn);
+      if (row === -1) row = rowEnds.length;
+      rowEnds[row] = span.endColumn;
+      return { ...span, row: row + 1 };
+    });
+}
+
+function weekDaySurface(dayIndex: number, isToday: boolean) {
+  if (isToday) {
+    return "color-mix(in srgb, var(--timeline-now) 14%, var(--surface-raised))";
+  }
+  return dayIndex % 2 === 0
+    ? "color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised))"
+    : "color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised))";
+}
+
+function WeekAllDayEvents({
+  calendarsById,
+  days,
+  layouts,
+  setEditor,
+  today,
+}: {
+  calendarsById: CalendarMap;
+  days: LocalDate[];
+  layouts: WeekAllDayEventLayout[];
+  setEditor: (editor: Editor) => void;
+  today: LocalDate;
+}) {
+  const rowCount = Math.max(1, ...layouts.map((layout) => layout.row));
+  return (
+    <div
+      className="week-all-day-layer"
+      style={{
+        gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${rowCount}, 23px)`,
+      }}
+    >
+      {days.map((day, dayIndex) => (
+        <div
+          aria-hidden="true"
+          className={`week-all-day-day${sameLocalDate(day, today) ? " is-today" : ""}`}
+          key={`all-day-surface-${localDateKey(day)}`}
+          style={
+            {
+              "--week-day-surface": weekDaySurface(dayIndex, sameLocalDate(day, today)),
+              gridColumn: dayIndex + 1,
+              gridRow: `1 / span ${rowCount}`,
+            } as CSSProperties
+          }
+        />
+      ))}
+      {layouts.map((layout) => {
+        const startIndex = layout.startColumn - 1;
+        const endIndex = layout.endColumn - 2;
+        const eventStyle = calendarEventColorStyle(
+          calendarsById.get(layout.event.calendarId)?.color,
+        );
+        return (
+          <button
+            aria-label={`All day ${layout.event.title}`}
+            className="week-all-day-event"
+            key={layout.event.id}
+            onClick={() => setEditor({ event: layout.event, kind: "event" })}
+            style={
+              {
+                ...eventStyle,
+                "--week-all-day-end-surface": weekDaySurface(
+                  endIndex,
+                  sameLocalDate(days[endIndex] as LocalDate, today),
+                ),
+                "--week-all-day-start-surface": weekDaySurface(
+                  startIndex,
+                  sameLocalDate(days[startIndex] as LocalDate, today),
+                ),
+                gridColumn: `${layout.startColumn} / ${layout.endColumn}`,
+                gridRow: layout.row,
+              } as CSSProperties
+            }
+            type="button"
+          >
+            <span>{layout.event.title}</span>
+            {layout.event.blocks.length > 0 ? (
+              <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

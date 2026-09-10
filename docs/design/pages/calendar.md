@@ -17,6 +17,9 @@ event without losing the shape of the day.
   layout outlet, preserving horizontal alignment with the spatial grid.
 - The week secondary bar expands only for real all-day material and meets the
   timeline without a decorative divider.
+- All-day events use compact rounded notched bars. A multi-day event is one
+  continuous bar spanning its occupied day columns, while overlapping events
+  stack into separate all-day lanes.
 - The persistent Calendar orientation occupies the shared workspace app bar's
   `identity` slot beside the workspace switcher, with Today and the view
   selector in `context`. The primary bar remains one vertically centred 52 px
@@ -33,12 +36,40 @@ event without losing the shape of the day.
   avatars with an `X of X calendars` label and uses switches for visibility.
 - Timeline columns carry 15-minute rules with an hour/half-hour/quarter-hour
   weight hierarchy. Half-hour labels in the gutter make the hierarchy readable
-  without counting subdivisions. Rules remain behind events, drag previews,
-  and the current-time marker.
+  without counting subdivisions. At scroll-top, the midnight label remains
+  fully visible below the pinned week bar. Every rule is quieter than the
+  standard border token, with half- and quarter-hour marks progressively more
+  subdued. Rules remain behind events, drag previews, and the current-time
+  marker.
+- Overlapping timed events remain in their time geometry at rest and divide the
+  available day width into equal side-by-side lanes. A quiet numbered push-pin
+  control appears to pierce the grouped cards; its visual head is smaller than
+  its accessible hit target, and the pin is drawn from the control surface
+  itself rather than using an icon. Hover,
+  event focus, or that control
+  spreads the existing event cards around the cluster centre on a circular
+  path, beginning from the left and right sides. A restrained fan rotation
+  reinforces the circular arrangement. Cards retain their normal
+  shape, content, and independent click target;
+  a stable interaction area prevents the layout animation from dropping hover.
+  The control also supports touch, and Escape collapses the chooser.
 - Vertical day separation remains visible. Horizontal rules communicate time,
-  not card boundaries.
+  not card boundaries. Week headers and timelines alternate between two subtle
+  neutral row-style surfaces so adjacent days read as distinct tiles. Today
+  overrides that alternation with a restrained tint from the current-time
+  accent.
+- The pinned week bar keeps weekday and date labels on its opaque navigation
+  surface. Immediately below that label row, a per-day downward fade inherits
+  the corresponding column surface, so alternating and current-day tints flow
+  naturally into the timeline. The surface-colored fade
+  with bounded backdrop blur carries through the remaining all-day area and
+  into the scrolling timeline so content recedes without a hard edge. The fade
+  remains translucent and paints behind header and all-day material; navigation
+  content itself stays fully opaque and sharp.
 - A bottom-centred floating pill owns date jump, search, and event creation.
-  Each action transforms the pill in place. Search moves to screen centre,
+  Its complete resting surface uses the primary button treatment, with all
+  three actions inheriting its foreground. Each action transforms the pill in
+  place. Search moves to screen centre,
   focuses immediately, searches a bounded event range plus dates, and supports
   direct relative-date phrases such as `last Christmas`. Creation exposes the
   standard event fields without launching a second surface.

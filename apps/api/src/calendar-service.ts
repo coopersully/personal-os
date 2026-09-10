@@ -143,12 +143,9 @@ function iCalendarUidValue(line: string): string | null {
   return null;
 }
 
-/** Reads the stable iCalendar UID shared by projections from different providers. */
 function providerIndependentEventUid(record: CalendarEventRecord): string | null {
   const googleUid = record.raw?.iCalUID;
-  if (typeof googleUid === "string" && googleUid.trim()) {
-    return googleUid.trim();
-  }
+  if (typeof googleUid === "string" && googleUid.trim()) return googleUid.trim();
 
   const calendarData = record.raw?.data;
   if (typeof calendarData !== "string") return null;
@@ -160,34 +157,80 @@ function providerIndependentEventUid(record: CalendarEventRecord): string | null
   return null;
 }
 
-/** Collapses provider projections while retaining every source-to-canonical association. */
-function deduplicateEvents(records: CalendarEventRecord[]): {
+function normalizedEventTitle(title: string): string {
+  return title.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+type EventIdentityCluster = {
+  accountIds: Set<string>;
+  calendarIds: Set<string>;
+  canonicalId: string;
+  hasLocalSource: boolean;
+};
+
+/** Collapses provider mirrors without collapsing separate events within one calendar. */
+function deduplicateEvents(
+  records: CalendarEventRecord[],
+  accountIdByCalendarId: ReadonlyMap<string, string>,
+): {
   canonicalIdBySourceId: Map<string, string>;
   records: CalendarEventRecord[];
 } {
   const canonicalIdBySourceId = new Map<string, string>();
-  const canonicalIdByKey = new Map<string, string>();
+  const clustersByKey = new Map<string, EventIdentityCluster[]>();
   const deduplicated: CalendarEventRecord[] = [];
+
   for (const record of records) {
-    const sharedUid = providerIndependentEventUid(record);
-    const key = sharedUid
-      ? JSON.stringify([
-          sharedUid,
-          record.startsAt.toISOString(),
-          record.endsAt.toISOString(),
-          record.allDay,
-        ])
-      : record.remoteEventId
-        ? `${record.provider}:${record.calendarId}:${record.remoteEventId}`
-        : record.id;
-    const canonicalId = canonicalIdByKey.get(key);
-    if (canonicalId) {
-      canonicalIdBySourceId.set(record.id, canonicalId);
+    const occurrence = [record.startsAt.toISOString(), record.endsAt.toISOString(), record.allDay];
+    const semanticKey = `semantic:${JSON.stringify([
+      normalizedEventTitle(record.title),
+      ...occurrence,
+    ])}`;
+    const uid = providerIndependentEventUid(record);
+    const uidKey = uid ? `uid:${JSON.stringify([uid, ...occurrence])}` : null;
+    const accountId = accountIdByCalendarId.get(record.calendarId);
+    const uidCluster = uidKey
+      ? clustersByKey
+          .get(uidKey)
+          ?.find((candidate) => !candidate.calendarIds.has(record.calendarId))
+      : undefined;
+    const semanticCluster =
+      record.provider !== "local" && accountId
+        ? clustersByKey
+            .get(semanticKey)
+            ?.find(
+              (candidate) =>
+                !candidate.hasLocalSource &&
+                !candidate.calendarIds.has(record.calendarId) &&
+                !candidate.accountIds.has(accountId),
+            )
+        : undefined;
+    const cluster = uidCluster ?? semanticCluster;
+    const keys = uidKey ? [uidKey, semanticKey] : [semanticKey];
+
+    if (cluster) {
+      if (accountId) cluster.accountIds.add(accountId);
+      cluster.calendarIds.add(record.calendarId);
+      cluster.hasLocalSource ||= record.provider === "local";
+      canonicalIdBySourceId.set(record.id, cluster.canonicalId);
+      for (const key of keys) {
+        const clusters = clustersByKey.get(key) ?? [];
+        if (!clusters.includes(cluster)) clustersByKey.set(key, [...clusters, cluster]);
+      }
       continue;
     }
-    canonicalIdByKey.set(key, record.id);
+
+    const nextCluster = {
+      accountIds: new Set(accountId ? [accountId] : []),
+      calendarIds: new Set([record.calendarId]),
+      canonicalId: record.id,
+      hasLocalSource: record.provider === "local",
+    };
     canonicalIdBySourceId.set(record.id, record.id);
     deduplicated.push(record);
+    for (const key of keys) {
+      clustersByKey.set(key, [...(clustersByKey.get(key) ?? []), nextCluster]);
+    }
   }
   return { canonicalIdBySourceId, records: deduplicated };
 }
@@ -1341,7 +1384,7 @@ export function createCalendarService({
         const source = sourcesById.get(record.blockSourceEventId);
         return !source || !visibleCalendarIds.has(source.calendarId);
       });
-      const deduplicated = deduplicateEvents(visibleRecords);
+      const deduplicated = deduplicateEvents(visibleRecords, accountIdByCalendarId);
       const displayedSourceIds = visibleRecords
         .filter((record) => !record.blockSourceEventId)
         .map((record) => record.id);

@@ -6436,6 +6436,82 @@ describe("ilo web app", () => {
     expect(stylesheet).toContain("background-size: 100% 48px, 5px 48px, 9px 24px;");
   });
 
+  it("renders a multi-day all-day event once across its week columns", async () => {
+    const multiDay = {
+      ...allDayEvent,
+      endsAt: "2026-07-16T00:00:00.000Z",
+      id: "66666666-6666-4666-8666-666666666666",
+      title: "Retreat",
+    };
+    mocks.listEvents.mockResolvedValue([multiDay]);
+
+    setup("/calendar?date=2026-07-13&view=week");
+
+    const renderedEvents = await screen.findAllByRole("button", { name: "All day Retreat" });
+    expect(renderedEvents).toHaveLength(1);
+    expect(renderedEvents[0]).toHaveClass("week-all-day-event");
+    expect(renderedEvents[0]).toHaveStyle({ gridColumn: "2 / 5" });
+  });
+
+  it("spreads overlapping timeline events as full cards over a stable hit area", async () => {
+    const overlappingEvent = {
+      ...event,
+      endsAt: "2026-07-13T14:30:00.000Z",
+      id: secondId,
+      startsAt: "2026-07-13T13:30:00.000Z",
+      title: "Customer debrief",
+    };
+    mocks.listEvents.mockResolvedValue([event, overlappingEvent]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const browser = userEvent.setup();
+
+    const spread = await screen.findByRole("button", { name: "Spread 2 overlapping events" });
+    const cluster = spread.closest(".calendar-overlap-cluster");
+    expect(cluster).not.toBeNull();
+    expect(cluster?.querySelector(".calendar-overlap-cluster__hit-area")).not.toBeNull();
+    expect(cluster?.querySelector(".calendar-timeline-event__orbit-mark")).toBeNull();
+    expect(spread).toHaveAttribute("aria-expanded", "false");
+
+    const firstEvent = within(cluster as HTMLElement).getByRole("button", {
+      name: "1:00 PM Focus block",
+    });
+    const secondEvent = within(cluster as HTMLElement).getByRole("button", {
+      name: "1:30 PM Customer debrief",
+    });
+    expect(firstEvent).toHaveStyle({
+      "--calendar-event-left": "calc(0% + 2px)",
+      "--calendar-event-width": "calc(50% - 4px)",
+      "--overlap-orbit-rotation": "-4deg",
+      "--overlap-orbit-x": "-76px",
+      "--overlap-orbit-y": "0px",
+    });
+    expect(secondEvent).toHaveStyle({
+      "--calendar-event-left": "calc(50% + 2px)",
+      "--calendar-event-width": "calc(50% - 4px)",
+      "--overlap-orbit-rotation": "4deg",
+      "--overlap-orbit-x": "76px",
+      "--overlap-orbit-y": "0px",
+    });
+    expect(within(spread).getByText("2")).toHaveClass("calendar-overlap-cluster__pin-head");
+
+    await browser.click(spread);
+    expect(spread).toHaveAttribute("aria-expanded", "true");
+    expect(cluster).toHaveClass("is-expanded");
+
+    const stylesheet = readFileSync("apps/web/src/styles.css", "utf8");
+    expect(stylesheet).toMatch(
+      /\.calendar-overlap-cluster:is\(\.is-hovered, \.is-expanded\)[^{]*\.calendar-timeline-event[^}]*\{[^}]*border-radius: 7px;[^}]*height: var\(--calendar-event-height\);[^}]*width: var\(--calendar-event-width\);/u,
+    );
+    expect(stylesheet).toMatch(/\.calendar-overlap-cluster__toggle::before\s*\{/u);
+    expect(stylesheet).toMatch(/\.calendar-overlap-cluster__toggle::after\s*\{/u);
+    expect(stylesheet).toContain(
+      "transform: translate(-50%, -50%) rotate(var(--overlap-orbit-rotation));",
+    );
+
+    await browser.click(screen.getByRole("button", { name: "1:00 PM Focus block" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
   it("uses the shared transparent dashed treatment for empty states and quotes", () => {
     const stylesheet = readFileSync("apps/web/src/styles.css", "utf8");
 
@@ -6919,7 +6995,10 @@ describe("ilo web app", () => {
       expect.stringContaining("Current time"),
     );
     const focusBlock = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
-    expect(focusBlock).toHaveStyle({ height: "48px", top: "624px" });
+    expect(focusBlock).toHaveStyle({
+      "--calendar-event-height": "48px",
+      "--calendar-event-top": "624px",
+    });
     await browser.click(screen.getByRole("button", { name: "All day Quiet day" }));
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "Create event" }));

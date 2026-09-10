@@ -340,9 +340,10 @@ coherent response without reproducing domain expertise.
   credential, scope-changing, or recipient-changing effects.
 - Messages are privacy-safe by default. Detailed financial, Mail, Calendar, or other sensitive
   content requires explicit channel and workspace disclosure preferences.
-- Per-workspace settings govern inbound routing, maintenance messages, reply behavior, content
-  detail, links, quiet hours, and maintenance guidance. Guidance applies consistently across app,
-  API, MCP, scheduled, and SMS-initiated runs.
+- Global communication defaults govern inbound routing, maintenance messages, reply behavior,
+  content detail, links, and quiet hours; each workspace inherits them unless the person creates an
+  explicit override. Workspace maintenance guidance remains domain-specific and applies
+  consistently across app, API, MCP, scheduled, and SMS-initiated runs.
 
 The target product and architecture contracts are
 [`texting and SMS`](texting-operations.md) and

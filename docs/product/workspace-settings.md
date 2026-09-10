@@ -18,8 +18,8 @@ in the first-party app, public API, MCP, an external scheduled task, or the gene
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Global account | Review bypass, default notification schedule, connected agents, security, and privacy defaults | Domain meanings or workspace-specific instructions |
-| Workspace | Sources, source meanings, maintenance behavior, channel participation, workspace privacy, and active guidance | Global identity, agent scopes, or hard safety limits |
+| Global account | Review bypass, notification and Texting defaults, connected agents, security, and privacy defaults | Domain meanings or workspace-specific instructions |
+| Workspace | Sources, source meanings, maintenance behavior, explicit communication overrides, workspace privacy, and active guidance | Global identity, agent scopes, or hard safety limits |
 | Rule | One explicit reusable condition, action, sources, exceptions, and policy | General personal context or broad prose instructions |
 | User Knowledge | Goals, priorities, relationships, preferences, constraints, habits, and learned patterns | Action authority or external mutation rules |
 
@@ -57,7 +57,8 @@ policy, domain rules, or hard product limits.
 
 ## Approved SMS controls
 
-For each workspace, the person can configure:
+The person configures the following defaults globally. Each workspace inherits them until the
+person deliberately creates a workspace override:
 
 - inbound SMS routing into that workspace: enabled or disabled;
 - maintenance SMS: off, questions only, actionable results, or every completed run;
@@ -70,12 +71,13 @@ For each workspace, the person can configure:
 These controls affect communication and routing only. The global review-bypass setting decides
 whether an otherwise policy-authorized reversible action executes directly or enters review.
 
-## Proposed inheritance boundary
+## Inheritance boundary
 
-The inheritance question applies only to settings for which an account-wide preference is useful.
-It does not mean that every workspace setting should have a global equivalent.
+Communication preferences use global defaults with explicit workspace overrides. This inheritance
+applies only to settings for which an account-wide preference is useful; it does not mean that
+every workspace setting has a global equivalent.
 
-| Setting class | Examples | Proposed behavior |
+| Setting class | Examples | Behavior |
 | --- | --- | --- |
 | Global-only | Review bypass, Texting connection and consent, account security, connected-agent scopes, and hard privacy limits | One account value; a workspace cannot override it |
 | Global default with workspace override | Maintenance notification mode, quiet hours, inbound SMS routing, reply handling, safe content detail, and first-party links | Inherit the account preference until the person deliberately changes that workspace |
@@ -110,7 +112,6 @@ behavior and must not be presented as shipped.
 
 ## Open design questions
 
-- Whether the proposed global-default/workspace-override model above is the desired interaction.
 - Whether notification overrides eventually apply independently to every channel or only to SMS
   initially.
 - Whether maintenance cadence is configured in nohmi, delegated entirely to external schedulers,

@@ -271,9 +271,9 @@ flowchart TD
 - Evolve the existing hardened SMS transport into the general nohmi inbox: durable inbound claims,
   event-driven processing, work-node answer matching, free-form intent routing, linked
   cross-workspace child intents, concise response composition, and uncertain-send reconciliation.
-- Add typed workspace notification intents and per-workspace SMS settings for inbound routing,
-  maintenance outcomes, replies, sensitive detail, links, and quiet hours. Workspaces never call
-  Twilio or read the shared conversation directly.
+- Add typed workspace notification intents plus global SMS defaults and explicit workspace
+  overrides for inbound routing, maintenance outcomes, replies, sensitive detail, links, and quiet
+  hours. Workspaces never call Twilio or read the shared conversation directly.
 - Promote Finance's current review-bypass control into one global policy used consistently by app,
   API, MCP, scheduled, and SMS work. Bind SMS approvals to one exact, reversible, unexpired proposal
   and retain stronger boundaries for unsupported or higher-impact effects.

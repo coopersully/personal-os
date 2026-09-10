@@ -86,10 +86,12 @@ policy, proposal version, conversation revision, effect, delivery, and undo or r
 The current implementation's bypass storage and UI are Finances-specific. Promoting review bypass
 to a global policy and migrating Finances onto it are target work, not shipped behavior.
 
-## Per-workspace controls
+## Global defaults and per-workspace controls
 
 The target settings contract is defined in
-[`per-workspace settings`](workspace-settings.md). For SMS, each workspace controls:
+[`per-workspace settings`](workspace-settings.md). SMS communication preferences are configured
+globally and inherited by every workspace; the person may deliberately override a workspace when
+it needs different behavior. The configurable preferences are:
 
 - whether general inbound texts may route work into that workspace;
 - whether maintenance may send SMS at all;

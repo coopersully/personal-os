@@ -100,6 +100,20 @@ describe("Mail stewardship domain", () => {
         details: { ...cleanStatus.details, openQuestionCount: 1 },
       }).success,
     ).toBe(false);
+    expect(
+      mailStatusSchema.safeParse({
+        ...cleanStatus,
+        details: {
+          ...cleanStatus.details,
+          objective: {
+            mode: "approved_profile",
+            profileId: null,
+            profileVersion: 1,
+            summary: "Approved Mail objective.",
+          },
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps response guidance structured and permanently non-transmittable", () => {

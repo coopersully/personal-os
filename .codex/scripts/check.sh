@@ -9,6 +9,9 @@ required_files=(
   ".codex/scripts/check-pr-body.sh"
   ".agents/skills/create-pr/SKILL.md"
   ".agents/skills/linear-work-sync/SKILL.md"
+  ".agents/skills/ship-it/SKILL.md"
+  ".agents/skills/ship-it/scripts/evaluate_readiness.py"
+  ".agents/skills/ship-it/scripts/evaluate_readiness_test.py"
   ".github/pull_request_template.md"
   "docs/engineering/pr-rubric.md"
   "docs/engineering/work-context.md"
@@ -40,6 +43,7 @@ node --test \
   ./.codex/scripts/worktree-runtime.test.mjs \
   ./.codex/scripts/compose-runtime-manager.test.mjs
 bash ./.codex/scripts/environment.test.sh
+PYTHONDONTWRITEBYTECODE=1 python3 ./.agents/skills/ship-it/scripts/evaluate_readiness_test.py
 
 grep -Eq '^## Work map$' .github/pull_request_template.md &&
   grep -Eq '^- Project: \[Nohmi\]\(https://linear\.app/coopersully/project/nohmi-6799e74a853f\)' .github/pull_request_template.md &&

@@ -2,6 +2,7 @@ import {
   createMailObligationInputSchema,
   mailResponseBriefSchema,
   mailStatusSchema,
+  updateMailObligationInputSchema,
 } from "./mail-stewardship.js";
 
 const now = "2026-08-25T12:00:00.000Z";
@@ -80,6 +81,10 @@ describe("Mail stewardship domain", () => {
         sourceThreadRevision: now,
       }).success,
     ).toBe(false);
+    expect(updateMailObligationInputSchema.safeParse({ expectedVersion: 1 }).success).toBe(false);
+    expect(
+      updateMailObligationInputSchema.safeParse({ expectedVersion: 1, state: "resolved" }).success,
+    ).toBe(true);
   });
 
   it("cannot settle clean with stale sources or unanswered material questions", () => {

@@ -4,6 +4,7 @@ import type { MailDraft, MailSetupAccount } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
 import { FloatingMailComposer } from "./floating-compose.js";
@@ -77,11 +78,11 @@ describe("FloatingMailComposer", () => {
     renderComposer();
     const trigger = screen.getByRole("button", { name: "Compose a message" });
     await userEvent.click(trigger);
-    expect(screen.getByRole("region", { name: "New message" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
     expect(screen.getByLabelText("To")).toHaveFocus();
 
     await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "New message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New message" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Compose a message" })).toHaveFocus();
   });
 
@@ -95,7 +96,7 @@ describe("FloatingMailComposer", () => {
 
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ subject: "A thought" }));
-    expect(screen.queryByRole("region", { name: "New message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New message" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Compose a message" })).toHaveFocus();
   });
 
@@ -130,6 +131,18 @@ describe("FloatingMailComposer", () => {
     );
   });
 
+  it("offers an explicit draft save action", async () => {
+    const create = vi.spyOn(api, "createMailDraft").mockResolvedValue(draft);
+    const successToast = vi.spyOn(toast, "success");
+    renderComposer();
+
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(successToast).toHaveBeenCalledWith("Draft saved");
+  });
+
   it("opens and updates an existing Cc draft from a reply or Drafts intent", async () => {
     const existing = {
       ...draft,
@@ -142,7 +155,7 @@ describe("FloatingMailComposer", () => {
 
     renderComposer({ intent: { draft: existing }, onIntentHandled: handled });
 
-    expect(await screen.findByRole("region", { name: "New message" })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "New message" })).toBeVisible();
     expect(screen.getByLabelText("Cc")).toHaveValue("copy@example.com");
     expect(screen.getByLabelText("Subject")).toHaveValue("Hello");
     expect(handled).toHaveBeenCalledOnce();
@@ -160,10 +173,10 @@ describe("FloatingMailComposer", () => {
         }),
       ),
     );
-    expect(screen.queryByRole("region", { name: "New message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New message" })).not.toBeInTheDocument();
   });
 
-  it("keeps reconnect-only accounts visible while preventing send", async () => {
+  it("removes reconnect-only accounts from sender selection and offers recovery", async () => {
     const reconnectAccount = {
       ...account,
       email: null,
@@ -173,9 +186,29 @@ describe("FloatingMailComposer", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Reconnect this account before sending");
-    expect(screen.getByRole("option", { name: "Personal" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Reconnect an account to compose");
+    expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reconnect account" })).toHaveAttribute(
+      "href",
+      "/settings?section=connections",
+    );
     expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
+  });
+
+  it("never offers a disconnected account when another sender is available", async () => {
+    const reconnectAccount = {
+      ...account,
+      accountId: "55555555-5555-4555-8555-555555555555",
+      email: "offline@example.com",
+      label: "Disconnected",
+      sendCapability: "reconnect" as const,
+    };
+    renderComposer({ accounts: [account, reconnectAccount] });
+
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+
+    expect(screen.getByLabelText("From")).toHaveTextContent("Personalme@example.com");
+    expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
   });
 
   it("prefills and saves a new reply or forward intent", async () => {
@@ -213,26 +246,26 @@ describe("FloatingMailComposer", () => {
 
   it("opens an empty intent and an account-free composer without inventing send authority", async () => {
     const first = renderComposer({ intent: {} });
-    expect(await screen.findByRole("region", { name: "New message" })).toBeVisible();
-    expect(screen.getByLabelText("From")).toHaveValue(account.accountId);
+    expect(await screen.findByRole("dialog", { name: "New message" })).toBeVisible();
+    expect(screen.getByLabelText("From")).toHaveTextContent("Personalme@example.com");
     expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
     first.unmount();
 
     const reconnectAccount = { ...account, sendCapability: "reconnect" as const };
     const reconnect = renderComposer({ accounts: [reconnectAccount], intent: {} });
-    expect(await screen.findByLabelText("From")).toHaveValue(reconnectAccount.accountId);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Reconnect an account to compose");
     reconnect.unmount();
 
     renderComposer({ accounts: [], intent: {} });
-    await screen.findByRole("region", { name: "New message" });
-    expect(screen.getByLabelText("From")).not.toHaveValue(account.accountId);
-    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    await screen.findByRole("dialog", { name: "New message" });
+    expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
     await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "New message" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New message" })).not.toBeInTheDocument();
   });
 
   it("keeps the composer open when saving on close fails", async () => {
+    const errorToast = vi.spyOn(toast, "error");
     vi.spyOn(api, "createMailDraft").mockRejectedValue(new Error("Draft storage unavailable"));
     renderComposer();
 
@@ -240,17 +273,22 @@ describe("FloatingMailComposer", () => {
     await userEvent.type(screen.getByLabelText("Subject"), "Do not lose this");
     await userEvent.keyboard("{Escape}");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Draft storage unavailable");
-    expect(screen.getByRole("region", { name: "New message" })).toBeVisible();
+    await waitFor(() =>
+      expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
+        description: "Draft storage unavailable",
+      }),
+    );
+    expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
   });
 
   it("returns a failed send to the editable durable draft", async () => {
+    const errorToast = vi.spyOn(toast, "error");
     const updated = { ...draft, updatedAt: "2026-08-28T12:00:04.000Z" };
     vi.spyOn(api, "updateMailDraft").mockResolvedValue(updated);
     vi.spyOn(api, "sendMailDraft").mockRejectedValue(new Error("Provider rejected delivery"));
     renderComposer({ intent: { draft } });
 
-    await screen.findByRole("region", { name: "New message" });
+    await screen.findByRole("dialog", { name: "New message" });
     await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
     await userEvent.click(await screen.findByRole("button", { name: "Keep editing" }));
     expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
@@ -258,8 +296,12 @@ describe("FloatingMailComposer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
     await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Provider rejected delivery");
+    await waitFor(() =>
+      expect(errorToast).toHaveBeenCalledWith("Message couldn’t be sent", {
+        description: "Provider rejected delivery",
+      }),
+    );
     expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "New message" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
   });
 });

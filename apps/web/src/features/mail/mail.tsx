@@ -30,6 +30,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
@@ -43,7 +46,6 @@ import {
 } from "../../components/ui/empty.js";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../components/ui/hover-card.js";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group.js";
-import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover.js";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -52,6 +54,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../../components/ui/sidebar.js";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
@@ -633,8 +636,6 @@ function MailSecondaryNavigation({
   toggleUnread: () => void;
   trash: () => void;
 }) {
-  const [densityOpen, setDensityOpen] = useState(false);
-
   return (
     <WorkspaceSecondaryAppBar aria-label="Mail controls" className="mail-secondary-nav">
       <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
@@ -642,32 +643,6 @@ function MailSecondaryNavigation({
         {listScope === "all" ? null : <Badge>{listScope}</Badge>}
       </WorkspaceSecondaryAppBarLeading>
       <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
-        <Popover onOpenChange={setDensityOpen} open={densityOpen}>
-          <PopoverTrigger asChild>
-            <Button aria-label="Message list layout" variant="ghost">
-              <ListChecksIcon aria-hidden="true" data-icon="inline-start" />
-              <span>{density.charAt(0).toUpperCase() + density.slice(1)}</span>
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="mail-density-popover">
-            <fieldset>
-              <legend>Message list layout</legend>
-              {mailListDensities.map((option) => (
-                <Button
-                  aria-pressed={density === option}
-                  key={option}
-                  onClick={() => {
-                    setDensity(option);
-                    setDensityOpen(false);
-                  }}
-                  variant="ghost"
-                >
-                  {option.charAt(0).toUpperCase() + option.slice(1)}
-                </Button>
-              ))}
-            </fieldset>
-          </PopoverContent>
-        </Popover>
         <div
           aria-hidden={selected ? undefined : "true"}
           className="mail-secondary-nav__conversation-actions"
@@ -785,6 +760,36 @@ function MailSecondaryNavigation({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  aria-label="Message list layout"
+                  className="mail-secondary-nav__density"
+                  size="icon"
+                  variant="ghost"
+                >
+                  <ListChecksIcon aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Message list layout</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="mail-density-menu">
+            <DropdownMenuLabel>Message list layout</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              onValueChange={(value) => setDensity(value as MailListDensity)}
+              value={density}
+            >
+              {mailListDensities.map((option) => (
+                <DropdownMenuRadioItem key={option} value={option}>
+                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </WorkspaceSecondaryAppBarActions>
     </WorkspaceSecondaryAppBar>
   );

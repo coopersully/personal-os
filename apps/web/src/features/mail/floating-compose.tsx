@@ -1,7 +1,8 @@
 import type { MailDraft, MailRecipientInput, MailSetupAccount } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MailIcon, PlusIcon, XIcon } from "@/components/icons";
+import { toast } from "sonner";
+import { MailIcon, PlugIcon, PlusIcon } from "@/components/icons";
 import {
   ResponsiveDialog,
   ResponsiveDialogActions,
@@ -12,15 +13,21 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { api, errorMessage } from "../../api.js";
 
 export type ComposeIntent = {
   accountId?: string;
@@ -39,6 +46,15 @@ function recipients(value: string): MailRecipientInput[] {
     .map((address) => ({ address, name: null }));
 }
 
+function accountInitials(account: MailSetupAccount) {
+  return account.label
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 export function FloatingMailComposer({
   accounts,
   intent,
@@ -53,10 +69,12 @@ export function FloatingMailComposer({
     () => accounts.filter((account) => account.sendCapability === "available"),
     [accounts],
   );
-  const [open, setOpen] = useState(false);
-  const [accountId, setAccountId] = useState(
-    available[0]?.accountId ?? accounts[0]?.accountId ?? "",
+  const reconnectable = useMemo(
+    () => accounts.filter((account) => account.sendCapability === "reconnect"),
+    [accounts],
   );
+  const [open, setOpen] = useState(false);
+  const [accountId, setAccountId] = useState(available[0]?.accountId ?? "");
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [showCc, setShowCc] = useState(false);
@@ -65,7 +83,6 @@ export function FloatingMailComposer({
   const [threadId, setThreadId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [error, setError] = useState<unknown>(null);
   const [confirmation, setConfirmation] = useState<MailDraft | null>(null);
   const [sending, setSending] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -95,7 +112,6 @@ export function FloatingMailComposer({
     setThreadId(null);
     setDirty(false);
     setSaveState("idle");
-    setError(null);
   }, []);
   const close = async (skipSave = false) => {
     if (saveTimeoutRef.current !== null) {
@@ -107,7 +123,7 @@ export function FloatingMailComposer({
       try {
         await persist();
       } catch (caught) {
-        setError(caught);
+        toast.error("Draft couldn’t be saved", { description: errorMessage(caught) });
         setSaveState("idle");
         return;
       }
@@ -119,15 +135,19 @@ export function FloatingMailComposer({
   const openComposer = useCallback(
     (nextIntent?: ComposeIntent | null) => {
       reset();
+      setAccountId((current) =>
+        available.some((account) => account.accountId === current)
+          ? current
+          : (available[0]?.accountId ?? ""),
+      );
       if (nextIntent) {
         const existing = nextIntent.draft;
         if (existing) draftRef.current = existing;
+        const preferredAccountId = existing?.accountId ?? nextIntent.accountId;
         setAccountId(
-          existing?.accountId ??
-            nextIntent.accountId ??
-            available[0]?.accountId ??
-            accounts[0]?.accountId ??
-            "",
+          available.some((account) => account.accountId === preferredAccountId)
+            ? (preferredAccountId ?? "")
+            : (available[0]?.accountId ?? ""),
         );
         setTo(existing?.to.map((recipient) => recipient.address).join(", ") ?? nextIntent.to ?? "");
         setCc(existing?.cc.map((recipient) => recipient.address).join(", ") ?? "");
@@ -143,7 +163,7 @@ export function FloatingMailComposer({
       }
       setOpen(true);
     },
-    [accounts, available, reset],
+    [available, reset],
   );
 
   useEffect(() => {
@@ -179,7 +199,6 @@ export function FloatingMailComposer({
         setDirty(false);
         setSaveState("saved");
       }
-      setError(null);
       await client.invalidateQueries({ queryKey: ["mail-drafts"] });
       return saved;
     });
@@ -196,7 +215,7 @@ export function FloatingMailComposer({
     const timeout = window.setTimeout(() => {
       saveTimeoutRef.current = null;
       void persist().catch((caught) => {
-        setError(caught);
+        toast.error("Draft couldn’t be saved", { description: errorMessage(caught) });
         setSaveState("idle");
       });
     }, 650);
@@ -212,160 +231,239 @@ export function FloatingMailComposer({
     editVersionRef.current += 1;
     setDirty(true);
   };
-  const selectedAccount = accounts.find((account) => account.accountId === accountId);
+  const selectedAccount = available.find((account) => account.accountId === accountId);
+  const soleAccount = available.length === 1 ? available[0] : undefined;
   const canSend =
     recipients(to).length > 0 && selectedAccount?.sendCapability === "available" && !sending;
 
   return (
-    <div className="mail-floating-compose" data-state={open ? "open" : "closed"}>
-      {open ? (
-        <Card
-          aria-label="New message"
-          className="mail-floating-compose__card"
-          onKeyDown={(event) => {
-            if (event.key !== "Escape" || confirmation) return;
-            event.preventDefault();
-            void close();
-          }}
-          role="region"
+    <>
+      <div className="mail-floating-compose" data-state={open ? "open" : "closed"}>
+        {!open ? (
+          <Button
+            aria-label="Compose a message"
+            className="mail-floating-compose__trigger"
+            onClick={() => openComposer()}
+            ref={triggerRef}
+            size="icon-lg"
+          >
+            <PlusIcon aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+      <ResponsiveDialog
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !confirmation) void close();
+        }}
+        open={open}
+      >
+        <ResponsiveDialogContent
+          className="mail-compose-dialog sm:max-w-[42rem]"
+          showCloseButton={!confirmation}
         >
-          <CardHeader className="mail-floating-compose__header">
-            <CardTitle>New message</CardTitle>
-            <Button
-              aria-label="Close composer"
-              onClick={() => void close()}
-              size="icon"
-              variant="ghost"
-            >
-              <XIcon aria-hidden="true" />
-            </Button>
-          </CardHeader>
-          <CardContent className="mail-floating-compose__fields">
-            <FieldGroup>
-              <Field orientation="horizontal">
-                <FieldLabel htmlFor="mail-compose-from">From</FieldLabel>
-                <NativeSelect
-                  aria-label="From"
-                  id="mail-compose-from"
-                  name="from"
-                  onChange={(event) => {
-                    setAccountId(event.target.value);
-                    editVersionRef.current += 1;
-                    setDirty(true);
-                  }}
-                  value={accountId}
-                >
-                  {accounts.map((account) => (
-                    <NativeSelectOption
-                      disabled={account.sendCapability !== "available"}
-                      key={account.accountId}
-                      value={account.accountId}
-                    >
-                      {account.label}
-                      {account.email ? ` · ${account.email}` : ""}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field orientation="horizontal">
-                <FieldLabel htmlFor="mail-compose-to">To</FieldLabel>
-                <div className="mail-floating-compose__recipient-field">
-                  <Input
-                    aria-label="To"
-                    autoComplete="email"
-                    id="mail-compose-to"
-                    multiple
-                    name="to"
-                    onChange={(event) => change(setTo, event.target.value)}
-                    placeholder="name@example.com"
-                    ref={toRef}
-                    spellCheck={false}
-                    type="email"
-                    value={to}
-                  />
-                  {!showCc ? (
-                    <Button onClick={() => setShowCc(true)} size="xs" type="button" variant="ghost">
-                      Cc
-                    </Button>
-                  ) : null}
-                </div>
-              </Field>
-              {showCc ? (
+          <ResponsiveDialogHeader className="mail-floating-compose__header">
+            <ResponsiveDialogTitle>New message</ResponsiveDialogTitle>
+            <ResponsiveDialogDescription className="sr-only">
+              Compose and save a mail draft before sending.
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody className="mail-floating-compose__fields">
+            {!available.length ? (
+              <Alert variant="warning">
+                <PlugIcon aria-hidden="true" />
+                <AlertTitle>
+                  {reconnectable.length
+                    ? "Reconnect an account to compose"
+                    : "No account can send mail"}
+                </AlertTitle>
+                <AlertDescription>
+                  {reconnectable.length
+                    ? "None of your mail accounts can send right now. Existing drafts remain saved."
+                    : "Add or update a mail account in Connections before composing a message."}
+                </AlertDescription>
+                <AlertAction>
+                  <Button asChild size="sm">
+                    <a href="/settings?section=connections">
+                      {reconnectable.length === 1
+                        ? "Reconnect account"
+                        : reconnectable.length > 1
+                          ? `Reconnect ${reconnectable.length} accounts`
+                          : "Manage accounts"}
+                    </a>
+                  </Button>
+                </AlertAction>
+              </Alert>
+            ) : (
+              <FieldGroup>
                 <Field orientation="horizontal">
-                  <FieldLabel htmlFor="mail-compose-cc">Cc</FieldLabel>
+                  <FieldLabel>From</FieldLabel>
+                  {soleAccount ? (
+                    <fieldset aria-label="From" className="mail-compose-sender">
+                      <Avatar size="sm">
+                        <AvatarFallback>{accountInitials(soleAccount)}</AvatarFallback>
+                      </Avatar>
+                      <span>
+                        <strong>{soleAccount.label}</strong>
+                        {soleAccount.email ? <small>{soleAccount.email}</small> : null}
+                      </span>
+                    </fieldset>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          aria-label="From"
+                          className="mail-compose-sender mail-compose-sender--button"
+                          variant="secondary"
+                        >
+                          {selectedAccount ? (
+                            <>
+                              <Avatar size="sm">
+                                <AvatarFallback>{accountInitials(selectedAccount)}</AvatarFallback>
+                              </Avatar>
+                              <span>
+                                <strong>{selectedAccount.label}</strong>
+                                {selectedAccount.email ? (
+                                  <small>{selectedAccount.email}</small>
+                                ) : null}
+                              </span>
+                            </>
+                          ) : null}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="mail-compose-sender-menu">
+                        <DropdownMenuLabel>Send from</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup
+                          onValueChange={(value) => {
+                            setAccountId(value);
+                            editVersionRef.current += 1;
+                            setDirty(true);
+                          }}
+                          value={accountId}
+                        >
+                          {available.map((account) => (
+                            <DropdownMenuRadioItem
+                              key={account.accountId}
+                              value={account.accountId}
+                            >
+                              <span>
+                                {account.label}
+                                {account.email ? ` · ${account.email}` : ""}
+                              </span>
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldLabel htmlFor="mail-compose-to">To</FieldLabel>
+                  <div className="mail-floating-compose__recipient-field">
+                    <Input
+                      aria-label="To"
+                      autoComplete="email"
+                      id="mail-compose-to"
+                      multiple
+                      name="to"
+                      onChange={(event) => change(setTo, event.target.value)}
+                      placeholder="name@example.com"
+                      ref={toRef}
+                      spellCheck={false}
+                      type="email"
+                      value={to}
+                    />
+                    {!showCc ? (
+                      <Button
+                        onClick={() => setShowCc(true)}
+                        size="xs"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Cc
+                      </Button>
+                    ) : null}
+                  </div>
+                </Field>
+                {showCc ? (
+                  <Field orientation="horizontal">
+                    <FieldLabel htmlFor="mail-compose-cc">Cc</FieldLabel>
+                    <Input
+                      aria-label="Cc"
+                      autoComplete="email"
+                      id="mail-compose-cc"
+                      multiple
+                      name="cc"
+                      onChange={(event) => change(setCc, event.target.value)}
+                      spellCheck={false}
+                      type="email"
+                      value={cc}
+                    />
+                  </Field>
+                ) : null}
+                <Field orientation="horizontal">
+                  <FieldLabel htmlFor="mail-compose-subject">Subject</FieldLabel>
                   <Input
-                    aria-label="Cc"
-                    autoComplete="email"
-                    id="mail-compose-cc"
-                    multiple
-                    name="cc"
-                    onChange={(event) => change(setCc, event.target.value)}
-                    spellCheck={false}
-                    type="email"
-                    value={cc}
+                    aria-label="Subject"
+                    id="mail-compose-subject"
+                    name="subject"
+                    onChange={(event) => change(setSubject, event.target.value)}
+                    value={subject}
                   />
                 </Field>
-              ) : null}
-              <Field orientation="horizontal">
-                <FieldLabel htmlFor="mail-compose-subject">Subject</FieldLabel>
-                <Input
-                  aria-label="Subject"
-                  id="mail-compose-subject"
-                  name="subject"
-                  onChange={(event) => change(setSubject, event.target.value)}
-                  value={subject}
-                />
-              </Field>
-              <Field className="mail-floating-compose__message">
-                <FieldLabel className="sr-only" htmlFor="mail-compose-message">
-                  Message
-                </FieldLabel>
-                <Textarea
-                  aria-label="Message"
-                  id="mail-compose-message"
-                  name="message"
-                  onChange={(event) => change(setBody, event.target.value)}
-                  placeholder="Write a message…"
-                  value={body}
-                />
-              </Field>
-            </FieldGroup>
-            {selectedAccount?.sendCapability === "reconnect" ? (
-              <Alert variant="warning">
-                <AlertTitle>Reconnect required</AlertTitle>
-                <AlertDescription>
-                  Reconnect this account before sending. Your draft will remain saved.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            {error ? <InlineError error={error} /> : null}
-          </CardContent>
-          <CardFooter className="mail-floating-compose__footer">
-            <Button
-              disabled={!canSend}
-              onClick={() => {
-                setSaveState("saving");
-                void persist().then(setConfirmation).catch(setError);
-              }}
-            >
-              Review and send
-            </Button>
+                <Field className="mail-floating-compose__message">
+                  <FieldLabel className="sr-only" htmlFor="mail-compose-message">
+                    Message
+                  </FieldLabel>
+                  <Textarea
+                    aria-label="Message"
+                    id="mail-compose-message"
+                    name="message"
+                    onChange={(event) => change(setBody, event.target.value)}
+                    placeholder="Write a message…"
+                    value={body}
+                  />
+                </Field>
+              </FieldGroup>
+            )}
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter className="mail-floating-compose__footer">
             <span aria-live="polite">
               {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
             </span>
-          </CardFooter>
-        </Card>
-      ) : (
-        <Button
-          aria-label="Compose a message"
-          className="mail-floating-compose__trigger"
-          onClick={() => openComposer()}
-          ref={triggerRef}
-          size="icon-lg"
-        >
-          <PlusIcon aria-hidden="true" />
-        </Button>
-      )}
+            <ResponsiveDialogActions>
+              <Button
+                disabled={!accountId || saveState === "saving"}
+                onClick={() => {
+                  setSaveState("saving");
+                  void persist()
+                    .then(() => toast.success("Draft saved"))
+                    .catch((caught) => {
+                      setSaveState("idle");
+                      toast.error("Draft couldn’t be saved", { description: errorMessage(caught) });
+                    });
+                }}
+                variant="secondary"
+              >
+                Save draft
+              </Button>
+              <Button
+                disabled={!canSend}
+                onClick={() => {
+                  setSaveState("saving");
+                  void persist()
+                    .then(setConfirmation)
+                    .catch((caught) => {
+                      setSaveState("idle");
+                      toast.error("Draft couldn’t be saved", { description: errorMessage(caught) });
+                    });
+                }}
+              >
+                Review and send
+              </Button>
+            </ResponsiveDialogActions>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
       <ResponsiveDialog
         onOpenChange={(next) => !next && setConfirmation(null)}
         open={Boolean(confirmation)}
@@ -404,11 +502,14 @@ export function FloatingMailComposer({
                     .then(async () => {
                       await client.invalidateQueries({ queryKey: ["mail-drafts"] });
                       setSending(false);
+                      toast.success("Message sent");
                       void close(true);
                     })
                     .catch(async (caught) => {
                       await client.invalidateQueries({ queryKey: ["mail-drafts"] });
-                      setError(caught);
+                      toast.error("Message couldn’t be sent", {
+                        description: errorMessage(caught),
+                      });
                       setSending(false);
                       setConfirmation(null);
                     });
@@ -420,6 +521,6 @@ export function FloatingMailComposer({
           </ResponsiveDialogFooter>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
-    </div>
+    </>
   );
 }

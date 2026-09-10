@@ -12,6 +12,10 @@ Signed-in people may compose, reply, forward, and send plain-text messages. Ever
 nohmi-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
 stewardship have no send capability.
 
+The current draft and provider-delivery contracts do not preserve rich text or outbound
+attachments. Mail does not expose formatting or attachment controls until those capabilities are
+durable from draft creation through provider acceptance.
+
 ## Connection health
 
 - Mail uses the shared connected-account health contract; it does not interpret provider errors.
@@ -122,8 +126,9 @@ initiate delivery.
   boundary restores the default width.
 - Conversation count, list density, and reader actions share one full-workspace
   `WorkspaceSecondaryAppBar`: Archive retains its label; Snooze, Star, and read state are icon
-  controls; Delete stays in the More menu. The bar uses the shared neutral surface rather than a
-  Mail-specific color.
+  controls; Delete stays in the More menu. List density is a stable icon action with a standard
+  radio menu rather than a labelled control that competes with message actions. The bar uses the
+  shared neutral surface rather than a Mail-specific color.
 - The conversation list defaults to Comfortable and offers Compact and Expanded device-local
   layouts. Comfortable and Expanded show a sender avatar before the sender name; Compact minimizes
   vertical detail without removing the sender, subject, or received time.
@@ -134,9 +139,11 @@ initiate delivery.
 - A reconnect warning is scoped only to Mail-enabled accounts.
 - The reconnect warning is visible on the account control and beside its affected account so cached
   mail stays visible and useful.
-- The end-justified floating plus opens a plain-text composer with From, To, optional Cc, Subject,
-  and Message. Drafts autosave, Escape restores focus, and the final send confirmation names the
-  sender and recipients.
+- The end-justified floating plus opens a top-level modal composer with From, To, optional Cc,
+  Subject, and Message. Only accounts with current send capability appear as senders; when none are
+  eligible, the composer shows a direct Connections recovery action instead of an unusable field.
+  Drafts autosave and expose an explicit Save draft action, Escape restores focus, and the final
+  send confirmation names the sender and recipients.
 - Reply and Forward live with the reader controls. Drafts exposes editable drafts and explicit
   reconciliation for delivery whose provider acceptance is uncertain.
 - Each message header toggles that message between its expanded and collapsed state. Sender and

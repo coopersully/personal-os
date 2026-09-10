@@ -7607,7 +7607,7 @@ describe("ilo web app", () => {
     expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
     const densityTrigger = await screen.findByRole("button", { name: "Message list layout" });
     await browser.click(densityTrigger);
-    await browser.click(await screen.findByRole("button", { name: "Compact" }));
+    await browser.click(await screen.findByRole("menuitemradio", { name: "Compact" }));
     expect(window.localStorage.getItem("ilo.mail.list-density.v1")).toBe("compact");
     expect(screen.getByRole("button", { name: /Project update/ })).toHaveAttribute(
       "data-density",

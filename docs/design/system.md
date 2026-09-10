@@ -230,6 +230,14 @@ geometry so focus, invalid, increased-contrast, or functional data boundaries
 can become visible without layout shift. A legacy `outline` variant names an
 interaction hierarchy, not a requirement to draw an outline.
 
+Raised overlays and bounded floating work use `surface-raised`, never the
+surface directly behind them. Contextual app-bar controls retain a quiet opaque
+resting fill, and interactive highlights use `control-hover-background` so an
+open or hovered control cannot collapse into its parent surface. Avatar
+fallbacks use nested neutral tones so the identity boundary remains legible on
+canvas, selected, and highlighted surfaces without a decorative border or
+shadow.
+
 ### Interface copy
 
 Copy earns its space by changing a decision. Apply these rules mechanically:

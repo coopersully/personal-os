@@ -1,6 +1,6 @@
 ---
 name: resolve-pr-comments
-description: Resolve outstanding GitHub pull request review threads, review summaries, top-level comments, and actionable bot feedback for the current ilo branch. Use when addressing PR feedback, requested changes, review comments, or re-review follow-up.
+description: Use when addressing review feedback, requested changes, review comments, or re-review follow-up on the current nohmi pull request.
 ---
 
 # Resolve PR comments
@@ -21,8 +21,9 @@ need separate confirmation.
 
 1. Run `gh pr view --json number,url,headRefName,baseRefName,title,author`.
 2. Stop if the current branch has no open PR.
-3. Read `AGENTS.md`, `docs/engineering/pr-rubric.md`, the applicable repo-local skills, and the
-   current docs named by or relevant to the feedback.
+3. Read `AGENTS.md`, `docs/engineering/pr-rubric.md`, `docs/engineering/work-context.md`,
+   `../linear-context/SKILL.md`, the applicable repo-local skills, and current docs named by or
+   relevant to the feedback.
 
 ### 2. Gather every review surface
 
@@ -38,7 +39,7 @@ Also inspect:
 
 - the base-to-head diff and changed-file list;
 - live mergeability, draft/review state, head SHA, and checks;
-- linked GitHub issues and their acceptance criteria; and
+- linked Nohmi Linear issues, their acceptance criteria, structured PR backlinks, and statuses; and
 - resolved threads with `--include-resolved` when checking prior fixes or completing the final audit.
 
 The collector covers inline review threads, top-level PR comments, and non-empty review summaries.
@@ -87,8 +88,9 @@ otherwise.
 - Do not mark an entry handled until the fix is pushed and verification passed or a gap is explicit.
 
 If review feedback materially changes scope, verification, a blocker, or completion of a linked
-issue, use `../github-work-sync/SKILL.md` to add one concise material update. Do not create an issue
-for each review comment.
+issue, use `../linear-work-sync/SKILL.md` to update that issue and add at most one concise material
+comment. The invocation grants only PR-scoped writes to issues already in Nohmi; do not create an
+issue for each review comment or mutate GitHub issue tracking.
 
 ### 6. Resolve inline threads
 
@@ -138,6 +140,7 @@ reply exists. After confirmation, post only the confirmed text and return the re
 - Focused checks and `pnpm verify` passed or the blocker is explicit.
 - Inline threads were resolved only after adequate handling.
 - Linked issue state/context remains accurate.
+- The PR Work map and every linked Nohmi issue's structured backlink agree.
 - No GitHub replies were posted without confirmation.
 
 ## Output

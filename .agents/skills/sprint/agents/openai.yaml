@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nohmi Sprint"
+  short_description: "Summarize the current Nohmi Linear cycle"
+  default_prompt: "Use $sprint to show the current Nohmi Linear cycle overview."

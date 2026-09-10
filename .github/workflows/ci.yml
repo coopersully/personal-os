@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [edited, opened, ready_for_review, reopened, synchronize]
   push:
     branches: [main, "feature/**"]
 
@@ -13,6 +14,18 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  pr-work-map:
+    name: PR Work map
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate submitted PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./.codex/scripts/check-pr-body.sh
+
   changes:
     name: Classify changes
     runs-on: ubuntu-latest
@@ -201,6 +214,7 @@ jobs:
   required:
     name: CI required
     needs:
+      - pr-work-map
       - changes
       - infrastructure
       - repository

@@ -160,6 +160,41 @@ describe("iCloud connector", () => {
     expect(imap.close).toHaveBeenCalledOnce();
     expect(imap.removeListener).toHaveBeenCalledTimes(5);
   });
+
+  it("preserves CalDAV attendee participation and organizer identity", async () => {
+    const data = timedIcs.replace(
+      "STATUS:TENTATIVE",
+      [
+        "STATUS:CONFIRMED",
+        "ORGANIZER:mailto:host@example.com",
+        "ATTENDEE;CN=Cooper;PARTSTAT=DECLINED:mailto:cooper@example.com",
+        "ATTENDEE;PARTSTAT=ACCEPTED:mailto:host@example.com",
+        "ATTENDEE;PARTSTAT=TENTATIVE:mailto:maybe@example.com",
+        "ATTENDEE:mailto:new@example.com",
+        "ATTENDEE:urn:uuid:unknown",
+      ].join("\r\n"),
+    );
+    const { value } = connector(
+      davClient({
+        fetchCalendarObjects: vi.fn(async () => [
+          { data, etag: "attendees", url: `${calendarId}attendees.ics` },
+        ]),
+      }),
+    );
+    const result = await value.syncCalendar(credentials, calendarId, null);
+    expect(result.changes[0]).toMatchObject({
+      kind: "upsert",
+      event: {
+        status: "confirmed",
+        attendees: [
+          { email: "cooper@example.com", name: "Cooper", response: "declined", isOrganizer: false },
+          { email: "host@example.com", name: null, response: "accepted", isOrganizer: true },
+          { email: "maybe@example.com", name: null, response: "tentative", isOrganizer: false },
+          { email: "new@example.com", name: null, response: "needs_action", isOrganizer: false },
+        ],
+      },
+    });
+  });
   it("extracts supported conference links from CalDAV event descriptions", async () => {
     const meetingIcs = timedIcs.replace(
       "DESCRIPTION:Notes",
@@ -693,6 +728,7 @@ describe("iCloud connector", () => {
       remoteThreadId: "INBOX:777:3",
       unread: false,
     });
+    expect(result.threads[0]?.messages?.[0]?.mailboxIds).toEqual(["INBOX"]);
     expect(release).toHaveBeenCalledTimes(7);
     expect(imap.logout).toHaveBeenCalledOnce();
   });

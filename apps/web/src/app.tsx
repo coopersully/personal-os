@@ -44,6 +44,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent,
   Suspense,
+  useCallback,
   useDeferredValue,
   useEffect,
   useId,
@@ -296,6 +297,9 @@ import {
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./features/connections/health.js";
+import { useDesktopActions } from "./features/desktop/events.js";
+import { resetDesktopSession } from "./features/desktop/session.js";
+import { DesktopSettingsPanel } from "./features/desktop/settings.js";
 import {
   FinanceSidebarNavigation,
   financeSectionFromPath,
@@ -489,7 +493,13 @@ function SessionApp() {
     );
   }
   if (me.isError && isUnauthorized(me.error)) return <AuthScreen />;
-  if (me.isError) return <FatalState error={me.error} />;
+  if (me.isError)
+    return (
+      <>
+        <FatalState error={me.error} />
+        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
+      </>
+    );
   return (
     <TooltipProvider>
       <AuthenticatedExperience user={me.data} />
@@ -814,6 +824,7 @@ function CredentialsScreen() {
           </button>
         )}
       </form>
+      {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
     </AuthLayout>
   );
 }
@@ -1061,7 +1072,13 @@ function MailNavigationResizeHandle({
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
+  const queryClient = useQueryClient();
   const [editor, setEditor] = useState<Editor>(null);
+  const desktopCapture = useCallback(
+    (kind: "task" | "reminder" | "event") => setEditor({ kind }),
+    [],
+  );
+  useDesktopActions(desktopCapture);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
@@ -1164,7 +1181,8 @@ function AuthenticatedApp({ user }: { user: User }) {
       .logout()
       .catch((error) => toast.error(errorMessage(error)))
       .finally(() => {
-        window.location.assign("/");
+        if (isTauri()) void resetDesktopSession(queryClient);
+        else window.location.assign("/");
       });
   };
   const mobileDockPasswordReset = () => {
@@ -1185,7 +1203,6 @@ function AuthenticatedApp({ user }: { user: User }) {
             : undefined
         }
       >
-        <PinterestWallpaperScheduler />
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
@@ -4941,6 +4958,9 @@ type SettingsSectionId =
   | "tasks"
   | "texting"
   | "wallpaper"
+  | "desktop"
+  | "pet"
+  | "notifications"
   | "workspace-access";
 
 const settingsNavigation: Array<{
@@ -4964,6 +4984,14 @@ const settingsNavigation: Array<{
     items: [
       { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
+    ],
+  },
+  {
+    label: "Desktop",
+    items: [
+      { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
+      { icon: SparklesIcon, id: "pet", label: "Desktop pet" },
+      { icon: PulseIcon, id: "notifications", label: "Notifications" },
     ],
   },
   {
@@ -5033,7 +5061,8 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
       items: group.items.filter(
         (item) =>
           (item.id !== "invitations" || canManageInvitations) &&
-          (item.id !== "wallpaper" || isTauri()),
+          (item.id !== "wallpaper" || isTauri()) &&
+          (isTauri() || !["desktop", "pet", "notifications"].includes(item.id)),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -5169,6 +5198,10 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         {section === "sessions" ? <SessionsSettings /> : null}
         {section === "texting" ? <TextingSettings /> : null}
         {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
+        {isTauri() &&
+        (section === "desktop" || section === "pet" || section === "notifications") ? (
+          <DesktopSettingsPanel section={section} />
+        ) : null}
       </section>
     </div>
   );
@@ -5671,7 +5704,12 @@ function XBookmarksConnectorRow({
 }
 
 async function applyPinterestWallpaper(settings: PinterestWallpaperSettings): Promise<string[]> {
-  const pins = await api.listPinterestPins(12);
+  const pins = await api.listPinterestPins(
+    12,
+    isTauri()
+      ? localDateToIso(localDateAt(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone))
+      : undefined,
+  );
   if (pins.length < 4) {
     throw new Error("This board needs at least four image Pins to make a collage.");
   }
@@ -5753,47 +5791,6 @@ async function getDesktopPreviewEnvironment(): Promise<DesktopPreviewEnvironment
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<DesktopPreviewEnvironment>("desktop_preview_environment");
-}
-
-function PinterestWallpaperScheduler() {
-  const settings = useQuery({
-    enabled: isTauri(),
-    queryFn: api.getPinterestWallpaperSettings ?? unavailablePinterestWallpaperSettings,
-    queryKey: ["pinterest-wallpaper"],
-    retry: false,
-  });
-  const applying = useRef(false);
-  useEffect(() => {
-    const value = settings.data;
-    if (!isTauri() || !value?.boardUrl || !value.enabled) return;
-    const refresh = async () => {
-      if (applying.current) return;
-      applying.current = true;
-      try {
-        await applyPinterestWallpaper(value);
-      } catch {
-        // The settings panel keeps actionable errors visible; scheduled refreshes stay quiet.
-      } finally {
-        applying.current = false;
-      }
-    };
-    const alreadyAppliedToday = value.lastAppliedAt
-      ? new Date(value.lastAppliedAt).toDateString() === new Date().toDateString()
-      : false;
-    if (!alreadyAppliedToday) void refresh();
-    let timer: number;
-    const scheduleNextRefresh = () => {
-      const next = new Date();
-      next.setHours(8, 0, 0, 0);
-      if (next <= new Date()) next.setDate(next.getDate() + 1);
-      timer = window.setTimeout(() => {
-        void refresh().finally(scheduleNextRefresh);
-      }, next.getTime() - Date.now());
-    };
-    scheduleNextRefresh();
-    return () => window.clearTimeout(timer);
-  }, [settings.data]);
-  return null;
 }
 
 function PinterestWallpaperSettingsPanel() {
@@ -5898,7 +5895,15 @@ function PinterestWallpaperDesktopSettingsPanel() {
     : Date.now();
   const preview = useQuery({
     enabled: Boolean(value?.boardUrl),
-    queryFn: () => api.listPinterestPins(12),
+    queryFn: () =>
+      api.listPinterestPins(
+        12,
+        isTauri()
+          ? localDateToIso(
+              localDateAt(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone),
+            )
+          : undefined,
+      ),
     queryKey: ["pinterest-wallpaper-preview", value?.boardUrl],
     retry: false,
   });
@@ -6496,7 +6501,14 @@ function previewBackground(
 
 function pinterestDailyBackdrop(timestamp: number): string {
   const palette = ["#DCE8F2", "#E9DFD0", "#DCE9DC", "#EEE0EA", "#F0E5D3", "#E1E2F1"];
-  return palette[Math.floor(timestamp / 86_400_000) % palette.length] ?? "#ffffff";
+  // Native application uses this device's current date, independently of another Mac's stamp.
+  const current = new Date();
+  const day = isTauri()
+    ? Math.floor(
+        Date.UTC(current.getFullYear(), current.getMonth(), current.getDate()) / 86_400_000,
+      )
+    : Math.floor(timestamp / 86_400_000);
+  return palette[((day % palette.length) + palette.length) % palette.length] ?? "#ffffff";
 }
 
 function ConnectorRow({
@@ -6679,6 +6691,10 @@ function ProfileSettings({ user }: { user: User }) {
     mutationFn: api.logout,
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
+      if (isTauri()) {
+        void resetDesktopSession(queryClient);
+        return;
+      }
       queryClient.clear();
       window.location.assign("/");
     },

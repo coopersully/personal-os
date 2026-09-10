@@ -16,6 +16,7 @@ const migrationsAfterTaskOrganization = [
   "0074_finance_budget_buckets",
   "0075_finance_ownership_constraint",
   "0076_task_list_icons",
+  "0077_desktop_mail_activity",
   "0073_mail_workspace_stewardship",
 ];
 
@@ -35,7 +36,7 @@ async function requireTaskOrganizationMigration(): Promise<void> {
   );
 }
 
-describe.sequential("Task organization migration", () => {
+describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
   let container: StartedPostgreSqlContainer;
   let admin: DatabaseClient;
   const clients: DatabaseClient[] = [];

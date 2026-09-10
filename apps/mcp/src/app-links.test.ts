@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIloAppLinks, resolveAppBaseUrl } from "./app-links.js";
 
-describe("Nomi application links", () => {
+describe("nohmi application links", () => {
   it("requires an explicit secure production origin", () => {
     expect(() => resolveAppBaseUrl({}, { production: true })).toThrow(/APP_BASE_URL/);
     expect(() =>

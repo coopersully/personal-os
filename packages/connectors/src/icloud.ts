@@ -5,6 +5,7 @@ import { ImapFlow } from "imapflow";
 import { type AddressObject, simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject, type DAVResponse } from "tsdav";
+import { z } from "zod";
 import { ConnectorError, classifyICloudError } from "./failures.js";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
 import {
@@ -800,8 +801,36 @@ function normalizeCalendarObject(
     if (!value) return "RRULE:";
     return `RRULE:${value.toString()}`;
   });
+  const organizer = String(component.getFirstPropertyValue("organizer") ?? "")
+    .replace(/^mailto:/i, "")
+    .toLowerCase();
+  const attendees = component
+    .getAllProperties("attendee")
+    .flatMap<NonNullable<NormalizedRemoteEvent["attendees"]>[number]>((property) => {
+      const email = String(property.getFirstValue()).replace(/^mailto:/i, "");
+      if (!z.email().safeParse(email).success) return [];
+      const name = property.getParameter("cn");
+      const participation = String(
+        property.getParameter("partstat") ?? "NEEDS-ACTION",
+      ).toLowerCase();
+      const response =
+        participation === "accepted" ||
+        participation === "declined" ||
+        participation === "tentative"
+          ? participation
+          : "needs_action";
+      return [
+        {
+          email,
+          name: typeof name === "string" ? name : null,
+          response,
+          isOrganizer: email.toLowerCase() === organizer,
+        },
+      ];
+    });
   return {
     allDay: event.startDate.isDate,
+    attendees,
     conferenceUrl: extractConferenceUrl(event.description) ?? extractConferenceUrl(event.location),
     endsAt: event.endDate.toJSDate(),
     etag: object.etag ?? null,

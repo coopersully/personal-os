@@ -586,6 +586,13 @@
     {
       "idx": 81,
       "version": "7",
+      "when": 1788868800000,
+      "tag": "0077_desktop_mail_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
       "when": 1788825600000,
       "tag": "0073_mail_workspace_stewardship",
       "breakpoints": true

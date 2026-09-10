@@ -410,6 +410,7 @@ describe.sequential("finance service", () => {
       // The task-list icon migration depends on task organization, which this
       // legacy Finance-upgrade fixture deliberately omits above.
       "0076_task_list_icons",
+      "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
     ]);
     await migrateDatabase(database.db, legacyMigrations);

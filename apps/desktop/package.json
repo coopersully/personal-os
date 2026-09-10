@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tauri build --bundles app --ci",
-    "bundle:dmg": "tauri build --bundles dmg --ci",
+    "bundle:dmg": "bash macos/scripts/release.sh",
     "dev": "tauri dev",
-    "typecheck": "tauri info"
+    "typecheck": "tauri info",
+    "test:native": "cargo test --manifest-path src-tauri/Cargo.toml && swift test --package-path macos"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4"

@@ -1,0 +1,90 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InspectMigrationResources",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeServices",
+        "ecs:DescribeTaskDefinition",
+        "ecs:DescribeTasks",
+        "ecs:ListTasks",
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBSnapshots",
+        "ec2:DescribeInstances",
+        "ec2:DescribeSecurityGroups",
+        "ssm:DescribeInstanceInformation",
+        "application-autoscaling:DescribeScalableTargets",
+        "application-autoscaling:DescribeScalingPolicies",
+        "cloudfront:GetDistribution",
+        "cloudfront:ListDistributions",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadApplicationConfiguration",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+      "Resource": "arn:aws:ssm:us-east-1:686584420666:parameter/personal-os/prod/*"
+    },
+    {
+      "Sid": "DecryptApplicationConfiguration",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "arn:aws:kms:us-east-1:686584420666:key/*",
+      "Condition": {
+        "StringEquals": { "kms:ViaService": "ssm.us-east-1.amazonaws.com" },
+        "StringLike": {
+          "kms:EncryptionContext:PARAMETER_ARN": "arn:aws:ssm:us-east-1:686584420666:parameter/personal-os/prod/*"
+        }
+      }
+    },
+    {
+      "Sid": "PullApplicationImages",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:DescribeImages"
+      ],
+      "Resource": "arn:aws:ecr:us-east-1:686584420666:repository/personal-os-prod-*"
+    },
+    {
+      "Sid": "AttendedWriterStopAndRollback",
+      "Effect": "Allow",
+      "Action": "ecs:UpdateService",
+      "Resource": [
+        "arn:aws:ecs:us-east-1:686584420666:service/personal-os-prod/personal-os-prod-api",
+        "arn:aws:ecs:us-east-1:686584420666:service/personal-os-prod/personal-os-prod-mcp"
+      ]
+    },
+    {
+      "Sid": "SuspendNohmiSourceWriterAutoscaling",
+      "Effect": "Allow",
+      "Action": "application-autoscaling:RegisterScalableTarget",
+      "Resource": [
+        "arn:aws:application-autoscaling:us-east-1:686584420666:scalable-target/0ec583a7583fb1b94f5a8848bfac92b73284",
+        "arn:aws:application-autoscaling:us-east-1:686584420666:scalable-target/0ec542f494416e6a4601acd22b47f5520f20"
+      ]
+    },
+    {
+      "Sid": "DatabaseTunnelOnly",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": [
+        "arn:aws:ec2:us-east-1:686584420666:instance/i-0b71b00ea3aeac352",
+        "arn:aws:ssm:us-east-1::document/AWS-StartPortForwardingSessionToRemoteHost"
+      ]
+    },
+    {
+      "Sid": "OwnTunnelLifecycle",
+      "Effect": "Allow",
+      "Action": ["ssm:ResumeSession", "ssm:TerminateSession"],
+      "Resource": "arn:aws:ssm:us-east-1:686584420666:session/${aws:username}-*"
+    }
+  ]
+}

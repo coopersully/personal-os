@@ -67,6 +67,7 @@ import type {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigserial,
   boolean,
   check,
   date,
@@ -3648,5 +3649,35 @@ export const auditEvents = pgTable(
   (table) => [
     index("audit_events_user_time_idx").on(table.userId, table.createdAt),
     index("audit_events_entity_idx").on(table.entityType, table.entityId),
+  ],
+);
+
+// Retain remote-message identities across mailbox reimports; only first observation can alert.
+export const desktopMailState = pgTable("desktop_mail_state", {
+  accountId: uuid("account_id")
+    .primaryKey()
+    .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+  establishedAt: timestamp("established_at", { withTimezone: true }).notNull(),
+});
+export const desktopMailActivity = pgTable(
+  "desktop_mail_activity",
+  {
+    sequence: bigserial("sequence", { mode: "bigint" }).primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    remoteMessageId: text("remote_message_id").notNull(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => mailThreads.id, { onDelete: "cascade" }),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    eligible: boolean("eligible").notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("desktop_mail_activity_remote_idx").on(table.accountId, table.remoteMessageId),
+    index("desktop_mail_activity_user_sequence_idx").on(table.userId, table.sequence),
   ],
 );

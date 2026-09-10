@@ -6,6 +6,7 @@ import type {
   CreateAccessTokenInput,
   CreateInvitationInput,
   DailyBrief,
+  DesktopActivityPage,
   Invitation,
   LoginInput,
   PinterestPin,
@@ -193,6 +194,11 @@ export function createApiClient(options: ClientOptions) {
 
   return {
     ...createAssistantApiClient(request, toQuery),
+    async getDesktopActivity(cursor?: string): Promise<DesktopActivityPage> {
+      return request(
+        `/v1/desktop/activity${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      );
+    },
     ...createFinanceApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
@@ -365,8 +371,12 @@ export function createApiClient(options: ClientOptions) {
       return response.settings;
     },
 
-    async listPinterestPins(limit = 12): Promise<PinterestPin[]> {
-      const response = await request<{ pins: PinterestPin[] }>(`/v1/pinterest/pins?limit=${limit}`);
+    async listPinterestPins(limit = 12, planningDate?: string): Promise<PinterestPin[]> {
+      const dateQuery =
+        planningDate === undefined ? "" : `&planningDate=${encodeURIComponent(planningDate)}`;
+      const response = await request<{ pins: PinterestPin[] }>(
+        `/v1/pinterest/pins?limit=${limit}${dateQuery}`,
+      );
       return response.pins;
     },
 

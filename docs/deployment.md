@@ -1,5 +1,73 @@
 # Deployment
 
+## Current production: nohmi on the Mac Mini
+
+The attended Mac Mini production migration is documented in
+[`deploy/mac-mini/README.md`](../deploy/mac-mini/README.md). It preserves the RDS
+database and provider/encryption configuration while deploying current code.
+The attended cutover was executed on September 9, 2026. The Mac became the
+authoritative writer at 14:56:22 UTC, running application revision
+`fba5bc5c39f291f792bdda85fcb3d519a06c05b0`. Frozen-source counts matched all 89
+relations (88 application tables plus the migration ledger); all 27 encrypted
+provider records decrypted successfully before application activation.
+
+The Mac target uses `nohmi.coopersully.me` (app), `nohmi-api.coopersully.me`
+(API), and `nohmi-mcp.coopersully.me` (MCP). These names use free Cloudflare
+Tunnel and Universal SSL. The old `*.ilo.coopersully.me` AWS addresses are source
+configuration, not the Mac target. Provider callbacks must be registered for the
+new addresses before cutover; the migration preserves provider secrets and data.
+The three new DNS records are published, with public HTTPS app, API readiness,
+MCP liveness and OAuth discovery verified. The local network initially cached
+negative DNS answers for the new API/MCP names; authenticated browser acceptance
+is not yet recorded. Existing Google authorization and iCloud transport failures
+were also present in the frozen AWS source, while Plaid synced from the Mac.
+
+AWS retirement was authorized after the Mac recovery checks. ECS, autoscaling,
+EC2, ALB/WAF, CloudFront, ECR, application parameters, backup recovery points and
+legacy public DNS have been removed; RDS deletion was requested without a retained
+AWS snapshot. RDS deletion and dependent network cleanup completed at 17:11:51 UTC
+on September 9. Fresh inventory confirmed the source database, automated snapshots,
+RDS-managed secret, subnet group, four subnets and dedicated VPC are gone.
+The owner-authorized removal of the nohmi-created account-wide
+security/audit services and storage is complete. The final frozen database dump, credentials
+and historical Terraform state are preserved privately on the Mac. Live sender
+DNS and unrelated account resources remain intact. The legacy hosted-deploy and
+production-health workflows remain disabled. Never apply the historical AWS stack
+or use the legacy live-RDS development mode below. Recovery must preserve subsequent
+Mac writes. The AWS operational sections below are historical reference only.
+
+The [continuous deployment controller](../deploy/mac-mini/continuous.md) accepts
+only successful exact-main push CI, builds against the dedicated production engine,
+and switches with a local encrypted backup and durable recovery state. Installation
+and first-main adoption are attended; application updates then require no GitHub
+credential or inbound port. Controller/configuration upgrades remain attended.
+The controller is installed under the dedicated production account and supervised
+by `me.coopersully.nohmi.continuous`. Read its live revision, phase and maintenance
+state using the private `continuous-cli.mjs status` command in the runbook; the
+initial cutover revision above is historical, not a pin on later releases.
+The temporary AWS migration access key/user/policy and local CLI delegation have
+been removed. The Mac runtime has no AWS credential dependency.
+The first CI-gated main deployment completed September 9 at 16:27:47 UTC, moving
+to `49d87e257ba7922814d6a0945fbea189dc1677cf` after its successful push CI. The
+running LaunchAgent performed the switch; the one-use initial squash authorization
+was consumed. Public app/API/MCP health passed, PostgreSQL identity and user count
+matched, and all three environment files, gateway config and tunnel token retained
+their pre-deployment fingerprints. Unrelated Docker Desktop services remained up.
+The next normal main update to `34e31e0fe31b8f9242931c75e026f948f08da401`
+completed unattended at 17:08:54 UTC after push CI run `34380016971`, with the same
+health, database identity/user-count and configuration-fingerprint checks passing.
+It required no bootstrap exception or manual deployment.
+Offsite backups and backup alerts
+were explicitly deferred by the sole user for this cutover; no new storage
+subscription was activated. Local migration copies do not protect against loss
+of the Mac. Startup is after the operator's login. The September 9 host audit found
+sleep disabled, power-failure restart enabled, FileVault off and automatic login
+configured for the existing operator. The LaunchAgent/VM restart and application
+process-exit recovery were exercised with the same PostgreSQL identity and user
+data. A physical host reboot remains untested. The active Wi-Fi address is DHCP;
+a router reservation is not yet verified. The outbound tunnel does not require a
+static LAN or public IP.
+
 ## Required configuration
 
 | Variable | Purpose |

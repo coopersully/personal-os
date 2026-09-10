@@ -1,4 +1,4 @@
-import { providerFetch } from "@personal-os/connectors";
+import { fetchPinterestBoardPins, PinterestBoardError } from "@personal-os/connectors";
 import { type Database, pinterestConnections } from "@personal-os/database";
 import type {
   PinterestPin,
@@ -118,7 +118,11 @@ export function createPinterestService({
     } satisfies PinterestWallpaperSettings;
   }
 
-  async function pins(userId: string, limit: number): Promise<PinterestPin[]> {
+  async function pins(
+    userId: string,
+    limit: number,
+    planningDate?: string,
+  ): Promise<PinterestPin[]> {
     const [connection] = await db
       .select()
       .from(pinterestConnections)
@@ -130,35 +134,17 @@ export function createPinterestService({
         "Paste a public Pinterest board URL before refreshing your wallpaper.",
       );
     }
-    const boardUrl = publicPinterestBoardUrl(connection.boardUrl);
-    const response = await providerFetch(requestFetch, boardUrl, {
-      headers: { "user-agent": "nohmi wallpaper/1.0" },
-    });
-    if (!response.ok) {
-      throw new AppError(
-        "service_unavailable",
-        "Pinterest could not load that public board right now.",
-      );
+    let images: PinterestPin[];
+    try {
+      images = await fetchPinterestBoardPins(connection.boardUrl, requestFetch);
+    } catch (error) {
+      if (error instanceof PinterestBoardError) throw new AppError(error.code, error.message);
+      throw error;
     }
-    const page = await response.text();
-    const images = [
-      ...new Set(
-        [
-          ...page.matchAll(
-            /https:\/\/i\.pinimg\.com\/(?:\d+x|originals)\/[^"\\\s?]+?\.(?:avif|jpe?g|png|webp)/gi,
-          ),
-        ].map((match) => highResolutionImage(match[0])),
-      ),
-    ]
-      .map((imageUrl) => ({ id: imageUrl, imageUrl, title: null }))
-      .slice(0, 100);
-    if (images.length === 0) {
-      throw new AppError(
-        "not_found",
-        "Pinterest did not expose any images from that public board.",
-      );
-    }
-    return repeatPinsToLimit(shuffledForToday(images, now()), limit);
+    return repeatPinsToLimit(
+      shuffledForToday(images, planningDate ?? now().toISOString().slice(0, 10)),
+      limit,
+    );
   }
 
   async function recordApplied(userId: string) {
@@ -179,25 +165,11 @@ function repeatPinsToLimit(pins: PinterestPin[], limit: number): PinterestPin[] 
   });
 }
 
-function publicPinterestBoardUrl(value: string): string {
-  const url = new URL(value);
-  if (
-    (url.hostname !== "pinterest.com" && !url.hostname.endsWith(".pinterest.com")) ||
-    url.pathname.split("/").filter(Boolean).length < 2
-  ) {
-    throw new AppError("invalid_request", "Provide the URL of a public Pinterest board.");
-  }
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
-function highResolutionImage(value: string): string {
-  return value.replace(/\/\d+x\//, "/736x/");
-}
-
-function shuffledForToday<T>(items: T[], now: Date): T[] {
-  const seed = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`
+function shuffledForToday<T>(items: T[], planningDate: string): T[] {
+  const seed = planningDate
+    .split("-")
+    .map(Number)
+    .join("-")
     .split("")
     .reduce((value, character) => (value * 31 + character.charCodeAt(0)) >>> 0, 0);
   let state = seed || 1;

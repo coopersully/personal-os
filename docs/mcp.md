@@ -1,7 +1,13 @@
 # MCP integration
 
-The MCP server is an adapter over the authenticated ilo API. It contains no reminder, calendar,
+The MCP server is an adapter over the authenticated nohmi API. It contains no reminder, calendar,
 mail, finance, provider, or audit rules of its own.
+
+The displayed product and OAuth resource name is **nohmi**. The protocol server
+identifier `ilo`, existing `get_ilo_*` tools, `ilo://` resources, `_ilo` metadata,
+and versioned `ilo-setup` artifacts remain compatibility contracts. The Mac target
+is `https://nohmi-mcp.coopersully.me/mcp`; reconnect clients after the public origin
+changes so discovery and audience-bound authorization use the new deployment.
 
 ## Transports
 

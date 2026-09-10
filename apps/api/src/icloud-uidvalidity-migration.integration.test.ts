@@ -67,6 +67,7 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0074_finance_budget_buckets",
         "0075_finance_ownership_constraint",
         "0076_task_list_icons",
+        "0077_desktop_mail_activity",
         "0073_mail_workspace_stewardship",
       ],
     );

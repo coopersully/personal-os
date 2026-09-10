@@ -411,6 +411,26 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/access-tokens/{id}": {
         delete: { security, responses: { 204: { description: "Agent token revoked" } } },
       },
+      "/v1/desktop/activity": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          description:
+            "Human-only mail arrival feed. Omit cursor to establish a baseline without notifying for imported history. Persist returned cursor per user and server.",
+          parameters: [
+            { name: "cursor", in: "query", schema: { type: "string", pattern: "^[0-9]{1,19}$" } },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            },
+          ],
+          responses: {
+            200: { description: "Mail arrivals, durable cursor, and hasMore" },
+            401: { description: "Sign-in required" },
+            403: { description: "Human session required" },
+          },
+        },
+      },
       "/v1/daily-brief": {
         get: { security, responses: { 200: { description: "Time-aware daily brief" } } },
       },

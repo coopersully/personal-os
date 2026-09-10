@@ -13,8 +13,10 @@ import {
   connectICloudInputSchema,
   createAccessTokenInputSchema,
   createInvitationInputSchema,
+  desktopActivityQuerySchema,
   featureAccessPolicies,
   loginInputSchema,
+  pinterestPinsQuerySchema,
   registerInputSchema,
   requestPasswordResetInputSchema,
   resetPasswordInputSchema,
@@ -42,6 +44,7 @@ import { createCalendarStewardshipService } from "./calendar-stewardship-service
 import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
+import { createDesktopActivityService } from "./desktop-activity-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceActionService } from "./finance-action-service.js";
@@ -182,9 +185,6 @@ const xBookmarkListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 const xFolderInputSchema = z.object({ folderId: z.string().min(1).max(100) });
-const pinterestPinsQuerySchema = z.object({
-  limit: z.coerce.number().int().min(4).max(20).default(12),
-});
 const agentDomainSupport = {
   calendar: "profile_and_attention",
   finances: "profile_and_attention",
@@ -970,6 +970,17 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/connectors/icloud", requireVerifiedEmail);
   app.use("/v1/x-bookmarks", authenticate);
   app.use("/v1/x-bookmarks/*", authenticate);
+  app.use("/v1/desktop/activity", authenticate, requireHuman);
+  app.get("/v1/desktop/activity", async (context) => {
+    const query = desktopActivityQuerySchema.parse(context.req.query());
+    return context.json(
+      await createDesktopActivityService(dependencies.db).list(
+        context.get("principal").userId,
+        query.cursor,
+        query.limit,
+      ),
+    );
+  });
   app.use("/v1/pinterest", authenticate, requireHuman);
   app.use("/v1/pinterest/*", authenticate, requireHuman);
 
@@ -1150,7 +1161,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/v1/pinterest/pins", async (context) => {
     const query = pinterestPinsQuerySchema.parse(context.req.query());
     return context.json({
-      pins: await pinterest.pins(context.get("principal").userId, query.limit),
+      pins: await pinterest.pins(context.get("principal").userId, query.limit, query.planningDate),
     });
   });
   app.patch("/v1/pinterest", async (context) =>

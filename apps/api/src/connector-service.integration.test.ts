@@ -4461,6 +4461,7 @@ describe.sequential("connector service", () => {
 
     for (const value of [
       remoteEvent("unchanged", "etag-same"),
+      remoteEvent("attendance-backfill", "etag-same"),
       remoteEvent("changed", "etag-old", "Old title"),
       remoteEvent("deleted", "etag-delete"),
       remoteEvent("stale", "etag-stale"),
@@ -4516,6 +4517,20 @@ describe.sequential("connector service", () => {
               { kind: "delete", remoteEventId: "deleted" },
               { event: remoteEvent("unchanged", "etag-same"), kind: "upsert" },
               {
+                event: {
+                  ...remoteEvent("attendance-backfill", "etag-same"),
+                  attendees: [
+                    {
+                      email: "renamed@example.com",
+                      name: null,
+                      response: "declined",
+                      isOrganizer: false,
+                    },
+                  ],
+                },
+                kind: "upsert",
+              },
+              {
                 event: remoteEvent(
                   "changed",
                   "etag-new",
@@ -4537,12 +4552,17 @@ describe.sequential("connector service", () => {
       };
     });
 
-    await expect(service.syncAccount(userId, account.id)).resolves.toEqual({ changed: 6 });
+    await expect(service.syncAccount(userId, account.id)).resolves.toEqual({ changed: 7 });
     const records = await database.db
       .select()
       .from(calendarEvents)
       .where(eq(calendarEvents.calendarId, primary.id));
     expect(records.find((value) => value.remoteEventId === "unchanged")?.deletedAt).toBeNull();
+    expect(
+      records.find((value) => value.remoteEventId === "attendance-backfill")?.attendees,
+    ).toEqual([
+      { email: "renamed@example.com", name: null, response: "declined", isOrganizer: false },
+    ]);
     expect(records.find((value) => value.remoteEventId === "changed")).toMatchObject({
       conferenceUrl: "https://meet.google.com/abc-defg-hij",
       deletedAt: null,

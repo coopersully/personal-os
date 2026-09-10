@@ -1,7 +1,8 @@
-# ilo — Complete Implementation Plan
+# nohmi — Complete Implementation Plan
 
 - Status: Proposed execution plan
 - Date: 2026-07-18
+- Last reconciled: 2026-09-10
 - Companion: [Master Product & Experience Design](./master-design.md)
 - Scope: every capability in the master design. Phases are dependency order, not a reduction in product ambition.
 
@@ -11,7 +12,9 @@
 2. A feature is not complete when its happy-path UI works; it also needs authorization, provider failure, offline/stale, audit, accessibility, mobile, and automated-test coverage.
 3. Build reusable primitives/data contracts before individual screens. If a phase finds a missing shared concept, add it to the domain model rather than creating a page-only workaround.
 4. Preserve the existing MVP during migration. Feature flags and capability-gated routes keep partially delivered surfaces honest.
-5. Every agent mutation starts in Preview or Approve Each. Promotion to Rule-authorized requires an explicit user-created rule, sample-run review, and immediate revoke/undo path.
+5. Inferred knowledge and action authority have separate lifecycles. Safely reinforced knowledge may
+   become active automatically, while promotion to Rule-authorized behavior requires the applicable
+   domain policy, evidence, review, and immediate revoke or recovery path.
 6. A unified view is built with typed links and projections over native domain records, never by collapsing provider events, mail threads, finance transactions, and local commitments into one generic mutable row.
 7. The repository coverage floor (95% statements/functions/lines and 94% branches) is a required signal, not a substitute for release evidence. High-risk work also requires contract, deterministic connector-simulator, migration/recovery, accessibility, visual, offline, and adversarial-policy tests.
 
@@ -22,6 +25,7 @@
 | Domain/API | Schemas, policy evaluation, source links, audit, OpenAPI, idempotency, migrations. |
 | Connectors | Google, iCloud, Plaid capability contracts, write-through sync, reconciliation, conflict handling. |
 | Agent controls | Workspace capability policy, review queues, daily-brief projection, and bounded domain-owned workers. |
+| User Knowledge | Typed personal context, relationships, goals, provenance, reinforcement, promotion, semantic retrieval, and purpose-bound context packs. |
 | Web/desktop/mobile | Shared shadcn blocks, responsive app, Tauri overlay, widgets, accessibility. |
 | Security/privacy | Credentials, encryption, consent, retention, export/delete, session/token lifecycle. |
 | Quality/operations | Test fixtures, deterministic environment actions, E2E, visual/accessibility checks, observability, recovery runbooks. |
@@ -37,7 +41,8 @@ flowchart TD
   C --> F[5. Calendar collaboration]
   B --> G[6. Agent policy & review controls]
   D --> H[7. Capacity-aware Today]
-  D --> I[8. Goals, motives, habits]
+  D --> I[8. User Knowledge, goals, motives, habits]
+  B --> I
   C --> K[10. Plaid finance]
   E --> L[11. Mail rule work]
   F --> M[12. Schedule assistance]
@@ -112,8 +117,11 @@ flowchart TD
 **Implement**
 
 - Migrate reminders into a commitment model while retaining existing IDs/API compatibility.
-- Add task fields: project, area, status, priority, estimate, due versus scheduled time, recurrence/exception, subtasks/checklists, tags, notes, attachments, energy/context, sources, goals/motives, defer/complete history.
-- Add projects, areas, task inbox, upcoming/someday/completed/custom filters, list/board/calendar/timeline/focus views, bulk actions, search, quick capture, natural-language parse confirmation, and keyboard commands.
+- Add task fields: project, long-lived organizational container, status, priority, estimate, due versus scheduled time, recurrence/exception, subtasks/checklists, tags, notes, attachments, energy/context, sources, goals/motives, defer/complete history.
+- Add projects, long-lived organizational containers, task inbox, upcoming/someday/completed/custom filters, list/board/calendar/timeline/focus views, bulk actions, search, quick capture, natural-language parse confirmation, and keyboard commands. Choose the final user-facing container name through product review rather than assuming “Areas.”
+- Import tasks from external providers and make nohmi the authoritative working workspace after
+  import. Preserve bidirectional multi-provider synchronization as a possible future extension, not
+  a current delivery requirement.
 - Build recurrence service for calendar and completion-relative patterns, occurrence exceptions, edit-one/edit-series semantics, and future preview.
 - Build internal/external time blocks with duration, actual time, privacy/busy setting, destination calendar, drag/resize, keyboard alternatives, and rollback.
 - Add focus timer/Pomodoro, break/interrupt capture, and low-distraction focus mode.
@@ -191,17 +199,39 @@ flowchart TD
 - Today distinguishes completed, active, hard, flexible, and triage material clearly on desktop/mobile/overlay.
 - Capacity recommendations do not write events/tasks until the user/policy approves.
 
-### Epic 8 — Goals, motives, habits, and reviews
+### Epic 8 — User Knowledge, goals, motives, habits, and reviews
 
 **Implement**
 
-- Build goals/milestones/metrics/reviews and motives/rewards/constraints/identity/coaching-boundaries data/UI; build habits with frequency, flex windows, time defense, completion/skip and scheduling integration.
-- Build daily/weekly/monthly reflection writeups and review UI with evidence, uncertainty, suggested actions, approval paths, and opt-in cross-domain correlation.
+- Build the typed User Knowledge graph for identity, relationships, circumstances, goals,
+  priorities, motives, preferences, constraints, routines, decisions, entity meanings, and
+  provisional patterns. Preserve provenance, sensitivity, scope, confidence, temporal validity,
+  immutable revisions, contradiction, supersession, and export/deletion.
+- Build goals with hierarchy, horizon, priority, measures, status, review cadence, and typed links to
+  workspace records rather than storing them as generic memory text.
+- Add full-text and semantic indexes as rebuildable projections over PostgreSQL; enforce ownership,
+  purpose, sensitivity, and workspace access before retrieval.
+- Build knowledge contracts and versioned context packs for setup, status, maintenance, and
+  advisory workflows. Record the knowledge revisions used by consequential decisions and explain
+  why context was selected, omitted, or considered missing.
+- Build proposal, reinforcement, manual promotion, safe automatic promotion, dispute, expiry, and
+  supersession flows. Automatic promotion requires independent reinforcement or successful reuse,
+  remains limited to reversible knowledge categories, and never grants action authority.
+- Build the About you / Your context UI plus contextual workspace controls for inspection,
+  correction, promotion, restriction, recent learning, provenance, cross-workspace disclosure,
+  export, and deletion.
+- Build habits with frequency, flex windows, time defense, completion/skip and scheduling
+  integration plus daily/weekly/monthly reflection writeups with evidence, uncertainty, suggested
+  actions, approval paths, and purpose-limited cross-domain correlation.
 
 **Done when**
 
-- Goals/motives/habits change Today and planning only when the user enables the relationship.
-- Reviews cite the source material behind observations and do not expose a domain the user excluded.
+- Every high-level workflow can retrieve the smallest sufficient context and state which required
+  knowledge is absent, stale, disputed, or prohibited.
+- Repeated safe learning reduces questions without silently changing agent scopes, rules, or
+  external systems.
+- Reviews cite source material and knowledge revisions without exposing a workspace or sensitive
+  category the person excluded.
 
 ### Epic 9 — Finance platform, Plaid, budgets, and review queue
 
@@ -238,7 +268,12 @@ flowchart TD
 
 ### Epic 11 — Domain-owned assisted workflows
 
-**Implement these as domain features or generated views, never as a generic installable routine catalog:**
+**Implement these as domain features or generated views, never as client-authored workflow logic:**
+
+External schedulers—including ChatGPT or Codex scheduled tasks, Claude recurring tasks or routines,
+Gemini scheduled actions or headless automation, and operating-system schedulers—may invoke these
+intents. nohmi owns their expertise, context retrieval, durable state, policy, recovery, questions,
+reviews, and completion truth.
 
 | Workflow | Inputs | Outputs/actions |
 | --- | --- | --- |
@@ -284,6 +319,7 @@ flowchart TD
 | Minimal Today: next/done/remaining | 7 |
 | Reminders/tasks and agent CRUD | 3, 6 |
 | Goals, motives, habits, coaching boundaries | 8 |
+| Shared User Knowledge, reinforcement, promotion, and semantic context | 8 |
 | Plaid, budget, categorization and uncertain queue | 9, 11 |
 | Scoped MCP tokens, Claude/Codex skills, scheduled agents | 1, 6, 11 |
 | Preview/approval/rules/undo/audit/kill switch | 1, 5, 6, 9 |
@@ -310,10 +346,15 @@ Do not ship a broad autonomous promise early. Ship capability progressively, but
 2. Material and safety: Epics 3–6.
 3. Daily value: Epics 7–8.
 4. Money and devices: Epics 9–10.
-5. Routine catalog and product hardening: Epics 11–12.
+5. Domain maintenance intents and product hardening: Epics 11–12.
 
 At every stage, the UI shows only enabled, proven capability. A future routine, connector, widget, or action is either absent or explicitly marked unavailable; it is never presented as working software.
 
 ## 8. Definition of complete master product
 
-The program is complete only when a user can connect multiple Google and iCloud accounts plus selected Plaid accounts; safely manage mail, calendar, reminders/tasks, goals/motives/habits, and finances; run visible and scoped agent routines; use Today, overlays, widgets, and notifications across supported devices; inspect/reverse/stop the relevant work; and pass all quality, privacy, accessibility, recovery, and verification gates above.
+The program is complete only when a person can use nohmi as their primary Mail, Tasks, Calendar,
+and Finances application; connect supported accounts and import external commitments; own and
+correct the shared User Knowledge that informs every workspace; invoke visible, scoped, durable
+maintenance through major external agent platforms; use Today and supported desktop/mobile
+surfaces; inspect, reverse, recover, or stop relevant work; and pass all quality, privacy,
+accessibility, recovery, and verification gates above.

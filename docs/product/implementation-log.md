@@ -2,6 +2,75 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-10 — Complete target product doctrine reconciled
+
+- Reframed nohmi as a user-owned autonomous exoskeleton with four core workspaces: Mail, Tasks,
+  Calendar, and Finances; Today is their cross-workspace operating surface.
+- Defined the direct UI, API, MCP orientation, maintenance, surgical, review, settings, and recovery
+  interfaces for every workspace in [`workspaces.md`](workspaces.md).
+- Accepted the target User Knowledge model: typed and versioned personal context, purpose-bound
+  retrieval, semantic indexing, reinforcement, manual promotion, safe automatic promotion, and a
+  strict separation between knowledge and action authority.
+- Documented external scheduling as an invocation boundary: agent platforms own cadence while
+  nohmi owns the workflow, knowledge, policy, durable state, questions, recovery, and result.
+- Recorded that Tasks imports external provider commitments and becomes the authoritative working
+  workspace; bidirectional provider sync remains possible future work, and the final label for the
+  long-lived container above Projects remains unresolved.
+- This milestone changes target documentation and agent guidance only. It does not claim that User
+  Knowledge, unimplemented workspace maintenance tools, task import, or other target behavior has
+  shipped.
+
+## 2026-09-09 — Native macOS application and Mac production runtime
+
+- The macOS 14+ app supports hosted and validated custom-server sessions, Keychain credentials,
+  resident lifecycle, menu-bar and Dock behavior, launch at login, deep links, native notifications,
+  WidgetKit Tasks and Reminders surfaces, an optional desktop pet, and bounded wallpaper work.
+- Production moved from AWS application infrastructure to a dedicated Mac runtime with isolated
+  containers, internal PostgreSQL, Cloudflare Tunnel, CI-gated continuous deployment, durable
+  switching, recovery, and preserved database and encryption identity.
+- Public app, API, and MCP health plus normal unattended main deployment were verified. Offsite
+  backup and a physical host reboot remain owner-deferred operational evidence.
+
+## 2026-09-07 — Unified workspace experience
+
+- Mail, Calendar, Tasks, Finances, Today, setup, workspace switching, and common responsive states
+  were consolidated around shared product interaction patterns.
+- This shipped UI consolidation does not imply that every target workspace steward or maintenance
+  workflow is complete.
+
+## 2026-09-01 — Task organization foundation
+
+- Tasks now has one protected Inbox, Lists, finite Projects, independently completable Tasks,
+  revision-safe movement, lifecycle, planning fields, archive, and recoverable Trash behavior.
+- API, typed client, web, MCP, audit, migration, and desktop/mobile acceptance coverage use the same
+  canonical records.
+- External task import, recurrence, durable maintenance, questions, learning, health, and review
+  artifacts remain target work.
+
+## 2026-09-01 — Finance playbook and budget buckets
+
+- Finance gained a versioned server-owned expert playbook with source lineage, explicit
+  uncertainty, and a hierarchy spanning cash-flow stability, reserves, obligations, debt,
+  retirement, diversified investing, and a sustainable life.
+- Budget buckets provide stable planning identities across plan revisions while preserving exact
+  allocations and evidence.
+
+## 2026-08-31 — Receipt-aware merchant review
+
+- Ambiguous merchant review can perform an opt-in, bounded Mail evidence lookup for one Finance
+  transaction without returning message bodies.
+- Missing, partial, conflicting, disabled, or degraded evidence becomes a focused question rather
+  than an invented categorization or merchant rule.
+
+## 2026-08-30 — Agent texting lifecycle
+
+- Account-linked agent texting supports verified US and Canadian numbers through one shared Twilio
+  sender, encrypted phone identity, bounded conversation reads, revision-bound sends, delivery
+  state, and authoritative provider opt-out behavior.
+- Verification, consent ordering, duplicate callbacks, pagination, phone reassignment, uncertain
+  sends, and webhook bounds have durable recovery and test coverage; real carrier and production
+  callback behavior remain external operational dependencies.
+
 ## 2026-08-27 — Trustworthy Finance account semantics
 
 - Persisted provider account evidence separately from user-owned kind, planning inclusion, and

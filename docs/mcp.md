@@ -1,13 +1,18 @@
 # MCP integration
 
-The MCP server is an adapter over the authenticated nohmi API. It contains no reminder, calendar,
-mail, finance, provider, or audit rules of its own.
+The MCP server is the agent unification interface over the authenticated nohmi API. It contains no
+Mail, Tasks, Calendar, Finances, User Knowledge, provider, policy, or audit rules of its own.
 
 The displayed product and OAuth resource name is **nohmi**. The protocol server
 identifier `ilo`, existing `get_ilo_*` tools, `ilo://` resources, `_ilo` metadata,
 and versioned `ilo-setup` artifacts remain compatibility contracts. The Mac target
 is `https://nohmi-mcp.coopersully.me/mcp`; reconnect clients after the public origin
 changes so discovery and audience-bound authorization use the new deployment.
+
+The approved target is a hard cutover to the `nohmi` protocol identifier,
+`get_nohmi_*` tools, `nohmi://` and `ui://nohmi/` resources, `_nohmi` metadata, and a
+`nohmi-setup` artifact. The current compatibility names below remain an implementation gap; do not
+add another alias or describe them as the product's permanent vocabulary.
 
 ## Transports
 
@@ -35,9 +40,9 @@ documentation. Compose and Terraform set the same first-party origin used by the
 and visual-entrypoint status of every tool; `tool-surface.ts` enforces that catalog uniformly.
 Adding a tool without a catalog record fails while the server is being constructed.
 
-### Workspace Ilo intent surface
+### Workspace stewardship intent surface
 
-For a mature workspace Ilo, prefer a small high-level intent pair:
+For a mature workspace steward, prefer a small high-level intent pair:
 
 - `get_<workspace>_status` reports setup readiness, source freshness, maintained-state checks,
   backlog, active or recoverable work, open questions, and the latest review.
@@ -49,17 +54,45 @@ tools. `get_ilo_context` remains the authority for what the current connection c
 tools remain available for useful surgical inspection, previews, and exact authorized actions.
 
 Maintenance is not batch CRUD and the MCP host does not provide the sequence. The workspace API
-owns its expert playbook, rulebook, orchestration, durable run state, question/learning loop,
+owns its expert playbook, knowledge contract, rulebook, orchestration, durable run state, question/learning loop,
 advisory model, review artifact, idempotency, and completion decision. MCP only validates the
 intent, calls the authenticated typed API, and returns the durable state. A host instruction such
 as `maintain finances` should therefore work consistently without embedding Finance procedure in a
 Claude, Codex, or other client automation.
 
+The person may schedule the same maintenance intent through ChatGPT or Codex scheduled tasks,
+Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
+operating-system scheduler, or another MCP-capable host. Those systems own cadence and invocation;
+nohmi owns durable execution, context, policy, questions, recovery, and completion truth.
+
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
 result distinguishes maintained, maintained-with-questions, blocked, and failed outcomes and links
 to the workspace's review and recovery surfaces. See
-[`ADR 0004`](architecture/0004-workspace-ilo-stewardship.md).
+[`ADR 0004`](architecture/0004-workspace-stewardship.md).
+
+### Target User Knowledge surface
+
+High-level workspace tools retrieve purpose-bound context internally. The target shared surgical
+surface adds:
+
+- `get_nohmi_context` for identity, time, authority, workspace readiness, knowledge readiness, and
+  available intent surfaces;
+- `get_context_for_intent` for the bounded context pack required by one declared purpose and target;
+- `search_user_knowledge` and `get_knowledge` for precise inspection;
+- `propose_knowledge`, `update_knowledge`, `promote_knowledge`, and `supersede_knowledge` for the
+  typed learning lifecycle; and
+- `explain_context` for the selection, omission, provenance, confidence, and missing requirements
+  behind a consequential result.
+
+Semantic retrieval never bypasses scope, purpose, sensitivity, or workspace policy. User-authored
+knowledge may become active immediately; agent inferences begin as proposals and may become active
+through manual promotion or domain-defined safe promotion after independent reinforcement or
+successful reuse. Knowledge never grants or expands action authority.
+
+This surface is a target contract, not a claim about current tool discovery. See
+[`User Knowledge`](product/user-knowledge.md) and
+[`ADR 0005`](architecture/0005-user-knowledge.md).
 
 Discovery follows these rules:
 

@@ -1,6 +1,6 @@
-# Workspace Ilo charter template
+# Workspace steward charter template
 
-Use this charter before planning or parallelizing a new workspace Ilo. Replace every bracketed
+Use this charter before planning or parallelizing a new workspace steward. Replace every bracketed
 prompt with a domain-specific decision. Do not begin with MCP tool names; begin with the ledger and
 the professional work required to keep it trustworthy.
 
@@ -8,8 +8,8 @@ the professional work required to keep it trustworthy.
 
 - **Workspace:** [name]
 - **User outcome:** [what the person can understand or accomplish after maintenance]
-- **Ilo promise:** [one sentence describing what this Ilo continually keeps true]
-- **Explicit non-goals:** [actions, professional claims, or material this Ilo will not own]
+- **Steward promise:** [one sentence describing what this steward continually keeps true]
+- **Explicit non-goals:** [actions, professional claims, or material this steward will not own]
 
 ## 2. Living ledger
 
@@ -51,27 +51,31 @@ and verify one exact item. For every mutation, state its policy (`preview`, `app
 
 Describe the domain-owned sequence for `all`, a bounded time window, and an exact target:
 
-1. establish scope and evidence cutoff;
+1. establish scope, purpose, and evidence cutoff;
 2. synchronize and inspect;
-3. reconcile and deduplicate;
-4. apply rules and authorized operations;
-5. queue questions;
-6. recalculate models and health;
-7. advise;
-8. publish the review; and
-9. verify terminal state.
+3. retrieve the bounded context pack required by the knowledge contract;
+4. reconcile and deduplicate;
+5. apply rules and authorized operations;
+6. queue questions;
+7. recalculate models and health;
+8. record proposed or reinforced knowledge;
+9. advise;
+10. publish the review; and
+11. verify terminal state.
 
 Specify durable run/step state, leases, retry limits, idempotency, cancellation, recovery, and
 concurrent-run behavior. Name what can remain outstanding without misreporting success.
 
 ## 7. Rulebook, questions, and learning
 
-- What can the Ilo infer provisionally?
+- What can the steward infer provisionally?
 - What needs a one-off answer?
-- What can become a future rule only through explicit approval?
+- Which knowledge may become active after explicit promotion or safe repeated reinforcement?
+- Which actions still require an explicitly approved domain rule?
 - How are rule scope, confidence, exceptions, provenance, version, disablement, and rollback stored?
-- Which earlier records are re-evaluated when an answer or rule changes?
-- How does the Ilo avoid asking the same resolved question again?
+- What is the workspace's required, optional, and prohibited User Knowledge?
+- Which earlier records are re-evaluated when knowledge, an answer, or a rule changes?
+- How does the steward avoid asking the same resolved question again?
 
 ## 8. Analysis, advice, and review artifact
 

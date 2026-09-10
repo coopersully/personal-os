@@ -1,10 +1,10 @@
-# Tasks Ilo charter
+# Tasks workspace charter
 
 **Status:** Approved direction; living ledger and surgical foundation implemented
 
-**Last reconciled:** 2026-08-15
+**Last reconciled:** 2026-09-10
 
-This charter applies the [workspace Ilo stewardship model](./ilo-workspace-stewardship.md) to the
+This charter applies the [workspace stewardship model](./workspace-stewardship.md) to the
 existing Tasks workspace. The two approved 2026-08-12 Tasks and Tracking specifications remain the
 normative ontology, classifier, and research basis. This charter names what the current foundation
 actually ships and what a future maintenance slice must still prove.
@@ -16,9 +16,9 @@ actually ships and what a future maintenance slice must still prove.
   workspace.
 - **User outcome:** The person can capture, organize, schedule, complete, cancel, trash, restore,
   and query finite work without confusing lifecycle, time, location, or delivery prompts.
-- **Ilo promise:** Keep the person's commitment ledger structurally trustworthy and make every
+- **Steward promise:** Keep the person's commitment ledger structurally trustworthy and make every
   authorized change explicit, revision-safe, recoverable where promised, and visible in activity.
-- **Explicit non-goals:** This Ilo does not diagnose, prescribe a life philosophy, manufacture
+- **Explicit non-goals:** This workspace does not diagnose, prescribe a life philosophy, manufacture
   urgency, silently reprioritize or reschedule work, treat a Project as a Task, or claim that an
   unfinished maintenance process has made the workspace healthy.
 
@@ -43,8 +43,15 @@ checks, foreign keys, and separate public contracts make that a transitional sto
 than shared domain ownership. Physical extraction remains an Integration/database migration.
 
 Provider projections, persisted questions, rules, derived workload models, and review artifacts do
-not yet exist for Tasks. A future source must define authority, freshness, reconciliation, degraded
-state, and source-selection privacy before it enters this ledger.
+not yet exist for Tasks. The target imports commitments from external task providers and then uses
+nohmi as the authoritative working workspace. Bidirectional synchronization with multiple providers
+remains an intentionally open future option rather than a current goal; any provider source must
+define authority, freshness, reconciliation, degraded state, and source-selection privacy before it
+enters the ledger.
+
+The long-lived organizational container above Projects remains required, but its user-facing name
+is unresolved. A Project is a finite outcome; the higher container represents a durable
+responsibility or context and may contain multiple Projects and standalone Tasks.
 
 ## 3. Expert playbook
 
@@ -53,7 +60,7 @@ state, and source-selection privacy before it enters this ledger.
 | Project manager | Keep finite outcomes separate from next actions; preserve explicit List and Project context | Approved ontology and the GTD planning hierarchy cited there | Does not infer organizational meaning that the person did not supply |
 | Prioritization and workload planner | Distinguish deadline from reserved time; support executable plans and honest Today capacity | Implementation-intention and plan-formation research cited by the ontology | Does not silently choose priorities, dates, or schedules |
 | Behavior-change designer | Use prompts as optional cognitive offloading and keep habits/repeated observations in Tracking | Reminder and habit research cited by the ontology | Does not impose streaks, fixed habit-formation periods, wellness claims, or diagnosis |
-| Reviewer | Identify structural conflicts, stale assumptions, and recovery needs with source and revision evidence | ilo audit, policy, and optimistic-concurrency contracts | Does not claim professional certification or infer success from process completion |
+| Reviewer | Identify structural conflicts, stale assumptions, and recovery needs with source and revision evidence | nohmi audit, policy, and optimistic-concurrency contracts | Does not claim professional certification or infer success from process completion |
 
 The research interpretation and source links live in
 [the ontology specification](../superpowers/specs/2026-08-12-tasks-tracking-ontology-classification-design.md#research-interpretation).
@@ -97,8 +104,8 @@ conflicts instead of inventing a result. Permanent Task deletion is not public; 
 
 A future Tasks maintenance turn may inspect `all`, a bounded time window, or an exact List, Project,
 or Task. It must establish an evidence cutoff, inspect the ledger, detect invalid or stale planning
-assumptions, apply only approved rules, queue genuine questions, recompute workload/advice, publish
-a review, and verify the resulting state.
+assumptions, retrieve a purpose-bound User Knowledge context pack, apply only approved rules, queue
+genuine questions, recompute workload/advice, publish a review, and verify the resulting state.
 
 That workflow is not implemented. Tasks has no durable maintenance run/step persistence, leases,
 fencing, resume/cancel behavior, retry budget, status endpoint, or `maintain_tasks` MCP tool. Those
@@ -107,10 +114,12 @@ must not be simulated as a client-authored sequence of the existing surgical too
 
 ## 7. Rulebook, questions, and learning
 
-The current ledger stores explicit Task material, not inferred user rules. A future rulebook may
-propose bounded placement, timing, or review preferences, but only explicit approval can turn a
-proposal into a reusable rule. Rules must carry scope, evidence, version, confidence, exceptions,
-disablement, rollback, and the records to re-evaluate.
+The current ledger stores explicit Task material, not inferred user rules or a complete model of the
+person. A future steward may propose knowledge about placement, timing, planning, capacity, or
+review preferences. Such knowledge may become active through manual promotion or domain-defined
+safe automatic promotion after reinforcement or successful reuse, but it cannot grant action
+authority; reusable mutation rules retain their explicit policy boundary. Rules must carry scope,
+evidence, version, confidence, exceptions, disablement, rollback, and the records to re-evaluate.
 
 Persisted questions, answer provenance, deduplication, and learning behavior are not implemented.
 Natural-language classification and its golden corpus also remain design data; no classifier may
@@ -124,8 +133,9 @@ maintenance review.
 
 A future review must disclose scope, evidence cutoff, freshness, changes, workload and timing risks,
 outstanding questions, assumptions, confidence, approved rules, recommendations, and recovery
-links. Advice may connect the ledger to the person's explicit goals and constraints, but it must
-separate facts, inferences, preferences, and recommendations. No stable Tasks review artifact is
+links. Advice may connect the ledger to relevant goals, priorities, relationships, constraints,
+habits, and preferences from User Knowledge, but it must separate facts, inferences, policies, and
+recommendations. No stable Tasks review artifact is
 implemented by this foundation.
 
 ## 9. Surfaces and ownership

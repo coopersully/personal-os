@@ -7,9 +7,9 @@ import urllib.request
 from pathlib import Path
 
 ENDPOINTS = {
-    "app": "https://app.ilo.coopersully.me",
-    "api": "https://api.ilo.coopersully.me/health/ready",
-    "mcp": "https://mcp.ilo.coopersully.me/health/live",
+    "app": "https://nohmi.coopersully.me",
+    "api": "https://nohmi-api.coopersully.me/health/ready",
+    "mcp": "https://nohmi-mcp.coopersully.me/health/live",
 }
 
 
@@ -24,7 +24,7 @@ def command_json(args):
 
 
 def endpoint(url):
-    request = urllib.request.Request(url, headers={"User-Agent": "ilo-deploy-status"})
+    request = urllib.request.Request(url, headers={"User-Agent": "personal-os-deploy-status"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             return {"url": url, "ok": 200 <= response.status < 400, "status": response.status}

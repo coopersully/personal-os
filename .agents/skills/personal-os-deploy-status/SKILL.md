@@ -1,9 +1,9 @@
 ---
-name: ilo-deploy-status
-description: Check whether ilo main is live and healthy in production by correlating GitHub CI/deploy runs, production commit status, health workflow, incident issues, and public app/API/MCP endpoints, with optional manual AWS ECS drilldown. Use for deploy progress, failure diagnosis, production health, release provenance, or live-version questions.
+name: personal-os-deploy-status
+description: Check whether personal-os main is live and nohmi is healthy in production by correlating GitHub CI/deploy runs, production commit status, health workflow, incident issues, and public app/API/MCP endpoints. Use for deploy progress, failure diagnosis, production health, release provenance, or live-version questions.
 ---
 
-# ilo deploy status
+# nohmi deploy status
 
 Prefer live evidence because deployment state changes quickly. This skill is read-only.
 

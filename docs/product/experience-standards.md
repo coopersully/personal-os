@@ -2,9 +2,11 @@
 
 ## Purpose
 
-nohmi should feel like one shared work surface for a person and their
-agents. Pages may expose different material, but they should not invent a new
-information hierarchy or a new location for common actions each time.
+nohmi should feel like one coherent exoskeleton for a person and their agents.
+Each core workspace should first behave like the familiar best-in-class product
+category it replaces for ordinary use: mail client, task manager, calendar, or
+budget and net-worth application. Intelligence simplifies and connects those
+interfaces without turning them into a generic dashboard or chat transcript.
 
 ## Page anatomy
 

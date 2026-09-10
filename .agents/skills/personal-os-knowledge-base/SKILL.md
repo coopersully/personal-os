@@ -1,9 +1,9 @@
 ---
-name: ilo-knowledge-base
-description: Find, apply, and update ilo's authoritative engineering-facing product, architecture, design, deployment, release, MCP, and development documentation. Use when implementation, review, planning, or debugging needs durable repository context or reveals behavior future engineers and agents must know.
+name: personal-os-knowledge-base
+description: Find, apply, and update nohmi's authoritative engineering-facing product, architecture, design, deployment, release, MCP, and development documentation. Use when implementation, review, planning, or debugging needs durable repository context or reveals behavior future engineers and agents must know.
 ---
 
-# ilo knowledge base
+# personal-os knowledge base
 
 Use current repository docs as durable product and engineering truth. Do not infer behavior from
 code names, an old PR, or a historical plan when a current document exists.
@@ -14,9 +14,13 @@ code names, an old PR, or a historical plan when a current document exists.
 | --- | --- |
 | System boundary and technology | `docs/architecture/0001-system-shape.md`, `0002-technology.md` |
 | Finance invariants | `docs/architecture/0003-finance-intelligence.md` |
-| Workspace Ilo product doctrine | `docs/product/ilo-workspace-stewardship.md` |
-| New workspace Ilo charter | `docs/product/workspace-ilo-charter-template.md` |
-| Workspace stewardship architecture | `docs/architecture/0004-workspace-ilo-stewardship.md` |
+| Four workspaces and their interfaces | `docs/product/workspaces.md` |
+| Workspace stewardship product doctrine | `docs/product/workspace-stewardship.md` |
+| New workspace steward charter | `docs/product/workspace-charter-template.md` |
+| Workspace stewardship architecture | `docs/architecture/0004-workspace-stewardship.md` |
+| User Knowledge product contract | `docs/product/user-knowledge.md` |
+| User Knowledge architecture | `docs/architecture/0005-user-knowledge.md` |
+| External agent scheduling | `docs/product/automation-hosts.md`, then `docs/mcp.md` |
 | Product scope and acceptance | `docs/product/mvp.md`, then the relevant master-plan section |
 | Product model and interaction contract | `docs/product/master-design.md`, `experience-standards.md` |
 | Challenged assumptions and safety gates | `docs/product/assumptions-audit.md` |
@@ -50,7 +54,12 @@ and authoritative contracts, then update the misleading current doc rather than 
 
 The workspace-stewardship doctrine is a target product contract. When applying it, name the target
 capability separately from the current implementation slice. A client prompt, coding-agent skill,
-or proposed plan is not evidence that the runtime Ilo capability has shipped.
+or proposed plan is not evidence that the runtime capability has shipped.
+
+When a product discussion settles a durable goal, workspace responsibility, interface, knowledge
+rule, safety boundary, or naming decision, update the nearest canonical document before treating the
+conversation as complete. Do not record implementation delivery when the change documents target
+scope only.
 
 ## Completion gate
 

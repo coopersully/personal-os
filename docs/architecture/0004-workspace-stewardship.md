@@ -1,11 +1,11 @@
-# ADR 0004: Workspace Ilo stewardship
+# ADR 0004: Workspace stewardship
 
 - Status: Accepted
 - Date: 2026-08-15
 
 ## Context
 
-An MCP client can invoke tools, but it cannot be the source of Ilo's domain expertise, workflow
+An MCP client can invoke tools, but it cannot be the source of nohmi's domain expertise, workflow
 ordering, rules, durable progress, or truth about whether a workspace is maintained. Encoding that
 behavior in host prompts would make outcomes vary by client, lose learning between sessions, and
 turn retries into duplicate or unobservable work.
@@ -16,11 +16,11 @@ explains the resulting state. Those concepts must remain domain-owned while shar
 infrastructure.
 
 The product doctrine is defined in
-[`ilo-workspace-stewardship.md`](../product/ilo-workspace-stewardship.md).
+[`workspace-stewardship.md`](../product/workspace-stewardship.md).
 
 ## Decision
 
-Implement each workspace Ilo as these layered, domain-owned contracts:
+Implement each workspace steward as these layered, domain-owned contracts:
 
 1. **Ledger:** canonical material, provider projections, provenance, annotations, questions, rules,
    decisions, and review artifacts.
@@ -32,9 +32,11 @@ Implement each workspace Ilo as these layered, domain-owned contracts:
    recovery behavior.
 5. **Maintenance coordinator:** a durable run composed of named steps that can claim, resume,
    retry, settle, and report work over `all`, a time window, or an exact target.
-6. **Question and proposal model:** evidence-linked uncertainty that can resolve one case or propose
-   an explicitly approved reusable rule.
-7. **Status and review model:** readiness, freshness, backlog, health, recommendations, terminal
+6. **Knowledge contract:** required, optional, and prohibited User Knowledge plus the purpose,
+   sensitivity, freshness, and missing-context behavior for every workflow.
+7. **Question and proposal model:** evidence-linked uncertainty that can resolve one case, propose
+   knowledge, reinforce an existing belief, or propose a reusable rule subject to its action policy.
+8. **Status and review model:** readiness, freshness, backlog, health, recommendations, terminal
    run state, and a durable period narrative.
 
 The generic maintenance substrate may own run/step identifiers, leases, fencing, idempotency,
@@ -56,6 +58,10 @@ other domain judgment.
 - `apps/web` presents source health, ledger state, questions, approvals, advice, and reviews.
 - `apps/mcp` remains a stateless adapter. It exposes intent and surgical tools but owns no playbook,
   sequencing, learning, or completion decision.
+
+Shared User Knowledge, context assembly, and promotion policy follow
+[`ADR 0005`](0005-user-knowledge.md). Workspaces declare the context they need but do not duplicate
+global knowledge in domain profiles.
 
 Repository agent skills are engineering instructions only. They help coding agents implement this
 architecture; they are not runtime expertise, user memory, an approval source, or a prerequisite
@@ -83,8 +89,8 @@ setting, verifies the committed result, and publishes the period review.
 
 ## Reliability and observation
 
-A maintenance run records its requested scope, evidence cutoff, playbook/rulebook versions, steps,
-claims, effects, questions, failures, review artifact, and terminal status. External effects follow
+A maintenance run records its requested scope, purpose, evidence cutoff, playbook/rulebook and User
+Knowledge revisions, steps, claims, effects, questions, failures, review artifact, and terminal status. External effects follow
 the connector reliability contract. Process loss resumes from durable state; concurrent requests
 coalesce or fence; ambiguous effects reconcile before replay. Status and review surfaces must
 distinguish queued, active, maintained, maintained-with-questions, blocked, and failed work.
@@ -92,14 +98,14 @@ distinguish queued, active, maintained, maintained-with-questions, blocked, and 
 ## Parallel development
 
 Start each workspace from the
-[`workspace Ilo charter template`](../product/workspace-ilo-charter-template.md). Domain branches
+[`workspace steward charter template`](../product/workspace-charter-template.md). Domain branches
 own their ledger semantics, playbook, operations, coordinator, and review contract. Shared run
 infrastructure and composition roots remain Integration-owned and should land through thin,
 explicit registration seams.
 
 ## Consequences
 
-- A simple client instruction can produce consistent behavior across MCP hosts because Ilo owns the
+- A simple client instruction can produce consistent behavior across MCP hosts because nohmi owns the
   workflow.
 - User answers and approved rules persist independently of a conversation or model vendor.
 - Reviews explain partial completion and advice instead of reducing a run to success/failure.

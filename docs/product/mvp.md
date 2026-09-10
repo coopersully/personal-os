@@ -1,8 +1,15 @@
-# ilo MVP
+# nohmi MVP
+
+- Status: Historical acceptance baseline for the first shipped slice
+- Last reconciled: 2026-09-10
+
+This document records the original implementation boundary. It does not define the complete target;
+use the [master design](master-design.md), [workspace contract](workspaces.md), and
+[User Knowledge contract](user-knowledge.md) for current product direction.
 
 ## Product statement
 
-ilo is a transparent coordination layer shared by people and agents. It
+nohmi is a transparent coordination layer shared by people and agents. It
 combines reminders, calendars, and mail in one directly manipulable interface, while also exposing
 the same operations through the Model Context Protocol (MCP).
 
@@ -92,14 +99,15 @@ provider internals.
 - Native Apple and Windows widget extensions. The Tauri overlay and PWA are the
   initial cross-platform surfaces.
 - Shared/team calendars, invitations, scheduling polls, and meeting negotiation.
-- General-purpose memory, autonomous multi-agent orchestration, or generated apps.
+- General-purpose memory, autonomous multi-agent orchestration, or generated apps in this MVP
+  slice. A typed, purpose-bound User Knowledge system is now part of the approved target product.
 
 ## Source-of-truth rules
 
-- ilo is authoritative for users, reminders, sessions, access tokens,
+- nohmi is authoritative for users, reminders, sessions, access tokens,
   local calendars, local events, preferences, and audit records.
 - A connected provider is authoritative for its calendars, events, and mail.
-- ilo stores a normalized projection of provider data and retains the
+- nohmi stores a normalized projection of provider data and retains the
   remote identifiers, revision, and raw payload required for reconciliation.
 - An account-saved weather location retains the selected place label and
   coordinates from a searchable place picker so it can be retrieved without a
@@ -130,7 +138,7 @@ The MVP is complete only when all of the following are demonstrated:
    handoff, revalidate authorization at execution time, and reconcile uncertain provider effects
    before replay; permanent deletion remains unavailable.
 7. A person can authorize a remote agent from the deployed MCP endpoint with
-   visible scoped consent. The host can call `get_ilo_setup`, perform the safe
+   visible scoped consent. The host can call the setup entrypoint, perform the safe
    Mail setup work it assigns, return for signed-in approval, verify completion,
    and be revoked from Settings without requiring a separately installed skill.
 8. A Finance-scoped agent can inspect guided-setup readiness, save only a

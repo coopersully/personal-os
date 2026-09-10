@@ -1,9 +1,9 @@
 ---
 name: personal-os-frontend
-description: Build and refine accessible, domain-owned ilo React PWA experiences. Use when changing `apps/web`, critiquing or refining a screen, translating UX feedback into shared rules, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
+description: Build and refine accessible, domain-owned nohmi React PWA experiences. Use when changing `apps/web`, critiquing or refining a screen, translating UX feedback into shared rules, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
 ---
 
-# ilo frontend
+# nohmi frontend
 
 Follow `docs/design/foundations.md`, `docs/design/governance.md`,
 `docs/design/system.md`, the relevant page specification in
@@ -11,6 +11,11 @@ Follow `docs/design/foundations.md`, `docs/design/governance.md`,
 `docs/engineering/feature-ownership.md`. Apply the installed `shadcn` skill for
 component lifecycle and the available React best-practices guidance for
 performance work.
+
+Read `docs/product/workspaces.md` before changing a core workspace. Mail is a mail client, Tasks a
+task manager, Calendar a calendar, and Finances a budgeting and net-worth application; nohmi
+intelligence simplifies those familiar models rather than replacing them with a generic dashboard
+or chat surface.
 
 ## Diagnose refinement before editing
 
@@ -143,10 +148,16 @@ surface API policy or permission failures clearly.
 
 For agent-driven setup, render the authenticated server plan as the source of
 truth for current, blocked, and complete state. Ask the person only for the
-connection, preference decisions, or approvals Ilo cannot perform. Keep hosted
+connection, preference decisions, or approvals nohmi cannot perform. Keep hosted
 skills and procedural prompts as optional compatibility references; never make
-the person copy setup instructions between Ilo and an agent after the agent can
-call Ilo.
+the person copy setup instructions between nohmi and an agent after the agent can
+call nohmi.
+
+For User Knowledge, read `docs/product/user-knowledge.md`. Present it as About you or Your context:
+show what nohmi believes, whether the person stated it or nohmi inferred it, its source, confidence,
+scope, and allowed purposes, with direct promotion, correction, restriction, dispute, export, and
+deletion controls. Do not expose vector similarity, raw embeddings, or an unbounded memory dump as
+the primary experience.
 
 ## Verify interaction behavior
 

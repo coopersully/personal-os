@@ -1,15 +1,17 @@
 ---
 name: personal-os-mcp
-description: Build and review secure ilo MCP tools and transports. Use when changing `apps/mcp`, adding a tool or resource, modifying agent-token scopes, or evaluating agent-initiated mutations.
+description: Build and review secure nohmi MCP tools and transports. Use when changing `apps/mcp`, adding a tool or resource, modifying agent-token scopes, or evaluating agent-initiated mutations.
 ---
 
-# ilo MCP
+# nohmi MCP
 
 Read `docs/mcp.md` and the agent-action section of
 `docs/engineering/feature-ownership.md` before altering MCP behavior.
 For a workspace status or maintenance surface, also read
-`docs/product/ilo-workspace-stewardship.md` and
-`docs/architecture/0004-workspace-ilo-stewardship.md`.
+`docs/product/workspace-stewardship.md` and
+`docs/architecture/0004-workspace-stewardship.md`.
+For personal context or semantic retrieval, also read `docs/product/user-knowledge.md` and
+`docs/architecture/0005-user-knowledge.md`.
 
 ## Preserve the adapter boundary
 
@@ -60,6 +62,15 @@ For a workspace status or maintenance surface, also read
 - Advertise prompts only when their prerequisite read scopes are present.
 - Do not expose MCP Tasks until the API owns a durable handle, progress,
   idempotency/reconciliation rule, and terminal recovery contract.
+
+The current orientation and resource names above are compatibility identifiers. New design and the
+coordinated hard-cutover target use `get_nohmi_context`, `nohmi://`, `ui://nohmi/`, and `_nohmi`;
+do not add another compatibility alias before the runtime, tests, clients, and published skill move
+together.
+
+High-level workspace tools retrieve purpose-bound User Knowledge through the API. Surgical
+knowledge search applies scope, purpose, sensitivity, time, and status filters before semantic
+similarity; MCP never assembles a hidden global memory dump or turns confidence into authority.
 
 ## Keep one result and annotation contract
 

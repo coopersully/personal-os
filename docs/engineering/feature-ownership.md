@@ -34,6 +34,7 @@ parallel worktree ownership. It complements the system boundary in
 | Tasks | `apps/web/src/features/tasks`, `apps/api/src/routes/tasks.ts`, `apps/api/src/routes/task-lists.ts`, `apps/api/src/routes/task-projects.ts`, `apps/api/src/task-service.ts`, `apps/api/src/task-list-service.ts`, `apps/api/src/task-project-service.ts`, `packages/domain/src/task.ts`, `packages/domain/src/task-organization.ts`, `packages/api-client/src/features/tasks.ts`, `apps/mcp/src/tools/planning.ts` | Reminder lifecycle, Today composition, global navigation, generic Add menu, physical database extraction |
 | Reminders | `apps/web/src/features/reminders`, `apps/api/src/routes/reminders.ts`, `apps/api/src/reminder-service.ts`, `packages/domain/src/reminder.ts`, `packages/api-client/src/features/reminders.ts`, `apps/mcp/src/tools/reminders.ts` | Task/List/Project lifecycle, Prompt migration, Today composition, global navigation |
 | Tracking (planned) | `apps/web/src/features/tracking`, future Tracking route/service modules, `packages/domain` Tracking contracts, typed client and MCP Tracking adapters | Tasks, Reminders, Today composition, global navigation, provider health bridges |
+| User Knowledge (planned) | future `apps/web/src/features/knowledge`, User Knowledge route/service modules, `packages/domain` knowledge and context contracts, typed client and MCP adapters | Workspace ledgers, domain playbooks, action policy, provider records |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
 | Texting | `apps/web/src/features/texting`, `apps/api/src/routes/texting.ts`, `apps/api/src/texting-*`, `packages/domain/src/texting.ts`, `packages/connectors/src/twilio.ts`, `packages/api-client/src/features/texting.ts`, `apps/mcp/src/tools/texting.ts` | Account authentication, global navigation, migration journal |
@@ -42,7 +43,7 @@ parallel worktree ownership. It complements the system boundary in
 The following are Integration-owned until they are reduced to thin registries:
 
 - The typed workspace/navigation-owner manifest is the source of truth for the
-  five workspace defaults and route-to-sidebar ownership. Feature routes must
+  four workspace defaults plus Today and route-to-sidebar ownership. Feature routes must
   register an owner or explicitly use the account-utility owner; they must not
   infer sidebar composition from a leaf route.
 
@@ -84,17 +85,22 @@ from stable entity ID and revision (`provider: local`, no account), not accepted
 stored as a second provenance record. A future provider-backed container requires a new reviewed
 storage and source contract.
 
-The completed [Tasks Ilo charter](../product/tasks-ilo-charter.md) maps this shipped foundation and
+The target Tasks workspace imports external provider commitments and becomes authoritative for
+subsequent work. Bidirectional multi-provider synchronization remains a possible later extension,
+not a current requirement. The durable container above Projects remains a required concept, but its
+user-facing name is unresolved and must not be assumed from the storage type.
+
+The completed [Tasks workspace charter](../product/tasks-workspace-charter.md) maps this shipped foundation and
 its explicit follow-ups to the workspace-stewardship doctrine. It does not turn the unimplemented
 maintenance, question, learning, status, or review layers into Integration-owned behavior.
 
-## Workspace Ilo ownership
+## Workspace stewardship ownership
 
-A workspace owner owns the semantics of its Ilo: living ledger, researched expert playbook,
+A workspace owner owns the semantics of its steward: living ledger, researched expert playbook,
 definition of maintained, rulebook, surgical operations, maintenance-step graph, questions and
-proposals, learning behavior, health/advisory model, review artifact, and domain status. These
+proposals, knowledge contract, learning behavior, health/advisory model, review artifact, and domain status. These
 contracts stay in the domain's normal paths and are described in a completed
-[`workspace Ilo charter`](../product/workspace-ilo-charter-template.md).
+[`workspace steward charter`](../product/workspace-charter-template.md).
 
 Integration may own generic durable maintenance infrastructure such as run/step identifiers,
 leases, fencing, idempotency, retry history, terminal settlement, and shared result envelopes. It
@@ -105,8 +111,14 @@ Parallel workspace branches should deliver independently testable vertical slice
 schema, migration-journal, registry, and composition-root changes as explicit Integration handoffs.
 Do not move orchestration into an MCP host or coding-agent skill to avoid those seams. The governing
 product and architecture contracts are
-[`Ilo workspace stewardship`](../product/ilo-workspace-stewardship.md) and
-[`ADR 0004`](../architecture/0004-workspace-ilo-stewardship.md).
+[`nohmi workspace stewardship`](../product/workspace-stewardship.md),
+[`User Knowledge`](../product/user-knowledge.md), and
+[`ADR 0004`](../architecture/0004-workspace-stewardship.md).
+
+User Knowledge owns shared personal facts, relationships, goals, priorities, motives, preferences,
+constraints, routines, decisions, reinforcement, promotion, provenance, and purpose-bound context
+assembly. Workspace owners declare what knowledge a workflow requires and remain responsible for
+their own action rules; shared knowledge never becomes an Integration-owned domain decision.
 
 ## Required seams
 

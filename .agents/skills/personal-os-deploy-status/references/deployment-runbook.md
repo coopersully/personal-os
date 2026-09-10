@@ -1,4 +1,4 @@
-# ilo deployment status runbook
+# nohmi deployment status runbook
 
 ## Evidence order
 
@@ -27,9 +27,9 @@ surfaces.
 ## Public health
 
 ```bash
-curl --fail --location https://app.ilo.coopersully.me
-curl --fail https://api.ilo.coopersully.me/health/ready
-curl --fail https://mcp.ilo.coopersully.me/health/live
+curl --fail --location https://nohmi.coopersully.me
+curl --fail https://nohmi-api.coopersully.me/health/ready
+curl --fail https://nohmi-mcp.coopersully.me/health/live
 ```
 
 API readiness includes PostgreSQL connectivity. MCP liveness proves the process responds; protocol

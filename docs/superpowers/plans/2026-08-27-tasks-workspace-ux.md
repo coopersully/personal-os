@@ -112,7 +112,7 @@
 **Files:**
 - Modify: `e2e/product.spec.ts`
 - Modify: `.agents/skills/personal-os-qa/references/planning.md`
-- Modify: `docs/product/tasks-ilo-charter.md`
+- Modify: `docs/product/tasks-workspace-charter.md`
 - Modify: `docs/product/implementation-log.md`
 
 **Interfaces:**

@@ -70,7 +70,8 @@ person deliberately creates a workspace override:
 - whether replies may approve exact reversible proposals when global review bypass is off;
 - useful contextual identifiers with privacy-safe detail, or explicitly expanded message content;
 - first-party review and recovery links when context, length, or multiple items require them; and
-- the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery.
+- the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery; and
+- a deliberately long reminder interval for unresolved items.
 
 These controls affect communication and routing only. The global review-bypass setting decides
 whether an otherwise policy-authorized reversible action executes directly or enters review.
@@ -95,6 +96,10 @@ Quiet-hour deferral is enabled by default from 10:00 PM through 8:00 AM in the p
 zone. The person may change the window or select `any time`; deferred maintenance texts are
 revalidated and consolidated when the window ends, while replies to user-initiated messages remain
 immediate.
+
+Each actionable item produces one initial notification. An unchanged unresolved item may be
+mentioned again only after the configured reminder interval; repeated maintenance runs do not
+restart or bypass that interval. nohmi prefers missing a reminder over becoming repetitive.
 
 ## Inheritance boundary
 
@@ -139,6 +144,8 @@ behavior and must not be presented as shipped.
 
 - Whether notification overrides eventually apply independently to every channel or only to SMS
   initially.
+- The exact default reminder interval; it must be deliberately long rather than optimized for
+  notification completeness.
 - Whether maintenance cadence is configured in nohmi, delegated entirely to external schedulers,
   or represented only as an expected-check-in contract.
 - How much rule generation guided setup may propose before requiring a dedicated preview.

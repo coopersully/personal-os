@@ -83,6 +83,11 @@ is explicitly enabled. Texting revalidates deferred items at release; the worksp
 underlying question or action state current rather than treating a queued notification as truth.
 Texting consolidates multiple current items into one Reviews alert after quiet hours.
 
+Give each notification intent the durable work-item identity needed for deduplication. Rediscovery
+in later maintenance runs must not request another message; Texting may remind only after the
+person's deliberately long configured interval and after revalidating the item. Prefer silence over
+notification completeness.
+
 ## Verify the delivered slice
 
 Test domain decisions, migrated persistence, concurrent claims, retry/recovery, authorization,

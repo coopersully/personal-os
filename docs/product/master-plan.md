@@ -295,6 +295,9 @@ flowchart TD
   Support a custom window and explicit `any time` delivery; revalidate deferred items before release
   and consolidate multiple items into one Reviews alert. Never delay a direct reply to a
   user-initiated message.
+- Deduplicate actionable notifications by durable work-item identity across maintenance runs. Send
+  one initial alert, permit another only after the person's deliberately long configured reminder
+  interval, and revalidate and consolidate eligible items before sending.
 - Require normal nohmi authentication for every SMS deep link, retain the requested destination
   across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
   in the URL.

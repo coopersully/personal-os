@@ -117,6 +117,18 @@ recomputes relative dates, and consolidates multiple remaining items into one Re
 Replies to a conversation the person initiated are immediate and are not proactive maintenance
 notifications.
 
+### Reminder suppression
+
+Texting sends the initial actionable notification once. Repeated maintenance runs do not repeat an
+unchanged question, review, connector failure, or recovery step; reminder eligibility is attached
+to the durable work item rather than the number of times maintenance discovers it.
+
+An unresolved item may be mentioned again only after the person's configured reminder interval has
+fully elapsed. The default interval should be deliberately long: nohmi prefers silence and a less
+complete notification history over becoming repetitive or annoying. Before any reminder, Texting
+revalidates the item, suppresses resolved or expired work, and consolidates multiple eligible items
+into one unified Reviews alert.
+
 ## Global review bypass and SMS approval
 
 Review bypass is a global execution setting. It applies consistently to app, API, MCP, scheduled,
@@ -156,7 +168,8 @@ it needs different behavior. The configurable preferences are:
 - whether SMS replies may answer questions and review exact reversible proposals;
 - useful contextual identifiers with privacy-safe detail, or explicitly expanded content;
 - whether to include first-party review and recovery links; and
-- the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery.
+- the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery; and
+- the deliberately long interval before an unresolved item may be mentioned again.
 
 Custom maintenance instructions are workspace guidance, not Texting configuration. They apply to
 every setup or maintenance invocation regardless of whether it began in the app, MCP, an external

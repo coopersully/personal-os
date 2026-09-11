@@ -352,6 +352,9 @@ coherent response without reproducing domain expertise.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.
+- An actionable item is notified once and is not repeated by later maintenance runs. A reminder is
+  eligible only after a deliberately long user-configurable interval, after revalidation and
+  deduplication; nohmi prefers silence over notification completeness.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
   authority. After sign-in, the app returns the person to the requested review destination.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized

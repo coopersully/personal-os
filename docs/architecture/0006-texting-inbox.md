@@ -77,6 +77,8 @@ conversation message, child run, source evidence, policy, approval, effect, and 
 - Proactive maintenance delivery respects the default 10:00 PM–8:00 AM local quiet window, a custom
   window, or explicit `any time` mode. Deferred items are revalidated before release; resolved or
   expired work is not sent, and multiple remaining items become one unified Reviews notification.
+- Notification history is keyed to durable work-item identity. Rediscovery by later maintenance
+  runs cannot resend an unchanged item before the configured long reminder interval elapses.
 - STOP, disconnect, feature disablement, or workspace SMS disablement stops new sends and routing
   while preserving prior audit and recovery state.
 

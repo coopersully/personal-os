@@ -62,6 +62,16 @@ class DeployStatusTest(unittest.TestCase):
         controller = {"deployed": "old", "phase": "idle", "locked": True}
         self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_locked")
 
+    def test_lock_outranks_maintenance(self):
+        runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
+        controller = {"phase": "idle", "locked": True, "maintenance": True}
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_locked")
+
+    def test_lock_outranks_blocked_phase(self):
+        runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
+        controller = {"phase": "blocked", "locked": True, "error": "switch-failed"}
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_locked")
+
     def test_active_phase_without_lock_is_blocked(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
         controller = {

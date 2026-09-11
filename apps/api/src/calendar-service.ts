@@ -143,12 +143,9 @@ function iCalendarUidValue(line: string): string | null {
   return null;
 }
 
-/** Reads the stable iCalendar UID shared by projections from different providers. */
 function providerIndependentEventUid(record: CalendarEventRecord): string | null {
   const googleUid = record.raw?.iCalUID;
-  if (typeof googleUid === "string" && googleUid.trim()) {
-    return googleUid.trim();
-  }
+  if (typeof googleUid === "string" && googleUid.trim()) return googleUid.trim();
 
   const calendarData = record.raw?.data;
   if (typeof calendarData !== "string") return null;
@@ -160,34 +157,111 @@ function providerIndependentEventUid(record: CalendarEventRecord): string | null
   return null;
 }
 
-/** Collapses provider projections while retaining every source-to-canonical association. */
-function deduplicateEvents(records: CalendarEventRecord[]): {
+function normalizedEventTitle(title: string): string {
+  return title.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+type EventIdentityCluster = {
+  accountIds: Set<string>;
+  calendarIds: Set<string>;
+  canonicalId: string;
+  hasLocalSource: boolean;
+  memberIds: Set<string>;
+};
+
+/** Collapses provider mirrors without collapsing separate events within one calendar. */
+function deduplicateEvents(
+  records: CalendarEventRecord[],
+  accountIdByCalendarId: ReadonlyMap<string, string>,
+): {
   canonicalIdBySourceId: Map<string, string>;
   records: CalendarEventRecord[];
 } {
   const canonicalIdBySourceId = new Map<string, string>();
-  const canonicalIdByKey = new Map<string, string>();
+  const clustersByKey = new Map<string, EventIdentityCluster[]>();
   const deduplicated: CalendarEventRecord[] = [];
+
   for (const record of records) {
-    const sharedUid = providerIndependentEventUid(record);
-    const key = sharedUid
-      ? JSON.stringify([
-          sharedUid,
-          record.startsAt.toISOString(),
-          record.endsAt.toISOString(),
-          record.allDay,
-        ])
-      : record.remoteEventId
-        ? `${record.provider}:${record.calendarId}:${record.remoteEventId}`
-        : record.id;
-    const canonicalId = canonicalIdByKey.get(key);
-    if (canonicalId) {
-      canonicalIdBySourceId.set(record.id, canonicalId);
+    const occurrence = [record.startsAt.toISOString(), record.endsAt.toISOString(), record.allDay];
+    const semanticKey = `semantic:${JSON.stringify([
+      normalizedEventTitle(record.title),
+      ...occurrence,
+    ])}`;
+    const uid = record.blockSourceEventId ? null : providerIndependentEventUid(record);
+    const uidKey = uid ? `uid:${JSON.stringify([uid, ...occurrence])}` : null;
+    const accountId = accountIdByCalendarId.get(record.calendarId);
+    const uidCluster = uidKey
+      ? clustersByKey
+          .get(uidKey)
+          ?.find((candidate) => !candidate.calendarIds.has(record.calendarId))
+      : undefined;
+    const semanticCluster =
+      !record.blockSourceEventId && record.provider !== "local" && accountId
+        ? clustersByKey
+            .get(semanticKey)
+            ?.find(
+              (candidate) =>
+                !candidate.hasLocalSource &&
+                !candidate.calendarIds.has(record.calendarId) &&
+                !candidate.accountIds.has(accountId),
+            )
+        : undefined;
+    let cluster = uidCluster ?? semanticCluster;
+    const keys = record.blockSourceEventId ? [] : uidKey ? [uidKey, semanticKey] : [semanticKey];
+
+    if (
+      uidCluster &&
+      semanticCluster &&
+      uidCluster !== semanticCluster &&
+      ![...uidCluster.calendarIds].some((calendarId) => semanticCluster.calendarIds.has(calendarId))
+    ) {
+      for (const memberId of semanticCluster.memberIds) {
+        uidCluster.memberIds.add(memberId);
+        canonicalIdBySourceId.set(memberId, uidCluster.canonicalId);
+      }
+      for (const account of semanticCluster.accountIds) uidCluster.accountIds.add(account);
+      for (const calendar of semanticCluster.calendarIds) uidCluster.calendarIds.add(calendar);
+      uidCluster.hasLocalSource ||= semanticCluster.hasLocalSource;
+      const secondaryIndex = deduplicated.findIndex(
+        (candidate) => candidate.id === semanticCluster.canonicalId,
+      );
+      if (secondaryIndex >= 0) deduplicated.splice(secondaryIndex, 1);
+      for (const [key, clusters] of clustersByKey) {
+        if (!clusters.includes(semanticCluster)) continue;
+        clustersByKey.set(key, [
+          ...new Set(
+            clusters.map((candidate) => (candidate === semanticCluster ? uidCluster : candidate)),
+          ),
+        ]);
+      }
+      cluster = uidCluster;
+    }
+
+    if (cluster) {
+      if (accountId) cluster.accountIds.add(accountId);
+      cluster.calendarIds.add(record.calendarId);
+      cluster.hasLocalSource ||= record.provider === "local";
+      cluster.memberIds.add(record.id);
+      canonicalIdBySourceId.set(record.id, cluster.canonicalId);
+      for (const key of keys) {
+        const clusters = clustersByKey.get(key) ?? [];
+        if (!clusters.includes(cluster)) clustersByKey.set(key, [...clusters, cluster]);
+      }
       continue;
     }
-    canonicalIdByKey.set(key, record.id);
+
+    const nextCluster = {
+      accountIds: new Set(accountId ? [accountId] : []),
+      calendarIds: new Set([record.calendarId]),
+      canonicalId: record.id,
+      hasLocalSource: record.provider === "local",
+      memberIds: new Set([record.id]),
+    };
     canonicalIdBySourceId.set(record.id, record.id);
     deduplicated.push(record);
+    for (const key of keys) {
+      clustersByKey.set(key, [...(clustersByKey.get(key) ?? []), nextCluster]);
+    }
   }
   return { canonicalIdBySourceId, records: deduplicated };
 }
@@ -235,6 +309,7 @@ function eventBlock(record: CalendarEventRecord): CalendarEventBlock {
     eventId: record.id,
     mode: record.blockMode as EventBlockMode,
     provider: record.provider,
+    sourceEventId: record.blockSourceEventId as string,
     updatedAt: record.updatedAt.toISOString(),
   };
 }
@@ -490,6 +565,63 @@ export function createCalendarService({
         ),
       )
       .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
+  }
+
+  async function findMirrorEvents(
+    source: CalendarEventRecord,
+    executor: Pick<Database, "select"> = db,
+  ): Promise<CalendarEventRecord[]> {
+    const candidates = await executor
+      .select()
+      .from(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.userId, source.userId),
+          eq(calendarEvents.startsAt, source.startsAt),
+          eq(calendarEvents.endsAt, source.endsAt),
+          eq(calendarEvents.allDay, source.allDay),
+          isNull(calendarEvents.blockSourceEventId),
+          isNull(calendarEvents.deletedAt),
+        ),
+      );
+    const candidateCalendarIds = [...new Set(candidates.map((candidate) => candidate.calendarId))];
+    const candidateCalendars = await executor
+      .select()
+      .from(calendars)
+      .where(
+        and(
+          eq(calendars.userId, source.userId),
+          inArray(calendars.id, candidateCalendarIds),
+          isNull(calendars.deletedAt),
+        ),
+      );
+    const accountIdByCalendarId = new Map(
+      candidateCalendars.map((calendar) => [calendar.id, calendar.accountId]),
+    );
+    const selectedCalendarPriority = new Map(
+      candidateCalendars
+        .filter((calendar) => calendar.isSelected)
+        .sort(
+          (left, right) =>
+            Number(right.isPrimary) - Number(left.isPrimary) ||
+            Number(right.isWritable) - Number(left.isWritable) ||
+            left.name.localeCompare(right.name) ||
+            left.id.localeCompare(right.id),
+        )
+        .map((calendar, index) => [calendar.id, index]),
+    );
+    const ordered = candidates.sort(
+      (left, right) =>
+        (selectedCalendarPriority.get(left.calendarId) ?? Number.MAX_SAFE_INTEGER) -
+          (selectedCalendarPriority.get(right.calendarId) ?? Number.MAX_SAFE_INTEGER) ||
+        left.createdAt.getTime() - right.createdAt.getTime() ||
+        left.id.localeCompare(right.id),
+    );
+    const identity = deduplicateEvents(ordered, accountIdByCalendarId);
+    const canonicalId = identity.canonicalIdBySourceId.get(source.id) ?? source.id;
+    return ordered.filter(
+      (candidate) => identity.canonicalIdBySourceId.get(candidate.id) === canonicalId,
+    );
   }
 
   async function serializeWithBlocks(record: CalendarEventRecord): Promise<CalendarEvent> {
@@ -872,57 +1004,68 @@ export function createCalendarService({
       assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
       const destination = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(destination);
-      if (destination.id === source.calendarId) {
-        throw new AppError("invalid_request", "An event cannot block its own calendar.");
-      }
-      const [existing] = await db
-        .select()
-        .from(calendarEvents)
-        .where(
-          and(
-            eq(calendarEvents.blockSourceEventId, source.id),
-            eq(calendarEvents.calendarId, destination.id),
-            isNull(calendarEvents.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (existing) return serializeWithBlocks(source);
-
       const mirrored = blockInput(source, destination.id, input.mode);
-      // A precise, unlinked Busy event can be adopted. This makes the initial migration from
-      // separately-created provider events safe without ever merging arbitrary detailed events.
-      const adoptionCandidates =
-        input.mode === "busy"
-          ? await db
-              .select()
-              .from(calendarEvents)
-              .where(
-                and(
-                  eq(calendarEvents.userId, context.principal.userId),
-                  eq(calendarEvents.calendarId, destination.id),
-                  eq(calendarEvents.title, "Busy"),
-                  eq(calendarEvents.startsAt, source.startsAt),
-                  eq(calendarEvents.endsAt, source.endsAt),
-                  eq(calendarEvents.allDay, source.allDay),
-                  isNull(calendarEvents.blockSourceEventId),
-                  isNull(calendarEvents.deletedAt),
-                ),
-              )
-              .limit(2)
-          : [];
-      const adopted = adoptionCandidates.length === 1 ? adoptionCandidates[0] : undefined;
-      const effect =
-        !adopted && destination.provider !== "local"
-          ? providerEffect("create", destination, null, "block")
-          : null;
-      const ledger = providerLedger("create_event_block", effect ? [effect] : [], context);
-      const remote = adopted
-        ? null
-        : effect
-          ? await ledger.run(effect, () => connectedEvents.create(destination, mirrored))
-          : null;
-      await ledger.commit(() =>
-        db.transaction(async (transaction) => {
+      const lockKey = `calendar-event-block:${context.principal.userId}:${source.startsAt.toISOString()}:${source.endsAt.toISOString()}:${source.allDay}:${destination.id}`;
+      let mirrorCalendarIds = new Set<string>();
+      let mirrorSourceIds: string[] = [];
+      await db.transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
+        );
+        const mirrorEvents = await findMirrorEvents(source, transaction);
+        mirrorCalendarIds = new Set(mirrorEvents.map((event) => event.calendarId));
+        if (mirrorCalendarIds.has(destination.id)) {
+          throw new AppError(
+            "invalid_request",
+            "An event cannot block a calendar that already contains this occurrence.",
+          );
+        }
+        mirrorSourceIds = mirrorEvents.map((event) => event.id).sort();
+        const existingBlocks = await transaction
+          .select()
+          .from(calendarEvents)
+          .where(
+            and(
+              inArray(calendarEvents.blockSourceEventId, mirrorSourceIds),
+              isNull(calendarEvents.deletedAt),
+            ),
+          )
+          .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
+        if (existingBlocks.some((block) => block.calendarId === destination.id)) return;
+
+        // A precise, unlinked Busy event can be adopted. This makes the initial migration from
+        // separately-created provider events safe without ever merging arbitrary detailed events.
+        const adoptionCandidates =
+          input.mode === "busy"
+            ? await transaction
+                .select()
+                .from(calendarEvents)
+                .where(
+                  and(
+                    eq(calendarEvents.userId, context.principal.userId),
+                    eq(calendarEvents.calendarId, destination.id),
+                    eq(calendarEvents.title, "Busy"),
+                    eq(calendarEvents.startsAt, source.startsAt),
+                    eq(calendarEvents.endsAt, source.endsAt),
+                    eq(calendarEvents.allDay, source.allDay),
+                    isNull(calendarEvents.blockSourceEventId),
+                    isNull(calendarEvents.deletedAt),
+                  ),
+                )
+                .limit(2)
+            : [];
+        const adopted = adoptionCandidates.length === 1 ? adoptionCandidates[0] : undefined;
+        const effect =
+          !adopted && destination.provider !== "local"
+            ? providerEffect("create", destination, null, "block")
+            : null;
+        const ledger = providerLedger("create_event_block", effect ? [effect] : [], context);
+        const remote = adopted
+          ? null
+          : effect
+            ? await ledger.run(effect, () => connectedEvents.create(destination, mirrored))
+            : null;
+        await ledger.commit(async () => {
           await requireCurrentRevision(transaction, source, false);
           const created = adopted
             ? requireRevisionWrite(
@@ -975,9 +1118,22 @@ export function createCalendarService({
               ...context,
             }),
           );
-        }),
-      );
-      return serializeWithBlocks(source);
+        });
+      });
+      const mirrorBlocks = await db
+        .select()
+        .from(calendarEvents)
+        .where(
+          and(
+            inArray(calendarEvents.blockSourceEventId, mirrorSourceIds),
+            isNull(calendarEvents.deletedAt),
+          ),
+        )
+        .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
+      const sourceCalendar = await findCalendar(source.userId, source.calendarId);
+      return serializeEvent(source, mirrorBlocks.map(eventBlock), sourceCalendar.accountId, [
+        ...mirrorCalendarIds,
+      ]);
     },
 
     async createLocalCalendar(
@@ -1260,21 +1416,25 @@ export function createCalendarService({
       if (query.calendarIds) {
         calendarConditions.push(inArray(calendars.id, query.calendarIds));
       }
-      const calendarRecords = await db
+      const allCalendarRecords = await db
         .select()
         .from(calendars)
-        .where(and(...calendarConditions))
+        .where(and(eq(calendars.userId, userId), isNull(calendars.deletedAt)))
         .orderBy(
           desc(calendars.isPrimary),
           desc(calendars.isWritable),
           asc(calendars.name),
           asc(calendars.id),
         );
+      const requestedCalendarIds = query.calendarIds ? new Set(query.calendarIds) : null;
+      const calendarRecords = requestedCalendarIds
+        ? allCalendarRecords.filter((calendar) => requestedCalendarIds.has(calendar.id))
+        : allCalendarRecords;
       const calendarIds = deduplicateCalendars(calendarRecords)
         .filter((calendar) => calendar.isSelected)
         .map((calendar) => calendar.id);
       const accountIdByCalendarId = new Map(
-        calendarRecords.map((calendar) => [calendar.id, calendar.accountId]),
+        allCalendarRecords.map((calendar) => [calendar.id, calendar.accountId]),
       );
       const conditions = [
         eq(calendarEvents.userId, userId),
@@ -1314,6 +1474,47 @@ export function createCalendarService({
             calendarIds.indexOf(left.calendarId) - calendarIds.indexOf(right.calendarId) ||
             left.id.localeCompare(right.id),
         );
+      const identityRecords = await db
+        .select({ event: calendarEvents })
+        .from(calendarEvents)
+        .innerJoin(
+          calendars,
+          and(eq(calendars.id, calendarEvents.calendarId), isNull(calendars.deletedAt)),
+        )
+        .where(
+          and(
+            eq(calendarEvents.userId, userId),
+            isNull(calendarEvents.blockSourceEventId),
+            isNull(calendarEvents.deletedAt),
+            lt(calendarEvents.startsAt, new Date(query.to)),
+            gt(calendarEvents.endsAt, new Date(query.from)),
+          ),
+        );
+      const selectedCalendarPriority = new Map(
+        calendarIds.map((calendarId, index) => [calendarId, index]),
+      );
+      const identityEvents = identityRecords
+        .map(({ event }) => event)
+        .sort((left, right) => {
+          const leftPriority = selectedCalendarPriority.get(left.calendarId);
+          const rightPriority = selectedCalendarPriority.get(right.calendarId);
+          return (
+            left.startsAt.getTime() - right.startsAt.getTime() ||
+            (leftPriority ?? Number.MAX_SAFE_INTEGER) -
+              (rightPriority ?? Number.MAX_SAFE_INTEGER) ||
+            left.createdAt.getTime() - right.createdAt.getTime() ||
+            left.id.localeCompare(right.id)
+          );
+        });
+      const identity = deduplicateEvents(identityEvents, accountIdByCalendarId);
+      const identityCalendarIdsByCanonicalId = new Map<string, Set<string>>();
+      for (const record of identityEvents) {
+        const canonicalId = identity.canonicalIdBySourceId.get(record.id) ?? record.id;
+        const calendarIdsForIdentity =
+          identityCalendarIdsByCanonicalId.get(canonicalId) ?? new Set();
+        calendarIdsForIdentity.add(record.calendarId);
+        identityCalendarIdsByCanonicalId.set(canonicalId, calendarIdsForIdentity);
+      }
       const linkedSourceIds = Array.from(
         new Set(
           eventRecords.flatMap((record) =>
@@ -1339,12 +1540,32 @@ export function createCalendarService({
       const visibleRecords = eventRecords.filter((record) => {
         if (!record.blockSourceEventId) return true;
         const source = sourcesById.get(record.blockSourceEventId);
-        return !source || !visibleCalendarIds.has(source.calendarId);
+        if (!source) return true;
+        const canonicalId = identity.canonicalIdBySourceId.get(source.id) ?? source.id;
+        return ![...(identityCalendarIdsByCanonicalId.get(canonicalId) ?? [])].some((calendarId) =>
+          visibleCalendarIds.has(calendarId),
+        );
       });
-      const deduplicated = deduplicateEvents(visibleRecords);
-      const displayedSourceIds = visibleRecords
-        .filter((record) => !record.blockSourceEventId)
-        .map((record) => record.id);
+      const deduplicated = deduplicateEvents(visibleRecords, accountIdByCalendarId);
+      const sourceCalendarIdsByCanonicalId = new Map<string, Set<string>>();
+      const visibleCanonicalIdBySourceId = new Map<string, string>();
+      for (const canonical of deduplicated.records) {
+        if (canonical.blockSourceEventId) continue;
+        const identityCanonicalId =
+          identity.canonicalIdBySourceId.get(canonical.id) ?? canonical.id;
+        sourceCalendarIdsByCanonicalId.set(
+          canonical.id,
+          new Set(
+            identityCalendarIdsByCanonicalId.get(identityCanonicalId) ?? [canonical.calendarId],
+          ),
+        );
+        for (const sourceRecord of identityEvents) {
+          if (identity.canonicalIdBySourceId.get(sourceRecord.id) === identityCanonicalId) {
+            visibleCanonicalIdBySourceId.set(sourceRecord.id, canonical.id);
+          }
+        }
+      }
+      const displayedSourceIds = [...visibleCanonicalIdBySourceId.keys()];
       const blockRecords =
         displayedSourceIds.length > 0
           ? await db
@@ -1362,7 +1583,7 @@ export function createCalendarService({
       const blocksBySource = new Map<string, CalendarEventBlock[]>();
       for (const block of blockRecords) {
         const sourceId = block.blockSourceEventId as string;
-        const canonicalId = deduplicated.canonicalIdBySourceId.get(sourceId) ?? sourceId;
+        const canonicalId = visibleCanonicalIdBySourceId.get(sourceId) ?? sourceId;
         blocksBySource.set(canonicalId, [
           ...(blocksBySource.get(canonicalId) ?? []),
           eventBlock(block),
@@ -1373,6 +1594,7 @@ export function createCalendarService({
           record,
           blocksBySource.get(record.id) ?? [],
           accountIdByCalendarId.get(record.calendarId) ?? null,
+          [...(sourceCalendarIdsByCanonicalId.get(record.id) ?? new Set([record.calendarId]))],
         ),
       );
     },

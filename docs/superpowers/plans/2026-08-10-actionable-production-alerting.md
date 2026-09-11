@@ -304,7 +304,7 @@ then execute:
 ```bash
 ECS_CLUSTER=personal-os-prod node .github/scripts/check-connector-observability.mjs
 PYTHONDONTWRITEBYTECODE=1 python3 \
-  .agents/skills/ilo-deploy-status/scripts/check_deploy_status.py --pretty
+  .agents/skills/personal-os-deploy-status/scripts/check_deploy_status.py --pretty
 ```
 
 Verify all public endpoints return 200; raw API health and deployment alarms are OK; the actionable composite is OK; connector freshness emits current one-minute samples; every notifying metric/composite alarm has empty recovery actions; and no SNS action executed for the planned drain or its recovery.

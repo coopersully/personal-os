@@ -5,21 +5,78 @@
 > trademark terms are available in [COMMERCIAL.md](COMMERCIAL.md) and
 > [TRADEMARKS.md](TRADEMARKS.md).
 
-nohmi is a transparent coordination layer shared by people and agents. It combines reminders,
-calendars, and unified mail in one directly editable surface and exposes the same material through
-HTTP and MCP.
+nohmi is an autonomous exoskeleton for power users in an increasingly agentic and online world. It
+gives the person ownership of their data, workflows, and agent authority, learns how their life
+works, and helps authorized agents act as capable copilots rather than disconnected chat sessions.
 
-The first slice is complete enough to run end to end:
+The internal repository and infrastructure name is `personal-os`; `nohmi` is the user-facing product
+name and is always lowercase.
+
+## Product model
+
+nohmi unifies four core workspaces and makes each available through a simple, familiar application,
+the public API, and MCP:
+
+| Workspace | User interface | Agent outcome |
+| --- | --- | --- |
+| Mail | A complete unified mail client across accounts | Triage communication, resolve safe work, and leave only genuine decisions |
+| Tasks | An authoritative task manager fed by local capture and external imports | Keep commitments clarified, intentional, feasible, and connected to priorities |
+| Calendar | A unified calendar across accounts | Protect time, reconcile conflicts, and make schedules reflect the person's reality |
+| Finances | A budget, cash-flow, balance, transaction, and net-worth application | Keep financial activity understood and plans aligned with current evidence and goals |
+
+Today is the calm cross-workspace operating surface. It shows what matters now, what requires a
+decision, and what nohmi completed without replacing the native models owned by each workspace.
+
+Texting is the shared general inbox rather than a fifth workspace. A person can send a free-form
+request that nohmi routes to the owning workspaces, answer exact questions or reversible reviews,
+and receive concise maintenance results and first-party links according to global and per-workspace
+settings.
+
+Every workspace provides narrow surgical tools plus a domain-owned setup, status, and maintenance
+workflow. External platforms such as ChatGPT, Codex, Claude, Gemini, or an operating-system
+scheduler may choose when to invoke maintenance; nohmi owns the expertise, User Knowledge retrieval,
+policy, durable execution, questions, audit, recovery, and verified outcome.
+
+User Knowledge is the shared, typed, semantically searchable model of the person's goals,
+priorities, motives, relationships, circumstances, preferences, constraints, routines, and learned
+patterns. Reinforced low-risk inferences may become active safely, but knowledge never grants action
+authority; the person can always inspect, correct, promote, restrict, export, or delete it.
+
+The complete target is documented in:
+
+- [Master product and experience design](docs/product/master-design.md)
+- [Naming contract](docs/product/naming.md)
+- [Workspace purposes and interfaces](docs/product/workspaces.md)
+- [Workspace stewardship](docs/product/workspace-stewardship.md)
+- [Per-workspace settings](docs/product/workspace-settings.md)
+- [User Knowledge](docs/product/user-knowledge.md)
+- [Texting and SMS](docs/product/texting-operations.md)
+- [External automation hosts](docs/product/automation-hosts.md)
+- [Master delivery plan](docs/product/master-plan.md)
+- [MCP integration](docs/mcp.md)
+
+## Current implementation
+
+The current product slice is complete enough to run end to end, but it does not yet implement the
+entire target described above:
 
 - responsive installable React PWA;
-- compact Tauri overlay for macOS and Windows with always-on-top mode;
-- reminder, local-calendar, and event workflows;
-- unified Google and iCloud mailboxes with search, conversation reading, durable drafts, and
-  human-confirmed plain-text sending;
+- installable macOS desktop app plus the shared desktop renderer and Windows build path;
+- organized Tasks workspace with Inbox, Lists, Projects, lifecycle, planning fields, Trash, and
+  revision-safe MCP operations;
+- reminder, unified-calendar, event-management, cross-provider deduplication, and selected-calendar
+  workflows;
+- unified Google and iCloud mailboxes with search, conversation reading, durable drafts,
+  human-confirmed sending, provider-backed actions, and reviewed retention rules;
 - multi-account Google Calendar/Gmail OAuth, discovery, synchronization, and calendar write-through CRUD;
 - one iCloud app-specific-password connection for IMAP Mail, CalDAV Calendar, or both;
+- Finance accounts, imports, transactions, ownership semantics, review inbox, budgets, playbook,
+  setup, maintenance, and review workflows;
 - opaque human sessions and separately scoped, revocable agent tokens;
 - MCP over stdio and Streamable HTTP;
+- agent texting through a hardened Twilio lifecycle;
+- a Settings-owned Reviews destination aggregating available Review and Attention work across Mail,
+  Calendar, Tasks, and Finances with workspace/type filters and domain-owned action links;
 - actor-aware, append-only activity history;
 - PostgreSQL migrations and production containers.
 
@@ -60,50 +117,18 @@ The checked-in Codex environment exposes deterministic actions backed by one lif
 - **Verify** runs mirror checks, lint, types, coverage, every production build, and E2E acceptance tests.
 - **Build** builds all applications and packages, including the native desktop bundles.
 
-Playwright uses local web `5174` and API `8797` by default. When another local project owns either
-port, set `ILO_E2E_WEB_PORT` and `ILO_E2E_API_PORT`; the Playwright client and its isolated fixture
-servers consume the same overrides.
+Playwright uses local web `5174` and API `8797` by default. See
+[local development](docs/local-development.md) for supported port overrides and isolated test
+servers.
 
 The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down.
 
 Linked worktrees copy the primary `.env` on setup and start, then generate an ignored `.env.codex.local` containing only non-secret runtime configuration. Docker labels record ownership, and Start removes confirmed orphan projects that no longer appear in `git worktree list`.
 
-### Run local source against production
-
-An explicitly acknowledged operator mode runs the current worktree's API, MCP server, and web app
-directly against live production PostgreSQL. It uses the worktree's normal local ports and a private
-Session Manager tunnel; it does not make RDS public or write production values into `.env`.
-
-Prerequisites are the AWS CLI, Session Manager plugin, the applied resources in
-`infra/local-production-runtime.tf`, and an AWS profile allowed to assume
-`personal-os-prod-local-production-runtime`. Start it in an attached terminal:
-
-```bash
-ILO_PRODUCTION_SOURCE_PROFILE=<named-ilo-operator-profile> \
-ILO_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
-pnpm env:prod:start
-```
-
-This is the real product boundary: local reads, writes, migrations, MCP actions, connector calls,
-scheduled work, email, and provider effects operate on production. Production webhooks continue to
-reach the hosted API and update the same database. The helper reads the deployed ECS task's exact
-runtime parameter references into process memory, replaces only local origins and the tunneled
-database address, and removes AWS credentials before spawning product services.
-
-Use another terminal to inspect or stop only this worktree's production runtime:
-
-```bash
-pnpm env:prod:status
-pnpm env:prod:stop
-```
-
-Normal `pnpm env:start` remains isolated on the worktree's Docker PostgreSQL volume.
-
 The same controls are available outside Codex:
 
 ```bash
 pnpm env:start
-pnpm env:prod:status
 pnpm env:status
 pnpm env:logs
 pnpm env:gc
@@ -117,18 +142,13 @@ pnpm verify
 Fixture credentials and scenario coverage are documented in
 [docs/engineering/qa-fixtures.md](docs/engineering/qa-fixtures.md).
 
-## Desktop overlay
+## Desktop app
 
-The packaged desktop app is the native overlay client; it does not bundle PostgreSQL or the API.
-Start the local services before opening an installed copy:
-
-```bash
-docker compose up --detach
-open -a "nohmi" # macOS
-```
-
-The services keep running after the window closes. Stop them with `docker compose down`; local data
-is preserved unless you explicitly add `--volumes`.
+The macOS app connects to the hosted nohmi service by default and supports a validated custom HTTPS
+server or loopback development origin. Credentials live in Keychain; account-scoped settings cover
+resident lifecycle, menu-bar and Dock behavior, launch at login, notifications, WidgetKit widgets,
+the optional desktop pet, and wallpapers. See [desktop operations](apps/desktop/README.md) for local
+development, provisioning, signing, release, recovery, and installed-app acceptance.
 
 For desktop development and packaging:
 

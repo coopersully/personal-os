@@ -1,15 +1,19 @@
 ---
 name: personal-os-mcp
-description: Build and review secure ilo MCP tools and transports. Use when changing `apps/mcp`, adding a tool or resource, modifying agent-token scopes, or evaluating agent-initiated mutations.
+description: Build and review secure nohmi MCP tools and transports. Use when changing `apps/mcp`, adding a tool or resource, modifying agent-token scopes, or evaluating agent-initiated mutations.
 ---
 
-# ilo MCP
+# nohmi MCP
 
 Read `docs/mcp.md` and the agent-action section of
 `docs/engineering/feature-ownership.md` before altering MCP behavior.
 For a workspace status or maintenance surface, also read
-`docs/product/ilo-workspace-stewardship.md` and
-`docs/architecture/0004-workspace-ilo-stewardship.md`.
+`docs/product/workspace-stewardship.md` and
+`docs/architecture/0004-workspace-stewardship.md`.
+For personal context or semantic retrieval, also read `docs/product/user-knowledge.md` and
+`docs/architecture/0005-user-knowledge.md`.
+For the general SMS inbox, workspace notification intents, or Texting maintenance, also read
+`docs/product/texting-operations.md` and `docs/architecture/0006-texting-inbox.md`.
 
 ## Preserve the adapter boundary
 
@@ -22,16 +26,28 @@ For a workspace status or maintenance surface, also read
 
 ## Expose workspace intent without moving intelligence
 
+- Target functional parity with the first-party app through typed, capability-specific tools. An
+  appropriately scoped agent should be able to inspect and change workspace settings, notification
+  channels, Texting enablement, maintenance guidance, rules, and ordinary domain material without
+  screen scraping or a generic unrestricted settings object.
+- Keep permission boundaries explicit. A settings-writing agent cannot change its own credential or
+  scopes, infer permission from tool visibility, or use a broad settings grant to weaken stronger
+  consent, privacy, approval, security, or account-ownership requirements.
 - For a mature workspace, prefer `get_<workspace>_status` and `maintain_<workspace>` as the small
-  high-level intent surface, plus granular tools for useful surgical operations.
+  high-level intent surface, plus `setup_<workspace>` or the shared setup plan when onboarding is
+  nontrivial and granular tools for useful surgical operations.
 - Treat maintenance as one domain-owned, durable stewardship turn—not a batch endpoint or a
   client-authored sequence of tool calls.
 - Return readiness, freshness, backlog, questions, run state, review, advice, and recovery links
   from API-owned contracts. Do not calculate maintained state in MCP.
 - Never embed the expert playbook, rulebook, retry order, learning behavior, or completion criteria
   in tool descriptions, prompts, or host-specific instructions.
+- Keep workspace vocabulary normalized and low entropy. Preserve provider identity, capability,
+  revision, and evidence, but do not make agents learn a separate workflow for each provider.
 - Do not claim the conventional intent tools exist unless current discovery and tests prove they
   are shipped for that workspace.
+- Treat `get_texting_status` and `maintain_texting` as target high-level general-inbox tools, not
+  workspace tools. Keep routing and child-intent coordination in the API; MCP remains an adapter.
 
 ## Add a tool safely
 
@@ -61,6 +77,18 @@ For a workspace status or maintenance surface, also read
 - Do not expose MCP Tasks until the API owns a durable handle, progress,
   idempotency/reconciliation rule, and terminal recovery contract.
 
+The current orientation and resource names above are compatibility identifiers. New design and the
+coordinated hard-cutover target use `get_nohmi_context`, `nohmi://`, `ui://nohmi/`, and `_nohmi`;
+do not add another compatibility alias before the runtime, tests, clients, and published skill move
+together.
+
+High-level workspace tools retrieve purpose-bound User Knowledge through the API. Surgical
+knowledge search applies scope, purpose, sensitivity, time, and status filters before semantic
+similarity; MCP never assembles a hidden global memory dump or turns confidence into authority.
+Fine-grained per-agent controls over what enters each external model host's context are a deferred
+future capability; use current credential scopes and purpose-bounded API results without claiming
+that later control surface exists.
+
 ## Keep one result and annotation contract
 
 The tool surface supplies all four standard annotations and the shared output
@@ -81,3 +109,7 @@ Every mutation is `read_only`, `preview`, `approve_each`, or `approved_rule`.
 Use the API's policy decision and audit behavior; never infer an approval,
 permanent financial categorization rule, or provider capability locally. Keep
 source references and actor/policy audit data intact.
+
+For multi-workspace requests, preserve verified child successes and return failed, blocked, or
+uncertain siblings exactly. Do not invent cross-provider atomic rollback or collapse partial
+completion into a success result.

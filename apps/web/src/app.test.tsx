@@ -20,6 +20,8 @@ import {
   airQualityDescription,
   formatTimelineTimeRange,
   formatWeatherFreshness,
+  overlapOrbitPoint,
+  overlapPinOffset,
   positionTimelineEvents,
   todayTimelineDensity,
   todayTimelineItemRange,
@@ -6379,13 +6381,26 @@ describe("ilo web app", () => {
   });
 
   it("syncs calendars through details-included and shown-as-busy badges", async () => {
+    const canonicalBlock = {
+      calendarId: googleCalendar.id,
+      eventId: "77777777-7777-4777-8777-777777777777",
+      mode: "details" as const,
+      provider: "google" as const,
+      sourceEventId: id,
+    };
     const block = {
       calendarId: nullColorCalendar.id,
       eventId: thirdId,
       mode: "busy" as const,
       provider: "google" as const,
+      sourceEventId: secondId,
     };
-    const linkedEvent = { ...event, blocks: [block] };
+    const duplicateBlock = {
+      ...block,
+      eventId: "99999999-9999-4999-8999-999999999998",
+      sourceEventId: "99999999-9999-4999-8999-999999999999",
+    };
+    const linkedEvent = { ...event, blocks: [canonicalBlock, block, duplicateBlock] };
     mocks.listEvents.mockResolvedValue([linkedEvent]);
     mocks.getDailyBrief.mockResolvedValue({
       allDay: [],
@@ -6403,11 +6418,29 @@ describe("ilo web app", () => {
       tomorrow: [],
     });
     mocks.createEventBlock.mockResolvedValue(linkedEvent);
-    mocks.updateEventBlock.mockResolvedValue({
-      ...linkedEvent,
-      blocks: [{ ...block, mode: "details" as const }],
+    let duplicateUpdateAttempts = 0;
+    mocks.updateEventBlock.mockImplementation(async (sourceEventId, blockId) => {
+      if (sourceEventId === duplicateBlock.sourceEventId && duplicateUpdateAttempts++ === 0) {
+        throw new Error("Second block update failed");
+      }
+      return {
+        ...event,
+        blocks: [
+          {
+            ...(blockId === block.eventId ? block : duplicateBlock),
+            mode: "details" as const,
+            sourceEventId,
+          },
+        ],
+      };
     });
-    mocks.deleteEventBlock.mockResolvedValue(event);
+    let duplicateDeleteAttempts = 0;
+    mocks.deleteEventBlock.mockImplementation(async (sourceEventId) => {
+      if (sourceEventId === duplicateBlock.sourceEventId && duplicateDeleteAttempts++ === 0) {
+        throw new Error("Second block delete failed");
+      }
+      return event;
+    });
     const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /^1:00 PM Focus block/ }));
@@ -6430,12 +6463,52 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Add calendar to Details Included" }));
     await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
     await waitFor(() =>
-      expect(mocks.updateEventBlock).toHaveBeenCalledWith(id, thirdId, { mode: "details" }),
+      expect(mocks.updateEventBlock).toHaveBeenCalledWith(secondId, thirdId, { mode: "details" }),
     );
+    expect(mocks.updateEventBlock).toHaveBeenCalledWith(
+      duplicateBlock.sourceEventId,
+      duplicateBlock.eventId,
+      { mode: "details" },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Second block update failed");
+    expect(
+      within(screen.getByRole("list", { name: "Calendars shown as busy" })).getByText(
+        "Selected Google",
+      ),
+    ).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Details Included" }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
+    await waitFor(() => expect(mocks.updateEventBlock).toHaveBeenCalledTimes(3));
+    expect(
+      mocks.updateEventBlock.mock.calls.filter(([sourceEventId]) => sourceEventId === secondId),
+    ).toHaveLength(1);
+    expect(screen.getAllByText("Selected Google")).toHaveLength(1);
+    expect(
+      within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
+        "Readonly Google",
+      ),
+    ).toBeInTheDocument();
     await browser.click(
       screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
     );
-    await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledWith(id, thirdId));
+    await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledWith(secondId, thirdId));
+    expect(mocks.deleteEventBlock).toHaveBeenCalledWith(
+      duplicateBlock.sourceEventId,
+      duplicateBlock.eventId,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Second block delete failed");
+    await browser.click(
+      screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
+    );
+    await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledTimes(3));
+    expect(
+      mocks.deleteEventBlock.mock.calls.filter(([sourceEventId]) => sourceEventId === secondId),
+    ).toHaveLength(1);
+    expect(
+      within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
+        "Readonly Google",
+      ),
+    ).toBeInTheDocument();
 
     mocks.createEventBlock.mockRejectedValueOnce(new Error("Block failed"));
     await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
@@ -6470,6 +6543,208 @@ describe("ilo web app", () => {
     expect(stylesheet).not.toContain(".week-day-header button,");
     expect(stylesheet).toContain("background-position: 0 0, 0 24px, 0 12px;");
     expect(stylesheet).toContain("background-size: 100% 48px, 5px 48px, 9px 24px;");
+  });
+
+  it("renders a multi-day all-day event once across its week columns", async () => {
+    const multiDay = {
+      ...allDayEvent,
+      endsAt: "2026-07-16T00:00:00.000Z",
+      id: "66666666-6666-4666-8666-666666666666",
+      title: "Retreat",
+    };
+    mocks.listEvents.mockResolvedValue([multiDay]);
+
+    setup("/calendar?date=2026-07-13&view=week");
+
+    const renderedEvents = await screen.findAllByRole("button", {
+      name: "All day Retreat, Monday, July 13 through Wednesday, July 15",
+    });
+    expect(renderedEvents).toHaveLength(1);
+    expect(renderedEvents[0]).toHaveClass("week-all-day-event");
+    expect(renderedEvents[0]).toHaveStyle({ gridColumn: "2 / 5" });
+  });
+
+  it("keeps remote date-only all-day events on their provider dates", async () => {
+    mocks.getMe.mockResolvedValue({ ...user, planningTimezone: "America/New_York" });
+    mocks.listEvents.mockResolvedValue([
+      {
+        ...allDayEvent,
+        calendarId: nullColorCalendar.id,
+        endsAt: "2026-07-16T00:00:00.000Z",
+        id: "88888888-8888-4888-8888-888888888887",
+        provider: "google" as const,
+        startsAt: "2026-07-13T00:00:00.000Z",
+        title: "Provider date retreat",
+      },
+    ]);
+
+    setup("/calendar?date=2026-07-13&view=week");
+
+    expect(
+      await screen.findByRole("button", {
+        name: "All day Provider date retreat, Monday, July 13 through Wednesday, July 15",
+      }),
+    ).toHaveStyle({ gridColumn: "2 / 5" });
+  });
+
+  it("gives overlapping all-day events accessible targets in separate lanes", async () => {
+    const first = { ...allDayEvent, title: "First all-day event" };
+    const second = {
+      ...allDayEvent,
+      id: "77777777-7777-4777-8777-777777777777",
+      title: "Second all-day event",
+    };
+    mocks.listEvents.mockResolvedValue([first, second]);
+
+    const view = setup("/calendar?date=2026-07-13&view=week");
+    await screen.findByRole("button", { name: /All day First all-day event/u });
+    await screen.findByRole("button", { name: /All day Second all-day event/u });
+
+    const layer = view.container.querySelector(".week-all-day-layer");
+    expect(layer).toHaveStyle({ gridTemplateRows: "repeat(2, 28px)" });
+    const stylesheet = readFileSync("apps/web/src/styles.css", "utf8");
+    expect(stylesheet).toMatch(/\.week-all-day-event\s*\{[^}]*height:\s*24px;/su);
+  });
+
+  it("collapses the all-day lane when the week has no all-day events", async () => {
+    mocks.listEvents.mockResolvedValue([event]);
+
+    const view = setup("/calendar?date=2026-07-13&view=week");
+    await screen.findByRole("button", { name: "1:00 PM Focus block" });
+
+    const layer = view.container.querySelector(".week-all-day-layer");
+    expect(layer).toHaveClass("is-empty");
+    expect((layer as HTMLElement).style.gridTemplateRows).toBe("0px");
+    expect((layer as HTMLElement).style.paddingBottom).toBe("0px");
+    expect(within(layer as HTMLElement).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("spreads overlapping timeline events as full cards over a stable hit area", async () => {
+    const overlappingEvent = {
+      ...event,
+      endsAt: "2026-07-13T14:30:00.000Z",
+      id: secondId,
+      startsAt: "2026-07-13T13:30:00.000Z",
+      title: "Customer debrief",
+    };
+    mocks.listEvents.mockResolvedValue([event, overlappingEvent]);
+    setup("/calendar?date=2026-07-13&view=week");
+    const browser = userEvent.setup();
+
+    const spread = await screen.findByRole("button", { name: "Spread 2 overlapping events" });
+    const cluster = spread.closest(".calendar-overlap-cluster");
+    expect(cluster).not.toBeNull();
+    expect(cluster?.querySelector(".calendar-overlap-cluster__hit-area")).toBeNull();
+    expect(spread).toHaveAttribute("aria-expanded", "false");
+
+    const firstEvent = within(cluster as HTMLElement).getByRole("button", {
+      name: "1:00 PM Focus block",
+    });
+    const secondEvent = within(cluster as HTMLElement).getByRole("button", {
+      name: "1:30 PM Customer debrief",
+    });
+    expect(firstEvent).toHaveStyle({
+      "--calendar-event-left": "calc(0% + 2px)",
+      "--calendar-event-width": "calc(50% - 4px)",
+      "--overlap-orbit-rotation": "-4deg",
+      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
+      "--overlap-orbit-x": "-52px",
+      "--overlap-orbit-y": "0px",
+    });
+    expect(secondEvent).toHaveStyle({
+      "--calendar-event-left": "calc(50% + 2px)",
+      "--calendar-event-width": "calc(50% - 4px)",
+      "--overlap-orbit-rotation": "4deg",
+      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
+      "--overlap-orbit-x": "52px",
+      "--overlap-orbit-y": "0px",
+    });
+    expect(within(spread).getByText("2")).toHaveClass("calendar-overlap-cluster__pin-head");
+
+    fireEvent.pointerEnter(cluster as HTMLElement, { pointerType: "mouse" });
+    expect(cluster).toHaveClass("is-hovered");
+    fireEvent.pointerLeave(cluster as HTMLElement, { pointerType: "mouse" });
+    expect(cluster).toHaveClass("is-hovered");
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+    });
+    expect(cluster).not.toHaveClass("is-hovered");
+
+    firstEvent.focus();
+    await browser.keyboard("{Escape}");
+    expect(spread).toHaveFocus();
+
+    await browser.click(spread);
+    expect(spread).toHaveAttribute("aria-expanded", "true");
+    expect(cluster).toHaveClass("is-expanded");
+
+    const stylesheet = readFileSync("apps/web/src/styles.css", "utf8");
+    const expandedRule = [
+      ...stylesheet.matchAll(
+        /\.calendar-overlap-cluster:is\(\.is-hovered, \.is-expanded\)[^{}]*\{([^}]*)\}/gu,
+      ),
+    ]
+      .map((match) => match[1])
+      .find((rule) => rule?.includes("var(--overlap-orbit-rotation)"));
+    expect(expandedRule).toContain("border-radius: 7px;");
+    expect(expandedRule).toContain("height: var(--calendar-event-height);");
+    expect(expandedRule).toContain("width: var(--overlap-orbit-width);");
+    expect(stylesheet).toMatch(/\.calendar-overlap-cluster__toggle::before\s*\{/u);
+    expect(stylesheet).toMatch(/\.calendar-overlap-cluster__toggle::after\s*\{/u);
+    expect(stylesheet).toContain(
+      "transform: translate(-50%, -50%) rotate(var(--overlap-orbit-rotation));",
+    );
+
+    await browser.keyboard("{Escape}");
+    expect(spread).toHaveAttribute("aria-expanded", "false");
+    expect(spread).toHaveFocus();
+
+    await browser.click(screen.getByRole("button", { name: "1:00 PM Focus block" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("clamps overlap orbits inside the timeline at day boundaries", () => {
+    const midnightPoint = overlapOrbitPoint(1, 3, true, {
+      clusterEndMinute: 30,
+      clusterStartMinute: 0,
+      eventEndMinute: 30,
+      eventStartMinute: 0,
+    });
+    const endOfDayPoint = overlapOrbitPoint(2, 3, true, {
+      clusterEndMinute: 24 * 60,
+      clusterStartMinute: 24 * 60 - 30,
+      eventEndMinute: 24 * 60,
+      eventStartMinute: 24 * 60 - 30,
+    });
+    const midnightPairPoint = overlapOrbitPoint(0, 2, false, {
+      clusterEndMinute: 30,
+      clusterStartMinute: 0,
+      eventEndMinute: 30,
+      eventStartMinute: 0,
+    });
+    const leadingEdgePoint = overlapOrbitPoint(0, 2, true, {
+      clusterEndMinute: 90,
+      clusterStartMinute: 60,
+      eventEndMinute: 90,
+      eventStartMinute: 60,
+      horizontalInset: "start",
+    });
+
+    const leadingEdgeCompanion = overlapOrbitPoint(1, 2, true, {
+      clusterEndMinute: 90,
+      clusterStartMinute: 60,
+      eventEndMinute: 90,
+      eventStartMinute: 60,
+      horizontalInset: "start",
+    });
+
+    expect(midnightPoint).toMatchObject({ rotation: -7, y: -2 });
+    expect(endOfDayPoint).toMatchObject({ rotation: 7, y: -22 });
+    expect(midnightPairPoint).toMatchObject({ rotation: -4, y: 0 });
+    expect(leadingEdgePoint.x).toBe(0);
+    expect(leadingEdgeCompanion.x).toBe(104);
+    expect(overlapPinOffset(0, 30)).toBe(0);
+    expect(overlapPinOffset(24 * 60 - 30, 24 * 60)).toBe(-15);
   });
 
   it("uses the shared transparent dashed treatment for empty states and quotes", () => {
@@ -6955,8 +7230,11 @@ describe("ilo web app", () => {
       expect.stringContaining("Current time"),
     );
     const focusBlock = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
-    expect(focusBlock).toHaveStyle({ height: "48px", top: "624px" });
-    await browser.click(screen.getByRole("button", { name: "All day Quiet day" }));
+    expect(focusBlock).toHaveStyle({
+      "--calendar-event-height": "48px",
+      "--calendar-event-top": "624px",
+    });
+    await browser.click(screen.getByRole("button", { name: /All day Quiet day/ }));
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "Create event" }));
     expect(screen.getByLabelText("Title")).toHaveFocus();

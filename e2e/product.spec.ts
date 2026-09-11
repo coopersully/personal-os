@@ -9,6 +9,10 @@ test("the repository QA fixture login exposes representative workspace data", as
 
   await page.goto("/calendar");
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
+  const overlapPin = page.getByRole("button", { name: "Spread 5 overlapping events" });
+  await expect(overlapPin).toBeVisible();
+  await overlapPin.click();
+  await expect(page.getByRole("button", { name: "Collapse 5 overlapping events" })).toBeVisible();
   await page.goto("/tasks");
   if (test.info().project.name === "mobile-chromium") {
     await page.getByRole("button", { name: "Workspace actions" }).click();
@@ -170,12 +174,42 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("menuitem", { name: "Event" }).click();
   await page.getByLabel("Event", { exact: true }).fill(eventTitle);
-  await page.getByLabel("Starts").fill(`${planningDate}T12:00`);
-  await page.getByLabel("Ends").fill(`${planningDate}T13:00`);
+  await page.getByLabel("Starts").fill(`${planningDate}T00:01`);
+  await page.getByLabel("Ends").fill(`${planningDate}T23:59`);
   await page.getByLabel("Location").fill("Desktop overlay");
-  await page.getByRole("checkbox", { name: "All day" }).check();
   await page.getByRole("button", { name: "Create event" }).click();
   await expect(page.getByText(eventTitle)).toBeVisible();
+  const todayEvent = page.locator('[data-slot="event-card"]').filter({ hasText: eventTitle });
+  const todayEventLayout = await todayEvent.evaluate((card) => {
+    const action = card.querySelector<HTMLElement>("button");
+    const body = card.querySelector<HTMLElement>('[data-slot="event-card-body"]');
+    if (!action || !body) throw new Error("Today event preview is incomplete.");
+    const actionStyle = getComputedStyle(action);
+    const bodyStyle = getComputedStyle(body);
+    return {
+      alignItems: actionStyle.alignItems,
+      bodyJustifyContent: bodyStyle.justifyContent,
+      paddingBottom: actionStyle.paddingBottom,
+      paddingLeft: actionStyle.paddingLeft,
+      paddingRight: actionStyle.paddingRight,
+      paddingTop: actionStyle.paddingTop,
+      textAlign: actionStyle.textAlign,
+    };
+  });
+  expect(todayEventLayout.paddingLeft).toBe(todayEventLayout.paddingRight);
+  expect(todayEventLayout.paddingTop).toBe(todayEventLayout.paddingBottom);
+  expect(Number.parseFloat(todayEventLayout.paddingTop)).toBeGreaterThan(0);
+  expect(todayEventLayout.alignItems).toBe("flex-start");
+  expect(todayEventLayout.bodyJustifyContent).toBe("flex-start");
+  expect(todayEventLayout.textAlign).toBe("left");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Event" }).click();
+  await page.getByLabel("Event", { exact: true }).fill(`All-day ${eventTitle}`);
+  await page.getByLabel("Starts").fill(`${planningDate}T00:00`);
+  await page.getByLabel("Ends").fill(`${planningDate}T23:59`);
+  await page.getByLabel("All day").check();
+  await page.getByRole("button", { name: "Create event" }).click();
+  await expect(page.getByText(`All-day ${eventTitle}`)).toBeVisible();
   const todayLayout = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
@@ -192,6 +226,124 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("radio", { name: "Week", exact: true, checked: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Today", exact: true })).toBeVisible();
   await expect(page.getByText("12 AM", { exact: true })).toBeVisible();
+  const floatingPillColors = await page.locator(".calendar-floating-nav__pill").evaluate((pill) => {
+    const primarySwatch = document.createElement("span");
+    primarySwatch.style.backgroundColor = "var(--primary)";
+    primarySwatch.style.color = "var(--primary-foreground)";
+    document.body.append(primarySwatch);
+    const colors = {
+      background: getComputedStyle(pill).backgroundColor,
+      foreground: getComputedStyle(pill).color,
+      primaryBackground: getComputedStyle(primarySwatch).backgroundColor,
+      primaryForeground: getComputedStyle(primarySwatch).color,
+    };
+    primarySwatch.remove();
+    return colors;
+  });
+  expect(floatingPillColors.background).toBe(floatingPillColors.primaryBackground);
+  expect(floatingPillColors.foreground).toBe(floatingPillColors.primaryForeground);
+  await page.locator(".week-calendar").evaluate((calendar) => {
+    calendar.scrollTop = 0;
+  });
+  const weekGridLayout = await page.locator(".week-calendar-grid").evaluate((grid) => {
+    const navigation = grid.querySelector<HTMLElement>(".calendar-secondary-app-bar--week");
+    const midnightLabel = grid.querySelector<HTMLElement>(".calendar-time-axis li:first-child");
+    const todayHeader = grid.querySelector<HTMLElement>(".week-day-header.is-today");
+    const todayFadeSurface = grid.querySelector<HTMLElement>(".week-all-day-day.is-today");
+    const allDayEvent = grid.querySelector<HTMLElement>(".week-all-day-event");
+    const otherHeaders = [...grid.querySelectorAll<HTMLElement>(".week-day-header:not(.is-today)")];
+    const todayTimeline = grid.querySelector<HTMLElement>(".week-day-timeline.is-today");
+    const otherTimelines = [
+      ...grid.querySelectorAll<HTMLElement>(".week-day-timeline:not(.is-today)"),
+    ];
+    if (
+      !navigation ||
+      !midnightLabel ||
+      !todayHeader ||
+      !todayFadeSurface ||
+      !allDayEvent ||
+      !todayTimeline ||
+      otherHeaders.length < 2 ||
+      otherTimelines.length < 2
+    ) {
+      throw new Error("Week calendar did not render comparable days.");
+    }
+    const fadeStyle = getComputedStyle(todayFadeSurface, "::after");
+    const allDayEventStyle = getComputedStyle(allDayEvent);
+    const allDayEventBounds = allDayEvent.getBoundingClientRect();
+    const allDaySurfaceBounds = todayFadeSurface.getBoundingClientRect();
+    const navigationStyle = getComputedStyle(navigation);
+    const weekHeaderGrid = navigation.querySelector<HTMLElement>(
+      ".calendar-secondary-app-bar__week-grid",
+    );
+    const allDayCorner = navigation.querySelector<HTMLElement>(".week-all-day-corner");
+    return {
+      allDayEventLeftInset: allDayEventBounds.left - allDaySurfaceBounds.left,
+      allDayEventRightInset: allDaySurfaceBounds.right - allDayEventBounds.right,
+      allDayEventZIndex: allDayEventStyle.zIndex,
+      allDayNotchRadius: allDayEventStyle.getPropertyValue("--week-all-day-notch-size").trim(),
+      calendarLine: getComputedStyle(todayTimeline).getPropertyValue("--line").trim(),
+      columnGap: getComputedStyle(grid).columnGap,
+      fadeBackdropFilter: fadeStyle.backdropFilter,
+      fadeBackgroundImage: fadeStyle.backgroundImage,
+      fadeBottom: Number.parseFloat(fadeStyle.bottom),
+      fadeSurfaceBackground: getComputedStyle(todayFadeSurface).backgroundColor,
+      fadeSurfaceTop: todayFadeSurface.getBoundingClientRect().top,
+      fadeZIndex: fadeStyle.zIndex,
+      foregroundEventOpacity: allDayEventStyle.opacity,
+      headerBottom: todayHeader.getBoundingClientRect().bottom,
+      headerOpacity: getComputedStyle(todayHeader).opacity,
+      hourRule: getComputedStyle(todayTimeline).getPropertyValue("--calendar-hour-rule").trim(),
+      gutterFadeBottom: allDayCorner
+        ? Number.parseFloat(getComputedStyle(allDayCorner, "::after").bottom)
+        : null,
+      midnightLabelTop: midnightLabel.getBoundingClientRect().top,
+      navigationBottom: navigation.getBoundingClientRect().bottom,
+      navigationBackground: navigationStyle.backgroundColor,
+      navigationHeight: navigation.getBoundingClientRect().height,
+      otherHeaderBackgrounds: otherHeaders.map(
+        (header) => getComputedStyle(header).backgroundColor,
+      ),
+      otherTimelineBackgrounds: otherTimelines.map(
+        (timeline) => getComputedStyle(timeline).backgroundColor,
+      ),
+      timelineBorderLeft: getComputedStyle(todayTimeline).borderLeftWidth,
+      todayHeaderBackground: getComputedStyle(todayHeader).backgroundColor,
+      todayTimelineBackground: getComputedStyle(todayTimeline).backgroundColor,
+      weekHeaderGridBackground: weekHeaderGrid
+        ? getComputedStyle(weekHeaderGrid).backgroundColor
+        : null,
+    };
+  });
+  expect(weekGridLayout.columnGap).toBe("1px");
+  expect(weekGridLayout.fadeBackdropFilter).toContain("blur(");
+  expect(weekGridLayout.fadeBackgroundImage).toContain("linear-gradient");
+  expect(weekGridLayout.fadeBackgroundImage).toContain("rgba(");
+  expect(weekGridLayout.navigationBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(weekGridLayout.weekHeaderGridBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(weekGridLayout.fadeSurfaceBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(weekGridLayout.fadeSurfaceTop).toBeGreaterThanOrEqual(weekGridLayout.headerBottom - 1);
+  expect(weekGridLayout.fadeSurfaceTop).toBeLessThan(weekGridLayout.navigationBottom);
+  expect(weekGridLayout.fadeBottom).toBeLessThanOrEqual(-32);
+  expect(weekGridLayout.gutterFadeBottom).toBe(0);
+  expect(weekGridLayout.fadeZIndex).toBe("0");
+  expect(weekGridLayout.headerOpacity).toBe("1");
+  expect(weekGridLayout.foregroundEventOpacity).toBe("1");
+  expect(weekGridLayout.allDayEventZIndex).toBe("2");
+  expect(weekGridLayout.allDayNotchRadius).toBe("8px");
+  expect(weekGridLayout.allDayEventLeftInset).toBeCloseTo(weekGridLayout.allDayEventRightInset, 0);
+  expect(weekGridLayout.allDayEventLeftInset).toBeGreaterThanOrEqual(3);
+  expect(weekGridLayout.allDayEventLeftInset).toBeLessThanOrEqual(5);
+  expect(weekGridLayout.hourRule).not.toBe(weekGridLayout.calendarLine);
+  expect(weekGridLayout.midnightLabelTop).toBeGreaterThanOrEqual(weekGridLayout.navigationBottom);
+  expect(weekGridLayout.timelineBorderLeft).toBe("0px");
+  expect(new Set(weekGridLayout.otherHeaderBackgrounds).size).toBeGreaterThan(1);
+  expect(new Set(weekGridLayout.otherTimelineBackgrounds).size).toBeGreaterThan(1);
+  expect(weekGridLayout.todayHeaderBackground).not.toBe(weekGridLayout.otherHeaderBackgrounds[0]);
+  expect(weekGridLayout.todayTimelineBackground).not.toBe(
+    weekGridLayout.otherTimelineBackgrounds[0],
+  );
+  expect(weekGridLayout.todayHeaderBackground).toBe(weekGridLayout.todayTimelineBackground);
   const calendarHeading = page.locator('[data-slot="workspace-app-bar-identity"] h2');
   const initialCalendarHeading = await calendarHeading.innerText();
   await page.getByRole("button", { name: "Next week" }).click();
@@ -200,6 +352,16 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect.poll(() => calendarHeading.innerText()).toBe(initialCalendarHeading);
   await page.getByRole("radio", { name: "Month" }).click();
   await expect(page.getByRole("radio", { name: "Month", checked: true })).toBeVisible();
+  const monthDayBackgrounds = await page.locator(".month-grid").evaluate((grid) => {
+    const today = grid.querySelector<HTMLElement>(".month-day.is-today");
+    const other = grid.querySelector<HTMLElement>(".month-day:not(.is-today):not(.is-outside)");
+    if (!today || !other) throw new Error("Month calendar did not render comparable days.");
+    return {
+      other: getComputedStyle(other).backgroundColor,
+      today: getComputedStyle(today).backgroundColor,
+    };
+  });
+  expect(monthDayBackgrounds.today).toBe(monthDayBackgrounds.other);
   const calendarLayout = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,

@@ -1,17 +1,23 @@
 ---
 name: personal-os-architecture
-description: Keep ilo changes within the established monorepo boundaries and domain ownership model. Use when adding or refactoring a product domain, deciding package placement, changing app/API/MCP composition roots, or planning cross-domain behavior.
+description: Keep nohmi changes within the established personal-os monorepo boundaries and domain ownership model. Use when adding or refactoring a product domain, deciding package placement, changing app/API/MCP composition roots, or planning cross-domain behavior.
 ---
 
-# ilo architecture
+# personal-os architecture
 
 Treat `docs/architecture/0001-system-shape.md` as the system boundary and
 `docs/engineering/feature-ownership.md` as the path-ownership authority.
-For workspace stewardship, also read `docs/product/ilo-workspace-stewardship.md` and
-`docs/architecture/0004-workspace-ilo-stewardship.md`.
+For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
+`docs/architecture/0004-workspace-stewardship.md`.
 
 ## Place work by responsibility
 
+- Design every surface as multi-user even when a fixture or early deployment contains one account.
+  Bind domain rows, provider projections, background claims, caches, embeddings, searches,
+  notifications, reviews, deep links, and audit reads to the authenticated owner through structural
+  tenant keys and authorization checks. Never use a display name, phone number, provider ID,
+  semantic match, or model inference as the tenant boundary; sharing and delegation require an
+  explicit consented relationship model.
 - Put schemas, invariants, and cross-surface contracts in `packages/domain`.
 - Put PostgreSQL schema, migrations, and data access in `packages/database`.
 - Put provider-specific work behind `packages/connectors`; never call providers
@@ -25,16 +31,40 @@ For workspace stewardship, also read `docs/product/ilo-workspace-stewardship.md`
 - Keep `apps/*/src/app.*`, `apps/mcp/src/server.ts`, and shared registries thin;
   they are Integration-owned composition roots.
 
-## Model a workspace Ilo
+## Model a workspace steward
 
-- Keep the domain's ledger, expert playbook, rulebook, surgical operations, maintenance turn,
-  question/learning loop, advice, review artifact, and status semantically domain-owned.
+- Keep the domain's ledger, expert playbook, guided setup, rulebook, surgical operations,
+  maintenance turn, typed work nodes, learning loop, advice, review artifact, and status
+  semantically domain-owned.
 - Share only mechanical execution infrastructure such as run/step persistence, leases, fencing,
   retry history, and terminal settlement.
-- Put runtime expertise and user memory in versioned domain/API data and contracts, never in an MCP
-  host prompt or repository coding-agent skill.
-- Complete `docs/product/workspace-ilo-charter-template.md` before splitting a new workspace across
+- Put runtime expertise and User Knowledge in versioned domain/API data and contracts, never in an
+  MCP host prompt or repository coding-agent skill. Use purpose-bound context packs; knowledge does
+  not grant action authority.
+- Complete `docs/product/workspace-charter-template.md` before splitting a new workspace across
   parallel branches. List composition-root and shared migration work as Integration handoffs.
+- Keep Texting a shared channel and coordinator rather than a fifth workspace. Texting owns
+  conversation, delivery, routing, and response composition; routed work retains workspace-owned
+  expertise, policy, work nodes, and terminal truth.
+- Preserve verified child successes across multi-workspace requests. Keep failed, blocked, and
+  uncertain siblings explicit; never hide partial completion or add compensating provider effects
+  merely to simulate atomicity.
+- Treat SMS links as ordinary authenticated nohmi destinations, never bearer or approval links.
+  Preserve the requested review destination across normal sign-in without putting sensitive item data
+  in the URL.
+
+## Model User Knowledge
+
+- Read `docs/product/user-knowledge.md` and `docs/architecture/0005-user-knowledge.md` before
+  changing profiles, goals, motives, memory, cross-workspace context, or semantic retrieval.
+- Keep native workspace records in their owning domains and connect them through typed relations.
+- Keep semantic indexes rebuildable; PostgreSQL records, revisions, provenance, scope, and policy
+  remain authoritative.
+- Let reinforced low-risk knowledge activate only through its documented promotion lifecycle. Never
+  convert confidence, an inference, or external content into scopes or mutation authority.
+- Treat fine-grained per-agent external-model context controls as planned but deferred. Current
+  architecture uses credential scopes and purpose-bounded API results; do not claim the later
+  disclosure-control layer is shipped.
 
 ## Deliver a vertical feature
 

@@ -79,6 +79,12 @@ links, format, and medium-appropriate detail, but they may only suppress deliver
 a suppressed intent eligible, bypass quiet hours or deduplication, widen authority, or exceed the
 shared privacy ceiling.
 
+Give every workspace-owned setting one canonical editor inside its workspace. Centralized Settings
+owns global policy, channels, connected-agent credentials/scopes, User Knowledge controls, and
+unified Reviews; it may show a read-only cross-workspace overview and deep links, but never a second
+editable copy of sources, maintenance behavior, workspace overrides, rules, learning, recovery,
+data controls, or domain access posture.
+
 Publish canonical times and typed entity context rather than pre-rendering `today`, `yesterday`, or
 `tomorrow`. Texting owns conversion into the person's current time zone and final relative-date
 language immediately before delivery.

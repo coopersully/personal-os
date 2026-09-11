@@ -98,9 +98,19 @@ Settings
 ├── Account: Profile settings, password, log out
 ├── Personal: User Knowledge, Goals, Priorities, Motives, Reviews
 ├── Experience: Appearance, wallpaper where supported, locale & time
-├── History & access: Activity, sessions, invitations, recovery, privacy, exports
-├── Workspace: Connections, calendars, mail, notifications, widgets
-└── Agents: Connected agents, Workspace access
+├── History & access: Activity, sessions, invitations, account recovery, privacy, exports
+├── Communications: Shared notification policy, channel connections/defaults, widgets
+└── Agents: Connected agents, Workspace overview
+
+Each workspace
+└── Workspace settings
+    ├── Sources and synchronization
+    ├── Maintain and external check-in health
+    ├── Questions and domain reviews
+    ├── Notification overrides and delivery controls
+    ├── Rules and learned behavior
+    ├── Privacy and domain access posture
+    └── Recovery and workspace data
 ```
 
 ### 4.1 Shared chrome
@@ -294,9 +304,10 @@ Knowledge rather than a separate top-level workspace.
 
 **Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide
 the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped
-personal tokens are an advanced local fallback. Settings → Workspace access then explains the
-actual read, write, approval, source-scope, and unavailable boundaries for Mail, Calendar, Tasks,
-and Finances while supervising one server-owned setup plan. After authentication the target agent
+personal tokens are an advanced local fallback. Each workspace's own Settings explains its actual
+read, write, approval, source-scope, and unavailable boundaries while supervising one server-owned
+setup plan. Centralized Settings provides a read-only cross-workspace access/readiness overview and
+deep-links to those canonical editors. After authentication the target agent
 flow calls `get_nohmi_context` and `get_nohmi_setup`, which return the current semantic step,
 observed evidence, exact scope, required tools, domain instructions, knowledge requirements, and
 approval boundary. The agent inspects a bounded representative sample, asks only unresolved
@@ -321,6 +332,14 @@ Attention items. Kind and workspace filters are URL-owned, results are cursor-pa
 action routes to the domain that owns the decision. Informational state, routine success, and work
 nohmi can recover automatically do not enter the queue; setup and access configuration never appear
 as queue work merely because they exist.
+
+Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
+review bypass, shared notification policy, channel connections/defaults, connected-agent
+credentials/scopes, and User Knowledge controls. Workspace-owned sources, maintenance behavior,
+notification overrides, rules, learning, recovery, data controls, and domain access posture are
+edited only inside Mail, Tasks, Calendar, or Finances. The centralized cross-workspace overview may
+show their effective state, health, override badges, and review counts, but only links to the owning
+workspace for changes.
 
 nohmi does not own maintenance schedules. External automation platforms are the sole authority for
 creating, editing, activating, pausing, and invoking recurring maintenance. nohmi may display a

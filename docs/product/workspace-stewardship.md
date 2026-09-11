@@ -25,6 +25,12 @@ knows what maintaining Finances entails.
 The four core stewards are Mail, Tasks, Calendar, and Finances. Their complete purposes and
 interfaces are defined in [`workspaces and interfaces`](workspaces.md).
 
+Each steward's sources, maintained-state definition, maintenance guidance, notification overrides,
+rules, learning, recovery, data controls, and domain access posture have one canonical editor inside
+that workspace. Centralized Settings owns global policy, channels, connected-agent credentials and
+scopes, User Knowledge controls, and unified Reviews; its cross-workspace overview summarizes and
+deep-links to workspace controls without duplicating their editors.
+
 ## What every workspace steward owns
 
 Each workspace defines these domain-specific capabilities:

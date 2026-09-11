@@ -176,7 +176,10 @@ flowchart TD
 
 **Implement**
 
-- Publish a Workspace access surface that names what agents may read, change, propose, and never do in every domain.
+- Put each domain's access posture and all other workspace-owned settings in one canonical editor
+  inside Mail, Tasks, Calendar, or Finances. Replace the centralized Workspace access editor with a
+  read-only cross-workspace overview of effective access, source/maintenance health, overrides, and
+  outstanding review counts that deep-links to exact workspace controls.
 - Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
 - Retain the existing Settings-owned Reviews destination that composes Review and Attention work,
   and expand it to every question, approval, connector failure, recovery step, or other item that

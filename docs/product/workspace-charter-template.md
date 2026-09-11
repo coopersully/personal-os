@@ -127,6 +127,13 @@ typed notification intent. List the workspace's per-channel settings, safe-summa
 sensitive fields, allowed reply vocabulary, review-bypass behavior, and first-party deep link.
 Never put provider delivery or general-inbox dispatch inside the workspace.
 
+Place every workspace-owned setting in one canonical editor inside the workspace. Define the
+read-only health, readiness, effective-policy, override, and outstanding-review summary that
+centralized Settings may show, plus deep links back to exact workspace controls. Do not create a
+second editable copy. Keep account-wide security, privacy ceilings, review bypass, notification
+policy, channel connections/defaults, connected-agent credentials/scopes, User Knowledge controls,
+and unified Reviews in centralized Settings.
+
 Keep expert judgment and orchestration in the domain/API. Keep MCP stateless. List every
 Integration-owned composition-root or shared-infrastructure change separately so parallel branches
 can land the domain slice without repeatedly conflicting.

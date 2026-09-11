@@ -23,6 +23,26 @@ in the first-party app, public API, MCP, an external scheduled task, or the gene
 | Rule | One explicit reusable condition, action, sources, exceptions, and policy | General personal context or broad prose instructions |
 | User Knowledge | Goals, priorities, relationships, preferences, constraints, habits, and learned patterns | Action authority or external mutation rules |
 
+## Surface ownership
+
+Every setting has one canonical editing surface. Workspace-owned settings live inside the owning
+Mail, Tasks, Calendar, or Finances workspace; they do not also become editable forms in centralized
+Settings. Each workspace's settings entry opens the same calm section model defined below and may
+deep-link directly to one source, rule, override, review, or recovery control.
+
+Centralized Settings owns account-wide identity, security, privacy ceilings, review bypass, shared
+notification policy, channel connections and defaults, connected-agent credentials and scopes,
+User Knowledge controls, and the unified Reviews queue. It also provides a cross-workspace overview
+of source health, maintenance readiness, external check-in health, effective notification state,
+override presence, and outstanding review counts. Workspace-owned values in that overview are
+read-only summaries with links to their canonical workspace editors.
+
+This boundary prevents two forms from drifting over one setting while preserving one place to see
+the whole system. Global values may show which workspaces inherit or override them; changing a
+workspace override still happens in that workspace. Reviews remain centralized because they are a
+cross-workspace action queue, but every review action routes to the owning workspace when domain
+context or configuration is required.
+
 ## Shared workspace sections
 
 Every Mail, Tasks, Calendar, and Finances settings surface should use the same conceptual sections
@@ -184,9 +204,6 @@ question or blocked result rather than an inferred permission.
 Current settings are distributed across account settings, connections, workspace access, domain
 profiles, Finance settings, Texting, and feature-specific pages. Finances has a workspace-specific
 review-bypass control, while the approved target is one global review-bypass policy. The complete
-shared per-workspace structure, maintenance guidance model, and SMS controls above are target
-behavior and must not be presented as shipped.
-
-## Open design questions
-
-- Which settings belong inline inside each workspace and which also appear in centralized Settings.
+shared per-workspace structure, canonical workspace editors, centralized read-only overview,
+maintenance guidance model, and SMS controls above are target behavior and must not be presented as
+shipped.

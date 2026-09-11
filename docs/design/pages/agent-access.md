@@ -1,6 +1,6 @@
 # Agent controls and Reviews
 
-Agent work has three distinct user questions. Ilo gives each one a dedicated destination.
+Agent work has three distinct user questions. nohmi gives each one a dedicated destination.
 
 ## Reviews in Settings
 
@@ -13,15 +13,15 @@ appears in Settings navigation on desktop and in the Settings action sheet on na
 - Kind and workspace filters are stored in the URL as `kind` and `workspace`.
 - Results use cursor pagination with Previous and Next controls and an honest displayed range.
 - Each row names its workspace, work type, title, explanation, and one direct action.
-- Partial source failure stays visible; Ilo never converts unavailable work into a successful zero.
+- Partial source failure stays visible; nohmi never converts unavailable work into a successful zero.
 - An empty state says the available work is clear when some workspaces could not be checked.
 
-Review actions route to the surface that owns the decision. Finance reviews stay in Finance. Mail
-rule activation opens Settings → Workspace access → Mail with the exact proposed rule selected.
+Review actions route to the surface that owns the decision. Finance reviews stay in Finances. Mail
+rule activation opens Mail settings with the exact proposed rule selected.
 
 ## Connected agents in Settings
 
-Settings → Connected agents answers **Who can act in Ilo?**
+Settings → Connected agents answers **Who can act in nohmi?**
 
 - Show the current MCP URL once, with a copy action.
 - List OAuth hosts and local/manual credentials separately.
@@ -31,28 +31,33 @@ Settings → Connected agents answers **Who can act in Ilo?**
 - `automations:write` is not offered on new tokens. If an older token contains it, label it as a
   legacy inactive permission rather than implying authority.
 
-Provider credentials remain in Ilo. Revoking an agent must not end human sessions or revoke a
+Provider credentials remain in nohmi. Revoking an agent must not end human sessions or revoke a
 different host.
 
-## Workspace access in Settings
+## Workspace access overview in Settings
 
-Settings → Workspace access answers **What may agents do here?**
+Settings → Workspace access answers **Where can agents act, and where does configuration need attention?**
 
-The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances each disclose:
+The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances each summarize:
 
 1. Allowed actions.
 2. Actions requiring signed-in approval.
-3. Actions Ilo does not permit.
+3. Actions nohmi does not permit.
 4. Whether access covers all connected sources or a provider-selected subset.
 5. Connected-host authority and domain readiness.
-6. The current server-owned setup step and optional setup reference.
+6. The current server-owned setup step and a direct link to the workspace's canonical settings.
+
+This centralized surface is a read-only cross-workspace overview. Every workspace-owned access,
+source, maintenance, override, rule, learning, recovery, and data control is edited inside the
+owning workspace; centralized Settings must not render a duplicate form. Connected-agent
+credentials and scopes remain global and editable in Settings → Connected agents.
 
 Do not imply per-source credential scope when the credential model is workspace-wide. State that
 limitation explicitly. Readiness is evidence, not a progress percentage. Use the stable phases
 Checking, Not set up, Needs review, Set up, and Unavailable.
 
 Mail owns proposed and active Mail rules. Proposed rules remain disabled until a signed-in person
-reviews the current bounded sample. Permanent deletion remains unavailable.
+reviews the current bounded sample in Mail settings. Permanent deletion remains unavailable.
 
 ## Visual standard
 
@@ -65,3 +70,7 @@ ambiguous without them. At most one primary raised region should compete for att
 `/settings?section=agents` and `/settings?section=automations` redirect to Workspace access while
 preserving relevant workspace and rule parameters. `/automations` also redirects there. There is
 no generic routine-management UI or public routine API.
+
+The current centralized Workspace access implementation may still contain editable domain controls
+until the target placement above is implemented. Code and the implementation log remain the source
+of truth for that shipped transition.

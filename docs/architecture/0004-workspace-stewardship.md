@@ -72,6 +72,12 @@ rule.
 - `apps/mcp` remains a stateless adapter. It exposes intent and surgical tools but owns no playbook,
   sequencing, learning, or completion decision.
 
+The web surface gives each workspace-owned setting one canonical editor inside that workspace.
+Centralized Settings owns global policy, channels, connected-agent credentials/scopes, User
+Knowledge controls, and unified Reviews, plus a read-only cross-workspace overview that deep-links
+to exact domain controls. It must not persist or render a second editable copy of workspace-owned
+configuration.
+
 Shared User Knowledge, context assembly, and promotion policy follow
 [`ADR 0005`](0005-user-knowledge.md). Workspaces declare the context they need but do not duplicate
 global knowledge in domain profiles.

@@ -299,6 +299,11 @@ flowchart TD
   one initial alert, default repeat eligibility to 7 days, support custom intervals and `never`, and
   revalidate and consolidate eligible items before sending. `Never` suppresses reminders without
   hiding unresolved work from Reviews.
+- Version notification eligibility semantically: before the reminder interval, notify again only
+  when the required action or the consequence of acting or not acting materially changes. Do not
+  treat new wording, evidence, confidence, rediscovery, or internal progress as a new notification
+  when the required action and consequence are unchanged; continue to enforce quiet hours and
+  send-time revalidation.
 - Require normal nohmi authentication for every SMS deep link, retain the requested destination
   across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
   in the URL.

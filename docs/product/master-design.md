@@ -356,6 +356,10 @@ coherent response without reproducing domain expertise.
   eligible only after the user-configurable interval, which defaults to 7 days, and only after
   revalidation and deduplication. `Never` disables repeats without hiding the item from Reviews;
   nohmi prefers silence over notification completeness.
+- Before the reminder interval, an unresolved item becomes notification-eligible again only when
+  its required action or the consequence of acting or not acting materially changes. Changes to
+  wording, evidence, confidence, rediscovery, or internal progress alone do not qualify; quiet
+  hours and send-time revalidation still apply.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
   authority. After sign-in, the app returns the person to the requested review destination.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized

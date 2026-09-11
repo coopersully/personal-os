@@ -80,6 +80,10 @@ conversation message, child run, source evidence, policy, approval, effect, and 
 - Notification history is keyed to durable work-item identity. Rediscovery by later maintenance
   runs cannot resend an unchanged item before the configured reminder interval elapses. The default
   is 7 days; `never` suppresses repeats without changing the work item's review state.
+- Notification eligibility also records a semantic revision of the required action and consequence.
+  Before the reminder interval, only a material change to either value creates new eligibility;
+  wording, evidence, confidence, rediscovery, and internal-progress revisions do not. The newly
+  eligible intent still passes quiet-hours policy and send-time revalidation.
 - STOP, disconnect, feature disablement, or workspace SMS disablement stops new sends and routing
   while preserving prior audit and recovery state.
 

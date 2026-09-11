@@ -101,6 +101,10 @@ Each actionable item produces one initial notification. An unchanged unresolved 
 mentioned again only after the configured reminder interval; repeated maintenance runs do not
 restart or bypass that interval. The default is 7 days, and `never` disables repeat notifications
 without removing the item from Reviews. nohmi prefers missing a reminder over becoming repetitive.
+Before that interval, the same item is eligible again only when the required action or the
+consequence of acting or not acting materially changes. Wording, supporting evidence, confidence,
+rediscovery, and internal status changes remain suppressed when they do not change either one;
+quiet hours and send-time revalidation still apply.
 
 ## Inheritance boundary
 

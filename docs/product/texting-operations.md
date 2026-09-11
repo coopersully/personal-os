@@ -123,6 +123,12 @@ Texting sends the initial actionable notification once. Repeated maintenance run
 unchanged question, review, connector failure, or recovery step; reminder eligibility is attached
 to the durable work item rather than the number of times maintenance discovers it.
 
+The same unresolved item becomes eligible for an earlier notification only when new information
+materially changes what the person must do or the consequence of acting or not acting. New wording,
+evidence, confidence, maintenance rediscovery, or internal progress does not qualify when the
+required action and consequence remain the same. An eligible material change still respects quiet
+hours and is revalidated immediately before delivery.
+
 An unresolved item may be mentioned again only after the person's configured reminder interval has
 fully elapsed. The default is 7 days; the person may choose another interval or `never`, which
 disables repeat notifications while leaving the item visible in Reviews. nohmi prefers silence and

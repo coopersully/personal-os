@@ -89,6 +89,12 @@ person's configured interval and after revalidating the item. The default is 7 d
 suppresses repeats without resolving or hiding the work item. Prefer silence over notification
 completeness.
 
+Before the reminder interval, request another notification for the same item only when the
+required action or the consequence of acting or not acting materially changes. Do not treat new
+wording, evidence, confidence, rediscovery, or internal progress as new eligibility when the action
+and consequence are unchanged. Keep the semantic revision explicit so Texting can deduplicate and
+revalidate it while continuing to enforce quiet hours.
+
 ## Verify the delivered slice
 
 Test domain decisions, migrated persistence, concurrent claims, retry/recovery, authorization,

@@ -290,6 +290,31 @@ describe("FloatingMailComposer", () => {
     );
   });
 
+  it("stays in Mail when a draft cannot be saved before opening Connections", async () => {
+    const errorToast = vi.spyOn(toast, "error");
+    vi.spyOn(api, "createMailDraft").mockRejectedValue(new Error("Draft storage unavailable"));
+    const view = renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.type(screen.getByLabelText("Subject"), "Keep this draft");
+
+    view.rerender(
+      <MemoryRouter initialEntries={["/mail"]}>
+        <QueryClientProvider client={new QueryClient()}>
+          <FloatingMailComposer accounts={[{ ...account, sendCapability: "reconnect" }]} />
+          <LocationProbe />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Reconnect account" }));
+
+    await waitFor(() =>
+      expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
+        description: "Draft storage unavailable",
+      }),
+    );
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/mail");
+  });
+
   it("never offers a disconnected account when another sender is available", async () => {
     const reconnectAccount = {
       ...account,
@@ -517,5 +542,39 @@ describe("FloatingMailComposer", () => {
     );
     expect(update).toHaveBeenCalledOnce();
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it("keeps retry-safe drafts blocked when durable authority cannot be recovered", async () => {
+    const errorToast = vi.spyOn(toast, "error");
+    const update = vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
+    vi.spyOn(api, "listMailDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "sendMailDraft").mockRejectedValue(
+      new ApiClientError({
+        code: "service_unavailable",
+        details: { retrySafe: true },
+        message: "Provider rejected delivery",
+        status: 503,
+      }),
+    );
+    renderComposer({ intent: { draft } });
+
+    await screen.findByRole("dialog", { name: "New message" });
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
+    await waitFor(() =>
+      expect(errorToast).toHaveBeenCalledWith("Message couldn’t be sent", {
+        description: "Provider rejected delivery",
+      }),
+    );
+
+    await userEvent.type(screen.getByLabelText("Message"), " again");
+    await waitFor(
+      () =>
+        expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
+          description: "The latest saved draft could not be recovered. Try again.",
+        }),
+      { timeout: 2_000 },
+    );
+    expect(update).toHaveBeenCalledOnce();
   });
 });

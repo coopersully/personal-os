@@ -8,6 +8,7 @@ import { api } from "../../api.js";
 import { SidebarProvider } from "../../components/ui/sidebar.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import {
+  formatAttachmentSize,
   isMailListScope,
   MailSidebar,
   MailTopbarSearch,
@@ -113,6 +114,36 @@ describe("Mail workspace helpers", () => {
         fallback,
       ),
     ).toEqual({ address: "recipient@example.com", name: "Recipient" });
+    expect(mailReplyRecipient(undefined, "me@example.com", fallback)).toEqual(fallback);
+    expect(
+      mailReplyRecipient(
+        {
+          ...base,
+          from: { address: "sender@example.com", name: "Sender" },
+          replyTo: [],
+        },
+        "me@example.com",
+        fallback,
+      ),
+    ).toEqual({ address: "sender@example.com", name: "Sender" });
+    expect(
+      mailReplyRecipient(
+        {
+          ...base,
+          from: { address: "me@example.com", name: null },
+          replyTo: [],
+          to: [{ address: "ME@example.com", name: null }],
+        },
+        "me@example.com",
+        fallback,
+      ),
+    ).toBeNull();
+  });
+
+  it("formats attachment sizes at each display scale", () => {
+    expect(formatAttachmentSize(512)).toBe("512 B");
+    expect(formatAttachmentSize(2048)).toBe("2 KB");
+    expect(formatAttachmentSize(2 * 1024 * 1024)).toBe("2.0 MB");
   });
 
   it("makes the combined Inbox primary and keeps sources out of navigation", async () => {

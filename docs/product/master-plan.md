@@ -296,8 +296,9 @@ flowchart TD
   and consolidate multiple items into one Reviews alert. Never delay a direct reply to a
   user-initiated message.
 - Deduplicate actionable notifications by durable work-item identity across maintenance runs. Send
-  one initial alert, permit another only after the person's deliberately long configured reminder
-  interval, and revalidate and consolidate eligible items before sending.
+  one initial alert, default repeat eligibility to 7 days, support custom intervals and `never`, and
+  revalidate and consolidate eligible items before sending. `Never` suppresses reminders without
+  hiding unresolved work from Reviews.
 - Require normal nohmi authentication for every SMS deep link, retain the requested destination
   across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
   in the URL.

@@ -353,8 +353,9 @@ coherent response without reproducing domain expertise.
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.
 - An actionable item is notified once and is not repeated by later maintenance runs. A reminder is
-  eligible only after a deliberately long user-configurable interval, after revalidation and
-  deduplication; nohmi prefers silence over notification completeness.
+  eligible only after the user-configurable interval, which defaults to 7 days, and only after
+  revalidation and deduplication. `Never` disables repeats without hiding the item from Reviews;
+  nohmi prefers silence over notification completeness.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
   authority. After sign-in, the app returns the person to the requested review destination.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized

@@ -85,8 +85,9 @@ Texting consolidates multiple current items into one Reviews alert after quiet h
 
 Give each notification intent the durable work-item identity needed for deduplication. Rediscovery
 in later maintenance runs must not request another message; Texting may remind only after the
-person's deliberately long configured interval and after revalidating the item. Prefer silence over
-notification completeness.
+person's configured interval and after revalidating the item. The default is 7 days, and `never`
+suppresses repeats without resolving or hiding the work item. Prefer silence over notification
+completeness.
 
 ## Verify the delivered slice
 

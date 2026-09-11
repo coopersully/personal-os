@@ -124,10 +124,11 @@ unchanged question, review, connector failure, or recovery step; reminder eligib
 to the durable work item rather than the number of times maintenance discovers it.
 
 An unresolved item may be mentioned again only after the person's configured reminder interval has
-fully elapsed. The default interval should be deliberately long: nohmi prefers silence and a less
-complete notification history over becoming repetitive or annoying. Before any reminder, Texting
-revalidates the item, suppresses resolved or expired work, and consolidates multiple eligible items
-into one unified Reviews alert.
+fully elapsed. The default is 7 days; the person may choose another interval or `never`, which
+disables repeat notifications while leaving the item visible in Reviews. nohmi prefers silence and
+a less complete notification history over becoming repetitive or annoying. Before any reminder,
+Texting revalidates the item, suppresses resolved or expired work, and consolidates multiple
+eligible items into one unified Reviews alert.
 
 ## Global review bypass and SMS approval
 
@@ -169,7 +170,7 @@ it needs different behavior. The configurable preferences are:
 - useful contextual identifiers with privacy-safe detail, or explicitly expanded content;
 - whether to include first-party review and recovery links; and
 - the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery; and
-- the deliberately long interval before an unresolved item may be mentioned again.
+- the 7-day default reminder interval, a custom interval, or `never` for no repeat notifications.
 
 Custom maintenance instructions are workspace guidance, not Texting configuration. They apply to
 every setup or maintenance invocation regardless of whether it began in the app, MCP, an external

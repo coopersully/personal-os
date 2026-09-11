@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { calendarNavigationItem } from "../features/calendar/manifest.js";
+import { financesNavigationItem } from "../features/finances/manifest.js";
+import { mailNavigationItem } from "../features/mail/manifest.js";
+import { settingsNavigationItem } from "../features/settings/manifest.js";
+import { tasksNavigationItem } from "../features/tasks/manifest.js";
 import {
   navigationOwnerForLocation,
   rendersApplicationShell,
@@ -33,5 +38,13 @@ describe("workspace navigation ownership", () => {
       "mail",
       "finances",
     ]);
+  });
+
+  it("keeps feature-owned navigation metadata aligned with the shell manifest", () => {
+    expect(calendarNavigationItem).toMatchObject({ label: "Calendar", path: "/calendar" });
+    expect(tasksNavigationItem).toMatchObject({ label: "Tasks", path: "/tasks" });
+    expect(mailNavigationItem).toMatchObject({ label: "Mail", path: "/mail" });
+    expect(financesNavigationItem).toMatchObject({ label: "Finances", path: "/finances" });
+    expect(settingsNavigationItem).toMatchObject({ label: "Settings", path: "/settings" });
   });
 });

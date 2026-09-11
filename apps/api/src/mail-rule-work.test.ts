@@ -8,6 +8,7 @@ import {
   applyMailRuleActionToState,
   classifyMailRuleProviderFailure,
   durableMailRuleActionFingerprint,
+  enqueueDurableMailRuleWork,
   mailRuleActionIsApplied,
   strongestMailRuleProviderEffect,
 } from "./mail-rule-work.js";
@@ -33,6 +34,26 @@ function connectorError(status: number): ConnectorError {
 }
 
 describe("durable Mail rule work helpers", () => {
+  it("does not enqueue work without both durable actions and threads", async () => {
+    const authorization = {
+      profileId: "10000000-0000-4000-8000-000000000001",
+      profileVersion: 1,
+      ruleId: "20000000-0000-4000-8000-000000000001",
+      ruleVersion: 1,
+      userId: "30000000-0000-4000-8000-000000000001",
+    };
+    await expect(
+      enqueueDurableMailRuleWork({} as never, { ...authorization, actions: [], threads: [] }),
+    ).resolves.toBe(0);
+    await expect(
+      enqueueDurableMailRuleWork({} as never, {
+        ...authorization,
+        actions: [{ afterDays: 0, mailboxId: null, type: "archive" }],
+        threads: [],
+      }),
+    ).resolves.toBe(0);
+  });
+
   it("builds a stable identity from the complete action snapshot", () => {
     const action = { afterDays: 1, mailboxId: null, type: "trash" as const };
     expect(durableMailRuleActionFingerprint(action)).toBe(

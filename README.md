@@ -66,8 +66,8 @@ entire target described above:
   revision-safe MCP operations;
 - reminder, unified-calendar, event-management, cross-provider deduplication, and selected-calendar
   workflows;
-- unified Google and iCloud mailboxes with search, conversation reading, drafts, sending,
-  provider-backed actions, and reviewed retention rules;
+- unified Google and iCloud mailboxes with search, conversation reading, durable drafts,
+  human-confirmed sending, provider-backed actions, and reviewed retention rules;
 - multi-account Google Calendar/Gmail OAuth, discovery, synchronization, and calendar write-through CRUD;
 - one iCloud app-specific-password connection for IMAP Mail, CalDAV Calendar, or both;
 - Finance accounts, imports, transactions, ownership semantics, review inbox, budgets, playbook,

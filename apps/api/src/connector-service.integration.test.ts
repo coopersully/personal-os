@@ -52,7 +52,6 @@ const googleCalendarScope = [
 const googleCalendarAndMailScope = [
   googleCalendarScope,
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send",
 ].join(" ");
 const credentials: GoogleCredentials = {
   accessToken: "access-1",
@@ -563,6 +562,100 @@ describe.sequential("connector service", () => {
         "wrong-code",
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("projects provider send capability without widening account authority", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Google account fixture is missing.");
+
+    const googleSendMail = google.sendMail;
+    delete google.sendMail;
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "unavailable",
+    );
+    google.sendMail = googleSendMail ?? vi.fn(async (value) => value);
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        email: "person@example.com",
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+        mailEnabled: true,
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "reconnect",
+    );
+    vi.mocked(google.sendMail).mockClear();
+    await expect(
+      service.mailGateway.send(userId, account.id, {
+        body: "Blocked without send scope",
+        cc: [],
+        subject: "Blocked",
+        to: [{ address: "recipient@example.com", name: null }],
+      }),
+    ).rejects.toBeInstanceOf(MailProviderRejectedError);
+    expect(google.sendMail).not.toHaveBeenCalled();
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          {
+            ...credentials,
+            scope: `${googleCalendarAndMailScope} https://www.googleapis.com/auth/gmail.send`,
+          },
+          encryptionKey,
+        ),
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "available",
+    );
+
+    await database.db
+      .update(calendarAccounts)
+      .set({ email: null })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "unavailable",
+    );
+    await database.db
+      .update(calendarAccounts)
+      .set({ email: "person@example.com", mailEnabled: false })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(service.mailGateway.sendCapability?.(userId, account.id)).resolves.toBe(
+      "unavailable",
+    );
+    await expect(service.mailGateway.sendCapability?.(userId, crypto.randomUUID())).resolves.toBe(
+      "unavailable",
+    );
+
+    const connected = await service.connectICloud(userId, {
+      appSpecificPassword: "send-capability-password",
+      calendar: false,
+      email: "sender@icloud.com",
+      mail: true,
+    });
+    const iCloudSendMail = icloud.sendMail;
+    delete icloud.sendMail;
+    await expect(service.mailGateway.sendCapability?.(userId, connected.accountId)).resolves.toBe(
+      "unavailable",
+    );
+    icloud.sendMail = iCloudSendMail ?? vi.fn(async () => undefined);
+    await expect(service.mailGateway.sendCapability?.(userId, connected.accountId)).resolves.toBe(
+      "available",
+    );
+
+    await database.db
+      .update(calendarAccounts)
+      .set({ email: "person@example.com", mailEnabled: true })
+      .where(eq(calendarAccounts.id, account.id));
   });
 
   it("advances Gmail history and applies only explicit deletions under the sync claim", async () => {
@@ -1194,40 +1287,17 @@ describe.sequential("connector service", () => {
     });
   });
 
-  it("writes Google Mail through the provider gateway and refreshes credentials", async () => {
+  it("writes Google Mail state through the provider gateway and refreshes credentials", async () => {
     const [account] = await database.db
       .select()
       .from(calendarAccounts)
       .where(eq(calendarAccounts.providerAccountId, "google-person"));
     if (!account) throw new Error("Connected account fixture is missing.");
-    await service.mailGateway.send(userId, account.id, {
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
-    });
     await service.mailGateway.update(userId, account.id, "remote-thread", {
       addMailboxIds: ["STARRED"],
       removeMailboxIds: ["UNREAD"],
     });
-    expect(google.sendMail).toHaveBeenCalledOnce();
     expect(google.updateMailThread).toHaveBeenCalledOnce();
-    const { sendMail: _sendMail, ...googleWithoutSend } = google;
-    const serviceWithoutSend = createConnectorService({
-      db: database.db,
-      encryptionKey,
-      google: googleWithoutSend,
-      icloud,
-      now: () => timestamp,
-    });
-    await expect(
-      serviceWithoutSend.mailGateway.send(userId, account.id, {
-        body: "Hello",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toMatchObject({ code: "service_unavailable" });
   });
 
   it("reports direct provider updates when rotated credentials cannot be saved", async () => {
@@ -1287,7 +1357,7 @@ describe.sequential("connector service", () => {
     }
   });
 
-  it("rejects Mail gateways when Google or iCloud Mail capability is disabled", async () => {
+  it("rejects Mail state updates when Google or iCloud Mail capability is disabled", async () => {
     const [googleAccount] = await database.db
       .select()
       .from(calendarAccounts)
@@ -1297,14 +1367,6 @@ describe.sequential("connector service", () => {
       .update(calendarAccounts)
       .set({ mailEnabled: false })
       .where(eq(calendarAccounts.id, googleAccount.id));
-    await expect(
-      service.mailGateway.send(userId, googleAccount.id, {
-        body: "Blocked",
-        cc: [],
-        subject: "Blocked",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toThrow("Mail is not enabled");
     await expect(
       service.mailGateway.update(userId, googleAccount.id, "blocked-thread", {
         addMailboxIds: ["STARRED"],
@@ -1321,14 +1383,6 @@ describe.sequential("connector service", () => {
       email: "calendar-only@icloud.example",
       mail: false,
     });
-    await expect(
-      service.mailGateway.send(userId, disabledICloud.accountId, {
-        body: "Blocked",
-        cc: [],
-        subject: "Blocked",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toThrow("Mail is not enabled");
     await expect(
       service.mailGateway.update(userId, disabledICloud.accountId, "blocked-thread", {
         removeMailboxIds: ["UNREAD"],
@@ -1368,6 +1422,18 @@ describe.sequential("connector service", () => {
       .from(calendarAccounts)
       .where(eq(calendarAccounts.providerAccountId, "google-person"));
     if (!googleAccount) throw new Error("Google account fixture is missing.");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          {
+            ...credentials,
+            scope: `${googleCalendarAndMailScope} https://www.googleapis.com/auth/gmail.send`,
+          },
+          encryptionKey,
+        ),
+      })
+      .where(eq(calendarAccounts.id, googleAccount.id));
     const sendGoogle = google.sendMail;
     const sendICloud = icloud.sendMail;
     if (!sendGoogle || !sendICloud) throw new Error("Mail send fixtures are unavailable.");
@@ -1430,6 +1496,18 @@ describe.sequential("connector service", () => {
       .from(calendarAccounts)
       .where(eq(calendarAccounts.providerAccountId, "google-person"));
     if (!account) throw new Error("Google account fixture is missing.");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          {
+            ...credentials,
+            scope: `${googleCalendarAndMailScope} https://www.googleapis.com/auth/gmail.send`,
+          },
+          encryptionKey,
+        ),
+      })
+      .where(eq(calendarAccounts.id, account.id));
     const mail = createMailService({
       db: database.db,
       gateway: service.mailGateway,
@@ -1464,15 +1542,11 @@ describe.sequential("connector service", () => {
     `);
     try {
       await expect(
-        mail.send(
+        mail.sendDraft(
           userId,
           {
-            accountId: account.id,
-            body: draft.body,
-            cc: draft.cc,
+            confirmedUpdatedAt: draft.updatedAt,
             draftId: draft.id,
-            subject: draft.subject,
-            to: draft.to,
           },
           {
             principal: {
@@ -2506,8 +2580,7 @@ describe.sequential("connector service", () => {
     ).resolves.toHaveLength(1);
     const reauthorizedCredentials = {
       ...credentials,
-      scope:
-        "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+      scope: "https://www.googleapis.com/auth/gmail.modify",
     };
     vi.mocked(google.exchangeCode).mockResolvedValueOnce(reauthorizedCredentials);
     vi.mocked(google.getProfile).mockResolvedValueOnce({
@@ -3715,12 +3788,6 @@ describe.sequential("connector service", () => {
     expect(icloud.syncMail).not.toHaveBeenCalled();
     await expect(service.syncAccount(userId, connected.accountId)).resolves.toMatchObject({
       changed: expect.any(Number),
-    });
-    await service.mailGateway.send(userId, connected.accountId, {
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
     });
     await expect(
       service.mailGateway.update(userId, connected.accountId, "thread", {
@@ -5617,12 +5684,13 @@ describe.sequential("connector service", () => {
           requestId: "rule-save-race",
         },
       );
+      const createRejection = create.catch((error: unknown) => error);
       await new Promise<void>((resolveTurn) => {
         setImmediate(resolveTurn);
       });
       await blocker.query("COMMIT");
       await expect(disconnect).resolves.toBeUndefined();
-      await expect(create).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(createRejection).resolves.toMatchObject({ code: "invalid_request" });
     } finally {
       await blocker.query("ROLLBACK");
       blocker.release();
@@ -6727,6 +6795,107 @@ describe.sequential("connector service", () => {
       succeeded: 1,
     });
     expect(updateMailThread).toHaveBeenCalledTimes(7);
+  });
+
+  it("fences a stewardship-triggered Mail rule dispatch to its owner", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const first = await createDurableMailWorkFixture("Owner-scoped first", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const second = await createDurableMailWorkFixture("Owner-scoped second", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    await expect(service.dispatchDueMailRuleWork(first.user.id)).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    await expect(
+      database.db
+        .select({ id: mailRuleWorkItems.id, status: mailRuleWorkItems.status })
+        .from(mailRuleWorkItems)
+        .orderBy(asc(mailRuleWorkItems.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: first.work.id, status: "succeeded" },
+        { id: second.work.id, status: "pending" },
+      ]),
+    );
+    expect(updateMailThread).toHaveBeenCalledOnce();
+  });
+
+  it("fences a stewardship-triggered Mail rule dispatch to the reviewed threads", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const action = { afterDays: 1, mailboxId: null, type: "archive" } as const;
+    const first = await createDurableMailWorkFixture("Thread-scoped first", action);
+    const [secondThread] = await database.db
+      .insert(mailThreads)
+      .values({
+        accountId: first.account.id,
+        bodyText: "Routine receipt outside the reviewed scope",
+        from: { address: "orders@example.com", name: "Orders" },
+        provider: "google",
+        receivedAt: new Date(timestamp.getTime() - 2 * 86_400_000),
+        remoteMailboxIds: ["INBOX", "UNREAD"],
+        remoteThreadId: "thread-scoped-second",
+        snippet: "Routine receipt outside the reviewed scope",
+        starred: false,
+        subject: "Routine Thread-scoped second",
+        to: [],
+        unread: true,
+        userId: first.user.id,
+      })
+      .returning();
+    if (!secondThread) throw new Error("Second scoped Mail thread was not created.");
+    const [secondWork] = await database.db
+      .insert(mailRuleWorkItems)
+      .values({
+        accountId: first.account.id,
+        action,
+        actionFingerprint: durableMailRuleActionFingerprint(action),
+        dueAt: new Date(secondThread.receivedAt.getTime() + 86_400_000),
+        nextAttemptAt: new Date(secondThread.receivedAt.getTime() + 86_400_000),
+        profileId: first.profile.id,
+        profileVersion: first.profile.version,
+        remoteThreadId: secondThread.remoteThreadId,
+        ruleId: first.rule.id,
+        ruleVersion: first.rule.version,
+        sourceUpdatedAt: secondThread.updatedAt,
+        threadId: secondThread.id,
+        userId: first.user.id,
+      })
+      .returning();
+    if (!secondWork) throw new Error("Second scoped Mail work item was not created.");
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    await expect(
+      service.dispatchDueMailRuleWork(first.user.id, [first.thread.id]),
+    ).resolves.toMatchObject({ claimed: 1, succeeded: 1 });
+    await expect(
+      database.db
+        .select({ id: mailRuleWorkItems.id, status: mailRuleWorkItems.status })
+        .from(mailRuleWorkItems)
+        .orderBy(asc(mailRuleWorkItems.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: first.work.id, status: "succeeded" },
+        { id: secondWork.id, status: "pending" },
+      ]),
+    );
+    expect(updateMailThread).toHaveBeenCalledOnce();
   });
 
   it("moves one-day cleanup work to recoverable Trash without permanent deletion", async () => {

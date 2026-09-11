@@ -16,6 +16,10 @@ import {
   type DatabaseClient,
   domainProfiles,
   financeTransactions,
+  mailReviews,
+  mailRuleWorkItems,
+  mailStewardshipQuestions,
+  mailThreadDispositions,
   mailThreads,
   migrateDatabase,
   reminders,
@@ -4864,6 +4868,7 @@ describe.sequential("ilo API", () => {
       .where(inArray(users.email, fixtureEmails));
     expect(fixtureUsers).toHaveLength(qaFixtureAccounts.length);
     const demo = fixtureUsers.find((record) => record.email === "demo+full@ilo.test");
+    const loaded = fixtureUsers.find((record) => record.email === "qa+loaded@ilo.test");
     const onboarding = fixtureUsers.find((record) => record.email === "qa+onboarding-new@ilo.test");
     const resumed = fixtureUsers.find((record) => record.email === "qa+onboarding-google@ilo.test");
     const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@ilo.test");
@@ -4893,6 +4898,10 @@ describe.sequential("ilo API", () => {
       profiles,
       emptyTasks,
       degradedAccounts,
+      demoReviews,
+      demoDispositions,
+      loadedQuestions,
+      degradedRuleWork,
       demoTaskLists,
       demoTaskProjects,
       demoTasks,
@@ -4923,6 +4932,22 @@ describe.sequential("ilo API", () => {
         .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
       database.db
         .select()
+        .from(mailReviews)
+        .where(eq(mailReviews.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailThreadDispositions)
+        .where(eq(mailThreadDispositions.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailStewardshipQuestions)
+        .where(eq(mailStewardshipQuestions.userId, loaded?.id ?? "")),
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.userId, degraded?.id ?? "")),
+      database.db
+        .select()
         .from(taskLists)
         .where(eq(taskLists.userId, demo?.id ?? "")),
       database.db
@@ -4941,6 +4966,16 @@ describe.sequential("ilo API", () => {
     expect(emptyTasks).toEqual([]);
     expect(degradedAccounts).toContainEqual(
       expect.objectContaining({ provider: "google", syncStatus: "error" }),
+    );
+    expect(demoReviews).toContainEqual(
+      expect.objectContaining({ sourceFreshness: "current", state: "maintained" }),
+    );
+    expect(demoDispositions).toHaveLength(5);
+    expect(loadedQuestions).toContainEqual(
+      expect.objectContaining({ kind: "needs_disposition", status: "open" }),
+    );
+    expect(degradedRuleWork).toContainEqual(
+      expect.objectContaining({ providerEffect: "indeterminate", status: "reconcile" }),
     );
     expect(demoTaskLists.map(({ kind, name }) => ({ kind, name }))).toEqual(
       expect.arrayContaining([

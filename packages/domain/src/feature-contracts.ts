@@ -38,7 +38,6 @@ export const connectorCapabilities = [
   "calendar_write",
   "mail_read",
   "mail_manage",
-  "mail_send",
   "finance_read",
   "finance_write",
   "bookmarks_read",

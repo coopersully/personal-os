@@ -1,5 +1,5 @@
 import type { ConnectedAccountHealth } from "@personal-os/domain";
-import { AlertTriangleIcon, RefreshIcon } from "@/components/icons";
+import { AlertTriangleIcon, LinkOffIcon, RefreshIcon } from "@/components/icons";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
@@ -20,10 +20,18 @@ export function ConnectionHealthBadge({ health }: { health: ConnectedAccountHeal
     );
   }
   if (health.state === "reconnect") {
-    return <Badge variant="destructive">Reconnect required</Badge>;
+    return (
+      <Badge variant="destructive">
+        <LinkOffIcon aria-hidden="true" data-icon="inline-start" /> Reconnect required
+      </Badge>
+    );
   }
   if (health.state === "service_attention") {
-    return <Badge variant="outline">nohmi is resolving this</Badge>;
+    return (
+      <Badge variant="destructive">
+        <AlertTriangleIcon aria-hidden="true" data-icon="inline-start" /> Service issue
+      </Badge>
+    );
   }
   return <Badge variant="secondary">Ready</Badge>;
 }

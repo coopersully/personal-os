@@ -1,5 +1,6 @@
+import { createServer } from "node:net";
 import { ConnectorError } from "./failures.js";
-import { createICloudConnector } from "./icloud.js";
+import { createICloudConnector, createICloudSmtpTransport } from "./icloud.js";
 import {
   calendarAttachmentProjectionOverflow,
   MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
@@ -72,11 +73,7 @@ function davClient(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function connector(
-  client = davClient(),
-  imap?: Record<string, unknown>,
-  createSmtpTransport?: () => { close: () => void; sendMail: (input: unknown) => Promise<unknown> },
-) {
+function connector(client = davClient(), imap?: Record<string, unknown>) {
   const createDavClient = vi.fn(async () => client as never);
   return {
     client,
@@ -84,12 +81,96 @@ function connector(
     value: createICloudConnector({
       createDavClient,
       ...(imap ? { createImapClient: vi.fn(() => imap as never) } : {}),
-      ...(createSmtpTransport ? { createSmtpTransport } : {}),
     }),
   };
 }
 
 describe("iCloud connector", () => {
+  it("submits a plain-text message once and closes the SMTP transport", async () => {
+    const close = vi.fn();
+    const sendMail = vi.fn(async () => ({ accepted: ["person@example.com"] }));
+    const value = createICloudConnector({
+      createSmtpTransport: vi.fn(() => ({ close, sendMail })),
+    } as never);
+    if (!value.sendMail) throw new Error("iCloud Mail delivery capability is missing.");
+
+    await expect(
+      value.sendMail(credentials, {
+        body: "Prepared response",
+        cc: [{ address: "copy@example.com", name: null }],
+        from: credentials.email,
+        inReplyTo: "<prior@example.com>",
+        references: ["<root@example.com>", "<prior@example.com>"],
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: "Person" }],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendMail).toHaveBeenCalledWith({
+      cc: [{ address: "copy@example.com" }],
+      from: credentials.email,
+      inReplyTo: "<prior@example.com>",
+      references: ["<root@example.com>", "<prior@example.com>"],
+      subject: "Follow up",
+      text: "Prepared response",
+      to: [{ address: "person@example.com", name: "Person" }],
+    });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("never authenticates when a controlled SMTP peer cannot negotiate STARTTLS", async () => {
+    const commands: string[] = [];
+    const server = createServer((socket) => {
+      socket.setEncoding("utf8");
+      socket.write("220 localhost ESMTP\r\n");
+      let pending = "";
+      socket.on("data", (chunk: string) => {
+        pending += chunk;
+        const lines = pending.split("\r\n");
+        pending = lines.pop() ?? "";
+        for (const line of lines) {
+          commands.push(line);
+          if (/^EHLO /u.test(line)) socket.write("250-localhost\r\n250 AUTH PLAIN\r\n");
+          else if (line === "STARTTLS") socket.write("454 TLS unavailable\r\n");
+          else socket.write("250 OK\r\n");
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("SMTP peer did not bind.");
+    const value = createICloudConnector({
+      createSmtpTransport: (smtpCredentials) =>
+        createICloudSmtpTransport(smtpCredentials, {
+          host: "127.0.0.1",
+          port: address.port,
+        }),
+    });
+    if (!value.sendMail) throw new Error("iCloud Mail delivery capability is missing.");
+
+    try {
+      await expect(
+        value.sendMail(credentials, {
+          body: "Prepared response",
+          cc: [],
+          from: credentials.email,
+          subject: "Follow up",
+          to: [{ address: "person@example.com", name: null }],
+        }),
+      ).rejects.toBeDefined();
+      expect(commands).toContain("STARTTLS");
+      expect(commands.some((command) => /^AUTH /u.test(command))).toBe(false);
+      expect(commands.join("\n")).not.toContain(credentials.appSpecificPassword);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("uses a bounded abortable IMAP IDLE session only as a change signal", async () => {
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     let finishIdle: (() => void) | undefined;
@@ -936,50 +1017,6 @@ describe("iCloud connector", () => {
       calendar: expect.objectContaining({ url: calendarId }),
       fetchOptions: { signal: controller.signal },
     });
-  });
-
-  it("sends iCloud mail through the authenticated SMTP transport", async () => {
-    const transport = { close: vi.fn(), sendMail: vi.fn(async () => undefined) };
-    const { value } = connector(davClient(), undefined, () => transport);
-    if (!value.sendMail) throw new Error("Mail sending is unavailable.");
-    await value.sendMail(credentials, {
-      body: "Hello",
-      cc: [{ address: "cc@example.com", name: "CC" }],
-      from: credentials.email,
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: "To" }],
-    });
-    expect(transport.sendMail).toHaveBeenCalledWith({
-      cc: [{ address: "cc@example.com", name: "CC" }],
-      from: credentials.email,
-      subject: "Subject",
-      text: "Hello",
-      to: [{ address: "to@example.com", name: "To" }],
-    });
-    expect(transport.close).toHaveBeenCalledOnce();
-
-    const failingTransport = {
-      close: vi.fn(),
-      sendMail: vi.fn(async () => {
-        throw new Error("SMTP unavailable");
-      }),
-    };
-    const { value: failing } = connector(davClient(), undefined, () => failingTransport);
-    if (!failing.sendMail) throw new Error("Mail sending is unavailable.");
-    await expect(
-      failing.sendMail(credentials, {
-        body: "Hello",
-        cc: [],
-        from: credentials.email,
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    ).rejects.toMatchObject({
-      category: "transport",
-      disposition: "retry",
-      status: null,
-    });
-    expect(failingTransport.close).toHaveBeenCalledOnce();
   });
 
   it("writes iCloud flags and mailbox moves through IMAP", async () => {

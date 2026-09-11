@@ -27,7 +27,13 @@ import {
   financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
+  mailObligations,
+  mailReviews,
+  mailRuleProposals,
   mailRuleWorkItems,
+  mailStewardshipFeedback,
+  mailStewardshipQuestions,
+  mailThreadDispositions,
   oauthStates,
   textingConsentEvents,
   textingVerificationChallenges,
@@ -42,6 +48,59 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("keeps the Mail stewardship ledger owned, revisioned, and historically reviewable", async () => {
+    const obligations = getTableConfig(mailObligations);
+    const dispositions = getTableConfig(mailThreadDispositions);
+    const questions = getTableConfig(mailStewardshipQuestions);
+    const proposals = getTableConfig(mailRuleProposals);
+    const feedback = getTableConfig(mailStewardshipFeedback);
+    const reviews = getTableConfig(mailReviews);
+
+    for (const table of [obligations, dispositions, questions, proposals, feedback, reviews]) {
+      expect(table.columns.map((column) => column.name)).toContain("user_id");
+    }
+    expect(obligations.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "mail_obligations_user_state_idx",
+        "mail_obligations_open_identity_idx",
+      ]),
+    );
+    expect(dispositions.indexes.map((index) => index.config.name)).toContain(
+      "mail_thread_dispositions_current_thread_idx",
+    );
+    expect(questions.indexes.map((index) => index.config.name)).toContain(
+      "mail_stewardship_questions_open_fingerprint_idx",
+    );
+    expect(proposals.columns.map((column) => column.name)).toContain("version");
+    expect(feedback.columns.map((column) => column.name)).not.toContain("updated_at");
+    expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
+    expect(reviews.indexes.map((index) => index.config.name)).toContain(
+      "mail_reviews_user_fingerprint_scope_idx",
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0073_mail_workspace_stewardship.sql"),
+      "utf8",
+    );
+    for (const table of [
+      "mail_obligations",
+      "mail_thread_dispositions",
+      "mail_stewardship_questions",
+      "mail_rule_proposals",
+      "mail_stewardship_feedback",
+      "mail_reviews",
+    ]) {
+      expect(migrationSql).toContain(`CREATE TABLE "${table}"`);
+    }
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "mail_thread_dispositions_current_thread_idx"',
+    );
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "mail_stewardship_questions_open_fingerprint_idx"',
+    );
+    expect(migrationSql).not.toContain('ALTER TABLE "mail_threads"');
+  });
+
   it("keeps texting verification recoverable and provider consent events idempotent", async () => {
     const challenges = getTableConfig(textingVerificationChallenges);
     const consentEvents = getTableConfig(textingConsentEvents);
@@ -262,6 +321,13 @@ describe("database schema contracts", () => {
     expect(journal.entries[budgetBucketIndex]?.when).toBeGreaterThan(
       journal.entries[budgetBucketIndex - 1]?.when ?? 0,
     );
+    const mailReconciliationIndex = journalTags.indexOf(
+      "0078_mail_workspace_stewardship_reconciliation",
+    );
+    expect(mailReconciliationIndex).toBeGreaterThan(0);
+    expect(journal.entries[mailReconciliationIndex]?.when).toBeGreaterThan(
+      journal.entries[mailReconciliationIndex - 1]?.when ?? 0,
+    );
     const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
     expect(financeAutomationIndex).toBeGreaterThanOrEqual(0);
     expect(journalTags.slice(financeAutomationIndex)).toEqual([
@@ -288,6 +354,10 @@ describe("database schema contracts", () => {
       "0075_finance_ownership_constraint",
       "0076_task_list_icons",
       "0077_desktop_mail_activity",
+      "0073_mail_workspace_stewardship",
+      "0078_mail_workspace_stewardship_reconciliation",
+      "0079_mail_stewardship_integrity",
+      "0080_mail_reply_metadata",
     ]);
   });
 

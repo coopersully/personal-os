@@ -68,6 +68,10 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0075_finance_ownership_constraint",
         "0076_task_list_icons",
         "0077_desktop_mail_activity",
+        "0073_mail_workspace_stewardship",
+        "0078_mail_workspace_stewardship_reconciliation",
+        "0079_mail_stewardship_integrity",
+        "0080_mail_reply_metadata",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);
@@ -149,8 +153,8 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
       .insert(mailDrafts)
       .values({
         accountId,
-        body: "Keep this reply",
-        subject: "Re: Historical source",
+        body: "Keep this historical draft record",
+        subject: "Historical source draft",
         threadId: thread.id,
         to: [{ address: "sender@example.com", name: null }],
         userId: user.id,

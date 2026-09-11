@@ -24,6 +24,10 @@ describe.sequential("Finance account-semantics migration recovery", () => {
         "0075_finance_ownership_constraint",
         "0076_task_list_icons",
         "0077_desktop_mail_activity",
+        "0073_mail_workspace_stewardship",
+        "0078_mail_workspace_stewardship_reconciliation",
+        "0079_mail_stewardship_integrity",
+        "0080_mail_reply_metadata",
       ],
     );
 

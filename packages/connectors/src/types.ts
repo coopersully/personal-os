@@ -123,6 +123,9 @@ export type NormalizedRemoteMailThread = {
     mailboxIds?: string[];
     providerRevision?: string | null;
     receivedAt: Date;
+    messageId?: string | null;
+    references?: string[];
+    replyTo?: MailAddress[];
     remoteMessageId: string;
     to: MailAddress[];
   }>;
@@ -210,6 +213,8 @@ export type SendRemoteMailInput = {
   body: string;
   cc: MailAddress[];
   from: string;
+  inReplyTo?: string;
+  references?: string[];
   subject: string;
   threadId?: string;
   to: MailAddress[];

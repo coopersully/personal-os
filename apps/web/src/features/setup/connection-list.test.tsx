@@ -11,15 +11,19 @@ describe("ConnectionList", () => {
     render(
       <ConnectionList
         addLabel="Add another Google account"
-        connections={[{ id: "1", label: "person@example.com", description: "Calendar · Mail" }]}
+        connections={[
+          { id: "1", label: "person@example.com", description: "Calendar · Mail" },
+          { id: "2", label: "second@example.com" },
+        ]}
         emptyText="No Google accounts connected"
         mark="google"
         onAdd={onAdd}
       />,
     );
 
-    expect(screen.getByRole("img", { name: "Google" })).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "Google" })).toHaveLength(2);
     expect(screen.getByText("Calendar · Mail")).toBeInTheDocument();
+    expect(screen.getByText("second@example.com")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add another Google account" }));
     expect(onAdd).toHaveBeenCalledOnce();
   });

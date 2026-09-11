@@ -229,6 +229,58 @@ describe("agent access readiness adapters", () => {
     });
     expect(rows[3]?.description).toBe("Automatic calendar creation is off · 2 candidates waiting");
 
+    const compactRows = mailAgentAccessReadiness({
+      ...base,
+      profile: ready(activeProfile),
+      rules: ready([]),
+      setup: ready({
+        ...emptySetup,
+        accounts: [
+          { email: "one@example.com", label: "One", syncStatus: "error" },
+          { email: null, label: "Two", syncStatus: "idle" },
+        ],
+        commitmentIntake: {
+          automaticCreationEnabled: true,
+          previewOnlyCount: 0,
+          serverVerifiedCount: 3,
+        },
+      } as unknown as MailSetupContext),
+    });
+    expect(compactRows[0]?.description).toBe(
+      "2 connected · one@example.com and Two · 1 needs reconnect",
+    );
+    expect(compactRows[1]?.description).toBe("Profile v1 · 0 approved rules active");
+    expect(compactRows[3]?.description).toBe("Automatic calendar creation is on · 3 verified");
+
+    const reconnectRows = mailAgentAccessReadiness({
+      ...base,
+      setup: ready({
+        ...emptySetup,
+        accounts: [
+          { email: "one@example.com", label: "One", syncStatus: "error" },
+          { email: "two@example.com", label: "Two", syncStatus: "error" },
+        ],
+      } as MailSetupContext),
+    });
+    expect(reconnectRows[0]?.description).toBe(
+      "2 connected · one@example.com and two@example.com · 2 need reconnect",
+    );
+
+    const oneCandidateRows = mailAgentAccessReadiness({
+      ...base,
+      setup: ready({
+        ...emptySetup,
+        commitmentIntake: {
+          automaticCreationEnabled: false,
+          previewOnlyCount: 1,
+          serverVerifiedCount: 0,
+        },
+      } as MailSetupContext),
+    });
+    expect(oneCandidateRows[3]?.description).toBe(
+      "Automatic calendar creation is off · 1 candidate waiting",
+    );
+
     expect(mailAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(mailAgentAccessCapability("profile_and_attention", "$ilo-setup").title).toContain(
       "preferences",
@@ -309,6 +361,15 @@ describe("agent access readiness adapters", () => {
         reminders: ready({ items: [{ id: "one" } as Reminder], nextCursor: "next" }),
       })[0]?.description,
     ).toContain("1+ open Reminder");
+    expect(
+      reminderAgentAccessReadiness({
+        ...shared,
+        reminders: ready({
+          items: [{ id: "one" } as Reminder, { id: "two" } as Reminder],
+          nextCursor: null,
+        }),
+      })[0]?.description,
+    ).toContain("2 open Reminders");
     expect(reminderAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(reminderAgentAccessCapability("executable_rules", "$ilo-setup").title).toContain(
       "rules",

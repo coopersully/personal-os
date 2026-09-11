@@ -14,9 +14,17 @@ import {
 
 describe("auth fields", () => {
   it("uses a useful reserved email example and the domain validator", () => {
-    render(<EmailField name="email" onChange={() => undefined} value="" />);
+    render(
+      <EmailField
+        error="Enter a valid email address."
+        name="email"
+        onChange={() => undefined}
+        value=""
+      />,
+    );
 
     expect(screen.getByLabelText("Email")).toHaveAttribute("placeholder", "sam@example.com");
+    expect(screen.getByText("Enter a valid email address.")).toBeInTheDocument();
     expect(isValidEmailAddress("sam@example.com")).toBe(true);
     expect(isValidEmailAddress("not-an-email")).toBe(false);
   });

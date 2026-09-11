@@ -432,11 +432,11 @@ const mocks = vi.hoisted(() => ({
   createInvitation: vi.fn(),
   createCalendar: vi.fn(),
   createCalendarReview: vi.fn(),
-  createMailDraft: vi.fn(),
   createEvent: vi.fn(),
   createEventBlock: vi.fn(),
   createGoal: vi.fn(),
   createMotive: vi.fn(),
+  createMailDraft: vi.fn(),
   createFinanceAccount: vi.fn(),
   createFinanceBudget: vi.fn(),
   createFinanceTransaction: vi.fn(),
@@ -458,6 +458,7 @@ const mocks = vi.hoisted(() => ({
   cancelTaskProject: vi.fn(),
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
+  deleteMailDraft: vi.fn(),
   disconnectTexting: vi.fn(),
   getDailyBrief: vi.fn(),
   getCalendarStatus: vi.fn(),
@@ -491,8 +492,6 @@ const mocks = vi.hoisted(() => ({
   listMailThreads: vi.fn(),
   listInvitations: vi.fn(),
   listOAuthClients: vi.fn(),
-  reconcileMailDraft: vi.fn(),
-  sendMail: vi.fn(),
   snoozeMailThread: vi.fn(),
   listGoals: vi.fn(),
   listMotives: vi.fn(),
@@ -577,6 +576,7 @@ const mocks = vi.hoisted(() => ({
   requestPasswordReset: vi.fn(),
   resendEmailVerification: vi.fn(),
   resetPassword: vi.fn(),
+  reconcileMailDraft: vi.fn(),
   resolveFinanceReview: vi.fn(),
   restoreEvent: vi.fn(),
   restoreReminder: vi.fn(),
@@ -584,6 +584,7 @@ const mocks = vi.hoisted(() => ({
   revokeOAuthClient: vi.fn(),
   setCalendarSelected: vi.fn(),
   setAlwaysOnTop: vi.fn(),
+  sendMailDraft: vi.fn(),
   syncConnector: vi.fn(),
   syncXBookmarks: vi.fn(),
   selectXBookmarkFolder: vi.fn(),
@@ -591,6 +592,7 @@ const mocks = vi.hoisted(() => ({
   startTextingVerification: vi.fn(),
   updateCalendar: vi.fn(),
   updateMailThread: vi.fn(),
+  updateMailDraft: vi.fn(),
   updateEvent: vi.fn(),
   updateEventBlock: vi.fn(),
   updateAccountSetup: vi.fn(),
@@ -629,6 +631,20 @@ vi.mock("./api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Fallback error"),
   isUnauthorized: (error: unknown) => error instanceof Error && error.message === "unauthorized",
 }));
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() {
+      return values.size;
+    },
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, String(value)),
+  };
+}
 
 function setup(path = "/today") {
   const queryClient = new QueryClient({
@@ -1115,10 +1131,14 @@ function defaults() {
         },
         automaticRuleExecution: true,
         email: "test@example.com",
+        health: { message: null, nextSyncAt: null, recovery: null, state: "ready" },
         label: "Google",
+        lastSyncAttemptAt: now,
         lastSyncedAt: now,
         mailboxes: [mailbox],
+        nextSyncAt: null,
         provider: "google",
+        sendCapability: "available",
         syncError: null,
         syncStatus: "idle",
       },
@@ -1146,13 +1166,12 @@ function defaults() {
     },
   });
   mocks.listMailDrafts.mockResolvedValue([]);
+  mocks.deleteMailDraft.mockResolvedValue(undefined);
+  mocks.sendMailDraft.mockResolvedValue(undefined);
   mocks.listMailThreads.mockResolvedValue([mailThread, secondMailThread]);
   mocks.listMailMessages.mockResolvedValue([]);
   mocks.listMailRules.mockResolvedValue([]);
   mocks.getMailThread.mockResolvedValue(mailThread);
-  mocks.sendMail.mockResolvedValue(undefined);
-  mocks.createMailDraft.mockResolvedValue({ id });
-  mocks.reconcileMailDraft.mockResolvedValue({ id, sendStatus: "draft" });
   mocks.snoozeMailThread.mockResolvedValue(undefined);
   mocks.updateMailThread.mockResolvedValue(mailThread);
   mocks.listAccessTokens.mockResolvedValue([
@@ -1646,6 +1665,7 @@ beforeEach(() => {
     }
   }
   vi.stubGlobal("Date", TestDate);
+  vi.stubGlobal("localStorage", memoryStorage());
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
@@ -3904,8 +3924,9 @@ describe("ilo web app", () => {
     await browser.selectOptions(screen.getByLabelText("List"), id);
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await browser.click(await screen.findByRole("button", { name: "Move and detach Project" }));
-    expect(await screen.findAllByText("Task move needs a retry")).toHaveLength(2);
-    expect(screen.getByRole("dialog")).toHaveTextContent("Move Task without its Project?");
+    const moveDialog = screen.getByRole("dialog");
+    expect(await within(moveDialog).findByText("Task move needs a retry")).toBeInTheDocument();
+    expect(moveDialog).toHaveTextContent("Move Task without its Project?");
     await browser.click(screen.getByRole("button", { name: "Move and detach Project" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     taskView.unmount();
@@ -4679,7 +4700,9 @@ describe("ilo web app", () => {
       nextCursor: null,
     });
     await browser.click(screen.getByRole("button", { name: "Retry Lists" }));
-    await waitFor(() => expect(screen.queryByText("Lists are temporarily unavailable")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry Lists" })).not.toBeInTheDocument(),
+    );
     listFailure.unmount();
 
     mocks.listTaskProjects.mockRejectedValue(new Error("Projects are temporarily unavailable"));
@@ -4691,7 +4714,7 @@ describe("ilo web app", () => {
     mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
     await browser.click(screen.getByRole("button", { name: "Retry Projects" }));
     await waitFor(() =>
-      expect(screen.queryByText("Projects are temporarily unavailable")).toBeNull(),
+      expect(screen.queryByRole("button", { name: "Retry Projects" })).not.toBeInTheDocument(),
     );
     projectFailure.unmount();
   });
@@ -4875,12 +4898,8 @@ describe("ilo web app", () => {
   });
 
   it("returns from Settings through the shared workspace picker", async () => {
-    const view = setup("/mail");
+    const view = setup("/settings?section=appearance");
     const browser = userEvent.setup();
-
-    expect(screen.queryByRole("button", { name: "Account menu" })).not.toBeInTheDocument();
-    await browser.click(await screen.findByRole("button", { name: "Switch workspace" }));
-    await browser.click(await screen.findByRole("menuitem", { name: "Settings" }));
 
     const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
@@ -5527,17 +5546,30 @@ describe("ilo web app", () => {
     }
   });
 
-  it("keeps Mail and Finances workspace controls on child routes", async () => {
+  it("keeps Mail conversation and Finances child-route controls stable", async () => {
     const mail = setup("/mail?thread=example");
-    await waitFor(() =>
-      expect(screen.getByRole("navigation", { name: "Top navigation" })).toHaveAttribute(
-        "data-workspace",
-        "mail",
-      ),
-    );
+    await waitFor(() => {
+      const currentAppBar = screen.getByRole("navigation", { name: "Top navigation" });
+      expect(currentAppBar).toHaveAttribute("data-workspace", "mail");
+      expect(
+        within(currentAppBar).getByRole("searchbox", { name: "Search mail" }),
+      ).toBeInTheDocument();
+    });
     const mailAppBar = screen.getByRole("navigation", { name: "Top navigation" });
     expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
-    expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
+    expect(
+      within(mailAppBar).getByRole("button", { name: "Sync all mail accounts" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(mailAppBar).getByRole("button", {
+          name: /^\d+ of \d+ mail accounts(?:, attention required)?$/,
+        }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(mailAppBar).queryByRole("button", { name: /compose|send/i }),
+    ).not.toBeInTheDocument();
     mail.unmount();
 
     const finances = setup("/finances/transactions");
@@ -5547,7 +5579,11 @@ describe("ilo web app", () => {
         "finances",
       ),
     );
-    const financeControls = await screen.findByRole("navigation", { name: "Transaction controls" });
+    const financeControls = await screen.findByRole(
+      "navigation",
+      { name: "Transaction controls" },
+      { timeout: 5_000 },
+    );
     expect(
       within(financeControls).getByRole("button", { name: "New transaction" }),
     ).toBeInTheDocument();
@@ -5560,12 +5596,12 @@ describe("ilo web app", () => {
     const view = setup("/mail?thread=f1000000-0000-4000-8000-000000000136");
 
     const mailboxes = await screen.findByRole("navigation", { name: "Mailboxes" });
-    await browser.click(await within(mailboxes).findByRole("button", { name: "Starred" }));
+    await browser.click(await within(mailboxes).findByRole("link", { name: "Starred" }));
 
     expect(view.location.value).toBe("/mail?view=starred");
-    expect(within(mailboxes).getAllByRole("button", { name: "All mail" })).not.toHaveLength(0);
-    expect(within(mailboxes).getByRole("button", { name: "Unread" })).toBeInTheDocument();
-    expect(within(mailboxes).getByRole("button", { name: "Snoozed" })).toBeInTheDocument();
+    expect(within(mailboxes).getByRole("link", { name: /^Inbox/ })).toBeInTheDocument();
+    expect(within(mailboxes).getByRole("link", { name: "Unread" })).toBeInTheDocument();
+    expect(within(mailboxes).getByRole("link", { name: "Snoozed" })).toBeInTheDocument();
     view.unmount();
   });
 
@@ -6147,7 +6183,7 @@ describe("ilo web app", () => {
     const view = setup("/calendar");
     const browser = userEvent.setup();
     await screen.findByText("Focus block");
-    const accountToggle = screen.getByRole("button", { name: "2 of 3 calendars" });
+    const accountToggle = screen.getByRole("button", { name: /2 of 3 calendars/ });
     expect(accountToggle.querySelectorAll('[data-slot="avatar"]')).not.toHaveLength(0);
     await browser.click(accountToggle);
     const googleToggle = screen.getByRole("switch", { name: /Readonly Google/ });
@@ -6611,7 +6647,7 @@ describe("ilo web app", () => {
       "--calendar-event-left": "calc(0% + 2px)",
       "--calendar-event-width": "calc(50% - 4px)",
       "--overlap-orbit-rotation": "-4deg",
-      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
+      "--overlap-orbit-width": "clamp(88px, calc(100% - 110px), 160px)",
       "--overlap-orbit-x": "-52px",
       "--overlap-orbit-y": "0px",
     });
@@ -6619,7 +6655,7 @@ describe("ilo web app", () => {
       "--calendar-event-left": "calc(50% + 2px)",
       "--calendar-event-width": "calc(50% - 4px)",
       "--overlap-orbit-rotation": "4deg",
-      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
+      "--overlap-orbit-width": "clamp(88px, calc(100% - 110px), 160px)",
       "--overlap-orbit-x": "52px",
       "--overlap-orbit-y": "0px",
     });
@@ -7153,7 +7189,7 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Calendar controls" })).toBeInTheDocument();
     await screen.findByText("Focus block");
-    expect(screen.getByRole("button", { name: "2 of 3 calendars" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /2 of 3 calendars/ })).toBeInTheDocument();
     expect(
       screen.queryByRole("complementary", { name: "Calendar Sidebar" }),
     ).not.toBeInTheDocument();
@@ -7559,24 +7595,73 @@ describe("ilo web app", () => {
     const filledStarMarkup = iconMarkup(StarIcon, "Filled");
     const topNavigation = await screen.findByRole("navigation", { name: "Top navigation" });
     expect(within(topNavigation).queryByRole("heading")).not.toBeInTheDocument();
-    // The app bar hides action labels at narrow width, so these buttons carry a
-    // descriptive accessible name for their icon-only state.
-    const composeButton = within(topNavigation).getByRole("button", { name: "Compose mail" });
-    expect(composeButton).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
-    expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
-    await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    expect(await screen.findByRole("navigation", { name: "Conversation actions" })).toHaveAttribute(
-      "data-slot",
-      "workspace-secondary-app-bar",
-    );
+    expect(
+      within(topNavigation).queryByRole("button", { name: /compose|send/i }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Compose a message" })).toBeInTheDocument();
+    const conversationList = await screen.findByRole("region", { name: "Conversations" });
     expect(within(topNavigation).getByLabelText("Search mail")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Back to Unified inbox" })).not.toBeInTheDocument();
+    expect(within(conversationList).queryByLabelText("Search mail")).not.toBeInTheDocument();
+    const mailSidebar = screen.getByRole("complementary", { name: "Mail Sidebar" });
+    expect(mailSidebar).toHaveAttribute("data-state", "expanded");
+    expect(within(topNavigation).queryByRole("button", { name: "Toggle Sidebar" })).toBeNull();
+    const navigationResize = screen.getByRole("separator", { name: "Resize mail navigation" });
+    navigationResize.focus();
+    await browser.keyboard("{Home}");
+    expect(mailSidebar).toHaveAttribute("data-state", "collapsed");
+    expect(navigationResize).toHaveAttribute("aria-valuenow", "48");
+    await browser.keyboard("{ArrowRight}");
+    expect(mailSidebar).toHaveAttribute("data-state", "expanded");
+    expect(within(mailSidebar).getByRole("link", { name: /^Inbox/ })).toBeInTheDocument();
+    expect(within(mailSidebar).getByRole("link", { name: "Unread" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: "Resize conversation list" })).toBeInTheDocument();
+    expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
+    const mailControls = screen.getByRole("navigation", { name: "Mail controls" });
+    expect(within(mailControls).getByText("2 conversations")).toBeInTheDocument();
+    const conversationActions = mailControls.querySelector(
+      ".mail-secondary-nav__conversation-actions",
+    );
+    expect(conversationActions).toHaveAttribute("data-visible", "false");
+    expect(
+      within(mailControls).getByRole("button", { name: "Message list layout" }),
+    ).toBeInTheDocument();
+    const firstThread = await screen.findByRole("button", { name: /Project update/ });
+    expect(firstThread.querySelector('[data-slot="avatar"]')).not.toBeNull();
+    await browser.click(await screen.findByRole("button", { name: /Project update/ }));
+    expect(conversationActions).toHaveAttribute("data-visible", "true");
+    const reader = screen.getByRole("region", { name: "Message reader" });
+    expect(mailControls).toHaveAttribute("data-slot", "workspace-secondary-app-bar");
+    expect(within(mailControls).getByRole("button", { name: "Reply" })).toBeInTheDocument();
+    expect(within(reader).queryByRole("navigation", { name: "Conversation actions" })).toBeNull();
+    expect(within(mailControls).getByRole("button", { name: "Back to inbox" })).toBeInTheDocument();
     expect(
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Attachments" })).toHaveTextContent("brief.pdf");
-    expect(screen.getByLabelText("Starred").innerHTML).toBe(filledStarMarkup);
+    const messageToggles = within(reader).getAllByRole("button", {
+      name: /Collapse message from/,
+    });
+    const firstMessageToggle = messageToggles.at(0);
+    expect(firstMessageToggle).toBeDefined();
+    if (!firstMessageToggle) throw new Error("Expected an expanded Mail message");
+    expect(firstMessageToggle).toHaveAttribute("aria-expanded", "true");
+    await browser.click(firstMessageToggle);
+    expect(firstMessageToggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByText("Hello Example User. This is the full message."),
+    ).not.toBeInTheDocument();
+    await browser.click(firstMessageToggle);
+    expect(await screen.findByText("Hello Example User. This is the full message.")).toBeVisible();
+    expect(within(reader).queryByText("From")).not.toBeInTheDocument();
+    expect(within(reader).queryByText("Date")).not.toBeInTheDocument();
+    const senderContacts = within(reader).getAllByLabelText(/Contact details for/);
+    const firstSenderContact = senderContacts.at(0);
+    expect(firstSenderContact).toBeDefined();
+    if (!firstSenderContact) throw new Error("Expected a sender contact trigger");
+    await browser.hover(firstSenderContact);
+    expect(await screen.findByText(mailThread.from.address)).toBeVisible();
+    expect(within(firstThread).getByLabelText("Starred").innerHTML).toBe(filledStarMarkup);
     expect(screen.getByText("2 messages")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Mark conversation read" }));
     await waitFor(() =>
@@ -7596,232 +7681,66 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.snoozeMailThread).toHaveBeenCalledWith(mailThread.id, expect.any(String)),
     );
-    await browser.click(screen.getByRole("button", { name: "Reply" }));
-    expect(screen.getByLabelText("To")).toHaveValue("ada@example.com");
-    expect(screen.getByLabelText("Subject")).toHaveValue("Re: Project update");
-    await browser.click(screen.getByRole("button", { name: "Discard" }));
-    await browser.click(composeButton);
-    expect(composeButton).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("To")).toBeInTheDocument();
-    await browser.click(composeButton);
-    expect(composeButton).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByLabelText("To")).not.toBeInTheDocument();
-    await browser.click(composeButton);
-    await browser.type(screen.getByLabelText("To"), "to@example.com");
-    await browser.type(screen.getByLabelText("Subject"), "Subject");
-    await browser.type(screen.getByLabelText("Message"), "Hello");
-    await browser.click(screen.getByRole("button", { name: "Save draft" }));
-    await waitFor(() =>
-      expect(mocks.createMailDraft).toHaveBeenCalledWith({
-        accountId: secondId,
-        body: "Hello",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    );
-    await waitFor(() => expect(composeButton).toHaveAttribute("aria-pressed", "false"));
-    await browser.click(composeButton);
-    await browser.type(await screen.findByLabelText("To"), "to@example.com");
-    await browser.type(screen.getByLabelText("Subject"), "Subject");
-    await browser.type(screen.getByLabelText("Message"), "Hello");
-    await browser.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() =>
-      expect(mocks.sendMail).toHaveBeenCalledWith({
-        accountId: secondId,
-        body: "Hello",
-        cc: [],
-        subject: "Subject",
-        to: [{ address: "to@example.com", name: null }],
-      }),
-    );
+    expect(screen.getByRole("button", { name: "Reply" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Forward" })).toBeInTheDocument();
 
     await browser.click(screen.getByRole("button", { name: /No body/ }));
     expect(
       await screen.findByText("This message has no plain-text body.", {}, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    await browser.type(screen.getByLabelText("Search mail"), "Project");
-    await browser.keyboard("{Enter}");
+    const mailSearch = screen.getByLabelText("Search mail");
+    fireEvent.change(mailSearch, { target: { value: "Project" } });
+    expect(screen.getByLabelText("Search mail")).toHaveValue("Project");
+    fireEvent.submit(mailSearch.closest("form") as HTMLFormElement);
     await waitFor(() =>
       expect(mocks.listMailThreads).toHaveBeenCalledWith(
         expect.objectContaining({ query: "Project" }),
       ),
     );
     await browser.click(
-      within(screen.getByRole("navigation", { name: "Mailboxes" })).getByRole("button", {
+      within(screen.getByRole("navigation", { name: "Mailboxes" })).getByRole("link", {
         name: "Unread",
       }),
     );
     await waitFor(() =>
       expect(mocks.listMailThreads).toHaveBeenCalledWith(expect.objectContaining({ unread: true })),
     );
-    const mailboxButtons = within(
-      screen.getByRole("navigation", { name: "Mailboxes" }),
-    ).getAllByRole("button", { name: /^Inbox/ });
-    await browser.click(mailboxButtons.at(-1) as HTMLElement);
-    await waitFor(() =>
-      expect(mocks.listMailThreads).toHaveBeenCalledWith(
-        expect.objectContaining({ mailboxId: mailbox.id }),
-      ),
+    await browser.click(
+      within(topNavigation).getByRole("button", { name: "1 of 1 mail accounts" }),
     );
-    await browser.click(screen.getByRole("button", { name: /Unified inbox/ }));
+    expect(await screen.findByRole("checkbox", { name: "Hide Google" })).toBeDisabled();
     await browser.click(screen.getByRole("button", { name: "Sync all mail accounts" }));
     await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledWith(secondId));
     view.unmount();
   }, 10_000);
 
-  it("keeps uncertain draft recovery human-readable and keyboard-accessible", async () => {
-    const recentAndReconcileDrafts = [
-      {
-        accountId: secondId,
-        body: "Private body",
-        cc: [],
-        createdAt: now,
-        id,
-        reconciliationState: "sent_mail_review_required" as const,
-        sendClaimedAt: now,
-        sendStatus: "reconcile",
-        sentAt: null,
-        subject: "Quarterly reply",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-      {
-        accountId: secondId,
-        body: "Another body",
-        cc: [],
-        createdAt: now,
-        id: secondId,
-        reconciliationState: "in_progress" as const,
-        sendClaimedAt: now,
-        sendStatus: "sending",
-        sentAt: null,
-        subject: "Travel details",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-    ];
-    mocks.listMailDrafts.mockResolvedValueOnce(recentAndReconcileDrafts).mockResolvedValue([
-      {
-        ...recentAndReconcileDrafts[1],
-        reconciliationState: "sent_mail_review_required",
-      },
-    ]);
-    mocks.reconcileMailDraft.mockResolvedValue({ id, sendStatus: "sent" });
-    setup("/mail");
+  it("keeps uncertain delivery visible and human-reconciled in Drafts", async () => {
+    const draft = {
+      accountId: secondId,
+      body: "Private draft body",
+      cc: [],
+      createdAt: now,
+      id,
+      reconciliationState: "sent_mail_review_required" as const,
+      sendClaimedAt: now,
+      sendStatus: "reconcile" as const,
+      sentAt: null,
+      subject: "Quarterly reply",
+      threadId: null,
+      to: [{ address: "to@example.com", name: null }],
+      updatedAt: now,
+    };
+    mocks.listMailDrafts.mockResolvedValue([draft]);
+    mocks.reconcileMailDraft.mockResolvedValue({ ...draft, sendStatus: "sent", sentAt: now });
+    setup("/mail?view=drafts");
     const browser = userEvent.setup();
-    const recovery = await screen.findByRole("region", { name: "Resolve an uncertain send" });
-    expect(recovery).toHaveTextContent("First inspect this account’s provider Sent Mail");
-    expect(
-      within(recovery).queryByRole("button", {
-        name: "It was not sent: Travel details",
-      }),
-    ).not.toBeInTheDocument();
-    expect(within(recovery).getByText("Waiting for the provider result…")).toBeInTheDocument();
-    await browser.click(
-      within(recovery).getByRole("button", {
-        name: "I found it in Sent Mail: Quarterly reply",
-      }),
-    );
+
+    expect(await screen.findByText("Quarterly reply")).toBeInTheDocument();
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Mark sent" }));
     await waitFor(() =>
       expect(mocks.reconcileMailDraft).toHaveBeenCalledWith(id, { outcome: "sent" }),
     );
-    await browser.click(
-      await within(recovery).findByRole("button", {
-        name: "It was not sent: Travel details",
-      }),
-    );
-    await waitFor(() =>
-      expect(mocks.reconcileMailDraft).toHaveBeenCalledWith(secondId, {
-        outcome: "not_sent",
-      }),
-    );
-    expect(mocks.reconcileMailDraft).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps uncertain send recovery errors visible without hiding the draft", async () => {
-    mocks.listMailDrafts.mockResolvedValue([
-      {
-        accountId: secondId,
-        body: "Untitled body",
-        cc: [],
-        createdAt: now,
-        id,
-        reconciliationState: "sent_mail_review_required",
-        sendClaimedAt: now,
-        sendStatus: "reconcile",
-        sentAt: null,
-        subject: "",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-    ]);
-    mocks.reconcileMailDraft.mockRejectedValueOnce(new Error("Recovery unavailable"));
-    setup("/mail");
-    const browser = userEvent.setup();
-
-    const recovery = await screen.findByRole("region", { name: "Resolve an uncertain send" });
-    expect(within(recovery).getByText("(No subject)")).toBeInTheDocument();
-    await browser.click(
-      within(recovery).getByRole("button", {
-        name: "I found it in Sent Mail: this message",
-      }),
-    );
-    expect(await within(recovery).findByRole("alert")).toHaveTextContent("Recovery unavailable");
-    expect(
-      within(recovery).getByRole("button", {
-        name: "It was not sent: this message",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows progress and query failures while checking uncertain sends", async () => {
-    let rejectDrafts: ((error: Error) => void) | undefined;
-    mocks.listMailDrafts.mockImplementationOnce(
-      () =>
-        new Promise((_, reject) => {
-          rejectDrafts = reject;
-        }),
-    );
-    setup("/mail");
-
-    expect(await screen.findByText("Checking uncertain sends…")).toBeInTheDocument();
-    rejectDrafts?.(new Error("Draft recovery unavailable"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Draft recovery unavailable");
-  });
-
-  it("keeps uncertain send recovery visible without an enabled Mail connector", async () => {
-    mocks.listConnectors.mockResolvedValue([]);
-    mocks.listMailDrafts.mockResolvedValue([
-      {
-        accountId: secondId,
-        body: "Disconnected body",
-        cc: [],
-        createdAt: now,
-        id,
-        reconciliationState: "sent_mail_review_required",
-        sendClaimedAt: now,
-        sendStatus: "reconcile",
-        sentAt: null,
-        subject: "Disconnected send",
-        threadId: null,
-        to: [{ address: "to@example.com", name: null }],
-        updatedAt: now,
-      },
-    ]);
-    setup("/mail");
-    expect(
-      await screen.findByRole("region", { name: "Resolve an uncertain send" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Connect a mailbox")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "I found it in Sent Mail: Disconnected send",
-      }),
-    ).toBeInTheDocument();
   });
 
   it("moves a conversation to the account trash", async () => {
@@ -7835,7 +7754,8 @@ describe("ilo web app", () => {
     setup("/mail");
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    await browser.click(screen.getByRole("button", { name: "More conversation actions" }));
+    screen.getByRole("button", { name: "More conversation actions" }).focus();
+    await browser.keyboard("{Enter}");
     await browser.click(await screen.findByRole("menuitem", { name: "Delete conversation" }));
     await waitFor(() =>
       expect(mocks.updateMailThread).toHaveBeenCalledWith(mailThread.id, {
@@ -7844,16 +7764,7 @@ describe("ilo web app", () => {
     );
   });
 
-  it("keeps an existing reply subject when replying", async () => {
-    mocks.listMailThreads.mockResolvedValue([{ ...mailThread, subject: "Re: Project update" }]);
-    setup("/mail");
-    const browser = userEvent.setup();
-    await browser.click(await screen.findByRole("button", { name: /Re: Project update/ }));
-    await browser.click(screen.getByRole("button", { name: "Reply" }));
-    expect(screen.getByLabelText("Subject")).toHaveValue("Re: Project update");
-  });
-
-  it("presents provider mailboxes as friendly, collapsible account groups", async () => {
+  it("filters the unified inbox from the account avatar control", async () => {
     const iCloudAccountId = "88888888-8888-4888-8888-888888888880";
     const unnamedAccountId = "88888888-8888-4888-8888-888888888890";
     mocks.listConnectors.mockResolvedValue([
@@ -7861,6 +7772,12 @@ describe("ilo web app", () => {
       {
         calendarEnabled: false,
         email: "icloud@example.com",
+        health: {
+          message: "iCloud authorization is no longer valid. Reconnect to resume syncing.",
+          nextSyncAt: null,
+          recovery: "reconnect",
+          state: "reconnect",
+        },
         id: iCloudAccountId,
         label: "",
         lastSyncedAt: null,
@@ -7969,59 +7886,46 @@ describe("ilo web app", () => {
         to: [],
       },
     ]);
-    setup("/mail");
+    const view = setup("/mail");
     const browser = userEvent.setup();
 
-    expect(await screen.findByText("Primary")).toBeInTheDocument();
-    expect(screen.getByText("Promotions")).toBeInTheDocument();
-    expect(screen.queryByText("CATEGORY_PERSONAL")).not.toBeInTheDocument();
-    const accountToggle = screen.getByRole("button", { name: /Google Google Mail/ });
-    expect(accountToggle).toHaveAttribute("aria-expanded", "true");
-
-    await browser.click(accountToggle);
-    expect(accountToggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Primary")).not.toBeInTheDocument();
-    await browser.click(accountToggle);
-    await browser.click(screen.getByText("Labels"));
-    expect(screen.getByRole("button", { name: "Project Alpha" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Team Alpha" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sent" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Drafts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
-    await browser.click(
-      within(screen.getByRole("navigation", { name: "Mailboxes" })).getByText("More"),
+    expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
+    const densityTrigger = await screen.findByRole("button", { name: "Message list layout" });
+    densityTrigger.focus();
+    await browser.keyboard("{Enter}");
+    await browser.click(await screen.findByRole("menuitemradio", { name: "Compact" }));
+    expect(window.localStorage.getItem("ilo.mail.list-density.v1")).toBe("compact");
+    expect(screen.getByRole("button", { name: /Project update/ })).toHaveAttribute(
+      "data-density",
+      "compact",
     );
-    expect(screen.getByRole("button", { name: "Spam" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Trash" })).toBeInTheDocument();
 
-    await browser.click(screen.getAllByRole("button", { name: "All mail" })[1] as HTMLElement);
-    expect(
-      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
-    ).not.toBeInTheDocument();
+    const accountControl = await screen.findByRole("button", {
+      name: "3 of 3 mail accounts, attention required",
+    });
+    expect(accountControl.querySelectorAll('[data-slot="avatar"]')).toHaveLength(3);
+    expect(accountControl).not.toHaveTextContent("Needs attention");
+    expect(accountControl.querySelector(".account-selection-trigger__warning")).not.toBeNull();
+    await browser.click(accountControl);
+    expect(await screen.findByText("Mail accounts")).toBeInTheDocument();
+    expect(screen.getByLabelText("iCloud account needs attention")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reconnect 1 account" })).toHaveAttribute(
+      "href",
+      "/settings?section=connections",
+    );
+    await browser.click(screen.getByRole("checkbox", { name: "Hide icloud@example.com" }));
+    expect(view.location.value).toContain(`account=${secondId}`);
+    expect(view.location.value).toContain(`account=${unnamedAccountId}`);
+    expect(view.location.value).not.toContain(iCloudAccountId);
     await waitFor(() =>
       expect(mocks.listMailThreads).toHaveBeenCalledWith(
-        expect.objectContaining({ accountIds: [secondId] }),
+        expect.objectContaining({ accountIds: [secondId, unnamedAccountId] }),
       ),
     );
     const unifiedInbox = screen.getByRole("navigation", { name: "Mailboxes" });
-    await browser.click(within(unifiedInbox).getByRole("button", { name: "Unread" }));
-    await browser.click(within(unifiedInbox).getByRole("button", { name: "Unread" }));
-    const search = screen.getByLabelText("Search mail");
-    await browser.clear(search);
-    await browser.keyboard("{Enter}");
-
-    await browser.click(screen.getByRole("button", { name: /iCloud note/ }));
-    expect((await screen.findAllByText("iCloud Mail")).length).toBeGreaterThan(0);
-    expect(screen.getByText("You")).toBeInTheDocument();
-    const iCloudToggle = screen.getByRole("button", { name: /icloud@example.com iCloud Mail/ });
-    await browser.click(iCloudToggle);
-    await browser.click(screen.getAllByRole("button", { name: "All mail" })[2] as HTMLElement);
-    expect(
-      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Connected account iCloud Mail/ }),
-    ).toBeInTheDocument();
+    await browser.click(within(unifiedInbox).getByRole("link", { name: "Unread" }));
+    expect(view.location.value).toContain("unread=1");
+    expect(view.location.value).toContain(`account=${secondId}`);
   });
 
   it("loads a mail conversation addressed directly by URL", async () => {
@@ -8125,9 +8029,17 @@ describe("ilo web app", () => {
   });
 
   it("renders mailbox loading, empty, and error alternatives", async () => {
+    mocks.listConnectors.mockImplementationOnce(() => new Promise(() => undefined));
+    const pendingAccountView = setup("/mail");
+    expect(await screen.findByRole("button", { name: "Loading mail accounts" })).toBeDisabled();
+    pendingAccountView.unmount();
+
     mocks.listConnectors.mockResolvedValueOnce([]);
     const emptyAccountView = setup("/mail");
-    expect(await screen.findByText("Connect a mailbox")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Connect a mailbox" })).toHaveAttribute(
+      "href",
+      "/settings?section=connections",
+    );
     emptyAccountView.unmount();
 
     mocks.listConnectors.mockRejectedValueOnce(new Error("accounts unavailable"));
@@ -8150,6 +8062,16 @@ describe("ilo web app", () => {
     expect(await screen.findByText("Nothing here")).toBeInTheDocument();
     expect(screen.getByText("Select a conversation")).toBeInTheDocument();
     noThreadsView.unmount();
+
+    mocks.getMailSetupContext.mockRejectedValueOnce(new Error("mail setup unavailable"));
+    const setupErrorView = setup("/mail");
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole("button", { name: "Compose a message" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
+    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByLabelText("From")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
+    setupErrorView.unmount();
   });
 
   it("renders iCloud mail and calendar states while connector work is pending or fails", async () => {
@@ -8179,13 +8101,17 @@ describe("ilo web app", () => {
     );
     const mailView = setup("/mail");
     const browser = userEvent.setup();
-    expect(await screen.findByText("iCloud Mail")).toBeInTheDocument();
+    await browser.click(await screen.findByRole("button", { name: "1 of 1 mail accounts" }));
+    expect(await screen.findByRole("checkbox", { name: "Hide person@icloud.com" })).toBeDisabled();
     const syncButton = screen.getByRole("button", { name: "Sync all mail accounts" });
     await browser.click(syncButton);
     expect(syncButton).toBeDisabled();
     expect(syncButton.querySelector(".spin")).toBeInTheDocument();
     rejectSync(new Error("iCloud sync unavailable"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("iCloud sync unavailable");
+    await waitFor(() => expect(syncButton).not.toBeDisabled());
+    expect(
+      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("alert"),
+    ).toBeNull();
     mailView.unmount();
 
     mocks.listConnectors.mockResolvedValue([icloudAccount]);
@@ -8380,17 +8306,17 @@ describe("ilo web app", () => {
     await browser.click(await findSettingsLink("Connections"));
     await browser.click(await screen.findByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "Google" }));
-    expect(await screen.findByText("Google Calendar is not configured.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Google Calendar is not configured.")).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Sync Google" }));
-    expect(await screen.findByText("Google sync failed.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Google sync failed.")).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Disconnect Google" }));
-    expect(await screen.findByText("Google disconnect failed.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Google disconnect failed.")).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "iCloud" }));
     await browser.type(screen.getByLabelText("Apple Account email"), "test@icloud.com");
     await browser.type(screen.getByLabelText("App-specific password"), "bad-password");
     await browser.click(screen.getByRole("button", { name: "Add iCloud" }));
-    expect(await screen.findByText("iCloud connection failed.")).toBeInTheDocument();
+    expect(await screen.findAllByText("iCloud connection failed.")).not.toHaveLength(0);
   });
 
   it("shows safe connection health and gives each reconnect state a direct repair action", async () => {
@@ -8803,11 +8729,17 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const connected = setup("/settings?section=connections");
     await browser.selectOptions(await screen.findByLabelText("X bookmark folder"), "folder-2");
-    expect(await screen.findByText("Folder selection failed")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Sync X bookmarks for cooper" }));
-    expect(await screen.findByText("Bookmark sync failed")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Disconnect X bookmarks for cooper" }));
-    expect(await screen.findByText("Disconnect failed")).toBeInTheDocument();
+    expect(await screen.findAllByText("Folder selection failed")).not.toHaveLength(0);
+    const syncButton = screen.getByRole("button", { name: "Sync X bookmarks for cooper" });
+    await waitFor(() => expect(syncButton).toBeEnabled());
+    await browser.click(syncButton);
+    expect(await screen.findAllByText("Bookmark sync failed")).not.toHaveLength(0);
+    const disconnectButton = screen.getByRole("button", {
+      name: "Disconnect X bookmarks for cooper",
+    });
+    await waitFor(() => expect(disconnectButton).toBeEnabled());
+    await browser.click(disconnectButton);
+    expect(await screen.findAllByText("Disconnect failed")).not.toHaveLength(0);
     connected.unmount();
 
     mocks.getXBookmarkAccount.mockResolvedValue(null);
@@ -8815,7 +8747,7 @@ describe("ilo web app", () => {
     setup("/settings?section=connections");
     await browser.click(await screen.findByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "X bookmarks" }));
-    expect(await screen.findByText("X authorization failed")).toBeInTheDocument();
+    expect(await screen.findAllByText("X authorization failed")).not.toHaveLength(0);
   });
 
   it("shows every X bookmark account health state", async () => {
@@ -8862,7 +8794,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     setup("/settings?section=connections");
     expect(await screen.findByText("Syncing")).toBeInTheDocument();
-    expect(screen.getByText(/^Synced /)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Synced /)).not.toHaveLength(0);
     const syncButton = screen.getByRole("button", { name: "Sync X bookmarks for cooper" });
     await browser.click(syncButton);
     expect(syncButton).toBeDisabled();

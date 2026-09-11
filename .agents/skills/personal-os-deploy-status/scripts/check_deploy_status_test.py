@@ -67,6 +67,13 @@ class DeployStatusTest(unittest.TestCase):
             "healthy_revision_unknown",
         )
 
+    def test_exact_main_ci_failure_remains_visible_off_host(self):
+        runs = [{"headSha": "abc", "status": "completed", "conclusion": "failure"}]
+        self.assertEqual(
+            verdict("abc", runs, {"collectionError": "not available"}, HEALTHY),
+            "ci_failed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

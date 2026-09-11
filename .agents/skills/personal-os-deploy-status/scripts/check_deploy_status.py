@@ -60,15 +60,14 @@ def verdict(main_sha, ci_runs, controller_status, endpoints):
     """Classify health and release provenance without inferring a private revision."""
     if any(not value.get("ok") for value in endpoints.values()):
         return "unhealthy"
-    if controller_status.get("collectionError"):
-        return "healthy_revision_unknown"
-    if controller_status.get("maintenance"):
-        return "maintenance"
-    controller_phase = controller_status.get("phase")
-    if controller_phase == "blocked":
-        return "controller_blocked"
-    if controller_phase in ACTIVE_CONTROLLER_PHASES:
-        return "in_progress"
+    if not controller_status.get("collectionError"):
+        if controller_status.get("maintenance"):
+            return "maintenance"
+        controller_phase = controller_status.get("phase")
+        if controller_phase == "blocked":
+            return "controller_blocked"
+        if controller_phase in ACTIVE_CONTROLLER_PHASES:
+            return "in_progress"
     main_run = exact_main_run(main_sha, ci_runs)
     if main_run.get("status") in {"queued", "in_progress", "pending", "waiting"}:
         return "in_progress"
@@ -80,6 +79,8 @@ def verdict(main_sha, ci_runs, controller_status, endpoints):
         "timed_out",
     }:
         return "ci_failed"
+    if controller_status.get("collectionError"):
+        return "healthy_revision_unknown"
     if controller_status.get("error"):
         return "controller_retrying"
     deployed_sha = controller_status.get("deployed")

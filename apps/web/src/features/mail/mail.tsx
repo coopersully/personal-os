@@ -433,7 +433,7 @@ export function MailPage({ user }: { user: User }) {
         back={() => update({ thread: null })}
         countLabel={
           listScope === "drafts"
-            ? `${drafts.data?.length ?? 0} drafts`
+            ? `${(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent").length} drafts`
             : `${threads.data?.length ?? 0} conversations`
         }
         density={density}

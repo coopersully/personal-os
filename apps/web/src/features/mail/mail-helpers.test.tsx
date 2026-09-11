@@ -117,6 +117,13 @@ describe("Mail workspace helpers", () => {
     expect(mailReplyRecipient(undefined, "me@example.com", fallback)).toEqual(fallback);
     expect(
       mailReplyRecipient(
+        { ...base, from: { address: "sender@example.com", name: "Sender" } },
+        null,
+        fallback,
+      ),
+    ).toEqual(fallback);
+    expect(
+      mailReplyRecipient(
         {
           ...base,
           from: { address: "sender@example.com", name: "Sender" },

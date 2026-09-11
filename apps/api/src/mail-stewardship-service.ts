@@ -468,8 +468,8 @@ export function createMailStewardshipService({ db, now }: Options) {
               id: thread.id,
               messages: (messagesByThread.get(thread.id) ?? []).map((message) => ({
                 authority: "provider_projected" as const,
-                direction: message.providerMailboxIds.some((mailboxId) =>
-                  mailboxId.toLowerCase().includes("sent"),
+                direction: message.providerMailboxIds.some(
+                  (mailboxId) => mailboxId.trim().toUpperCase() === "SENT",
                 )
                   ? ("outbound" as const)
                   : ("inbound" as const),

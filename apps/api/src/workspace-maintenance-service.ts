@@ -648,17 +648,29 @@ export function createWorkspaceMaintenanceService({
             { runId: input.runId },
           );
         }
-        const [successor] = await transaction
-          .insert(workspaceMaintenanceRuns)
-          .values({
-            domain: superseded.domain,
-            rulebookVersion: superseded.rulebookVersion,
-            scope: superseded.scope,
-            status: "queued",
-            updatedAt: sql`NOW()`,
-            userId: superseded.userId,
-          })
-          .returning();
+        let successor: typeof superseded | undefined;
+        try {
+          [successor] = await transaction
+            .insert(workspaceMaintenanceRuns)
+            .values({
+              domain: superseded.domain,
+              rulebookVersion: superseded.rulebookVersion,
+              scope: superseded.scope,
+              status: "queued",
+              updatedAt: sql`NOW()`,
+              userId: superseded.userId,
+            })
+            .returning();
+        } catch (error) {
+          if (isUniqueViolation(error, "workspace_maintenance_runs_open_user_domain_idx")) {
+            throw new AppError(
+              "conflict",
+              "A concurrent workspace maintenance run was created during restart.",
+              { runId: input.runId },
+            );
+          }
+          throw error;
+        }
         if (!successor) {
           throw new AppError("internal_error", "The replacement maintenance run was not created.");
         }

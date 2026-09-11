@@ -2,7 +2,7 @@
 
 - Status: Approved target design
 - Date: 2026-08-15
-- Governing doctrine: [`Ilo workspace stewardship`](../../product/workspace-stewardship.md)
+- Governing doctrine: [`Workspace stewardship`](../../product/workspace-stewardship.md)
 - Governing architecture: [`ADR 0004`](../../architecture/0004-workspace-stewardship.md)
 
 ## Goal

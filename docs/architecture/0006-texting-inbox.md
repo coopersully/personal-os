@@ -38,6 +38,9 @@ minimum useful entity context and canonical times; Texting applies channel polic
 to the person's current time zone, renders nearby dates relatively, and composes one result, one
 available question or exact review action, and an optional first-party deep link.
 
+When several questions or actions are available, Texting renders only a formal count and topical
+preview with the review link. It does not serialize the complete queue into SMS.
+
 ## Authority
 
 One global review-bypass policy applies across app, API, MCP, scheduled, and SMS callers. With

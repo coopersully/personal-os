@@ -55,13 +55,22 @@ no requested input sends no text; Texting still answers messages the person init
 A maintenance message should normally contain:
 
 - one outcome sentence;
-- at most one currently available question or exact review action;
+- one currently available question or exact review action when only one needs attention;
+- a count and short topical preview plus the first-party review link when several need attention;
 - the useful merchant, sender, event, task, or other entity name needed to understand it;
 - explicit reply choices when the answer vocabulary is bounded; and
 - one short first-party review or recovery link when it adds value.
 
+Messages are formal, concise, and immediately scannable. They omit greetings, sign-offs,
+conversational filler, repeated status, and the full contents of a multi-item queue. When several
+questions or actions are open, the SMS summarizes their number and subjects without asking each one;
+the linked nohmi review surface contains the complete queue and evidence.
+
 Example: “Your budget is on track this month. One question: dinner yesterday was unusually large—are
 you expecting reimbursement? Reply yes, no, or unsure. Review: [link]”
+
+Multiple-item example: “Three items need review: two Finance transactions and one Calendar
+conflict. Review: [link]”
 
 Privacy-safe does not mean context-free. Merchant display names, sender display names, event titles,
 task titles, and comparable identifiers are included when they are needed to understand the action;

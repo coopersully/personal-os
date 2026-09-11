@@ -338,6 +338,8 @@ coherent response without reproducing domain expertise.
 - Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting
   converts canonical times into the person's time zone and renders nearby dates as `today`,
   `yesterday`, or `tomorrow` immediately before sending.
+- SMS is formal, short, and concise. A single item may be asked directly; multiple questions or
+  actions become a count and topical preview plus a link to the complete review queue.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.

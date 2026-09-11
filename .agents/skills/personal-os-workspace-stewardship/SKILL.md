@@ -64,6 +64,10 @@ Publish canonical times and typed entity context rather than pre-rendering `toda
 `tomorrow`. Texting owns conversion into the person's current time zone and final relative-date
 language immediately before delivery.
 
+Keep notification summaries formal, short, and concise. Supply one directly answerable item when
+only one is open; for multiple questions or actions, supply a count and topical preview plus the
+complete review-queue link rather than rendering every item.
+
 ## Verify the delivered slice
 
 Test domain decisions, migrated persistence, concurrent claims, retry/recovery, authorization,

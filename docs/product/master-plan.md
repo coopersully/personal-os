@@ -278,6 +278,8 @@ flowchart TD
 - Render actionable SMS with the minimum useful merchant, sender, event, task, or comparable entity
   context. Preserve canonical instants, convert them to the person's current time zone immediately
   before sending, and use accurate `today`, `yesterday`, or `tomorrow` labels for nearby dates.
+- Keep SMS formal, short, and concise. Render one item directly, but summarize multiple questions or
+  actions by count and topic and link to the complete nohmi review queue instead of reproducing it.
 - Promote Finance's current review-bypass control into one global policy used consistently by app,
   API, MCP, scheduled, and SMS work. Bind SMS approvals to one exact, reversible, unexpired proposal
   and retain stronger boundaries for unsupported or higher-impact effects.

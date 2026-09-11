@@ -28,6 +28,8 @@ The checker correlates:
 - `not_live`: healthy endpoints exist and exact-main CI passed, but the controller still reports an older revision.
 - `ci_failed`: exact-main push CI failed, so the controller must not deploy it.
 - `controller_blocked`: the local controller reports a blocked deployment transaction.
+- `controller_locked`: an operation lock exists; it may be live or orphaned and requires owner
+  inspection before another operation.
 - `controller_retrying`: the controller records a recoverable idle/backoff error and will retry.
 - `maintenance`: the local production maintenance marker is active.
 - `healthy_revision_unknown`: public endpoints respond, but this host cannot read the private controller state.
@@ -35,8 +37,9 @@ The checker correlates:
 - `unknown`: required evidence was unavailable or contradictory.
 
 Public health proves availability, not the deployed revision. Only the private controller state can
-prove which SHA is live; exact-main CI proves eligibility, not deployment. A failed CI run does not
-prove production is down.
+prove which SHA is live; exact-main CI proves eligibility, not deployment. The checker never treats
+a retained lock as proof of progress because owner liveness is not exposed by the installed
+controller. A failed CI run does not prove production is down.
 
 Read [references/deployment-runbook.md](references/deployment-runbook.md) for controller and CI
 drilldown, failure handling, and safe next actions.

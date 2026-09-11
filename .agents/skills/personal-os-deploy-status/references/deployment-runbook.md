@@ -32,9 +32,12 @@ sudo -n -H -u nohmi-production node \
 ```
 
 `deployed` is the live revision claim. `candidate` and `phase` describe an active or failed
-transaction; `maintenance` and `locked` must be interpreted before any recovery. The checker returns
-`healthy_revision_unknown` off-host because public endpoints and GitHub cannot prove the private
-deployed SHA.
+transaction. `locked` proves only that the lock exists; because the installed status interface does
+not expose owner liveness, the checker conservatively returns `controller_locked` and requires the
+operator to inspect the private `operation.lock/owner.json`, owning PID, descendants, and in-flight
+Docker work before deciding whether the operation is active or orphaned. Never print the private
+owner file in chat or logs. The checker returns `healthy_revision_unknown` off-host because public
+endpoints and GitHub cannot prove the private deployed SHA.
 
 ## Public health
 
@@ -52,7 +55,10 @@ requests still require authorization.
 - Failed exact-main CI: fix CI; the controller correctly refuses the candidate.
 - Healthy endpoints with unknown revision: run the checker on the production Mac before claiming main
   is live.
-- Controller building or switching: wait and re-read status; do not start a second deployment.
+- Controller locked: inspect owner liveness and in-flight work on the production Mac; do not start a
+  second deployment or clear the lock merely because its timestamp is old.
+- Active controller phase without a lock: treat it as blocked transaction state and follow attended
+  recovery.
 - Controller retrying: preserve the live release and inspect the sanitized error; normal polling or
   backoff may recover without attended transaction repair.
 - Maintenance active: preserve it until the operator intentionally completes maintenance.

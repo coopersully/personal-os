@@ -66,8 +66,10 @@ def verdict(main_sha, ci_runs, controller_status, endpoints):
         controller_phase = controller_status.get("phase")
         if controller_phase == "blocked":
             return "controller_blocked"
+        if controller_status.get("locked"):
+            return "controller_locked"
         if controller_phase in ACTIVE_CONTROLLER_PHASES:
-            return "in_progress"
+            return "controller_blocked"
     main_run = exact_main_run(main_sha, ci_runs)
     if main_run.get("status") in {"queued", "in_progress", "pending", "waiting"}:
         return "in_progress"

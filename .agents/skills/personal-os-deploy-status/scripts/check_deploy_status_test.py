@@ -27,10 +27,15 @@ class DeployStatusTest(unittest.TestCase):
         runs = [{"headSha": "abc", "status": "in_progress"}]
         self.assertEqual(verdict("abc", runs, {"deployed": "old"}, HEALTHY), "in_progress")
 
-    def test_controller_switch_is_in_progress(self):
+    def test_controller_switch_with_lock_requires_inspection(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
-        controller = {"deployed": "old", "candidate": "abc", "phase": "switching"}
-        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "in_progress")
+        controller = {
+            "deployed": "old",
+            "candidate": "abc",
+            "phase": "switching",
+            "locked": True,
+        }
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_locked")
 
     def test_ci_failed(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "failure"}]
@@ -41,15 +46,31 @@ class DeployStatusTest(unittest.TestCase):
         controller = {"phase": "blocked", "error": "switch-failed"}
         self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_blocked")
 
-    def test_active_controller_phase_outranks_stale_error(self):
+    def test_active_controller_lock_outranks_stale_error(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
         controller = {
             "deployed": "old",
             "candidate": "abc",
             "phase": "building",
             "error": "awaiting-successful-main-ci",
+            "locked": True,
         }
-        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "in_progress")
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_locked")
+
+    def test_orphaned_idle_lock_requires_attended_inspection(self):
+        runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
+        controller = {"deployed": "old", "phase": "idle", "locked": True}
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_locked")
+
+    def test_active_phase_without_lock_is_blocked(self):
+        runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
+        controller = {
+            "deployed": "old",
+            "candidate": "abc",
+            "phase": "switching",
+            "locked": False,
+        }
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_blocked")
 
     def test_recoverable_controller_error_is_retrying(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]

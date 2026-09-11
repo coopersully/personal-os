@@ -6381,16 +6381,22 @@ describe("ilo web app", () => {
       tomorrow: [],
     });
     mocks.createEventBlock.mockResolvedValue(linkedEvent);
-    mocks.updateEventBlock.mockImplementation(async (sourceEventId, blockId) => ({
-      ...event,
-      blocks: [
-        {
-          ...(blockId === block.eventId ? block : duplicateBlock),
-          mode: "details" as const,
-          sourceEventId,
-        },
-      ],
-    }));
+    let duplicateUpdateAttempts = 0;
+    mocks.updateEventBlock.mockImplementation(async (sourceEventId, blockId) => {
+      if (sourceEventId === duplicateBlock.sourceEventId && duplicateUpdateAttempts++ === 0) {
+        throw new Error("Second block update failed");
+      }
+      return {
+        ...event,
+        blocks: [
+          {
+            ...(blockId === block.eventId ? block : duplicateBlock),
+            mode: "details" as const,
+            sourceEventId,
+          },
+        ],
+      };
+    });
     let duplicateDeleteAttempts = 0;
     mocks.deleteEventBlock.mockImplementation(async (sourceEventId) => {
       if (sourceEventId === duplicateBlock.sourceEventId && duplicateDeleteAttempts++ === 0) {
@@ -6427,6 +6433,18 @@ describe("ilo web app", () => {
       duplicateBlock.eventId,
       { mode: "details" },
     );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Second block update failed");
+    expect(
+      within(screen.getByRole("list", { name: "Calendars shown as busy" })).getByText(
+        "Selected Google",
+      ),
+    ).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add calendar to Details Included" }));
+    await browser.click(screen.getByRole("button", { name: /^Selected Google$/ }));
+    await waitFor(() => expect(mocks.updateEventBlock).toHaveBeenCalledTimes(3));
+    expect(
+      mocks.updateEventBlock.mock.calls.filter(([sourceEventId]) => sourceEventId === secondId),
+    ).toHaveLength(1);
     expect(screen.getAllByText("Selected Google")).toHaveLength(1);
     expect(
       within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
@@ -6592,6 +6610,7 @@ describe("ilo web app", () => {
       "--calendar-event-left": "calc(0% + 2px)",
       "--calendar-event-width": "calc(50% - 4px)",
       "--overlap-orbit-rotation": "-4deg",
+      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
       "--overlap-orbit-x": "-52px",
       "--overlap-orbit-y": "0px",
     });
@@ -6599,6 +6618,7 @@ describe("ilo web app", () => {
       "--calendar-event-left": "calc(50% + 2px)",
       "--calendar-event-width": "calc(50% - 4px)",
       "--overlap-orbit-rotation": "4deg",
+      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
       "--overlap-orbit-x": "52px",
       "--overlap-orbit-y": "0px",
     });
@@ -6659,9 +6679,17 @@ describe("ilo web app", () => {
       eventEndMinute: 24 * 60,
       eventStartMinute: 24 * 60 - 30,
     });
+    const leadingEdgePoint = overlapOrbitPoint(0, 2, true, {
+      clusterEndMinute: 90,
+      clusterStartMinute: 60,
+      eventEndMinute: 90,
+      eventStartMinute: 60,
+      horizontalInset: "start",
+    });
 
     expect(midnightPoint.y).toBe(-12);
     expect(endOfDayPoint.y).toBe(-12);
+    expect(leadingEdgePoint.x).toBe(18);
   });
 
   it("uses the shared transparent dashed treatment for empty states and quotes", () => {

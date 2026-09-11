@@ -3464,6 +3464,11 @@ function WeekCalendarView({
                 draggedEventId={draggedEventId}
                 layouts={layouts}
                 onDragEnd={clearDrag}
+                {...(dayIndex === 0
+                  ? { orbitHorizontalInset: "start" as const }
+                  : dayIndex === days.length - 1
+                    ? { orbitHorizontalInset: "end" as const }
+                    : {})}
                 setDraggedEventId={setDraggedEventId}
                 setEditor={setEditor}
                 timeZone={timeZone}
@@ -3802,6 +3807,7 @@ export function overlapOrbitPoint(
     clusterStartMinute: number;
     eventEndMinute: number;
     eventStartMinute: number;
+    horizontalInset?: "end" | "start";
   },
 ) {
   let point: { rotation: number; x: number; y: number };
@@ -3818,6 +3824,11 @@ export function overlapOrbitPoint(
     };
   }
   if (!bounds) return point;
+  if (bounds.horizontalInset === "start" && point.x < 0) {
+    point.x = Math.round(Math.abs(point.x) * 0.35);
+  } else if (bounds.horizontalInset === "end" && point.x > 0) {
+    point.x = -Math.round(point.x * 0.35);
+  }
   const eventHeight = Math.max(
     minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
     18,
@@ -3839,6 +3850,7 @@ function TimelineEventCollection({
   draggedEventId,
   layouts,
   onDragEnd,
+  orbitHorizontalInset,
   setDraggedEventId,
   setEditor,
   timeZone,
@@ -3848,6 +3860,7 @@ function TimelineEventCollection({
   draggedEventId: string | null;
   layouts: TimelineEventLayout[];
   onDragEnd: () => void;
+  orbitHorizontalInset?: "end" | "start";
   setDraggedEventId: (id: string | null) => void;
   setEditor: (editor: Editor) => void;
   timeZone: string;
@@ -3858,6 +3871,7 @@ function TimelineEventCollection({
       compact,
       draggedEventId,
       onDragEnd,
+      ...(orbitHorizontalInset ? { orbitHorizontalInset } : {}),
       setDraggedEventId,
       setEditor,
       timeZone,
@@ -3896,6 +3910,7 @@ function TimelineEventItem({
   orbit?: {
     clusterEndMinute: number;
     clusterStartMinute: number;
+    horizontalInset?: "end" | "start";
     index: number;
     total: number;
   };
@@ -3927,6 +3942,7 @@ function TimelineOverlapCluster({
   compact,
   draggedEventId,
   onDragEnd,
+  orbitHorizontalInset,
   setDraggedEventId,
   setEditor,
   timeZone,
@@ -3936,6 +3952,7 @@ function TimelineOverlapCluster({
   compact: boolean;
   draggedEventId: string | null;
   onDragEnd: () => void;
+  orbitHorizontalInset?: "end" | "start";
   setDraggedEventId: (id: string | null) => void;
   setEditor: (editor: Editor) => void;
   timeZone: string;
@@ -4009,6 +4026,7 @@ function TimelineOverlapCluster({
             clusterStartMinute: cluster.startMinute,
             index,
             total: count,
+            ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
           }}
           setDraggedEventId={setDraggedEventId}
           setEditor={setEditor}
@@ -4042,6 +4060,7 @@ function TimelineEvent({
   orbit?: {
     clusterEndMinute: number;
     clusterStartMinute: number;
+    horizontalInset?: "end" | "start";
     index: number;
     total: number;
   };
@@ -4065,6 +4084,7 @@ function TimelineEvent({
         clusterStartMinute: orbit.clusterStartMinute,
         eventEndMinute: endMinute,
         eventStartMinute: startMinute,
+        ...(orbit.horizontalInset ? { horizontalInset: orbit.horizontalInset } : {}),
       })
     : null;
   const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
@@ -4141,7 +4161,7 @@ function TimelineEvent({
               ? `calc(${100 / laneCount}% - 4px)`
               : `calc(100% - ${6 + column * 12}px)`,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
-            "--overlap-orbit-width": `calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px)`,
+            "--overlap-orbit-width": `${compact ? "max(88px, " : ""}calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px)${compact ? ")" : ""}`,
             "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
             "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
             zIndex: 2 + column,
@@ -7936,10 +7956,8 @@ function EventInspector({
   const calendarsWithDetails = blockedCalendars.filter((blockedCalendar) =>
     blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "details"),
   );
-  const calendarsWithBusyOnly = blockedCalendars.filter(
-    (blockedCalendar) =>
-      !blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "details") &&
-      blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "busy"),
+  const calendarsWithBusy = blockedCalendars.filter((blockedCalendar) =>
+    blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "busy"),
   );
   const eventStartsAt = new Date(event.startsAt).getTime();
   const eventEndsAt = new Date(event.endsAt).getTime();
@@ -8090,7 +8108,7 @@ function EventInspector({
               <dd>
                 <EventVisibilityList
                   blocks={blocks}
-                  calendars={calendarsWithBusyOnly}
+                  calendars={calendarsWithBusy}
                   destinations={blockDestinations}
                   disabled={changeBlock.isPending}
                   label="Calendars shown as busy"
@@ -8266,12 +8284,10 @@ function EventVisibilityList({
   const [open, setOpen] = useState(false);
   const blocksForCalendar = (calendarId: string) =>
     blocks.filter((block) => block.calendarId === calendarId);
-  const effectiveMode = (calendarId: string) => {
-    const calendarBlocks = blocksForCalendar(calendarId);
-    if (calendarBlocks.some((block) => block.mode === "details")) return "details";
-    return calendarBlocks.some((block) => block.mode === "busy") ? "busy" : null;
-  };
-  const availableCalendars = destinations.filter((calendar) => effectiveMode(calendar.id) !== mode);
+  const availableCalendars = destinations.filter((calendar) => {
+    const calendarBlocks = blocksForCalendar(calendar.id);
+    return calendarBlocks.length === 0 || calendarBlocks.some((block) => block.mode !== mode);
+  });
   const status = mode === "details" ? "Details Included" : "Shown as Busy";
   return (
     <ul aria-label={label} className="event-details-card__calendar-list">
@@ -8328,7 +8344,10 @@ function EventVisibilityList({
                 <ShadcnButton
                   key={calendar.id}
                   onClick={() => {
-                    onAdd(calendar.id, blocksForCalendar(calendar.id));
+                    onAdd(
+                      calendar.id,
+                      blocksForCalendar(calendar.id).filter((block) => block.mode !== mode),
+                    );
                     setOpen(false);
                   }}
                   variant="ghost"

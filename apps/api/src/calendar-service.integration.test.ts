@@ -546,7 +546,31 @@ describe.sequential("Calendar commitment proposals", () => {
       })
       .returning();
     if (!mirrorCalendar) throw new Error("Mirror calendar fixture was not created.");
-    const [sourceEvent, mirrorEvent] = await database.db
+    const [bridgeAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Bridge account",
+        provider: "google",
+        providerAccountId: "bridge-account",
+        userId,
+      })
+      .returning();
+    if (!bridgeAccount) throw new Error("Bridge account fixture was not created.");
+    const [bridgeCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: bridgeAccount.id,
+        isSelected: false,
+        isWritable: true,
+        name: "Bridge calendar",
+        provider: "google",
+        remoteCalendarId: "bridge-calendar",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!bridgeCalendar) throw new Error("Bridge calendar fixture was not created.");
+    const [sourceEvent, mirrorEvent, bridgeEvent] = await database.db
       .insert(calendarEvents)
       .values([
         {
@@ -564,14 +588,28 @@ describe.sequential("Calendar commitment proposals", () => {
           endsAt: new Date("2026-08-06T17:00:00.000Z"),
           provider: "google",
           remoteEventId: "mirror-source-two",
+          raw: { iCalUID: "transitive-bridge" },
           startsAt: new Date("2026-08-06T16:00:00.000Z"),
           timezone: "UTC",
           title: "Mirrored appointment",
           userId,
         },
+        {
+          calendarId: bridgeCalendar.id,
+          endsAt: new Date("2026-08-06T17:00:00.000Z"),
+          provider: "google",
+          raw: { iCalUID: "transitive-bridge" },
+          remoteEventId: "mirror-source-three",
+          startsAt: new Date("2026-08-06T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Alternate provider title",
+          userId,
+        },
       ])
       .returning();
-    if (!sourceEvent || !mirrorEvent) throw new Error("Mirror event fixtures were not created.");
+    if (!sourceEvent || !mirrorEvent || !bridgeEvent) {
+      throw new Error("Mirror event fixtures were not created.");
+    }
     const [existingMirrorBlock] = await database.db
       .insert(calendarEvents)
       .values({
@@ -596,7 +634,7 @@ describe.sequential("Calendar commitment proposals", () => {
 
     expect(visible).toHaveLength(1);
     expect(visible[0]?.sourceCalendarIds?.sort()).toEqual(
-      [remoteCalendarId, mirrorCalendar.id].sort(),
+      [remoteCalendarId, mirrorCalendar.id, bridgeCalendar.id].sort(),
     );
     expect(visible[0]?.blocks).toEqual([
       expect.objectContaining({
@@ -609,6 +647,16 @@ describe.sequential("Calendar commitment proposals", () => {
       service.createEventBlock(
         visible[0]?.id ?? "",
         { calendarId: mirrorCalendar.id, mode: "busy" },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "An event cannot block a calendar that already contains this occurrence.",
+    });
+    await expect(
+      service.createEventBlock(
+        visible[0]?.id ?? "",
+        { calendarId: bridgeCalendar.id, mode: "busy" },
         context(),
       ),
     ).rejects.toMatchObject({

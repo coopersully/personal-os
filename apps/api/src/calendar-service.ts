@@ -235,6 +235,59 @@ function deduplicateEvents(
   return { canonicalIdBySourceId, records: deduplicated };
 }
 
+function mirrorEventCluster(
+  source: CalendarEventRecord,
+  candidates: CalendarEventRecord[],
+  accountIdByCalendarId: ReadonlyMap<string, string>,
+): CalendarEventRecord[] {
+  const mirrors = [source];
+  const ids = new Set([source.id]);
+  const calendarIds = new Set([source.calendarId]);
+  const accountIds = new Set(
+    [accountIdByCalendarId.get(source.calendarId)].filter((accountId): accountId is string =>
+      Boolean(accountId),
+    ),
+  );
+  let added = true;
+  while (added) {
+    added = false;
+    for (const candidate of candidates) {
+      if (
+        ids.has(candidate.id) ||
+        candidate.blockSourceEventId ||
+        calendarIds.has(candidate.calendarId) ||
+        candidate.startsAt.getTime() !== source.startsAt.getTime() ||
+        candidate.endsAt.getTime() !== source.endsAt.getTime() ||
+        candidate.allDay !== source.allDay
+      ) {
+        continue;
+      }
+      const candidateUid = providerIndependentEventUid(candidate);
+      const sharesUid = Boolean(
+        candidateUid &&
+          mirrors.some((mirror) => providerIndependentEventUid(mirror) === candidateUid),
+      );
+      const candidateAccountId = accountIdByCalendarId.get(candidate.calendarId);
+      const sharesSemanticIdentity =
+        candidate.provider !== "local" &&
+        Boolean(candidateAccountId) &&
+        !accountIds.has(candidateAccountId as string) &&
+        mirrors.some(
+          (mirror) =>
+            mirror.provider !== "local" &&
+            normalizedEventTitle(mirror.title) === normalizedEventTitle(candidate.title),
+        );
+      if (!sharesUid && !sharesSemanticIdentity) continue;
+      mirrors.push(candidate);
+      ids.add(candidate.id);
+      calendarIds.add(candidate.calendarId);
+      if (candidateAccountId) accountIds.add(candidateAccountId);
+      added = true;
+    }
+  }
+  return mirrors;
+}
+
 function blockInput(
   source: CalendarEventRecord,
   calendarId: string,
@@ -537,8 +590,6 @@ export function createCalendarService({
   }
 
   async function findMirrorEvents(source: CalendarEventRecord): Promise<CalendarEventRecord[]> {
-    const sourceCalendar = await findCalendar(source.userId, source.calendarId);
-    const sourceUid = providerIndependentEventUid(source);
     const candidates = await db
       .select()
       .from(calendarEvents)
@@ -552,20 +603,21 @@ export function createCalendarService({
           isNull(calendarEvents.deletedAt),
         ),
       );
-    const mirrors = [source];
-    for (const candidate of candidates) {
-      if (candidate.id === source.id || candidate.calendarId === source.calendarId) continue;
-      const candidateCalendar = await findCalendar(source.userId, candidate.calendarId);
-      const candidateUid = providerIndependentEventUid(candidate);
-      const sharesUid = Boolean(sourceUid && candidateUid === sourceUid);
-      const sharesSemanticIdentity =
-        source.provider !== "local" &&
-        candidate.provider !== "local" &&
-        sourceCalendar.accountId !== candidateCalendar.accountId &&
-        normalizedEventTitle(source.title) === normalizedEventTitle(candidate.title);
-      if (sharesUid || sharesSemanticIdentity) mirrors.push(candidate);
-    }
-    return mirrors;
+    const candidateCalendarIds = [...new Set(candidates.map((candidate) => candidate.calendarId))];
+    const candidateCalendars = await db
+      .select()
+      .from(calendars)
+      .where(
+        and(
+          eq(calendars.userId, source.userId),
+          inArray(calendars.id, candidateCalendarIds),
+          isNull(calendars.deletedAt),
+        ),
+      );
+    const accountIdByCalendarId = new Map(
+      candidateCalendars.map((calendar) => [calendar.id, calendar.accountId]),
+    );
+    return mirrorEventCluster(source, candidates, accountIdByCalendarId);
   }
 
   async function serializeWithBlocks(record: CalendarEventRecord): Promise<CalendarEvent> {
@@ -1422,18 +1474,7 @@ export function createCalendarService({
             gt(calendarEvents.endsAt, new Date(query.from)),
           ),
         );
-      const identity = deduplicateEvents(
-        identityRecords.map(({ event }) => event),
-        accountIdByCalendarId,
-      );
-      const identityCalendarIdsByCanonicalId = new Map<string, Set<string>>();
-      for (const { event } of identityRecords) {
-        const canonicalId = identity.canonicalIdBySourceId.get(event.id) ?? event.id;
-        const calendarIdsForIdentity =
-          identityCalendarIdsByCanonicalId.get(canonicalId) ?? new Set();
-        calendarIdsForIdentity.add(event.calendarId);
-        identityCalendarIdsByCanonicalId.set(canonicalId, calendarIdsForIdentity);
-      }
+      const identityEvents = identityRecords.map(({ event }) => event);
       const linkedSourceIds = Array.from(
         new Set(
           eventRecords.flatMap((record) =>
@@ -1460,28 +1501,21 @@ export function createCalendarService({
         if (!record.blockSourceEventId) return true;
         const source = sourcesById.get(record.blockSourceEventId);
         if (!source) return true;
-        const identityId = identity.canonicalIdBySourceId.get(source.id) ?? source.id;
-        return ![...(identityCalendarIdsByCanonicalId.get(identityId) ?? [])].some((calendarId) =>
-          visibleCalendarIds.has(calendarId),
+        return !mirrorEventCluster(source, identityEvents, accountIdByCalendarId).some((mirror) =>
+          visibleCalendarIds.has(mirror.calendarId),
         );
       });
       const deduplicated = deduplicateEvents(visibleRecords, accountIdByCalendarId);
-      const visibleCanonicalIdByIdentityId = new Map(
-        deduplicated.records.map((record) => [
-          identity.canonicalIdBySourceId.get(record.id) ?? record.id,
-          record.id,
-        ]),
-      );
       const sourceCalendarIdsByCanonicalId = new Map<string, Set<string>>();
       const visibleCanonicalIdBySourceId = new Map<string, string>();
-      for (const record of identityRecords.map(({ event }) => event)) {
-        const identityId = identity.canonicalIdBySourceId.get(record.id) ?? record.id;
-        const canonicalId = visibleCanonicalIdByIdentityId.get(identityId);
-        if (!canonicalId) continue;
-        const sourceCalendarIds = sourceCalendarIdsByCanonicalId.get(canonicalId) ?? new Set();
-        sourceCalendarIds.add(record.calendarId);
-        sourceCalendarIdsByCanonicalId.set(canonicalId, sourceCalendarIds);
-        visibleCanonicalIdBySourceId.set(record.id, canonicalId);
+      for (const canonical of deduplicated.records) {
+        if (canonical.blockSourceEventId) continue;
+        const mirrors = mirrorEventCluster(canonical, identityEvents, accountIdByCalendarId);
+        sourceCalendarIdsByCanonicalId.set(
+          canonical.id,
+          new Set(mirrors.map((mirror) => mirror.calendarId)),
+        );
+        for (const mirror of mirrors) visibleCanonicalIdBySourceId.set(mirror.id, canonical.id);
       }
       const displayedSourceIds = [...visibleCanonicalIdBySourceId.keys()];
       const blockRecords =

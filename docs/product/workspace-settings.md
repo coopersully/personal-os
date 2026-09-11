@@ -65,7 +65,7 @@ person deliberately creates a workspace override:
 - whether replies may answer that workspace's questions;
 - whether replies may approve exact reversible proposals when global review bypass is off;
 - useful contextual identifiers with privacy-safe detail, or explicitly expanded message content;
-- inclusion of first-party review and recovery links; and
+- first-party review and recovery links when context, length, or multiple items require them; and
 - inherited global quiet hours or a workspace-specific schedule.
 
 These controls affect communication and routing only. The global review-bypass setting decides
@@ -84,6 +84,9 @@ Messages remain formal, short, and concise. One item may be asked directly; seve
 count and topical preview with a scoped review link rather than a long SMS checklist.
 That link opens exactly the summarized items first and provides a separate route to the complete
 queue.
+
+A self-contained single question omits the link unless the person needs more context or the
+necessary content is too long for a reasonable text.
 
 ## Inheritance boundary
 

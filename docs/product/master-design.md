@@ -341,6 +341,8 @@ coherent response without reproducing domain expertise.
 - SMS is formal, short, and concise. A single item may be asked directly; multiple questions or
   actions become a count and topical preview plus a link scoped to exactly those items. The scoped
   view offers a separate action to open the complete review queue.
+- A self-contained single question omits the link. Texting adds one only when additional context is
+  useful, multiple items are involved, or the necessary content is too long for a reasonable SMS.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
   authority. After sign-in, the app returns the person to the exact scoped review destination.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized

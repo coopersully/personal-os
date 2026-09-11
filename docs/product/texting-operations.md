@@ -59,12 +59,16 @@ A maintenance message should normally contain:
 - a count and short topical preview plus the first-party review link when several need attention;
 - the useful merchant, sender, event, task, or other entity name needed to understand it;
 - explicit reply choices when the answer vocabulary is bounded; and
-- one short first-party review or recovery link when it adds value.
+- one short first-party review or recovery link only when additional context is useful, several
+  items are involved, or the necessary content is too long for a reasonable text.
 
 Messages are formal, concise, and immediately scannable. They omit greetings, sign-offs,
 conversational filler, repeated status, and the full contents of a multi-item queue. When several
 questions or actions are open, the SMS summarizes their number and subjects without asking each one;
 the linked nohmi review surface contains the complete summarized item set and its evidence.
+
+A short, self-contained single question does not include a redundant link. The message stays brief
+and directly answerable by text unless evidence or context is needed to decide safely.
 
 The link opens a scoped review view containing exactly the items summarized in that SMS, preserving
 their message, run, and work-node context. That view offers a separate action to open the complete
@@ -75,8 +79,8 @@ approval authority, answer, or sensitive item content; possession of the phone o
 SMS is not a web session. If authentication is required, nohmi returns the person to the same scoped
 review after sign-in.
 
-Example: “Your budget is on track this month. One question: dinner yesterday was unusually large—are
-you expecting reimbursement? Reply yes, no, or unsure. Review: [link]”
+Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
+unsure.”
 
 Multiple-item example: “Three items need review: two Finance transactions and one Calendar
 conflict. Review: [link]”

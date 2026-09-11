@@ -43,6 +43,9 @@ preview with the review link. The link resolves the exact message-bound item set
 separate route to the full queue; it does not serialize the complete queue into SMS or open an
 unfiltered backlog by default.
 
+A self-contained single question has no link. Texting adds a scoped link only when context is
+needed, multiple items are involved, or the necessary content cannot remain a reasonable SMS.
+
 Review links use ordinary authenticated nohmi routes. The URL identifies a scoped destination but
 contains no bearer credential, action authority, answer, or sensitive item content; SMS recipient
 verification does not create a web session. Authentication preserves and resumes the destination.

@@ -69,6 +69,10 @@ only one is open; for multiple questions or actions, supply a count and topical 
 message-bound scoped review link rather than rendering every item. The scoped view contains exactly
 the summarized items and offers a separate action for the complete queue.
 
+Do not add a redundant link to a self-contained single question. Request a scoped link when the
+decision needs more context, multiple items are involved, or the necessary content cannot fit a
+reasonable SMS.
+
 ## Verify the delivered slice
 
 Test domain decisions, migrated persistence, concurrent claims, retry/recovery, authorization,

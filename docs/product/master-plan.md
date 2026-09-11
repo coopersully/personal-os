@@ -281,6 +281,9 @@ flowchart TD
 - Keep SMS formal, short, and concise. Render one item directly, but summarize multiple questions or
   actions by count and topic instead of reproducing them. Link to a scoped review view containing
   exactly those items, with a separate action for the complete nohmi review queue.
+- Omit links from self-contained single questions. Add a scoped link only when the decision needs
+  more context, multiple items are involved, or the necessary content would make the SMS
+  unreasonably long.
 - Require normal nohmi authentication for every SMS deep link, retain the exact scoped destination
   across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
   in the URL.

@@ -87,6 +87,12 @@ Retain granular tools for surgical inspection, previews, and exact authorized ac
 the high-level operation a synchronous loop of client-authored calls. Consequential authority stays
 at each underlying operation, and a maintenance request cannot widen the caller's scopes or policy.
 
+External platforms are the sole scheduling authority for recurring maintenance. nohmi may persist
+the declared host and expected cadence plus last-observed and overdue/unknown check-in state, but
+that metadata cannot enqueue a run or modify the external schedule. Internal queues, leases,
+retries, delayed authorized effects, and recovery timers may continue an accepted invocation; they
+must not originate a new recurring maintenance turn.
+
 Workspace stewards may publish typed notification intents that reference their run, work nodes,
 safe summary, sensitivity, and first-party destination. The shared Texting coordinator owns channel
 policy, rendering, delivery, and reply routing; it cannot own or reinterpret the workspace's

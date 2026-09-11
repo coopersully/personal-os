@@ -5,13 +5,21 @@
 
 ## Product decision
 
-nohmi does not require one scheduling provider. The person chooses where and when an automation
-runs; the host connects to nohmi through MCP or another authenticated API surface and invokes one
-high-level intent such as `maintain_finances`.
+nohmi does not own maintenance schedules. The person chooses an external platform and configures
+where and when an automation runs there; the host connects to nohmi through MCP or another
+authenticated API surface and invokes one high-level intent such as `maintain_finances`.
 
-The host owns cadence, wake-up, and delivery of the invocation. nohmi owns the meaning of the tool,
-purpose-bound User Knowledge retrieval, source synchronization, policy, durable run state,
-idempotency, resumability, questions, approvals, recovery, audit, and the verified result.
+The external host is the sole authority for cadence, wake-up, pausing, resuming, and delivery of
+the invocation. nohmi owns the meaning of the tool, purpose-bound User Knowledge retrieval, source
+synchronization, policy, durable run state, idempotency, resumability, questions, approvals,
+recovery, audit, and the verified result. nohmi must not create, edit, activate, or execute a
+recurring maintenance schedule.
+
+nohmi may store a user- or host-declared expected cadence, the last observed invocation, and an
+expected, overdue, or unknown check-in state so the person can see whether an external automation
+appears healthy. This metadata is observational only: changing it does not update the external
+platform, and reaching an expected time does not enqueue or start maintenance. The UI must direct
+the person to the owning platform or provide setup instructions when a schedule needs to change.
 
 ## Supported scheduling patterns
 
@@ -56,6 +64,10 @@ reinforced knowledge to reduce unnecessary questions.
 `maintain_texting` is a valid scheduled catch-up and recovery intent for the general SMS inbox, but
 normal inbound messages should enqueue the same durable coordinator at webhook arrival. A schedule
 must not become the only mechanism for replying to the person.
+
+Internal queues, leases, retries, delayed authorized effects, and recovery timers may continue work
+that nohmi already accepted. They are execution infrastructure, not maintenance schedulers, and
+must never originate a new recurring maintenance invocation.
 
 ## Platform references
 

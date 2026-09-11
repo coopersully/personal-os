@@ -49,6 +49,12 @@ mechanical run infrastructure. Keep MCP stateless: normally expose `get_<workspa
 `maintain_<workspace>`, useful surgical tools, and `setup_<workspace>` or the shared setup plan when
 onboarding is nontrivial, all as thin typed-API adapters.
 
+Treat external agent platforms as the sole authority for recurring maintenance schedules. nohmi
+may report a declared host, expected cadence, last observed invocation, and overdue or unknown
+check-in health, but those records must never trigger work or modify the external schedule. Internal
+queues, leases, retries, delayed authorized effects, and recovery timers may only continue an
+invocation nohmi already accepted; they cannot originate a new recurring maintenance turn.
+
 Every mutation retains least privilege, source evidence, policy, revision/idempotency controls,
 audit, and recovery. User Knowledge may become active through manual promotion or safe repeated
 reinforcement, but it never grants action authority or activates a mutation rule. Never

@@ -110,15 +110,21 @@ surgical tools inspect or change one exact thing.
 
 ## Scheduling boundary
 
-An external scheduler may invoke a maintenance intent at the person's chosen cadence. Supported
-patterns include ChatGPT and Codex scheduled tasks, Claude recurring tasks and routines, Gemini
-scheduled actions or headless automation, operating-system schedulers, and other MCP hosts. The
-current compatibility matrix and official references live in
+An external scheduler is the sole authority for invoking a maintenance intent at the person's
+chosen cadence. Supported patterns include ChatGPT and Codex scheduled tasks, Claude recurring
+tasks and routines, Gemini scheduled actions or headless automation, operating-system schedulers,
+and other MCP hosts. nohmi never creates, edits, activates, pauses, or executes the recurring
+maintenance schedule. The current compatibility matrix and official references live in
 [`external automation hosts`](automation-hosts.md).
 
 The scheduler owns when to call. nohmi owns what the intent means, the knowledge and evidence it
 requires, durable execution, policy, idempotency, questions, review, recovery, and the verified
-terminal result. Scheduled prompts must stay small and must not duplicate the domain workflow.
+terminal result. nohmi may show a declared expected cadence, last observed invocation, and overdue
+or unknown check-in health, but these are observational and never trigger work. Scheduled prompts
+must stay small and must not duplicate the domain workflow.
+
+Internal queues, leases, retries, delayed authorized effects, and recovery timers may complete an
+already accepted invocation. They cannot originate a new recurring maintenance turn.
 
 A steward may publish a typed notification intent when maintenance completes, needs input, or
 requires recovery. The shared Texting service—not the workspace—applies channel settings, renders

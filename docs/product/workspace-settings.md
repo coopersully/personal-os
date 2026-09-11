@@ -30,8 +30,9 @@ while presenting domain-specific controls:
 
 - **Sources and synchronization:** connected providers, selected sources, meanings, destinations,
   capabilities, freshness, failures, retries, and removal.
-- **Maintain:** whether maintenance is enabled, its bounded scope and review cadence, the current
-  definition of maintained, and custom maintenance guidance.
+- **Maintain:** whether the workspace accepts maintenance, its default bounded scope, its declared
+  external cadence and last observed check-in, the current definition of maintained, and custom
+  maintenance guidance. Schedule creation and editing remain in the external platform.
 - **Questions and reviews:** open work nodes, answer behavior, review history, and the inherited
   global review-bypass state.
 - **Texting and notifications:** whether this workspace participates in the general SMS inbox,
@@ -58,6 +59,19 @@ while retaining the original instruction, provenance, version, and effective sco
 Guidance applies to all setup, status, maintenance, and advisory surfaces. A channel-specific copy
 must not drift into a separate SMS behavior, and prose guidance cannot bypass scopes, global review
 policy, domain rules, or hard product limits.
+
+## External scheduling boundary
+
+External platforms own maintenance schedules completely. nohmi exposes stable maintenance intents
+and setup instructions, but it does not create, edit, pause, resume, or execute their recurring
+schedules. A workspace may store the declared external host and expected cadence, show the last
+observed invocation, and report expected, overdue, or unknown check-in health; those values are
+observational and never trigger a run.
+
+Internal queues, leases, retries, delayed authorized effects, and recovery timers may finish work
+from an invocation nohmi already accepted. They do not constitute schedule ownership and cannot
+originate a new recurring maintenance turn. To change when maintenance begins, the person must
+change the schedule in its owning external platform.
 
 ## Shared notification policy and channel controls
 
@@ -133,7 +147,7 @@ every workspace setting has a global equivalent.
 | Global-only | Review bypass, cross-channel notification evaluation, Texting connection and consent, account security, connected-agent scopes, and hard privacy limits | One account value; a workspace or channel cannot override it |
 | Global default with workspace override | Maintenance notification mode, quiet hours, reminder behavior, safe content ceiling, and aggregation | Inherit the account preference until the person deliberately changes that workspace; evaluation is shared across channels |
 | Channel delivery | SMS, in-app, push, or email enablement, destination/device, supported interaction, link behavior, and medium-appropriate detail | Controls how an eligible notification is delivered; cannot create eligibility or widen privacy and action policy |
-| Workspace-only | Connected sources, source meanings, definition of maintained, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; no global value is implied |
+| Workspace-only | Connected sources, source meanings, definition of maintained, declared external host/cadence, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; schedule changes still occur in the external host |
 
 For example, the person could keep the default “send only questions and actions, use privacy-safe
 detail, and stay quiet overnight,” then let Mail inherit it while allowing Finances to send every
@@ -164,7 +178,5 @@ behavior and must not be presented as shipped.
 
 ## Open design questions
 
-- Whether maintenance cadence is configured in nohmi, delegated entirely to external schedulers,
-  or represented only as an expected-check-in contract.
 - How much rule generation guided setup may propose before requiring a dedicated preview.
 - Which settings belong inline inside each workspace and which also appear in centralized Settings.

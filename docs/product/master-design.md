@@ -318,9 +318,11 @@ action routes to the domain that owns the decision. Informational state, routine
 nohmi can recover automatically do not enter the queue; setup and access configuration never appear
 as queue work merely because they exist.
 
-nohmi does not require a generic routine scheduler. External automation platforms may schedule a
-small workspace maintenance intent, while durable behavior is domain-owned and must expose
-domain-specific pending, success, reconciliation, and failure state. A client-scheduled prompt is
+nohmi does not own maintenance schedules. External automation platforms are the sole authority for
+creating, editing, activating, pausing, and invoking recurring maintenance. nohmi may display a
+declared expected cadence, last observed invocation, and overdue or unknown check-in health, but
+that metadata never triggers a run. Once invoked, durable behavior is domain-owned and must expose
+domain-specific pending, success, reconciliation, and failure state; a client-scheduled prompt is
 an invocation mechanism, not the source of workflow logic or completion truth.
 
 The Activity view filters by material, actor, source, result, date, and reversible state. Every event links to the affected material and source evidence.
@@ -436,10 +438,11 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
 ```
 
 - Mail retention is the first domain-owned durable execution implementation: stable work identity,
-  bounded scheduler claims, lease recovery, exact provider reconciliation, terminal state, and
+  bounded worker claims, lease recovery, exact provider reconciliation, terminal state, and
   redacted audit/attention observations. Other recurring domains still require a shared durable
-  job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before
-  enabling real recurring automation.
+  job queue, worker lease/heartbeats, dead-letter handling, and run/event store before reliably
+  executing externally invoked recurring work. Those internals may continue accepted runs but do
+  not own or originate maintenance schedules.
 - Model native domain records separately and expose a typed material-link/source-reference graph above them. A link carries relation type, source reference, ownership, revision/reconciliation state, and policy/audit references; it never makes a provider record and a local note falsely interchangeable.
 - Maintain a shared User Knowledge graph above native records. Purpose-bound context assembly
   retrieves only the facts, preferences, inferences, policy, and missing requirements needed for a

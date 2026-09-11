@@ -184,7 +184,7 @@ flowchart TD
   stable pagination, and deep links back to the owning domain; exclude informational and
   automatically recoverable states.
 - Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
-- Give a durable scheduler or queue only to a domain workflow that needs it, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior.
+- Give an internal timer or durable queue only to a domain workflow that needs to continue already accepted work, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior; internal timing never originates recurring maintenance.
 - Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.
 
 **Done when**
@@ -323,8 +323,11 @@ flowchart TD
 
 External schedulers—including ChatGPT or Codex scheduled tasks, Claude recurring tasks or routines,
 Gemini scheduled actions or headless automation, and operating-system schedulers—may invoke these
-intents. nohmi owns their expertise, context retrieval, durable state, policy, recovery, questions,
-reviews, and completion truth.
+intents and are the sole authority for creating, editing, activating, pausing, and delivering those
+schedules. nohmi owns their expertise, context retrieval, durable state, policy, recovery,
+questions, reviews, and completion truth. It may record expected cadence and observed check-in
+health, but those records never trigger maintenance; internal queues and timers only continue work
+from an invocation already accepted.
 
 Each workspace also needs a domain-owned guided setup flow that lets the person describe an ideal
 workflow in ordinary language, converts it into explicit proposed source meanings, configuration,

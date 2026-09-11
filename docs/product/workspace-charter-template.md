@@ -71,6 +71,11 @@ Describe the domain-owned sequence for `all`, a bounded time window, and an exac
 Specify durable run/step state, leases, retry limits, idempotency, cancellation, recovery, and
 concurrent-run behavior. Name what can remain outstanding without misreporting success.
 
+Define the external scheduling contract: supported hosts, the expected cadence metadata and
+check-in health shown by nohmi, and the setup or repair handoff back to the owning platform. nohmi
+must not create, edit, activate, pause, or execute a recurring maintenance schedule; internal
+timers may only continue or recover work from an invocation already accepted.
+
 ## 7. Rulebook, questions, and learning
 
 - What can the steward infer provisionally?

@@ -70,8 +70,11 @@ Claude, Codex, or other client automation.
 
 The person may schedule the same maintenance intent through ChatGPT or Codex scheduled tasks,
 Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
-operating-system scheduler, or another MCP-capable host. Those systems own cadence and invocation;
-nohmi owns durable execution, context, policy, questions, recovery, and completion truth.
+operating-system scheduler, or another MCP-capable host. Those systems are the sole authority for
+creating, editing, activating, pausing, and delivering the recurring schedule. nohmi may record an
+expected cadence and observed check-in health, but those records never invoke the tool; nohmi owns
+durable execution, context, policy, questions, recovery, and completion truth only after a host
+calls it.
 
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
@@ -320,7 +323,8 @@ Mail is the first executable implementation:
 - automatic execution coalesces compatible actions into one provider call per thread and processes
   at most six threads with two workers. Immediate and delayed retention both use a durable
   rule/action/thread identity. Leased claims recover through exact provider reconciliation after
-  process loss or an uncertain external effect. Backlog remains pending for later scheduled runs;
+  process loss or an uncertain external effect. Backlog remains pending for a later externally
+  invoked run;
   setup context exposes per-account pending, in-progress, reconciliation, failed, and
   last-completed state plus global oldest-due status, without message bodies or credentials.
 - disconnecting or disabling Mail removes its cached provider mailbox/thread projection, detaches
@@ -330,7 +334,7 @@ Mail is the first executable implementation:
 
 New rules remain disabled and preview-only by default. Active rules must be paused before their
 matching behavior changes, and connector sync executes only enabled `approved_rule` rules.
-MCP annotations remain untrusted UX hints. The API and durable scheduler remain authoritative;
+MCP annotations remain untrusted UX hints. The API and durable execution coordinator remain authoritative;
 Mail-to-Calendar intake does not use experimental MCP task execution.
 
 ### Shared Finance workspace

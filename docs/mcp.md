@@ -3,6 +3,14 @@
 The MCP server is the agent unification interface over the authenticated nohmi API. It contains no
 Mail, Tasks, Calendar, Finances, User Knowledge, provider, policy, or audit rules of its own.
 
+The target is functional parity with the first-party product: anything a person can inspect or
+change in the app should have a typed API and MCP capability when the provider and platform permit
+it. This includes workspace and global settings, notification-channel controls, maintenance
+guidance, rules, and Texting enablement. Parity does not mean one generic omnipotent tool: discovery
+and execution remain limited by the connected agent's explicit scopes, and an agent cannot change
+its own credential, grant itself authority, or bypass stronger consent, approval, privacy, or
+security boundaries.
+
 The displayed product and OAuth resource name is **nohmi**. The protocol server
 identifier `ilo`, existing `get_ilo_*` tools, `ilo://` resources, `_ilo` metadata,
 and versioned `ilo-setup` artifacts remain compatibility contracts. The Mac target
@@ -74,13 +82,19 @@ intent, calls the authenticated typed API, and returns the durable state. A host
 as `maintain finances` should therefore work consistently without embedding Finance procedure in a
 Claude, Codex, or other client automation.
 
-The person may schedule the same maintenance intent through ChatGPT or Codex scheduled tasks,
-Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
-operating-system scheduler, or another MCP-capable host. Those systems are the sole authority for
-creating, editing, activating, pausing, and delivering the recurring schedule. nohmi may record an
-expected cadence and observed check-in health, but those records never invoke the tool; nohmi owns
-durable execution, context, policy, questions, recovery, and completion truth only after a host
-calls it.
+The person may schedule the same maintenance intent through any number of ChatGPT or Codex scheduled
+tasks, Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
+operating-system scheduler, or another MCP-capable host. Multiple hosts and overlapping schedules
+are permitted; nohmi must not choose one exclusive owner merely to simplify orchestration. Those
+systems are the sole authority for creating, editing, activating, pausing, and delivering the
+recurring schedule. nohmi may record an expected cadence and observed check-in health, but those
+records never invoke the tool; nohmi owns durable execution, context, policy, questions, recovery,
+and completion truth only after a host calls it.
+
+Each call retains its invoking connection, host-declared automation identity when available,
+requested scope, and idempotency identity. The domain's durable-run contract coalesces or resumes
+compatible concurrent calls and keeps incompatible scopes separate without replaying completed
+external effects.
 
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal

@@ -2,13 +2,15 @@
 
 - Status: Living master design; shipped and future behavior are labelled explicitly
 - Date: 2026-07-18
-- Last reconciled: 2026-09-10
+- Last reconciled: 2026-09-11
 - Supersedes: the product direction in `docs/product/mvp.md` for future planning. The MVP remains the record of what has already been built.
 
 ## 1. Decision and intentional scope expansion
 
-nohmi will be a private, cross-device autonomous exoskeleton for an individual's commitments,
-communications, time, priorities, and money. It does not replace operating systems or the external
+nohmi will be a private, cross-device autonomous exoskeleton for each person's commitments,
+communications, time, priorities, and money. It is a multi-user product: every account, credential,
+provider projection, knowledge record, run, review, and audit event is isolated to its owner by
+default. It does not replace operating systems or the external
 providers that remain authoritative for connected records; it should replace the person's need to
 visit each provider application for ordinary work. A person owns the data and workflows, operates
 the same material directly in nohmi, and delegates bounded or autonomous work to any authorized
@@ -34,7 +36,12 @@ workspace domain owns the expertise and durable workflow. The shared product doc
 
 ### 2.1 Target user and jobs
 
-The primary user is an individual with multiple Google/iCloud accounts, variable attention and energy, a calendar that mixes work and life, an inbox that needs recurring cleanup, and existing Claude/Codex subscriptions. They want help without surrendering control.
+Each user has an independently secured account and may have multiple Google/iCloud accounts,
+variable attention and energy, a calendar that mixes work and life, an inbox that needs recurring
+cleanup, and one or more external agent hosts. The current implementation may begin with one user,
+but product, storage, authorization, retrieval, notification, and audit contracts must always be
+designed and tested for many mutually isolated users. Shared household or delegated access requires
+an explicit future sharing and consent model; it must never arise from weak tenant boundaries.
 
 | Job | Success outcome |
 | --- | --- |
@@ -75,6 +82,15 @@ The primary user is an individual with multiple Google/iCloud accounts, variable
     every rule remains inactive until a dedicated, version-bound preview exposes its scope,
     examples, consequences, conflicts, authority, and recovery path and the owning domain receives
     the required approval. Global review bypass cannot activate an action rule.
+19. **Agents receive capability parity without self-escalation.** Everything a person can do in a
+    first-party interface should have a typed API and MCP path when the underlying provider and
+    platform permit it. A connected agent may read or change settings, channels, rules, and
+    workspace material only through scopes the person granted; it cannot grant itself new scopes,
+    replace the account owner, or bypass a stronger approval boundary.
+20. **Tenant isolation is structural.** Every query, mutation, background claim, cache, embedding,
+    search result, deep link, notification, and audit lookup is bound to the authenticated owner.
+    Names, phone numbers, provider IDs, semantic similarity, and model inference are never tenant
+    boundaries.
 
 ## 4. Information architecture
 
@@ -251,12 +267,16 @@ tags, deadline, and reserved time. Lifecycle, Trash, and restore are focused act
 content form. Natural-language classification, Task recurrence/occurrences, attachments, bulk
 editing, Prompt persistence, time-block synchronization, and focus mode remain future work.
 
-The target product imports tasks from external providers and then treats nohmi as the authoritative
-working workspace. Bidirectional synchronization with multiple task providers remains an open
-future option, not a current goal. Keep **Lists** as the provisional user-facing name for the
-long-lived container above Projects because it is familiar and already shipped; do not adopt
-**Areas** by default. The naming decision can change later without changing the settled distinction
-between a durable responsibility/context and a finite Project.
+The target product performs a one-time import from external task providers and then treats nohmi as
+the authoritative working workspace. The person may explicitly re-trigger a heavily rate-limited
+import to collect new external commitments. Re-import uses stable provider identity and bounded
+content fingerprints to deduplicate unchanged material, never silently overwrites a task already
+owned or edited in nohmi, and surfaces unresolved source conflicts for review. Continuous inbound
+ingestion is not the current contract. Bidirectional synchronization with multiple task providers
+remains an open future option, not a current goal. Keep **Lists** as the provisional user-facing
+name for the long-lived container above Projects because it is familiar and already shipped; do not
+adopt **Areas** by default. The naming decision can change later without changing the settled
+distinction between a durable responsibility/context and a finite Project.
 
 Reminders remain a separate lightweight compatibility domain and `/reminders` surface today. The
 approved target is to model a reminder as delivery behavior attached to a Task or Tracking
@@ -362,18 +382,21 @@ coherent response without reproducing domain expertise.
   delivery.
 - Workspace maintenance publishes typed notification intents. The shared notification policy
   decides eligibility once across channels; Texting applies SMS delivery controls and sends one
-  outcome sentence, at most one available question or exact review, and a useful first-party link.
+  outcome sentence, up to three directly answerable questions or exact reviews that reasonably fit,
+  and a useful first-party link when additional context or outstanding work requires it.
 - Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
   quiet, while a message initiated by the person still receives a response.
 - Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting
   converts canonical times into the person's time zone and renders nearby dates as `today`,
   `yesterday`, or `tomorrow` immediately before sending.
-- SMS is formal, short, and concise. A single item may be asked directly; multiple questions or
-  actions become one statement that several items need review plus the unified Settings-owned
-  Reviews link. Texting does not send separate messages per item or workspace.
+- SMS is formal, short, and concise. It may include as many directly answerable questions or exact
+  reviews as reasonably fit, with a hard cap of three. If even two would make the text difficult to
+  scan, include only one. Every multi-item message includes the unified Settings-owned Reviews link;
+  when more items remain, it summarizes the overflow. Texting does not send separate proactive
+  messages per item or workspace.
 - A self-contained single question omits the link. Texting adds an exact-item or workspace link when
-  that question needs more context or is too long for a reasonable SMS; multiple items use the
-  unified Reviews link.
+  that question needs more context or is too long for a reasonable SMS; every multi-item message
+  uses the unified Reviews link.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.

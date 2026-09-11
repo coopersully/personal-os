@@ -37,20 +37,23 @@ Workspace stewards publish typed notification intents rather than rendered SMS. 
 notification service evaluates eligibility, quiet hours, reminders, deduplication, aggregation, and
 privacy once across every channel. Texting then applies SMS enablement, destination, interaction,
 link, format, and detail controls; converts canonical times to the person's current time zone;
-renders nearby dates relatively; and composes one result, one available question or exact review
-action, and an optional first-party deep link. SMS controls may suppress delivery but cannot create
+renders nearby dates relatively; and composes one result, up to three directly answerable questions
+or exact review actions that reasonably fit, and an optional first-party deep link. SMS controls may suppress delivery but cannot create
 eligibility, widen authority, or exceed the shared privacy ceiling.
 
-When several questions or actions are available, Texting renders only a brief formal statement
-with the unified Reviews link. It sends one notification across workspaces rather than
-serializing the queue into SMS or sending one message per item or domain.
+Texting includes no more than three directly answerable items in one message and may include only
+one or two when the content would otherwise stop being short and scannable. When more work remains
+or the items need richer context, it renders a brief formal summary. Every multi-item message
+includes the unified Reviews link. Texting sends one notification across workspaces rather than
+serializing the whole queue into SMS or sending one proactive message per item or domain.
 
 Unified Reviews includes questions, approvals, connector failures, recovery steps, and other work
 that requires the person. Informational and automatically recoverable states remain in their owning
 workspace status and activity history rather than producing a review item or proactive SMS.
 
 A self-contained single question has no link. Texting adds an exact-item or domain link only when
-that question needs context or cannot remain a reasonable SMS; multiple items use unified Reviews.
+that question needs context or cannot remain a reasonable SMS; every multi-item message uses unified
+Reviews.
 
 Review links use ordinary authenticated nohmi routes. The URL identifies a requested destination but
 contains no bearer credential, action authority, answer, or sensitive item content; SMS recipient

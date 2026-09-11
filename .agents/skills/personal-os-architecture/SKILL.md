@@ -12,6 +12,12 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
 
 ## Place work by responsibility
 
+- Design every surface as multi-user even when a fixture or early deployment contains one account.
+  Bind domain rows, provider projections, background claims, caches, embeddings, searches,
+  notifications, reviews, deep links, and audit reads to the authenticated owner through structural
+  tenant keys and authorization checks. Never use a display name, phone number, provider ID,
+  semantic match, or model inference as the tenant boundary; sharing and delegation require an
+  explicit consented relationship model.
 - Put schemas, invariants, and cross-surface contracts in `packages/domain`.
 - Put PostgreSQL schema, migrations, and data access in `packages/database`.
 - Put provider-specific work behind `packages/connectors`; never call providers

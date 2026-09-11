@@ -125,9 +125,12 @@ flowchart TD
 - Migrate reminders into a commitment model while retaining existing IDs/API compatibility.
 - Add task fields: project, long-lived organizational container, status, priority, estimate, due versus scheduled time, recurrence/exception, subtasks/checklists, tags, notes, attachments, energy/context, sources, goals/motives, defer/complete history.
 - Add projects, long-lived organizational containers, task inbox, upcoming/someday/completed/custom filters, list/board/calendar/timeline/focus views, bulk actions, search, quick capture, natural-language parse confirmation, and keyboard commands. Retain **Lists** as the provisional label, do not assume **Areas**, and allow a later product review to change the label without changing the hierarchy.
-- Import tasks from external providers and make nohmi the authoritative working workspace after
-  import. Preserve bidirectional multi-provider synchronization as a possible future extension, not
-  a current delivery requirement.
+- Import tasks from external providers once and make nohmi the authoritative working workspace
+  afterward. Allow a person to re-trigger a heavily rate-limited, auditable import that adds new
+  source commitments, deduplicates stable provider identities and bounded fingerprints, and sends
+  source conflicts to review without silently overwriting nohmi-owned edits. Preserve continuous
+  inbound and bidirectional multi-provider synchronization as possible future extensions, not
+  current delivery requirements.
 - Build recurrence service for calendar and completion-relative patterns, occurrence exceptions, edit-one/edit-series semantics, and future preview.
 - Build internal/external time blocks with duration, actual time, privacy/busy setting, destination calendar, drag/resize, keyboard alternatives, and rollback.
 - Add focus timer/Pomodoro, break/interrupt capture, and low-distraction focus mode.
@@ -181,6 +184,11 @@ flowchart TD
   read-only cross-workspace overview of effective access, source/maintenance health, overrides, and
   outstanding review counts that deep-links to exact workspace controls.
 - Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
+- Expose functional app parity through typed API and MCP capabilities, including settings,
+  notification channels, Texting enablement, workspace maintenance guidance, and rules. Add
+  separately understandable agent permissions for settings read, notification/channel changes,
+  workspace configuration, rule management, and higher-impact account or policy changes; never let
+  an agent edit its own credential or scopes.
 - Retain the existing Settings-owned Reviews destination that composes Review and Attention work,
   and expand it to every question, approval, connector failure, recovery step, or other item that
   explicitly requires the person. Preserve workspace/type filters, honest partial availability,
@@ -287,10 +295,11 @@ flowchart TD
 - Render actionable SMS with the minimum useful merchant, sender, event, task, or comparable entity
   context. Preserve canonical instants, convert them to the person's current time zone immediately
   before sending, and use accurate `today`, `yesterday`, or `tomorrow` labels for nearby dates.
-- Keep SMS formal, short, and concise. Render one item directly, but summarize multiple questions or
-  actions with one statement that several items need review instead of reproducing them. Send one
-  cross-workspace notification linking to the existing Settings-owned unified Reviews destination,
-  not separate messages per item or workspace.
+- Keep SMS formal, short, and concise. Render as many directly answerable questions or actions as
+  reasonably fit, with a hard cap of three and permission to include only one or two when clarity
+  requires. Include the existing Settings-owned unified Reviews link in every multi-item message;
+  when additional work remains or context is too large, summarize the overflow. Send one
+  cross-workspace notification, not separate proactive messages per item or workspace.
 - Omit links from self-contained single questions. Add an exact-item or workspace link when one
   decision needs more context or would make the SMS unreasonably long; use the unified Reviews link
   for multiple items.
@@ -331,6 +340,11 @@ schedules. nohmi owns their expertise, context retrieval, durable state, policy,
 questions, reviews, and completion truth. It may record expected cadence and observed check-in
 health, but those records never trigger maintenance; internal queues and timers only continue work
 from an invocation already accepted.
+
+Allow the person to configure multiple hosts and schedules for the same workspace or maintenance
+intent. Persist health and revocation per declared schedule when the host exposes an identity, and
+use the durable run/idempotency contract to coalesce compatible overlapping invocations without
+restricting the person's choice of tooling.
 
 Each workspace also needs a domain-owned guided setup flow that lets the person describe an ideal
 workflow in ordinary language, converts it into explicit proposed source meanings, configuration,

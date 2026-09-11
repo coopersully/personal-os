@@ -1,7 +1,7 @@
 # nohmi User Knowledge
 
 - Status: Approved target product contract; not yet implemented as a complete system
-- Last reconciled: 2026-09-10
+- Last reconciled: 2026-09-11
 
 ## Purpose
 
@@ -14,6 +14,13 @@ The purpose is not to remember everything or place a transcript into every model
 purpose is to retrieve the smallest trustworthy context needed for a specific decision, disclose
 what is missing, learn from outcomes, and let the person inspect and correct the resulting model of
 their life.
+
+User Knowledge is multi-user infrastructure even when an early environment has one account. Every
+knowledge object, revision, relationship, evidence source, embedding, search candidate, context
+pack, and access record belongs to an authenticated owner and is filtered by that ownership before
+structured or semantic retrieval. Similar names, relationships, provider identities, phone numbers,
+or embedding proximity can never join knowledge across users. Future household or delegated access
+requires an explicit sharing, consent, and revocation model rather than weakening this isolation.
 
 ## Product boundaries
 

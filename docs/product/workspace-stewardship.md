@@ -132,6 +132,12 @@ and other MCP hosts. nohmi never creates, edits, activates, pauses, or executes 
 maintenance schedule. The current compatibility matrix and official references live in
 [`external automation hosts`](automation-hosts.md).
 
+This authority is per schedule, not an exclusive workspace lease. The person may configure
+multiple hosts and overlapping schedules for the same maintenance intent. Each invocation retains
+its connection, host-declared automation identity when available, scope, and idempotency identity;
+compatible work coalesces or resumes, while incompatible scopes remain separate without replaying
+completed effects.
+
 The scheduler owns when to call. nohmi owns what the intent means, the knowledge and evidence it
 requires, durable execution, policy, idempotency, questions, review, recovery, and the verified
 terminal result. nohmi may show a declared expected cadence, last observed invocation, and overdue

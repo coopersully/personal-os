@@ -79,6 +79,12 @@ model.
 The API owns context assembly. Web and MCP clients declare purpose and target but cannot bypass
 authorization, sensitivity, or workspace policy by issuing a semantically broad query.
 
+Ownership and authorization filters run before structured, full-text, or vector candidate
+selection. Every source row and derived index entry carries the authenticated owner's tenant key;
+shared names, source identifiers, relationships, or semantic similarity cannot bridge users.
+Household or delegated context requires an explicit future sharing grant with purpose, scope,
+consent, audit, expiry, and revocation rather than an exception to tenant isolation.
+
 Context selection applies access controls before similarity search, ranks candidates using status,
 freshness, confidence, provenance, and contradiction, and returns bounded sections for facts,
 preferences, inferences, policies, evidence, and missing requirements. High-level workspace

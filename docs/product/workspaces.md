@@ -90,8 +90,11 @@ inbox while always preserving account identity, provider capabilities, and sourc
 Tasks is the person's authoritative commitment workspace: a complete task manager with the clarity
 of Things or Todoist, planning awareness associated with Sunsama or Akiflow, and fast interaction
 patterns associated with Linear. It imports tasks from external providers and becomes the unified
-workspace used from then on; bidirectional multi-provider synchronization remains a possible future
-capability, not a current product commitment.
+workspace used from then on. Import is a one-time migration that the person may explicitly
+re-trigger under a heavy rate limit; repeated imports add genuinely new source commitments,
+deduplicate prior material, and do not silently replace nohmi-owned edits. Continuous inbound and
+bidirectional multi-provider synchronization remain possible future capabilities, not current
+product commitments.
 
 ### Direct interface
 
@@ -213,12 +216,16 @@ investment analysis, auditing, and coaching without claiming professional creden
 
 nohmi owns durable execution but does not require one scheduler. A person may invoke maintenance
 through ChatGPT or Codex scheduled tasks, Claude recurring tasks or routines, Gemini scheduled
-actions or headless automation, an operating-system scheduler, or another MCP-capable host.
+actions or headless automation, an operating-system scheduler, or another MCP-capable host. They may
+configure several hosts or schedules for the same workspace or maintenance intent; nohmi does not
+select a single owner or prevent this power-user workflow.
 
 The external platform owns cadence and invocation. nohmi owns the meaning of maintenance,
 knowledge retrieval, policy checks, durable run state, idempotency, questions, reviews, recovery,
 and the verified terminal result; a client should be able to invoke one maintenance intent rather
-than reconstruct the workflow.
+than reconstruct the workflow. Each invocation retains its host, credential, trigger, and
+idempotency identity. Compatible concurrent calls coalesce or resume durable work, while conflicting
+scopes remain separate and report their own honest result.
 
 ## Target versus current implementation
 

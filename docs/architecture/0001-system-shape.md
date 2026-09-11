@@ -28,6 +28,14 @@ Use a TypeScript monorepo with the following boundaries:
 The API is the product boundary. MCP contains no business rules. Interactive
 clients never call provider APIs directly.
 
+The system is multi-user even when an early environment contains only one account. Every API
+operation, provider projection, domain record, background claim, cache key, embedding, search
+result, notification, review, audit event, and deep link is bound to the authenticated owner through
+a structural tenant key and ownership checks. A phone number, provider identifier, display name,
+semantic match, or agent inference is never accepted as a tenant boundary. Shared or delegated
+access requires a future explicit relationship, consent, and authorization model rather than an
+exception to isolation.
+
 Mail, Tasks, Calendar, and Finances own their native ledgers and maintenance semantics. The shared
 User Knowledge domain owns the typed personal-context and context-assembly contract; `apps/api`
 performs authorized, purpose-bound assembly. User Knowledge does not own workspace records or grant

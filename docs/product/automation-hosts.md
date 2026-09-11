@@ -1,7 +1,7 @@
 # External automation hosts
 
 - Status: Target interoperability contract
-- Last verified against official platform documentation: 2026-09-10
+- Last verified against official platform documentation: 2026-09-11
 
 ## Product decision
 
@@ -18,11 +18,20 @@ synchronization, policy, durable run state, idempotency, resumability, questions
 recovery, audit, and the verified result. nohmi must not create, edit, activate, or execute a
 recurring maintenance schedule.
 
+“The external host” describes authority for each individual schedule, not an exclusive owner for a
+workspace. The person may configure multiple hosts, multiple schedules on one host, or overlapping
+invocations of the same maintenance intent. nohmi must not reject that topology merely to simplify
+coordination. It records the invoking connection, host-declared automation identity when available,
+credential, trigger, requested scope, and idempotency identity, then coalesces or resumes compatible
+durable work and isolates incompatible scopes without duplicating external effects.
+
 nohmi may store a user- or host-declared expected cadence, the last observed invocation, and an
 expected, overdue, or unknown check-in state so the person can see whether an external automation
 appears healthy. This metadata is observational only: changing it does not update the external
 platform, and reaching an expected time does not enqueue or start maintenance. The UI must direct
 the person to the owning platform or provide setup instructions when a schedule needs to change.
+When several schedules exist, health and repair are shown per declared schedule rather than reduced
+to one workspace-level owner.
 
 ## Supported scheduling patterns
 

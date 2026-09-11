@@ -1,7 +1,7 @@
 # nohmi per-workspace settings
 
-- Status: Living target product contract; decisions are being refined
-- Last reconciled: 2026-09-10
+- Status: Accepted target product contract
+- Last reconciled: 2026-09-11
 
 ## Purpose
 
@@ -42,6 +42,24 @@ the whole system. Global values may show which workspaces inherit or override th
 workspace override still happens in that workspace. Reviews remain centralized because they are a
 cross-workspace action queue, but every review action routes to the owning workspace when domain
 context or configuration is required.
+
+## Agent-managed settings
+
+The target MCP surface should expose every meaningful first-party setting through typed,
+capability-specific tools. An appropriately scoped agent may perform requests such as “turn off
+texting,” “disable email delivery for this notification,” change a workspace's maintenance guidance,
+or update a channel preference without requiring the person to reproduce the change in the app.
+MCP parity means functional coverage, not a generic unrestricted settings document or direct
+database access.
+
+Connected-agent controls live beside global review bypass so the person can understand automation
+authority in one place. Permissions distinguish settings read, global notification/channel changes,
+workspace configuration, rule management, data actions, and higher-impact account or policy
+changes. An agent can use only the permissions granted to its credential, cannot change its own
+credential or scopes, and cannot turn a general settings permission into authority to weaken a
+stronger approval, privacy, security, provider-consent, or account-ownership boundary. Every change
+is revision-guarded, audited, immediately attributable to the agent, and reversible when the setting
+supports restoration.
 
 ## Shared workspace sections
 
@@ -104,6 +122,11 @@ from an invocation nohmi already accepted. They do not constitute schedule owner
 originate a new recurring maintenance turn. To change when maintenance begins, the person must
 change the schedule in its owning external platform.
 
+The person may configure multiple external schedules or hosts for the same workspace and intent.
+Each retains its own declared identity, cadence, check-in health, connection, and revocation state;
+compatible invocations coalesce or resume through the domain's durable-run contract rather than
+being rejected or allowed to duplicate effects.
+
 ## Shared notification policy and channel controls
 
 One notification policy applies across SMS, in-app, push, email, and future channels. It decides
@@ -146,9 +169,11 @@ suppress a reply to a text the person initiated.
 The default content includes the merchant, sender, event, task, or comparable entity name needed to
 understand the action. Dates and times are rendered in the person's current time zone, using
 `today`, `yesterday`, or `tomorrow` when applicable; unnecessary sensitive detail remains omitted.
-Messages remain formal, short, and concise. One item may be asked directly; several items produce a
-single statement that several items need review plus the unified cross-workspace Reviews link,
-rather than a long SMS checklist or separate messages per workspace.
+Messages remain formal, short, and concise. They may include as many directly answerable items as
+reasonably fit, with a hard cap of three. If two or three would make the message difficult to scan,
+Texting includes fewer. Every multi-item message includes the unified cross-workspace Reviews link;
+when more work remains, it adds a short overflow summary rather than sending separate messages per
+item or workspace.
 
 A self-contained single question omits the link unless the person needs more context or the
 necessary content is too long for a reasonable text.
@@ -164,6 +189,7 @@ message described above. An unchanged unresolved item may be mentioned again onl
 configured reminder interval; repeated maintenance runs do not restart or bypass that interval. The
 default is 7 days, and `never` disables repeat notifications without removing the item from Reviews.
 nohmi prefers missing a reminder over becoming repetitive.
+
 Before that interval, the same item is eligible again only when the required action or the
 consequence of acting or not acting materially changes. Wording, supporting evidence, confidence,
 rediscovery, and internal status changes remain suppressed when they do not change either one;

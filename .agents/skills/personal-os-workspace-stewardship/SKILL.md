@@ -55,6 +55,11 @@ check-in health, but those records must never trigger work or modify the externa
 queues, leases, retries, delayed authorized effects, and recovery timers may only continue an
 invocation nohmi already accepted; they cannot originate a new recurring maintenance turn.
 
+Do not impose one exclusive scheduler per workspace or intent. Multiple hosts and overlapping
+schedules are allowed; preserve each call's connection, host-declared automation identity when
+available, scope, and idempotency identity so the API can coalesce compatible durable work and keep
+incompatible scopes separate without replaying effects.
+
 Allow guided setup to propose any number of rules, but keep every rule inactive until a dedicated,
 version-bound preview exposes its condition, scope, sources, representative matches and
 non-matches, action, consequences, conflicts/precedence, required authority, and disable/rollback
@@ -89,10 +94,11 @@ Publish canonical times and typed entity context rather than pre-rendering `toda
 `tomorrow`. Texting owns conversion into the person's current time zone and final relative-date
 language immediately before delivery.
 
-Keep notification summaries formal, short, and concise. Supply one directly answerable item when
-only one is open. For multiple questions or actions, let Texting send one cross-workspace statement
-that several items need review plus the unified Settings-owned Reviews link; do not request one
-message per item or workspace.
+Keep notification summaries formal, short, and concise. Texting may supply as many directly
+answerable questions or actions as reasonably fit, with a hard cap of three and permission to use
+only one or two when clarity requires. Every multi-item message includes the unified Settings-owned
+Reviews link; if additional work remains or needs richer context, add one short overflow summary.
+Do not request one proactive message per item or workspace.
 
 Create or reference a unified Reviews item for every question, approval, connector failure,
 recovery step, or other state that explicitly requires the person. Keep informational and
@@ -100,8 +106,8 @@ automatically recoverable conditions in workspace status and activity instead of
 or notification noise.
 
 Do not add a redundant link to a self-contained single question. Request an exact-item or workspace
-link when that decision needs more context or cannot fit a reasonable SMS; multiple items use the
-unified Settings-owned Reviews link.
+link when that decision needs more context or cannot fit a reasonable SMS; every multi-item message
+uses the unified Settings-owned Reviews link.
 
 Assume proactive maintenance texts defer during the person's global quiet hours unless `any time`
 is explicitly enabled. Texting revalidates deferred items at release; the workspace must keep the

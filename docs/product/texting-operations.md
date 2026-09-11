@@ -1,7 +1,7 @@
 # nohmi texting and SMS
 
 - Status: Living target product contract; transport foundation shipped, general inbox pending
-- Last reconciled: 2026-09-10
+- Last reconciled: 2026-09-11
 
 ## Product role
 
@@ -56,18 +56,20 @@ the person initiates.
 A maintenance message should normally contain:
 
 - one outcome sentence;
-- one currently available question or exact review action when only one needs attention;
-- one brief statement that several items need review plus the unified Reviews link when multiple
-  items need attention;
+- as many currently available questions or exact review actions as remain easy to scan, with a hard
+  cap of three and permission to include only one or two when the items need more context;
+- the unified Reviews link whenever two or more items are included, plus one brief overflow summary
+  when additional items remain or the available items cannot fit cleanly;
 - the useful merchant, sender, event, task, or other entity name needed to understand it;
 - explicit reply choices when the answer vocabulary is bounded; and
 - one short first-party review or recovery link only when additional context is useful, several
   items are involved, or the necessary content is too long for a reasonable text.
 
 Messages are formal, concise, and immediately scannable. They omit greetings, sign-offs,
-conversational filler, repeated status, and the full contents of a multi-item queue. When several
-questions or actions are open, Texting sends one cross-workspace notification rather than one
-message per item or workspace.
+conversational filler, repeated status, and the full contents of a large queue. A multi-item message
+contains no more than three directly answerable items and may contain fewer when clarity requires;
+Texting sends one cross-workspace notification rather than one proactive message per item or
+workspace.
 
 A short, self-contained single question does not include a redundant link. The message stays brief
 and directly answerable by text unless evidence or context is needed to decide safely.
@@ -86,7 +88,14 @@ review destination after sign-in.
 Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
 unsure.”
 
-Multiple-item example: “Several items need review. Review: [link]”
+Provisional two-item example: “Two questions: 1) Archive 18 promotional emails? 2) Move Friday's
+dentist event to 3 PM? Reply `1 yes, 2 no`. Review: [link]”
+
+The numeric labels are short references bound internally to the exact message and proposal
+revisions; they are not durable public IDs. This multi-item reply syntax remains provisional until
+the product decision is approved.
+
+Overflow example: “Several items need review. Review: [link]”
 
 Privacy-safe does not mean context-free. Merchant display names, sender display names, event titles,
 task titles, and comparable identifiers are included when they are needed to understand the action;
@@ -153,6 +162,13 @@ When bypass is off, a verified SMS reply may approve or reject an exact reversib
 outbound review must bind the reply to one unexpired proposal, disclose the action and consequence,
 and accept only its bounded answer vocabulary. A bare “yes” cannot approve an older, superseded,
 ambiguous, recipient-changing, scope-changing, credential, irreversible, or unavailable action.
+
+Texting may route any request represented by an MCP-equivalent capability; SMS is not a smaller
+domain surface. It still uses the same API policy, provider capability, approval requirements, and
+audit contract as app, API, MCP, and scheduled work. Authority remains caller-specific: an inbound
+message uses the verified user's Texting identity and channel policy, while an external model or
+automation uses its connected-agent credential and scopes. Channel access never creates authority
+that the corresponding operation would not have elsewhere.
 
 Review bypass never grants scopes, creates a domain rule, supplies missing facts, or converts model
 confidence into authority. Every direct action and SMS approval retains actor, channel, source,

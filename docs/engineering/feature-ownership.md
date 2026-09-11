@@ -85,10 +85,13 @@ from stable entity ID and revision (`provider: local`, no account), not accepted
 stored as a second provenance record. A future provider-backed container requires a new reviewed
 storage and source contract.
 
-The target Tasks workspace imports external provider commitments and becomes authoritative for
-subsequent work. Bidirectional multi-provider synchronization remains a possible later extension,
-not a current requirement. The durable container above Projects remains a required concept, but its
-user-facing name is unresolved and must not be assumed from the storage type.
+The target Tasks workspace performs a one-time external-provider import and becomes authoritative
+for subsequent work. The person may explicitly re-trigger that heavily rate-limited migration;
+stable source identity and deduplication add new commitments without silently overwriting
+nohmi-owned edits, while conflicts enter review. Continuous inbound and bidirectional multi-provider
+synchronization remain possible later extensions, not current requirements. The durable container
+above Projects remains required; **Lists** is the provisional user-facing label and may change
+without changing the model.
 
 The completed [Tasks workspace charter](../product/tasks-workspace-charter.md) maps this shipped foundation and
 its explicit follow-ups to the workspace-stewardship doctrine. It does not turn the unimplemented

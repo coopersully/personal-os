@@ -26,6 +26,13 @@ For the general SMS inbox, workspace notification intents, or Texting maintenanc
 
 ## Expose workspace intent without moving intelligence
 
+- Target functional parity with the first-party app through typed, capability-specific tools. An
+  appropriately scoped agent should be able to inspect and change workspace settings, notification
+  channels, Texting enablement, maintenance guidance, rules, and ordinary domain material without
+  screen scraping or a generic unrestricted settings object.
+- Keep permission boundaries explicit. A settings-writing agent cannot change its own credential or
+  scopes, infer permission from tool visibility, or use a broad settings grant to weaken stronger
+  consent, privacy, approval, security, or account-ownership requirements.
 - For a mature workspace, prefer `get_<workspace>_status` and `maintain_<workspace>` as the small
   high-level intent surface, plus `setup_<workspace>` or the shared setup plan when onboarding is
   nontrivial and granular tools for useful surgical operations.

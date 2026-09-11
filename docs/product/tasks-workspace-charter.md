@@ -43,11 +43,15 @@ checks, foreign keys, and separate public contracts make that a transitional sto
 than shared domain ownership. Physical extraction remains an Integration/database migration.
 
 Provider projections, persisted questions, rules, derived workload models, and review artifacts do
-not yet exist for Tasks. The target imports commitments from external task providers and then uses
-nohmi as the authoritative working workspace. Bidirectional synchronization with multiple providers
-remains an intentionally open future option rather than a current goal; any provider source must
-define authority, freshness, reconciliation, degraded state, and source-selection privacy before it
-enters the ledger.
+not yet exist for Tasks. The target performs a one-time import from external task providers and then
+uses nohmi as the authoritative working workspace. The person may explicitly re-trigger an import,
+but it is heavily rate-limited and represented as a bounded, auditable import run. Stable provider
+identities and content fingerprints deduplicate unchanged and cross-import material; new external
+commitments may be added, while matched source changes never silently overwrite nohmi-owned edits
+and conflicts enter review. Continuous inbound ingestion and bidirectional synchronization with
+multiple providers remain intentionally open future options rather than current goals; any provider
+source must define authority, freshness, reconciliation, degraded state, and source-selection
+privacy before it enters the ledger.
 
 The long-lived organizational container above Projects remains required. A Project is a finite
 outcome; the higher container represents a durable responsibility or context and may contain
@@ -120,9 +124,11 @@ or Task. It must establish an evidence cutoff, inspect the ledger, detect invali
 assumptions, retrieve a purpose-bound User Knowledge context pack, apply only approved rules, queue
 genuine questions, recompute workload/advice, publish a review, and verify the resulting state.
 
-Before that loop, guided setup should import supported external commitments, learn how the person
+Before that loop, guided setup should import supported external commitments once, learn how the person
 wants to capture, group, prioritize, schedule, and review work, then propose an initial
-organization and rulebook. nohmi becomes the authoritative working workspace after import;
+organization and rulebook. nohmi becomes the authoritative working workspace after import. A later
+explicit re-import is a rate-limited migration run that adds new material and reconciles duplicates
+without treating the provider as a continuously authoritative source; continuous inbound or
 bidirectional provider synchronization remains a possible future extension rather than a setup
 promise.
 

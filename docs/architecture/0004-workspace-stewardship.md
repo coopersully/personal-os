@@ -107,6 +107,11 @@ that metadata cannot enqueue a run or modify the external schedule. Internal que
 retries, delayed authorized effects, and recovery timers may continue an accepted invocation; they
 must not originate a new recurring maintenance turn.
 
+Scheduling authority is scoped to each schedule rather than one exclusive owner per workspace.
+Multiple hosts and overlapping schedules may invoke the same intent. Their calls retain separate
+connection, host-declared automation, scope, and idempotency identities; compatible runs coalesce or
+resume, and incompatible scopes remain separate without duplicating completed external effects.
+
 Workspace stewards may publish typed notification intents that reference their run, work nodes,
 safe summary, sensitivity, and first-party destination. The shared Texting coordinator owns channel
 policy, rendering, delivery, and reply routing; it cannot own or reinterpret the workspace's

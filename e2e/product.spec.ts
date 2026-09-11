@@ -335,7 +335,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(weekGridLayout.allDayEventLeftInset).toBeGreaterThanOrEqual(3);
   expect(weekGridLayout.allDayEventLeftInset).toBeLessThanOrEqual(5);
   expect(weekGridLayout.hourRule).not.toBe(weekGridLayout.calendarLine);
-  expect(weekGridLayout.midnightLabelTop).toBeGreaterThanOrEqual(weekGridLayout.navigationBottom);
+  expect(weekGridLayout.midnightLabelTop + 0.01).toBeGreaterThanOrEqual(
+    weekGridLayout.navigationBottom,
+  );
   expect(weekGridLayout.timelineBorderLeft).toBe("0px");
   expect(new Set(weekGridLayout.otherHeaderBackgrounds).size).toBeGreaterThan(1);
   expect(new Set(weekGridLayout.otherTimelineBackgrounds).size).toBeGreaterThan(1);

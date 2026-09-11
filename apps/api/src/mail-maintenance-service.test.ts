@@ -130,6 +130,54 @@ function harness(
 }
 
 describe("Mail maintenance orchestration edges", () => {
+  it.each([
+    [
+      snapshot({
+        threads: [
+          {
+            accountId: "10000000-0000-4000-8000-000000000002",
+            approvedRuleMatched: false,
+            attentionLinked: false,
+            currentDisposition: null,
+            goalLinked: false,
+            id: "20000000-0000-4000-8000-000000000002",
+            messages: [],
+            obligations: [],
+            openQuestions: [{ fingerprint: "question-1", id: "question-1", version: 1 }],
+            snoozedUntil: null,
+            source: {
+              accountId: "10000000-0000-4000-8000-000000000002",
+              provider: "google" as const,
+              remoteId: "remote-thread-2",
+              revision: "thread-v1",
+              sourceType: "mail_thread" as const,
+            },
+            starred: false,
+            updatedAt: now.toISOString(),
+          },
+        ],
+      }),
+      "completed_with_questions",
+      "Mail maintenance completed with 1 question for the user.",
+      "questions",
+    ],
+    [
+      snapshot({ sourceFreshness: "stale" }),
+      "blocked",
+      "Mail maintenance is blocked by source or provider-effect evidence.",
+      "blocked",
+    ],
+  ] as const)("settles evidence as %s", async (source, expectedStatus, expectedSummary, verificationStatus) => {
+    const { service } = harness([source]);
+    await expect(
+      service.maintain(userId, { scope: { type: "all_outstanding" } }),
+    ).resolves.toMatchObject({
+      run: { status: expectedStatus },
+      summary: expectedSummary,
+      verification: { status: verificationStatus },
+    });
+  });
+
   it("restarts a blocked run before collecting fresh evidence", async () => {
     const { activeRun, service, workspace } = harness([snapshot()]);
     activeRun.status = "blocked";
@@ -345,6 +393,12 @@ describe("Mail maintenance orchestration edges", () => {
       "mail_maintenance_temporary_failure",
       true,
       "Mail maintenance encountered a temporary internal failure.",
+    ],
+    [
+      new AppError("internal_error", "Safe internal failure."),
+      "internal_error",
+      false,
+      "Safe internal failure.",
     ],
   ])("classifies maintenance failures without leaking internals", async (error, code, recoverable, summary) => {
     const { service, workspace } = harness([snapshot()], { refreshError: error });

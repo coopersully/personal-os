@@ -146,6 +146,9 @@ explicit registration seams.
   workflow.
 - User answers and approved rules persist independently of a conversation or model vendor.
 - Reviews explain partial completion and advice instead of reducing a run to success/failure.
+- Cross-workspace coordination preserves verified child successes and reports sibling failures,
+  blocks, and uncertainty truthfully instead of hiding partial completion or manufacturing
+  all-or-nothing behavior through compensating mutations.
 - Shared infrastructure can improve reliability without flattening domain expertise into a generic
   workflow engine.
 - Each workspace can be developed in parallel against an explicit charter and stable integration

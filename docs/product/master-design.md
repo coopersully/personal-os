@@ -91,6 +91,9 @@ an explicit future sharing and consent model; it must never arise from weak tena
     search result, deep link, notification, and audit lookup is bound to the authenticated owner.
     Names, phone numbers, provider IDs, semantic similarity, and model inference are never tenant
     boundaries.
+21. **Verified success remains true.** A cross-workspace request preserves each verified successful
+    child operation and reports failed, blocked, or uncertain siblings exactly. nohmi does not call
+    partial completion a success or automatically undo useful work merely to manufacture atomicity.
 
 ## 4. Information architecture
 
@@ -361,6 +364,11 @@ edited only inside Mail, Tasks, Calendar, or Finances. The centralized cross-wor
 show their effective state, health, override badges, and review counts, but only links to the owning
 workspace for changes.
 
+Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
+an external model host's context are planned but deferred. Credential scopes, purpose-limited API
+results, and existing privacy boundaries govern the initial target; this later control layer must
+not block first-party API/MCP capability parity.
+
 nohmi does not own maintenance schedules. External automation platforms are the sole authority for
 creating, editing, activating, pausing, and invoking recurring maintenance. nohmi may display a
 declared expected cadence, last observed invocation, and overdue or unknown check-in health, but
@@ -384,6 +392,9 @@ coherent response without reproducing domain expertise.
   decides eligibility once across channels; Texting applies SMS delivery controls and sends one
   outcome sentence, up to three directly answerable questions or exact reviews that reasonably fit,
   and a useful first-party link when additional context or outstanding work requires it.
+- Multi-item texts number each question or review and bind those short references to the exact
+  message and proposal revisions. Replies identify every answered number; a bare bounded answer is
+  accepted only for one unambiguous active item.
 - Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
   quiet, while a message initiated by the person still receives a response.
 - Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting

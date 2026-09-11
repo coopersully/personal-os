@@ -61,6 +61,13 @@ stronger approval, privacy, security, provider-consent, or account-ownership bou
 is revision-guarded, audited, immediately attributable to the agent, and reversible when the setting
 supports restoration.
 
+Fine-grained controls over which workspace records or User Knowledge categories may be disclosed to
+each external model host's context are planned but explicitly deferred. They should eventually make
+model-context disclosure visible and configurable per connected agent without interrupting every
+tool call, but the first agent-settings target relies on credential scopes, purpose-limited API
+results, and existing privacy boundaries. Do not block useful app/API/MCP settings parity on this
+later control layer or describe it as shipped.
+
 ## Shared workspace sections
 
 Every Mail, Tasks, Calendar, and Finances settings surface should use the same conceptual sections
@@ -173,7 +180,8 @@ Messages remain formal, short, and concise. They may include as many directly an
 reasonably fit, with a hard cap of three. If two or three would make the message difficult to scan,
 Texting includes fewer. Every multi-item message includes the unified cross-workspace Reviews link;
 when more work remains, it adds a short overflow summary rather than sending separate messages per
-item or workspace.
+item or workspace. Multi-item messages number each item and bind those references to the exact
+message and proposal revisions; replies identify every answered number.
 
 A self-contained single question omits the link unless the person needs more context or the
 necessary content is too long for a reasonable text.

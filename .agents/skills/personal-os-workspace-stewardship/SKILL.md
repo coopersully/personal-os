@@ -100,10 +100,18 @@ only one or two when clarity requires. Every multi-item message includes the uni
 Reviews link; if additional work remains or needs richer context, add one short overflow summary.
 Do not request one proactive message per item or workspace.
 
+Number each item in a multi-item text and bind that short reference to the exact message and
+proposal revision. Require the reply to identify every answered number; accept a direct bounded
+answer without a reference only when one unambiguous active item exists.
+
 Create or reference a unified Reviews item for every question, approval, connector failure,
 recovery step, or other state that explicitly requires the person. Keep informational and
 automatically recoverable conditions in workspace status and activity instead of generating review
 or notification noise.
+
+When one request spans workspaces, preserve every verified successful child operation and report
+failed, blocked, and uncertain siblings exactly. Never describe partial completion as complete or
+automatically reverse useful verified work merely to simulate an atomic cross-provider result.
 
 Do not add a redundant link to a self-contained single question. Request an exact-item or workspace
 link when that decision needs more context or cannot fit a reasonable SMS; every multi-item message

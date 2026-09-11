@@ -99,7 +99,9 @@ external effects.
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
 result distinguishes maintained, maintained-with-questions, blocked, and failed outcomes and links
-to the workspace's review and recovery surfaces. See
+to the workspace's review and recovery surfaces. For a multi-workspace request, verified child
+successes remain committed while failed, blocked, or uncertain siblings are reported exactly and
+resume only through their own safe retry contracts; MCP does not invent atomic rollback. See
 [`ADR 0004`](architecture/0004-workspace-stewardship.md).
 
 ### Target Texting intent surface
@@ -145,6 +147,11 @@ Semantic retrieval never bypasses scope, purpose, sensitivity, or workspace poli
 knowledge may become active immediately; agent inferences begin as proposals and may become active
 through manual promotion or domain-defined safe promotion after independent reinforcement or
 successful reuse. Knowledge never grants or expands action authority.
+
+Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
+an external model host's context are planned but deferred. The initial target continues to use
+credential scopes, purpose-bounded API results, and existing privacy policy; do not delay typed MCP
+parity on this later disclosure-control layer or advertise it as shipped.
 
 This surface is a target contract, not a claim about current tool discovery. See
 [`User Knowledge`](product/user-knowledge.md) and

@@ -189,6 +189,9 @@ flowchart TD
   separately understandable agent permissions for settings read, notification/channel changes,
   workspace configuration, rule management, and higher-impact account or policy changes; never let
   an agent edit its own credential or scopes.
+- Defer fine-grained per-agent controls over which workspace records or User Knowledge categories
+  may enter each external model host's context. Plan that later disclosure-control layer without
+  blocking initial capability parity, credential scopes, or purpose-bounded API results.
 - Retain the existing Settings-owned Reviews destination that composes Review and Attention work,
   and expand it to every question, approval, connector failure, recovery step, or other item that
   explicitly requires the person. Preserve workspace/type filters, honest partial availability,
@@ -300,6 +303,9 @@ flowchart TD
   requires. Include the existing Settings-owned unified Reviews link in every multi-item message;
   when additional work remains or context is too large, summarize the overflow. Send one
   cross-workspace notification, not separate proactive messages per item or workspace.
+- Number every item in a multi-item SMS and bind the short reference to the exact outbound message
+  and proposal revision. Require replies to identify each answered number; accept a direct bounded
+  answer without a reference only for one unambiguous active item.
 - Omit links from self-contained single questions. Add an exact-item or workspace link when one
   decision needs more context or would make the SMS unreasonably long; use the unified Reviews link
   for multiple items.
@@ -352,6 +358,11 @@ review cadence, notifications, and rules, and keeps consequential approvals huma
 maintenance create durable typed questions, approvals, reviews, recovery steps, follow-ups, and
 completed-work summaries; later runs reuse their resolutions and reinforced knowledge to reduce
 unnecessary questions.
+
+Cross-workspace coordination preserves every verified successful child operation. Failed, blocked,
+and uncertain siblings remain visible and resumable under their own safe retry contracts; the
+combined result never reports partial work as complete or automatically compensates successful
+work merely to appear atomic.
 
 Guided setup may propose a complete rule set in one batch, but every rule remains inactive pending
 a dedicated, version-bound preview of its condition, scope, sources, representative matches and

@@ -84,6 +84,11 @@ claim completion merely because a process ran. Work that outlives a request uses
 state, leases, idempotency, and recovery. Repeating the same intent must resume or verify prior work
 rather than duplicate it.
 
+For a request spanning workspaces, each child operation settles under its owning domain. The
+coordinator preserves verified successes, keeps failed, blocked, and uncertain siblings explicit,
+and reports the combined truth without claiming atomic completion or automatically undoing useful
+work solely because another child failed.
+
 ## Durable work nodes
 
 “Node” is the conceptual name for an evidence-linked unit that setup or maintenance leaves for the

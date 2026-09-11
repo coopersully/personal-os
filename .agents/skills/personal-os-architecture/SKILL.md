@@ -46,6 +46,9 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
 - Keep Texting a shared channel and coordinator rather than a fifth workspace. Texting owns
   conversation, delivery, routing, and response composition; routed work retains workspace-owned
   expertise, policy, work nodes, and terminal truth.
+- Preserve verified child successes across multi-workspace requests. Keep failed, blocked, and
+  uncertain siblings explicit; never hide partial completion or add compensating provider effects
+  merely to simulate atomicity.
 - Treat SMS links as ordinary authenticated nohmi destinations, never bearer or approval links.
   Preserve the requested review destination across normal sign-in without putting sensitive item data
   in the URL.
@@ -59,6 +62,9 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
   remain authoritative.
 - Let reinforced low-risk knowledge activate only through its documented promotion lifecycle. Never
   convert confidence, an inference, or external content into scopes or mutation authority.
+- Treat fine-grained per-agent external-model context controls as planned but deferred. Current
+  architecture uses credential scopes and purpose-bounded API results; do not claim the later
+  disclosure-control layer is shipped.
 
 ## Deliver a vertical feature
 

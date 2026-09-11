@@ -209,6 +209,9 @@ investment analysis, auditing, and coaching without claiming professional creden
   charge to a receipt in Mail, without receiving unrelated private content.
 - Cross-workspace actions preserve the initiating purpose, source references, permissions, and an
   auditable explanation of what was disclosed and why.
+- Cross-workspace operations preserve every verified success and report completed, failed, blocked,
+  and uncertain child results exactly. A sibling failure never turns partial completion into a
+  success claim or triggers compensating rollback solely to create an all-or-nothing appearance.
 - Today composes outcomes and decisions from the workspaces; it does not own their records or expert
   logic.
 

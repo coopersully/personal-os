@@ -47,6 +47,10 @@ or the items need richer context, it renders a brief formal summary. Every multi
 includes the unified Reviews link. Texting sends one notification across workspaces rather than
 serializing the whole queue into SMS or sending one proactive message per item or domain.
 
+Each item in a multi-item message receives a short numeric reference bound to that exact outbound
+message and proposal revision. Replies must identify the number for every answered item; a direct
+bounded answer without a reference is accepted only when one unambiguous active item exists.
+
 Unified Reviews includes questions, approvals, connector failures, recovery steps, and other work
 that requires the person. Informational and automatically recoverable states remain in their owning
 workspace status and activity history rather than producing a review item or proactive SMS.
@@ -75,7 +79,10 @@ conversation message, child run, source evidence, policy, approval, effect, and 
 
 - Each inbound message has one durable claim and an idempotent routing identity.
 - Child intents have stable identities and can resume without replaying completed effects.
-- A cross-workspace reply waits for honest child states and never reports partial work as complete.
+- A cross-workspace reply waits for honest child states, preserves verified successes, and never
+  reports partial work as complete. A failed, blocked, or uncertain sibling remains explicit and
+  may resume only under its own safe retry contract; Texting does not compensate a verified success
+  merely to simulate an atomic multi-domain operation.
 - Ambiguous routing asks one clarification and leaves unrelated work available.
 - An uncertain outbound provider result reconciles before identical content can be sent again.
 - A queued message that crosses the person's local date boundary is rendered again before provider

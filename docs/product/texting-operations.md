@@ -88,12 +88,13 @@ review destination after sign-in.
 Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
 unsure.”
 
-Provisional two-item example: “Two questions: 1) Archive 18 promotional emails? 2) Move Friday's
+Multi-item example: “Two questions: 1) Archive 18 promotional emails? 2) Move Friday's
 dentist event to 3 PM? Reply `1 yes, 2 no`. Review: [link]”
 
 The numeric labels are short references bound internally to the exact message and proposal
-revisions; they are not durable public IDs. This multi-item reply syntax remains provisional until
-the product decision is approved.
+revisions; they are not durable public IDs. A reply to one unambiguous active item may use its
+bounded answer directly, such as `yes`, `no`, or `unsure`. A message with two or three items requires
+the reply to name each answered number so nohmi never guesses which proposal the person approved.
 
 Overflow example: “Several items need review. Review: [link]”
 
@@ -169,6 +170,12 @@ audit contract as app, API, MCP, and scheduled work. Authority remains caller-sp
 message uses the verified user's Texting identity and channel policy, while an external model or
 automation uses its connected-agent credential and scopes. Channel access never creates authority
 that the corresponding operation would not have elsewhere.
+
+Cross-workspace child operations settle independently. Texting preserves every verified success
+when a sibling operation fails, remains blocked, or becomes uncertain; it retries only safely
+replayable remaining work and reports the exact completed, failed, blocked, and uncertain results.
+It never describes the whole request as successful when only part of it completed and never rolls
+back a verified success merely to make the combined response look atomic.
 
 Review bypass never grants scopes, creates a domain rule, supplies missing facts, or converts model
 confidence into authority. Every direct action and SMS approval retains actor, channel, source,

@@ -85,6 +85,9 @@ together.
 High-level workspace tools retrieve purpose-bound User Knowledge through the API. Surgical
 knowledge search applies scope, purpose, sensitivity, time, and status filters before semantic
 similarity; MCP never assembles a hidden global memory dump or turns confidence into authority.
+Fine-grained per-agent controls over what enters each external model host's context are a deferred
+future capability; use current credential scopes and purpose-bounded API results without claiming
+that later control surface exists.
 
 ## Keep one result and annotation contract
 
@@ -106,3 +109,7 @@ Every mutation is `read_only`, `preview`, `approve_each`, or `approved_rule`.
 Use the API's policy decision and audit behavior; never infer an approval,
 permanent financial categorization rule, or provider capability locally. Keep
 source references and actor/policy audit data intact.
+
+For multi-workspace requests, preserve verified child successes and return failed, blocked, or
+uncertain siblings exactly. Do not invent cross-provider atomic rollback or collapse partial
+completion into a success result.

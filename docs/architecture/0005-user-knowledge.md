@@ -110,5 +110,7 @@ workflows declare knowledge contracts and consume context packs internally.
 - The system can learn progressively while preserving provenance and explicit authority.
 - Context assembly, promotion thresholds, sensitivity policy, migration, embedding lifecycle, and
   deletion require dedicated implementation and adversarial testing before the target can ship.
+- Fine-grained per-agent control over external-model context disclosure remains a deferred future
+  layer; credential scopes and purpose-bounded context packs govern the initial target.
 - Current document-style profiles remain transitional and must not be described as complete
   persistent memory.

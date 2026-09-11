@@ -218,6 +218,11 @@ the item they are reviewing.
 - The person can disable learning, automatic promotion, or cross-workspace use by category and can
   inspect the practical consequence before saving the change.
 
+Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
+an external model host's context are planned but deferred. Until that later layer is designed and
+implemented, the target relies on credential scopes, purpose-limited context assembly, and the
+privacy rules above; the deferred control must not be described as available.
+
 ## Relationship to current implementation
 
 | Current record | What it provides | Why it is not complete User Knowledge |

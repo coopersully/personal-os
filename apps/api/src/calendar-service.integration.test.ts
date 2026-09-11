@@ -687,6 +687,20 @@ describe.sequential("Calendar commitment proposals", () => {
       })
       .returning();
     if (!concurrentDestination) throw new Error("Concurrent destination fixture was not created.");
+    const [lateMirrorCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: bridgeAccount.id,
+        isSelected: false,
+        isWritable: true,
+        name: "Late mirror calendar",
+        provider: "google",
+        remoteCalendarId: "late-mirror-calendar",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!lateMirrorCalendar) throw new Error("Late mirror calendar fixture was not created.");
     let releaseProvider: (() => void) | undefined;
     const providerStarted = new Promise<void>((resolveStarted) => {
       gateway.create.mockImplementationOnce(async (...args) => {
@@ -717,8 +731,23 @@ describe.sequential("Calendar commitment proposals", () => {
       context(),
     );
     await providerStarted;
+    const [lateMirrorEvent] = await database.db
+      .insert(calendarEvents)
+      .values({
+        calendarId: lateMirrorCalendar.id,
+        endsAt: sourceEvent.endsAt,
+        provider: "google",
+        raw: { iCalUID: "transitive-bridge" },
+        remoteEventId: "late-mirror-source",
+        startsAt: sourceEvent.startsAt,
+        timezone: "UTC",
+        title: "Late provider title",
+        userId,
+      })
+      .returning();
+    if (!lateMirrorEvent) throw new Error("Late mirror event fixture was not created.");
     const secondCreate = service.createEventBlock(
-      mirrorEvent.id,
+      lateMirrorEvent.id,
       { calendarId: concurrentDestination.id, mode: "busy" },
       context(),
     );

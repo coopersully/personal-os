@@ -595,15 +595,25 @@ export function createCalendarService({
     const accountIdByCalendarId = new Map(
       candidateCalendars.map((calendar) => [calendar.id, calendar.accountId]),
     );
-    const ordered = [
-      source,
-      ...candidates
-        .filter((candidate) => candidate.id !== source.id)
+    const selectedCalendarPriority = new Map(
+      candidateCalendars
+        .filter((calendar) => calendar.isSelected)
         .sort(
           (left, right) =>
-            left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id),
-        ),
-    ];
+            Number(right.isPrimary) - Number(left.isPrimary) ||
+            Number(right.isWritable) - Number(left.isWritable) ||
+            left.name.localeCompare(right.name) ||
+            left.id.localeCompare(right.id),
+        )
+        .map((calendar, index) => [calendar.id, index]),
+    );
+    const ordered = candidates.sort(
+      (left, right) =>
+        (selectedCalendarPriority.get(left.calendarId) ?? Number.MAX_SAFE_INTEGER) -
+          (selectedCalendarPriority.get(right.calendarId) ?? Number.MAX_SAFE_INTEGER) ||
+        left.createdAt.getTime() - right.createdAt.getTime() ||
+        left.id.localeCompare(right.id),
+    );
     const identity = deduplicateEvents(ordered, accountIdByCalendarId);
     const canonicalId = identity.canonicalIdBySourceId.get(source.id) ?? source.id;
     return ordered.filter(
@@ -991,21 +1001,23 @@ export function createCalendarService({
       assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
       const destination = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(destination);
-      const mirrorEvents = await findMirrorEvents(source);
-      const mirrorCalendarIds = new Set(mirrorEvents.map((event) => event.calendarId));
-      if (mirrorCalendarIds.has(destination.id)) {
-        throw new AppError(
-          "invalid_request",
-          "An event cannot block a calendar that already contains this occurrence.",
-        );
-      }
       const mirrored = blockInput(source, destination.id, input.mode);
-      const mirrorSourceIds = mirrorEvents.map((event) => event.id).sort();
-      const lockKey = `calendar-event-block:${context.principal.userId}:${mirrorSourceIds.join(",")}:${destination.id}`;
+      const lockKey = `calendar-event-block:${context.principal.userId}:${source.startsAt.toISOString()}:${source.endsAt.toISOString()}:${source.allDay}:${destination.id}`;
+      let mirrorCalendarIds = new Set<string>();
+      let mirrorSourceIds: string[] = [];
       await db.transaction(async (transaction) => {
         await transaction.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
         );
+        const mirrorEvents = await findMirrorEvents(source);
+        mirrorCalendarIds = new Set(mirrorEvents.map((event) => event.calendarId));
+        if (mirrorCalendarIds.has(destination.id)) {
+          throw new AppError(
+            "invalid_request",
+            "An event cannot block a calendar that already contains this occurrence.",
+          );
+        }
+        mirrorSourceIds = mirrorEvents.map((event) => event.id).sort();
         const existingBlocks = await transaction
           .select()
           .from(calendarEvents)

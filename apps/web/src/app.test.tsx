@@ -6680,6 +6680,12 @@ describe("ilo web app", () => {
       eventEndMinute: 24 * 60,
       eventStartMinute: 24 * 60 - 30,
     });
+    const midnightPairPoint = overlapOrbitPoint(0, 2, false, {
+      clusterEndMinute: 30,
+      clusterStartMinute: 0,
+      eventEndMinute: 30,
+      eventStartMinute: 0,
+    });
     const leadingEdgePoint = overlapOrbitPoint(0, 2, true, {
       clusterEndMinute: 90,
       clusterStartMinute: 60,
@@ -6698,6 +6704,7 @@ describe("ilo web app", () => {
 
     expect(midnightPoint).toMatchObject({ rotation: 0, y: -12 });
     expect(endOfDayPoint).toMatchObject({ rotation: 0, y: -12 });
+    expect(midnightPairPoint.rotation).toBe(0);
     expect(leadingEdgePoint.x).toBe(0);
     expect(leadingEdgeCompanion.x).toBe(104);
     expect(overlapPinOffset(0, 30)).toBe(0);

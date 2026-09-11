@@ -3847,7 +3847,13 @@ export function overlapOrbitPoint(
   const minimumY = eventHeight / 2 - center;
   const maximumY = calendarTimelineHeight - eventHeight / 2 - center;
   const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
-  return { ...point, rotation: clampedY === point.y ? point.rotation : 0, y: clampedY || 0 };
+  const rotationMayCrossDayEdge =
+    bounds.eventStartMinute < 60 || bounds.eventEndMinute > calendarMinutesPerDay - 60;
+  return {
+    ...point,
+    rotation: clampedY === point.y && !rotationMayCrossDayEdge ? point.rotation : 0,
+    y: clampedY || 0,
+  };
 }
 
 export function overlapPinOffset(clusterStartMinute: number, clusterEndMinute: number) {

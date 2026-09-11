@@ -1077,6 +1077,31 @@ describe.sequential("Mail stewardship service", () => {
     });
   });
 
+  it("keeps scoped review provenance distinct from the global workspace review", async () => {
+    const sourceSnapshot = await service.snapshot(principal.userId, { type: "all_outstanding" });
+    const assessment = assessMail(sourceSnapshot, MAIL_PLAYBOOK);
+    const globalReview = await service.createReview(principal.userId, sourceSnapshot, assessment);
+    const scopedReview = await service.createReview(principal.userId, sourceSnapshot, assessment, {
+      runId: null,
+      scope: { entityType: "mail_thread", id: threadId, type: "target" },
+    });
+
+    expect(scopedReview.id).not.toBe(globalReview.id);
+    expect(scopedReview).toMatchObject({
+      runId: null,
+      scope: { entityType: "mail_thread", id: threadId, type: "target" },
+    });
+    await expect(service.getStatus(principal.userId)).resolves.toMatchObject({
+      details: {
+        latestReview: {
+          id: globalReview.id,
+          runId: null,
+          scope: { type: "all_outstanding" },
+        },
+      },
+    });
+  });
+
   it("keeps orphaned provider effects visible and projects open thread attention", async () => {
     await database.db.insert(attentionItems).values({
       domain: "mail",

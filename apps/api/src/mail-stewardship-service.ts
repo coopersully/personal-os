@@ -147,6 +147,8 @@ function serializeReview(row: typeof mailReviews.$inferSelect): MailReview {
     playbookVersion: row.playbookVersion,
     profileVersion: row.profileVersion,
     rulebookVersion: row.rulebookVersion,
+    runId: row.runId,
+    scope: row.scope,
     sourceFreshness: row.sourceFreshness,
     state: row.state,
   };
@@ -1218,6 +1220,10 @@ export function createMailStewardshipService({ db, now }: Options) {
       userId: string,
       snapshot: MailAssessmentSnapshot,
       assessment: MailAssessment,
+      provenance: { runId: string | null; scope: MaintenanceScope } = {
+        runId: null,
+        scope: { type: "all_outstanding" },
+      },
     ): Promise<MailReview> {
       const recalculated = assessMail(snapshot, MAIL_PLAYBOOK);
       if (recalculated.ledgerFingerprint !== assessment.ledgerFingerprint) {
@@ -1231,6 +1237,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             and(
               eq(mailReviews.userId, userId),
               eq(mailReviews.ledgerFingerprint, assessment.ledgerFingerprint),
+              eq(mailReviews.scope, provenance.scope),
             ),
           )
           .orderBy(desc(mailReviews.createdAt))
@@ -1253,6 +1260,8 @@ export function createMailStewardshipService({ db, now }: Options) {
             playbookVersion: MAIL_PLAYBOOK.version,
             profileVersion: snapshot.profileVersion,
             rulebookVersion: snapshot.rulebookVersion,
+            runId: provenance.runId,
+            scope: provenance.scope,
             sourceFreshness: snapshot.sourceFreshness,
             state: assessment.proposedSettlement,
             userId,
@@ -1267,6 +1276,7 @@ export function createMailStewardshipService({ db, now }: Options) {
               and(
                 eq(mailReviews.userId, userId),
                 eq(mailReviews.ledgerFingerprint, assessment.ledgerFingerprint),
+                eq(mailReviews.scope, provenance.scope),
               ),
             )
             .limit(1);
@@ -1310,7 +1320,9 @@ export function createMailStewardshipService({ db, now }: Options) {
       const [latestReview] = await db
         .select()
         .from(mailReviews)
-        .where(eq(mailReviews.userId, userId))
+        .where(
+          and(eq(mailReviews.userId, userId), eq(mailReviews.scope, { type: "all_outstanding" })),
+        )
         .orderBy(desc(mailReviews.createdAt))
         .limit(1);
       const [activeRun] = await db
@@ -1386,6 +1398,8 @@ export function createMailStewardshipService({ db, now }: Options) {
                 evidenceCutoff: latestReview.evidenceCutoff.toISOString(),
                 id: latestReview.id,
                 ledgerFingerprint: latestReview.ledgerFingerprint,
+                runId: latestReview.runId,
+                scope: latestReview.scope,
                 state: latestReview.state,
               }
             : null,

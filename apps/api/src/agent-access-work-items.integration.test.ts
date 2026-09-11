@@ -584,5 +584,41 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(blockedPage.items.some((item) => item.id === `mail-question:${question.id}`)).toBe(
       false,
     );
+
+    await database.db
+      .update(mailStewardshipQuestions)
+      .set({ updatedAt: new Date("2026-08-11T14:15:00.000Z") })
+      .where(eq(mailStewardshipQuestions.id, question.id));
+    const newerQuestionPage = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(newerQuestionPage.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: `mail-run:${run.id}` }),
+        expect.objectContaining({ id: `mail-question:${question.id}` }),
+      ]),
+    );
+
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        status: "completed_with_questions",
+        updatedAt: new Date("2026-08-11T14:20:00.000Z"),
+      })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const settledQuestionPage = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(settledQuestionPage.items).toContainEqual(
+      expect.objectContaining({
+        id: `mail-run:${run.id}`,
+        priority: "person_review",
+        title: "Mail needs your input",
+      }),
+    );
   });
 });

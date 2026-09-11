@@ -413,6 +413,7 @@ describe.sequential("finance service", () => {
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
+      "0079_mail_stewardship_integrity",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

@@ -1507,9 +1507,9 @@ describe("ilo MCP server", () => {
         readOnlyHint: expect.any(Boolean),
       });
     }
-    expect(tools.tools.map((tool) => tool.name)).not.toEqual(
-      expect.arrayContaining(["create_mail_draft", "send_mail"]),
-    );
+    const toolNames = tools.tools.map((tool) => tool.name);
+    expect(toolNames).not.toContain("create_mail_draft");
+    expect(toolNames).not.toContain("send_mail");
     const updateMailInput = tools.tools.find((tool) => tool.name === "update_mail")
       ?.inputSchema as { required?: string[] };
     expect(updateMailInput.required).toContain("expectedUpdatedAt");

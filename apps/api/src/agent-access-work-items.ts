@@ -404,8 +404,9 @@ function projectItems({
         title: blocked ? "Mail maintenance is blocked" : "Mail needs your input",
         updatedAt: representedRun.updatedAt.toISOString(),
       });
-    } else {
-      for (const question of results.mailQuestions ?? []) {
+    }
+    for (const question of results.mailQuestions ?? []) {
+      if (!representedRun || question.updatedAt.getTime() > representedRun.updatedAt.getTime()) {
         items.push({
           action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
           actionAt: null,

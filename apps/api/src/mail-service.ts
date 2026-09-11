@@ -1162,10 +1162,15 @@ export function createMailService({
         await Promise.all(
           accounts.map(async (account) => {
             const health = connectionHealthForAccount(account);
-            const capability =
-              health.state === "reconnect"
-                ? "reconnect"
-                : ((await gateway.sendCapability?.(userId, account.id)) ?? "unavailable");
+            let capability: "available" | "reconnect" | "unavailable";
+            if (health.state === "reconnect") capability = "reconnect";
+            else {
+              try {
+                capability = (await gateway.sendCapability?.(userId, account.id)) ?? "unavailable";
+              } catch {
+                capability = "unavailable";
+              }
+            }
             return [account.id, capability] as const;
           }),
         ),

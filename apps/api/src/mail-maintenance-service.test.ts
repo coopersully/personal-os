@@ -7,6 +7,7 @@ import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 const now = new Date("2026-08-25T16:00:00.000Z");
 const userId = "10000000-0000-4000-8000-000000000001";
 const runId = "20000000-0000-4000-8000-000000000001";
+const successorRunId = "20000000-0000-4000-8000-000000000002";
 
 function snapshot(overrides: Partial<MailAssessmentSnapshot> = {}): MailAssessmentSnapshot {
   return {
@@ -71,10 +72,8 @@ function harness(
     listDueRunIds: vi.fn().mockResolvedValue([runId]),
     listStepRecords: vi.fn().mockResolvedValue(options?.records ?? []),
     renewClaim: vi.fn().mockResolvedValue(activeRun),
-    restartBlocked: vi.fn().mockImplementation(async () => {
-      activeRun.status = "queued";
-      return activeRun;
-    }),
+    reviseCompletedStep: vi.fn().mockResolvedValue(undefined),
+    restartBlocked: vi.fn().mockResolvedValue(run({ id: successorRunId, status: "queued" })),
     settle: vi.fn().mockImplementation(async ({ status }: { status: MaintenanceRun["status"] }) => {
       activeRun.status = status;
       return activeRun;
@@ -97,7 +96,9 @@ function harness(
           openQuestionCount: assessment.openQuestionCount,
           playbookVersion: MAIL_PLAYBOOK.version,
           profileVersion: source.profileVersion,
+          runId,
           rulebookVersion: source.rulebookVersion,
+          scope: { type: "all_outstanding" as const },
           sourceFreshness: source.sourceFreshness,
           state: assessment.proposedSettlement,
         } satisfies MailReview;
@@ -139,7 +140,7 @@ describe("Mail maintenance orchestration edges", () => {
       expectedRulebookVersion: activeRun.rulebookVersion,
       runId,
     });
-    expect(workspace.claim).toHaveBeenCalledWith(runId);
+    expect(workspace.claim).toHaveBeenCalledWith(successorRunId);
   });
 
   it("returns the settled run when another worker already owns it", async () => {
@@ -223,7 +224,9 @@ describe("Mail maintenance orchestration edges", () => {
       openQuestionCount: originalAssessment.openQuestionCount,
       playbookVersion: MAIL_PLAYBOOK.version,
       profileVersion: original.profileVersion,
+      runId,
       rulebookVersion: original.rulebookVersion,
+      scope: { type: "all_outstanding" as const },
       sourceFreshness: original.sourceFreshness,
       state: originalAssessment.proposedSettlement,
     } satisfies MailReview;
@@ -263,6 +266,18 @@ describe("Mail maintenance orchestration edges", () => {
       expect.objectContaining({ ledgerFingerprint: expect.any(String) }),
     );
     expect(workspace.completeStep).toHaveBeenCalledTimes(1);
+    expect(workspace.reviseCompletedStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "mail:publish-review:v1",
+        result: expect.objectContaining({
+          assessment: expect.objectContaining({
+            ledgerFingerprint: expect.not.stringMatching(originalAssessment.ledgerFingerprint),
+          }),
+          snapshot: changed,
+        }),
+        step: "publish_review",
+      }),
+    );
   });
 
   it("settles a resumed run from its persisted completed verification", async () => {
@@ -280,7 +295,9 @@ describe("Mail maintenance orchestration edges", () => {
       openQuestionCount: assessment.openQuestionCount,
       playbookVersion: MAIL_PLAYBOOK.version,
       profileVersion: source.profileVersion,
+      runId,
       rulebookVersion: source.rulebookVersion,
+      scope: { type: "all_outstanding" as const },
       sourceFreshness: source.sourceFreshness,
       state: assessment.proposedSettlement,
     } satisfies MailReview;

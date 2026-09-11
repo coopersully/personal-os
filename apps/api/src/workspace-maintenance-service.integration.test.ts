@@ -737,4 +737,63 @@ describe.sequential("workspace maintenance service", () => {
     });
     await expect(service.claim(run.id)).resolves.toBeNull();
   });
+
+  it("restarts blocked work as a successor without deleting the prior run evidence", async () => {
+    const service = createWorkspaceMaintenanceService({ db: database.db, now: () => new Date() });
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Blocked restart owner",
+        email: `blocked-restart-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Blocked restart owner was not created.");
+    const original = await service.createOrResume(
+      owner.id,
+      "calendar",
+      { type: "all_outstanding" },
+      "rules:preserve-evidence",
+    );
+    const claim = await service.claim(original.id);
+    if (!claim) throw new Error("Maintenance run was not claimed.");
+    await service.completeStep({
+      claimId: claim.claimId,
+      idempotencyKey: "reviews:snapshot:v1",
+      result: { fingerprint: "evidence-v1" },
+      runId: original.id,
+      step: "snapshot",
+    });
+    await service.settle({
+      claimId: claim.claimId,
+      result: { blocker: "authorization" },
+      runId: original.id,
+      status: "blocked",
+    });
+
+    const successor = await service.restartBlocked({
+      expectedRulebookVersion: original.rulebookVersion,
+      runId: original.id,
+    });
+    expect(successor).toMatchObject({
+      domain: original.domain,
+      rulebookVersion: original.rulebookVersion,
+      scope: original.scope,
+      status: "queued",
+      userId: owner.id,
+    });
+    expect(successor.id).not.toBe(original.id);
+    await expect(service.getOwnedRun(owner.id, original.id)).resolves.toMatchObject({
+      settledResult: expect.objectContaining({ recovery: "superseded_by_manual_retry" }),
+      status: "failed_terminal",
+    });
+    await expect(service.listStepRecords(original.id)).resolves.toEqual([
+      expect.objectContaining({
+        result: { fingerprint: "evidence-v1" },
+        status: "completed",
+        step: "snapshot",
+      }),
+    ]);
+  });
 });

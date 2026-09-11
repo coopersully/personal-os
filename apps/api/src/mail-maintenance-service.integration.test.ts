@@ -172,9 +172,13 @@ describe.sequential("Mail maintenance service", () => {
       .set({ lastSyncedAt: now })
       .where(eq(calendarAccounts.userId, userId));
     const recovered = await service.maintain(userId, { scope: { type: "all_outstanding" } });
-    expect(recovered.run.id).toBe(result.run.id);
+    expect(recovered.run.id).not.toBe(result.run.id);
     expect(recovered.run.status).toBe("completed_with_questions");
     await expect(service.getRun(userId, result.run.id)).resolves.toMatchObject({
+      settledResult: expect.objectContaining({ recovery: "superseded_by_manual_retry" }),
+      status: "failed_terminal",
+    });
+    await expect(service.getRun(userId, recovered.run.id)).resolves.toMatchObject({
       settledResult: expect.objectContaining({
         verification: expect.objectContaining({ status: "questions" }),
       }),

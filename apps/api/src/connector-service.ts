@@ -2008,7 +2008,10 @@ export function createConnectorService({
     shutdown.signal.throwIfAborted();
   }
 
-  async function claimDueMailRuleWork(userId?: string): Promise<{
+  async function claimDueMailRuleWork(
+    userId?: string,
+    threadIds?: string[],
+  ): Promise<{
     claimed: MailRuleWorkRow[];
     maintenanceFailed: number;
     touchedAccountIds: string[];
@@ -2046,6 +2049,7 @@ export function createConnectorService({
             lt(mailRuleWorkItems.claimedAt, staleBefore),
             sql`${mailRuleWorkItems.attemptCount} >= ${MAIL_RULE_WORK_MAX_ATTEMPTS}`,
             userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
+            threadIds ? inArray(mailRuleWorkItems.threadId, threadIds) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2076,6 +2080,7 @@ export function createConnectorService({
             lt(mailRuleWorkItems.claimedAt, staleBefore),
             lt(mailRuleWorkItems.attemptCount, MAIL_RULE_WORK_MAX_ATTEMPTS),
             userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
+            threadIds ? inArray(mailRuleWorkItems.threadId, threadIds) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2097,6 +2102,7 @@ export function createConnectorService({
             inArray(mailRuleWorkItems.status, ["pending", "reconcile"]),
             isNull(mailRuleWorkItems.threadId),
             userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
+            threadIds ? inArray(mailRuleWorkItems.threadId, threadIds) : undefined,
           ),
         )
         .returning({ accountId: mailRuleWorkItems.accountId });
@@ -2113,6 +2119,14 @@ export function createConnectorService({
           FROM mail_rule_work_items work
           WHERE work.thread_id IS NOT NULL
             AND (${userId ?? null}::uuid IS NULL OR work.user_id = ${userId ?? null}::uuid)
+            AND ${
+              threadIds
+                ? sql`work.thread_id IN (${sql.join(
+                    threadIds.map((threadId) => sql`${threadId}::uuid`),
+                    sql`, `,
+                  )})`
+                : sql`TRUE`
+            }
             AND work.status IN ('pending', 'reconcile')
             AND work.due_at <= ${current}
             AND work.next_attempt_at <= ${current}
@@ -2179,55 +2193,59 @@ export function createConnectorService({
       .orderBy(asc(mailRuleWorkItems.accountId), asc(mailRuleWorkItems.remoteThreadId));
     await releaseMailRuleClaimForQuiesce(claimId);
     for (const item of claimed) touchedAccountIds.add(item.accountId);
-    const outstandingAccounts = await db
-      .select({
-        accountId: mailRuleWorkItems.accountId,
-        oldestUpdatedAt: sql<Date>`min(${mailRuleWorkItems.updatedAt})`,
-      })
-      .from(mailRuleWorkItems)
-      .where(
-        and(
-          inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
-          userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
-          notExists(
-            db
-              .select({ id: attentionItems.id })
-              .from(attentionItems)
-              .where(
-                and(
-                  eq(attentionItems.domain, "mail"),
-                  eq(attentionItems.kind, "run_summary"),
-                  eq(attentionItems.status, "open"),
-                  eq(attentionItems.relatedEntityType, "mail_account"),
-                  eq(attentionItems.relatedEntityId, mailRuleWorkItems.accountId),
-                ),
+    const outstandingAccounts = threadIds
+      ? []
+      : await db
+          .select({
+            accountId: mailRuleWorkItems.accountId,
+            oldestUpdatedAt: sql<Date>`min(${mailRuleWorkItems.updatedAt})`,
+          })
+          .from(mailRuleWorkItems)
+          .where(
+            and(
+              inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+              userId ? eq(mailRuleWorkItems.userId, userId) : undefined,
+              notExists(
+                db
+                  .select({ id: attentionItems.id })
+                  .from(attentionItems)
+                  .where(
+                    and(
+                      eq(attentionItems.domain, "mail"),
+                      eq(attentionItems.kind, "run_summary"),
+                      eq(attentionItems.status, "open"),
+                      eq(attentionItems.relatedEntityType, "mail_account"),
+                      eq(attentionItems.relatedEntityId, mailRuleWorkItems.accountId),
+                    ),
+                  ),
               ),
-          ),
-        ),
-      )
-      .groupBy(mailRuleWorkItems.accountId)
-      .orderBy(asc(sql`min(${mailRuleWorkItems.updatedAt})`), asc(mailRuleWorkItems.accountId))
-      .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
+            ),
+          )
+          .groupBy(mailRuleWorkItems.accountId)
+          .orderBy(asc(sql`min(${mailRuleWorkItems.updatedAt})`), asc(mailRuleWorkItems.accountId))
+          .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
     for (const item of outstandingAccounts) touchedAccountIds.add(item.accountId);
-    const openSummaryAccounts = await db
-      .select({
-        accountId: attentionItems.relatedEntityId,
-        oldestUpdatedAt: sql<Date>`min(${attentionItems.updatedAt})`,
-      })
-      .from(attentionItems)
-      .where(
-        and(
-          eq(attentionItems.domain, "mail"),
-          eq(attentionItems.kind, "run_summary"),
-          eq(attentionItems.status, "open"),
-          eq(attentionItems.relatedEntityType, "mail_account"),
-          isNotNull(attentionItems.relatedEntityId),
-          userId ? eq(attentionItems.userId, userId) : undefined,
-        ),
-      )
-      .groupBy(attentionItems.relatedEntityId)
-      .orderBy(asc(sql`min(${attentionItems.updatedAt})`), asc(attentionItems.relatedEntityId))
-      .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
+    const openSummaryAccounts = threadIds
+      ? []
+      : await db
+          .select({
+            accountId: attentionItems.relatedEntityId,
+            oldestUpdatedAt: sql<Date>`min(${attentionItems.updatedAt})`,
+          })
+          .from(attentionItems)
+          .where(
+            and(
+              eq(attentionItems.domain, "mail"),
+              eq(attentionItems.kind, "run_summary"),
+              eq(attentionItems.status, "open"),
+              eq(attentionItems.relatedEntityType, "mail_account"),
+              isNotNull(attentionItems.relatedEntityId),
+              userId ? eq(attentionItems.userId, userId) : undefined,
+            ),
+          )
+          .groupBy(attentionItems.relatedEntityId)
+          .orderBy(asc(sql`min(${attentionItems.updatedAt})`), asc(attentionItems.relatedEntityId))
+          .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
     for (const item of openSummaryAccounts) {
       if (item.accountId) touchedAccountIds.add(item.accountId);
     }
@@ -3085,14 +3103,20 @@ export function createConnectorService({
     if (firstError) throw firstError;
   }
 
-  async function dispatchDueMailRuleWork(userId?: string): Promise<{
+  async function dispatchDueMailRuleWork(
+    userId?: string,
+    threadIds?: string[],
+  ): Promise<{
     claimed: number;
     failed: number;
     pending: number;
     reconciliation: number;
     succeeded: number;
   }> {
-    const claim = await claimDueMailRuleWork(userId);
+    if (threadIds?.length === 0) {
+      return { claimed: 0, failed: 0, pending: 0, reconciliation: 0, succeeded: 0 };
+    }
+    const claim = await claimDueMailRuleWork(userId, threadIds);
     const { claimed } = claim;
     const groups = new Map<string, MailRuleWorkRow[]>();
     for (const work of claimed) {

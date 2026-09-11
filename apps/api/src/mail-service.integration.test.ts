@@ -118,6 +118,7 @@ describe.sequential("mail service", () => {
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
+      "0079_mail_stewardship_integrity",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -188,6 +189,7 @@ describe.sequential("mail service", () => {
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
+      "0079_mail_stewardship_integrity",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -894,6 +896,10 @@ describe.sequential("mail service", () => {
       accounts: [expect.objectContaining({ sendCapability: "available" })],
       automation: { lastCompletedAt: null, oldestDueAt: null },
       commitmentIntake: { previewOnlyCount: 0 },
+    });
+    gateway.sendCapability.mockRejectedValueOnce(new Error("provider capability unavailable"));
+    await expect(service.listSetupContext(userId)).resolves.toMatchObject({
+      accounts: [expect.objectContaining({ sendCapability: "unavailable" })],
     });
     const serviceWithoutCapability = createMailService({
       db: database.db,

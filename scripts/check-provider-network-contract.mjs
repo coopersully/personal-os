@@ -95,8 +95,8 @@ const smtpTransportOptions = icloud.match(
 )?.groups?.options;
 if (
   !smtpTransportOptions ||
-  !/"smtp\.mail\.me\.com"/.test(smtpTransportOptions) ||
-  !/\b587\b/.test(smtpTransportOptions) ||
+  !/\bhost\s*:\s*endpoint\.host\s*\?\?\s*["']smtp\.mail\.me\.com["']/.test(smtpTransportOptions) ||
+  !/\bport\s*:\s*endpoint\.port\s*\?\?\s*587\b/.test(smtpTransportOptions) ||
   !/secure:\s*false/.test(smtpTransportOptions)
 ) {
   throw new Error("iCloud Mail delivery must declare STARTTLS SMTP submission on port 587.");

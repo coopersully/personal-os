@@ -2,6 +2,7 @@ import {
   createMailObligationInputSchema,
   mailResponseBriefSchema,
   mailStatusSchema,
+  mailStewardshipQuestionSchema,
   updateMailObligationInputSchema,
 } from "./mail-stewardship.js";
 
@@ -112,6 +113,67 @@ describe("Mail stewardship domain", () => {
             summary: "Approved Mail objective.",
           },
         },
+      }).success,
+    ).toBe(false);
+    expect(
+      mailStatusSchema.safeParse({
+        ...cleanStatus,
+        details: {
+          ...cleanStatus.details,
+          objective: {
+            mode: "approved_profile",
+            profileId: id,
+            profileVersion: null,
+            summary: "Approved Mail objective.",
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires answer text and timestamp to agree with question status", () => {
+    const question = {
+      accountId: id,
+      answer: null,
+      answeredAt: null,
+      createdAt: now,
+      evidence: [
+        {
+          accountId: id,
+          provider: "google",
+          remoteId: "remote-thread",
+          revision: now,
+          sourceType: "mail_thread",
+        },
+      ],
+      fingerprint: "a".repeat(64),
+      id,
+      kind: "needs_disposition",
+      options: [],
+      reason: "The disposition needs confirmation.",
+      status: "open",
+      threadId: id,
+      updatedAt: now,
+      version: 1,
+    } as const;
+
+    expect(mailStewardshipQuestionSchema.safeParse(question).success).toBe(true);
+    expect(
+      mailStewardshipQuestionSchema.safeParse({ ...question, status: "answered" }).success,
+    ).toBe(false);
+    expect(
+      mailStewardshipQuestionSchema.safeParse({
+        ...question,
+        answer: "reference",
+        answeredAt: now,
+        status: "answered",
+      }).success,
+    ).toBe(true);
+    expect(
+      mailStewardshipQuestionSchema.safeParse({
+        ...question,
+        answer: "reference",
+        answeredAt: now,
       }).success,
     ).toBe(false);
   });

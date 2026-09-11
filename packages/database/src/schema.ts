@@ -1549,7 +1549,11 @@ export const mailStewardshipQuestions = pgTable(
     ),
     check(
       "mail_stewardship_questions_answer_check",
-      sql`(${table.status} = 'answered') = (${table.answer} IS NOT NULL AND ${table.answeredAt} IS NOT NULL)`,
+      sql`(
+        (${table.status} = 'answered' AND ${table.answer} IS NOT NULL AND ${table.answeredAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'answered' AND ${table.answer} IS NULL AND ${table.answeredAt} IS NULL)
+      )`,
     ),
     check("mail_stewardship_questions_version_check", sql`${table.version} > 0`),
   ],
@@ -1622,6 +1626,8 @@ export const mailReviews = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => workspaceMaintenanceRuns.id, { onDelete: "set null" }),
+    scope: jsonb("scope").$type<MaintenanceScope>().notNull().default({ type: "all_outstanding" }),
     state: text("state").$type<"maintained" | "maintained_with_questions" | "blocked">().notNull(),
     evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
     nextMaintenanceAt: timestamp("next_maintenance_at", { withTimezone: true }).notNull(),
@@ -1643,7 +1649,11 @@ export const mailReviews = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("mail_reviews_user_fingerprint_idx").on(table.userId, table.ledgerFingerprint),
+    uniqueIndex("mail_reviews_user_fingerprint_scope_idx").on(
+      table.userId,
+      table.ledgerFingerprint,
+      table.scope,
+    ),
     index("mail_reviews_user_created_idx").on(table.userId, table.createdAt),
     check("mail_reviews_fingerprint_check", sql`${table.ledgerFingerprint} ~ '^[0-9a-f]{64}$'`),
     check(

@@ -101,6 +101,7 @@ export function FloatingMailComposer({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const toRef = useRef<HTMLInputElement>(null);
   const draftRef = useRef<MailDraft | null>(null);
+  const staleDraftIdRef = useRef<string | null>(null);
   const editVersionRef = useRef(0);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveTimeoutRef = useRef<number | null>(null);
@@ -124,6 +125,7 @@ export function FloatingMailComposer({
 
   const reset = useCallback(() => {
     draftRef.current = null;
+    staleDraftIdRef.current = null;
     editVersionRef.current = 0;
     setTo("");
     setCc("");
@@ -208,6 +210,17 @@ export function FloatingMailComposer({
     const payload = snapshot();
     const requestedVersion = editVersionRef.current;
     const run = async () => {
+      if (staleDraftIdRef.current) {
+        const staleDraftId = staleDraftIdRef.current;
+        const refreshed = (await api.listMailDrafts()).find(
+          (candidate) => candidate.id === staleDraftId,
+        );
+        if (!refreshed) {
+          throw new Error("The latest saved draft could not be recovered. Try again.");
+        }
+        draftRef.current = refreshed;
+        staleDraftIdRef.current = null;
+      }
       const existing = draftRef.current;
       const saved = existing
         ? await api.updateMailDraft(existing.id, {
@@ -565,10 +578,18 @@ export function FloatingMailComposer({
                     .catch(async (caught) => {
                       await client.invalidateQueries({ queryKey: ["mail-drafts"] });
                       if (isRetrySafeMailSendFailure(caught)) {
-                        const drafts = await api.listMailDrafts().catch(() => []);
-                        draftRef.current =
-                          drafts.find((candidate) => candidate.id === confirmation.id) ??
-                          draftRef.current;
+                        staleDraftIdRef.current = confirmation.id;
+                        try {
+                          const refreshed = (await api.listMailDrafts()).find(
+                            (candidate) => candidate.id === confirmation.id,
+                          );
+                          if (refreshed) {
+                            draftRef.current = refreshed;
+                            staleDraftIdRef.current = null;
+                          }
+                        } catch {
+                          // Persistence remains blocked until a later retry refreshes durable authority.
+                        }
                       }
                       toast.error("Message couldn’t be sent", {
                         description: errorMessage(caught),

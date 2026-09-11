@@ -3,6 +3,7 @@ import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js"
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
 import {
   maintenanceRunSchema,
+  maintenanceScopeSchema,
   maintenanceVerificationSchema,
   workspaceStatusSchema,
 } from "./maintenance.js";
@@ -149,24 +150,35 @@ export const mailDispositionSchema = z.object({
 });
 export type MailDisposition = z.infer<typeof mailDispositionSchema>;
 
-export const mailStewardshipQuestionSchema = z.object({
-  accountId: idSchema,
-  answer: z.string().max(2_000).nullable(),
-  answeredAt: isoDateTimeSchema.nullable(),
-  createdAt: isoDateTimeSchema,
-  evidence: z.array(materialSourceReferenceSchema).min(1).max(50),
-  fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-  id: idSchema,
-  kind: mailQuestionKindSchema,
-  options: z
-    .array(z.object({ label: z.string().min(1).max(200), value: z.string().min(1).max(200) }))
-    .max(10),
-  reason: z.string().trim().min(1).max(1_000),
-  status: z.enum(["open", "answered", "dismissed"]),
-  threadId: idSchema,
-  updatedAt: isoDateTimeSchema,
-  version: z.int().positive(),
-});
+export const mailStewardshipQuestionSchema = z
+  .object({
+    accountId: idSchema,
+    answer: z.string().trim().min(1).max(2_000).nullable(),
+    answeredAt: isoDateTimeSchema.nullable(),
+    createdAt: isoDateTimeSchema,
+    evidence: z.array(materialSourceReferenceSchema).min(1).max(50),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    id: idSchema,
+    kind: mailQuestionKindSchema,
+    options: z
+      .array(z.object({ label: z.string().min(1).max(200), value: z.string().min(1).max(200) }))
+      .max(10),
+    reason: z.string().trim().min(1).max(1_000),
+    status: z.enum(["open", "answered", "dismissed"]),
+    threadId: idSchema,
+    updatedAt: isoDateTimeSchema,
+    version: z.int().positive(),
+  })
+  .superRefine((question, context) => {
+    const hasAnswerEvidence = question.answer !== null && question.answeredAt !== null;
+    if ((question.status === "answered") !== hasAnswerEvidence) {
+      context.addIssue({
+        code: "custom",
+        message: "Answered questions require answer text and an answered timestamp.",
+        path: ["status"],
+      });
+    }
+  });
 export type MailStewardshipQuestion = z.infer<typeof mailStewardshipQuestionSchema>;
 
 export const mailRuleProposalSchema = z.object({
@@ -219,6 +231,8 @@ export const mailReviewSummarySchema = z.object({
   evidenceCutoff: isoDateTimeSchema,
   id: idSchema,
   ledgerFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  runId: idSchema.nullable(),
+  scope: maintenanceScopeSchema,
   state: z.enum(["maintained", "maintained_with_questions", "blocked"]),
 });
 
@@ -293,7 +307,8 @@ export const mailStatusSchema = workspaceStatusSchema(mailStatusDetailsSchema).s
     }
     if (
       status.details.objective.mode === "approved_profile" &&
-      status.details.objective.profileId === null
+      (status.details.objective.profileId === null ||
+        status.details.objective.profileVersion === null)
     ) {
       context.addIssue({
         code: "custom",

@@ -122,6 +122,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       targetId: string;
       targetType: "obligation" | "disposition" | "question";
     }) => api.createMailStewardshipFeedback({ comment, kind, targetId, targetType }),
+    onError: refresh,
     onSuccess: refresh,
   });
   const brief = useMutation({
@@ -142,6 +143,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       createObligation.error ??
       updateObligation.error ??
       answer.error ??
+      feedback.error ??
       brief.error,
   );
 
@@ -166,6 +168,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       createObligation.isError ||
       updateObligation.isError ||
       answer.isError ||
+      feedback.isError ||
       brief.isError ? (
         <Alert variant="warning">
           <AlertTriangleIcon aria-hidden="true" />

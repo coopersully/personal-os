@@ -500,8 +500,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
   const mailMaintenance = createMailMaintenanceService({
-    dispatchApprovedRules: async (userId) => {
-      const result = await connectors.dispatchDueMailRuleWork(userId);
+    dispatchApprovedRules: async (userId, threadIds) => {
+      const result = await connectors.dispatchDueMailRuleWork(userId, threadIds);
       return {
         dispatched: result.claimed,
         failed: result.failed,

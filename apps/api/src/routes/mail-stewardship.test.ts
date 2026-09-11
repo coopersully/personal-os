@@ -6,11 +6,14 @@ import { registerMailStewardshipRoutes } from "./mail-stewardship.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 
-function testApp(scopes: Array<"mail:read" | "mail:write">) {
+function testApp(
+  scopes: Array<"mail:read" | "mail:write">,
+  actorType: Principal["actorType"] = "user",
+) {
   const app = new Hono<AppEnv>();
   const principal: Principal = {
     actorId: id,
-    actorType: "user",
+    actorType,
     scopes: new Set(scopes),
     userId: id,
   };
@@ -78,6 +81,29 @@ describe("Mail stewardship routes", () => {
       method: "POST",
     });
 
+    expect(answer.status).toBe(403);
+    expect(stewardship.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it("keeps direct stewardship mutations human-only while allowing agent maintenance", async () => {
+    const { app, maintenance, stewardship } = testApp(["mail:read", "mail:write"], "agent");
+
+    expect(
+      (
+        await app.request("/v1/mail/maintenance", {
+          body: JSON.stringify({ scope: { type: "all_outstanding" } }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(200);
+    expect(maintenance.maintain).toHaveBeenCalledOnce();
+
+    const answer = await app.request(`/v1/mail/questions/${id}/answer`, {
+      body: JSON.stringify({ answer: "reference", expectedVersion: 1, generalize: false }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
     expect(answer.status).toBe(403);
     expect(stewardship.answerQuestion).not.toHaveBeenCalled();
   });

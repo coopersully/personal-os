@@ -593,7 +593,7 @@
     {
       "idx": 82,
       "version": "7",
-      "when": 1788825600000,
+      "when": 1788900000000,
       "tag": "0073_mail_workspace_stewardship",
       "breakpoints": true
     },
@@ -602,6 +602,13 @@
       "version": "7",
       "when": 1789070400000,
       "tag": "0078_mail_workspace_stewardship_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1789156800000,
+      "tag": "0079_mail_stewardship_integrity",
       "breakpoints": true
     }
   ]

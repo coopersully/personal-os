@@ -283,7 +283,7 @@ it("never exposes another user's ledger", async () => {
 
 Run: `pnpm exec vitest run apps/api/src/mail-stewardship-service.integration.test.ts packages/database/src/schema.test.ts`
 
-Expected: FAIL because migration 0072 and the service do not exist.
+Expected: FAIL because migration 0073 and the service do not exist.
 
 - [ ] **Step 3: Add the six tables and database invariants**
 
@@ -299,7 +299,7 @@ CREATE UNIQUE INDEX mail_obligations_open_identity_idx
   WHERE state IN ('open', 'waiting', 'deferred');
 ```
 
-Add foreign keys with cascade for user-owned stewardship and `set null` for evidence that may disappear. Reviews and feedback remain after source deletion but retain only safe references/fingerprints. Register 0072 without changing prior journal entries.
+Add foreign keys with cascade for user-owned stewardship and `set null` for evidence that may disappear. Reviews and feedback remain after source deletion but retain only safe references/fingerprints. Register 0073 without changing prior journal entries.
 
 - [ ] **Step 4: Implement transactional owner-scoped serialization**
 

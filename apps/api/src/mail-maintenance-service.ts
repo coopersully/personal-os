@@ -35,7 +35,7 @@ type DispatchRulesResult = {
   reconcile?: number;
 };
 type Options = {
-  dispatchApprovedRules: (userId: string) => Promise<DispatchRulesResult>;
+  dispatchApprovedRules: (userId: string, threadIds: string[]) => Promise<DispatchRulesResult>;
   now: () => Date;
   refreshSources: (userId: string) => Promise<RefreshSourcesResult>;
   stewardship: MailStewardshipService;
@@ -193,14 +193,25 @@ export function createMailMaintenanceService({
           continue;
         }
         if (step === "dispatch_approved_rules") {
-          const dispatched = await dispatchApprovedRules(userId);
+          const dispatched = await dispatchApprovedRules(
+            userId,
+            snapshotResult.snapshot.threads.map((thread) => thread.id),
+          );
           await complete(step, idempotencyKey, dispatched);
           continue;
         }
         if (step === "publish_review") {
           const publishSnapshot = await stewardship.snapshot(userId, scope);
           const publishAssessment = assessMail(publishSnapshot, MAIL_PLAYBOOK);
-          const review = await stewardship.createReview(userId, publishSnapshot, publishAssessment);
+          const review = await stewardship.createReview(
+            userId,
+            publishSnapshot,
+            publishAssessment,
+            {
+              runId,
+              scope,
+            },
+          );
           await complete(step, idempotencyKey, {
             assessment: publishAssessment,
             review,
@@ -225,7 +236,28 @@ export function createMailMaintenanceService({
           );
           const rebasedSnapshot = await stewardship.snapshot(userId, scope);
           const rebasedAssessment = assessMail(rebasedSnapshot, MAIL_PLAYBOOK);
-          review = await stewardship.createReview(userId, rebasedSnapshot, rebasedAssessment);
+          review = await stewardship.createReview(userId, rebasedSnapshot, rebasedAssessment, {
+            runId,
+            scope,
+          });
+          const rebasedReviewResult = {
+            assessment: rebasedAssessment,
+            review,
+            snapshot: rebasedSnapshot,
+          } satisfies ReviewStepResult;
+          await workspace.reviseCompletedStep({
+            claimId,
+            idempotencyKey: "mail:publish-review:v1",
+            result: rebasedReviewResult,
+            runId,
+            step: "publish_review",
+          });
+          records.set("publish_review", {
+            idempotencyKey: "mail:publish-review:v1",
+            result: rebasedReviewResult,
+            status: "completed",
+            step: "publish_review",
+          });
           verificationSnapshot = await stewardship.snapshot(userId, scope);
           verificationAssessment = assessMail(verificationSnapshot, MAIL_PLAYBOOK);
         }

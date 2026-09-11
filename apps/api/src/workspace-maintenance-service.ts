@@ -75,6 +75,8 @@ type RenewClaimInput = {
   runId: string;
 };
 
+type ReviseCompletedStepInput = CompleteStepInput;
+
 type ReleaseForRetryInput = {
   claimId: string;
   code: string;
@@ -105,6 +107,7 @@ export type WorkspaceMaintenanceService = {
   listStepRecords: (runId: string) => Promise<WorkspaceMaintenanceStepRecord[]>;
   releaseForRetry: (input: ReleaseForRetryInput) => Promise<MaintenanceRun>;
   renewClaim: (input: RenewClaimInput) => Promise<MaintenanceRun>;
+  reviseCompletedStep: (input: ReviseCompletedStepInput) => Promise<void>;
   requeue: (input: RequeueInput) => Promise<MaintenanceRun>;
   restartBlocked: (input: RestartBlockedInput) => Promise<MaintenanceRun>;
   settle: (input: SettleInput) => Promise<MaintenanceRun>;
@@ -548,6 +551,38 @@ export function createWorkspaceMaintenanceService({
       return serializeRun(run);
     },
 
+    async reviseCompletedStep(input) {
+      await db.transaction(async (transaction) => {
+        await fenceClaim(transaction, input, {
+          checkpoint: { completedStep: input.step },
+        });
+        const [step] = await transaction
+          .update(workspaceMaintenanceSteps)
+          .set({
+            attemptClaimId: input.claimId,
+            attemptCount: sql`${workspaceMaintenanceSteps.attemptCount} + 1`,
+            safeResult: input.result,
+            updatedAt: sql`NOW()`,
+          })
+          .where(
+            and(
+              eq(workspaceMaintenanceSteps.runId, input.runId),
+              eq(workspaceMaintenanceSteps.stepName, input.step),
+              eq(workspaceMaintenanceSteps.idempotencyKey, input.idempotencyKey),
+              eq(workspaceMaintenanceSteps.status, "completed"),
+            ),
+          )
+          .returning();
+        if (!step) {
+          throw new AppError(
+            "conflict",
+            "The completed maintenance step no longer matches the revision evidence.",
+            { runId: input.runId, step: input.step },
+          );
+        }
+      });
+    },
+
     async requeue(input) {
       if (input.expectedStatus !== "blocked" && input.expectedStatus !== "awaiting_approval") {
         throw new AppError(
@@ -586,17 +621,16 @@ export function createWorkspaceMaintenanceService({
 
     async restartBlocked(input) {
       return db.transaction(async (transaction) => {
-        const [run] = await transaction
+        const [superseded] = await transaction
           .update(workspaceMaintenanceRuns)
           .set({
-            checkpoint: null,
-            lastSafeError: null,
             leaseClaimId: null,
             leaseExpiresAt: null,
             retryAt: null,
-            settledResult: null,
-            sourceSnapshot: null,
-            status: "queued",
+            settledResult: sql`COALESCE(${workspaceMaintenanceRuns.settledResult}, '{}'::jsonb) || ${{
+              recovery: "superseded_by_manual_retry",
+            }}::jsonb`,
+            status: "failed_terminal",
             updatedAt: sql`NOW()`,
           })
           .where(
@@ -607,17 +641,28 @@ export function createWorkspaceMaintenanceService({
             ),
           )
           .returning();
-        if (!run) {
+        if (!superseded) {
           throw new AppError(
             "conflict",
             "The blocked workspace maintenance run no longer matches the restart evidence.",
             { runId: input.runId },
           );
         }
-        await transaction
-          .delete(workspaceMaintenanceSteps)
-          .where(eq(workspaceMaintenanceSteps.runId, input.runId));
-        return serializeRun(run);
+        const [successor] = await transaction
+          .insert(workspaceMaintenanceRuns)
+          .values({
+            domain: superseded.domain,
+            rulebookVersion: superseded.rulebookVersion,
+            scope: superseded.scope,
+            status: "queued",
+            updatedAt: sql`NOW()`,
+            userId: superseded.userId,
+          })
+          .returning();
+        if (!successor) {
+          throw new AppError("internal_error", "The replacement maintenance run was not created.");
+        }
+        return serializeRun(successor);
       });
     },
 

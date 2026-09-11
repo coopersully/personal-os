@@ -428,7 +428,10 @@ describe("FloatingMailComposer", () => {
       .mockResolvedValueOnce(updated)
       .mockResolvedValueOnce(updated)
       .mockResolvedValueOnce(edited);
-    vi.spyOn(api, "listMailDrafts").mockResolvedValue([released]);
+    const list = vi
+      .spyOn(api, "listMailDrafts")
+      .mockRejectedValueOnce(new Error("Draft refresh unavailable"))
+      .mockResolvedValueOnce([released]);
     vi.spyOn(api, "sendMailDraft").mockRejectedValue(
       new ApiClientError({
         code: "service_unavailable",
@@ -464,6 +467,7 @@ describe("FloatingMailComposer", () => {
         expectedUpdatedAt: released.updatedAt,
       }),
     ]);
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it("does not refresh a draft after an ambiguous send failure", async () => {

@@ -222,6 +222,23 @@ describe("exact-thread Mail stewardship", () => {
     });
   });
 
+  it("surfaces feedback failures and refreshes the thread evidence", async () => {
+    mocks.createMailStewardshipFeedback.mockRejectedValue(new Error("Feedback unavailable"));
+    const user = userEvent.setup();
+    renderThread();
+
+    await user.selectOptions(await screen.findByLabelText("Feedback"), "incorrect");
+    await user.type(screen.getByLabelText("Comment"), "This classification is wrong");
+    await user.click(screen.getByRole("button", { name: "Record feedback" }));
+
+    expect(
+      await screen.findByText("Evidence changed or the operation could not apply"),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(mocks.getMailThreadStewardship.mock.calls.length).toBeGreaterThan(1),
+    );
+  });
+
   it("shows a safe error when thread stewardship cannot load", async () => {
     mocks.getMailThreadStewardship.mockRejectedValueOnce(new Error("Thread unavailable"));
     renderThread();

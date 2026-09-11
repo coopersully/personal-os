@@ -77,6 +77,8 @@ const status: MailStatus = {
       evidenceCutoff: now,
       id: "44444444-4444-4444-8444-444444444444",
       ledgerFingerprint: "b".repeat(64),
+      runId: null,
+      scope: { type: "all_outstanding" },
       state: "maintained_with_questions",
     },
     objective: {
@@ -117,6 +119,8 @@ const review: MailReview = {
   playbookVersion: "1.0.0",
   profileVersion: null,
   rulebookVersion: "mail-rules-v1",
+  runId: null,
+  scope: { type: "all_outstanding" },
   sourceFreshness: "current",
   state: "maintained_with_questions",
 };

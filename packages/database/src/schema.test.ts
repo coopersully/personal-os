@@ -75,7 +75,7 @@ describe("database schema contracts", () => {
     expect(feedback.columns.map((column) => column.name)).not.toContain("updated_at");
     expect(reviews.columns.map((column) => column.name)).not.toContain("updated_at");
     expect(reviews.indexes.map((index) => index.config.name)).toContain(
-      "mail_reviews_user_fingerprint_idx",
+      "mail_reviews_user_fingerprint_scope_idx",
     );
 
     const migrationSql = await readFile(
@@ -356,6 +356,7 @@ describe("database schema contracts", () => {
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
+      "0079_mail_stewardship_integrity",
     ]);
   });
 

@@ -81,9 +81,9 @@ linked provider records as one material action.
 
 Mail defaults to one synchronized **Inbox** across every connected provider. The
 left rail gives direct access to Inbox, Unread, Starred, Snoozed, Sent, and
-Drafts; provider-account mailboxes remain available in a collapsed secondary
-group. Search stays with the conversation list, reader actions stay at the top
-of the reader, and every desktop pane remains resizable.
+Drafts. Provider accounts remain an app-bar visibility filter rather than a
+second navigation hierarchy. Search starts in the primary app bar, reader
+actions stay at the top of the reader, and every desktop pane remains resizable.
 
 An end-justified floating plus opens the human Mail composer. Compose, Reply,
 and Forward create a durable plain-text draft with From, To, optional Cc,

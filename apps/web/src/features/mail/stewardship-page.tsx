@@ -330,6 +330,14 @@ function ReviewPanel({ pending, review }: { pending: boolean; review: MailReview
             <Metadata label="Rulebook" value={review.rulebookVersion} />
             <Metadata label="Source freshness" value={label(review.sourceFreshness)} />
             <Metadata label="Open questions" value={String(review.openQuestionCount)} />
+            <Metadata
+              label="Scope"
+              value={
+                review.scope.type === "all_outstanding"
+                  ? "All outstanding"
+                  : label(review.scope.type)
+              }
+            />
           </CardContent>
         </Card>
       ) : (

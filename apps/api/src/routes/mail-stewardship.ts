@@ -12,7 +12,7 @@ import type { Context, Hono } from "hono";
 import type { MailMaintenanceService } from "../mail-maintenance-service.js";
 import type { MailStewardshipService } from "../mail-stewardship-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, parseOptionalBody, requireFeatureAccess } from "./support.js";
+import { parseBody, parseOptionalBody, requireFeatureAccess, requireHuman } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type MailStewardshipRouteOptions = {
@@ -41,6 +41,11 @@ export function registerMailStewardshipRoutes({
   app.use("/v1/mail/obligations/*", requireMailAccess);
   app.use("/v1/mail/questions/*", requireMailAccess);
   app.use("/v1/mail/feedback", requireMailAccess);
+  app.use("/v1/mail/threads/*/disposition", requireHuman);
+  app.use("/v1/mail/threads/*/obligations", requireHuman);
+  app.use("/v1/mail/obligations/*", requireHuman);
+  app.use("/v1/mail/questions/*", requireHuman);
+  app.use("/v1/mail/feedback", requireHuman);
 
   app.get("/v1/mail/status", async (context) =>
     context.json({ status: await stewardship.getStatus(context.get("principal").userId) }),

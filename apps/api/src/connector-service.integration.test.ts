@@ -6771,6 +6771,71 @@ describe.sequential("connector service", () => {
     expect(updateMailThread).toHaveBeenCalledOnce();
   });
 
+  it("fences a stewardship-triggered Mail rule dispatch to the reviewed threads", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const action = { afterDays: 1, mailboxId: null, type: "archive" } as const;
+    const first = await createDurableMailWorkFixture("Thread-scoped first", action);
+    const [secondThread] = await database.db
+      .insert(mailThreads)
+      .values({
+        accountId: first.account.id,
+        bodyText: "Routine receipt outside the reviewed scope",
+        from: { address: "orders@example.com", name: "Orders" },
+        provider: "google",
+        receivedAt: new Date(timestamp.getTime() - 2 * 86_400_000),
+        remoteMailboxIds: ["INBOX", "UNREAD"],
+        remoteThreadId: "thread-scoped-second",
+        snippet: "Routine receipt outside the reviewed scope",
+        starred: false,
+        subject: "Routine Thread-scoped second",
+        to: [],
+        unread: true,
+        userId: first.user.id,
+      })
+      .returning();
+    if (!secondThread) throw new Error("Second scoped Mail thread was not created.");
+    const [secondWork] = await database.db
+      .insert(mailRuleWorkItems)
+      .values({
+        accountId: first.account.id,
+        action,
+        actionFingerprint: durableMailRuleActionFingerprint(action),
+        dueAt: new Date(secondThread.receivedAt.getTime() + 86_400_000),
+        nextAttemptAt: new Date(secondThread.receivedAt.getTime() + 86_400_000),
+        profileId: first.profile.id,
+        profileVersion: first.profile.version,
+        remoteThreadId: secondThread.remoteThreadId,
+        ruleId: first.rule.id,
+        ruleVersion: first.rule.version,
+        sourceUpdatedAt: secondThread.updatedAt,
+        threadId: secondThread.id,
+        userId: first.user.id,
+      })
+      .returning();
+    if (!secondWork) throw new Error("Second scoped Mail work item was not created.");
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    await expect(
+      service.dispatchDueMailRuleWork(first.user.id, [first.thread.id]),
+    ).resolves.toMatchObject({ claimed: 1, succeeded: 1 });
+    await expect(
+      database.db
+        .select({ id: mailRuleWorkItems.id, status: mailRuleWorkItems.status })
+        .from(mailRuleWorkItems)
+        .orderBy(asc(mailRuleWorkItems.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: first.work.id, status: "succeeded" },
+        { id: secondWork.id, status: "pending" },
+      ]),
+    );
+    expect(updateMailThread).toHaveBeenCalledOnce();
+  });
+
   it("moves one-day cleanup work to recoverable Trash without permanent deletion", async () => {
     await database.db.delete(mailRuleWorkItems);
     const fixture = await createDurableMailWorkFixture("One day Trash", {

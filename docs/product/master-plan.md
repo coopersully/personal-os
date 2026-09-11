@@ -275,6 +275,9 @@ flowchart TD
   overrides for inbound routing, maintenance outcomes, replies, sensitive detail, links, and quiet
   hours. Default proactive maintenance texts to runs that need an answer or action; do not send a
   routine success message. Workspaces never call Twilio or read the shared conversation directly.
+- Render actionable SMS with the minimum useful merchant, sender, event, task, or comparable entity
+  context. Preserve canonical instants, convert them to the person's current time zone immediately
+  before sending, and use accurate `today`, `yesterday`, or `tomorrow` labels for nearby dates.
 - Promote Finance's current review-bypass control into one global policy used consistently by app,
   API, MCP, scheduled, and SMS work. Bind SMS approvals to one exact, reversible, unexpired proposal
   and retain stronger boundaries for unsupported or higher-impact effects.

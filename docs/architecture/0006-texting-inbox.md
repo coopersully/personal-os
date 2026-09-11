@@ -33,9 +33,10 @@ reinterpret a domain result, or grant action authority.
 work, unresolved delivery, and missing replies. Inbound webhook arrival should durably enqueue the
 same coordinator promptly; the maintenance intent and event-driven path share one source of truth.
 
-Workspace stewards publish typed notification intents rather than rendered SMS. Texting applies
-channel policy and renders one result, one available question or exact review action, and an
-optional first-party deep link.
+Workspace stewards publish typed notification intents rather than rendered SMS. They provide the
+minimum useful entity context and canonical times; Texting applies channel policy, converts times
+to the person's current time zone, renders nearby dates relatively, and composes one result, one
+available question or exact review action, and an optional first-party deep link.
 
 ## Authority
 
@@ -55,6 +56,8 @@ conversation message, child run, source evidence, policy, approval, effect, and 
 - A cross-workspace reply waits for honest child states and never reports partial work as complete.
 - Ambiguous routing asks one clarification and leaves unrelated work available.
 - An uncertain outbound provider result reconciles before identical content can be sent again.
+- A queued message that crosses the person's local date boundary is rendered again before provider
+  submission so relative dates remain accurate.
 - STOP, disconnect, feature disablement, or workspace SMS disablement stops new sends and routing
   while preserving prior audit and recovery state.
 

@@ -335,13 +335,17 @@ coherent response without reproducing domain expertise.
   review, and a useful first-party link.
 - Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
   quiet, while a message initiated by the person still receives a response.
+- Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting
+  converts canonical times into the person's time zone and renders nearby dates as `today`,
+  `yesterday`, or `tomorrow` immediately before sending.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.
 - Bypass never widens scopes or permits missing, ambiguous, blocked, unsupported, irreversible,
   credential, scope-changing, or recipient-changing effects.
-- Messages are privacy-safe by default. Detailed financial, Mail, Calendar, or other sensitive
-  content requires explicit channel and workspace disclosure preferences.
+- Privacy-safe messages retain the entity context required to answer but omit account numbers,
+  message bodies, descriptions, and unnecessary sensitive detail unless explicit channel and
+  workspace disclosure preferences allow them.
 - Global communication defaults govern inbound routing, maintenance messages, reply behavior,
   content detail, links, and quiet hours; each workspace inherits them unless the person creates an
   explicit override. Workspace maintenance guidance remains domain-specific and applies

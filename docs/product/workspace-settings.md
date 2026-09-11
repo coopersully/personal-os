@@ -64,7 +64,7 @@ person deliberately creates a workspace override:
 - maintenance SMS: questions and actions only by default, with explicit off or every-run options;
 - whether replies may answer that workspace's questions;
 - whether replies may approve exact reversible proposals when global review bypass is off;
-- privacy-safe or explicitly detailed message content;
+- useful contextual identifiers with privacy-safe detail, or explicitly expanded message content;
 - inclusion of first-party review and recovery links; and
 - inherited global quiet hours or a workspace-specific schedule.
 
@@ -74,6 +74,10 @@ whether an otherwise policy-authorized reversible action executes directly or en
 The default is quiet on routine success. A maintenance run sends a proactive text only when nohmi
 needs an answer, approval, recovery step, or other action from the person. This default does not
 suppress a reply to a text the person initiated.
+
+The default content includes the merchant, sender, event, task, or comparable entity name needed to
+understand the action. Dates and times are rendered in the person's current time zone, using
+`today`, `yesterday`, or `tomorrow` when applicable; unnecessary sensitive detail remains omitted.
 
 ## Inheritance boundary
 

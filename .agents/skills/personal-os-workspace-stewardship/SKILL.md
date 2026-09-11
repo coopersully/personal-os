@@ -37,8 +37,8 @@ Define all of the following before naming MCP tools:
   completed-work summaries, including how answers create or reinforce proposed knowledge;
 - reinforcement and safe promotion boundaries plus how later runs avoid repeating resolved
   questions;
-- typed notification intents, per-workspace channel settings, safe summaries, reply vocabulary,
-  and first-party review or recovery links;
+- typed notification intents, per-workspace channel settings, safe summaries, minimum useful entity
+  context, canonical times, reply vocabulary, and first-party review or recovery links;
 - health analysis, recommendations, goals/preferences, and confidence/evidence boundaries; and
 - the durable review artifact explaining work, state, uncertainty, advice, and next actions.
 
@@ -59,6 +59,10 @@ Workspaces publish notification intents but never call Twilio, read the shared S
 route general-inbox requests. Read `docs/product/texting-operations.md` and
 `docs/architecture/0006-texting-inbox.md` when a steward sends or receives Texting work. The global
 review-bypass policy applies across channels; workspace settings cannot widen it.
+
+Publish canonical times and typed entity context rather than pre-rendering `today`, `yesterday`, or
+`tomorrow`. Texting owns conversion into the person's current time zone and final relative-date
+language immediately before delivery.
 
 ## Verify the delivered slice
 

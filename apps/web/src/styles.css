@@ -565,7 +565,7 @@ p {
   grid-template-columns: var(--mail-sidebar-width, var(--sidebar-expanded-width)) 1px minmax(0, 1fr);
 }
 .app-shell--mail[data-sidebar-state="collapsed"] {
-  grid-template-columns: 3rem 1px minmax(0, 1fr);
+  grid-template-columns: var(--mail-sidebar-width) 1px minmax(0, 1fr);
 }
 .app-shell--mail[data-sidebar-state="collapsed"] .sidebar {
   padding-inline: 8px;
@@ -3818,7 +3818,7 @@ p {
 }
 .mail-thread-row[data-density="expanded"] {
   contain-intrinsic-size: 118px;
-  gap-block: 7px;
+  row-gap: 7px;
   padding-block: 18px;
 }
 .mail-thread-row[data-density="expanded"] .mail-thread-row__snippet {

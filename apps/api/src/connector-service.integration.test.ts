@@ -5622,12 +5622,13 @@ describe.sequential("connector service", () => {
           requestId: "rule-save-race",
         },
       );
+      const createRejection = create.catch((error: unknown) => error);
       await new Promise<void>((resolveTurn) => {
         setImmediate(resolveTurn);
       });
       await blocker.query("COMMIT");
       await expect(disconnect).resolves.toBeUndefined();
-      await expect(create).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(createRejection).resolves.toMatchObject({ code: "invalid_request" });
     } finally {
       await blocker.query("ROLLBACK");
       blocker.release();

@@ -5544,8 +5544,8 @@ describe("ilo web app", () => {
     }
   });
 
-  it("keeps Mail and Finances workspace controls on child routes", async () => {
-    const mail = setup("/mail/thread/example");
+  it("keeps Mail conversation and Finances child-route controls stable", async () => {
+    const mail = setup("/mail?thread=example");
     await waitFor(() => {
       const currentAppBar = screen.getByRole("navigation", { name: "Top navigation" });
       expect(currentAppBar).toHaveAttribute("data-workspace", "mail");
@@ -5558,9 +5558,13 @@ describe("ilo web app", () => {
     expect(
       within(mailAppBar).getByRole("button", { name: "Sync all mail accounts" }),
     ).toBeInTheDocument();
-    expect(
-      within(mailAppBar).getByRole("button", { name: /^\d+ of \d+ mail accounts$/ }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(mailAppBar).getByRole("button", {
+          name: /^\d+ of \d+ mail accounts(?:, attention required)?$/,
+        }),
+      ).toBeInTheDocument(),
+    );
     expect(
       within(mailAppBar).queryByRole("button", { name: /compose|send/i }),
     ).not.toBeInTheDocument();
@@ -7747,6 +7751,11 @@ describe("ilo web app", () => {
   });
 
   it("renders mailbox loading, empty, and error alternatives", async () => {
+    mocks.listConnectors.mockImplementationOnce(() => new Promise(() => undefined));
+    const pendingAccountView = setup("/mail");
+    expect(await screen.findByRole("button", { name: "Loading mail accounts" })).toBeDisabled();
+    pendingAccountView.unmount();
+
     mocks.listConnectors.mockResolvedValueOnce([]);
     const emptyAccountView = setup("/mail");
     expect(await screen.findByRole("link", { name: "Connect a mailbox" })).toHaveAttribute(

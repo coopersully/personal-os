@@ -63,7 +63,6 @@ describe("desktop API transport", () => {
       .mockResolvedValueOnce({ status: 200, body: '{"ok":true}' });
     await desktopFetch(
       new Request("https://api.test/v1/tasks", { body: '{"title":"Test"}', method: "POST" }),
-      { body: '{"title":"Test"}', method: "POST" },
     );
     expect(invoke).toHaveBeenLastCalledWith("desktop_request", {
       request: {
@@ -73,16 +72,47 @@ describe("desktop API transport", () => {
         body: '{"title":"Test"}',
       },
     });
+    invoke.mockResolvedValueOnce({ status: 200, body: '{"ok":true}' });
+    await desktopFetch(
+      new Request("https://api.test/v1/tasks", { body: '{"title":"Original"}', method: "POST" }),
+      { body: '{"title":"Override"}', method: "PUT" },
+    );
+    expect(invoke).toHaveBeenLastCalledWith("desktop_request", {
+      request: {
+        serverUrl: "https://api.test",
+        path: "/v1/tasks",
+        method: "PUT",
+        body: '{"title":"Override"}',
+      },
+    });
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   });
   it("honors cancellation while a native request is in flight", async () => {
     const controller = new AbortController();
+    const removeAbortListener = vi.spyOn(controller.signal, "removeEventListener");
+    let resolveRequest: ((value: { status: number; body: string }) => void) | undefined;
+    const nativeRequest = new Promise<{ status: number; body: string }>((resolve) => {
+      resolveRequest = resolve;
+    });
     invoke
       .mockResolvedValueOnce({ settings: { serverUrl: "https://api.test" } })
-      .mockImplementationOnce(async () => {
+      .mockReturnValueOnce(nativeRequest);
+    const response = desktopFetch("https://api.test/v1/tasks", { signal: controller.signal });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    controller.abort();
+    await expect(response).rejects.toThrow("Request cancelled");
+    expect(removeAbortListener).toHaveBeenCalledWith("abort", expect.any(Function));
+    resolveRequest?.({ status: 200, body: '{"ok":true}' });
+  });
+  it("honors cancellation raised while dispatching the native request", async () => {
+    const controller = new AbortController();
+    invoke
+      .mockResolvedValueOnce({ settings: { serverUrl: "https://api.test" } })
+      .mockImplementationOnce(() => {
         controller.abort();
-        return { status: 200, body: '{"ok":true}' };
+        return new Promise(() => undefined);
       });
+
     await expect(
       desktopFetch("https://api.test/v1/tasks", { signal: controller.signal }),
     ).rejects.toThrow("Request cancelled");

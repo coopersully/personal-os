@@ -321,6 +321,13 @@ describe("database schema contracts", () => {
     expect(journal.entries[budgetBucketIndex]?.when).toBeGreaterThan(
       journal.entries[budgetBucketIndex - 1]?.when ?? 0,
     );
+    const mailReconciliationIndex = journalTags.indexOf(
+      "0078_mail_workspace_stewardship_reconciliation",
+    );
+    expect(mailReconciliationIndex).toBeGreaterThan(0);
+    expect(journal.entries[mailReconciliationIndex]?.when).toBeGreaterThan(
+      journal.entries[mailReconciliationIndex - 1]?.when ?? 0,
+    );
     const financeAutomationIndex = journalTags.indexOf("0059_finance_automation_settings");
     expect(financeAutomationIndex).toBeGreaterThanOrEqual(0);
     expect(journalTags.slice(financeAutomationIndex)).toEqual([
@@ -348,6 +355,7 @@ describe("database schema contracts", () => {
       "0076_task_list_icons",
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
+      "0078_mail_workspace_stewardship_reconciliation",
     ]);
   });
 

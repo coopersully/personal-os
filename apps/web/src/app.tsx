@@ -4746,7 +4746,9 @@ function MailAccountsControl() {
     (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
   ).length;
   const needsAttention = attentionCount > 0;
-  const triggerLabel = `${label}${needsAttention ? ", attention required" : ""}`;
+  const triggerLabel = accounts.isPending
+    ? "Loading mail accounts"
+    : `${label}${needsAttention ? ", attention required" : ""}`;
   const setAccountVisible = (accountId: string, visible: boolean) => {
     const nextIds = new Set(selectedIds);
     visible ? nextIds.add(accountId) : nextIds.delete(accountId);

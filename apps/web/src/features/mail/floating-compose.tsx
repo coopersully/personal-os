@@ -1,6 +1,7 @@
 import type { MailDraft, MailRecipientInput, MailSetupAccount } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { MailIcon, PlugIcon, PlusIcon } from "@/components/icons";
 import {
@@ -69,6 +70,7 @@ export function FloatingMailComposer({
   onRetryAccounts?: () => void;
 }) {
   const client = useQueryClient();
+  const navigate = useNavigate();
   const available = useMemo(
     () => accounts.filter((account) => account.sendCapability === "available"),
     [accounts],
@@ -99,11 +101,11 @@ export function FloatingMailComposer({
 
   useEffect(() => {
     setAccountId((current) =>
-      available.some((account) => account.accountId === current)
+      accounts.some((account) => account.accountId === current)
         ? current
         : (available[0]?.accountId ?? ""),
     );
-  }, [available]);
+  }, [accounts, available]);
 
   useEffect(() => {
     if (open && accountsState === "ready" && available.length) toRef.current?.focus();
@@ -248,6 +250,20 @@ export function FloatingMailComposer({
   const soleAccount = available.length === 1 ? available[0] : undefined;
   const canSend =
     recipients(to).length > 0 && selectedAccount?.sendCapability === "available" && !sending;
+  const openConnections = async () => {
+    if (saveTimeoutRef.current !== null) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    try {
+      if (dirty && accountId) await persist();
+      else await persistQueueRef.current;
+      navigate("/settings?section=connections");
+    } catch (caught) {
+      toast.error("Draft couldn’t be saved", { description: errorMessage(caught) });
+      setSaveState("idle");
+    }
+  };
 
   return (
     <>
@@ -318,14 +334,12 @@ export function FloatingMailComposer({
                     : "Add or update a mail account in Connections before composing a message."}
                 </AlertDescription>
                 <AlertAction>
-                  <Button asChild size="sm">
-                    <a href="/settings?section=connections">
-                      {reconnectable.length === 1
-                        ? "Reconnect account"
-                        : reconnectable.length > 1
-                          ? `Reconnect ${reconnectable.length} accounts`
-                          : "Manage accounts"}
-                    </a>
+                  <Button onClick={() => void openConnections()} size="sm">
+                    {reconnectable.length === 1
+                      ? "Reconnect account"
+                      : reconnectable.length > 1
+                        ? `Reconnect ${reconnectable.length} accounts`
+                        : "Manage accounts"}
                   </Button>
                 </AlertAction>
               </Alert>

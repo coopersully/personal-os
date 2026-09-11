@@ -117,6 +117,7 @@ describe.sequential("mail service", () => {
       "0076_task_list_icons",
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
+      "0078_mail_workspace_stewardship_reconciliation",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -186,6 +187,7 @@ describe.sequential("mail service", () => {
       "0076_task_list_icons",
       "0077_desktop_mail_activity",
       "0073_mail_workspace_stewardship",
+      "0078_mail_workspace_stewardship_reconciliation",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

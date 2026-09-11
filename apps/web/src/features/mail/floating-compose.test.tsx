@@ -4,6 +4,7 @@ import type { MailDraft, MailSetupAccount } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
@@ -62,16 +63,24 @@ function renderComposer({
   onRetryAccounts?: () => void;
 } = {}) {
   return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <FloatingMailComposer
-        accounts={accounts}
-        {...(accountsState === undefined ? {} : { accountsState })}
-        {...(intent === undefined ? {} : { intent })}
-        {...(onIntentHandled === undefined ? {} : { onIntentHandled })}
-        {...(onRetryAccounts === undefined ? {} : { onRetryAccounts })}
-      />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={["/mail"]}>
+      <QueryClientProvider client={new QueryClient()}>
+        <FloatingMailComposer
+          accounts={accounts}
+          {...(accountsState === undefined ? {} : { accountsState })}
+          {...(intent === undefined ? {} : { intent })}
+          {...(onIntentHandled === undefined ? {} : { onIntentHandled })}
+          {...(onRetryAccounts === undefined ? {} : { onRetryAccounts })}
+        />
+        <LocationProbe />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output aria-label="Current route">{`${location.pathname}${location.search}`}</output>;
 }
 
 describe("FloatingMailComposer", () => {
@@ -194,11 +203,61 @@ describe("FloatingMailComposer", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Reconnect an account to compose");
     expect(screen.queryByLabelText("From")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reconnect account" })).toHaveAttribute(
-      "href",
+    expect(screen.getByRole("button", { name: "Reconnect account" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Reconnect account" }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent(
       "/settings?section=connections",
     );
-    expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
+  });
+
+  it("keeps loading and multi-account recovery states explicit", async () => {
+    const loading = renderComposer({ accounts: [], accountsState: "loading" });
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Loading mail accounts");
+    loading.unmount();
+
+    const reconnectAccount = { ...account, sendCapability: "reconnect" as const };
+    renderComposer({
+      accounts: [
+        reconnectAccount,
+        { ...reconnectAccount, accountId: "55555555-5555-4555-8555-555555555555" },
+      ],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    expect(screen.getByRole("button", { name: "Reconnect 2 accounts" })).toBeEnabled();
+  });
+
+  it("persists pending edits before navigating to Connections", async () => {
+    let resolveDraft: ((saved: MailDraft) => void) | undefined;
+    const create = vi.spyOn(api, "createMailDraft").mockImplementation(
+      () =>
+        new Promise<MailDraft>((resolve) => {
+          resolveDraft = resolve;
+        }),
+    );
+    const view = renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.type(screen.getByLabelText("Subject"), "Keep this draft");
+
+    view.rerender(
+      <MemoryRouter initialEntries={["/mail"]}>
+        <QueryClientProvider client={new QueryClient()}>
+          <FloatingMailComposer accounts={[{ ...account, sendCapability: "reconnect" }]} />
+          <LocationProbe />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Reconnect account" }));
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ subject: "Keep this draft" }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/mail");
+    resolveDraft?.(draft);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current route")).toHaveTextContent(
+        "/settings?section=connections",
+      ),
+    );
   });
 
   it("never offers a disconnected account when another sender is available", async () => {

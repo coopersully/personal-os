@@ -53,6 +53,8 @@ requests still require authorization.
 - Healthy endpoints with unknown revision: run the checker on the production Mac before claiming main
   is live.
 - Controller building or switching: wait and re-read status; do not start a second deployment.
+- Controller retrying: preserve the live release and inspect the sanitized error; normal polling or
+  backoff may recover without attended transaction repair.
 - Maintenance active: preserve it until the operator intentionally completes maintenance.
 - Controller blocked or locked: preserve state, inspect the recorded phase and owned processes, and
   follow `deploy/mac-mini/continuous.md`; never clear state or a lock to force a retry.

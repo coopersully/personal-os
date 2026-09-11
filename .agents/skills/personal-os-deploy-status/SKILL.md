@@ -28,6 +28,7 @@ The checker correlates:
 - `not_live`: healthy endpoints exist and exact-main CI passed, but the controller still reports an older revision.
 - `ci_failed`: exact-main push CI failed, so the controller must not deploy it.
 - `controller_blocked`: the local controller reports a blocked deployment transaction.
+- `controller_retrying`: the controller records a recoverable idle/backoff error and will retry.
 - `maintenance`: the local production maintenance marker is active.
 - `healthy_revision_unknown`: public endpoints respond, but this host cannot read the private controller state.
 - `unhealthy`: one or more public surfaces fail, regardless of workflow state.

@@ -38,7 +38,13 @@ class DeployStatusTest(unittest.TestCase):
 
     def test_controller_blocked(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
-        self.assertEqual(verdict("abc", runs, {"phase": "blocked"}, HEALTHY), "controller_blocked")
+        controller = {"phase": "blocked", "error": "switch-failed"}
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_blocked")
+
+    def test_recoverable_controller_error_is_retrying(self):
+        runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]
+        controller = {"deployed": "old", "phase": "idle", "error": "prepare-failed"}
+        self.assertEqual(verdict("abc", runs, controller, HEALTHY), "controller_retrying")
 
     def test_maintenance(self):
         runs = [{"headSha": "abc", "status": "completed", "conclusion": "success"}]

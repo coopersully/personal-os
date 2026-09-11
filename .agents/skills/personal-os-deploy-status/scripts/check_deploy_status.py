@@ -74,8 +74,10 @@ def verdict(main_sha, ci_runs, controller_status, endpoints):
         return "healthy_revision_unknown"
     if controller_status.get("maintenance"):
         return "maintenance"
-    if controller_status.get("phase") == "blocked" or controller_status.get("error"):
+    if controller_status.get("phase") == "blocked":
         return "controller_blocked"
+    if controller_status.get("error"):
+        return "controller_retrying"
     deployed_sha = controller_status.get("deployed")
     if deployed_sha == main_sha and main_run.get("conclusion") == "success":
         return "live"

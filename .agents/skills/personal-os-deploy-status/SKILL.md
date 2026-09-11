@@ -1,6 +1,6 @@
 ---
 name: personal-os-deploy-status
-description: Check whether personal-os main is live and nohmi is healthy in production by correlating GitHub CI/deploy runs, production commit status, health workflow, incident issues, and public app/API/MCP endpoints. Use for deploy progress, failure diagnosis, production health, release provenance, or live-version questions.
+description: Check whether personal-os main is live and nohmi is healthy in production by correlating exact-main CI, the Mac production controller, and public app/API/MCP endpoints. Use for deploy progress, failure diagnosis, production health, release provenance, or live-version questions.
 ---
 
 # nohmi deploy status
@@ -17,28 +17,31 @@ PYTHONDONTWRITEBYTECODE=1 python3 \
 The checker correlates:
 
 - current default-branch SHA;
-- latest `Deploy hosted application` run and `production/ilo` commit status;
-- latest `Production health` run;
-- open deployment/health incident issues;
+- its exact `push` run from the `CI` workflow;
+- the read-only Mac continuous-controller status when run from an authorized production operator;
 - app, API readiness, and MCP liveness endpoints.
 
 ## Interpret
 
-- `live`: main has a successful `production/ilo` status and all public endpoints respond.
-- `in_progress`: the main deployment is queued/running; endpoints may still serve the prior release.
-- `not_live`: healthy endpoints exist, but the successful deployed SHA trails main.
-- `deploy_failed`: the latest main deployment failed; the previous release may remain healthy.
+- `live`: the controller reports main as deployed, exact-main push CI passed, and all public endpoints respond.
+- `in_progress`: exact-main CI or a controller deployment of main is active; endpoints may still serve the prior release.
+- `not_live`: healthy endpoints exist and exact-main CI passed, but the controller still reports an older revision.
+- `ci_failed`: exact-main push CI failed, so the controller must not deploy it.
+- `controller_blocked`: the local controller reports a blocked deployment transaction.
+- `maintenance`: the local production maintenance marker is active.
+- `healthy_revision_unknown`: public endpoints respond, but this host cannot read the private controller state.
 - `unhealthy`: one or more public surfaces fail, regardless of workflow state.
 - `unknown`: required evidence was unavailable or contradictory.
 
-Treat running ECS task-definition images and healthy public endpoints as runtime truth. Treat
-GitHub workflow/status as release provenance. A failed deployment does not prove production is down.
+Public health proves availability, not the deployed revision. Only the private controller state can
+prove which SHA is live; exact-main CI proves eligibility, not deployment. A failed CI run does not
+prove production is down.
 
-Read [references/deployment-runbook.md](references/deployment-runbook.md) for drilldown, AWS commands,
-incident handling, and safe next actions.
+Read [references/deployment-runbook.md](references/deployment-runbook.md) for controller and CI
+drilldown, failure handling, and safe next actions.
 
 ## Output
 
-Report verdict, target and deployed SHA evidence, workflow and incident links, endpoint results,
-optional manual ECS findings, contradictions, and the next operational step. Never expose GitHub/AWS
-tokens, task secrets, SSM values, database URLs, or raw provider payloads.
+Report verdict, target and deployed SHA evidence, exact-main CI link, controller phase/maintenance
+state, endpoint results, contradictions, and the next operational step. Never expose GitHub tokens,
+controller configuration, task secrets, environment files, database URLs, or provider payloads.

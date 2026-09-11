@@ -79,9 +79,14 @@ Specify durable run/step state, leases, retry limits, idempotency, cancellation,
 concurrent-run behavior. Name what can remain outstanding without misreporting success.
 
 Define the external scheduling contract: supported hosts, the expected cadence metadata and
-check-in health shown by nohmi, and the setup or repair handoff back to the owning platform. nohmi
-must not create, edit, activate, pause, or execute a recurring maintenance schedule; internal
-timers may only continue or recover work from an invocation already accepted.
+check-in health shown by nohmi, and the setup or repair handoff back to the owning platform. Give
+every declared schedule an immutable nohmi-owned local identity, require scheduled maintenance
+inputs to carry it through the authenticated connection, validate that binding, and propagate the
+identity through run, health, revocation, idempotency, and coalescing records. Retain only a
+non-secret credential reference and optional host automation identity; leave schedule identity
+absent for manual and otherwise unscheduled invocations. nohmi must not create, edit, activate,
+pause, or execute a recurring maintenance schedule; internal timers may only continue or recover
+work from an invocation already accepted.
 
 ## 7. Rulebook, questions, and learning
 

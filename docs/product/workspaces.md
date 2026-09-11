@@ -226,9 +226,13 @@ select a single owner or prevent this power-user workflow.
 The external platform owns cadence and invocation. nohmi owns the meaning of maintenance,
 knowledge retrieval, policy checks, durable run state, idempotency, questions, reviews, recovery,
 and the verified terminal result; a client should be able to invoke one maintenance intent rather
-than reconstruct the workflow. Each invocation retains its host, credential, trigger, and
-idempotency identity. Compatible concurrent calls coalesce or resume durable work, while conflicting
-scopes remain separate and report their own honest result.
+than reconstruct the workflow. Every declared schedule receives an immutable nohmi-owned local
+identity, and scheduled calls must pass it through the authenticated connection; nohmi validates and
+propagates it through run, health, revocation, idempotency, and coalescing records. Only a non-secret
+credential reference, optional host automation identity, trigger evidence, scope, and idempotency
+identity are retained. Manual and otherwise unscheduled invocations leave schedule identity absent.
+Compatible concurrent calls coalesce or resume durable work, while conflicting scopes remain
+separate and report their own honest result.
 
 ## Target versus current implementation
 

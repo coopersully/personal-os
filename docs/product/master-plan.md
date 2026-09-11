@@ -37,24 +37,21 @@ flowchart TD
   A[0. Product contracts & design system] --> B[1. Trust platform]
   B --> C[2. Connector capability & sync platform]
   C --> D[3. Task/commitment material]
-  C --> E[4. Writable mail]
-  C --> F[5. Calendar collaboration]
+  C --> E[5. Writable mail]
+  C --> F[4. Calendar collaboration]
   B --> G[6. Agent policy & review controls]
   D --> H[7. Capacity-aware Today]
   D --> I[8. User Knowledge, goals, motives, habits]
   B --> I
-  C --> K[10. Plaid finance]
-  E --> L[11. Mail rule work]
-  F --> M[12. Schedule assistance]
+  C --> K[9. Finance & Plaid]
+  E --> L[11. Domain-owned assisted workflows]
+  F --> L
+  K --> L
   G --> L
-  G --> M
-  H --> N[13. Overlay, widgets & notifications]
-  K --> P[15. Finance review workflows]
-  L --> Q[16. Full-product hardening & launch]
-  M --> Q
+  H --> N[10. Overlay, widgets & notifications]
+  L --> Q[12. Full-product hardening & launch]
   N --> Q
   I --> Q
-  P --> Q
 ```
 
 ## 4. Detailed epics and completion criteria

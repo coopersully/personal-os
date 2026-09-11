@@ -7,23 +7,39 @@ import urllib.request
 from pathlib import Path
 
 ENDPOINTS = {
-    "app": "https://app.ilo.coopersully.me",
-    "api": "https://api.ilo.coopersully.me/health/ready",
-    "mcp": "https://mcp.ilo.coopersully.me/health/live",
+    "app": "https://nohmi.coopersully.me",
+    "api": "https://nohmi-api.coopersully.me/health/ready",
+    "mcp": "https://nohmi-mcp.coopersully.me/health/live",
 }
+CONTROLLER_STATUS_COMMAND = [
+    "sudo",
+    "-n",
+    "-H",
+    "-u",
+    "nohmi-production",
+    "node",
+    "/Users/nohmi-production/controller/deploy/mac-mini/continuous-cli.mjs",
+    "status",
+    "/Users/nohmi-production/nohmi-production/config.json",
+]
 
 
 def command_json(args):
-    result = subprocess.run(args, text=True, capture_output=True, check=False, timeout=30)
+    """Run a bounded command and decode its JSON without raising collection failures."""
+    try:
+        result = subprocess.run(args, text=True, capture_output=True, check=False, timeout=30)
+    except (subprocess.TimeoutExpired, OSError) as error:
+        return {"collectionError": str(error)}
     if result.returncode:
-        return {"error": result.stderr.strip() or result.stdout.strip()}
+        return {"collectionError": result.stderr.strip() or result.stdout.strip()}
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as error:
-        return {"error": str(error)}
+        return {"collectionError": str(error)}
 
 
 def endpoint(url):
+    """Return a bounded public-health observation for one endpoint."""
     request = urllib.request.Request(url, headers={"User-Agent": "personal-os-deploy-status"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -32,96 +48,91 @@ def endpoint(url):
         return {"url": url, "ok": False, "error": str(error)}
 
 
-def verdict(main_sha, production_status, deploy_runs, endpoints):
+def exact_main_run(main_sha, ci_runs):
+    """Select only the CI push run whose head exactly matches current main."""
+    if not isinstance(ci_runs, list):
+        return {}
+    return next((run for run in ci_runs if run.get("headSha") == main_sha), {})
+
+
+def verdict(main_sha, ci_runs, controller_status, endpoints):
+    """Classify health and release provenance without inferring a private revision."""
     if any(not value.get("ok") for value in endpoints.values()):
         return "unhealthy"
-    latest = deploy_runs[0] if isinstance(deploy_runs, list) and deploy_runs else {}
-    if latest.get("status") in {"queued", "in_progress", "pending", "waiting"}:
+    main_run = exact_main_run(main_sha, ci_runs)
+    if main_run.get("status") in {"queued", "in_progress", "pending", "waiting"}:
         return "in_progress"
-    if latest.get("headSha") == main_sha and latest.get("conclusion") == "failure":
-        return "deploy_failed"
-    state = production_status.get("state")
-    deployed_sha = production_status.get("sha")
-    if state in {"failure", "error"}:
-        return "deploy_failed"
-    if state == "success" and deployed_sha == main_sha:
+    if main_run.get("conclusion") in {
+        "action_required",
+        "cancelled",
+        "failure",
+        "stale",
+        "timed_out",
+    }:
+        return "ci_failed"
+    if controller_status.get("collectionError"):
+        return "healthy_revision_unknown"
+    if controller_status.get("maintenance"):
+        return "maintenance"
+    if controller_status.get("phase") == "blocked" or controller_status.get("error"):
+        return "controller_blocked"
+    deployed_sha = controller_status.get("deployed")
+    if deployed_sha == main_sha and main_run.get("conclusion") == "success":
         return "live"
-    if state == "success" and deployed_sha:
+    if controller_status.get("candidate") == main_sha and controller_status.get("phase") not in {
+        None,
+        "idle",
+        "not-started",
+    }:
+        return "in_progress"
+    if deployed_sha and main_run.get("conclusion") == "success":
         return "not_live"
     return "unknown"
 
 
-def production_commit_status(repo, sha):
-    payload = command_json(["gh", "api", f"repos/{repo}/commits/{sha}/status"])
-    statuses = payload.get("statuses", []) if isinstance(payload, dict) else []
-    match = next((item for item in statuses if item.get("context") == "production/ilo"), {})
-    return {
-        "sha": sha if match else None,
-        "state": match.get("state"),
-        "url": match.get("target_url"),
-        "description": match.get("description"),
-    }
-
-
 def collect(repo):
+    """Collect current GitHub, controller, and public endpoint evidence."""
     repository = command_json(["gh", "repo", "view", repo, "--json", "nameWithOwner,defaultBranchRef"])
     full_name = repository.get("nameWithOwner", repo)
     branch = (repository.get("defaultBranchRef") or {}).get("name", "main")
     commit = command_json(["gh", "api", f"repos/{full_name}/commits/{branch}"])
     sha = commit.get("sha")
     runs_fields = "databaseId,status,conclusion,headSha,url,createdAt,updatedAt,event,displayTitle"
-    deploy_runs = command_json(
-        ["gh", "run", "list", "--repo", full_name, "--workflow", "deploy.yml", "--limit", "10", "--json", runs_fields]
-    )
-    health_runs = command_json(
-        ["gh", "run", "list", "--repo", full_name, "--workflow", "production-health.yml", "--limit", "5", "--json", runs_fields]
-    )
-    incidents = command_json(
+    ci_runs = command_json(
         [
             "gh",
-            "issue",
+            "run",
             "list",
             "--repo",
             full_name,
-            "--state",
-            "open",
-            "--search",
-            '"Production deployment is failing" in:title OR "Production health check is failing" in:title',
+            "--workflow",
+            "ci.yml",
+            "--branch",
+            branch,
+            "--event",
+            "push",
+            "--limit",
+            "20",
             "--json",
-            "number,title,url,updatedAt",
+            runs_fields,
         ]
     )
     endpoint_state = {name: endpoint(url) for name, url in ENDPOINTS.items()}
-    status = production_commit_status(full_name, sha) if sha else {}
-    successful_run = next(
-        (
-            run
-            for run in deploy_runs
-            if run.get("conclusion") == "success" and run.get("headSha")
-        ),
-        None,
-    ) if isinstance(deploy_runs, list) else None
-    if not status.get("state") and successful_run:
-        status = {
-            "state": "success",
-            "sha": successful_run["headSha"],
-            "url": successful_run.get("url"),
-            "description": "Latest successful deploy workflow",
-        }
+    controller_status = command_json(CONTROLLER_STATUS_COMMAND)
     return {
         "repository": full_name,
         "defaultBranch": branch,
         "mainSha": sha,
-        "productionStatus": status,
-        "deployRuns": deploy_runs,
-        "healthRuns": health_runs,
-        "incidents": incidents,
+        "mainCi": exact_main_run(sha, ci_runs),
+        "ciRuns": ci_runs,
+        "controllerStatus": controller_status,
         "endpoints": endpoint_state,
-        "verdict": verdict(sha, status, deploy_runs, endpoint_state),
+        "verdict": verdict(sha, ci_runs, controller_status, endpoint_state),
     }
 
 
 def main(argv):
+    """Render a deployment-status snapshot to stdout or an explicit output path."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default="coopersully/personal-os")
     parser.add_argument("--output")

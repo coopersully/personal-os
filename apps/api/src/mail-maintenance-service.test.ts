@@ -162,6 +162,39 @@ describe("Mail maintenance orchestration edges", () => {
       "questions",
     ],
     [
+      snapshot({
+        threads: [
+          {
+            accountId: "10000000-0000-4000-8000-000000000003",
+            approvedRuleMatched: false,
+            attentionLinked: false,
+            currentDisposition: null,
+            goalLinked: false,
+            id: "20000000-0000-4000-8000-000000000003",
+            messages: [],
+            obligations: [],
+            openQuestions: [
+              { fingerprint: "question-1", id: "question-1", version: 1 },
+              { fingerprint: "question-2", id: "question-2", version: 1 },
+            ],
+            snoozedUntil: null,
+            source: {
+              accountId: "10000000-0000-4000-8000-000000000003",
+              provider: "google" as const,
+              remoteId: "remote-thread-3",
+              revision: "thread-v1",
+              sourceType: "mail_thread" as const,
+            },
+            starred: false,
+            updatedAt: now.toISOString(),
+          },
+        ],
+      }),
+      "completed_with_questions",
+      "Mail maintenance completed with 2 questions for the user.",
+      "questions",
+    ],
+    [
       snapshot({ sourceFreshness: "stale" }),
       "blocked",
       "Mail maintenance is blocked by source or provider-effect evidence.",
@@ -394,6 +427,7 @@ describe("Mail maintenance orchestration edges", () => {
       true,
       "Mail maintenance encountered a temporary internal failure.",
     ],
+    [new AppError("conflict", "Safe conflict."), "conflict", true, "Safe conflict."],
     [
       new AppError("internal_error", "Safe internal failure."),
       "internal_error",

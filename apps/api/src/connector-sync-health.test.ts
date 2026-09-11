@@ -97,6 +97,17 @@ describe("connector sync health policy", () => {
     ).toBe("This connection was interrupted. nohmi will retry automatically.");
   });
 
+  it("keeps an unavailable retry message empty when no safe message was stored", () => {
+    expect(
+      connectionHealthForAccount({
+        nextSyncAt: null,
+        syncError: null,
+        syncRecovery: "automatic",
+        syncStatus: "error",
+      }).message,
+    ).toBeNull();
+  });
+
   it("creates a safe structured application error", () => {
     const failure = classifyConnectorSyncFailure(new Error("raw-provider-canary"), "icloud");
     const error = connectorSyncAppError(failure, accountId, "icloud", now);

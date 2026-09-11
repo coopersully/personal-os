@@ -318,6 +318,38 @@ describe("FloatingMailComposer", () => {
     expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
   });
 
+  it("renders account setup failures without requiring a retry action", async () => {
+    renderComposer({ accounts: [], accountsState: "error" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to the account label when a send-capable account has no email", async () => {
+    vi.spyOn(api, "createMailDraft").mockResolvedValue({ ...draft, accountId: account.accountId });
+    renderComposer({ accounts: [{ ...account, email: null }] });
+
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    expect(screen.getByLabelText("From")).toHaveTextContent("Personal");
+    await userEvent.type(screen.getByLabelText("To"), "you@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+
+    expect(screen.getByText("This sends from Personal to you@example.com.")).toBeVisible();
+  });
+
+  it("uses the available sender when an intent requests an unavailable account", async () => {
+    renderComposer({
+      intent: {
+        accountId: "55555555-5555-4555-8555-555555555555",
+        to: "you@example.com",
+      },
+    });
+
+    expect(await screen.findByLabelText("From")).toHaveTextContent("Personalme@example.com");
+  });
+
   it("continues a later queued autosave after an earlier save fails", async () => {
     let rejectFirst: (reason: Error) => void = () => undefined;
     const firstSave = new Promise<MailDraft>((_resolve, reject) => {

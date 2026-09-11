@@ -536,6 +536,7 @@ describe.sequential("Calendar commitment proposals", () => {
       .insert(calendars)
       .values({
         accountId: mirrorAccount.id,
+        isSelected: false,
         isWritable: true,
         name: "Mirrored calendar",
         provider: "google",
@@ -545,28 +546,48 @@ describe.sequential("Calendar commitment proposals", () => {
       })
       .returning();
     if (!mirrorCalendar) throw new Error("Mirror calendar fixture was not created.");
-    await database.db.insert(calendarEvents).values([
-      {
-        calendarId: remoteCalendarId,
-        endsAt: new Date("2026-08-06T17:00:00.000Z"),
+    const [sourceEvent, mirrorEvent] = await database.db
+      .insert(calendarEvents)
+      .values([
+        {
+          calendarId: remoteCalendarId,
+          endsAt: new Date("2026-08-06T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "mirror-source-one",
+          startsAt: new Date("2026-08-06T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Mirrored appointment",
+          userId,
+        },
+        {
+          calendarId: mirrorCalendar.id,
+          endsAt: new Date("2026-08-06T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "mirror-source-two",
+          startsAt: new Date("2026-08-06T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Mirrored appointment",
+          userId,
+        },
+      ])
+      .returning();
+    if (!sourceEvent || !mirrorEvent) throw new Error("Mirror event fixtures were not created.");
+    const [existingMirrorBlock] = await database.db
+      .insert(calendarEvents)
+      .values({
+        blockMode: "busy",
+        blockSourceEventId: mirrorEvent.id,
+        calendarId: secondRemoteCalendarId,
+        endsAt: mirrorEvent.endsAt,
         provider: "google",
-        remoteEventId: "mirror-source-one",
-        startsAt: new Date("2026-08-06T16:00:00.000Z"),
+        remoteEventId: "existing-mirror-block",
+        startsAt: mirrorEvent.startsAt,
         timezone: "UTC",
-        title: "Mirrored appointment",
+        title: "Busy",
         userId,
-      },
-      {
-        calendarId: mirrorCalendar.id,
-        endsAt: new Date("2026-08-06T17:00:00.000Z"),
-        provider: "google",
-        remoteEventId: "mirror-source-two",
-        startsAt: new Date("2026-08-06T16:00:00.000Z"),
-        timezone: "UTC",
-        title: "Mirrored appointment",
-        userId,
-      },
-    ]);
+      })
+      .returning();
+    if (!existingMirrorBlock) throw new Error("Mirror block fixture was not created.");
 
     const visible = await service.listEvents(userId, {
       from: "2026-08-06T00:00:00.000Z",
@@ -577,6 +598,13 @@ describe.sequential("Calendar commitment proposals", () => {
     expect(visible[0]?.sourceCalendarIds?.sort()).toEqual(
       [remoteCalendarId, mirrorCalendar.id].sort(),
     );
+    expect(visible[0]?.blocks).toEqual([
+      expect.objectContaining({
+        calendarId: secondRemoteCalendarId,
+        eventId: existingMirrorBlock.id,
+        sourceEventId: mirrorEvent.id,
+      }),
+    ]);
     await expect(
       service.createEventBlock(
         visible[0]?.id ?? "",
@@ -587,6 +615,14 @@ describe.sequential("Calendar commitment proposals", () => {
       code: "invalid_request",
       message: "An event cannot block a calendar that already contains this occurrence.",
     });
+    const idempotent = await service.createEventBlock(
+      visible[0]?.id ?? "",
+      { calendarId: secondRemoteCalendarId, mode: "busy" },
+      context(),
+    );
+    expect(idempotent.blocks).toEqual([
+      expect.objectContaining({ eventId: existingMirrorBlock.id, sourceEventId: mirrorEvent.id }),
+    ]);
     expect(gateway.create).not.toHaveBeenCalled();
   });
 

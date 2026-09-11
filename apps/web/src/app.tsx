@@ -3798,6 +3798,8 @@ export function overlapOrbitPoint(
   total: number,
   compact: boolean,
   bounds?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
     eventEndMinute: number;
     eventStartMinute: number;
   },
@@ -3820,9 +3822,13 @@ export function overlapOrbitPoint(
     minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
     18,
   );
-  const eventTop = minuteToTimelinePixels(bounds.eventStartMinute);
-  const minimumY = -eventTop;
-  const maximumY = calendarTimelineHeight - eventTop - eventHeight;
+  const clusterHeight = Math.max(
+    minuteToTimelinePixels(bounds.clusterEndMinute - bounds.clusterStartMinute),
+    48,
+  );
+  const center = minuteToTimelinePixels(bounds.clusterStartMinute) + clusterHeight / 2;
+  const minimumY = eventHeight / 2 - center;
+  const maximumY = calendarTimelineHeight - eventHeight / 2 - center;
   const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
   return { ...point, y: clampedY || 0 };
 }
@@ -3888,6 +3894,8 @@ function TimelineEventItem({
   layout: TimelineEventLayout;
   onDragEnd: () => void;
   orbit?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
     index: number;
     total: number;
   };
@@ -3996,7 +4004,12 @@ function TimelineOverlapCluster({
           key={layout.event.id}
           layout={layout}
           onDragEnd={onDragEnd}
-          orbit={{ index, total: count }}
+          orbit={{
+            clusterEndMinute: cluster.endMinute,
+            clusterStartMinute: cluster.startMinute,
+            index,
+            total: count,
+          }}
           setDraggedEventId={setDraggedEventId}
           setEditor={setEditor}
           timeZone={timeZone}
@@ -4027,6 +4040,8 @@ function TimelineEvent({
   onEdit: () => void;
   onDragEnd: () => void;
   orbit?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
     index: number;
     total: number;
   };
@@ -4046,6 +4061,8 @@ function TimelineEvent({
     : "This event is read-only and can’t be moved.";
   const orbitPoint = orbit
     ? overlapOrbitPoint(orbit.index, orbit.total, compact, {
+        clusterEndMinute: orbit.clusterEndMinute,
+        clusterStartMinute: orbit.clusterStartMinute,
         eventEndMinute: endMinute,
         eventStartMinute: startMinute,
       })
@@ -4124,7 +4141,7 @@ function TimelineEvent({
               ? `calc(${100 / laneCount}% - 4px)`
               : `calc(100% - ${6 + column * 12}px)`,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
-            "--overlap-orbit-width": "calc(100% - 6px)",
+            "--overlap-orbit-width": `calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px)`,
             "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
             "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
             zIndex: 2 + column,
@@ -4243,7 +4260,10 @@ function CalendarEventContextMenu({
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
   const writable = calendar?.isWritable ?? false;
   const destinations = (calendars.data ?? []).filter(
-    (candidate) => candidate.id !== event.calendarId && candidate.isWritable,
+    (candidate) =>
+      !(event.sourceCalendarIds ?? [event.calendarId]).includes(candidate.id) &&
+      !event.blocks.some((eventBlock) => eventBlock.calendarId === candidate.id) &&
+      candidate.isWritable,
   );
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
@@ -7937,6 +7957,12 @@ function EventInspector({
       close();
     },
   });
+  const replaceSourceBlocks = (sourceEventId: string, updatedBlocks: CalendarEvent["blocks"]) => {
+    setBlocks((current) => [
+      ...current.filter((block) => (block.sourceEventId ?? event.id) !== sourceEventId),
+      ...updatedBlocks,
+    ]);
+  };
   const changeBlock = useMutation({
     mutationFn: async (input: {
       blocks: CalendarEvent["blocks"];
@@ -7949,6 +7975,7 @@ function EventInspector({
           calendarId: input.calendarId,
           mode: input.mode,
         });
+        replaceSourceBlocks(event.id, updated.blocks);
         return [{ sourceEventId: event.id, updated }];
       }
       const responses: Array<{ sourceEventId: string; updated: CalendarEvent }> = [];
@@ -7958,6 +7985,7 @@ function EventInspector({
           input.operation === "remove"
             ? await api.deleteEventBlock(sourceEventId, block.eventId)
             : await api.updateEventBlock(sourceEventId, block.eventId, { mode: input.mode });
+        replaceSourceBlocks(sourceEventId, updated.blocks);
         responses.push({ sourceEventId, updated });
       }
       return responses;
@@ -7972,9 +8000,7 @@ function EventInspector({
       ]);
       await invalidateMaterial(queryClient);
     },
-    onError: async () => {
-      await invalidateMaterial(queryClient);
-    },
+    onError: () => invalidateMaterial(queryClient),
   });
   useEffect(() => {
     const handleEscape = (keyboardEvent: KeyboardEvent) => {

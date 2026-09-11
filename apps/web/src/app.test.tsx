@@ -6391,7 +6391,13 @@ describe("ilo web app", () => {
         },
       ],
     }));
-    mocks.deleteEventBlock.mockResolvedValue(event);
+    let duplicateDeleteAttempts = 0;
+    mocks.deleteEventBlock.mockImplementation(async (sourceEventId) => {
+      if (sourceEventId === duplicateBlock.sourceEventId && duplicateDeleteAttempts++ === 0) {
+        throw new Error("Second block delete failed");
+      }
+      return event;
+    });
     const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /^1:00 PM Focus block/ }));
@@ -6435,6 +6441,14 @@ describe("ilo web app", () => {
       duplicateBlock.sourceEventId,
       duplicateBlock.eventId,
     );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Second block delete failed");
+    await browser.click(
+      screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
+    );
+    await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledTimes(3));
+    expect(
+      mocks.deleteEventBlock.mock.calls.filter(([sourceEventId]) => sourceEventId === secondId),
+    ).toHaveLength(1);
     expect(
       within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
         "Readonly Google",
@@ -6634,16 +6648,20 @@ describe("ilo web app", () => {
 
   it("clamps overlap orbits inside the timeline at day boundaries", () => {
     const midnightPoint = overlapOrbitPoint(1, 3, true, {
+      clusterEndMinute: 30,
+      clusterStartMinute: 0,
       eventEndMinute: 30,
       eventStartMinute: 0,
     });
     const endOfDayPoint = overlapOrbitPoint(2, 3, true, {
+      clusterEndMinute: 24 * 60,
+      clusterStartMinute: 24 * 60 - 30,
       eventEndMinute: 24 * 60,
       eventStartMinute: 24 * 60 - 30,
     });
 
-    expect(midnightPoint.y).toBe(0);
-    expect(endOfDayPoint.y).toBe(0);
+    expect(midnightPoint.y).toBe(-12);
+    expect(endOfDayPoint.y).toBe(-12);
   });
 
   it("uses the shared transparent dashed treatment for empty states and quotes", () => {

@@ -146,6 +146,86 @@ describe("Mail stewardship assessment", () => {
     );
   });
 
+  it.each([
+    {
+      accountId: "10000000-0000-4000-8000-000000000002",
+      observedAt: "2026-08-25T14:30:00.000Z",
+      references: ["<source@example.com>"],
+    },
+    {
+      accountId: "10000000-0000-4000-8000-000000000001",
+      observedAt: "2026-08-25T13:30:00.000Z",
+      references: ["<source@example.com>"],
+    },
+    {
+      accountId: "10000000-0000-4000-8000-000000000001",
+      observedAt: "2026-08-25T14:30:00.000Z",
+      references: ["<different@example.com>"],
+    },
+  ])("does not close a reply from unrelated correlation evidence", (outboundMessage) => {
+    const result = assessMail(
+      snapshot(
+        [
+          thread({
+            messages: [
+              {
+                authority: "provider_projected",
+                direction: "inbound",
+                id: "30000000-0000-4000-8000-000000000001",
+                messageId: "<source@example.com>",
+                observedAt: "2026-08-25T14:00:00.000Z",
+                revision: "message-v1",
+              },
+            ],
+            obligations: [
+              {
+                id: "40000000-0000-4000-8000-000000000001",
+                kind: "reply",
+                sourceThreadRevision: "2026-08-25T14:00:00.000Z",
+                state: "open",
+                version: 1,
+              },
+            ],
+          }),
+        ],
+        { outboundMessages: [outboundMessage] },
+      ),
+      MAIL_PLAYBOOK,
+    );
+
+    expect(result.obligationTransitions).toEqual([]);
+  });
+
+  it("fingerprints cross-thread correlation evidence", () => {
+    const source = thread({
+      messages: [
+        {
+          authority: "provider_projected",
+          direction: "inbound",
+          id: "30000000-0000-4000-8000-000000000001",
+          messageId: "<source@example.com>",
+          observedAt: "2026-08-25T14:00:00.000Z",
+          revision: "message-v1",
+        },
+      ],
+    });
+    const first = assessMail(snapshot([source]), MAIL_PLAYBOOK);
+    const second = assessMail(
+      snapshot([source], {
+        outboundMessages: [
+          {
+            accountId: source.accountId,
+            observedAt: "2026-08-25T14:30:00.000Z",
+            references: ["<source@example.com>"],
+          },
+        ],
+      }),
+      MAIL_PLAYBOOK,
+    );
+
+    expect(second.ledgerFingerprint).not.toBe(first.ledgerFingerprint);
+  });
+
   it("preserves a dismissed reply obligation when newer outbound evidence exists", () => {
     const result = assessMail(
       snapshot([

@@ -70,7 +70,7 @@ describe("Mail workspace helpers", () => {
         mailListScopeQuery(scope as never),
       ),
     ).toEqual([
-      {},
+      { mailboxRole: "inbox" },
       { unread: true },
       { starred: true },
       { snoozed: true },

@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { MailDraft, MailRecipientInput, MailSetupAccount } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,6 +39,12 @@ export type ComposeIntent = {
   threadId?: string;
   to?: string;
 };
+
+export function isRetrySafeMailSendFailure(error: unknown): boolean {
+  if (!(error instanceof ApiClientError)) return false;
+  if (typeof error.details !== "object" || error.details === null) return false;
+  return "retrySafe" in error.details && error.details.retrySafe === true;
+}
 
 function recipients(value: string): MailRecipientInput[] {
   return value
@@ -557,6 +564,12 @@ export function FloatingMailComposer({
                     })
                     .catch(async (caught) => {
                       await client.invalidateQueries({ queryKey: ["mail-drafts"] });
+                      if (isRetrySafeMailSendFailure(caught)) {
+                        const drafts = await api.listMailDrafts().catch(() => []);
+                        draftRef.current =
+                          drafts.find((candidate) => candidate.id === confirmation.id) ??
+                          draftRef.current;
+                      }
                       toast.error("Message couldn’t be sent", {
                         description: errorMessage(caught),
                       });

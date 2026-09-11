@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  attentionItems,
   auditEvents,
   calendarAccounts,
   type Database,
@@ -285,9 +286,32 @@ export function createMailStewardshipService({ db, now }: Options) {
           .orderBy(asc(mailRules.id));
         const rulebookVersion = sha256(JSON.stringify(rules));
 
+        const workItemConditions = [eq(mailRuleWorkItems.userId, userId)];
+        if (scope.type !== "all_outstanding") {
+          if (threadIds.length > 0) {
+            workItemConditions.push(inArray(mailRuleWorkItems.threadId, threadIds));
+          }
+        }
+        const workItems =
+          scope.type !== "all_outstanding" && threadIds.length === 0
+            ? []
+            : await tx
+                .select()
+                .from(mailRuleWorkItems)
+                .where(and(...workItemConditions));
+        const effectCounts = workItems.reduce(
+          (counts, item) => {
+            if (item.status === "failed") counts.failed += 1;
+            else if (item.status === "reconcile") counts.reconcile += 1;
+            else if (item.status === "pending" || item.status === "claimed") counts.pending += 1;
+            return counts;
+          },
+          { failed: 0, pending: 0, reconcile: 0 },
+        );
+
         if (threadIds.length === 0) {
           return {
-            effectCounts: { failed: 0, pending: 0, reconcile: 0 },
+            effectCounts,
             now: asOf.toISOString(),
             profileId: approval?.profileId ?? null,
             profileVersion: approval?.profileVersion ?? null,
@@ -330,13 +354,16 @@ export function createMailStewardshipService({ db, now }: Options) {
               eq(mailStewardshipQuestions.status, "open"),
             ),
           );
-        const workItems = await tx
+        const openAttention = await tx
           .select()
-          .from(mailRuleWorkItems)
+          .from(attentionItems)
           .where(
             and(
-              eq(mailRuleWorkItems.userId, userId),
-              inArray(mailRuleWorkItems.threadId, threadIds),
+              eq(attentionItems.userId, userId),
+              eq(attentionItems.domain, "mail"),
+              eq(attentionItems.status, "open"),
+              eq(attentionItems.relatedEntityType, "mail_thread"),
+              inArray(attentionItems.relatedEntityId, threadIds),
             ),
           );
         const obligationByThread = groupRows(obligations, (row) => row.threadId);
@@ -345,14 +372,8 @@ export function createMailStewardshipService({ db, now }: Options) {
         const workByThread = groupRows(workItems, (row) => row.threadId ?? "");
         const dispositionByThread = new Map(dispositions.map((row) => [row.threadId, row]));
         const snoozeByThread = new Map(snoozes.map((row) => [row.threadId, row]));
-        const effectCounts = workItems.reduce(
-          (counts, item) => {
-            if (item.status === "failed") counts.failed += 1;
-            else if (item.status === "reconcile") counts.reconcile += 1;
-            else if (item.status === "pending" || item.status === "claimed") counts.pending += 1;
-            return counts;
-          },
-          { failed: 0, pending: 0, reconcile: 0 },
+        const attentionThreadIds = new Set(
+          openAttention.map((item) => item.relatedEntityId as string),
         );
 
         return {
@@ -373,7 +394,7 @@ export function createMailStewardshipService({ db, now }: Options) {
                 ruleId: item.ruleId,
                 ruleVersion: item.ruleVersion,
               })),
-              attentionLinked: false,
+              attentionLinked: attentionThreadIds.has(thread.id),
               currentDisposition: disposition
                 ? {
                     disposition: disposition.disposition,

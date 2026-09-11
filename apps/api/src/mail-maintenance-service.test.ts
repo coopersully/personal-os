@@ -71,6 +71,10 @@ function harness(
     listDueRunIds: vi.fn().mockResolvedValue([runId]),
     listStepRecords: vi.fn().mockResolvedValue(options?.records ?? []),
     renewClaim: vi.fn().mockResolvedValue(activeRun),
+    restartBlocked: vi.fn().mockImplementation(async () => {
+      activeRun.status = "queued";
+      return activeRun;
+    }),
     settle: vi.fn().mockImplementation(async ({ status }: { status: MaintenanceRun["status"] }) => {
       activeRun.status = status;
       return activeRun;
@@ -125,6 +129,19 @@ function harness(
 }
 
 describe("Mail maintenance orchestration edges", () => {
+  it("restarts a blocked run before collecting fresh evidence", async () => {
+    const { activeRun, service, workspace } = harness([snapshot()]);
+    activeRun.status = "blocked";
+
+    await service.maintain(userId, { scope: { type: "all_outstanding" } });
+
+    expect(workspace.restartBlocked).toHaveBeenCalledWith({
+      expectedRulebookVersion: activeRun.rulebookVersion,
+      runId,
+    });
+    expect(workspace.claim).toHaveBeenCalledWith(runId);
+  });
+
   it("returns the settled run when another worker already owns it", async () => {
     const { activeRun, service } = harness([snapshot()], { claim: false });
     activeRun.settledResult = {

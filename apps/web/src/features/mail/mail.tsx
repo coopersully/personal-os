@@ -93,6 +93,7 @@ export function mailListScopeQuery(scope: MailListScope) {
   if (scope === "starred") return { starred: true };
   if (scope === "snoozed") return { snoozed: true };
   if (scope === "sent") return { mailboxRole: "sent" as const };
+  if (scope === "all") return { mailboxRole: "inbox" as const };
   return {};
 }
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { MailDraft, MailSetupAccount } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -8,7 +9,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
-import { FloatingMailComposer } from "./floating-compose.js";
+import { FloatingMailComposer, isRetrySafeMailSendFailure } from "./floating-compose.js";
 
 const account: MailSetupAccount = {
   accountId: "22222222-2222-4222-8222-222222222222",
@@ -87,6 +88,35 @@ describe("FloatingMailComposer", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("recognizes only explicit retry-safe provider failures", () => {
+    expect(isRetrySafeMailSendFailure(new Error("ambiguous"))).toBe(false);
+    expect(
+      isRetrySafeMailSendFailure(
+        new ApiClientError({ code: "conflict", message: "conflict", status: 409 }),
+      ),
+    ).toBe(false);
+    expect(
+      isRetrySafeMailSendFailure(
+        new ApiClientError({
+          code: "service_unavailable",
+          details: { retrySafe: false },
+          message: "not safe",
+          status: 503,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isRetrySafeMailSendFailure(
+        new ApiClientError({
+          code: "service_unavailable",
+          details: { retrySafe: true },
+          message: "safe",
+          status: 503,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("opens from the end-justified plus action and restores focus on Escape", async () => {
@@ -387,8 +417,26 @@ describe("FloatingMailComposer", () => {
   it("returns a failed send to the editable durable draft", async () => {
     const errorToast = vi.spyOn(toast, "error");
     const updated = { ...draft, updatedAt: "2026-08-28T12:00:04.000Z" };
-    vi.spyOn(api, "updateMailDraft").mockResolvedValue(updated);
-    vi.spyOn(api, "sendMailDraft").mockRejectedValue(new Error("Provider rejected delivery"));
+    const released = { ...updated, updatedAt: "2026-08-28T12:00:05.000Z" };
+    const edited = {
+      ...released,
+      body: "Hello there again",
+      updatedAt: "2026-08-28T12:00:06.000Z",
+    };
+    const update = vi
+      .spyOn(api, "updateMailDraft")
+      .mockResolvedValueOnce(updated)
+      .mockResolvedValueOnce(updated)
+      .mockResolvedValueOnce(edited);
+    vi.spyOn(api, "listMailDrafts").mockResolvedValue([released]);
+    vi.spyOn(api, "sendMailDraft").mockRejectedValue(
+      new ApiClientError({
+        code: "service_unavailable",
+        details: { retrySafe: true },
+        message: "Provider rejected delivery",
+        status: 503,
+      }),
+    );
     renderComposer({ intent: { draft } });
 
     await screen.findByRole("dialog", { name: "New message" });
@@ -406,5 +454,15 @@ describe("FloatingMailComposer", () => {
     );
     expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
+
+    await userEvent.type(screen.getByLabelText("Message"), " again");
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(3), { timeout: 2_000 });
+    expect(update.mock.calls[2]).toEqual([
+      draft.id,
+      expect.objectContaining({
+        body: "Hello there again",
+        expectedUpdatedAt: released.updatedAt,
+      }),
+    ]);
   });
 });

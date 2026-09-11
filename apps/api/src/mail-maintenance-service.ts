@@ -311,12 +311,18 @@ export function createMailMaintenanceService({
       userId: string,
       request: MaintenanceRequest,
     ): Promise<MailMaintenanceDispatchResult> {
-      const run = await workspace.createOrResume(
+      let run = await workspace.createOrResume(
         userId,
         "mail",
         request.scope,
         maintenanceRulebookVersion,
       );
+      if (run.status === "blocked") {
+        run = await workspace.restartBlocked({
+          expectedRulebookVersion: run.rulebookVersion,
+          runId: run.id,
+        });
+      }
       const result = await execute(run.id, userId);
       if (!result) {
         throw new AppError("conflict", "Mail maintenance could not read its current run.");

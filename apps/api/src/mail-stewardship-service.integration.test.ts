@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  attentionItems,
   auditEvents,
   calendarAccounts,
   createDatabaseClient,
@@ -11,6 +12,8 @@ import {
   mailObligations,
   mailReviews,
   mailRuleProposals,
+  mailRules,
+  mailRuleWorkItems,
   mailSnoozes,
   mailStewardshipFeedback,
   mailStewardshipQuestions,
@@ -1071,6 +1074,69 @@ describe.sequential("Mail stewardship service", () => {
       },
       domain: "mail",
       state: "needs_input",
+    });
+  });
+
+  it("keeps orphaned provider effects visible and projects open thread attention", async () => {
+    await database.db.insert(attentionItems).values({
+      domain: "mail",
+      importance: "high",
+      kind: "important",
+      relatedEntityId: threadId,
+      relatedEntityType: "mail_thread",
+      status: "open",
+      summary: "A source-linked Mail exception needs review.",
+      title: "Review Mail exception",
+      userId: principal.userId,
+    });
+    const [rule] = await database.db
+      .insert(mailRules)
+      .values({ name: "Archive receipts", userId: principal.userId })
+      .returning();
+    if (!rule) throw new Error("Mail rule fixture was not created.");
+    await database.db.insert(mailRuleWorkItems).values({
+      accountId,
+      action: { afterDays: 0, mailboxId: null, type: "archive" },
+      actionFingerprint: "a".repeat(64),
+      completedAt: now,
+      dueAt: now,
+      nextAttemptAt: now,
+      profileVersion: 1,
+      remoteThreadId: "orphaned-effect",
+      ruleId: rule.id,
+      ruleVersion: rule.version,
+      sourceUpdatedAt: now,
+      status: "failed",
+      threadId,
+      userId: principal.userId,
+    });
+
+    await expect(
+      service.snapshot(principal.userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      effectCounts: { failed: 1, pending: 0, reconcile: 0 },
+      threads: [expect.objectContaining({ attentionLinked: true, id: threadId })],
+    });
+
+    await database.db
+      .update(mailThreads)
+      .set({ deletedAt: now })
+      .where(eq(mailThreads.id, threadId));
+    await expect(
+      service.snapshot(principal.userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      effectCounts: { failed: 1, pending: 0, reconcile: 0 },
+      threads: [],
+    });
+    await expect(
+      service.snapshot(principal.userId, {
+        entityType: "mail_thread",
+        id: threadId,
+        type: "target",
+      }),
+    ).resolves.toMatchObject({
+      effectCounts: { failed: 0, pending: 0, reconcile: 0 },
+      threads: [],
     });
   });
 

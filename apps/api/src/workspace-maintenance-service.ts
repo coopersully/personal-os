@@ -58,6 +58,11 @@ type RequeueInput = {
   runId: string;
 };
 
+type RestartBlockedInput = {
+  expectedRulebookVersion: string;
+  runId: string;
+};
+
 type CheckpointAndReleaseInput = {
   checkpoint: unknown;
   claimId: string;
@@ -101,6 +106,7 @@ export type WorkspaceMaintenanceService = {
   releaseForRetry: (input: ReleaseForRetryInput) => Promise<MaintenanceRun>;
   renewClaim: (input: RenewClaimInput) => Promise<MaintenanceRun>;
   requeue: (input: RequeueInput) => Promise<MaintenanceRun>;
+  restartBlocked: (input: RestartBlockedInput) => Promise<MaintenanceRun>;
   settle: (input: SettleInput) => Promise<MaintenanceRun>;
 };
 
@@ -576,6 +582,43 @@ export function createWorkspaceMaintenanceService({
         );
       }
       return serializeRun(run);
+    },
+
+    async restartBlocked(input) {
+      return db.transaction(async (transaction) => {
+        const [run] = await transaction
+          .update(workspaceMaintenanceRuns)
+          .set({
+            checkpoint: null,
+            lastSafeError: null,
+            leaseClaimId: null,
+            leaseExpiresAt: null,
+            retryAt: null,
+            settledResult: null,
+            sourceSnapshot: null,
+            status: "queued",
+            updatedAt: sql`NOW()`,
+          })
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, input.runId),
+              eq(workspaceMaintenanceRuns.status, "blocked"),
+              eq(workspaceMaintenanceRuns.rulebookVersion, input.expectedRulebookVersion),
+            ),
+          )
+          .returning();
+        if (!run) {
+          throw new AppError(
+            "conflict",
+            "The blocked workspace maintenance run no longer matches the restart evidence.",
+            { runId: input.runId },
+          );
+        }
+        await transaction
+          .delete(workspaceMaintenanceSteps)
+          .where(eq(workspaceMaintenanceSteps.runId, input.runId));
+        return serializeRun(run);
+      });
     },
 
     async settle(input) {

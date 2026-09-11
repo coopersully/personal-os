@@ -73,6 +73,10 @@ Do not add a redundant link to a self-contained single question. Request a scope
 decision needs more context, multiple items are involved, or the necessary content cannot fit a
 reasonable SMS.
 
+Assume proactive maintenance texts defer during the person's global quiet hours unless `any time`
+is explicitly enabled. Texting revalidates deferred items at release; the workspace must keep the
+underlying question or action state current rather than treating a queued notification as truth.
+
 ## Verify the delivered slice
 
 Test domain decisions, migrated persistence, concurrent claims, retry/recovery, authorization,

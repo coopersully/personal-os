@@ -66,7 +66,7 @@ person deliberately creates a workspace override:
 - whether replies may approve exact reversible proposals when global review bypass is off;
 - useful contextual identifiers with privacy-safe detail, or explicitly expanded message content;
 - first-party review and recovery links when context, length, or multiple items require them; and
-- inherited global quiet hours or a workspace-specific schedule.
+- the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery.
 
 These controls affect communication and routing only. The global review-bypass setting decides
 whether an otherwise policy-authorized reversible action executes directly or enters review.
@@ -87,6 +87,10 @@ queue.
 
 A self-contained single question omits the link unless the person needs more context or the
 necessary content is too long for a reasonable text.
+
+Quiet-hour deferral is enabled by default from 10:00 PM through 8:00 AM in the person's current time
+zone. The person may change the window or select `any time`; deferred maintenance texts are
+revalidated when the window ends, while replies to user-initiated messages remain immediate.
 
 ## Inheritance boundary
 

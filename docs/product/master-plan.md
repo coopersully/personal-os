@@ -284,6 +284,9 @@ flowchart TD
 - Omit links from self-contained single questions. Add a scoped link only when the decision needs
   more context, multiple items are involved, or the necessary content would make the SMS
   unreasonably long.
+- Enable quiet-hour deferral by default from 10:00 PM–8:00 AM in the person's current time zone.
+  Support a custom window and explicit `any time` delivery; revalidate deferred items before release
+  and never delay a direct reply to a user-initiated message.
 - Require normal nohmi authentication for every SMS deep link, retain the exact scoped destination
   across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
   in the URL.

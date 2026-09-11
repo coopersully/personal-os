@@ -70,6 +70,9 @@ conversation message, child run, source evidence, policy, approval, effect, and 
 - An uncertain outbound provider result reconciles before identical content can be sent again.
 - A queued message that crosses the person's local date boundary is rendered again before provider
   submission so relative dates remain accurate.
+- Proactive maintenance delivery respects the default 10:00 PM–8:00 AM local quiet window, a custom
+  window, or explicit `any time` mode. Deferred items are revalidated before release; resolved or
+  expired work is not sent.
 - STOP, disconnect, feature disablement, or workspace SMS disablement stops new sends and routing
   while preserving prior audit and recovery state.
 

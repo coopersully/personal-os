@@ -343,6 +343,9 @@ coherent response without reproducing domain expertise.
   view offers a separate action to open the complete review queue.
 - A self-contained single question omits the link. Texting adds one only when additional context is
   useful, multiple items are involved, or the necessary content is too long for a reasonable SMS.
+- Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
+  texts wait until the window ends unless the person selects `any time`; direct replies to the
+  person's messages remain immediate.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
   authority. After sign-in, the app returns the person to the exact scoped review destination.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized

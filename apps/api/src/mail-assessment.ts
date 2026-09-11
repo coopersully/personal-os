@@ -48,7 +48,7 @@ export type MailAssessmentThreadSnapshot = {
 export type MailAssessmentSnapshot = {
   effectCounts: { failed: number; pending: number; reconcile: number };
   now: string;
-  outboundMessages?: Array<{ observedAt: string; references: string[] }>;
+  outboundMessages?: Array<{ accountId: string; observedAt: string; references: string[] }>;
   profileId: string | null;
   profileVersion: number | null;
   rulebookVersion: string;
@@ -131,6 +131,11 @@ function assessmentIdentity(
     profileVersion: snapshot.profileVersion,
     rulebookVersion: snapshot.rulebookVersion,
     sourceFreshness: snapshot.sourceFreshness,
+    outboundMessages: [...(snapshot.outboundMessages ?? [])].sort((left, right) =>
+      `${left.accountId}:${left.observedAt}:${left.references.join("\u0000")}`.localeCompare(
+        `${right.accountId}:${right.observedAt}:${right.references.join("\u0000")}`,
+      ),
+    ),
     questionFingerprints: [...effectiveQuestionFingerprints].sort(),
     threads: [...snapshot.threads]
       .sort((left, right) => left.id.localeCompare(right.id))
@@ -142,10 +147,11 @@ function assessmentIdentity(
         id: thread.id,
         messages: [...thread.messages]
           .sort((left, right) => left.id.localeCompare(right.id))
-          .map(({ authority, direction, id, observedAt, revision }) => ({
+          .map(({ authority, direction, id, messageId, observedAt, revision }) => ({
             authority,
             direction,
             id,
+            messageId,
             observedAt,
             revision,
           })),
@@ -207,6 +213,7 @@ export function assessMail(
         ) ||
         outboundMessages.some(
           (message) =>
+            message.accountId === thread.accountId &&
             new Date(message.observedAt).getTime() >
               new Date(obligation.sourceThreadRevision).getTime() &&
             message.references.some((reference) => sourceMessageIds.has(reference)),

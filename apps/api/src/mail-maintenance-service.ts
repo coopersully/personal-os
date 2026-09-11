@@ -200,8 +200,11 @@ export function createMailMaintenanceService({
           continue;
         }
         if (step === "publish_review") {
-          const publishSnapshot = await stewardship.snapshot(userId, scope);
-          const publishAssessment = assessMail(publishSnapshot, MAIL_PLAYBOOK);
+          let publishSnapshot = await stewardship.snapshot(userId, scope);
+          let publishAssessment = assessMail(publishSnapshot, MAIL_PLAYBOOK);
+          await stewardship.reconcileAssessment(userId, publishSnapshot, publishAssessment);
+          publishSnapshot = await stewardship.snapshot(userId, scope);
+          publishAssessment = assessMail(publishSnapshot, MAIL_PLAYBOOK);
           const review = await stewardship.createReview(
             userId,
             publishSnapshot,

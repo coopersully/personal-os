@@ -260,20 +260,12 @@ export function createMailStewardshipService({ db, now }: Options) {
             )
           )`);
         }
-        const threads: Array<typeof mailThreads.$inferSelect> = [];
-        let offset = 0;
-        for (;;) {
-          const page = await tx
-            .select()
-            .from(mailThreads)
-            .where(and(...threadConditions))
-            .orderBy(asc(mailThreads.updatedAt), asc(mailThreads.id))
-            .limit(MAIL_MAINTENANCE_THREAD_LIMIT)
-            .offset(offset);
-          threads.push(...page);
-          if (page.length < MAIL_MAINTENANCE_THREAD_LIMIT) break;
-          offset += page.length;
-        }
+        const threads = await tx
+          .select()
+          .from(mailThreads)
+          .where(and(...threadConditions))
+          .orderBy(asc(mailThreads.updatedAt), asc(mailThreads.id))
+          .limit(MAIL_MAINTENANCE_THREAD_LIMIT);
         const threadIds = threads.map((thread) => thread.id);
         const scopedAccountIds = [...new Set(threads.map((thread) => thread.accountId))];
         const accounts = await tx
@@ -473,6 +465,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             ),
           )
           .map((message) => ({
+            accountId: message.accountId,
             observedAt: message.observedAt.toISOString(),
             references: message.references,
           }));

@@ -1239,7 +1239,7 @@ describe.sequential("Mail stewardship service", () => {
     expect(result.details.openQuestions).toHaveLength(100);
   });
 
-  it("processes every bounded all-outstanding snapshot page", async () => {
+  it("bounds each all-outstanding snapshot", async () => {
     await database.db.insert(mailThreads).values(
       Array.from({ length: 501 }, (_, index) => ({
         accountId,
@@ -1259,8 +1259,6 @@ describe.sequential("Mail stewardship service", () => {
       })),
     );
     const result = await service.snapshot(principal.userId, { type: "all_outstanding" });
-    expect(
-      result.threads.filter((thread) => thread.source.remoteId.startsWith("bounded-thread-")),
-    ).toHaveLength(501);
+    expect(result.threads).toHaveLength(500);
   }, 60_000);
 });

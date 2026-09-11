@@ -3810,24 +3810,30 @@ export function overlapOrbitPoint(
     horizontalInset?: "end" | "start";
   },
 ) {
-  let point: { rotation: number; x: number; y: number };
-  if (total === 2) {
-    const offset = compact ? 52 : 76;
-    point = { rotation: index === 0 ? -4 : 4, x: index === 0 ? -offset : offset, y: 0 };
-  } else {
+  const pointAt = (pointIndex: number) => {
+    if (total === 2) {
+      const offset = compact ? 52 : 76;
+      return {
+        rotation: pointIndex === 0 ? -4 : 4,
+        x: pointIndex === 0 ? -offset : offset,
+        y: 0,
+      };
+    }
     const radius = compact ? Math.min(64, 40 + total * 4) : Math.min(92, 58 + total * 6);
-    const angle = Math.PI + (index * Math.PI * 2) / total;
-    point = {
+    const angle = Math.PI + (pointIndex * Math.PI * 2) / total;
+    return {
       rotation: Math.round(Math.sin(angle) * 8),
       x: Math.round(Math.cos(angle) * radius),
       y: Math.round(Math.sin(angle) * radius),
     };
-  }
+  };
+  const point = pointAt(index);
   if (!bounds) return point;
-  if (bounds.horizontalInset === "start" && point.x < 0) {
-    point.x = Math.round(Math.abs(point.x) * 0.35);
-  } else if (bounds.horizontalInset === "end" && point.x > 0) {
-    point.x = -Math.round(point.x * 0.35);
+  const orbitXs = Array.from({ length: total }, (_, pointIndex) => pointAt(pointIndex).x);
+  if (bounds.horizontalInset === "start") {
+    point.x -= Math.min(...orbitXs, 0);
+  } else if (bounds.horizontalInset === "end") {
+    point.x -= Math.max(...orbitXs, 0);
   }
   const eventHeight = Math.max(
     minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
@@ -3841,7 +3847,15 @@ export function overlapOrbitPoint(
   const minimumY = eventHeight / 2 - center;
   const maximumY = calendarTimelineHeight - eventHeight / 2 - center;
   const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
-  return { ...point, y: clampedY || 0 };
+  return { ...point, rotation: clampedY === point.y ? point.rotation : 0, y: clampedY || 0 };
+}
+
+export function overlapPinOffset(clusterStartMinute: number, clusterEndMinute: number) {
+  const clusterTop = minuteToTimelinePixels(clusterStartMinute);
+  const clusterHeight = Math.max(minuteToTimelinePixels(clusterEndMinute - clusterStartMinute), 48);
+  const desiredTop = clusterTop + clusterHeight / 2 - 15;
+  const clampedTop = Math.min(calendarTimelineHeight - 30, Math.max(0, desiredTop));
+  return Math.round(clampedTop - desiredTop);
 }
 
 function TimelineEventCollection({
@@ -3994,10 +4008,13 @@ function TimelineOverlapCluster({
           hoverLeaveTimer.current = null;
         }, 160);
       }}
-      style={{
-        height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
-        top: minuteToTimelinePixels(cluster.startMinute),
-      }}
+      style={
+        {
+          height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
+          top: minuteToTimelinePixels(cluster.startMinute),
+          "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
+        } as CSSProperties
+      }
     >
       <button
         aria-controls={clusterId}

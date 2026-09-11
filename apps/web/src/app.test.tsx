@@ -21,6 +21,7 @@ import {
   formatTimelineTimeRange,
   formatWeatherFreshness,
   overlapOrbitPoint,
+  overlapPinOffset,
   positionTimelineEvents,
   todayTimelineDensity,
   todayTimelineItemRange,
@@ -6687,9 +6688,20 @@ describe("ilo web app", () => {
       horizontalInset: "start",
     });
 
-    expect(midnightPoint.y).toBe(-12);
-    expect(endOfDayPoint.y).toBe(-12);
-    expect(leadingEdgePoint.x).toBe(18);
+    const leadingEdgeCompanion = overlapOrbitPoint(1, 2, true, {
+      clusterEndMinute: 90,
+      clusterStartMinute: 60,
+      eventEndMinute: 90,
+      eventStartMinute: 60,
+      horizontalInset: "start",
+    });
+
+    expect(midnightPoint).toMatchObject({ rotation: 0, y: -12 });
+    expect(endOfDayPoint).toMatchObject({ rotation: 0, y: -12 });
+    expect(leadingEdgePoint.x).toBe(0);
+    expect(leadingEdgeCompanion.x).toBe(104);
+    expect(overlapPinOffset(0, 30)).toBe(0);
+    expect(overlapPinOffset(24 * 60 - 30, 24 * 60)).toBe(-15);
   });
 
   it("uses the shared transparent dashed treatment for empty states and quotes", () => {

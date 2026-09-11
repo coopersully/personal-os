@@ -672,6 +672,70 @@ describe.sequential("Calendar commitment proposals", () => {
       expect.objectContaining({ eventId: existingMirrorBlock.id, sourceEventId: mirrorEvent.id }),
     ]);
     expect(gateway.create).not.toHaveBeenCalled();
+
+    const [concurrentDestination] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: remoteAccountId,
+        isSelected: true,
+        isWritable: true,
+        name: "Concurrent destination",
+        provider: "google",
+        remoteCalendarId: "concurrent-destination",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!concurrentDestination) throw new Error("Concurrent destination fixture was not created.");
+    let releaseProvider: (() => void) | undefined;
+    const providerStarted = new Promise<void>((resolveStarted) => {
+      gateway.create.mockImplementationOnce(async (...args) => {
+        resolveStarted();
+        await new Promise<void>((resolveProvider) => {
+          releaseProvider = resolveProvider;
+        });
+        return {
+          allDay: sourceEvent.allDay,
+          conferenceUrl: null,
+          endsAt: sourceEvent.endsAt,
+          etag: "concurrent-create",
+          location: args[1].location ?? null,
+          notes: args[1].notes ?? null,
+          raw: { id: "concurrent-create" },
+          recurrence: [],
+          remoteEventId: "concurrent-create",
+          startsAt: sourceEvent.startsAt,
+          status: "confirmed",
+          timezone: args[1].timezone ?? sourceEvent.timezone,
+          title: args[1].title,
+        };
+      });
+    });
+    const firstCreate = service.createEventBlock(
+      sourceEvent.id,
+      { calendarId: concurrentDestination.id, mode: "busy" },
+      context(),
+    );
+    await providerStarted;
+    const secondCreate = service.createEventBlock(
+      mirrorEvent.id,
+      { calendarId: concurrentDestination.id, mode: "busy" },
+      context(),
+    );
+    releaseProvider?.();
+    const concurrentResults = await Promise.all([firstCreate, secondCreate]);
+    expect(gateway.create).toHaveBeenCalledTimes(1);
+    expect(concurrentResults[0].blocks).toEqual(concurrentResults[1].blocks);
+    const concurrentBlocks = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.calendarId, concurrentDestination.id),
+          eq(calendarEvents.blockSourceEventId, sourceEvent.id),
+        ),
+      );
+    expect(concurrentBlocks).toHaveLength(1);
   });
 
   it("reports profile drift, weak/flexible evidence, and exact projection duplicates", async () => {

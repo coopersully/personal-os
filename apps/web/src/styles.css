@@ -3414,7 +3414,7 @@ p {
 .calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible)
   .calendar-overlap-cluster__toggle {
   right: calc(50% - 15px);
-  top: calc(50% - 15px);
+  top: calc(50% - 15px + var(--overlap-pin-y, 0px));
 }
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-timeline-event.is-dragging {
   border-radius: 7px;

@@ -164,9 +164,12 @@ to a global policy and migrating Finances onto it are target work, not shipped b
 ## Global defaults and per-workspace controls
 
 The target settings contract is defined in
-[`per-workspace settings`](workspace-settings.md). SMS communication preferences are configured
-globally and inherited by every workspace; the person may deliberately override a workspace when
-it needs different behavior. The configurable preferences are:
+[`per-workspace settings`](workspace-settings.md). A shared notification policy evaluates the work
+item once across SMS, in-app, push, email, and future channels; Texting only decides how an eligible
+intent is delivered over SMS. Shared preferences are configured globally and inherited by every
+workspace; the person may deliberately override a workspace when it needs different behavior.
+SMS-specific controls cannot create eligibility, bypass shared quiet hours or reminder suppression,
+widen authority, or exceed the shared privacy ceiling. The configurable SMS preferences are:
 
 - whether general inbound texts may route work into that workspace;
 - whether maintenance may send SMS at all;

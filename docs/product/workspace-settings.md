@@ -18,7 +18,7 @@ in the first-party app, public API, MCP, an external scheduled task, or the gene
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Global account | Review bypass, notification and Texting defaults, connected agents, security, and privacy defaults | Domain meanings or workspace-specific instructions |
+| Global account | Review bypass, shared notification policy, channel delivery defaults, connected agents, security, and privacy defaults | Domain meanings or workspace-specific instructions |
 | Workspace | Sources, source meanings, maintenance behavior, explicit communication overrides, workspace privacy, and active guidance | Global identity, agent scopes, or hard safety limits |
 | Rule | One explicit reusable condition, action, sources, exceptions, and policy | General personal context or broad prose instructions |
 | User Knowledge | Goals, priorities, relationships, preferences, constraints, habits, and learned patterns | Action authority or external mutation rules |
@@ -58,6 +58,22 @@ while retaining the original instruction, provenance, version, and effective sco
 Guidance applies to all setup, status, maintenance, and advisory surfaces. A channel-specific copy
 must not drift into a separate SMS behavior, and prose guidance cannot bypass scopes, global review
 policy, domain rules, or hard product limits.
+
+## Shared notification policy and channel controls
+
+One notification policy applies across SMS, in-app, push, email, and future channels. It decides
+whether an underlying work item is eligible to notify, why it is eligible, its urgency, quiet-hour
+handling, reminder interval, deduplication identity, material-change behavior, aggregation, and the
+maximum content that may be disclosed. Global defaults may retain deliberate per-workspace
+overrides, but the policy is evaluated once for the work item rather than independently by each
+channel.
+
+Each channel has separate delivery controls for whether it is enabled, its destination or device,
+its supported interaction and links, and the format and detail appropriate to that medium. A
+channel may mute or further reduce an eligible notification, but it cannot make a policy-suppressed
+item eligible, bypass quiet hours or reminder suppression, widen action authority, or disclose more
+than the shared privacy policy permits. Reviews remain the durable source of outstanding work even
+when every delivery channel is disabled.
 
 ## Approved SMS controls
 
@@ -114,8 +130,9 @@ every workspace setting has a global equivalent.
 
 | Setting class | Examples | Behavior |
 | --- | --- | --- |
-| Global-only | Review bypass, Texting connection and consent, account security, connected-agent scopes, and hard privacy limits | One account value; a workspace cannot override it |
-| Global default with workspace override | Maintenance notification mode, quiet hours, inbound SMS routing, reply handling, safe content detail, and first-party links | Inherit the account preference until the person deliberately changes that workspace |
+| Global-only | Review bypass, cross-channel notification evaluation, Texting connection and consent, account security, connected-agent scopes, and hard privacy limits | One account value; a workspace or channel cannot override it |
+| Global default with workspace override | Maintenance notification mode, quiet hours, reminder behavior, safe content ceiling, and aggregation | Inherit the account preference until the person deliberately changes that workspace; evaluation is shared across channels |
+| Channel delivery | SMS, in-app, push, or email enablement, destination/device, supported interaction, link behavior, and medium-appropriate detail | Controls how an eligible notification is delivered; cannot create eligibility or widen privacy and action policy |
 | Workspace-only | Connected sources, source meanings, definition of maintained, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; no global value is implied |
 
 For example, the person could keep the default “send only questions and actions, use privacy-safe
@@ -129,8 +146,8 @@ Settings resolve in this order:
 
 1. hard product and provider limits;
 2. authenticated actor scopes and selected-source access;
-3. global security, privacy, review-bypass, and notification policy;
-4. workspace source, maintenance, privacy, and channel settings;
+3. global security, privacy, review-bypass, and shared notification policy;
+4. workspace source, maintenance, privacy, notification-policy overrides, and channel delivery settings;
 5. active domain rules and versioned maintenance guidance; and
 6. purpose-bound User Knowledge used for interpretation and recommendations.
 
@@ -147,8 +164,6 @@ behavior and must not be presented as shipped.
 
 ## Open design questions
 
-- Whether notification overrides eventually apply independently to every channel or only to SMS
-  initially.
 - Whether maintenance cadence is configured in nohmi, delegated entirely to external schedulers,
   or represented only as an expected-check-in contract.
 - How much rule generation guided setup may propose before requiring a dedicated preview.

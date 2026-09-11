@@ -60,6 +60,12 @@ route general-inbox requests. Read `docs/product/texting-operations.md` and
 `docs/architecture/0006-texting-inbox.md` when a steward sends or receives Texting work. The global
 review-bypass policy applies across channels; workspace settings cannot widen it.
 
+Treat notification eligibility as one shared policy across SMS, in-app, push, email, and future
+channels. Channel-specific controls may choose enablement, destination, supported interaction,
+links, format, and medium-appropriate detail, but they may only suppress delivery: they cannot make
+a suppressed intent eligible, bypass quiet hours or deduplication, widen authority, or exceed the
+shared privacy ceiling.
+
 Publish canonical times and typed entity context rather than pre-rendering `today`, `yesterday`, or
 `tomorrow`. Texting owns conversion into the person's current time zone and final relative-date
 language immediately before delivery.

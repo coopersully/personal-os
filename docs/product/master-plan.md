@@ -273,7 +273,7 @@ flowchart TD
 - Build Tauri desktop integration: compact window, pin/always-on-top, global shortcut, launch-at-login preference, deep links, and safe platform permission handling.
 - Build docked sprite/pet overlay with accessible states, count/error/pending behavior, reduced motion, click/shortcut toggle, privacy-safe compact panel, and no click-through ambiguity.
 - Build platform-specific widget adapters with configurable Today/calendar/reminder/mail/finance/habit blocks and privacy levels: a native Apple WidgetKit extension with shared-container/timeline/push behavior, and a Windows widget-provider/PWA adapter using the platform's Adaptive Card model. Treat widgets as glanceable/deep-link surfaces, not mini-apps.
-- Build unified notification service: device registration, domain rules, quiet hours, escalation, deduplication, local timezone, action deep links, calendar/reminder installs, and audit delivery state.
+- Build a unified notification service whose shared policy evaluates eligibility, urgency, quiet hours, escalation/reminders, deduplication, aggregation, local timezone, and privacy once per work item across SMS, in-app, push, email, and future channels. Give each channel separate enablement, destination/device, supported-interaction, deep-link, format, and detail controls that may suppress delivery but cannot create eligibility, widen authority, or exceed the shared privacy ceiling. Preserve shared work-item identity and per-channel audit delivery state.
 - Evolve the existing hardened SMS transport into the general nohmi inbox: durable inbound claims,
   event-driven processing, work-node answer matching, free-form intent routing, linked
   cross-workspace child intents, concise response composition, and uncertain-send reconciliation.

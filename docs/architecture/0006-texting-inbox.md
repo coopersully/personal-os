@@ -22,7 +22,7 @@ Texting is a shared channel with a domain-owned coordinator, not a core workspac
 - durable inbound claims and event-driven processing;
 - classification into existing-work-node answers, reviews, or new intents;
 - routing and linked child-intent coordination across workspaces;
-- application of global and per-workspace channel settings; and
+- application of SMS-specific delivery controls after shared notification-policy evaluation; and
 - concise response composition over domain-owned results.
 
 Each workspace owns the operation, evidence, policy decision, work nodes, and terminal truth for
@@ -33,10 +33,13 @@ reinterpret a domain result, or grant action authority.
 work, unresolved delivery, and missing replies. Inbound webhook arrival should durably enqueue the
 same coordinator promptly; the maintenance intent and event-driven path share one source of truth.
 
-Workspace stewards publish typed notification intents rather than rendered SMS. They provide the
-minimum useful entity context and canonical times; Texting applies channel policy, converts times
-to the person's current time zone, renders nearby dates relatively, and composes one result, one
-available question or exact review action, and an optional first-party deep link.
+Workspace stewards publish typed notification intents rather than rendered SMS. The shared
+notification service evaluates eligibility, quiet hours, reminders, deduplication, aggregation, and
+privacy once across every channel. Texting then applies SMS enablement, destination, interaction,
+link, format, and detail controls; converts canonical times to the person's current time zone;
+renders nearby dates relatively; and composes one result, one available question or exact review
+action, and an optional first-party deep link. SMS controls may suppress delivery but cannot create
+eligibility, widen authority, or exceed the shared privacy ceiling.
 
 When several questions or actions are available, Texting renders only a brief formal statement
 with the unified Reviews link. It sends one notification across workspaces rather than

@@ -335,9 +335,9 @@ coherent response without reproducing domain expertise.
 - Inbound messages promptly enqueue durable processing; `maintain_texting` is the manual or scheduled
   catch-up and recovery intent for unprocessed messages, interrupted child work, and uncertain
   delivery.
-- Workspace maintenance publishes typed notification intents. Texting applies global and
-  per-workspace policy and sends one outcome sentence, at most one available question or exact
-  review, and a useful first-party link.
+- Workspace maintenance publishes typed notification intents. The shared notification policy
+  decides eligibility once across channels; Texting applies SMS delivery controls and sends one
+  outcome sentence, at most one available question or exact review, and a useful first-party link.
 - Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
   quiet, while a message initiated by the person still receives a response.
 - Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting
@@ -370,9 +370,12 @@ coherent response without reproducing domain expertise.
 - Privacy-safe messages retain the entity context required to answer but omit account numbers,
   message bodies, descriptions, and unnecessary sensitive detail unless explicit channel and
   workspace disclosure preferences allow them.
-- Global communication defaults govern inbound routing, maintenance messages, reply behavior,
-  content detail, links, and quiet hours; each workspace inherits them unless the person creates an
-  explicit override. Workspace maintenance guidance remains domain-specific and applies
+- Global communication defaults govern inbound routing and the shared cross-channel notification
+  policy; each workspace inherits them unless the person creates an explicit override. SMS,
+  in-app, push, email, and future channels separately control enablement, destination, interaction,
+  links, format, and medium-appropriate detail, but cannot create notification eligibility, weaken
+  quiet hours or deduplication, widen authority, or exceed the shared privacy ceiling. Workspace
+  maintenance guidance remains domain-specific and applies
   consistently across app, API, MCP, scheduled, and SMS-initiated runs.
 
 The target product and architecture contracts are
@@ -385,7 +388,7 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
 - The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.
-- Notifications use a per-domain policy, quiet hours, time zone, device selection, escalation/reminder behavior, and source privacy. Calendar/reminder notifications respect platform permissions and are de-duplicated across devices.
+- One notification policy evaluates eligibility, urgency, quiet hours, time zone, escalation/reminder behavior, deduplication, aggregation, and source privacy across SMS, in-app, push, email, and future channels. Each channel separately controls enablement, destination/device, interaction, links, format, and medium-appropriate detail; those controls may suppress delivery but cannot create eligibility, widen authority, or exceed the shared privacy ceiling. Calendar/reminder delivery also respects platform permissions and the shared work-item identity across devices and channels.
 - PWA and native shell preserve core actions offline, visibly queue local changes, reconcile provider material on return, and show conflict/resolution UI.
 
 ## 7. Automation safety and policy engine

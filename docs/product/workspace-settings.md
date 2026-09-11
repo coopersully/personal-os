@@ -44,6 +44,10 @@ while presenting domain-specific controls:
 - **Recovery and data:** connector repair, failed or interrupted runs, exports, retention, and
   deletion or disconnection consequences.
 
+Every question, approval, connector failure, or recovery step that requires the person also appears
+in the unified Settings-owned Reviews queue. Informational and automatically recoverable states stay
+in workspace status or activity rather than creating review noise.
+
 ## Maintenance guidance
 
 The person may add natural-language instructions for each workspace, such as “prioritize

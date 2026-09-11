@@ -179,8 +179,10 @@ flowchart TD
 - Publish a Workspace access surface that names what agents may read, change, propose, and never do in every domain.
 - Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
 - Retain the existing Settings-owned Reviews destination that composes Review and Attention work,
-  and extend it without losing workspace/type filters, honest partial availability, stable
-  pagination, or deep links back to the owning domain.
+  and expand it to every question, approval, connector failure, recovery step, or other item that
+  explicitly requires the person. Preserve workspace/type filters, honest partial availability,
+  stable pagination, and deep links back to the owning domain; exclude informational and
+  automatically recoverable states.
 - Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
 - Give a durable scheduler or queue only to a domain workflow that needs it, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior.
 - Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.
@@ -189,6 +191,8 @@ flowchart TD
 
 - Every connected agent and workspace capability is inspectable and immediately revocable.
 - Review work remains visible until its owning domain reports a terminal outcome.
+- Every supported connector failure or recovery step that needs the person appears in Reviews;
+  automatically recoverable states do not create queue noise.
 - Every durable domain worker is terminally accounted for and stops making provider mutations after authority is revoked.
 
 ### Epic 7 — Capacity-aware Today and daily planning

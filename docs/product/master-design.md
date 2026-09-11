@@ -311,7 +311,12 @@ while retaining domain-owned conditions, actions, validation, and execution.
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/settings?section=reviews` is an account-utility destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
+**Reviews:** `/settings?section=reviews` is the account-wide action queue for work that explicitly
+requires the person: questions, approvals, connector failures, recovery steps, and other Review or
+Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
+action routes to the domain that owns the decision. Informational state, routine success, and work
+nohmi can recover automatically do not enter the queue; setup and access configuration never appear
+as queue work merely because they exist.
 
 nohmi does not require a generic routine scheduler. External automation platforms may schedule a
 small workspace maintenance intent, while durable behavior is domain-owned and must expose

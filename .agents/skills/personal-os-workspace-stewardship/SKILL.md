@@ -69,6 +69,11 @@ only one is open. For multiple questions or actions, let Texting send one cross-
 that several items need review plus the unified Settings-owned Reviews link; do not request one
 message per item or workspace.
 
+Create or reference a unified Reviews item for every question, approval, connector failure,
+recovery step, or other state that explicitly requires the person. Keep informational and
+automatically recoverable conditions in workspace status and activity instead of generating review
+or notification noise.
+
 Do not add a redundant link to a self-contained single question. Request an exact-item or workspace
 link when that decision needs more context or cannot fit a reasonable SMS; multiple items use the
 unified Settings-owned Reviews link.

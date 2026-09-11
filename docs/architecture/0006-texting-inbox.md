@@ -42,6 +42,10 @@ When several questions or actions are available, Texting renders only a brief fo
 with the unified Reviews link. It sends one notification across workspaces rather than
 serializing the queue into SMS or sending one message per item or domain.
 
+Unified Reviews includes questions, approvals, connector failures, recovery steps, and other work
+that requires the person. Informational and automatically recoverable states remain in their owning
+workspace status and activity history rather than producing a review item or proactive SMS.
+
 A self-contained single question has no link. Texting adds an exact-item or domain link only when
 that question needs context or cannot remain a reasonable SMS; multiple items use unified Reviews.
 

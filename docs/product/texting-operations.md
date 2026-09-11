@@ -49,8 +49,9 @@ and owns provider delivery. A workspace never calls Twilio, reads the general SM
 polls for replies directly.
 
 Proactive maintenance SMS is quiet by default unless the run needs an answer or action from the
-person, such as a bounded question, exact review, or recovery step. A routine successful run with
-no requested input sends no text; Texting still answers messages the person initiates.
+person, such as a bounded question, exact review, connector repair, or recovery step. A routine
+successful run or automatically recoverable failure sends no text; Texting still answers messages
+the person initiates.
 
 A maintenance message should normally contain:
 
@@ -73,8 +74,9 @@ and directly answerable by text unless evidence or context is needed to decide s
 
 The multi-item link opens the existing unified Reviews destination at
 `/settings?section=reviews`, where the person can see all outstanding Review and Attention work
-across available workspaces, filter it, and follow each item to its owning domain. A single-item
-context link may still open that exact item or owning workspace.
+across available workspaces—including questions, approvals, connector failures, and recovery
+steps—filter it, and follow each item to its owning domain. A single-item context link may still open
+that exact item or owning workspace.
 
 Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
 approval authority, answer, or sensitive item content; possession of the phone or receipt of the
@@ -197,8 +199,10 @@ explicit local offset.
 The shipped implementation provides verification, consent, conversation history, guarded manual
 reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
 also has the authenticated Settings-owned Reviews destination, which aggregates available Review
-and Attention work across the four workspaces with filters and domain-owned action links. It
-does not yet provide general-inbox intent classification, work-node answers, cross-workspace child
+and Attention work across the four workspaces with filters and domain-owned action links. Current
+sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
+recovery coverage remains target work. Texting does not yet provide general-inbox intent
+classification, work-node answers, cross-workspace child
 intents, event-driven agent dispatch, `maintain_texting`, maintenance notification intents,
 per-workspace SMS controls, global review bypass, or SMS-bound approvals.
 

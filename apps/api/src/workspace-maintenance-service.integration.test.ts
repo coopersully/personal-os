@@ -658,6 +658,10 @@ describe.sequential("workspace maintenance service", () => {
     });
 
     await expect(
+      service.restartBlocked({ expectedRulebookVersion: "rules:v2", runId: run.id }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(
       service.requeue({
         expectedRulebookVersion: "rules:v1",
         expectedStatus: "awaiting_approval",

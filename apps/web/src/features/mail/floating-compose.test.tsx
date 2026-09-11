@@ -465,4 +465,21 @@ describe("FloatingMailComposer", () => {
       }),
     ]);
   });
+
+  it("does not refresh a draft after an ambiguous send failure", async () => {
+    const update = vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
+    const list = vi.spyOn(api, "listMailDrafts");
+    vi.spyOn(api, "sendMailDraft").mockRejectedValue(new Error("Delivery outcome unknown"));
+    renderComposer({ intent: { draft } });
+
+    await screen.findByRole("dialog", { name: "New message" });
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument(),
+    );
+    expect(update).toHaveBeenCalledOnce();
+    expect(list).not.toHaveBeenCalled();
+  });
 });

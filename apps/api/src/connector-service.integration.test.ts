@@ -5047,10 +5047,43 @@ describe.sequential("connector service", () => {
     });
     expect(unifiedEvents.filter((value) => value.remoteEventId === "domain-created")).toEqual([
       expect.objectContaining({
-        blocks: [expect.objectContaining({ eventId: icloudEventBlock.id })],
+        blocks: [
+          expect.objectContaining({
+            eventId: icloudEventBlock.id,
+            sourceEventId: icloudEvent.id,
+          }),
+        ],
         calendarId: primary.id,
       }),
     ]);
+    const canonicalEvent = unifiedEvents.find((value) => value.remoteEventId === "domain-created");
+    const aggregatedBlock = canonicalEvent?.blocks[0];
+    if (!aggregatedBlock?.sourceEventId) {
+      throw new Error("Aggregated block source identity is missing.");
+    }
+    gateway.update.mockResolvedValueOnce(
+      remoteEvent("icloud-event-block", "aggregate-update-etag", "Provider create"),
+    );
+    await expect(
+      calendarService.updateEventBlock(
+        aggregatedBlock.sourceEventId,
+        aggregatedBlock.eventId,
+        { mode: "details" },
+        context,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: icloudEvent.id,
+        blocks: [expect.objectContaining({ mode: "details", sourceEventId: icloudEvent.id })],
+      }),
+    );
+    await expect(
+      calendarService.deleteEventBlock(
+        aggregatedBlock.sourceEventId,
+        aggregatedBlock.eventId,
+        context,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ id: icloudEvent.id, blocks: [] }));
     expect(unifiedEvents.some((value) => value.remoteEventId === mirroredEvent.remoteEventId)).toBe(
       false,
     );

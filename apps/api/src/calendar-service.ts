@@ -186,7 +186,7 @@ function deduplicateEvents(
       normalizedEventTitle(record.title),
       ...occurrence,
     ])}`;
-    const uid = providerIndependentEventUid(record);
+    const uid = record.blockSourceEventId ? null : providerIndependentEventUid(record);
     const uidKey = uid ? `uid:${JSON.stringify([uid, ...occurrence])}` : null;
     const accountId = accountIdByCalendarId.get(record.calendarId);
     const uidCluster = uidKey
@@ -195,7 +195,7 @@ function deduplicateEvents(
           ?.find((candidate) => !candidate.calendarIds.has(record.calendarId))
       : undefined;
     const semanticCluster =
-      record.provider !== "local" && accountId
+      !record.blockSourceEventId && record.provider !== "local" && accountId
         ? clustersByKey
             .get(semanticKey)
             ?.find(
@@ -278,6 +278,7 @@ function eventBlock(record: CalendarEventRecord): CalendarEventBlock {
     eventId: record.id,
     mode: record.blockMode as EventBlockMode,
     provider: record.provider,
+    sourceEventId: record.blockSourceEventId as string,
     updatedAt: record.updatedAt.toISOString(),
   };
 }

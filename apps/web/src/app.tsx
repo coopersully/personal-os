@@ -3673,7 +3673,7 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     if (event.button !== 0 || event.pointerType === "touch") return;
     if (
       (event.target as Element).closest(
-        ".calendar-timeline-event, .calendar-overlap-cluster__toggle",
+        ".calendar-timeline-event, .calendar-overlap-cluster__toggle, .calendar-overlap-cluster__hit-area",
       )
     ) {
       return;
@@ -3782,11 +3782,12 @@ function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): Eve
   });
 }
 
-function overlapOrbitPoint(index: number, total: number) {
+function overlapOrbitPoint(index: number, total: number, compact: boolean) {
   if (total === 2) {
-    return { rotation: index === 0 ? -4 : 4, x: index === 0 ? -76 : 76, y: 0 };
+    const offset = compact ? 52 : 76;
+    return { rotation: index === 0 ? -4 : 4, x: index === 0 ? -offset : offset, y: 0 };
   }
-  const radius = Math.min(92, 58 + total * 6);
+  const radius = compact ? Math.min(64, 40 + total * 4) : Math.min(92, 58 + total * 6);
   const angle = Math.PI + (index * Math.PI * 2) / total;
   return {
     rotation: Math.round(Math.sin(angle) * 8),
@@ -3908,7 +3909,7 @@ function TimelineOverlapCluster({
       className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
       id={clusterId}
       onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
+        if (event.key !== "Escape" || !expanded) return;
         event.stopPropagation();
         setExpanded(false);
         toggle.current?.focus();
@@ -3990,7 +3991,7 @@ function TimelineEvent({
   const blockedMessage = calendar
     ? `${calendar.name} is read-only, so this event can’t be moved.`
     : "This event is read-only and can’t be moved.";
-  const orbitPoint = orbit ? overlapOrbitPoint(orbit.index, orbit.total) : null;
+  const orbitPoint = orbit ? overlapOrbitPoint(orbit.index, orbit.total, compact) : null;
   const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
@@ -4327,7 +4328,7 @@ function positionWeekAllDayEvents(
   });
   const rowEnds: number[] = [];
   return [...spans.values()]
-    .toSorted(
+    .sort(
       (left, right) =>
         left.startColumn - right.startColumn ||
         right.endColumn - right.startColumn - (left.endColumn - left.startColumn),
@@ -4390,12 +4391,27 @@ function WeekAllDayEvents({
       {layouts.map((layout) => {
         const startIndex = layout.startColumn - 1;
         const endIndex = layout.endColumn - 2;
+        const startDay = days[startIndex] as LocalDate;
+        const endDay = days[endIndex] as LocalDate;
+        const accessibleStart = formatLocalDate(startDay, {
+          day: "numeric",
+          month: "long",
+          weekday: "long",
+        });
+        const accessibleEnd = formatLocalDate(endDay, {
+          day: "numeric",
+          month: "long",
+          weekday: "long",
+        });
+        const accessibleDate = sameLocalDate(startDay, endDay)
+          ? accessibleStart
+          : `${accessibleStart} through ${accessibleEnd}`;
         const eventStyle = calendarEventColorStyle(
           calendarsById.get(layout.event.calendarId)?.color,
         );
         return (
           <button
-            aria-label={`All day ${layout.event.title}`}
+            aria-label={`All day ${layout.event.title}, ${accessibleDate}`}
             className="week-all-day-event"
             key={layout.event.id}
             onClick={() => setEditor({ event: layout.event, kind: "event" })}
@@ -7401,7 +7417,10 @@ export function TodayEventCard({
       >
         <EventCardContent>
           <DropdownMenuTrigger asChild>
-            <EventCardPrimaryAction aria-label={`${eventLabel}. Open quick actions`}>
+            <EventCardPrimaryAction
+              aria-label={`${eventLabel}. Open quick actions`}
+              className="today-timeline__event-action"
+            >
               <EventCardBody>
                 <EventCardTitle>
                   <span className="min-w-0 truncate">{event.title}</span>
@@ -7510,7 +7529,11 @@ export function TodayTaskTimelineCard({
       style={layoutStyle}
     >
       <EventCardContent>
-        <EventCardPrimaryAction aria-label={`Open task ${task.title}`} onClick={onEdit}>
+        <EventCardPrimaryAction
+          aria-label={`Open task ${task.title}`}
+          className="today-timeline__event-action"
+          onClick={onEdit}
+        >
           <EventCardBody>
             <EventCardTitle>
               <ListChecksIcon aria-hidden="true" />
@@ -7859,6 +7882,7 @@ function EventInspector({
             calendarId: string;
             mode: "busy" | "details";
             operation: "delete" | "update";
+            sourceEventId: string | undefined;
           },
     ) => {
       if (input.operation === "create") {
@@ -7867,9 +7891,10 @@ function EventInspector({
           mode: input.mode,
         });
       }
+      const sourceEventId = input.sourceEventId ?? event.id;
       return input.operation === "delete"
-        ? api.deleteEventBlock(event.id, input.blockId)
-        : api.updateEventBlock(event.id, input.blockId, { mode: input.mode });
+        ? api.deleteEventBlock(sourceEventId, input.blockId)
+        : api.updateEventBlock(sourceEventId, input.blockId, { mode: input.mode });
     },
     onSuccess: async (updated) => {
       setBlocks(updated.blocks);
@@ -7946,6 +7971,7 @@ function EventInspector({
                             calendarId,
                             mode: "details",
                             operation: "update",
+                            sourceEventId: block.sourceEventId,
                           }
                         : { calendarId, mode: "details", operation: "create" },
                     )
@@ -7956,6 +7982,7 @@ function EventInspector({
                       calendarId: block.calendarId,
                       mode: block.mode,
                       operation: "delete",
+                      sourceEventId: block.sourceEventId,
                     })
                   }
                 />
@@ -7981,6 +8008,7 @@ function EventInspector({
                             calendarId,
                             mode: "busy",
                             operation: "update",
+                            sourceEventId: block.sourceEventId,
                           }
                         : { calendarId, mode: "busy", operation: "create" },
                     )
@@ -7991,6 +8019,7 @@ function EventInspector({
                       calendarId: block.calendarId,
                       mode: block.mode,
                       operation: "delete",
+                      sourceEventId: block.sourceEventId,
                     })
                   }
                 />

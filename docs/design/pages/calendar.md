@@ -26,7 +26,9 @@ event without losing the shape of the day.
   only across different calendars and different connected accounts when their
   Unicode-normalized, whitespace-collapsed, case-insensitive title and exact
   occurrence fields agree. Events within one calendar, and every local event,
-  remain distinct under that fallback. The first visible projection supplies
+  remain distinct under that fallback. Managed busy/detail blocks are excluded
+  from both mirror identities so separate source commitments remain actionable.
+  The first visible projection supplies
   the canonical event while source associations remain available for linked
   block behavior. This conservative display rule does not merge provider
   records, and two independently created cross-account events with identical

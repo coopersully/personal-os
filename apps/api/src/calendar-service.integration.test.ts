@@ -387,6 +387,110 @@ describe.sequential("Calendar commitment proposals", () => {
     ]);
   });
 
+  it("keeps same-time managed busy blocks from different sources distinct", async () => {
+    const [otherAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Other Google",
+        provider: "google",
+        providerAccountId: "other-google-blocks",
+        userId,
+      })
+      .returning();
+    if (!otherAccount) throw new Error("Other account fixture was not created.");
+    const [hiddenSourceCalendar, otherDestinationCalendar] = await database.db
+      .insert(calendars)
+      .values([
+        {
+          accountId: otherAccount.id,
+          isSelected: false,
+          isWritable: true,
+          name: "Hidden block sources",
+          provider: "google",
+          remoteCalendarId: "hidden-block-sources",
+          timezone: "UTC",
+          userId,
+        },
+        {
+          accountId: otherAccount.id,
+          isWritable: true,
+          name: "Other destination",
+          provider: "google",
+          remoteCalendarId: "other-block-destination",
+          timezone: "UTC",
+          userId,
+        },
+      ])
+      .returning();
+    if (!hiddenSourceCalendar || !otherDestinationCalendar) {
+      throw new Error("Managed block calendar fixtures were not created.");
+    }
+    const sources = await database.db
+      .insert(calendarEvents)
+      .values([
+        {
+          calendarId: hiddenSourceCalendar.id,
+          endsAt: new Date("2026-08-05T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "hidden-source-one",
+          startsAt: new Date("2026-08-05T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Source one",
+          userId,
+        },
+        {
+          calendarId: hiddenSourceCalendar.id,
+          endsAt: new Date("2026-08-05T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "hidden-source-two",
+          startsAt: new Date("2026-08-05T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Source two",
+          userId,
+        },
+      ])
+      .returning();
+    const firstSource = sources[0];
+    const secondSource = sources[1];
+    if (!firstSource || !secondSource) throw new Error("Managed block sources were not created.");
+    await database.db.insert(calendarEvents).values([
+      {
+        blockMode: "busy",
+        blockSourceEventId: firstSource.id,
+        calendarId: remoteCalendarId,
+        endsAt: firstSource.endsAt,
+        provider: "google",
+        remoteEventId: "managed-busy-one",
+        startsAt: firstSource.startsAt,
+        timezone: "UTC",
+        title: "Busy",
+        userId,
+      },
+      {
+        blockMode: "busy",
+        blockSourceEventId: secondSource.id,
+        calendarId: otherDestinationCalendar.id,
+        endsAt: secondSource.endsAt,
+        provider: "google",
+        remoteEventId: "managed-busy-two",
+        startsAt: secondSource.startsAt,
+        timezone: "UTC",
+        title: "Busy",
+        userId,
+      },
+    ]);
+
+    const visibleBlocks = await service.listEvents(userId, {
+      from: "2026-08-05T00:00:00.000Z",
+      to: "2026-08-06T00:00:00.000Z",
+    });
+
+    expect(visibleBlocks.map((event) => event.remoteEventId).sort()).toEqual([
+      "managed-busy-one",
+      "managed-busy-two",
+    ]);
+  });
+
   it("reports profile drift, weak/flexible evidence, and exact projection duplicates", async () => {
     await expect(
       service.createEvent(

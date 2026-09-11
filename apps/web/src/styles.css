@@ -1867,7 +1867,7 @@ p {
   height: 100%;
   padding: 0;
 }
-.today-timeline__event [data-event-card-primary-action] {
+.today-timeline__event-action {
   align-items: flex-start;
   border-radius: inherit;
   height: 100%;
@@ -1887,7 +1887,7 @@ p {
 .today-timeline__event[data-density="compact"] {
   border-radius: 0.375rem;
 }
-.today-timeline__event[data-density="compact"] [data-event-card-primary-action] {
+.today-timeline__event[data-density="compact"] .today-timeline__event-action {
   padding: 0.25rem;
 }
 .today-timeline__event[data-density="compact"] [data-slot="event-card-description"],
@@ -3245,6 +3245,7 @@ p {
   .calendar-timeline-event.is-move-blocked {
     animation: none;
   }
+  .calendar-timeline-event,
   .calendar-overlap-cluster__toggle,
   .calendar-overlap-cluster .calendar-timeline-event {
     transition: none;
@@ -3404,11 +3405,6 @@ p {
   pointer-events: none;
   position: absolute;
   z-index: 0;
-}
-.calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-overlap-cluster__hit-area,
-.calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible)
-  .calendar-overlap-cluster__hit-area {
-  pointer-events: auto;
 }
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-timeline-event,
 .calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible) .calendar-timeline-event {
@@ -3574,7 +3570,7 @@ p {
   color: var(--calendar-event-foreground);
   cursor: pointer;
   display: flex;
-  font-size: 7px;
+  font-size: 14px;
   font-weight: 600;
   gap: 4px;
   height: 20px;
@@ -3583,6 +3579,7 @@ p {
   padding: 3px 9px;
   position: relative;
   text-align: left;
+  line-height: 1;
   z-index: 2;
 }
 .week-all-day-event::before,

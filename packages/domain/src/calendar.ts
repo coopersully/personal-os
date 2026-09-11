@@ -222,6 +222,7 @@ export const calendarEventBlockSchema = z.object({
   eventId: idSchema,
   mode: eventBlockModeSchema,
   provider: calendarProviderSchema,
+  sourceEventId: idSchema.optional(),
   updatedAt: isoDateTimeSchema,
 });
 export type CalendarEventBlock = z.infer<typeof calendarEventBlockSchema>;

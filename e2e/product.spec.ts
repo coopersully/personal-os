@@ -196,12 +196,20 @@ test("a person and an agent share one reminder and calendar surface", async ({
       textAlign: actionStyle.textAlign,
     };
   });
-  expect(todayEventLayout.paddingLeft).toBe(todayEventLayout.paddingTop);
-  expect(todayEventLayout.paddingRight).toBe(todayEventLayout.paddingBottom);
+  expect(todayEventLayout.paddingLeft).toBe(todayEventLayout.paddingRight);
+  expect(todayEventLayout.paddingTop).toBe(todayEventLayout.paddingBottom);
   expect(Number.parseFloat(todayEventLayout.paddingTop)).toBeGreaterThan(0);
   expect(todayEventLayout.alignItems).toBe("flex-start");
   expect(todayEventLayout.bodyJustifyContent).toBe("flex-start");
   expect(todayEventLayout.textAlign).toBe("left");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Event" }).click();
+  await page.getByLabel("Event", { exact: true }).fill(`All-day ${eventTitle}`);
+  await page.getByLabel("Starts").fill(`${planningDate}T00:00`);
+  await page.getByLabel("Ends").fill(`${planningDate}T23:59`);
+  await page.getByLabel("All day").check();
+  await page.getByRole("button", { name: "Create event" }).click();
+  await expect(page.getByText(`All-day ${eventTitle}`)).toBeVisible();
   const todayLayout = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
@@ -253,6 +261,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
       !midnightLabel ||
       !todayHeader ||
       !todayFadeSurface ||
+      !allDayEvent ||
       !todayTimeline ||
       otherHeaders.length < 2 ||
       otherTimelines.length < 2
@@ -260,8 +269,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
       throw new Error("Week calendar did not render comparable days.");
     }
     const fadeStyle = getComputedStyle(todayFadeSurface, "::after");
-    const allDayEventStyle = allDayEvent ? getComputedStyle(allDayEvent) : null;
-    const allDayEventBounds = allDayEvent?.getBoundingClientRect();
+    const allDayEventStyle = getComputedStyle(allDayEvent);
+    const allDayEventBounds = allDayEvent.getBoundingClientRect();
     const allDaySurfaceBounds = todayFadeSurface.getBoundingClientRect();
     const navigationStyle = getComputedStyle(navigation);
     const weekHeaderGrid = navigation.querySelector<HTMLElement>(
@@ -269,11 +278,10 @@ test("a person and an agent share one reminder and calendar surface", async ({
     );
     const allDayCorner = navigation.querySelector<HTMLElement>(".week-all-day-corner");
     return {
-      allDayEventLeftInset: allDayEventBounds && allDayEventBounds.left - allDaySurfaceBounds.left,
-      allDayEventRightInset:
-        allDayEventBounds && allDaySurfaceBounds.right - allDayEventBounds.right,
-      allDayEventZIndex: allDayEvent ? getComputedStyle(allDayEvent).zIndex : null,
-      allDayNotchRadius: allDayEventStyle?.getPropertyValue("--week-all-day-notch-size").trim(),
+      allDayEventLeftInset: allDayEventBounds.left - allDaySurfaceBounds.left,
+      allDayEventRightInset: allDaySurfaceBounds.right - allDayEventBounds.right,
+      allDayEventZIndex: allDayEventStyle.zIndex,
+      allDayNotchRadius: allDayEventStyle.getPropertyValue("--week-all-day-notch-size").trim(),
       calendarLine: getComputedStyle(todayTimeline).getPropertyValue("--line").trim(),
       columnGap: getComputedStyle(grid).columnGap,
       fadeBackdropFilter: fadeStyle.backdropFilter,
@@ -282,7 +290,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
       fadeSurfaceBackground: getComputedStyle(todayFadeSurface).backgroundColor,
       fadeSurfaceTop: todayFadeSurface.getBoundingClientRect().top,
       fadeZIndex: fadeStyle.zIndex,
-      foregroundEventOpacity: allDayEventStyle?.opacity ?? null,
+      foregroundEventOpacity: allDayEventStyle.opacity,
       headerBottom: todayHeader.getBoundingClientRect().bottom,
       headerOpacity: getComputedStyle(todayHeader).opacity,
       hourRule: getComputedStyle(todayTimeline).getPropertyValue("--calendar-hour-rule").trim(),
@@ -320,19 +328,12 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(weekGridLayout.gutterFadeBottom).toBe(0);
   expect(weekGridLayout.fadeZIndex).toBe("0");
   expect(weekGridLayout.headerOpacity).toBe("1");
-  if (weekGridLayout.foregroundEventOpacity) {
-    expect(weekGridLayout.foregroundEventOpacity).toBe("1");
-  }
-  if (weekGridLayout.allDayEventZIndex) {
-    expect(weekGridLayout.allDayEventZIndex).toBe("2");
-    expect(weekGridLayout.allDayNotchRadius).toBe("8px");
-    expect(weekGridLayout.allDayEventLeftInset).toBeCloseTo(
-      weekGridLayout.allDayEventRightInset as number,
-      0,
-    );
-    expect(weekGridLayout.allDayEventLeftInset).toBeGreaterThanOrEqual(3);
-    expect(weekGridLayout.allDayEventLeftInset).toBeLessThanOrEqual(5);
-  }
+  expect(weekGridLayout.foregroundEventOpacity).toBe("1");
+  expect(weekGridLayout.allDayEventZIndex).toBe("2");
+  expect(weekGridLayout.allDayNotchRadius).toBe("8px");
+  expect(weekGridLayout.allDayEventLeftInset).toBeCloseTo(weekGridLayout.allDayEventRightInset, 0);
+  expect(weekGridLayout.allDayEventLeftInset).toBeGreaterThanOrEqual(3);
+  expect(weekGridLayout.allDayEventLeftInset).toBeLessThanOrEqual(5);
   expect(weekGridLayout.hourRule).not.toBe(weekGridLayout.calendarLine);
   expect(weekGridLayout.midnightLabelTop).toBeGreaterThanOrEqual(weekGridLayout.navigationBottom);
   expect(weekGridLayout.timelineBorderLeft).toBe("0px");

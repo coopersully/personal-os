@@ -6453,6 +6453,19 @@ describe("ilo web app", () => {
     expect(renderedEvents[0]).toHaveStyle({ gridColumn: "2 / 5" });
   });
 
+  it("collapses the all-day lane when the week has no all-day events", async () => {
+    mocks.listEvents.mockResolvedValue([event]);
+
+    const view = setup("/calendar?date=2026-07-13&view=week");
+    await screen.findByRole("button", { name: "1:00 PM Focus block" });
+
+    const layer = view.container.querySelector(".week-all-day-layer");
+    expect(layer).toHaveClass("is-empty");
+    expect((layer as HTMLElement).style.gridTemplateRows).toBe("0px");
+    expect((layer as HTMLElement).style.paddingBottom).toBe("0px");
+    expect(within(layer as HTMLElement).queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("spreads overlapping timeline events as full cards over a stable hit area", async () => {
     const overlappingEvent = {
       ...event,

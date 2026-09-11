@@ -4362,13 +4362,15 @@ function WeekAllDayEvents({
   setEditor: (editor: Editor) => void;
   today: LocalDate;
 }) {
-  const rowCount = Math.max(1, ...layouts.map((layout) => layout.row));
+  const rowCount = Math.max(0, ...layouts.map((layout) => layout.row));
+  const isEmpty = rowCount === 0;
   return (
     <div
-      className="week-all-day-layer"
+      className={`week-all-day-layer${isEmpty ? " is-empty" : ""}`}
       style={{
         gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${rowCount}, 23px)`,
+        gridTemplateRows: isEmpty ? "0px" : `repeat(${rowCount}, 23px)`,
+        paddingBottom: isEmpty ? 0 : undefined,
       }}
     >
       {days.map((day, dayIndex) => (
@@ -4380,7 +4382,7 @@ function WeekAllDayEvents({
             {
               "--week-day-surface": weekDaySurface(dayIndex, sameLocalDate(day, today)),
               gridColumn: dayIndex + 1,
-              gridRow: `1 / span ${rowCount}`,
+              gridRow: `1 / span ${Math.max(rowCount, 1)}`,
             } as CSSProperties
           }
         />

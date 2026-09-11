@@ -20,6 +20,17 @@ event without losing the shape of the day.
 - All-day events use compact rounded notched bars. A multi-day event is one
   continuous bar spanning its occupied day columns, while overlapping events
   stack into separate all-day lanes.
+- Visible event feeds collapse provider mirrors into one canonical occurrence.
+  A shared iCalendar UID plus the exact start, end, and all-day state is the
+  preferred identity. When no shared UID exists, non-local events may match
+  only across different calendars and different connected accounts when their
+  Unicode-normalized, whitespace-collapsed, case-insensitive title and exact
+  occurrence fields agree. Events within one calendar, and every local event,
+  remain distinct under that fallback. The first visible projection supplies
+  the canonical event while source associations remain available for linked
+  block behavior. This conservative display rule does not merge provider
+  records, and two independently created cross-account events with identical
+  fallback fields remain a known false-positive boundary.
 - The persistent Calendar orientation occupies the shared workspace app bar's
   `identity` slot beside the workspace switcher, with Today and the view
   selector in `context`. The primary bar remains one vertically centred 52 px

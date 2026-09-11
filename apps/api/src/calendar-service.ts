@@ -567,8 +567,11 @@ export function createCalendarService({
       .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
   }
 
-  async function findMirrorEvents(source: CalendarEventRecord): Promise<CalendarEventRecord[]> {
-    const candidates = await db
+  async function findMirrorEvents(
+    source: CalendarEventRecord,
+    executor: Pick<Database, "select"> = db,
+  ): Promise<CalendarEventRecord[]> {
+    const candidates = await executor
       .select()
       .from(calendarEvents)
       .where(
@@ -582,7 +585,7 @@ export function createCalendarService({
         ),
       );
     const candidateCalendarIds = [...new Set(candidates.map((candidate) => candidate.calendarId))];
-    const candidateCalendars = await db
+    const candidateCalendars = await executor
       .select()
       .from(calendars)
       .where(
@@ -1009,7 +1012,7 @@ export function createCalendarService({
         await transaction.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
         );
-        const mirrorEvents = await findMirrorEvents(source);
+        const mirrorEvents = await findMirrorEvents(source, transaction);
         mirrorCalendarIds = new Set(mirrorEvents.map((event) => event.calendarId));
         if (mirrorCalendarIds.has(destination.id)) {
           throw new AppError(

@@ -6702,9 +6702,9 @@ describe("ilo web app", () => {
       horizontalInset: "start",
     });
 
-    expect(midnightPoint).toMatchObject({ rotation: 0, y: -12 });
-    expect(endOfDayPoint).toMatchObject({ rotation: 0, y: -12 });
-    expect(midnightPairPoint.rotation).toBe(0);
+    expect(midnightPoint).toMatchObject({ rotation: -7, y: -2 });
+    expect(endOfDayPoint).toMatchObject({ rotation: 7, y: -22 });
+    expect(midnightPairPoint).toMatchObject({ rotation: -4, y: 0 });
     expect(leadingEdgePoint.x).toBe(0);
     expect(leadingEdgeCompanion.x).toBe(104);
     expect(overlapPinOffset(0, 30)).toBe(0);

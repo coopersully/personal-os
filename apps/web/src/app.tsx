@@ -3839,19 +3839,21 @@ export function overlapOrbitPoint(
     minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
     18,
   );
+  const maximumEventWidth = compact ? 160 : 320;
+  const rotationRadians = (Math.abs(point.rotation) * Math.PI) / 180;
+  const transformedEventHeight =
+    eventHeight * Math.cos(rotationRadians) + maximumEventWidth * Math.sin(rotationRadians);
   const clusterHeight = Math.max(
     minuteToTimelinePixels(bounds.clusterEndMinute - bounds.clusterStartMinute),
     48,
   );
   const center = minuteToTimelinePixels(bounds.clusterStartMinute) + clusterHeight / 2;
-  const minimumY = eventHeight / 2 - center;
-  const maximumY = calendarTimelineHeight - eventHeight / 2 - center;
+  const minimumY = transformedEventHeight / 2 - center;
+  const maximumY = calendarTimelineHeight - transformedEventHeight / 2 - center;
   const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
-  const rotationMayCrossDayEdge =
-    bounds.eventStartMinute < 60 || bounds.eventEndMinute > calendarMinutesPerDay - 60;
   return {
     ...point,
-    rotation: clampedY === point.y && !rotationMayCrossDayEdge ? point.rotation : 0,
+    rotation: point.rotation,
     y: clampedY || 0,
   };
 }
@@ -4184,7 +4186,9 @@ function TimelineEvent({
               ? `calc(${100 / laneCount}% - 4px)`
               : `calc(100% - ${6 + column * 12}px)`,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
-            "--overlap-orbit-width": `${compact ? "max(88px, " : ""}calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px)${compact ? ")" : ""}`,
+            "--overlap-orbit-width": compact
+              ? `clamp(88px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px), 160px)`
+              : `min(320px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px))`,
             "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
             "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
             zIndex: 2 + column,

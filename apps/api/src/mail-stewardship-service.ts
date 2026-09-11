@@ -38,7 +38,7 @@ import type {
   UpdateMailObligationInput,
 } from "@personal-os/domain";
 import { mailDispositionKindSchema, mailStatusSchema } from "@personal-os/domain";
-import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -48,6 +48,7 @@ import type { Principal } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type Options = { db: Database; now: () => Date };
+export const MAIL_MAINTENANCE_THREAD_LIMIT = 500;
 
 function serializeObligation(row: typeof mailObligations.$inferSelect): MailObligation {
   return {
@@ -210,10 +211,76 @@ export function createMailStewardshipService({ db, now }: Options) {
     return db.transaction(
       async (tx) => {
         const asOf = now();
+        const threadConditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
+        if (scope.type === "target") {
+          if (scope.entityType !== "mail_thread") {
+            throw new AppError(
+              "invalid_request",
+              "Mail maintenance targets must identify a mail_thread.",
+            );
+          }
+          threadConditions.push(eq(mailThreads.id, scope.id));
+        } else if (scope.type === "window") {
+          threadConditions.push(
+            gte(mailThreads.receivedAt, new Date(`${scope.start}T00:00:00.000Z`)),
+          );
+          threadConditions.push(
+            lte(mailThreads.receivedAt, new Date(`${scope.end}T23:59:59.999Z`)),
+          );
+        } else {
+          threadConditions.push(sql`(
+            (${mailThreads.starred} = true AND NOT EXISTS (
+              SELECT 1 FROM mail_thread_dispositions disposition
+              WHERE disposition.thread_id = ${mailThreads.id} AND disposition.current = true
+            ))
+            OR EXISTS (
+              SELECT 1 FROM mail_obligations obligation
+              WHERE obligation.thread_id = ${mailThreads.id}
+                AND obligation.state IN ('open', 'waiting', 'deferred')
+            )
+            OR EXISTS (
+              SELECT 1 FROM mail_stewardship_questions question
+              WHERE question.thread_id = ${mailThreads.id} AND question.status = 'open'
+            )
+            OR EXISTS (
+              SELECT 1 FROM mail_rule_work_items work
+              WHERE work.thread_id = ${mailThreads.id}
+                AND work.status IN ('pending', 'claimed', 'reconcile', 'failed')
+            )
+            OR EXISTS (
+              SELECT 1 FROM mail_snoozes snooze
+              WHERE snooze.thread_id = ${mailThreads.id} AND snooze.until > ${asOf}
+            )
+            OR EXISTS (
+              SELECT 1 FROM attention_items attention
+              WHERE attention.related_entity_id = ${mailThreads.id}
+                AND attention.related_entity_type = 'mail_thread'
+                AND attention.domain = 'mail' AND attention.status = 'open'
+            )
+          )`);
+        }
+        const threads = await tx
+          .select()
+          .from(mailThreads)
+          .where(and(...threadConditions))
+          .orderBy(asc(mailThreads.updatedAt), asc(mailThreads.id))
+          .limit(MAIL_MAINTENANCE_THREAD_LIMIT);
+        const threadIds = threads.map((thread) => thread.id);
+        const scopedAccountIds = [...new Set(threads.map((thread) => thread.accountId))];
         const accounts = await tx
           .select()
           .from(calendarAccounts)
-          .where(and(eq(calendarAccounts.userId, userId), eq(calendarAccounts.mailEnabled, true)));
+          .where(
+            and(
+              eq(calendarAccounts.userId, userId),
+              eq(calendarAccounts.mailEnabled, true),
+              scope.type !== "all_outstanding"
+                ? scopedAccountIds.length > 0
+                  ? inArray(calendarAccounts.id, scopedAccountIds)
+                  : sql`false`
+                : undefined,
+            ),
+          );
         const freshnessCutoff =
           asOf.getTime() - MAIL_PLAYBOOK.freshness.currentWithinMinutes * 60_000;
         const currentAccountIds = new Set(
@@ -236,30 +303,6 @@ export function createMailStewardshipService({ db, now }: Options) {
                 : accounts.some((account) => account.lastSyncedAt !== null)
                   ? "stale"
                   : "unavailable";
-
-        const threadConditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
-        if (scope.type === "target") {
-          if (scope.entityType !== "mail_thread") {
-            throw new AppError(
-              "invalid_request",
-              "Mail maintenance targets must identify a mail_thread.",
-            );
-          }
-          threadConditions.push(eq(mailThreads.id, scope.id));
-        } else if (scope.type === "window") {
-          threadConditions.push(
-            gte(mailThreads.receivedAt, new Date(`${scope.start}T00:00:00.000Z`)),
-          );
-          threadConditions.push(
-            lte(mailThreads.receivedAt, new Date(`${scope.end}T23:59:59.999Z`)),
-          );
-        }
-        const threads = await tx
-          .select()
-          .from(mailThreads)
-          .where(and(...threadConditions))
-          .orderBy(asc(mailThreads.id));
-        const threadIds = threads.map((thread) => thread.id);
         const [approval] = await tx
           .select({
             profileId: domainProfileApprovals.profileId,
@@ -288,28 +331,27 @@ export function createMailStewardshipService({ db, now }: Options) {
           .orderBy(asc(mailRules.id));
         const rulebookVersion = sha256(JSON.stringify(rules));
 
-        const workItemConditions = [eq(mailRuleWorkItems.userId, userId)];
-        if (scope.type !== "all_outstanding") {
-          if (threadIds.length > 0) {
-            workItemConditions.push(inArray(mailRuleWorkItems.threadId, threadIds));
-          }
+        const effectRows = await tx
+          .select({ status: mailRuleWorkItems.status, total: sql<number>`count(*)::int` })
+          .from(mailRuleWorkItems)
+          .where(
+            and(
+              eq(mailRuleWorkItems.userId, userId),
+              scope.type !== "all_outstanding"
+                ? threadIds.length > 0
+                  ? inArray(mailRuleWorkItems.threadId, threadIds)
+                  : sql`false`
+                : undefined,
+            ),
+          )
+          .groupBy(mailRuleWorkItems.status);
+        const effectCounts = { failed: 0, pending: 0, reconcile: 0 };
+        for (const row of effectRows) {
+          if (row.status === "failed") effectCounts.failed += row.total;
+          else if (row.status === "reconcile") effectCounts.reconcile += row.total;
+          else if (row.status === "pending" || row.status === "claimed")
+            effectCounts.pending += row.total;
         }
-        const workItems =
-          scope.type !== "all_outstanding" && threadIds.length === 0
-            ? []
-            : await tx
-                .select()
-                .from(mailRuleWorkItems)
-                .where(and(...workItemConditions));
-        const effectCounts = workItems.reduce(
-          (counts, item) => {
-            if (item.status === "failed") counts.failed += 1;
-            else if (item.status === "reconcile") counts.reconcile += 1;
-            else if (item.status === "pending" || item.status === "claimed") counts.pending += 1;
-            return counts;
-          },
-          { failed: 0, pending: 0, reconcile: 0 },
-        );
 
         if (threadIds.length === 0) {
           return {
@@ -322,6 +364,19 @@ export function createMailStewardshipService({ db, now }: Options) {
             threads: [],
           };
         }
+        const workItems = await tx
+          .select({
+            ruleId: mailRuleWorkItems.ruleId,
+            ruleVersion: mailRuleWorkItems.ruleVersion,
+            threadId: mailRuleWorkItems.threadId,
+          })
+          .from(mailRuleWorkItems)
+          .where(
+            and(
+              eq(mailRuleWorkItems.userId, userId),
+              inArray(mailRuleWorkItems.threadId, threadIds),
+            ),
+          );
         const obligations = await tx
           .select()
           .from(mailObligations)
@@ -339,7 +394,13 @@ export function createMailStewardshipService({ db, now }: Options) {
             ),
           );
         const messages = await tx
-          .select()
+          .select({
+            id: mailMessages.id,
+            providerMailboxIds: mailMessages.providerMailboxIds,
+            providerRevision: mailMessages.providerRevision,
+            receivedAt: mailMessages.receivedAt,
+            threadId: mailMessages.threadId,
+          })
           .from(mailMessages)
           .where(inArray(mailMessages.threadId, threadIds));
         const snoozes = await tx

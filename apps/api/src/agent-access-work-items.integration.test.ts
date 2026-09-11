@@ -620,5 +620,39 @@ describe.sequential("Agent Access work-item projection", () => {
         title: "Mail needs your input",
       }),
     );
+
+    await database.db
+      .update(mailStewardshipQuestions)
+      .set({
+        answer: "reference",
+        answeredAt: new Date("2026-08-11T14:21:00.000Z"),
+        status: "answered",
+        updatedAt: new Date("2026-08-11T14:21:00.000Z"),
+      })
+      .where(eq(mailStewardshipQuestions.id, question.id));
+    const resolvedPage = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(resolvedPage.items).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: `mail-run:${run.id}` })]),
+    );
+
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "mail",
+      rulebookVersion: "mail-v1",
+      scope: { type: "all_outstanding" },
+      settledResult: {},
+      status: "completed",
+      updatedAt: new Date("2026-08-11T14:22:00.000Z"),
+      userId: principal.userId,
+    });
+    const cleanPage = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(cleanPage.items.some((item) => item.id.startsWith("mail-run:"))).toBe(false);
   });
 });

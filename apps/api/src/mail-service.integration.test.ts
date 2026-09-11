@@ -119,6 +119,7 @@ describe.sequential("mail service", () => {
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
+      "0080_mail_reply_metadata",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -190,6 +191,7 @@ describe.sequential("mail service", () => {
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
+      "0080_mail_reply_metadata",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -421,7 +423,10 @@ describe.sequential("mail service", () => {
       bodyText: "Message body",
       cc: [],
       from: { address: "ada@example.com", name: "Ada" },
+      messageId: "<message-1@example.com>",
       receivedAt: new Date("2026-07-15T13:00:00.000Z"),
+      references: ["<root@example.com>"],
+      replyTo: [{ address: "replies@example.com", name: "Ada replies" }],
       remoteMessageId: "message-1",
       threadId,
       to: [],
@@ -521,6 +526,8 @@ describe.sequential("mail service", () => {
     expect(gateway.send).toHaveBeenCalledWith(userId, enabledAccountId, {
       body: "Prepared response",
       cc: [],
+      inReplyTo: "<message-1@example.com>",
+      references: ["<root@example.com>", "<message-1@example.com>"],
       subject: "Follow up",
       threadId: "thread-1",
       to: [{ address: "person@example.com", name: null }],

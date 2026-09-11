@@ -246,7 +246,6 @@ describe("Mail maintenance orchestration edges", () => {
         completed("publish_review", {
           assessment: originalAssessment,
           review: originalReview,
-          snapshot: original,
         }),
         {
           idempotencyKey: "mail:verify:v1",
@@ -273,7 +272,6 @@ describe("Mail maintenance orchestration edges", () => {
           assessment: expect.objectContaining({
             ledgerFingerprint: expect.not.stringMatching(originalAssessment.ledgerFingerprint),
           }),
-          snapshot: changed,
         }),
         step: "publish_review",
       }),

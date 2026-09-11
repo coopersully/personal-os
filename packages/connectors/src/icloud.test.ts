@@ -99,6 +99,8 @@ describe("iCloud connector", () => {
         body: "Prepared response",
         cc: [{ address: "copy@example.com", name: null }],
         from: credentials.email,
+        inReplyTo: "<prior@example.com>",
+        references: ["<root@example.com>", "<prior@example.com>"],
         subject: "Follow up",
         to: [{ address: "person@example.com", name: "Person" }],
       }),
@@ -107,6 +109,8 @@ describe("iCloud connector", () => {
     expect(sendMail).toHaveBeenCalledWith({
       cc: [{ address: "copy@example.com" }],
       from: credentials.email,
+      inReplyTo: "<prior@example.com>",
+      references: ["<root@example.com>", "<prior@example.com>"],
       subject: "Follow up",
       text: "Prepared response",
       to: [{ address: "person@example.com", name: "Person" }],

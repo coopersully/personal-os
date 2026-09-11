@@ -172,10 +172,6 @@ export function createAgentAccessWorkItemService({
           and(
             eq(workspaceMaintenanceRuns.userId, userId),
             eq(workspaceMaintenanceRuns.domain, "mail"),
-            or(
-              eq(workspaceMaintenanceRuns.status, "blocked"),
-              eq(workspaceMaintenanceRuns.status, "completed_with_questions"),
-            ),
             lte(workspaceMaintenanceRuns.updatedAt, snapshotAt),
           ),
         ),
@@ -388,7 +384,14 @@ function projectItems({
     const representedRun = (results.mailRuns ?? []).toSorted(
       (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
     )[0];
-    if (representedRun) {
+    const representedOpenQuestions = (results.mailQuestions ?? []).filter(
+      (question) =>
+        representedRun && question.updatedAt.getTime() <= representedRun.updatedAt.getTime(),
+    );
+    if (
+      representedRun?.status === "blocked" ||
+      (representedRun?.status === "completed_with_questions" && representedOpenQuestions.length > 0)
+    ) {
       const blocked = representedRun.status === "blocked";
       items.push({
         action: { label: "Review Mail", to: "/mail/review" },

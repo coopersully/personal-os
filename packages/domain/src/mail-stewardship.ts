@@ -170,8 +170,12 @@ export const mailStewardshipQuestionSchema = z
     version: z.int().positive(),
   })
   .superRefine((question, context) => {
-    const hasAnswerEvidence = question.answer !== null && question.answeredAt !== null;
-    if ((question.status === "answered") !== hasAnswerEvidence) {
+    const hasAnswer = question.answer !== null;
+    const hasAnsweredAt = question.answeredAt !== null;
+    if (
+      (question.status === "answered" && (!hasAnswer || !hasAnsweredAt)) ||
+      (question.status !== "answered" && (hasAnswer || hasAnsweredAt))
+    ) {
       context.addIssue({
         code: "custom",
         message: "Answered questions require answer text and an answered timestamp.",

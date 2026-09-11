@@ -6,6 +6,7 @@ import {
   createTwilioConnector,
   createXConnector,
 } from "@personal-os/connectors";
+import { mailThreads } from "@personal-os/database";
 import {
   type AgentConnectionGuide,
   assistantDomains,
@@ -28,7 +29,7 @@ import {
   weatherLocationSearchQuerySchema,
   weatherQuerySchema,
 } from "@personal-os/domain";
-import { sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
@@ -510,10 +511,31 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       };
     },
     now,
-    refreshSources: async (userId) => {
-      const accounts = (await connectors.listAccounts(userId)).filter(
-        (account) => account.mailEnabled,
-      );
+    refreshSources: async (userId, scope) => {
+      let scopedAccountIds: Set<string> | null = null;
+      if (scope.type !== "all_outstanding") {
+        const scopeConditions = [
+          eq(mailThreads.userId, userId),
+          isNull(mailThreads.deletedAt),
+          ...(scope.type === "target"
+            ? [eq(mailThreads.id, scope.id)]
+            : [
+                gte(mailThreads.receivedAt, new Date(`${scope.start}T00:00:00.000Z`)),
+                lte(mailThreads.receivedAt, new Date(`${scope.end}T23:59:59.999Z`)),
+              ]),
+        ];
+        scopedAccountIds = new Set(
+          (
+            await dependencies.db
+              .selectDistinct({ accountId: mailThreads.accountId })
+              .from(mailThreads)
+              .where(and(...scopeConditions))
+          ).map((row) => row.accountId),
+        );
+      }
+      const accounts = (await connectors.listAccounts(userId))
+        .filter((account) => account.mailEnabled)
+        .filter((account) => scopedAccountIds === null || scopedAccountIds.has(account.id));
       for (const account of accounts) {
         await connectors.enqueueSyncTrigger(account.id, "reconciliation");
       }

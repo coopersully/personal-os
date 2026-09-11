@@ -37,7 +37,7 @@ type DispatchRulesResult = {
 type Options = {
   dispatchApprovedRules: (userId: string, threadIds: string[]) => Promise<DispatchRulesResult>;
   now: () => Date;
-  refreshSources: (userId: string) => Promise<RefreshSourcesResult>;
+  refreshSources: (userId: string, scope: MaintenanceScope) => Promise<RefreshSourcesResult>;
   stewardship: MailStewardshipService;
   workspace: WorkspaceMaintenanceService;
 };
@@ -47,7 +47,6 @@ type AssessmentStepResult = { assessment: MailAssessment };
 type ReviewStepResult = {
   assessment: MailAssessment;
   review: MailReview;
-  snapshot: MailAssessmentSnapshot;
 };
 type VerificationStepResult = {
   ledgerFingerprint: string;
@@ -160,7 +159,7 @@ export function createMailMaintenanceService({
         await workspace.renewClaim({ claimId, runId });
 
         if (step === "refresh_sources") {
-          const refreshed = await refreshSources(userId);
+          const refreshed = await refreshSources(userId, scope);
           await complete(step, idempotencyKey, refreshed);
           continue;
         }
@@ -215,7 +214,6 @@ export function createMailMaintenanceService({
           await complete(step, idempotencyKey, {
             assessment: publishAssessment,
             review,
-            snapshot: publishSnapshot,
           } satisfies ReviewStepResult);
           continue;
         }
@@ -243,7 +241,6 @@ export function createMailMaintenanceService({
           const rebasedReviewResult = {
             assessment: rebasedAssessment,
             review,
-            snapshot: rebasedSnapshot,
           } satisfies ReviewStepResult;
           await workspace.reviseCompletedStep({
             claimId,

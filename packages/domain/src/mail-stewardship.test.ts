@@ -176,6 +176,9 @@ describe("Mail stewardship domain", () => {
         answeredAt: now,
       }).success,
     ).toBe(false);
+    expect(mailStewardshipQuestionSchema.safeParse({ ...question, answeredAt: now }).success).toBe(
+      false,
+    );
   });
 
   it("keeps response guidance structured and permanently non-transmittable", () => {

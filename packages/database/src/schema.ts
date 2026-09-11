@@ -1110,6 +1110,9 @@ export const mailMessages = pgTable(
     from: jsonb("from_address").$type<MailAddress>().notNull(),
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
+    messageId: text("message_id"),
+    references: jsonb("references").$type<string[]>().notNull().default([]),
+    replyTo: jsonb("reply_to_addresses").$type<MailAddress[]>().notNull().default([]),
     attachments: jsonb("attachments").$type<MailAttachment[]>().notNull().default([]),
     providerMailboxIds: jsonb("provider_mailbox_ids").$type<string[]>().notNull().default([]),
     providerRevision: text("provider_revision"),
@@ -1550,7 +1553,7 @@ export const mailStewardshipQuestions = pgTable(
     check(
       "mail_stewardship_questions_answer_check",
       sql`(
-        (${table.status} = 'answered' AND ${table.answer} IS NOT NULL AND ${table.answeredAt} IS NOT NULL)
+        (${table.status} = 'answered' AND ${table.answer} IS NOT NULL AND btrim(${table.answer}) <> '' AND ${table.answeredAt} IS NOT NULL)
         OR
         (${table.status} <> 'answered' AND ${table.answer} IS NULL AND ${table.answeredAt} IS NULL)
       )`,

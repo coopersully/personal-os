@@ -357,6 +357,7 @@ describe("database schema contracts", () => {
       "0073_mail_workspace_stewardship",
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
+      "0080_mail_reply_metadata",
     ]);
   });
 

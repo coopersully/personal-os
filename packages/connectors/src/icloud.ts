@@ -488,8 +488,15 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
                       ? mailAddress(parsed.from?.value[0])
                       : mailAddress(message.envelope?.from?.[0]),
                     mailboxIds: [mailbox.path],
+                    messageId: parsed?.messageId ?? null,
                     providerRevision: `${mailboxRevision}:${String(message.uid)}`,
                     receivedAt,
+                    references: parsed?.references
+                      ? Array.isArray(parsed.references)
+                        ? parsed.references
+                        : [parsed.references]
+                      : [],
+                    replyTo: parsed ? parsedAddresses(parsed.replyTo) : [],
                     remoteMessageId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
                     to: parsed ? parsedAddresses(parsed.to) : imapAddresses(message.envelope?.to),
                   },
@@ -547,6 +554,8 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
               }
             : {}),
           from: credentials.email,
+          ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+          ...(input.references?.length ? { references: input.references } : {}),
           subject: input.subject,
           text: input.body,
           to: input.to.map((address) => ({

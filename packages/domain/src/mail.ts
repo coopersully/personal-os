@@ -168,7 +168,10 @@ export const mailMessageSchema = z.object({
   cc: z.array(mailAddressSchema),
   from: mailAddressSchema,
   id: idSchema,
+  messageId: z.string().nullable(),
   receivedAt: isoDateTimeSchema,
+  references: z.array(z.string()),
+  replyTo: z.array(mailAddressSchema),
   threadId: idSchema,
   to: z.array(mailAddressSchema),
 });

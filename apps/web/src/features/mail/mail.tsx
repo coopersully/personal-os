@@ -97,6 +97,23 @@ export function mailListScopeQuery(scope: MailListScope) {
   return {};
 }
 
+export function mailReplyRecipient(
+  message: MailMessage | undefined,
+  accountAddress: string | null | undefined,
+  fallback: MailAddress,
+): MailAddress | null {
+  if (!message) return fallback;
+  const ownAddress = accountAddress?.toLowerCase();
+  if (message.from.address.toLowerCase() !== ownAddress) {
+    return message.replyTo[0] ?? message.from;
+  }
+  return (
+    [...message.to, ...message.cc].find(
+      (recipient) => recipient.address.toLowerCase() !== ownAddress,
+    ) ?? null
+  );
+}
+
 function inboxUnreadCount(items: Array<{ role: string; unreadCount: number }>) {
   return items
     .filter((mailbox) => mailbox.role === "inbox")
@@ -434,13 +451,19 @@ export function MailPage({ user }: { user: User }) {
         pending={updateThread.isPending}
         reply={() => {
           if (!selected) return;
+          const accountAddress = setup.data?.accounts
+            .find((account) => account.accountId === selected.accountId)
+            ?.email?.toLowerCase();
+          const latestMessage = messages.data?.at(-1);
+          const replyRecipient = mailReplyRecipient(latestMessage, accountAddress, selected.from);
+          if (!replyRecipient) return;
           setComposeIntent({
             accountId: selected.accountId,
             subject: selected.subject.startsWith("Re:")
               ? selected.subject
               : `Re: ${selected.subject}`,
             threadId: selected.id,
-            to: selected.from.address,
+            to: replyRecipient.address,
           });
         }}
         selected={selected}
@@ -903,7 +926,10 @@ function Reader({
     cc: [],
     from: thread.from,
     id: thread.id,
+    messageId: null,
     receivedAt: thread.receivedAt,
+    references: [],
+    replyTo: [],
     threadId: thread.id,
     to: thread.to,
   };

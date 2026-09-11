@@ -825,6 +825,8 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
             ...(address.name ? { name: address.name } : {}),
           })),
           from: input.from,
+          ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+          ...(input.references?.length ? { references: input.references } : {}),
           subject: input.subject,
           text: input.body,
           to: input.to.map((address) => ({
@@ -948,8 +950,11 @@ function normalizeMailThread(
       cc: splitAddresses(gmailHeader(message, "cc")),
       from: parseMailAddress(gmailHeader(message, "from")),
       mailboxIds: message.labelIds,
+      messageId: gmailHeader(message, "message-id") || null,
       providerRevision: message.historyId ?? message.internalDate ?? null,
       receivedAt: normalizedGmailDate(message.internalDate),
+      references: splitMessageReferences(gmailHeader(message, "references")),
+      replyTo: splitAddresses(gmailHeader(message, "reply-to")),
       remoteMessageId: message.id,
       to: splitAddresses(gmailHeader(message, "to")),
     })),
@@ -1024,6 +1029,10 @@ export function projectGmailAttachments(part: z.infer<typeof gmailPartSchema>) {
 
 function gmailHeader(message: z.infer<typeof gmailMessageSchema>, name: string): string {
   return message.payload.headers.find((header) => header.name.toLowerCase() === name)?.value ?? "";
+}
+
+function splitMessageReferences(value: string): string[] {
+  return value.match(/<[^>]+>/gu) ?? [];
 }
 
 function gmailBody(

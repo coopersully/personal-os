@@ -282,6 +282,8 @@ describe("Google Calendar connector", () => {
           body: "Prepared response",
           cc: [{ address: "copy@example.com", name: null }],
           from: "sender@example.com",
+          inReplyTo: "<prior@example.com>",
+          references: ["<root@example.com>", "<prior@example.com>"],
           subject: "Follow up",
           threadId: "thread-1",
           to: [{ address: "person@example.com", name: "Person" }],
@@ -297,7 +299,10 @@ describe("Google Calendar connector", () => {
       threadId: string;
     };
     expect(body.threadId).toBe("thread-1");
-    expect(Buffer.from(body.raw, "base64url").toString()).toContain("person@example.com");
+    const raw = Buffer.from(body.raw, "base64url").toString();
+    expect(raw).toContain("person@example.com");
+    expect(raw).toContain("In-Reply-To: <prior@example.com>");
+    expect(raw).toContain("References: <root@example.com> <prior@example.com>");
   });
 
   it("rejects Mail delivery before provider submission when send authority is absent", async () => {

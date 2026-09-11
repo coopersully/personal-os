@@ -14,6 +14,7 @@ import {
   mailListScopeFromSearch,
   mailListScopeParams,
   mailListScopeQuery,
+  mailReplyRecipient,
   persistMailListDensity,
   persistMailReaderLayout,
   storedMailListDensity,
@@ -77,6 +78,41 @@ describe("Mail workspace helpers", () => {
       { mailboxRole: "sent" },
       {},
     ]);
+  });
+
+  it("replies to Reply-To and never addresses an outbound message back to the connected account", () => {
+    const fallback = { address: "reply@example.com", name: "Reply desk" };
+    const base = {
+      attachments: [],
+      bodyText: "",
+      cc: [],
+      id: "33333333-3333-4333-8333-333333333333",
+      messageId: "<message@example.com>",
+      receivedAt: "2026-08-28T12:00:00.000Z",
+      references: [],
+      replyTo: [fallback],
+      threadId: "22222222-2222-4222-8222-222222222222",
+      to: [{ address: "me@example.com", name: null }],
+    };
+    expect(
+      mailReplyRecipient(
+        { ...base, from: { address: "sender@example.com", name: "Sender" } },
+        "me@example.com",
+        fallback,
+      ),
+    ).toEqual(fallback);
+    expect(
+      mailReplyRecipient(
+        {
+          ...base,
+          from: { address: "me@example.com", name: null },
+          replyTo: [],
+          to: [{ address: "recipient@example.com", name: "Recipient" }],
+        },
+        "me@example.com",
+        fallback,
+      ),
+    ).toEqual({ address: "recipient@example.com", name: "Recipient" });
   });
 
   it("makes the combined Inbox primary and keeps sources out of navigation", async () => {

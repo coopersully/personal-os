@@ -691,11 +691,16 @@ export function createMailService({
           "Add a recipient and a subject or message before sending.",
         );
       }
-      const remoteThreadId = draft.threadId
+      const replyContext = draft.threadId
         ? (
             await db
-              .select({ remoteThreadId: mailThreads.remoteThreadId })
+              .select({
+                messageId: mailMessages.messageId,
+                references: mailMessages.references,
+                remoteThreadId: mailThreads.remoteThreadId,
+              })
               .from(mailThreads)
+              .leftJoin(mailMessages, eq(mailMessages.threadId, mailThreads.id))
               .where(
                 and(
                   eq(mailThreads.id, draft.threadId),
@@ -704,9 +709,11 @@ export function createMailService({
                   isNull(mailThreads.deletedAt),
                 ),
               )
+              .orderBy(desc(mailMessages.receivedAt), desc(mailMessages.id))
               .limit(1)
-          )[0]?.remoteThreadId
+          )[0]
         : undefined;
+      const remoteThreadId = replyContext?.remoteThreadId;
       if (draft.threadId && !remoteThreadId) {
         throw new AppError("not_found", "The Mail conversation was not found.");
       }
@@ -739,6 +746,14 @@ export function createMailService({
           cc: draft.cc,
           subject: draft.subject,
           ...(remoteThreadId ? { threadId: remoteThreadId } : {}),
+          ...(replyContext?.messageId
+            ? {
+                inReplyTo: replyContext.messageId,
+                references: [
+                  ...new Set([...(replyContext.references ?? []), replyContext.messageId]),
+                ],
+              }
+            : {}),
           to: draft.to,
         });
       } catch (error) {
@@ -1755,7 +1770,10 @@ export function createMailService({
         cc: message.cc,
         from: message.from,
         id: message.id,
+        messageId: message.messageId,
         receivedAt: message.receivedAt.toISOString(),
+        references: message.references,
+        replyTo: message.replyTo,
         threadId: message.threadId,
         to: message.to,
       }));

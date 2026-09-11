@@ -952,7 +952,7 @@ describe.sequential("Mail stewardship service", () => {
         start: "2026-08-24",
         type: "window",
       }),
-    ).resolves.toMatchObject({ sourceFreshness: "current", threads: [] });
+    ).resolves.toMatchObject({ sourceFreshness: "unavailable", threads: [] });
 
     const targetSnapshot = await service.snapshot(principal.userId, {
       entityType: "mail_thread",
@@ -1019,6 +1019,13 @@ describe.sequential("Mail stewardship service", () => {
     await expect(
       service.snapshot(principal.userId, { type: "all_outstanding" }),
     ).resolves.toMatchObject({ sourceFreshness: "partial" });
+    await expect(
+      service.snapshot(principal.userId, {
+        entityType: "mail_thread",
+        id: threadId,
+        type: "target",
+      }),
+    ).resolves.toMatchObject({ sourceFreshness: "current" });
 
     await database.db
       .update(calendarAccounts)
@@ -1230,5 +1237,28 @@ describe.sequential("Mail stewardship service", () => {
     });
     const result = await service.getStatus(principal.userId);
     expect(result.details.openQuestions).toHaveLength(100);
+  });
+
+  it("bounds each all-outstanding snapshot page", async () => {
+    await database.db.insert(mailThreads).values(
+      Array.from({ length: 510 }, (_, index) => ({
+        accountId,
+        bodyText: "",
+        from: { address: `sender-${index}@example.com`, name: null },
+        messageCount: 1,
+        provider: "google" as const,
+        receivedAt: new Date(1_700_000_000_000 + index),
+        remoteMailboxIds: [],
+        remoteThreadId: `bounded-thread-${index}`,
+        snippet: "",
+        starred: true,
+        subject: `Bounded ${index}`,
+        to: [],
+        unread: false,
+        userId: principal.userId,
+      })),
+    );
+    const result = await service.snapshot(principal.userId, { type: "all_outstanding" });
+    expect(result.threads).toHaveLength(500);
   });
 });

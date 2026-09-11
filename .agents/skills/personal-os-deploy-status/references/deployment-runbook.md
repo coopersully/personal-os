@@ -27,10 +27,14 @@ surfaces.
 ## Public health
 
 ```bash
-curl --fail --location https://nohmi.coopersully.me
-curl --fail https://nohmi-api.coopersully.me/health/ready
-curl --fail https://nohmi-mcp.coopersully.me/health/live
+curl --fail --location https://app.ilo.coopersully.me
+curl --fail https://api.ilo.coopersully.me/health/ready
+curl --fail https://mcp.ilo.coopersully.me/health/live
 ```
+
+These are the currently deployed compatibility endpoints. Do not substitute target nohmi domains
+until the coordinated runtime, DNS, certificate, callback, monitoring, and rollback cutover is
+complete.
 
 API readiness includes PostgreSQL connectivity. MCP liveness proves the process responds; protocol
 requests still require authorization.

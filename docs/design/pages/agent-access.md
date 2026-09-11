@@ -57,7 +57,8 @@ limitation explicitly. Readiness is evidence, not a progress percentage. Use the
 Checking, Not set up, Needs review, Set up, and Unavailable.
 
 Mail owns proposed and active Mail rules. Proposed rules remain disabled until a signed-in person
-reviews the current bounded sample in Mail settings. Permanent deletion remains unavailable.
+completes a fresh review of the current bounded sample in Mail settings, tied to the exact preview
+version. Proposal or sample drift invalidates activation. Permanent deletion remains unavailable.
 
 ## Visual standard
 

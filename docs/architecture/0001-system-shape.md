@@ -29,8 +29,9 @@ The API is the product boundary. MCP contains no business rules. Interactive
 clients never call provider APIs directly.
 
 Mail, Tasks, Calendar, and Finances own their native ledgers and maintenance semantics. The shared
-User Knowledge domain owns typed personal context and purpose-bound context assembly; it does not
-own workspace records or grant action authority. See [`ADR 0005`](0005-user-knowledge.md).
+User Knowledge domain owns the typed personal-context and context-assembly contract; `apps/api`
+performs authorized, purpose-bound assembly. User Knowledge does not own workspace records or grant
+action authority. See [`ADR 0005`](0005-user-knowledge.md).
 
 External platforms may own cadence and invoke a small maintenance intent. nohmi owns durable run
 state, playbook and policy versions, context retrieval, idempotency, questions, recovery, and the
@@ -44,7 +45,9 @@ against the same migrations.
 
 - Browser sessions are opaque, random tokens. Only token hashes are stored.
 - MCP uses revocable personal access tokens. Only token hashes are stored.
-- Tokens carry explicit read/write scopes for each workspace, User Knowledge purpose, and audit.
+- Tokens carry explicit read/write scopes for each workspace and User Knowledge purpose. Audit
+  access is read-only through `audit:read`; authorized mutations write their audit records
+  internally rather than through a public audit-write operation.
 - OAuth credentials are encrypted at rest with an application key distinct from
   the database.
 - Connector callbacks bind OAuth state to a user, expire quickly, and are

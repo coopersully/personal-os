@@ -158,10 +158,12 @@ zone. The person may change the window or select `any time`; deferred maintenanc
 revalidated and consolidated when the window ends, while replies to user-initiated messages remain
 immediate.
 
-Each actionable item produces one initial notification. An unchanged unresolved item may be
-mentioned again only after the configured reminder interval; repeated maintenance runs do not
-restart or bypass that interval. The default is 7 days, and `never` disables repeat notifications
-without removing the item from Reviews. nohmi prefers missing a reminder over becoming repetitive.
+Each actionable item produces one initial notification record, which is the unit of deduplication
+and reminder timing. Channel delivery may aggregate several item records into the single concise
+message described above. An unchanged unresolved item may be mentioned again only after the
+configured reminder interval; repeated maintenance runs do not restart or bypass that interval. The
+default is 7 days, and `never` disables repeat notifications without removing the item from Reviews.
+nohmi prefers missing a reminder over becoming repetitive.
 Before that interval, the same item is eligible again only when the required action or the
 consequence of acting or not acting materially changes. Wording, supporting evidence, confidence,
 rediscovery, and internal status changes remain suppressed when they do not change either one;

@@ -7,9 +7,9 @@ import urllib.request
 from pathlib import Path
 
 ENDPOINTS = {
-    "app": "https://nohmi.coopersully.me",
-    "api": "https://nohmi-api.coopersully.me/health/ready",
-    "mcp": "https://nohmi-mcp.coopersully.me/health/live",
+    "app": "https://app.ilo.coopersully.me",
+    "api": "https://api.ilo.coopersully.me/health/ready",
+    "mcp": "https://mcp.ilo.coopersully.me/health/live",
 }
 
 

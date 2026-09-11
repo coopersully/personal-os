@@ -9,6 +9,9 @@ nohmi does not own maintenance schedules. The person chooses an external platfor
 where and when an automation runs there; the host connects to nohmi through MCP or another
 authenticated API surface and invokes one high-level intent such as `maintain_finances`.
 
+Every remote host connection requires public HTTPS, including the production MCP-to-API hop. Bearer
+credentials and User Knowledge must never cross a plaintext remote connection.
+
 The external host is the sole authority for cadence, wake-up, pausing, resuming, and delivery of
 the invocation. nohmi owns the meaning of the tool, purpose-bound User Knowledge retrieval, source
 synchronization, policy, durable run state, idempotency, resumability, questions, approvals,
@@ -25,7 +28,8 @@ the person to the owning platform or provide setup instructions when a schedule 
 
 | Host pattern | How it invokes nohmi | Product constraint |
 | --- | --- | --- |
-| ChatGPT or Codex scheduled task | A scheduled task runs with the configured project, tools, plugins, or skills and calls the remote nohmi MCP server. | Local-project work depends on the desktop host and machine being available; cloud tasks cannot assume local files. Keep the saved prompt to intent and scope. |
+| ChatGPT scheduled task | A web or mobile task runs on a time schedule or supported app event and may use the connected tools, plugins, and skills available to its chat. | Plan and workspace availability vary. Direct invocation of a custom remote nohmi MCP server from this surface is an unverified target pattern and must not be advertised until production-tested. |
+| Codex project automation | A desktop scheduled task runs in its configured local project or isolated worktree and may use configured plugins or skills to invoke a nohmi adapter. | The machine and desktop app must remain available for local work. End-to-end nohmi MCP or API invocation remains a target pattern until the exact plugin, skill, credentials, network access, and unattended permissions are verified. |
 | Claude recurring task in Cowork | A scheduled Claude session uses its configured connectors, tools, skills, or plugins to call nohmi. | Availability differs between local and cloud scheduling; nohmi must resume safely after missed or duplicated invocations. |
 | Claude Code routine | A schedule, API call, or webhook starts a routine that invokes nohmi MCP. | The routine is an adapter and must not reproduce the workspace playbook or retain private state as the only memory. |
 | Gemini scheduled action | Gemini invokes a configured action on a recurring schedule. | Account, region, plan, and application availability may vary; the nohmi run remains authoritative. |
@@ -71,6 +75,7 @@ must never originate a new recurring maintenance invocation.
 
 ## Platform references
 
+- [ChatGPT scheduled tasks](https://learn.chatgpt.com/docs/automations)
 - [OpenAI Codex automations](https://developers.openai.com/codex/app/automations)
 - [OpenAI Codex MCP configuration](https://developers.openai.com/codex/mcp/)
 - [Claude recurring tasks in Cowork](https://support.claude.com/en/articles/13854387-schedule-recurring-tasks-in-claude-cowork)

@@ -135,10 +135,12 @@ must not be simulated as a client-authored sequence of the existing surgical too
 
 The current ledger stores explicit Task material, not inferred user rules or a complete model of the
 person. A future steward may propose knowledge about placement, timing, planning, capacity, or
-review preferences. Such knowledge may become active through manual promotion or domain-defined
-safe automatic promotion after reinforcement or successful reuse, but it cannot grant action
-authority; reusable mutation rules retain their explicit policy boundary. Rules must carry scope,
-evidence, version, confidence, exceptions, disablement, rollback, and the records to re-evaluate.
+review preferences under the shared [`User Knowledge`](user-knowledge.md) contract. Automatic
+promotion requires independent reinforcement or successful reuse and is limited to reversible
+knowledge categories; it cannot increase authority, activate an external action rule, or bypass
+stricter confirmation for a sensitive or high-impact claim. Reusable mutation rules retain their
+explicit domain policy boundary. Rules must carry scope, evidence, version, confidence, exceptions,
+disablement, rollback, and the records to re-evaluate.
 
 Persisted questions, answer provenance, deduplication, and learning behavior are not implemented.
 Natural-language classification and its golden corpus also remain design data; no classifier may

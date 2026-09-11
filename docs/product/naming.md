@@ -32,6 +32,11 @@ production rollback must move together where their contracts depend on one anoth
 This documentation branch records the target and migration scope but does not perform that runtime
 cutover.
 
+Before the cutover, change review rejects newly invented former-name identifiers and treats an
+unchanged deployed compatibility value moved during a documentation or skill rename as current
+implementation evidence, not target vocabulary. This transitional rule is not an allowlist for the
+completed migration: the final gate below still requires literal zero occurrences.
+
 ## Completion gate
 
 The migration is complete only when:
@@ -41,5 +46,5 @@ The migration is complete only when:
 - public endpoints, callbacks, certificates, registered clients, and published agent artifacts use
   the correct current name;
 - production evidence shows the new identifiers are healthy and old endpoints are retired; and
-- the implementation log records the cutover, recovery evidence, and any intentionally retained
-  third-party value that cannot be changed by nohmi.
+- the implementation log records the cutover and recovery evidence without retaining a former name
+  as a tracked compatibility value.

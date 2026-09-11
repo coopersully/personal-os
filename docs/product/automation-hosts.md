@@ -57,6 +57,7 @@ to one workspace-level owner.
 A scheduled prompt should contain only:
 
 - the nohmi maintenance intent;
+- the immutable nohmi-owned local schedule identity created during setup;
 - a bounded scope when the person selected one;
 - whether the host should report only actionable results or every completed run; and
 - an instruction to return the durable nohmi state rather than guessing after an interruption.
@@ -69,7 +70,9 @@ to nohmi's API-owned playbook, User Knowledge, rulebook, and run state.
 
 1. Authenticate with least-privilege workspace and knowledge-purpose scopes.
 2. Read `get_nohmi_context` and the relevant workspace status when orientation is required.
-3. Invoke `maintain_<workspace>` once with an idempotency identity or resumable scope.
+3. Invoke `maintain_<workspace>` once with the declared local schedule identity and an idempotency
+   identity or resumable scope. nohmi validates that schedule against the authenticated connection
+   before associating it with health, revocation, or run state.
 4. If the result is active or waiting, retain the returned run handle and follow only the reported
    next action.
 5. If the host repeats the schedule, nohmi resumes, coalesces, or verifies the compatible run rather

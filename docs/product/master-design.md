@@ -160,7 +160,7 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Transitional domain profile | Current document-style domain objective, source meanings, categories, and preferences; target behavior migrates durable meaning into User Knowledge while policy remains domain-owned. |
 | Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
 | Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
-| Automation | Template, versioned instructions/skill, trigger, schedule/event trigger, inputs, scopes, policy, model host, state, run and approval queue. |
+| External schedule declaration | Immutable nohmi-owned local identity, optional host automation identity, authenticated connection, intended workspace/intent and scope, expected cadence, observed check-in health, revocation, and linked durable runs. It is observational invocation metadata, never a nohmi-owned trigger or schedule. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
 ## 6. Complete experience design

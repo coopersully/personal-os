@@ -75,6 +75,8 @@ entire target described above:
 - opaque human sessions and separately scoped, revocable agent tokens;
 - MCP over stdio and Streamable HTTP;
 - agent texting through a hardened Twilio lifecycle;
+- a Settings-owned Reviews destination aggregating available Review and Attention work across Mail,
+  Calendar, Tasks, and Finances with workspace/type filters and domain-owned action links;
 - actor-aware, append-only activity history;
 - PostgreSQL migrations and production containers.
 

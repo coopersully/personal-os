@@ -178,7 +178,9 @@ flowchart TD
 
 - Publish a Workspace access surface that names what agents may read, change, propose, and never do in every domain.
 - Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
-- Compose Review and Attention work into the Settings-owned Reviews destination with workspace/type filters, honest partial availability, stable pagination, and deep links back to the owning domain.
+- Retain the existing Settings-owned Reviews destination that composes Review and Attention work,
+  and extend it without losing workspace/type filters, honest partial availability, stable
+  pagination, or deep links back to the owning domain.
 - Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
 - Give a durable scheduler or queue only to a domain workflow that needs it, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior.
 - Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.
@@ -279,15 +281,17 @@ flowchart TD
   context. Preserve canonical instants, convert them to the person's current time zone immediately
   before sending, and use accurate `today`, `yesterday`, or `tomorrow` labels for nearby dates.
 - Keep SMS formal, short, and concise. Render one item directly, but summarize multiple questions or
-  actions by count and topic instead of reproducing them. Link to a scoped review view containing
-  exactly those items, with a separate action for the complete nohmi review queue.
-- Omit links from self-contained single questions. Add a scoped link only when the decision needs
-  more context, multiple items are involved, or the necessary content would make the SMS
-  unreasonably long.
+  actions with one statement that several items need review instead of reproducing them. Send one
+  cross-workspace notification linking to the existing Settings-owned unified Reviews destination,
+  not separate messages per item or workspace.
+- Omit links from self-contained single questions. Add an exact-item or workspace link when one
+  decision needs more context or would make the SMS unreasonably long; use the unified Reviews link
+  for multiple items.
 - Enable quiet-hour deferral by default from 10:00 PM–8:00 AM in the person's current time zone.
   Support a custom window and explicit `any time` delivery; revalidate deferred items before release
-  and never delay a direct reply to a user-initiated message.
-- Require normal nohmi authentication for every SMS deep link, retain the exact scoped destination
+  and consolidate multiple items into one Reviews alert. Never delay a direct reply to a
+  user-initiated message.
+- Require normal nohmi authentication for every SMS deep link, retain the requested destination
   across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
   in the URL.
 - Promote Finance's current review-bypass control into one global policy used consistently by app,

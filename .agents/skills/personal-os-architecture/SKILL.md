@@ -41,7 +41,7 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
   conversation, delivery, routing, and response composition; routed work retains workspace-owned
   expertise, policy, work nodes, and terminal truth.
 - Treat SMS links as ordinary authenticated nohmi destinations, never bearer or approval links.
-  Preserve the exact scoped destination across normal sign-in without putting sensitive item data
+  Preserve the requested review destination across normal sign-in without putting sensitive item data
   in the URL.
 
 ## Model User Knowledge

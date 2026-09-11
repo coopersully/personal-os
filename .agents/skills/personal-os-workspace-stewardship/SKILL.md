@@ -65,17 +65,18 @@ Publish canonical times and typed entity context rather than pre-rendering `toda
 language immediately before delivery.
 
 Keep notification summaries formal, short, and concise. Supply one directly answerable item when
-only one is open; for multiple questions or actions, supply a count and topical preview plus the
-message-bound scoped review link rather than rendering every item. The scoped view contains exactly
-the summarized items and offers a separate action for the complete queue.
+only one is open. For multiple questions or actions, let Texting send one cross-workspace statement
+that several items need review plus the unified Settings-owned Reviews link; do not request one
+message per item or workspace.
 
-Do not add a redundant link to a self-contained single question. Request a scoped link when the
-decision needs more context, multiple items are involved, or the necessary content cannot fit a
-reasonable SMS.
+Do not add a redundant link to a self-contained single question. Request an exact-item or workspace
+link when that decision needs more context or cannot fit a reasonable SMS; multiple items use the
+unified Settings-owned Reviews link.
 
 Assume proactive maintenance texts defer during the person's global quiet hours unless `any time`
 is explicitly enabled. Texting revalidates deferred items at release; the workspace must keep the
 underlying question or action state current rather than treating a queued notification as truth.
+Texting consolidates multiple current items into one Reviews alert after quiet hours.
 
 ## Verify the delivered slice
 

@@ -81,16 +81,16 @@ The default content includes the merchant, sender, event, task, or comparable en
 understand the action. Dates and times are rendered in the person's current time zone, using
 `today`, `yesterday`, or `tomorrow` when applicable; unnecessary sensitive detail remains omitted.
 Messages remain formal, short, and concise. One item may be asked directly; several items produce a
-count and topical preview with a scoped review link rather than a long SMS checklist.
-That link opens exactly the summarized items first and provides a separate route to the complete
-queue.
+single statement that several items need review plus the unified cross-workspace Reviews link,
+rather than a long SMS checklist or separate messages per workspace.
 
 A self-contained single question omits the link unless the person needs more context or the
 necessary content is too long for a reasonable text.
 
 Quiet-hour deferral is enabled by default from 10:00 PM through 8:00 AM in the person's current time
 zone. The person may change the window or select `any time`; deferred maintenance texts are
-revalidated when the window ends, while replies to user-initiated messages remain immediate.
+revalidated and consolidated when the window ends, while replies to user-initiated messages remain
+immediate.
 
 ## Inheritance boundary
 

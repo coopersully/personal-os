@@ -56,7 +56,8 @@ A maintenance message should normally contain:
 
 - one outcome sentence;
 - one currently available question or exact review action when only one needs attention;
-- a count and short topical preview plus the first-party review link when several need attention;
+- one brief statement that several items need review plus the unified Reviews link when multiple
+  items need attention;
 - the useful merchant, sender, event, task, or other entity name needed to understand it;
 - explicit reply choices when the answer vocabulary is bounded; and
 - one short first-party review or recovery link only when additional context is useful, several
@@ -64,26 +65,26 @@ A maintenance message should normally contain:
 
 Messages are formal, concise, and immediately scannable. They omit greetings, sign-offs,
 conversational filler, repeated status, and the full contents of a multi-item queue. When several
-questions or actions are open, the SMS summarizes their number and subjects without asking each one;
-the linked nohmi review surface contains the complete summarized item set and its evidence.
+questions or actions are open, Texting sends one cross-workspace notification rather than one
+message per item or workspace.
 
 A short, self-contained single question does not include a redundant link. The message stays brief
 and directly answerable by text unless evidence or context is needed to decide safely.
 
-The link opens a scoped review view containing exactly the items summarized in that SMS, preserving
-their message, run, and work-node context. That view offers a separate action to open the complete
-review queue; the text never drops the person into an unrelated unfiltered backlog.
+The multi-item link opens the existing unified Reviews destination at
+`/settings?section=reviews`, where the person can see all outstanding Review and Attention work
+across available workspaces, filter it, and follow each item to its owning domain. A single-item
+context link may still open that exact item or owning workspace.
 
 Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
 approval authority, answer, or sensitive item content; possession of the phone or receipt of the
-SMS is not a web session. If authentication is required, nohmi returns the person to the same scoped
-review after sign-in.
+SMS is not a web session. If authentication is required, nohmi returns the person to the requested
+review destination after sign-in.
 
 Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
 unsure.”
 
-Multiple-item example: “Three items need review: two Finance transactions and one Calendar
-conflict. Review: [link]”
+Multiple-item example: “Several items need review. Review: [link]”
 
 Privacy-safe does not mean context-free. Merchant display names, sender display names, event titles,
 task titles, and comparable identifiers are included when they are needed to understand the action;
@@ -110,8 +111,9 @@ deferral.
 
 During quiet hours, proactive maintenance texts wait until the window ends. Before release, Texting
 revalidates that each question or action is still current, suppresses resolved or expired items,
-recomputes relative dates, and sends the remaining concise message. Replies to a conversation the
-person initiated are immediate and are not proactive maintenance notifications.
+recomputes relative dates, and consolidates multiple remaining items into one Reviews notification.
+Replies to a conversation the person initiated are immediate and are not proactive maintenance
+notifications.
 
 ## Global review bypass and SMS approval
 
@@ -194,6 +196,8 @@ explicit local offset.
 
 The shipped implementation provides verification, consent, conversation history, guarded manual
 reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
+also has the authenticated Settings-owned Reviews destination, which aggregates available Review
+and Attention work across the four workspaces with filters and domain-owned action links. It
 does not yet provide general-inbox intent classification, work-node answers, cross-workspace child
 intents, event-driven agent dispatch, `maintain_texting`, maintenance notification intents,
 per-workspace SMS controls, global review bypass, or SMS-bound approvals.

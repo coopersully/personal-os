@@ -38,17 +38,17 @@ minimum useful entity context and canonical times; Texting applies channel polic
 to the person's current time zone, renders nearby dates relatively, and composes one result, one
 available question or exact review action, and an optional first-party deep link.
 
-When several questions or actions are available, Texting renders only a formal count and topical
-preview with the review link. The link resolves the exact message-bound item set and offers a
-separate route to the full queue; it does not serialize the complete queue into SMS or open an
-unfiltered backlog by default.
+When several questions or actions are available, Texting renders only a brief formal statement
+with the unified Reviews link. It sends one notification across workspaces rather than
+serializing the queue into SMS or sending one message per item or domain.
 
-A self-contained single question has no link. Texting adds a scoped link only when context is
-needed, multiple items are involved, or the necessary content cannot remain a reasonable SMS.
+A self-contained single question has no link. Texting adds an exact-item or domain link only when
+that question needs context or cannot remain a reasonable SMS; multiple items use unified Reviews.
 
-Review links use ordinary authenticated nohmi routes. The URL identifies a scoped destination but
+Review links use ordinary authenticated nohmi routes. The URL identifies a requested destination but
 contains no bearer credential, action authority, answer, or sensitive item content; SMS recipient
-verification does not create a web session. Authentication preserves and resumes the destination.
+verification does not create a web session. Authentication preserves and resumes the requested
+destination.
 
 ## Authority
 
@@ -72,7 +72,7 @@ conversation message, child run, source evidence, policy, approval, effect, and 
   submission so relative dates remain accurate.
 - Proactive maintenance delivery respects the default 10:00 PM–8:00 AM local quiet window, a custom
   window, or explicit `any time` mode. Deferred items are revalidated before release; resolved or
-  expired work is not sent.
+  expired work is not sent, and multiple remaining items become one unified Reviews notification.
 - STOP, disconnect, feature disablement, or workspace SMS disablement stops new sends and routing
   while preserving prior audit and recovery state.
 

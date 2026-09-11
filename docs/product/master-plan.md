@@ -348,9 +348,10 @@ health, but those records never trigger maintenance; internal queues and timers 
 from an invocation already accepted.
 
 Allow the person to configure multiple hosts and schedules for the same workspace or maintenance
-intent. Persist health and revocation per declared schedule when the host exposes an identity, and
-use the durable run/idempotency contract to coalesce compatible overlapping invocations without
-restricting the person's choice of tooling.
+intent. Give every declared schedule an immutable nohmi-owned local identity, bind a host-provided
+automation identity when one exists, and carry the local identity through invocation, run, health,
+revocation, idempotency, and coalescing records. Use the durable run/idempotency contract to
+coalesce compatible overlapping invocations without restricting the person's choice of tooling.
 
 Each workspace also needs a domain-owned guided setup flow that lets the person describe an ideal
 workflow in ordinary language, converts it into explicit proposed source meanings, configuration,

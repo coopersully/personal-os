@@ -157,6 +157,9 @@ This surface is a target contract, not a claim about current tool discovery. See
 [`User Knowledge`](product/user-knowledge.md) and
 [`ADR 0005`](architecture/0005-user-knowledge.md).
 
+The following discovery rules describe the current pre-cutover implementation evidence. The target
+identifiers are defined above and replace these names at hard cutover.
+
 Discovery follows these rules:
 
 1. `get_ilo_context` and `get_ilo_setup` remain available after authentication so an agent can

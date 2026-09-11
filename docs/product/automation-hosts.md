@@ -22,8 +22,15 @@ recurring maintenance schedule.
 workspace. The person may configure multiple hosts, multiple schedules on one host, or overlapping
 invocations of the same maintenance intent. nohmi must not reject that topology merely to simplify
 coordination. It records the invoking connection, host-declared automation identity when available,
-credential, trigger, requested scope, and idempotency identity, then coalesces or resumes compatible
-durable work and isolates incompatible scopes without duplicating external effects.
+non-secret credential reference, trigger, requested scope, and idempotency identity, then coalesces
+or resumes compatible durable work and isolates incompatible scopes without duplicating external
+effects. Bearer tokens and provider credentials never enter durable schedule metadata.
+
+Every declared schedule receives an immutable nohmi-owned local identity. When the host exposes a
+stable automation identity, nohmi binds it to that local identity; when it does not, setup creates
+the local identity before the first invocation. Invocation, run, health, revocation, idempotency,
+and coalescing records carry that identity so schedules remain distinguishable and independently
+revocable without requiring a host-specific identifier.
 
 nohmi may store a user- or host-declared expected cadence, the last observed invocation, and an
 expected, overdue, or unknown check-in state so the person can see whether an external automation

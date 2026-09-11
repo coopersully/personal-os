@@ -119,9 +119,10 @@ product and architecture contracts are
 [`ADR 0004`](../architecture/0004-workspace-stewardship.md).
 
 User Knowledge owns shared personal facts, relationships, goals, priorities, motives, preferences,
-constraints, routines, decisions, reinforcement, promotion, provenance, and purpose-bound context
-assembly. Workspace owners declare what knowledge a workflow requires and remain responsible for
-their own action rules; shared knowledge never becomes an Integration-owned domain decision.
+constraints, routines, decisions, reinforcement, promotion, provenance, and the typed personal-context
+contract. Workspace owners declare what knowledge a workflow requires and remain responsible for
+their own action rules; `apps/api` performs authorized, purpose-bound context assembly. Shared
+knowledge never becomes an Integration-owned domain decision or an alternate authorization layer.
 
 Texting owns the shared conversation, consent, delivery, inbound claims, intent routing, child-run
 coordination, channel settings, and response composition. A workspace owns every routed operation,

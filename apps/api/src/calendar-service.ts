@@ -206,7 +206,7 @@ function deduplicateEvents(
             )
         : undefined;
     const cluster = uidCluster ?? semanticCluster;
-    const keys = uidKey ? [uidKey, semanticKey] : [semanticKey];
+    const keys = record.blockSourceEventId ? [] : uidKey ? [uidKey, semanticKey] : [semanticKey];
 
     if (cluster) {
       if (accountId) cluster.accountIds.add(accountId);

@@ -6343,6 +6343,13 @@ describe("ilo web app", () => {
   });
 
   it("syncs calendars through details-included and shown-as-busy badges", async () => {
+    const canonicalBlock = {
+      calendarId: googleCalendar.id,
+      eventId: "77777777-7777-4777-8777-777777777777",
+      mode: "details" as const,
+      provider: "google" as const,
+      sourceEventId: id,
+    };
     const block = {
       calendarId: nullColorCalendar.id,
       eventId: thirdId,
@@ -6350,7 +6357,7 @@ describe("ilo web app", () => {
       provider: "google" as const,
       sourceEventId: secondId,
     };
-    const linkedEvent = { ...event, blocks: [block] };
+    const linkedEvent = { ...event, blocks: [canonicalBlock, block] };
     mocks.listEvents.mockResolvedValue([linkedEvent]);
     mocks.getDailyBrief.mockResolvedValue({
       allDay: [],
@@ -6397,10 +6404,20 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateEventBlock).toHaveBeenCalledWith(secondId, thirdId, { mode: "details" }),
     );
+    expect(
+      within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
+        "Readonly Google",
+      ),
+    ).toBeInTheDocument();
     await browser.click(
       screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
     );
     await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledWith(secondId, thirdId));
+    expect(
+      within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
+        "Readonly Google",
+      ),
+    ).toBeInTheDocument();
 
     mocks.createEventBlock.mockRejectedValueOnce(new Error("Block failed"));
     await browser.click(screen.getByRole("button", { name: "Add calendar to Shown as Busy" }));
@@ -6456,6 +6473,25 @@ describe("ilo web app", () => {
     expect(renderedEvents[0]).toHaveStyle({ gridColumn: "2 / 5" });
   });
 
+  it("gives overlapping all-day events accessible targets in separate lanes", async () => {
+    const first = { ...allDayEvent, title: "First all-day event" };
+    const second = {
+      ...allDayEvent,
+      id: "77777777-7777-4777-8777-777777777777",
+      title: "Second all-day event",
+    };
+    mocks.listEvents.mockResolvedValue([first, second]);
+
+    const view = setup("/calendar?date=2026-07-13&view=week");
+    await screen.findByRole("button", { name: /All day First all-day event/u });
+    await screen.findByRole("button", { name: /All day Second all-day event/u });
+
+    const layer = view.container.querySelector(".week-all-day-layer");
+    expect(layer).toHaveStyle({ gridTemplateRows: "repeat(2, 28px)" });
+    const stylesheet = readFileSync("apps/web/src/styles.css", "utf8");
+    expect(stylesheet).toMatch(/\.week-all-day-event\s*\{[^}]*height:\s*24px;/su);
+  });
+
   it("collapses the all-day lane when the week has no all-day events", async () => {
     mocks.listEvents.mockResolvedValue([event]);
 
@@ -6484,7 +6520,7 @@ describe("ilo web app", () => {
     const spread = await screen.findByRole("button", { name: "Spread 2 overlapping events" });
     const cluster = spread.closest(".calendar-overlap-cluster");
     expect(cluster).not.toBeNull();
-    expect(cluster?.querySelector(".calendar-overlap-cluster__hit-area")).not.toBeNull();
+    expect(cluster?.querySelector(".calendar-overlap-cluster__hit-area")).toBeNull();
     expect(spread).toHaveAttribute("aria-expanded", "false");
 
     const firstEvent = within(cluster as HTMLElement).getByRole("button", {
@@ -6509,9 +6545,18 @@ describe("ilo web app", () => {
     });
     expect(within(spread).getByText("2")).toHaveClass("calendar-overlap-cluster__pin-head");
 
+    fireEvent.pointerEnter(cluster as HTMLElement, { pointerType: "mouse" });
+    expect(cluster).toHaveClass("is-hovered");
+    fireEvent.pointerLeave(cluster as HTMLElement, { pointerType: "mouse" });
+    expect(cluster).toHaveClass("is-hovered");
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+    });
+    expect(cluster).not.toHaveClass("is-hovered");
+
     firstEvent.focus();
     await browser.keyboard("{Escape}");
-    expect(firstEvent).toHaveFocus();
+    expect(spread).toHaveFocus();
 
     await browser.click(spread);
     expect(spread).toHaveAttribute("aria-expanded", "true");

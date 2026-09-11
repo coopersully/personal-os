@@ -3399,13 +3399,6 @@ p {
 .calendar-overlap-cluster .calendar-timeline-event {
   pointer-events: auto;
 }
-.calendar-overlap-cluster__hit-area {
-  inset-block: -88px;
-  inset-inline: 0;
-  pointer-events: none;
-  position: absolute;
-  z-index: 0;
-}
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-timeline-event,
 .calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible) .calendar-timeline-event {
   border-color: color-mix(in srgb, var(--calendar-color) 78%, var(--surface-raised));
@@ -3573,7 +3566,7 @@ p {
   font-size: 14px;
   font-weight: 600;
   gap: 4px;
-  height: 20px;
+  height: 24px;
   margin-inline: var(--week-all-day-edge-padding);
   min-width: 0;
   padding: 3px 9px;

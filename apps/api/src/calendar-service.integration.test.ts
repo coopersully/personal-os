@@ -398,7 +398,17 @@ describe.sequential("Calendar commitment proposals", () => {
       })
       .returning();
     if (!otherAccount) throw new Error("Other account fixture was not created.");
-    const [hiddenSourceCalendar, otherDestinationCalendar] = await database.db
+    const [realEventAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Real event account",
+        provider: "google",
+        providerAccountId: "real-google-busy-event",
+        userId,
+      })
+      .returning();
+    if (!realEventAccount) throw new Error("Real event account fixture was not created.");
+    const [hiddenSourceCalendar, otherDestinationCalendar, realEventCalendar] = await database.db
       .insert(calendars)
       .values([
         {
@@ -420,9 +430,18 @@ describe.sequential("Calendar commitment proposals", () => {
           timezone: "UTC",
           userId,
         },
+        {
+          accountId: realEventAccount.id,
+          isWritable: true,
+          name: "Real events",
+          provider: "google",
+          remoteCalendarId: "real-events",
+          timezone: "UTC",
+          userId,
+        },
       ])
       .returning();
-    if (!hiddenSourceCalendar || !otherDestinationCalendar) {
+    if (!hiddenSourceCalendar || !otherDestinationCalendar || !realEventCalendar) {
       throw new Error("Managed block calendar fixtures were not created.");
     }
     const sources = await database.db
@@ -479,6 +498,16 @@ describe.sequential("Calendar commitment proposals", () => {
         userId,
       },
     ]);
+    await database.db.insert(calendarEvents).values({
+      calendarId: realEventCalendar.id,
+      endsAt: firstSource.endsAt,
+      provider: "google",
+      remoteEventId: "real-busy-event",
+      startsAt: firstSource.startsAt,
+      timezone: "UTC",
+      title: "Busy",
+      userId,
+    });
 
     const visibleBlocks = await service.listEvents(userId, {
       from: "2026-08-05T00:00:00.000Z",
@@ -488,6 +517,7 @@ describe.sequential("Calendar commitment proposals", () => {
     expect(visibleBlocks.map((event) => event.remoteEventId).sort()).toEqual([
       "managed-busy-one",
       "managed-busy-two",
+      "real-busy-event",
     ]);
   });
 

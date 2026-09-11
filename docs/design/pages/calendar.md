@@ -19,7 +19,8 @@ event without losing the shape of the day.
   timeline without a decorative divider.
 - All-day events use compact rounded notched bars. A multi-day event is one
   continuous bar spanning its occupied day columns, while overlapping events
-  stack into separate all-day lanes.
+  stack into separate all-day lanes. Each all-day control retains at least a
+  24 px target with spacing between adjacent lanes.
 - Visible event feeds collapse provider mirrors into one canonical occurrence.
   A shared iCalendar UID plus the exact start, end, and all-day state is the
   preferred identity. When no shared UID exists, non-local events may match
@@ -63,8 +64,9 @@ event without losing the shape of the day.
   spreads the existing event cards around the cluster centre on a circular
   path, beginning from the left and right sides. A restrained fan rotation
   reinforces the circular arrangement. Cards retain their normal
-  shape, content, and independent click target;
-  a stable interaction area prevents the layout animation from dropping hover.
+  shape, content, and independent click target; a short pointer-exit grace
+  period bridges the animated gap without placing an intercepting hit area over
+  neighbouring events.
   The control also supports touch, and Escape collapses the chooser.
 - Vertical day separation remains visible. Horizontal rules communicate time,
   not card boundaries. Week headers and timelines alternate between two subtle

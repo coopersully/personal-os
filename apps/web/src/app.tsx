@@ -3673,7 +3673,7 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     if (event.button !== 0 || event.pointerType === "touch") return;
     if (
       (event.target as Element).closest(
-        ".calendar-timeline-event, .calendar-overlap-cluster__toggle, .calendar-overlap-cluster__hit-area",
+        ".calendar-timeline-event, .calendar-overlap-cluster__toggle",
       )
     ) {
       return;
@@ -3900,30 +3900,46 @@ function TimelineOverlapCluster({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const hoverLeaveTimer = useRef<number | null>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const clusterId = useId();
   const count = cluster.layouts.length;
+  useEffect(
+    () => () => {
+      if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
+    },
+    [],
+  );
   return (
     <fieldset
       aria-label={`${count} overlapping events`}
       className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
       id={clusterId}
       onKeyDown={(event) => {
-        if (event.key !== "Escape" || !expanded) return;
+        const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
+        if (event.key !== "Escape" || (!expanded && !focusedEvent)) return;
         event.stopPropagation();
         setExpanded(false);
         toggle.current?.focus();
       }}
       onPointerEnter={(event) => {
-        if (event.pointerType !== "touch") setHovered(true);
+        if (event.pointerType === "touch") return;
+        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
+        hoverLeaveTimer.current = null;
+        setHovered(true);
       }}
-      onPointerLeave={() => setHovered(false)}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "touch") return;
+        hoverLeaveTimer.current = window.setTimeout(() => {
+          setHovered(false);
+          hoverLeaveTimer.current = null;
+        }, 160);
+      }}
       style={{
         height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
         top: minuteToTimelinePixels(cluster.startMinute),
       }}
     >
-      <span aria-hidden="true" className="calendar-overlap-cluster__hit-area" />
       <button
         aria-controls={clusterId}
         aria-expanded={expanded}
@@ -4370,7 +4386,7 @@ function WeekAllDayEvents({
       className={`week-all-day-layer${isEmpty ? " is-empty" : ""}`}
       style={{
         gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
-        gridTemplateRows: isEmpty ? "0px" : `repeat(${rowCount}, 23px)`,
+        gridTemplateRows: isEmpty ? "0px" : `repeat(${rowCount}, 28px)`,
         paddingBottom: isEmpty ? 0 : undefined,
       }}
     >
@@ -7896,8 +7912,13 @@ function EventInspector({
         ? api.deleteEventBlock(sourceEventId, input.blockId)
         : api.updateEventBlock(sourceEventId, input.blockId, { mode: input.mode });
     },
-    onSuccess: async (updated) => {
-      setBlocks(updated.blocks);
+    onSuccess: async (updated, input) => {
+      const sourceEventId =
+        input.operation === "create" ? event.id : (input.sourceEventId ?? event.id);
+      setBlocks((current) => [
+        ...current.filter((block) => (block.sourceEventId ?? event.id) !== sourceEventId),
+        ...updated.blocks,
+      ]);
       await invalidateMaterial(queryClient);
     },
   });

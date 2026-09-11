@@ -336,6 +336,13 @@ maintenance create durable typed questions, approvals, reviews, recovery steps, 
 completed-work summaries; later runs reuse their resolutions and reinforced knowledge to reduce
 unnecessary questions.
 
+Guided setup may propose a complete rule set in one batch, but every rule remains inactive pending
+a dedicated, version-bound preview of its condition, scope, sources, representative matches and
+non-matches, action, consequences, conflicts/precedence, authority, and disable/rollback behavior.
+Large sets may be grouped and paginated while keeping every rule individually inspectable and
+deselectable. Drift forces a new preview; setup completion and global review bypass never activate
+an action rule.
+
 | Workflow | Inputs | Outputs/actions |
 | --- | --- | --- |
 | Daily brief | schedule, selected sources, privacy | Now/Next/remaining/triage, schedule health, chosen priorities. |

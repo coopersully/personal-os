@@ -46,7 +46,8 @@ For a mature workspace steward, prefer a small, predictable high-level intent su
 
 - `setup_<workspace>` or the shared setup plan starts or resumes a domain-owned interview when the
   person needs to define source meanings, goals, constraints, review preferences, or their desired
-  workflow.
+  workflow. It may return any number of proposed rules, but all remain inactive until a dedicated,
+  version-bound preview and the owning domain's required activation approval.
 - `get_<workspace>_status` reports setup readiness, source freshness, maintained-state checks,
   backlog, active or recoverable work, open questions, and the latest review.
 - `maintain_<workspace>` starts, resumes, or verifies the domain-owned maintenance turn for `all`,
@@ -56,6 +57,11 @@ These names are a product convention, not a claim that every workspace already a
 maintenance operations or a dedicated setup tool. `get_ilo_context` remains the authority for what
 the current connection can use. Granular tools remain available for useful surgical inspection,
 previews, and exact authorized actions.
+
+Setup proposal volume does not grant authority. A large rule set may be grouped or paginated, but
+each rule remains individually inspectable and deselectable with its scope, examples, consequences,
+conflicts, required authority, and disable/rollback behavior. Proposal or evaluation drift requires
+a new preview; neither setup completion nor global review bypass activates an action rule.
 
 The normalized tool vocabulary is intentionally low entropy: provider-specific identifiers and
 capabilities remain available as evidence, but an agent should learn one Mail, Tasks, Calendar,

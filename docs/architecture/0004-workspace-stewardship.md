@@ -30,7 +30,8 @@ Implement each workspace steward as these layered, domain-owned contracts:
    and action authority.
 4. **Guided setup:** a resumable, domain-owned interview that translates the person's goals,
    source meanings, constraints, and desired workflow into explicit proposed configuration and
-   rules.
+   any number of inactive rules. Rules require a dedicated, version-bound preview before the
+   owning domain's activation policy can approve them.
 5. **Surgical operations:** small idempotent or revision-guarded domain operations with audit and
    recovery behavior.
 6. **Maintenance coordinator:** a durable run composed of named steps that can claim, resume,
@@ -48,6 +49,13 @@ The generic maintenance substrate may own run/step identifiers, leases, fencing,
 terminal settlement, retry history, and common result envelopes. It must not encode what counts as
 a duplicate transaction, an urgent conversation, a scheduling conflict, a healthy budget, or any
 other domain judgment.
+
+A rule preview records each proposal's immutable version or fingerprint, condition, scope, source
+selection, representative matches and non-matches, action, consequences, conflicts/precedence,
+authority requirement, and disable/rollback behavior. Large proposal sets may be grouped and
+paginated, but every rule remains individually inspectable and deselectable. Any proposal or sample
+drift invalidates the preview; setup completion and global review bypass cannot activate an action
+rule.
 
 ## Package responsibilities
 

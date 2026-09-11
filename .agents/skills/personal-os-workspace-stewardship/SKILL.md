@@ -55,6 +55,13 @@ check-in health, but those records must never trigger work or modify the externa
 queues, leases, retries, delayed authorized effects, and recovery timers may only continue an
 invocation nohmi already accepted; they cannot originate a new recurring maintenance turn.
 
+Allow guided setup to propose any number of rules, but keep every rule inactive until a dedicated,
+version-bound preview exposes its condition, scope, sources, representative matches and
+non-matches, action, consequences, conflicts/precedence, required authority, and disable/rollback
+path. Large sets may be grouped and paginated only if each rule remains inspectable and deselectable.
+Invalidate the preview after proposal or sample drift. Setup completion and global review bypass do
+not activate an action rule.
+
 Every mutation retains least privilege, source evidence, policy, revision/idempotency controls,
 audit, and recovery. User Knowledge may become active through manual promotion or safe repeated
 reinforcement, but it never grants action authority or activates a mutation rule. Never

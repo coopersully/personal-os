@@ -60,6 +60,17 @@ Guidance applies to all setup, status, maintenance, and advisory surfaces. A cha
 must not drift into a separate SMS behavior, and prose guidance cannot bypass scopes, global review
 policy, domain rules, or hard product limits.
 
+Guided setup may generate a complete proposed rule set in one batch; proposal count is not an
+activation shortcut. Every rule remains inactive until a dedicated preview makes its condition,
+scope, source selection, representative matches and non-matches, intended action, consequences,
+conflicts and precedence, required authority, and disable/rollback path inspectable. Large sets may
+be grouped and paginated, but each rule stays individually reviewable and deselectable.
+
+The preview binds to immutable proposal versions or fingerprints. If a rule or its evaluated source
+sample changes, its preview becomes stale and must be regenerated before activation. Finishing
+setup, trusting the agent, or enabling global review bypass does not activate an action rule; rule
+activation follows the owning domain's explicit approval policy.
+
 ## External scheduling boundary
 
 External platforms own maintenance schedules completely. nohmi exposes stable maintenance intents
@@ -178,5 +189,4 @@ behavior and must not be presented as shipped.
 
 ## Open design questions
 
-- How much rule generation guided setup may propose before requiring a dedicated preview.
 - Which settings belong inline inside each workspace and which also appear in centralized Settings.

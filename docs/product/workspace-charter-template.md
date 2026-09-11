@@ -51,6 +51,13 @@ Before implementation, define the guided setup interview: what it learns about t
 sources, constraints, preferred workflow, review cadence, and notifications; which configuration or
 rules it may propose; and which approvals remain human-owned.
 
+Guided setup may propose any number of rules in one batch, but every rule remains inactive until a
+dedicated preview shows its condition, scope, selected sources, representative matches and
+non-matches, intended action, consequences, conflicts/precedence, required authority, and
+disable/rollback path. Define grouping and pagination without losing individual inspection and
+deselection, plus immutable proposal versions that force re-preview after drift. Setup completion
+and global review bypass must not activate an action rule.
+
 ## 6. Maintenance turn
 
 Describe the domain-owned sequence for `all`, a bounded time window, and an exact target:

@@ -12,8 +12,9 @@ patterns, and produces an evidence-backed review of the current state and how to
 
 The person may describe how they want the workspace to operate in ordinary language. Guided setup
 turns that intent into explicit source meanings, preferences, review cadence, notifications, and
-proposed rules, shows the consequences, and asks for the approvals that the resulting behavior
-requires.
+proposed rules. It may propose a complete rule set at once, but every rule remains inactive until a
+dedicated, version-bound preview shows its scope, examples, consequences, conflicts, authority, and
+recovery path and the owning domain receives the required approval.
 
 The steward is not an MCP prompt, scheduled client automation, batch-cleanup endpoint, or separate
 agent persona. It is nohmi product behavior owned by the domain and available consistently to the
@@ -38,7 +39,8 @@ Each workspace defines these domain-specific capabilities:
 4. **Knowledge contract.** The required, optional, and prohibited User Knowledge for each workflow,
    including freshness, sensitivity, missing-data behavior, and allowed learning outputs.
 5. **Guided setup.** A resumable interview that learns the person's goals, source meanings,
-   constraints, desired workflow, and review preferences, then proposes configuration and rules.
+   constraints, desired workflow, and review preferences, then proposes configuration and any
+   number of inactive rules for dedicated preview.
 6. **Surgical operations.** Narrow reads, previews, annotations, corrections, and approved actions
    for one exact record or decision.
 7. **Maintenance turn.** A durable, resumable workflow that brings all outstanding work—or a named
@@ -107,6 +109,13 @@ Where onboarding is nontrivial, the same surface also exposes a setup intent or 
 Across workspaces the vocabulary should remain predictable: setup defines how the workspace should
 work, status explains its current state, maintain performs the durable stewardship turn, and
 surgical tools inspect or change one exact thing.
+
+Setup may return a large proposed rule set, grouped or paginated for usability, without activating
+it. Each rule must remain individually inspectable and deselectable in a dedicated preview covering
+condition, scope, source selection, representative matches and non-matches, action, consequences,
+conflicts and precedence, required authority, and disable/rollback behavior. Activation binds to
+the exact previewed versions; drift requires a new preview, and global review bypass does not
+activate action rules.
 
 ## Scheduling boundary
 

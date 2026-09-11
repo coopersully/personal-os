@@ -71,6 +71,10 @@ The primary user is an individual with multiple Google/iCloud accounts, variable
 17. **External schedulers invoke; nohmi executes.** ChatGPT, Codex, Claude, Gemini, operating-system
     schedulers, and future MCP hosts may choose cadence and invoke an intent. nohmi owns durable
     workflow state, expertise, policy, questions, recovery, and the verified outcome.
+18. **Rule generation is not rule activation.** Guided setup may propose a complete rule set, but
+    every rule remains inactive until a dedicated, version-bound preview exposes its scope,
+    examples, consequences, conflicts, authority, and recovery path and the owning domain receives
+    the required approval. Global review bypass cannot activate an action rule.
 
 ## 4. Information architecture
 

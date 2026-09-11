@@ -56,9 +56,12 @@ queues, leases, retries, delayed authorized effects, and recovery timers may onl
 invocation nohmi already accepted; they cannot originate a new recurring maintenance turn.
 
 Do not impose one exclusive scheduler per workspace or intent. Multiple hosts and overlapping
-schedules are allowed; preserve each call's connection, host-declared automation identity when
-available, scope, and idempotency identity so the API can coalesce compatible durable work and keep
-incompatible scopes separate without replaying effects.
+schedules are allowed. Give every declared schedule an immutable nohmi-owned local identity; require
+scheduled maintenance API/MCP inputs to carry it, validate it against the authenticated connection,
+and propagate it through run, health, revocation, idempotency, and coalescing records. Treat a host
+automation identity as optional evidence and leave schedule identity absent for manual or otherwise
+unscheduled calls. Preserve scope and idempotency identity so the API can coalesce compatible
+durable work and keep incompatible scopes separate without replaying effects.
 
 Allow guided setup to propose any number of rules, but keep every rule inactive until a dedicated,
 version-bound preview exposes its condition, scope, sources, representative matches and

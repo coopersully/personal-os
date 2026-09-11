@@ -161,6 +161,7 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
 | Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
 | External schedule declaration | Immutable nohmi-owned local identity, optional host automation identity, authenticated connection, intended workspace/intent and scope, expected cadence, observed check-in health, revocation, and linked durable runs. It is observational invocation metadata, never a nohmi-owned trigger or schedule. |
+| Maintenance/action run | Owner, invoking actor and authenticated connection, optional validated local schedule identity, intent and requested scope, playbook/rulebook/User Knowledge versions, evidence cutoff, durable steps and effects, policy decisions and approvals, idempotency and recovery state, work nodes, review artifact, and verified terminal state. Runs exist independently of schedule declarations and also represent manual, app, SMS, and other authorized invocations. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
 ## 6. Complete experience design

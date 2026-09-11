@@ -91,10 +91,14 @@ recurring schedule. nohmi may record an expected cadence and observed check-in h
 records never invoke the tool; nohmi owns durable execution, context, policy, questions, recovery,
 and completion truth only after a host calls it.
 
-Each call retains its invoking connection, host-declared automation identity when available,
-requested scope, and idempotency identity. The domain's durable-run contract coalesces or resumes
-compatible concurrent calls and keeps incompatible scopes separate without replaying completed
-external effects.
+Each call accepts an optional immutable nohmi-owned local schedule identity in addition to its
+invoking connection, host-declared automation identity when available, requested scope, and
+idempotency identity. The local schedule identity is required when a declared external schedule
+invokes maintenance and is validated against the authenticated connection; manual and otherwise
+unscheduled calls leave it absent. Run, health, revocation, idempotency, and coalescing records
+propagate that identity so the domain's durable-run contract can coalesce or resume compatible
+concurrent calls, keep incompatible scopes separate, and distinguish schedules without replaying
+completed external effects.
 
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal

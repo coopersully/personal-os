@@ -108,9 +108,13 @@ retries, delayed authorized effects, and recovery timers may continue an accepte
 must not originate a new recurring maintenance turn.
 
 Scheduling authority is scoped to each schedule rather than one exclusive owner per workspace.
-Multiple hosts and overlapping schedules may invoke the same intent. Their calls retain separate
-connection, host-declared automation, scope, and idempotency identities; compatible runs coalesce or
-resume, and incompatible scopes remain separate without duplicating completed external effects.
+Multiple hosts and overlapping schedules may invoke the same intent. Every declaration receives an
+immutable nohmi-owned local schedule identity, and a declared schedule must pass it through the
+typed maintenance API/MCP input. The API validates it against the authenticated connection and
+propagates it through run, health, revocation, idempotency, and coalescing records; host-declared
+automation identity remains optional evidence, while manual and otherwise unscheduled invocations
+carry no schedule identity. Compatible runs coalesce or resume, and incompatible scopes remain
+separate without duplicating completed external effects.
 
 Workspace stewards may publish typed notification intents that reference their run, work nodes,
 safe summary, sensitivity, and first-party destination. The shared Texting coordinator owns channel
@@ -126,11 +130,13 @@ setting, verifies the committed result, and publishes the period review.
 
 ## Reliability and observation
 
-A maintenance run records its requested scope, purpose, evidence cutoff, playbook/rulebook and User
-Knowledge revisions, steps, claims, effects, work nodes, failures, review artifact, and terminal status. External effects follow
-the connector reliability contract. Process loss resumes from durable state; concurrent requests
-coalesce or fence; ambiguous effects reconcile before replay. Status and review surfaces must
-distinguish queued, active, maintained, maintained-with-questions, blocked, and failed work.
+A maintenance run records its owner, invoking actor and connection, optional validated local
+schedule identity, requested scope, purpose, evidence cutoff, playbook/rulebook and User Knowledge
+revisions, steps, claims, effects, policy decisions, approvals, idempotency and recovery state, work
+nodes, failures, review artifact, and terminal status. External effects follow the connector
+reliability contract. Process loss resumes from durable state; concurrent requests coalesce or
+fence; ambiguous effects reconcile before replay. Status and review surfaces must distinguish
+queued, active, maintained, maintained-with-questions, blocked, and failed work.
 
 ## Parallel development
 

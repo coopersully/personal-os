@@ -138,9 +138,12 @@ maintenance schedule. The current compatibility matrix and official references l
 [`external automation hosts`](automation-hosts.md).
 
 This authority is per schedule, not an exclusive workspace lease. The person may configure
-multiple hosts and overlapping schedules for the same maintenance intent. Each invocation retains
-its connection, host-declared automation identity when available, scope, and idempotency identity;
-compatible work coalesces or resumes, while incompatible scopes remain separate without replaying
+multiple hosts and overlapping schedules for the same maintenance intent. Every declaration has an
+immutable nohmi-owned local schedule identity. A declared schedule must pass that identity on each
+invocation, where nohmi validates it against the authenticated connection and propagates it through
+the run, health, revocation, idempotency, and coalescing records; a host automation identity remains
+optional evidence. Manual and otherwise unscheduled invocations leave the schedule identity absent.
+Compatible work coalesces or resumes, while incompatible scopes remain separate without replaying
 completed effects.
 
 The scheduler owns when to call. nohmi owns what the intent means, the knowledge and evidence it

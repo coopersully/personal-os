@@ -70,6 +70,11 @@ The link opens a scoped review view containing exactly the items summarized in t
 their message, run, and work-node context. That view offers a separate action to open the complete
 review queue; the text never drops the person into an unrelated unfiltered backlog.
 
+Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
+approval authority, answer, or sensitive item content; possession of the phone or receipt of the
+SMS is not a web session. If authentication is required, nohmi returns the person to the same scoped
+review after sign-in.
+
 Example: “Your budget is on track this month. One question: dinner yesterday was unusually large—are
 you expecting reimbursement? Reply yes, no, or unsure. Review: [link]”
 

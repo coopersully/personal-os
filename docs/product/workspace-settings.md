@@ -70,6 +70,8 @@ person deliberately creates a workspace override:
 
 These controls affect communication and routing only. The global review-bypass setting decides
 whether an otherwise policy-authorized reversible action executes directly or enters review.
+Enabling links does not enable passwordless access: every linked review uses normal nohmi
+authentication.
 
 The default is quiet on routine success. A maintenance run sends a proactive text only when nohmi
 needs an answer, approval, recovery step, or other action from the person. This default does not

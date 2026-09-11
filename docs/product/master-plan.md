@@ -281,6 +281,9 @@ flowchart TD
 - Keep SMS formal, short, and concise. Render one item directly, but summarize multiple questions or
   actions by count and topic instead of reproducing them. Link to a scoped review view containing
   exactly those items, with a separate action for the complete nohmi review queue.
+- Require normal nohmi authentication for every SMS deep link, retain the exact scoped destination
+  across sign-in, and never place bearer credentials, approvals, answers, or sensitive item content
+  in the URL.
 - Promote Finance's current review-bypass control into one global policy used consistently by app,
   API, MCP, scheduled, and SMS work. Bind SMS approvals to one exact, reversible, unexpired proposal
   and retain stronger boundaries for unsupported or higher-impact effects.

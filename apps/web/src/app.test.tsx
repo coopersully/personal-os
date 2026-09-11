@@ -6647,7 +6647,7 @@ describe("ilo web app", () => {
       "--calendar-event-left": "calc(0% + 2px)",
       "--calendar-event-width": "calc(50% - 4px)",
       "--overlap-orbit-rotation": "-4deg",
-      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
+      "--overlap-orbit-width": "clamp(88px, calc(100% - 110px), 160px)",
       "--overlap-orbit-x": "-52px",
       "--overlap-orbit-y": "0px",
     });
@@ -6655,7 +6655,7 @@ describe("ilo web app", () => {
       "--calendar-event-left": "calc(50% + 2px)",
       "--calendar-event-width": "calc(50% - 4px)",
       "--overlap-orbit-rotation": "4deg",
-      "--overlap-orbit-width": "max(88px, calc(100% - 110px))",
+      "--overlap-orbit-width": "clamp(88px, calc(100% - 110px), 160px)",
       "--overlap-orbit-x": "52px",
       "--overlap-orbit-y": "0px",
     });

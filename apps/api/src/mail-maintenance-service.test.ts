@@ -193,7 +193,7 @@ describe("Mail maintenance orchestration edges", () => {
   it("fails recoverably when evidence changes between publication and verification", async () => {
     const first = snapshot();
     const changed = snapshot({ rulebookVersion: "rules-v2" });
-    const { service, workspace } = harness([first, first, changed]);
+    const { service, workspace } = harness([first, first, first, changed]);
     await expect(
       service.maintain(userId, { scope: { type: "all_outstanding" } }),
     ).resolves.toMatchObject({

@@ -333,6 +333,8 @@ coherent response without reproducing domain expertise.
 - Workspace maintenance publishes typed notification intents. Texting applies global and
   per-workspace policy and sends one outcome sentence, at most one available question or exact
   review, and a useful first-party link.
+- Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
+  quiet, while a message initiated by the person still receives a response.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.

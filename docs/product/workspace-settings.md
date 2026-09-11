@@ -61,7 +61,7 @@ The person configures the following defaults globally. Each workspace inherits t
 person deliberately creates a workspace override:
 
 - inbound SMS routing into that workspace: enabled or disabled;
-- maintenance SMS: off, questions only, actionable results, or every completed run;
+- maintenance SMS: questions and actions only by default, with explicit off or every-run options;
 - whether replies may answer that workspace's questions;
 - whether replies may approve exact reversible proposals when global review bypass is off;
 - privacy-safe or explicitly detailed message content;
@@ -70,6 +70,10 @@ person deliberately creates a workspace override:
 
 These controls affect communication and routing only. The global review-bypass setting decides
 whether an otherwise policy-authorized reversible action executes directly or enters review.
+
+The default is quiet on routine success. A maintenance run sends a proactive text only when nohmi
+needs an answer, approval, recovery step, or other action from the person. This default does not
+suppress a reply to a text the person initiated.
 
 ## Inheritance boundary
 
@@ -83,9 +87,9 @@ every workspace setting has a global equivalent.
 | Global default with workspace override | Maintenance notification mode, quiet hours, inbound SMS routing, reply handling, safe content detail, and first-party links | Inherit the account preference until the person deliberately changes that workspace |
 | Workspace-only | Connected sources, source meanings, definition of maintained, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; no global value is implied |
 
-For example, the person could set “send only actionable maintenance texts, use privacy-safe detail,
-and stay quiet overnight” once, then let Mail inherit it while allowing Finances to send questions
-only and Calendar to send nothing. The override changes communication for that workspace; it does
+For example, the person could keep the default “send only questions and actions, use privacy-safe
+detail, and stay quiet overnight,” then let Mail inherit it while allowing Finances to send every
+run and Calendar to send nothing. The override changes communication for that workspace; it does
 not create a separate security policy or review-bypass value.
 
 ## Resolution order

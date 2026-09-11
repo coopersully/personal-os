@@ -47,6 +47,10 @@ The Texting service applies global and per-workspace settings, renders the small
 and owns provider delivery. A workspace never calls Twilio, reads the general SMS conversation, or
 polls for replies directly.
 
+Proactive maintenance SMS is quiet by default unless the run needs an answer or action from the
+person, such as a bounded question, exact review, or recovery step. A routine successful run with
+no requested input sends no text; Texting still answers messages the person initiates.
+
 A maintenance message should normally contain:
 
 - one outcome sentence;
@@ -95,7 +99,8 @@ it needs different behavior. The configurable preferences are:
 
 - whether general inbound texts may route work into that workspace;
 - whether maintenance may send SMS at all;
-- whether to send only questions, actionable results, or every completed run;
+- whether to keep the questions-and-actions-only default, turn maintenance SMS off, or send every
+  completed run;
 - whether SMS replies may answer questions and review exact reversible proposals;
 - privacy-safe versus explicitly enabled detailed content;
 - whether to include first-party review and recovery links; and

@@ -1,4 +1,4 @@
 interface:
-  display_name: "ilo Frontend"
-  short_description: "Refine and build accessible ilo experiences."
-  default_prompt: "Use $personal-os-frontend to refine or build this ilo web experience."
+  display_name: "nohmi Frontend"
+  short_description: "Refine and build accessible nohmi experiences."
+  default_prompt: "Use $personal-os-frontend to refine or build this nohmi web experience."

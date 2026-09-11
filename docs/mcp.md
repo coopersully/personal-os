@@ -1,13 +1,26 @@
 # MCP integration
 
-The MCP server is an adapter over the authenticated nohmi API. It contains no reminder, calendar,
-mail, finance, provider, or audit rules of its own.
+The MCP server is the agent unification interface over the authenticated nohmi API. It contains no
+Mail, Tasks, Calendar, Finances, User Knowledge, provider, policy, or audit rules of its own.
+
+The target is functional parity with the first-party product: anything a person can inspect or
+change in the app should have a typed API and MCP capability when the provider and platform permit
+it. This includes workspace and global settings, notification-channel controls, maintenance
+guidance, rules, and Texting enablement. Parity does not mean one generic omnipotent tool: discovery
+and execution remain limited by the connected agent's explicit scopes, and an agent cannot change
+its own credential, grant itself authority, or bypass stronger consent, approval, privacy, or
+security boundaries.
 
 The displayed product and OAuth resource name is **nohmi**. The protocol server
 identifier `ilo`, existing `get_ilo_*` tools, `ilo://` resources, `_ilo` metadata,
 and versioned `ilo-setup` artifacts remain compatibility contracts. The Mac target
 is `https://nohmi-mcp.coopersully.me/mcp`; reconnect clients after the public origin
 changes so discovery and audience-bound authorization use the new deployment.
+
+The approved target is a hard cutover to the `nohmi` protocol identifier,
+`get_nohmi_*` tools, `nohmi://` and `ui://nohmi/` resources, `_nohmi` metadata, and a
+`nohmi-setup` artifact. The current compatibility names below remain an implementation gap; do not
+add another alias or describe them as the product's permanent vocabulary.
 
 ## Transports
 
@@ -35,31 +48,121 @@ documentation. Compose and Terraform set the same first-party origin used by the
 and visual-entrypoint status of every tool; `tool-surface.ts` enforces that catalog uniformly.
 Adding a tool without a catalog record fails while the server is being constructed.
 
-### Workspace Ilo intent surface
+### Workspace stewardship intent surface
 
-For a mature workspace Ilo, prefer a small high-level intent pair:
+For a mature workspace steward, prefer a small, predictable high-level intent surface:
 
+- `setup_<workspace>` or the shared setup plan starts or resumes a domain-owned interview when the
+  person needs to define source meanings, goals, constraints, review preferences, or their desired
+  workflow. It may return any number of proposed rules, but all remain inactive until a dedicated,
+  version-bound preview and the owning domain's required activation approval.
 - `get_<workspace>_status` reports setup readiness, source freshness, maintained-state checks,
   backlog, active or recoverable work, open questions, and the latest review.
 - `maintain_<workspace>` starts, resumes, or verifies the domain-owned maintenance turn for `all`,
   a bounded time window, or an exact target.
 
 These names are a product convention, not a claim that every workspace already advertises both
-tools. `get_ilo_context` remains the authority for what the current connection can use. Granular
-tools remain available for useful surgical inspection, previews, and exact authorized actions.
+maintenance operations or a dedicated setup tool. `get_ilo_context` remains the authority for what
+the current connection can use. Granular tools remain available for useful surgical inspection,
+previews, and exact authorized actions.
+
+Setup proposal volume does not grant authority. A large rule set may be grouped or paginated, but
+each rule remains individually inspectable and deselectable with its scope, examples, consequences,
+conflicts, required authority, and disable/rollback behavior. Proposal or evaluation drift requires
+a new preview; neither setup completion nor global review bypass activates an action rule.
+
+The normalized tool vocabulary is intentionally low entropy: provider-specific identifiers and
+capabilities remain available as evidence, but an agent should learn one Mail, Tasks, Calendar,
+Finances, and User Knowledge contract rather than a separate workflow for every provider.
 
 Maintenance is not batch CRUD and the MCP host does not provide the sequence. The workspace API
-owns its expert playbook, rulebook, orchestration, durable run state, question/learning loop,
+owns its expert playbook, knowledge contract, rulebook, orchestration, durable run state, question/learning loop,
 advisory model, review artifact, idempotency, and completion decision. MCP only validates the
 intent, calls the authenticated typed API, and returns the durable state. A host instruction such
 as `maintain finances` should therefore work consistently without embedding Finance procedure in a
 Claude, Codex, or other client automation.
 
+The person may schedule the same maintenance intent through any number of ChatGPT or Codex scheduled
+tasks, Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
+operating-system scheduler, or another MCP-capable host. Multiple hosts and overlapping schedules
+are permitted; nohmi must not choose one exclusive owner merely to simplify orchestration. Those
+systems are the sole authority for creating, editing, activating, pausing, and delivering the
+recurring schedule. nohmi may record an expected cadence and observed check-in health, but those
+records never invoke the tool; nohmi owns durable execution, context, policy, questions, recovery,
+and completion truth only after a host calls it.
+
+Each call accepts an optional immutable nohmi-owned local schedule identity in addition to its
+invoking connection, host-declared automation identity when available, requested scope, and
+idempotency identity. The local schedule identity is required when a declared external schedule
+invokes maintenance and is validated against the authenticated connection; manual and otherwise
+unscheduled calls leave it absent. Run, health, revocation, idempotency, and coalescing records
+propagate that identity so the domain's durable-run contract can coalesce or resume compatible
+concurrent calls, keep incompatible scopes separate, and distinguish schedules without replaying
+completed external effects.
+
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
 result distinguishes maintained, maintained-with-questions, blocked, and failed outcomes and links
-to the workspace's review and recovery surfaces. See
-[`ADR 0004`](architecture/0004-workspace-ilo-stewardship.md).
+to the workspace's review and recovery surfaces. For a multi-workspace request, verified child
+successes remain committed while failed, blocked, or uncertain siblings are reported exactly and
+resume only through their own safe retry contracts; MCP does not invent atomic rollback. See
+[`ADR 0004`](architecture/0004-workspace-stewardship.md).
+
+### Target Texting intent surface
+
+Texting is a shared general inbox, not a fifth workspace. Its target high-level tools are:
+
+- `get_texting_status` for connection, consent, conversation backlog, active child intents,
+  awaiting replies, delivery uncertainty, and valid recovery actions; and
+- `maintain_texting` for claiming unprocessed inbound messages, routing free-form and
+  cross-workspace requests, resuming child work, resolving bound answers or reviews, composing a
+  concise reply, and reconciling uncertain delivery.
+
+The API-owned Texting coordinator dispatches only to domain-owned operations available under the
+caller's scopes and global/per-workspace settings. It does not place multi-domain logic in MCP.
+Workspace maintenance publishes typed notification intents; Texting renders and sends them without
+letting a workspace call Twilio or read the shared conversation.
+
+The global review-bypass setting applies to every channel. Policy-authorized reversible work may
+execute directly when bypass is enabled; otherwise it becomes an exact review, which a verified
+SMS reply may approve only when bound to the current unexpired proposal. See
+[`texting and SMS`](product/texting-operations.md) and
+[`ADR 0006`](architecture/0006-texting-inbox.md).
+
+The existing `read_text_conversation` and `send_text_message` tools are surgical transport tools,
+not this general-inbox coordinator. The high-level Texting tools and dispatch behavior are target
+contracts and must not be advertised until current discovery and tests prove they ship.
+
+### Target User Knowledge surface
+
+High-level workspace tools retrieve purpose-bound context internally. The target shared surgical
+surface adds:
+
+- `get_nohmi_context` for identity, time, authority, workspace readiness, knowledge readiness, and
+  available intent surfaces;
+- `get_context_for_intent` for the bounded context pack required by one declared purpose and target;
+- `search_user_knowledge` and `get_knowledge` for precise inspection;
+- `propose_knowledge`, `update_knowledge`, `promote_knowledge`, and `supersede_knowledge` for the
+  typed learning lifecycle; and
+- `explain_context` for the selection, omission, provenance, confidence, and missing requirements
+  behind a consequential result.
+
+Semantic retrieval never bypasses scope, purpose, sensitivity, or workspace policy. User-authored
+knowledge may become active immediately; agent inferences begin as proposals and may become active
+through manual promotion or domain-defined safe promotion after independent reinforcement or
+successful reuse. Knowledge never grants or expands action authority.
+
+Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
+an external model host's context are planned but deferred. The initial target continues to use
+credential scopes, purpose-bounded API results, and existing privacy policy; do not delay typed MCP
+parity on this later disclosure-control layer or advertise it as shipped.
+
+This surface is a target contract, not a claim about current tool discovery. See
+[`User Knowledge`](product/user-knowledge.md) and
+[`ADR 0005`](architecture/0005-user-knowledge.md).
+
+The following discovery rules describe the current pre-cutover implementation evidence. The target
+identifiers are defined above and replace these names at hard cutover.
 
 Discovery follows these rules:
 
@@ -254,7 +357,8 @@ Mail is the first executable implementation:
 - automatic execution coalesces compatible actions into one provider call per thread and processes
   at most six threads with two workers. Immediate and delayed retention both use a durable
   rule/action/thread identity. Leased claims recover through exact provider reconciliation after
-  process loss or an uncertain external effect. Backlog remains pending for later scheduled runs;
+  process loss or an uncertain external effect. Backlog remains pending for a later externally
+  invoked run;
   setup context exposes per-account pending, in-progress, reconciliation, failed, and
   last-completed state plus global oldest-due status, without message bodies or credentials.
 - disconnecting or disabling Mail removes its cached provider mailbox/thread projection, detaches
@@ -264,7 +368,7 @@ Mail is the first executable implementation:
 
 New rules remain disabled and preview-only by default. Active rules must be paused before their
 matching behavior changes, and connector sync executes only enabled `approved_rule` rules.
-MCP annotations remain untrusted UX hints. The API and durable scheduler remain authoritative;
+MCP annotations remain untrusted UX hints. The API and durable execution coordinator remain authoritative;
 Mail-to-Calendar intake does not use experimental MCP task execution.
 
 ### Shared Finance workspace

@@ -2546,11 +2546,7 @@ function CalendarPage({
         const endsAt = new Date(dayRange.to).getTime();
         return [
           localDateKey(day),
-          records.filter(
-            (event) =>
-              new Date(event.startsAt).getTime() < endsAt &&
-              new Date(event.endsAt).getTime() > startsAt,
-          ),
+          records.filter((event) => calendarEventOccursOnDay(event, day, startsAt, endsAt)),
         ];
       }),
     );
@@ -3215,19 +3211,15 @@ function DayCalendarView({
                   <CalendarDropPreview preview={dragPreview} />
                 ) : null}
                 {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
-                {timelineEvents.map((layout) => (
-                  <TimelineEvent
-                    blockColors={eventBlockColors(layout.event, calendarsById)}
-                    calendar={calendarsById.get(layout.event.calendarId)}
-                    isDragging={draggedEventId === layout.event.id}
-                    key={layout.event.id}
-                    layout={layout}
-                    onEdit={() => setEditor({ event: layout.event, kind: "event" })}
-                    onDragEnd={clearDrag}
-                    setDraggedEventId={setDraggedEventId}
-                    timeZone={timeZone}
-                  />
-                ))}
+                <TimelineEventCollection
+                  calendarsById={calendarsById}
+                  draggedEventId={draggedEventId}
+                  layouts={timelineEvents}
+                  onDragEnd={clearDrag}
+                  setDraggedEventId={setDraggedEventId}
+                  setEditor={setEditor}
+                  timeZone={timeZone}
+                />
               </section>
             </ContextMenuTrigger>
             <CalendarBlankContextMenu
@@ -3309,6 +3301,10 @@ function WeekCalendarView({
       ),
     [eventsByDay],
   );
+  const allDayLayouts = useMemo(
+    () => positionWeekAllDayEvents(days, eventsByDay),
+    [days, eventsByDay],
+  );
   const scrollContainer = useRef<HTMLDivElement>(null);
   const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const includesToday = days.some((day) => sameLocalDate(day, today));
@@ -3379,9 +3375,8 @@ function WeekCalendarView({
             }}
           >
             <div className="week-time-corner">All day</div>
+            <div aria-hidden="true" className="week-all-day-corner" />
             {days.map((day) => {
-              const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
-              const allDayEvents = dayEvents.filter((event) => event.allDay);
               const isToday = sameLocalDate(day, today);
               return (
                 <header
@@ -3405,15 +3400,16 @@ function WeekCalendarView({
                       {day.day}
                     </button>
                   </div>
-                  <AllDayEvents
-                    calendarsById={calendarsById}
-                    compact
-                    events={allDayEvents}
-                    setEditor={setEditor}
-                  />
                 </header>
               );
             })}
+            <WeekAllDayEvents
+              calendarsById={calendarsById}
+              days={days}
+              layouts={allDayLayouts}
+              setEditor={setEditor}
+              today={today}
+            />
           </WorkspaceSecondaryAppBarContent>
         </WorkspaceSecondaryAppBar>
         <TimeAxis />
@@ -3462,20 +3458,21 @@ function WeekCalendarView({
                   timeZone={timeZone}
                 />
               ) : null}
-              {layouts.map((layout) => (
-                <TimelineEvent
-                  blockColors={eventBlockColors(layout.event, calendarsById)}
-                  calendar={calendarsById.get(layout.event.calendarId)}
-                  compact
-                  isDragging={draggedEventId === layout.event.id}
-                  key={layout.event.id}
-                  layout={layout}
-                  onEdit={() => setEditor({ event: layout.event, kind: "event" })}
-                  onDragEnd={clearDrag}
-                  setDraggedEventId={setDraggedEventId}
-                  timeZone={timeZone}
-                />
-              ))}
+              <TimelineEventCollection
+                calendarsById={calendarsById}
+                compact
+                draggedEventId={draggedEventId}
+                layouts={layouts}
+                onDragEnd={clearDrag}
+                {...(dayIndex === 0
+                  ? { orbitHorizontalInset: "start" as const }
+                  : dayIndex === days.length - 1
+                    ? { orbitHorizontalInset: "end" as const }
+                    : {})}
+                setDraggedEventId={setDraggedEventId}
+                setEditor={setEditor}
+                timeZone={timeZone}
+              />
             </section>
           );
         })}
@@ -3498,6 +3495,30 @@ type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> = {
   event: T;
   startMinute: number;
 };
+
+type TimelineEventCluster = {
+  endMinute: number;
+  layouts: TimelineEventLayout[];
+  startMinute: number;
+};
+
+function groupTimelineEventLayouts(layouts: TimelineEventLayout[]): TimelineEventCluster[] {
+  const clusters: TimelineEventCluster[] = [];
+  for (const layout of layouts) {
+    const cluster = clusters.at(-1);
+    if (!cluster || layout.startMinute >= cluster.endMinute) {
+      clusters.push({
+        endMinute: layout.endMinute,
+        layouts: [layout],
+        startMinute: layout.startMinute,
+      });
+      continue;
+    }
+    cluster.layouts.push(layout);
+    cluster.endMinute = Math.max(cluster.endMinute, layout.endMinute);
+  }
+  return clusters;
+}
 
 function TimeAxis() {
   return (
@@ -3651,7 +3672,13 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
   };
   const start = (event: ReactPointerEvent<HTMLElement>, day: LocalDate) => {
     if (event.button !== 0 || event.pointerType === "touch") return;
-    if ((event.target as Element).closest(".calendar-timeline-event")) return;
+    if (
+      (event.target as Element).closest(
+        ".calendar-timeline-event, .calendar-overlap-cluster__toggle",
+      )
+    ) {
+      return;
+    }
     const minute = createRangeMinuteAtPointer(event, event.currentTarget);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     updateSelection({
@@ -3756,6 +3783,286 @@ function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): Eve
   });
 }
 
+export function calendarEventOccursOnDay(
+  event: CalendarEvent,
+  day: LocalDate,
+  dayStartsAt: number,
+  dayEndsAt: number,
+) {
+  if (event.allDay && event.provider !== "local") {
+    const date = localDateKey(day);
+    return date >= event.startsAt.slice(0, 10) && date < event.endsAt.slice(0, 10);
+  }
+  return (
+    new Date(event.startsAt).getTime() < dayEndsAt && new Date(event.endsAt).getTime() > dayStartsAt
+  );
+}
+
+export function overlapOrbitPoint(
+  index: number,
+  total: number,
+  compact: boolean,
+  bounds?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
+    eventEndMinute: number;
+    eventStartMinute: number;
+    horizontalInset?: "end" | "start";
+  },
+) {
+  const pointAt = (pointIndex: number) => {
+    if (total === 2) {
+      const offset = compact ? 52 : 76;
+      return {
+        rotation: pointIndex === 0 ? -4 : 4,
+        x: pointIndex === 0 ? -offset : offset,
+        y: 0,
+      };
+    }
+    const radius = compact ? Math.min(64, 40 + total * 4) : Math.min(92, 58 + total * 6);
+    const angle = Math.PI + (pointIndex * Math.PI * 2) / total;
+    return {
+      rotation: Math.round(Math.sin(angle) * 8),
+      x: Math.round(Math.cos(angle) * radius),
+      y: Math.round(Math.sin(angle) * radius),
+    };
+  };
+  const point = pointAt(index);
+  if (!bounds) return point;
+  const orbitXs = Array.from({ length: total }, (_, pointIndex) => pointAt(pointIndex).x);
+  if (bounds.horizontalInset === "start") {
+    point.x -= Math.min(...orbitXs, 0);
+  } else if (bounds.horizontalInset === "end") {
+    point.x -= Math.max(...orbitXs, 0);
+  }
+  const eventHeight = Math.max(
+    minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
+    18,
+  );
+  const maximumEventWidth = compact ? 160 : 320;
+  const rotationRadians = (Math.abs(point.rotation) * Math.PI) / 180;
+  const transformedEventHeight =
+    eventHeight * Math.cos(rotationRadians) + maximumEventWidth * Math.sin(rotationRadians);
+  const clusterHeight = Math.max(
+    minuteToTimelinePixels(bounds.clusterEndMinute - bounds.clusterStartMinute),
+    48,
+  );
+  const center = minuteToTimelinePixels(bounds.clusterStartMinute) + clusterHeight / 2;
+  const minimumY = transformedEventHeight / 2 - center;
+  const maximumY = calendarTimelineHeight - transformedEventHeight / 2 - center;
+  const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
+  return {
+    ...point,
+    rotation: point.rotation,
+    y: clampedY || 0,
+  };
+}
+
+export function overlapPinOffset(clusterStartMinute: number, clusterEndMinute: number) {
+  const clusterTop = minuteToTimelinePixels(clusterStartMinute);
+  const clusterHeight = Math.max(minuteToTimelinePixels(clusterEndMinute - clusterStartMinute), 48);
+  const desiredTop = clusterTop + clusterHeight / 2 - 15;
+  const clampedTop = Math.min(calendarTimelineHeight - 30, Math.max(0, desiredTop));
+  return Math.round(clampedTop - desiredTop);
+}
+
+function TimelineEventCollection({
+  calendarsById,
+  compact = false,
+  draggedEventId,
+  layouts,
+  onDragEnd,
+  orbitHorizontalInset,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+}: {
+  calendarsById: CalendarMap;
+  compact?: boolean;
+  draggedEventId: string | null;
+  layouts: TimelineEventLayout[];
+  onDragEnd: () => void;
+  orbitHorizontalInset?: "end" | "start";
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  return groupTimelineEventLayouts(layouts).map((cluster) => {
+    const shared = {
+      calendarsById,
+      compact,
+      draggedEventId,
+      onDragEnd,
+      ...(orbitHorizontalInset ? { orbitHorizontalInset } : {}),
+      setDraggedEventId,
+      setEditor,
+      timeZone,
+    };
+    if (cluster.layouts.length === 1) {
+      const layout = cluster.layouts[0] as TimelineEventLayout;
+      return <TimelineEventItem {...shared} key={layout.event.id} layout={layout} />;
+    }
+    return (
+      <TimelineOverlapCluster
+        {...shared}
+        cluster={cluster}
+        key={cluster.layouts.map((layout) => layout.event.id).join(":")}
+      />
+    );
+  });
+}
+
+function TimelineEventItem({
+  calendarsById,
+  compact,
+  draggedEventId,
+  layout,
+  onDragEnd,
+  orbit,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+  topOffsetMinute,
+}: {
+  calendarsById: CalendarMap;
+  compact: boolean;
+  draggedEventId: string | null;
+  layout: TimelineEventLayout;
+  onDragEnd: () => void;
+  orbit?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
+    horizontalInset?: "end" | "start";
+    index: number;
+    total: number;
+  };
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+  topOffsetMinute?: number;
+}) {
+  return (
+    <TimelineEvent
+      blockColors={eventBlockColors(layout.event, calendarsById)}
+      calendar={calendarsById.get(layout.event.calendarId)}
+      compact={compact}
+      isDragging={draggedEventId === layout.event.id}
+      layout={layout}
+      onEdit={() => setEditor({ event: layout.event, kind: "event" })}
+      onDragEnd={onDragEnd}
+      setDraggedEventId={setDraggedEventId}
+      timeZone={timeZone}
+      {...(orbit ? { orbit } : {})}
+      {...(topOffsetMinute === undefined ? {} : { topOffsetMinute })}
+    />
+  );
+}
+
+function TimelineOverlapCluster({
+  calendarsById,
+  cluster,
+  compact,
+  draggedEventId,
+  onDragEnd,
+  orbitHorizontalInset,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+}: {
+  calendarsById: CalendarMap;
+  cluster: TimelineEventCluster;
+  compact: boolean;
+  draggedEventId: string | null;
+  onDragEnd: () => void;
+  orbitHorizontalInset?: "end" | "start";
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const hoverLeaveTimer = useRef<number | null>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const clusterId = useId();
+  const count = cluster.layouts.length;
+  useEffect(
+    () => () => {
+      if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
+    },
+    [],
+  );
+  return (
+    <fieldset
+      aria-label={`${count} overlapping events`}
+      className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
+      id={clusterId}
+      onKeyDown={(event) => {
+        const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
+        if (event.key !== "Escape" || (!expanded && !focusedEvent)) return;
+        event.stopPropagation();
+        setExpanded(false);
+        toggle.current?.focus();
+      }}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "touch") return;
+        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
+        hoverLeaveTimer.current = null;
+        setHovered(true);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "touch") return;
+        hoverLeaveTimer.current = window.setTimeout(() => {
+          setHovered(false);
+          hoverLeaveTimer.current = null;
+        }, 160);
+      }}
+      style={
+        {
+          height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
+          top: minuteToTimelinePixels(cluster.startMinute),
+          "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
+        } as CSSProperties
+      }
+    >
+      <button
+        aria-controls={clusterId}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Spread"} ${count} overlapping events`}
+        className="calendar-overlap-cluster__toggle"
+        onClick={(event) => {
+          event.stopPropagation();
+          setExpanded((current) => !current);
+        }}
+        ref={toggle}
+        type="button"
+      >
+        <span className="calendar-overlap-cluster__pin-head">{count}</span>
+      </button>
+      {cluster.layouts.map((layout, index) => (
+        <TimelineEventItem
+          calendarsById={calendarsById}
+          compact={compact}
+          draggedEventId={draggedEventId}
+          key={layout.event.id}
+          layout={layout}
+          onDragEnd={onDragEnd}
+          orbit={{
+            clusterEndMinute: cluster.endMinute,
+            clusterStartMinute: cluster.startMinute,
+            index,
+            total: count,
+            ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
+          }}
+          setDraggedEventId={setDraggedEventId}
+          setEditor={setEditor}
+          timeZone={timeZone}
+          topOffsetMinute={cluster.startMinute}
+        />
+      ))}
+    </fieldset>
+  );
+}
+
 function TimelineEvent({
   blockColors,
   calendar,
@@ -3763,9 +4070,11 @@ function TimelineEvent({
   layout,
   onEdit,
   onDragEnd,
+  orbit,
   setDraggedEventId,
   isDragging = false,
   timeZone,
+  topOffsetMinute = 0,
 }: {
   blockColors: EventBlockColor[];
   calendar: Calendar | undefined;
@@ -3773,9 +4082,17 @@ function TimelineEvent({
   layout: TimelineEventLayout;
   onEdit: () => void;
   onDragEnd: () => void;
+  orbit?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
+    horizontalInset?: "end" | "start";
+    index: number;
+    total: number;
+  };
   setDraggedEventId: (id: string | null) => void;
   isDragging?: boolean;
   timeZone: string;
+  topOffsetMinute?: number;
 }) {
   const { column, endMinute, event, startMinute } = layout;
   const writable = calendar?.isWritable ?? false;
@@ -3786,6 +4103,16 @@ function TimelineEvent({
   const blockedMessage = calendar
     ? `${calendar.name} is read-only, so this event can’t be moved.`
     : "This event is read-only and can’t be moved.";
+  const orbitPoint = orbit
+    ? overlapOrbitPoint(orbit.index, orbit.total, compact, {
+        clusterEndMinute: orbit.clusterEndMinute,
+        clusterStartMinute: orbit.clusterStartMinute,
+        eventEndMinute: endMinute,
+        eventStartMinute: startMinute,
+        ...(orbit.horizontalInset ? { horizontalInset: orbit.horizontalInset } : {}),
+      })
+    : null;
+  const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
     window.clearTimeout(blockedHoldTimer.current);
@@ -3847,14 +4174,26 @@ function TimelineEvent({
           blockedHoldTriggered.current = false;
         }}
         onPointerUp={clearBlockedHoldTimer}
-        style={{
-          ...calendarEventColorStyle(calendar?.color),
-          height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 18),
-          left: 3 + column * 12,
-          top: minuteToTimelinePixels(startMinute),
-          width: `calc(100% - ${6 + column * 12}px)`,
-          zIndex: 2 + column,
-        }}
+        style={
+          {
+            ...calendarEventColorStyle(calendar?.color),
+            "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
+            "--calendar-event-left": orbit
+              ? `calc(${(column / laneCount) * 100}% + 2px)`
+              : `${3 + column * 12}px`,
+            "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
+            "--calendar-event-width": orbit
+              ? `calc(${100 / laneCount}% - 4px)`
+              : `calc(100% - ${6 + column * 12}px)`,
+            "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
+            "--overlap-orbit-width": compact
+              ? `clamp(88px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px), 160px)`
+              : `min(320px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px))`,
+            "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
+            "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
+            zIndex: 2 + column,
+          } as CSSProperties
+        }
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
         type="button"
       >
@@ -3968,7 +4307,10 @@ function CalendarEventContextMenu({
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
   const writable = calendar?.isWritable ?? false;
   const destinations = (calendars.data ?? []).filter(
-    (candidate) => candidate.id !== event.calendarId && candidate.isWritable,
+    (candidate) =>
+      !(event.sourceCalendarIds ?? [event.calendarId]).includes(candidate.id) &&
+      !event.blocks.some((eventBlock) => eventBlock.calendarId === candidate.id) &&
+      candidate.isWritable,
   );
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
@@ -4082,6 +4424,146 @@ function AllDayEvents({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+type WeekAllDayEventLayout = {
+  endColumn: number;
+  event: CalendarEvent;
+  row: number;
+  startColumn: number;
+};
+
+function positionWeekAllDayEvents(
+  days: LocalDate[],
+  eventsByDay: Map<string, CalendarEvent[]>,
+): WeekAllDayEventLayout[] {
+  const spans = new Map<string, Omit<WeekAllDayEventLayout, "row">>();
+  days.forEach((day, dayIndex) => {
+    for (const event of eventsByDay.get(localDateKey(day)) ?? []) {
+      if (!event.allDay) continue;
+      const current = spans.get(event.id);
+      spans.set(event.id, {
+        endColumn: dayIndex + 2,
+        event,
+        startColumn: current?.startColumn ?? dayIndex + 1,
+      });
+    }
+  });
+  const rowEnds: number[] = [];
+  return [...spans.values()]
+    .sort(
+      (left, right) =>
+        left.startColumn - right.startColumn ||
+        right.endColumn - right.startColumn - (left.endColumn - left.startColumn),
+    )
+    .map((span) => {
+      let row = rowEnds.findIndex((endColumn) => endColumn <= span.startColumn);
+      if (row === -1) row = rowEnds.length;
+      rowEnds[row] = span.endColumn;
+      return { ...span, row: row + 1 };
+    });
+}
+
+function weekDaySurface(dayIndex: number, isToday: boolean) {
+  if (isToday) {
+    return "color-mix(in srgb, var(--timeline-now) 14%, var(--surface-raised))";
+  }
+  return dayIndex % 2 === 0
+    ? "color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised))"
+    : "color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised))";
+}
+
+function WeekAllDayEvents({
+  calendarsById,
+  days,
+  layouts,
+  setEditor,
+  today,
+}: {
+  calendarsById: CalendarMap;
+  days: LocalDate[];
+  layouts: WeekAllDayEventLayout[];
+  setEditor: (editor: Editor) => void;
+  today: LocalDate;
+}) {
+  const rowCount = Math.max(0, ...layouts.map((layout) => layout.row));
+  const isEmpty = rowCount === 0;
+  return (
+    <div
+      className={`week-all-day-layer${isEmpty ? " is-empty" : ""}`}
+      style={{
+        gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+        gridTemplateRows: isEmpty ? "0px" : `repeat(${rowCount}, 28px)`,
+        paddingBottom: isEmpty ? 0 : undefined,
+      }}
+    >
+      {days.map((day, dayIndex) => (
+        <div
+          aria-hidden="true"
+          className={`week-all-day-day${sameLocalDate(day, today) ? " is-today" : ""}`}
+          key={`all-day-surface-${localDateKey(day)}`}
+          style={
+            {
+              "--week-day-surface": weekDaySurface(dayIndex, sameLocalDate(day, today)),
+              gridColumn: dayIndex + 1,
+              gridRow: `1 / span ${Math.max(rowCount, 1)}`,
+            } as CSSProperties
+          }
+        />
+      ))}
+      {layouts.map((layout) => {
+        const startIndex = layout.startColumn - 1;
+        const endIndex = layout.endColumn - 2;
+        const startDay = days[startIndex] as LocalDate;
+        const endDay = days[endIndex] as LocalDate;
+        const accessibleStart = formatLocalDate(startDay, {
+          day: "numeric",
+          month: "long",
+          weekday: "long",
+        });
+        const accessibleEnd = formatLocalDate(endDay, {
+          day: "numeric",
+          month: "long",
+          weekday: "long",
+        });
+        const accessibleDate = sameLocalDate(startDay, endDay)
+          ? accessibleStart
+          : `${accessibleStart} through ${accessibleEnd}`;
+        const eventStyle = calendarEventColorStyle(
+          calendarsById.get(layout.event.calendarId)?.color,
+        );
+        return (
+          <button
+            aria-label={`All day ${layout.event.title}, ${accessibleDate}`}
+            className="week-all-day-event"
+            key={layout.event.id}
+            onClick={() => setEditor({ event: layout.event, kind: "event" })}
+            style={
+              {
+                ...eventStyle,
+                "--week-all-day-end-surface": weekDaySurface(
+                  endIndex,
+                  sameLocalDate(days[endIndex] as LocalDate, today),
+                ),
+                "--week-all-day-start-surface": weekDaySurface(
+                  startIndex,
+                  sameLocalDate(days[startIndex] as LocalDate, today),
+                ),
+                gridColumn: `${layout.startColumn} / ${layout.endColumn}`,
+                gridRow: layout.row,
+              } as CSSProperties
+            }
+            type="button"
+          >
+            <span>{layout.event.title}</span>
+            {layout.event.blocks.length > 0 ? (
+              <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -7060,7 +7542,10 @@ export function TodayEventCard({
       >
         <EventCardContent>
           <DropdownMenuTrigger asChild>
-            <EventCardPrimaryAction aria-label={`${eventLabel}. Open quick actions`}>
+            <EventCardPrimaryAction
+              aria-label={`${eventLabel}. Open quick actions`}
+              className="today-timeline__event-action"
+            >
               <EventCardBody>
                 <EventCardTitle>
                   <span className="min-w-0 truncate">{event.title}</span>
@@ -7169,7 +7654,11 @@ export function TodayTaskTimelineCard({
       style={layoutStyle}
     >
       <EventCardContent>
-        <EventCardPrimaryAction aria-label={`Open task ${task.title}`} onClick={onEdit}>
+        <EventCardPrimaryAction
+          aria-label={`Open task ${task.title}`}
+          className="today-timeline__event-action"
+          onClick={onEdit}
+        >
           <EventCardBody>
             <EventCardTitle>
               <ListChecksIcon aria-hidden="true" />
@@ -7480,23 +7969,31 @@ function EventInspector({
   const [blocks, setBlocks] = useState(event.blocks);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const calendar = calendars.find((record) => record.id === event.calendarId);
-  const blockedCalendars = blocks.flatMap((block) => {
-    const blockedCalendar = calendars.find((record) => record.id === block.calendarId);
-    return blockedCalendar ? [{ block, calendar: blockedCalendar }] : [];
+  const blocksByCalendarId = new Map<string, CalendarEvent["blocks"]>();
+  for (const block of blocks) {
+    blocksByCalendarId.set(block.calendarId, [
+      ...(blocksByCalendarId.get(block.calendarId) ?? []),
+      block,
+    ]);
+  }
+  const blockedCalendars = [...blocksByCalendarId.keys()].flatMap((calendarId) => {
+    const blockedCalendar = calendars.find((record) => record.id === calendarId);
+    return blockedCalendar ? [blockedCalendar] : [];
   });
-  const calendarsWithDetails = blockedCalendars
-    .filter(({ block }) => block.mode === "details")
-    .map(({ calendar: blockedCalendar }) => blockedCalendar);
-  const calendarsWithBusyOnly = blockedCalendars
-    .filter(({ block }) => block.mode === "busy")
-    .map(({ calendar: blockedCalendar }) => blockedCalendar);
+  const calendarsWithDetails = blockedCalendars.filter((blockedCalendar) =>
+    blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "details"),
+  );
+  const calendarsWithBusy = blockedCalendars.filter((blockedCalendar) =>
+    blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "busy"),
+  );
   const eventStartsAt = new Date(event.startsAt).getTime();
   const eventEndsAt = new Date(event.endsAt).getTime();
   const eventIsInProgress =
     currentTime.getTime() >= eventStartsAt && currentTime.getTime() < eventEndsAt;
   const remainingMinutes = Math.max(1, Math.ceil((eventEndsAt - currentTime.getTime()) / 60_000));
+  const sourceCalendarIds = new Set(event.sourceCalendarIds ?? [event.calendarId]);
   const blockDestinations = calendars.filter(
-    (record) => record.id !== event.calendarId && record.isWritable,
+    (record) => !sourceCalendarIds.has(record.id) && record.isWritable,
   );
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
@@ -7505,35 +8002,50 @@ function EventInspector({
       close();
     },
   });
+  const replaceSourceBlocks = (sourceEventId: string, updatedBlocks: CalendarEvent["blocks"]) => {
+    setBlocks((current) => [
+      ...current.filter((block) => (block.sourceEventId ?? event.id) !== sourceEventId),
+      ...updatedBlocks,
+    ]);
+  };
   const changeBlock = useMutation({
-    mutationFn: async (
-      input:
-        | {
-            calendarId: string;
-            mode: "busy" | "details";
-            operation: "create";
-          }
-        | {
-            blockId: string;
-            calendarId: string;
-            mode: "busy" | "details";
-            operation: "delete" | "update";
-          },
-    ) => {
-      if (input.operation === "create") {
-        return api.createEventBlock(event.id, {
+    mutationFn: async (input: {
+      blocks: CalendarEvent["blocks"];
+      calendarId: string;
+      mode: "busy" | "details";
+      operation: "remove" | "set";
+    }) => {
+      if (input.blocks.length === 0) {
+        const updated = await api.createEventBlock(event.id, {
           calendarId: input.calendarId,
           mode: input.mode,
         });
+        replaceSourceBlocks(event.id, updated.blocks);
+        return [{ sourceEventId: event.id, updated }];
       }
-      return input.operation === "delete"
-        ? api.deleteEventBlock(event.id, input.blockId)
-        : api.updateEventBlock(event.id, input.blockId, { mode: input.mode });
+      const responses: Array<{ sourceEventId: string; updated: CalendarEvent }> = [];
+      for (const block of input.blocks) {
+        const sourceEventId = block.sourceEventId ?? event.id;
+        const updated =
+          input.operation === "remove"
+            ? await api.deleteEventBlock(sourceEventId, block.eventId)
+            : await api.updateEventBlock(sourceEventId, block.eventId, { mode: input.mode });
+        replaceSourceBlocks(sourceEventId, updated.blocks);
+        responses.push({ sourceEventId, updated });
+      }
+      return responses;
     },
-    onSuccess: async (updated) => {
-      setBlocks(updated.blocks);
+    onSuccess: async (responses) => {
+      const updatedBySourceId = new Map(
+        responses.map(({ sourceEventId, updated }) => [sourceEventId, updated.blocks]),
+      );
+      setBlocks((current) => [
+        ...current.filter((block) => !updatedBySourceId.has(block.sourceEventId ?? event.id)),
+        ...[...updatedBySourceId.values()].flat(),
+      ]);
       await invalidateMaterial(queryClient);
     },
+    onError: () => invalidateMaterial(queryClient),
   });
   useEffect(() => {
     const handleEscape = (keyboardEvent: KeyboardEvent) => {
@@ -7597,24 +8109,20 @@ function EventInspector({
                   disabled={changeBlock.isPending}
                   label="Calendars with details included"
                   mode="details"
-                  onAdd={(calendarId, block) =>
-                    changeBlock.mutate(
-                      block
-                        ? {
-                            blockId: block.eventId,
-                            calendarId,
-                            mode: "details",
-                            operation: "update",
-                          }
-                        : { calendarId, mode: "details", operation: "create" },
-                    )
-                  }
-                  onRemove={(block) =>
+                  onAdd={(calendarId, calendarBlocks) =>
                     changeBlock.mutate({
-                      blockId: block.eventId,
-                      calendarId: block.calendarId,
-                      mode: block.mode,
-                      operation: "delete",
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "details",
+                      operation: "set",
+                    })
+                  }
+                  onRemove={(calendarId, calendarBlocks) =>
+                    changeBlock.mutate({
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "details",
+                      operation: "remove",
                     })
                   }
                 />
@@ -7627,29 +8135,25 @@ function EventInspector({
               <dd>
                 <EventVisibilityList
                   blocks={blocks}
-                  calendars={calendarsWithBusyOnly}
+                  calendars={calendarsWithBusy}
                   destinations={blockDestinations}
                   disabled={changeBlock.isPending}
                   label="Calendars shown as busy"
                   mode="busy"
-                  onAdd={(calendarId, block) =>
-                    changeBlock.mutate(
-                      block
-                        ? {
-                            blockId: block.eventId,
-                            calendarId,
-                            mode: "busy",
-                            operation: "update",
-                          }
-                        : { calendarId, mode: "busy", operation: "create" },
-                    )
-                  }
-                  onRemove={(block) =>
+                  onAdd={(calendarId, calendarBlocks) =>
                     changeBlock.mutate({
-                      blockId: block.eventId,
-                      calendarId: block.calendarId,
-                      mode: block.mode,
-                      operation: "delete",
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "busy",
+                      operation: "set",
+                    })
+                  }
+                  onRemove={(calendarId, calendarBlocks) =>
+                    changeBlock.mutate({
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "busy",
+                      operation: "remove",
                     })
                   }
                 />
@@ -7801,18 +8305,23 @@ function EventVisibilityList({
   disabled: boolean;
   label: string;
   mode: "busy" | "details";
-  onAdd: (calendarId: string, block: CalendarEvent["blocks"][number] | undefined) => void;
-  onRemove: (block: CalendarEvent["blocks"][number]) => void;
+  onAdd: (calendarId: string, blocks: CalendarEvent["blocks"]) => void;
+  onRemove: (calendarId: string, blocks: CalendarEvent["blocks"]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const availableCalendars = destinations.filter(
-    (calendar) => blocks.find((block) => block.calendarId === calendar.id)?.mode !== mode,
-  );
+  const blocksForCalendar = (calendarId: string) =>
+    blocks.filter((block) => block.calendarId === calendarId);
+  const availableCalendars = destinations.filter((calendar) => {
+    const calendarBlocks = blocksForCalendar(calendar.id);
+    return calendarBlocks.length === 0 || calendarBlocks.some((block) => block.mode !== mode);
+  });
   const status = mode === "details" ? "Details Included" : "Shown as Busy";
   return (
     <ul aria-label={label} className="event-details-card__calendar-list">
       {calendars.map((calendar) => {
-        const block = blocks.find((record) => record.calendarId === calendar.id);
+        const calendarBlocks = blocksForCalendar(calendar.id).filter(
+          (block) => block.mode === mode,
+        );
         return (
           <ShadcnBadge asChild key={calendar.id} variant="secondary">
             <li
@@ -7821,12 +8330,12 @@ function EventVisibilityList({
             >
               <i aria-hidden="true" style={{ background: calendar.color ?? "var(--muted)" }} />
               <span>{calendar.name}</span>
-              {block ? (
+              {calendarBlocks.length > 0 ? (
                 <button
                   aria-label={`Remove ${calendar.name} from ${status}`}
                   className="event-details-card__calendar-remove"
                   disabled={disabled}
-                  onClick={() => onRemove(block)}
+                  onClick={() => onRemove(calendar.id, calendarBlocks)}
                   type="button"
                 >
                   <XIcon aria-hidden="true" />
@@ -7864,7 +8373,7 @@ function EventVisibilityList({
                   onClick={() => {
                     onAdd(
                       calendar.id,
-                      blocks.find((block) => block.calendarId === calendar.id),
+                      blocksForCalendar(calendar.id).filter((block) => block.mode !== mode),
                     );
                     setOpen(false);
                   }}

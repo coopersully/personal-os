@@ -2546,11 +2546,7 @@ function CalendarPage({
         const endsAt = new Date(dayRange.to).getTime();
         return [
           localDateKey(day),
-          records.filter(
-            (event) =>
-              new Date(event.startsAt).getTime() < endsAt &&
-              new Date(event.endsAt).getTime() > startsAt,
-          ),
+          records.filter((event) => calendarEventOccursOnDay(event, day, startsAt, endsAt)),
         ];
       }),
     );
@@ -3782,18 +3778,53 @@ function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): Eve
   });
 }
 
-function overlapOrbitPoint(index: number, total: number, compact: boolean) {
+export function calendarEventOccursOnDay(
+  event: CalendarEvent,
+  day: LocalDate,
+  dayStartsAt: number,
+  dayEndsAt: number,
+) {
+  if (event.allDay && event.provider !== "local") {
+    const date = localDateKey(day);
+    return date >= event.startsAt.slice(0, 10) && date < event.endsAt.slice(0, 10);
+  }
+  return (
+    new Date(event.startsAt).getTime() < dayEndsAt && new Date(event.endsAt).getTime() > dayStartsAt
+  );
+}
+
+export function overlapOrbitPoint(
+  index: number,
+  total: number,
+  compact: boolean,
+  bounds?: {
+    eventEndMinute: number;
+    eventStartMinute: number;
+  },
+) {
+  let point: { rotation: number; x: number; y: number };
   if (total === 2) {
     const offset = compact ? 52 : 76;
-    return { rotation: index === 0 ? -4 : 4, x: index === 0 ? -offset : offset, y: 0 };
+    point = { rotation: index === 0 ? -4 : 4, x: index === 0 ? -offset : offset, y: 0 };
+  } else {
+    const radius = compact ? Math.min(64, 40 + total * 4) : Math.min(92, 58 + total * 6);
+    const angle = Math.PI + (index * Math.PI * 2) / total;
+    point = {
+      rotation: Math.round(Math.sin(angle) * 8),
+      x: Math.round(Math.cos(angle) * radius),
+      y: Math.round(Math.sin(angle) * radius),
+    };
   }
-  const radius = compact ? Math.min(64, 40 + total * 4) : Math.min(92, 58 + total * 6);
-  const angle = Math.PI + (index * Math.PI * 2) / total;
-  return {
-    rotation: Math.round(Math.sin(angle) * 8),
-    x: Math.round(Math.cos(angle) * radius),
-    y: Math.round(Math.sin(angle) * radius),
-  };
+  if (!bounds) return point;
+  const eventHeight = Math.max(
+    minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
+    18,
+  );
+  const eventTop = minuteToTimelinePixels(bounds.eventStartMinute);
+  const minimumY = -eventTop;
+  const maximumY = calendarTimelineHeight - eventTop - eventHeight;
+  const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
+  return { ...point, y: clampedY || 0 };
 }
 
 function TimelineEventCollection({
@@ -3856,7 +3887,10 @@ function TimelineEventItem({
   draggedEventId: string | null;
   layout: TimelineEventLayout;
   onDragEnd: () => void;
-  orbit?: { index: number; total: number };
+  orbit?: {
+    index: number;
+    total: number;
+  };
   setDraggedEventId: (id: string | null) => void;
   setEditor: (editor: Editor) => void;
   timeZone: string;
@@ -3992,7 +4026,10 @@ function TimelineEvent({
   layout: TimelineEventLayout;
   onEdit: () => void;
   onDragEnd: () => void;
-  orbit?: { index: number; total: number };
+  orbit?: {
+    index: number;
+    total: number;
+  };
   setDraggedEventId: (id: string | null) => void;
   isDragging?: boolean;
   timeZone: string;
@@ -4007,7 +4044,12 @@ function TimelineEvent({
   const blockedMessage = calendar
     ? `${calendar.name} is read-only, so this event can’t be moved.`
     : "This event is read-only and can’t be moved.";
-  const orbitPoint = orbit ? overlapOrbitPoint(orbit.index, orbit.total, compact) : null;
+  const orbitPoint = orbit
+    ? overlapOrbitPoint(orbit.index, orbit.total, compact, {
+        eventEndMinute: endMinute,
+        eventStartMinute: startMinute,
+      })
+    : null;
   const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
@@ -7860,23 +7902,33 @@ function EventInspector({
   const [blocks, setBlocks] = useState(event.blocks);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const calendar = calendars.find((record) => record.id === event.calendarId);
-  const blockedCalendars = blocks.flatMap((block) => {
-    const blockedCalendar = calendars.find((record) => record.id === block.calendarId);
-    return blockedCalendar ? [{ block, calendar: blockedCalendar }] : [];
+  const blocksByCalendarId = new Map<string, CalendarEvent["blocks"]>();
+  for (const block of blocks) {
+    blocksByCalendarId.set(block.calendarId, [
+      ...(blocksByCalendarId.get(block.calendarId) ?? []),
+      block,
+    ]);
+  }
+  const blockedCalendars = [...blocksByCalendarId.keys()].flatMap((calendarId) => {
+    const blockedCalendar = calendars.find((record) => record.id === calendarId);
+    return blockedCalendar ? [blockedCalendar] : [];
   });
-  const calendarsWithDetails = blockedCalendars
-    .filter(({ block }) => block.mode === "details")
-    .map(({ calendar: blockedCalendar }) => blockedCalendar);
-  const calendarsWithBusyOnly = blockedCalendars
-    .filter(({ block }) => block.mode === "busy")
-    .map(({ calendar: blockedCalendar }) => blockedCalendar);
+  const calendarsWithDetails = blockedCalendars.filter((blockedCalendar) =>
+    blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "details"),
+  );
+  const calendarsWithBusyOnly = blockedCalendars.filter(
+    (blockedCalendar) =>
+      !blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "details") &&
+      blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "busy"),
+  );
   const eventStartsAt = new Date(event.startsAt).getTime();
   const eventEndsAt = new Date(event.endsAt).getTime();
   const eventIsInProgress =
     currentTime.getTime() >= eventStartsAt && currentTime.getTime() < eventEndsAt;
   const remainingMinutes = Math.max(1, Math.ceil((eventEndsAt - currentTime.getTime()) / 60_000));
+  const sourceCalendarIds = new Set(event.sourceCalendarIds ?? [event.calendarId]);
   const blockDestinations = calendars.filter(
-    (record) => record.id !== event.calendarId && record.isWritable,
+    (record) => !sourceCalendarIds.has(record.id) && record.isWritable,
   );
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
@@ -7886,39 +7938,41 @@ function EventInspector({
     },
   });
   const changeBlock = useMutation({
-    mutationFn: async (
-      input:
-        | {
-            calendarId: string;
-            mode: "busy" | "details";
-            operation: "create";
-          }
-        | {
-            blockId: string;
-            calendarId: string;
-            mode: "busy" | "details";
-            operation: "delete" | "update";
-            sourceEventId: string | undefined;
-          },
-    ) => {
-      if (input.operation === "create") {
-        return api.createEventBlock(event.id, {
+    mutationFn: async (input: {
+      blocks: CalendarEvent["blocks"];
+      calendarId: string;
+      mode: "busy" | "details";
+      operation: "remove" | "set";
+    }) => {
+      if (input.blocks.length === 0) {
+        const updated = await api.createEventBlock(event.id, {
           calendarId: input.calendarId,
           mode: input.mode,
         });
+        return [{ sourceEventId: event.id, updated }];
       }
-      const sourceEventId = input.sourceEventId ?? event.id;
-      return input.operation === "delete"
-        ? api.deleteEventBlock(sourceEventId, input.blockId)
-        : api.updateEventBlock(sourceEventId, input.blockId, { mode: input.mode });
+      const responses: Array<{ sourceEventId: string; updated: CalendarEvent }> = [];
+      for (const block of input.blocks) {
+        const sourceEventId = block.sourceEventId ?? event.id;
+        const updated =
+          input.operation === "remove"
+            ? await api.deleteEventBlock(sourceEventId, block.eventId)
+            : await api.updateEventBlock(sourceEventId, block.eventId, { mode: input.mode });
+        responses.push({ sourceEventId, updated });
+      }
+      return responses;
     },
-    onSuccess: async (updated, input) => {
-      const sourceEventId =
-        input.operation === "create" ? event.id : (input.sourceEventId ?? event.id);
+    onSuccess: async (responses) => {
+      const updatedBySourceId = new Map(
+        responses.map(({ sourceEventId, updated }) => [sourceEventId, updated.blocks]),
+      );
       setBlocks((current) => [
-        ...current.filter((block) => (block.sourceEventId ?? event.id) !== sourceEventId),
-        ...updated.blocks,
+        ...current.filter((block) => !updatedBySourceId.has(block.sourceEventId ?? event.id)),
+        ...[...updatedBySourceId.values()].flat(),
       ]);
+      await invalidateMaterial(queryClient);
+    },
+    onError: async () => {
       await invalidateMaterial(queryClient);
     },
   });
@@ -7984,26 +8038,20 @@ function EventInspector({
                   disabled={changeBlock.isPending}
                   label="Calendars with details included"
                   mode="details"
-                  onAdd={(calendarId, block) =>
-                    changeBlock.mutate(
-                      block
-                        ? {
-                            blockId: block.eventId,
-                            calendarId,
-                            mode: "details",
-                            operation: "update",
-                            sourceEventId: block.sourceEventId,
-                          }
-                        : { calendarId, mode: "details", operation: "create" },
-                    )
-                  }
-                  onRemove={(block) =>
+                  onAdd={(calendarId, calendarBlocks) =>
                     changeBlock.mutate({
-                      blockId: block.eventId,
-                      calendarId: block.calendarId,
-                      mode: block.mode,
-                      operation: "delete",
-                      sourceEventId: block.sourceEventId,
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "details",
+                      operation: "set",
+                    })
+                  }
+                  onRemove={(calendarId, calendarBlocks) =>
+                    changeBlock.mutate({
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "details",
+                      operation: "remove",
                     })
                   }
                 />
@@ -8021,26 +8069,20 @@ function EventInspector({
                   disabled={changeBlock.isPending}
                   label="Calendars shown as busy"
                   mode="busy"
-                  onAdd={(calendarId, block) =>
-                    changeBlock.mutate(
-                      block
-                        ? {
-                            blockId: block.eventId,
-                            calendarId,
-                            mode: "busy",
-                            operation: "update",
-                            sourceEventId: block.sourceEventId,
-                          }
-                        : { calendarId, mode: "busy", operation: "create" },
-                    )
-                  }
-                  onRemove={(block) =>
+                  onAdd={(calendarId, calendarBlocks) =>
                     changeBlock.mutate({
-                      blockId: block.eventId,
-                      calendarId: block.calendarId,
-                      mode: block.mode,
-                      operation: "delete",
-                      sourceEventId: block.sourceEventId,
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "busy",
+                      operation: "set",
+                    })
+                  }
+                  onRemove={(calendarId, calendarBlocks) =>
+                    changeBlock.mutate({
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "busy",
+                      operation: "remove",
                     })
                   }
                 />
@@ -8192,18 +8234,25 @@ function EventVisibilityList({
   disabled: boolean;
   label: string;
   mode: "busy" | "details";
-  onAdd: (calendarId: string, block: CalendarEvent["blocks"][number] | undefined) => void;
-  onRemove: (block: CalendarEvent["blocks"][number]) => void;
+  onAdd: (calendarId: string, blocks: CalendarEvent["blocks"]) => void;
+  onRemove: (calendarId: string, blocks: CalendarEvent["blocks"]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const availableCalendars = destinations.filter(
-    (calendar) => blocks.find((block) => block.calendarId === calendar.id)?.mode !== mode,
-  );
+  const blocksForCalendar = (calendarId: string) =>
+    blocks.filter((block) => block.calendarId === calendarId);
+  const effectiveMode = (calendarId: string) => {
+    const calendarBlocks = blocksForCalendar(calendarId);
+    if (calendarBlocks.some((block) => block.mode === "details")) return "details";
+    return calendarBlocks.some((block) => block.mode === "busy") ? "busy" : null;
+  };
+  const availableCalendars = destinations.filter((calendar) => effectiveMode(calendar.id) !== mode);
   const status = mode === "details" ? "Details Included" : "Shown as Busy";
   return (
     <ul aria-label={label} className="event-details-card__calendar-list">
       {calendars.map((calendar) => {
-        const block = blocks.find((record) => record.calendarId === calendar.id);
+        const calendarBlocks = blocksForCalendar(calendar.id).filter(
+          (block) => block.mode === mode,
+        );
         return (
           <ShadcnBadge asChild key={calendar.id} variant="secondary">
             <li
@@ -8212,12 +8261,12 @@ function EventVisibilityList({
             >
               <i aria-hidden="true" style={{ background: calendar.color ?? "var(--muted)" }} />
               <span>{calendar.name}</span>
-              {block ? (
+              {calendarBlocks.length > 0 ? (
                 <button
                   aria-label={`Remove ${calendar.name} from ${status}`}
                   className="event-details-card__calendar-remove"
                   disabled={disabled}
-                  onClick={() => onRemove(block)}
+                  onClick={() => onRemove(calendar.id, calendarBlocks)}
                   type="button"
                 >
                   <XIcon aria-hidden="true" />
@@ -8253,10 +8302,7 @@ function EventVisibilityList({
                 <ShadcnButton
                   key={calendar.id}
                   onClick={() => {
-                    onAdd(
-                      calendar.id,
-                      blocks.find((block) => block.calendarId === calendar.id),
-                    );
+                    onAdd(calendar.id, blocksForCalendar(calendar.id));
                     setOpen(false);
                   }}
                   variant="ghost"

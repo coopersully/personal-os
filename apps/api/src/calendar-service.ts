@@ -536,6 +536,38 @@ export function createCalendarService({
       .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
   }
 
+  async function findMirrorCalendarIds(source: CalendarEventRecord): Promise<Set<string>> {
+    const sourceCalendar = await findCalendar(source.userId, source.calendarId);
+    const sourceUid = providerIndependentEventUid(source);
+    const candidates = await db
+      .select()
+      .from(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.userId, source.userId),
+          eq(calendarEvents.startsAt, source.startsAt),
+          eq(calendarEvents.endsAt, source.endsAt),
+          eq(calendarEvents.allDay, source.allDay),
+          isNull(calendarEvents.blockSourceEventId),
+          isNull(calendarEvents.deletedAt),
+        ),
+      );
+    const mirrorCalendarIds = new Set([source.calendarId]);
+    for (const candidate of candidates) {
+      if (candidate.id === source.id || candidate.calendarId === source.calendarId) continue;
+      const candidateCalendar = await findCalendar(source.userId, candidate.calendarId);
+      const candidateUid = providerIndependentEventUid(candidate);
+      const sharesUid = Boolean(sourceUid && candidateUid === sourceUid);
+      const sharesSemanticIdentity =
+        source.provider !== "local" &&
+        candidate.provider !== "local" &&
+        sourceCalendar.accountId !== candidateCalendar.accountId &&
+        normalizedEventTitle(source.title) === normalizedEventTitle(candidate.title);
+      if (sharesUid || sharesSemanticIdentity) mirrorCalendarIds.add(candidate.calendarId);
+    }
+    return mirrorCalendarIds;
+  }
+
   async function serializeWithBlocks(record: CalendarEventRecord): Promise<CalendarEvent> {
     const calendar = await findCalendar(record.userId, record.calendarId);
     if (record.blockSourceEventId) return serializeEvent(record, [], calendar.accountId);
@@ -916,8 +948,12 @@ export function createCalendarService({
       assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
       const destination = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(destination);
-      if (destination.id === source.calendarId) {
-        throw new AppError("invalid_request", "An event cannot block its own calendar.");
+      const mirrorCalendarIds = await findMirrorCalendarIds(source);
+      if (mirrorCalendarIds.has(destination.id)) {
+        throw new AppError(
+          "invalid_request",
+          "An event cannot block a calendar that already contains this occurrence.",
+        );
       }
       const [existing] = await db
         .select()
@@ -1386,6 +1422,14 @@ export function createCalendarService({
         return !source || !visibleCalendarIds.has(source.calendarId);
       });
       const deduplicated = deduplicateEvents(visibleRecords, accountIdByCalendarId);
+      const sourceCalendarIdsByCanonicalId = new Map<string, Set<string>>();
+      for (const record of visibleRecords) {
+        if (record.blockSourceEventId) continue;
+        const canonicalId = deduplicated.canonicalIdBySourceId.get(record.id) ?? record.id;
+        const sourceCalendarIds = sourceCalendarIdsByCanonicalId.get(canonicalId) ?? new Set();
+        sourceCalendarIds.add(record.calendarId);
+        sourceCalendarIdsByCanonicalId.set(canonicalId, sourceCalendarIds);
+      }
       const displayedSourceIds = visibleRecords
         .filter((record) => !record.blockSourceEventId)
         .map((record) => record.id);
@@ -1417,6 +1461,7 @@ export function createCalendarService({
           record,
           blocksBySource.get(record.id) ?? [],
           accountIdByCalendarId.get(record.calendarId) ?? null,
+          [...(sourceCalendarIdsByCanonicalId.get(record.id) ?? new Set([record.calendarId]))],
         ),
       );
     },

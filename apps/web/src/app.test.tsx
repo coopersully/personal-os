@@ -20,6 +20,7 @@ import {
   airQualityDescription,
   formatTimelineTimeRange,
   formatWeatherFreshness,
+  overlapOrbitPoint,
   positionTimelineEvents,
   todayTimelineDensity,
   todayTimelineItemRange,
@@ -6357,7 +6358,12 @@ describe("ilo web app", () => {
       provider: "google" as const,
       sourceEventId: secondId,
     };
-    const linkedEvent = { ...event, blocks: [canonicalBlock, block] };
+    const duplicateBlock = {
+      ...block,
+      eventId: "99999999-9999-4999-8999-999999999998",
+      sourceEventId: "99999999-9999-4999-8999-999999999999",
+    };
+    const linkedEvent = { ...event, blocks: [canonicalBlock, block, duplicateBlock] };
     mocks.listEvents.mockResolvedValue([linkedEvent]);
     mocks.getDailyBrief.mockResolvedValue({
       allDay: [],
@@ -6375,10 +6381,16 @@ describe("ilo web app", () => {
       tomorrow: [],
     });
     mocks.createEventBlock.mockResolvedValue(linkedEvent);
-    mocks.updateEventBlock.mockResolvedValue({
-      ...linkedEvent,
-      blocks: [{ ...block, mode: "details" as const }],
-    });
+    mocks.updateEventBlock.mockImplementation(async (sourceEventId, blockId) => ({
+      ...event,
+      blocks: [
+        {
+          ...(blockId === block.eventId ? block : duplicateBlock),
+          mode: "details" as const,
+          sourceEventId,
+        },
+      ],
+    }));
     mocks.deleteEventBlock.mockResolvedValue(event);
     const view = setup();
     const browser = userEvent.setup();
@@ -6404,6 +6416,12 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateEventBlock).toHaveBeenCalledWith(secondId, thirdId, { mode: "details" }),
     );
+    expect(mocks.updateEventBlock).toHaveBeenCalledWith(
+      duplicateBlock.sourceEventId,
+      duplicateBlock.eventId,
+      { mode: "details" },
+    );
+    expect(screen.getAllByText("Selected Google")).toHaveLength(1);
     expect(
       within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
         "Readonly Google",
@@ -6413,6 +6431,10 @@ describe("ilo web app", () => {
       screen.getByRole("button", { name: "Remove Selected Google from Details Included" }),
     );
     await waitFor(() => expect(mocks.deleteEventBlock).toHaveBeenCalledWith(secondId, thirdId));
+    expect(mocks.deleteEventBlock).toHaveBeenCalledWith(
+      duplicateBlock.sourceEventId,
+      duplicateBlock.eventId,
+    );
     expect(
       within(screen.getByRole("list", { name: "Calendars with details included" })).getByText(
         "Readonly Google",
@@ -6471,6 +6493,29 @@ describe("ilo web app", () => {
     expect(renderedEvents).toHaveLength(1);
     expect(renderedEvents[0]).toHaveClass("week-all-day-event");
     expect(renderedEvents[0]).toHaveStyle({ gridColumn: "2 / 5" });
+  });
+
+  it("keeps remote date-only all-day events on their provider dates", async () => {
+    mocks.getMe.mockResolvedValue({ ...user, planningTimezone: "America/New_York" });
+    mocks.listEvents.mockResolvedValue([
+      {
+        ...allDayEvent,
+        calendarId: nullColorCalendar.id,
+        endsAt: "2026-07-16T00:00:00.000Z",
+        id: "88888888-8888-4888-8888-888888888887",
+        provider: "google" as const,
+        startsAt: "2026-07-13T00:00:00.000Z",
+        title: "Provider date retreat",
+      },
+    ]);
+
+    setup("/calendar?date=2026-07-13&view=week");
+
+    expect(
+      await screen.findByRole("button", {
+        name: "All day Provider date retreat, Monday, July 13 through Wednesday, July 15",
+      }),
+    ).toHaveStyle({ gridColumn: "2 / 5" });
   });
 
   it("gives overlapping all-day events accessible targets in separate lanes", async () => {
@@ -6585,6 +6630,20 @@ describe("ilo web app", () => {
 
     await browser.click(screen.getByRole("button", { name: "1:00 PM Focus block" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("clamps overlap orbits inside the timeline at day boundaries", () => {
+    const midnightPoint = overlapOrbitPoint(1, 3, true, {
+      eventEndMinute: 30,
+      eventStartMinute: 0,
+    });
+    const endOfDayPoint = overlapOrbitPoint(2, 3, true, {
+      eventEndMinute: 24 * 60,
+      eventStartMinute: 24 * 60 - 30,
+    });
+
+    expect(midnightPoint.y).toBe(0);
+    expect(endOfDayPoint.y).toBe(0);
   });
 
   it("uses the shared transparent dashed treatment for empty states and quotes", () => {

@@ -3499,7 +3499,7 @@ p {
   grid-column: 1 / -1;
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
 }
 .week-time-corner {
   grid-row: 1;

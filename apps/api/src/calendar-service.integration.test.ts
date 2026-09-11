@@ -521,6 +521,75 @@ describe.sequential("Calendar commitment proposals", () => {
     ]);
   });
 
+  it("exposes backing mirror calendars and refuses to block into them", async () => {
+    const [mirrorAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Mirror account",
+        provider: "google",
+        providerAccountId: "mirror-account",
+        userId,
+      })
+      .returning();
+    if (!mirrorAccount) throw new Error("Mirror account fixture was not created.");
+    const [mirrorCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: mirrorAccount.id,
+        isWritable: true,
+        name: "Mirrored calendar",
+        provider: "google",
+        remoteCalendarId: "mirrored-calendar",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!mirrorCalendar) throw new Error("Mirror calendar fixture was not created.");
+    await database.db.insert(calendarEvents).values([
+      {
+        calendarId: remoteCalendarId,
+        endsAt: new Date("2026-08-06T17:00:00.000Z"),
+        provider: "google",
+        remoteEventId: "mirror-source-one",
+        startsAt: new Date("2026-08-06T16:00:00.000Z"),
+        timezone: "UTC",
+        title: "Mirrored appointment",
+        userId,
+      },
+      {
+        calendarId: mirrorCalendar.id,
+        endsAt: new Date("2026-08-06T17:00:00.000Z"),
+        provider: "google",
+        remoteEventId: "mirror-source-two",
+        startsAt: new Date("2026-08-06T16:00:00.000Z"),
+        timezone: "UTC",
+        title: "Mirrored appointment",
+        userId,
+      },
+    ]);
+
+    const visible = await service.listEvents(userId, {
+      from: "2026-08-06T00:00:00.000Z",
+      to: "2026-08-07T00:00:00.000Z",
+    });
+
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.sourceCalendarIds?.sort()).toEqual(
+      [remoteCalendarId, mirrorCalendar.id].sort(),
+    );
+    await expect(
+      service.createEventBlock(
+        visible[0]?.id ?? "",
+        { calendarId: mirrorCalendar.id, mode: "busy" },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "An event cannot block a calendar that already contains this occurrence.",
+    });
+    expect(gateway.create).not.toHaveBeenCalled();
+  });
+
   it("reports profile drift, weak/flexible evidence, and exact projection duplicates", async () => {
     await expect(
       service.createEvent(

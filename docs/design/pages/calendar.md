@@ -20,7 +20,8 @@ event without losing the shape of the day.
 - All-day events use compact rounded notched bars. A multi-day event is one
   continuous bar spanning its occupied day columns, while overlapping events
   stack into separate all-day lanes. Each all-day control retains at least a
-  24 px target with spacing between adjacent lanes.
+  24 px target with spacing between adjacent lanes. Provider date-only events
+  stay on their source dates instead of shifting with the planning time zone.
 - Visible event feeds collapse provider mirrors into one canonical occurrence.
   A shared iCalendar UID plus the exact start, end, and all-day state is the
   preferred identity. When no shared UID exists, non-local events may match
@@ -31,7 +32,10 @@ event without losing the shape of the day.
   from both mirror identities so separate source commitments remain actionable.
   The first visible projection supplies
   the canonical event while source associations remain available for linked
-  block behavior. This conservative display rule does not merge provider
+  block behavior. Backing source calendars are excluded from block destinations,
+  and duplicate block relationships to one destination are presented as one
+  effective visibility state while changes apply to every backing relationship.
+  This conservative display rule does not merge provider
   records, and two independently created cross-account events with identical
   fallback fields remain a known false-positive boundary.
 - The persistent Calendar orientation occupies the shared workspace app bar's
@@ -66,7 +70,8 @@ event without losing the shape of the day.
   reinforces the circular arrangement. Cards retain their normal
   shape, content, and independent click target; a short pointer-exit grace
   period bridges the animated gap without placing an intercepting hit area over
-  neighbouring events.
+  neighbouring events. Orbit geometry remains inside the start and end of the
+  day, and the pinned navigation stays above spread cards.
   The control also supports touch, and Escape collapses the chooser.
 - Vertical day separation remains visible. Horizontal rules communicate time,
   not card boundaries. Week headers and timelines alternate between two subtle

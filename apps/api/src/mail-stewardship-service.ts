@@ -6,6 +6,7 @@ import {
   type Database,
   domainProfileApprovals,
   domainProfiles,
+  mailboxes,
   mailMessages,
   mailObligations,
   mailReviews,
@@ -259,12 +260,20 @@ export function createMailStewardshipService({ db, now }: Options) {
             )
           )`);
         }
-        const threads = await tx
-          .select()
-          .from(mailThreads)
-          .where(and(...threadConditions))
-          .orderBy(asc(mailThreads.updatedAt), asc(mailThreads.id))
-          .limit(MAIL_MAINTENANCE_THREAD_LIMIT);
+        const threads: Array<typeof mailThreads.$inferSelect> = [];
+        let offset = 0;
+        for (;;) {
+          const page = await tx
+            .select()
+            .from(mailThreads)
+            .where(and(...threadConditions))
+            .orderBy(asc(mailThreads.updatedAt), asc(mailThreads.id))
+            .limit(MAIL_MAINTENANCE_THREAD_LIMIT)
+            .offset(offset);
+          threads.push(...page);
+          if (page.length < MAIL_MAINTENANCE_THREAD_LIMIT) break;
+          offset += page.length;
+        }
         const threadIds = threads.map((thread) => thread.id);
         const scopedAccountIds = [...new Set(threads.map((thread) => thread.accountId))];
         const accounts = await tx
@@ -274,7 +283,7 @@ export function createMailStewardshipService({ db, now }: Options) {
             and(
               eq(calendarAccounts.userId, userId),
               eq(calendarAccounts.mailEnabled, true),
-              scope.type !== "all_outstanding"
+              scope.type === "target"
                 ? scopedAccountIds.length > 0
                   ? inArray(calendarAccounts.id, scopedAccountIds)
                   : sql`false`
@@ -396,6 +405,7 @@ export function createMailStewardshipService({ db, now }: Options) {
         const messages = await tx
           .select({
             id: mailMessages.id,
+            messageId: mailMessages.messageId,
             providerMailboxIds: mailMessages.providerMailboxIds,
             providerRevision: mailMessages.providerRevision,
             receivedAt: mailMessages.receivedAt,
@@ -403,6 +413,69 @@ export function createMailStewardshipService({ db, now }: Options) {
           })
           .from(mailMessages)
           .where(inArray(mailMessages.threadId, threadIds));
+        const replyObligations = obligations.filter(
+          (obligation) =>
+            obligation.kind === "reply" &&
+            obligation.state !== "resolved" &&
+            obligation.state !== "dismissed",
+        );
+        const earliestReplyRevision = replyObligations.reduce<Date | null>(
+          (earliest, obligation) =>
+            !earliest || obligation.sourceThreadRevision < earliest
+              ? obligation.sourceThreadRevision
+              : earliest,
+          null,
+        );
+        const outboundCandidates = earliestReplyRevision
+          ? await tx
+              .select({
+                accountId: mailThreads.accountId,
+                observedAt: mailMessages.receivedAt,
+                providerMailboxIds: mailMessages.providerMailboxIds,
+                references: mailMessages.references,
+              })
+              .from(mailMessages)
+              .innerJoin(mailThreads, eq(mailThreads.id, mailMessages.threadId))
+              .where(
+                and(
+                  eq(mailThreads.userId, userId),
+                  isNull(mailThreads.deletedAt),
+                  gte(mailMessages.receivedAt, earliestReplyRevision),
+                ),
+              )
+          : [];
+        const sentMailboxes = new Set(
+          accounts.length === 0
+            ? []
+            : (
+                await tx
+                  .select({
+                    accountId: mailboxes.accountId,
+                    remoteMailboxId: mailboxes.remoteMailboxId,
+                  })
+                  .from(mailboxes)
+                  .where(
+                    and(
+                      inArray(
+                        mailboxes.accountId,
+                        accounts.map((account) => account.id),
+                      ),
+                      eq(mailboxes.role, "sent"),
+                      isNull(mailboxes.deletedAt),
+                    ),
+                  )
+              ).map((mailbox) => `${mailbox.accountId}:${mailbox.remoteMailboxId}`),
+        );
+        const outboundMessages = outboundCandidates
+          .filter((message) =>
+            message.providerMailboxIds.some((mailboxId) =>
+              sentMailboxes.has(`${message.accountId}:${mailboxId}`),
+            ),
+          )
+          .map((message) => ({
+            observedAt: message.observedAt.toISOString(),
+            references: message.references,
+          }));
         const snoozes = await tx
           .select()
           .from(mailSnoozes)
@@ -442,6 +515,7 @@ export function createMailStewardshipService({ db, now }: Options) {
         return {
           effectCounts,
           now: asOf.toISOString(),
+          outboundMessages,
           profileId: approval?.profileId ?? null,
           profileVersion: approval?.profileVersion ?? null,
           rulebookVersion,
@@ -469,11 +543,14 @@ export function createMailStewardshipService({ db, now }: Options) {
               messages: (messagesByThread.get(thread.id) ?? []).map((message) => ({
                 authority: "provider_projected" as const,
                 direction: message.providerMailboxIds.some(
-                  (mailboxId) => mailboxId.trim().toUpperCase() === "SENT",
+                  (mailboxId) =>
+                    sentMailboxes.has(`${thread.accountId}:${mailboxId}`) ||
+                    mailboxId.trim().toUpperCase() === "SENT",
                 )
                   ? ("outbound" as const)
                   : ("inbound" as const),
                 id: message.id,
+                messageId: message.messageId,
                 observedAt: message.receivedAt.toISOString(),
                 revision: message.providerRevision,
               })),

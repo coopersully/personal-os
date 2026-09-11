@@ -12,6 +12,7 @@ export type MailAssessmentMessageSnapshot = {
   authority: "provider_projected" | "local";
   direction: "inbound" | "outbound";
   id: string;
+  messageId?: string | null;
   observedAt: string;
   revision: string | null;
 };
@@ -47,6 +48,7 @@ export type MailAssessmentThreadSnapshot = {
 export type MailAssessmentSnapshot = {
   effectCounts: { failed: number; pending: number; reconcile: number };
   now: string;
+  outboundMessages?: Array<{ observedAt: string; references: string[] }>;
   profileId: string | null;
   profileVersion: number | null;
   rulebookVersion: string;
@@ -178,6 +180,7 @@ export function assessMail(
     (count, thread) => count + thread.openQuestions.length,
     0,
   );
+  const outboundMessages = snapshot.outboundMessages ?? [];
 
   for (const thread of snapshot.threads) {
     if (thread.currentDisposition) {
@@ -191,13 +194,23 @@ export function assessMail(
         obligation.state === "dismissed"
       )
         continue;
-      const newerOutbound = thread.messages.some(
-        (message) =>
-          message.authority === "provider_projected" &&
-          message.direction === "outbound" &&
-          new Date(message.observedAt).getTime() >
-            new Date(obligation.sourceThreadRevision).getTime(),
+      const sourceMessageIds = new Set(
+        thread.messages.flatMap((message) => (message.messageId ? [message.messageId] : [])),
       );
+      const newerOutbound =
+        thread.messages.some(
+          (message) =>
+            message.authority === "provider_projected" &&
+            message.direction === "outbound" &&
+            new Date(message.observedAt).getTime() >
+              new Date(obligation.sourceThreadRevision).getTime(),
+        ) ||
+        outboundMessages.some(
+          (message) =>
+            new Date(message.observedAt).getTime() >
+              new Date(obligation.sourceThreadRevision).getTime() &&
+            message.references.some((reference) => sourceMessageIds.has(reference)),
+        );
       if (newerOutbound) {
         obligationTransitions.push({
           evidence: [thread.source],

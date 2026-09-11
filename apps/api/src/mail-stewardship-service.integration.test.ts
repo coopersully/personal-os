@@ -952,7 +952,7 @@ describe.sequential("Mail stewardship service", () => {
         start: "2026-08-24",
         type: "window",
       }),
-    ).resolves.toMatchObject({ sourceFreshness: "unavailable", threads: [] });
+    ).resolves.toMatchObject({ sourceFreshness: "current", threads: [] });
 
     const targetSnapshot = await service.snapshot(principal.userId, {
       entityType: "mail_thread",
@@ -1239,9 +1239,9 @@ describe.sequential("Mail stewardship service", () => {
     expect(result.details.openQuestions).toHaveLength(100);
   });
 
-  it("bounds each all-outstanding snapshot page", async () => {
+  it("processes every bounded all-outstanding snapshot page", async () => {
     await database.db.insert(mailThreads).values(
-      Array.from({ length: 510 }, (_, index) => ({
+      Array.from({ length: 501 }, (_, index) => ({
         accountId,
         bodyText: "",
         from: { address: `sender-${index}@example.com`, name: null },
@@ -1259,6 +1259,8 @@ describe.sequential("Mail stewardship service", () => {
       })),
     );
     const result = await service.snapshot(principal.userId, { type: "all_outstanding" });
-    expect(result.threads).toHaveLength(500);
-  });
+    expect(
+      result.threads.filter((thread) => thread.source.remoteId.startsWith("bounded-thread-")),
+    ).toHaveLength(501);
+  }, 60_000);
 });

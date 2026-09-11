@@ -29,7 +29,7 @@ import {
   weatherLocationSearchQuerySchema,
   weatherQuerySchema,
 } from "@personal-os/domain";
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
@@ -513,16 +513,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     refreshSources: async (userId, scope) => {
       let scopedAccountIds: Set<string> | null = null;
-      if (scope.type !== "all_outstanding") {
+      if (scope.type === "target") {
         const scopeConditions = [
           eq(mailThreads.userId, userId),
           isNull(mailThreads.deletedAt),
-          ...(scope.type === "target"
-            ? [eq(mailThreads.id, scope.id)]
-            : [
-                gte(mailThreads.receivedAt, new Date(`${scope.start}T00:00:00.000Z`)),
-                lte(mailThreads.receivedAt, new Date(`${scope.end}T23:59:59.999Z`)),
-              ]),
+          eq(mailThreads.id, scope.id),
         ];
         scopedAccountIds = new Set(
           (

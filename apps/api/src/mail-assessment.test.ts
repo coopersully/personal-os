@@ -102,6 +102,49 @@ describe("Mail stewardship assessment", () => {
     );
   });
 
+  it("closes a reply obligation when a separately projected sent message references it", () => {
+    const result = assessMail(
+      snapshot(
+        [
+          thread({
+            messages: [
+              {
+                authority: "provider_projected",
+                direction: "inbound",
+                id: "30000000-0000-4000-8000-000000000001",
+                messageId: "<source@example.com>",
+                observedAt: "2026-08-25T14:00:00.000Z",
+                revision: "message-v1",
+              },
+            ],
+            obligations: [
+              {
+                id: "40000000-0000-4000-8000-000000000001",
+                kind: "reply",
+                sourceThreadRevision: "2026-08-25T14:00:00.000Z",
+                state: "open",
+                version: 1,
+              },
+            ],
+          }),
+        ],
+        {
+          outboundMessages: [
+            {
+              observedAt: "2026-08-25T14:30:00.000Z",
+              references: ["<source@example.com>"],
+            },
+          ],
+        },
+      ),
+      MAIL_PLAYBOOK,
+    );
+
+    expect(result.obligationTransitions).toContainEqual(
+      expect.objectContaining({ nextState: "resolved", reasonCode: "newer_outbound_observed" }),
+    );
+  });
+
   it("preserves a dismissed reply obligation when newer outbound evidence exists", () => {
     const result = assessMail(
       snapshot([

@@ -910,7 +910,7 @@ function ThreadRow({
     </button>
   );
 }
-function Reader({
+export function Reader({
   messages,
   thread,
   timeZone,

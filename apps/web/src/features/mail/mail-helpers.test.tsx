@@ -12,6 +12,7 @@ import {
   isMailListScope,
   MailSidebar,
   MailTopbarSearch,
+  Reader,
   mailListScopeFromSearch,
   mailListScopeParams,
   mailListScopeQuery,
@@ -151,6 +152,76 @@ describe("Mail workspace helpers", () => {
     expect(formatAttachmentSize(512)).toBe("512 B");
     expect(formatAttachmentSize(2048)).toBe("2 KB");
     expect(formatAttachmentSize(2 * 1024 * 1024)).toBe("2.0 MB");
+  });
+
+  it("renders and collapses complete recipient and attachment variants", () => {
+    const now = "2026-08-28T12:00:00.000Z";
+    const thread = {
+      accountId: "11111111-1111-4111-8111-111111111111",
+      bodyText: "Primary body",
+      from: { address: "sender@example.com", name: "Sender" },
+      id: "22222222-2222-4222-8222-222222222222",
+      mailboxIds: [],
+      messageCount: 2,
+      provider: "google" as const,
+      receivedAt: now,
+      remoteThreadId: "remote-thread",
+      snippet: "Primary body",
+      starred: false,
+      subject: "Recipient variants",
+      to: [],
+      unread: false,
+      updatedAt: now,
+    };
+    const messages = [
+      {
+        attachments: [
+          { contentType: "application/pdf", filename: "brief.pdf", id: "attachment-1", size: 2048 },
+        ],
+        bodyText: "Primary body",
+        cc: [
+          { address: "first-cc@example.com", name: "First CC" },
+          { address: "second-cc@example.com", name: "Second CC" },
+        ],
+        from: thread.from,
+        id: "33333333-3333-4333-8333-333333333333",
+        messageId: null,
+        receivedAt: now,
+        references: [],
+        replyTo: [],
+        threadId: thread.id,
+        to: [],
+      },
+      {
+        attachments: [],
+        bodyText: "",
+        cc: [],
+        from: { address: "", name: null },
+        id: "44444444-4444-4444-8444-444444444444",
+        messageId: null,
+        receivedAt: now,
+        references: [],
+        replyTo: [],
+        threadId: thread.id,
+        to: [
+          { address: "first@example.com", name: "First" },
+          { address: "second@example.com", name: "Second" },
+        ],
+      },
+    ];
+
+    render(<Reader messages={messages} thread={thread} timeZone="UTC" />);
+    expect(screen.getByText("undisclosed recipients")).toBeVisible();
+    expect(screen.getByText("brief.pdf")).toBeVisible();
+    expect(screen.getByText("This message has no plain-text body.")).toBeVisible();
+    const collapse = screen.getByRole("button", { name: "Collapse message from Sender" });
+    fireEvent.click(collapse);
+    expect(screen.getByRole("button", { name: "Expand message from Sender" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Expand message from Sender" }));
+    expect(screen.getByRole("button", { name: "Collapse message from Sender" })).toBeVisible();
   });
 
   it("makes the combined Inbox primary and keeps sources out of navigation", async () => {

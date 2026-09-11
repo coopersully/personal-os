@@ -1,6 +1,6 @@
-# Workspace Ilo charter template
+# Workspace steward charter template
 
-Use this charter before planning or parallelizing a new workspace Ilo. Replace every bracketed
+Use this charter before planning or parallelizing a new workspace steward. Replace every bracketed
 prompt with a domain-specific decision. Do not begin with MCP tool names; begin with the ledger and
 the professional work required to keep it trustworthy.
 
@@ -8,8 +8,8 @@ the professional work required to keep it trustworthy.
 
 - **Workspace:** [name]
 - **User outcome:** [what the person can understand or accomplish after maintenance]
-- **Ilo promise:** [one sentence describing what this Ilo continually keeps true]
-- **Explicit non-goals:** [actions, professional claims, or material this Ilo will not own]
+- **Steward promise:** [one sentence describing what this steward continually keeps true]
+- **Explicit non-goals:** [actions, professional claims, or material this steward will not own]
 
 ## 2. Living ledger
 
@@ -47,31 +47,58 @@ Inventory the narrow operations needed to inspect, preview, annotate, correct, a
 and verify one exact item. For every mutation, state its policy (`preview`, `approve_each`, or
 `approved_rule`), revision guard, idempotency identity, audit evidence, and recovery path.
 
+Before implementation, define the guided setup interview: what it learns about the person's goals,
+sources, constraints, preferred workflow, review cadence, and notifications; which configuration or
+rules it may propose; and which approvals remain human-owned.
+
+Guided setup may propose any number of rules in one batch, but every rule remains inactive until a
+dedicated preview shows its condition, scope, selected sources, representative matches and
+non-matches, intended action, consequences, conflicts/precedence, required authority, and
+disable/rollback path. Define grouping and pagination without losing individual inspection and
+deselection, plus immutable proposal versions that force re-preview after drift. Setup completion
+and global review bypass must not activate an action rule.
+
 ## 6. Maintenance turn
 
 Describe the domain-owned sequence for `all`, a bounded time window, and an exact target:
 
-1. establish scope and evidence cutoff;
+1. establish scope, purpose, and evidence cutoff;
 2. synchronize and inspect;
-3. reconcile and deduplicate;
-4. apply rules and authorized operations;
-5. queue questions;
-6. recalculate models and health;
-7. advise;
-8. publish the review; and
-9. verify terminal state.
+3. retrieve the bounded context pack required by the knowledge contract;
+4. reconcile and deduplicate;
+5. apply rules and authorized operations;
+6. queue typed work nodes for questions, approvals, reviews, recovery, follow-up, and completed-work
+   summaries;
+7. recalculate models and health;
+8. record proposed or reinforced knowledge;
+9. advise;
+10. publish the review; and
+11. verify terminal state.
 
 Specify durable run/step state, leases, retry limits, idempotency, cancellation, recovery, and
 concurrent-run behavior. Name what can remain outstanding without misreporting success.
 
+Define the external scheduling contract: supported hosts, the expected cadence metadata and
+check-in health shown by nohmi, and the setup or repair handoff back to the owning platform. Give
+every declared schedule an immutable nohmi-owned local identity, require scheduled maintenance
+inputs to carry it through the authenticated connection, validate that binding, and propagate the
+identity through run, health, revocation, idempotency, and coalescing records. Retain only a
+non-secret credential reference and optional host automation identity; leave schedule identity
+absent for manual and otherwise unscheduled invocations. nohmi must not create, edit, activate,
+pause, or execute a recurring maintenance schedule; internal timers may only continue or recover
+work from an invocation already accepted.
+
 ## 7. Rulebook, questions, and learning
 
-- What can the Ilo infer provisionally?
+- What can the steward infer provisionally?
 - What needs a one-off answer?
-- What can become a future rule only through explicit approval?
+- Which knowledge may become active after explicit promotion or safe repeated reinforcement?
+- Which actions still require an explicitly approved domain rule?
 - How are rule scope, confidence, exceptions, provenance, version, disablement, and rollback stored?
-- Which earlier records are re-evaluated when an answer or rule changes?
-- How does the Ilo avoid asking the same resolved question again?
+- What is the workspace's required, optional, and prohibited User Knowledge?
+- Which earlier records are re-evaluated when knowledge, an answer, or a rule changes?
+- How does the steward avoid asking the same resolved question again?
+- Which domain-specific labels should the UI use instead of exposing “node” as a generic term?
 
 ## 8. Analysis, advice, and review artifact
 
@@ -96,8 +123,21 @@ Design the API/domain behavior first. Then map it to:
 - workspace UI for inspection, questions, approvals, recovery, and reviews;
 - typed API-client contracts;
 - a small MCP intent surface, normally `get_<workspace>_status` and
-  `maintain_<workspace>`; and
+  `maintain_<workspace>`, plus `setup_<workspace>` or the shared setup plan when onboarding is
+  nontrivial; and
 - granular MCP tools only for useful surgical operations.
+
+Define which setup, maintenance, question, review, completion, or recovery outcomes may publish a
+typed notification intent. List the workspace's per-channel settings, safe-summary fields,
+sensitive fields, allowed reply vocabulary, review-bypass behavior, and first-party deep link.
+Never put provider delivery or general-inbox dispatch inside the workspace.
+
+Place every workspace-owned setting in one canonical editor inside the workspace. Define the
+read-only health, readiness, effective-policy, override, and outstanding-review summary that
+centralized Settings may show, plus deep links back to exact workspace controls. Do not create a
+second editable copy. Keep account-wide security, privacy ceilings, review bypass, notification
+policy, channel connections/defaults, connected-agent credentials/scopes, User Knowledge controls,
+and unified Reviews in centralized Settings.
 
 Keep expert judgment and orchestration in the domain/API. Keep MCP stateless. List every
 Integration-owned composition-root or shared-infrastructure change separately so parallel branches

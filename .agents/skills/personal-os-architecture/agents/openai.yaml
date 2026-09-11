@@ -1,4 +1,4 @@
 interface:
-  display_name: "ilo Architecture"
+  display_name: "personal-os Architecture"
   short_description: "Keep product boundaries and feature ownership coherent."
-  default_prompt: "Use $personal-os-architecture to structure this ilo feature."
+  default_prompt: "Use $personal-os-architecture to structure this nohmi feature."

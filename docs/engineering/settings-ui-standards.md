@@ -2,6 +2,19 @@
 
 Settings is a control surface for a person’s persistent preferences, access, and connected capabilities. Keep each screen calm: show the decision that matters now, explain a constraint where it occurs, and keep rare tuning out of the initial scan.
 
+## Ownership and placement
+
+- Give every setting one canonical editing surface.
+- Edit account-wide identity, security, privacy ceilings, review bypass, shared notification policy,
+  channel connections/defaults, connected-agent credentials/scopes, User Knowledge controls, and
+  unified Reviews in centralized Settings.
+- Edit sources, source meanings, maintenance behavior, notification overrides, rules, learning,
+  recovery, data controls, and domain access posture inside the owning workspace.
+- Let centralized Settings summarize cross-workspace health, readiness, effective policy, override
+  presence, and outstanding review counts, then deep-link to the exact workspace control.
+- Never render a second editable copy of workspace-owned configuration. A summary may refresh after
+  returning from the workspace, but it does not maintain parallel form state.
+
 ## Feedback
 
 | Situation | Pattern | Behavior |
@@ -46,7 +59,7 @@ An inline message needs a specific title and a next step. Never use a static ale
   incomplete permission, provider failure, and unknown state never render provider text or a JSON
   response.
 - Render only the structured account health state: **Ready**, **Syncing**, **Retrying
-  automatically**, **Reconnect required**, or **ilo is resolving this**. Never render a raw
+  automatically**, **Reconnect required**, or **nohmi is resolving this**. Never render a raw
   provider exception or response.
 - A manual sync result is a toast; the durable account row remains the persistent truth. Always
   refresh account and material queries after the attempt, including failure.
@@ -56,7 +69,7 @@ An inline message needs a specific title and a next step. Never use a static ale
   Mail and Calendar use a warning callout only when a person must reconnect.
 - Refresh health every 30 seconds while a relevant view is mounted and visible. Browsers never
   initiate provider sync on a polling interval.
-- X follows the same rule: persisted and displayed synchronization failures use ilo-authored copy,
+- X follows the same rule: persisted and displayed synchronization failures use nohmi-authored copy,
   never an exception message from the provider or SDK.
 
 ## Security & agent access

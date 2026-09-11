@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Zod, Drizzle/PostgreSQL, Hono, React Query, React Router, shadcn/Radix, Tailwind.
 
-**Spec:** Approved conversation design and `docs/design/pages/commitments.md`; ontology in `docs/product/master-design.md` and `docs/product/tasks-ilo-charter.md`.
+**Spec:** Approved conversation design and `docs/design/pages/commitments.md`; ontology in `docs/product/master-design.md` and `docs/product/tasks-workspace-charter.md`.
 
 ## Global Constraints
 

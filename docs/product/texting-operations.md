@@ -64,7 +64,11 @@ A maintenance message should normally contain:
 Messages are formal, concise, and immediately scannable. They omit greetings, sign-offs,
 conversational filler, repeated status, and the full contents of a multi-item queue. When several
 questions or actions are open, the SMS summarizes their number and subjects without asking each one;
-the linked nohmi review surface contains the complete queue and evidence.
+the linked nohmi review surface contains the complete summarized item set and its evidence.
+
+The link opens a scoped review view containing exactly the items summarized in that SMS, preserving
+their message, run, and work-node context. That view offers a separate action to open the complete
+review queue; the text never drops the person into an unrelated unfiltered backlog.
 
 Example: “Your budget is on track this month. One question: dinner yesterday was unusually large—are
 you expecting reimbursement? Reply yes, no, or unsure. Review: [link]”

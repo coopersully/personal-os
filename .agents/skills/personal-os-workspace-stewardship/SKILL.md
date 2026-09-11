@@ -66,7 +66,8 @@ language immediately before delivery.
 
 Keep notification summaries formal, short, and concise. Supply one directly answerable item when
 only one is open; for multiple questions or actions, supply a count and topical preview plus the
-complete review-queue link rather than rendering every item.
+message-bound scoped review link rather than rendering every item. The scoped view contains exactly
+the summarized items and offers a separate action for the complete queue.
 
 ## Verify the delivered slice
 

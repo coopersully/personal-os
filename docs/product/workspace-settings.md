@@ -79,7 +79,9 @@ The default content includes the merchant, sender, event, task, or comparable en
 understand the action. Dates and times are rendered in the person's current time zone, using
 `today`, `yesterday`, or `tomorrow` when applicable; unnecessary sensitive detail remains omitted.
 Messages remain formal, short, and concise. One item may be asked directly; several items produce a
-count and topical preview with a link to the complete review queue rather than a long SMS checklist.
+count and topical preview with a scoped review link rather than a long SMS checklist.
+That link opens exactly the summarized items first and provides a separate route to the complete
+queue.
 
 ## Inheritance boundary
 

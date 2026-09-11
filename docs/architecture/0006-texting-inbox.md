@@ -39,7 +39,9 @@ to the person's current time zone, renders nearby dates relatively, and composes
 available question or exact review action, and an optional first-party deep link.
 
 When several questions or actions are available, Texting renders only a formal count and topical
-preview with the review link. It does not serialize the complete queue into SMS.
+preview with the review link. The link resolves the exact message-bound item set and offers a
+separate route to the full queue; it does not serialize the complete queue into SMS or open an
+unfiltered backlog by default.
 
 ## Authority
 

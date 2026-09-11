@@ -22,6 +22,7 @@ CONTROLLER_STATUS_COMMAND = [
     "status",
     "/Users/nohmi-production/nohmi-production/config.json",
 ]
+ACTIVE_CONTROLLER_PHASES = {"building", "quiescing", "resuming-previous", "switching"}
 
 
 def command_json(args):
@@ -59,6 +60,15 @@ def verdict(main_sha, ci_runs, controller_status, endpoints):
     """Classify health and release provenance without inferring a private revision."""
     if any(not value.get("ok") for value in endpoints.values()):
         return "unhealthy"
+    if controller_status.get("collectionError"):
+        return "healthy_revision_unknown"
+    if controller_status.get("maintenance"):
+        return "maintenance"
+    controller_phase = controller_status.get("phase")
+    if controller_phase == "blocked":
+        return "controller_blocked"
+    if controller_phase in ACTIVE_CONTROLLER_PHASES:
+        return "in_progress"
     main_run = exact_main_run(main_sha, ci_runs)
     if main_run.get("status") in {"queued", "in_progress", "pending", "waiting"}:
         return "in_progress"
@@ -70,23 +80,11 @@ def verdict(main_sha, ci_runs, controller_status, endpoints):
         "timed_out",
     }:
         return "ci_failed"
-    if controller_status.get("collectionError"):
-        return "healthy_revision_unknown"
-    if controller_status.get("maintenance"):
-        return "maintenance"
-    if controller_status.get("phase") == "blocked":
-        return "controller_blocked"
     if controller_status.get("error"):
         return "controller_retrying"
     deployed_sha = controller_status.get("deployed")
     if deployed_sha == main_sha and main_run.get("conclusion") == "success":
         return "live"
-    if controller_status.get("candidate") == main_sha and controller_status.get("phase") not in {
-        None,
-        "idle",
-        "not-started",
-    }:
-        return "in_progress"
     if deployed_sha and main_run.get("conclusion") == "success":
         return "not_live"
     return "unknown"

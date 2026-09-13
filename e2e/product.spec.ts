@@ -97,7 +97,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const suffix = `${testInfo.project.name}-${Date.now()}`;
   const email = `e2e+${suffix}@example.com`;
   const reminderTitle = `Material reminder ${suffix}`;
-  const eventTitle = `Material event ${suffix}`;
+  const eventTitle = `Material event ${suffix}-${"x".repeat(96)}`;
   const mobile = testInfo.project.name === "mobile-chromium";
   // The desktop switcher and the narrow dock expose the same five destinations
   // under the same accessible names, so workspace movement is one path.
@@ -127,6 +127,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   };
 
   await page.goto("/");
+  const initialViewportWidth = await page.evaluate(() => window.innerWidth);
   await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();
   await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Invite code").fill("E2E12345");
@@ -215,6 +216,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     viewportWidth: window.innerWidth,
   }));
   expect(todayLayout.documentWidth).toBeLessThanOrEqual(todayLayout.viewportWidth + 1);
+  expect(todayLayout.viewportWidth).toBe(initialViewportWidth);
 
   await openWorkspace("Calendar");
   if (mobile) {

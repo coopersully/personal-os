@@ -14,7 +14,7 @@ Default to a read-only review draft. Post to GitHub only when the user explicitl
    review threads through the GitHub app or `gh`.
 2. Read the full patch and surrounding code for every possible finding.
 3. Read `AGENTS.md`, `docs/engineering/pr-rubric.md`, `docs/engineering/work-context.md`,
-   `../linear-context/SKILL.md`, `../ilo-knowledge-base/SKILL.md`, the current docs it routes to,
+   `../linear-context/SKILL.md`, `../personal-os-knowledge-base/SKILL.md`, the current docs it routes to,
    and applicable implementation/testing skills.
 4. Build a concise context: intent, linked Nohmi issue acceptance/status, Work map and reciprocal
    structured backlink coverage, changed surfaces, public contracts, migration/deployment impact,

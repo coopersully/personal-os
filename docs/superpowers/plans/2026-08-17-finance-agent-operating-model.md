@@ -590,8 +590,8 @@ git commit -m "feat(finances): present maintained ledger work"
 
 **Files:**
 - Modify: `docs/architecture/0003-finance-intelligence.md`
-- Modify: `docs/architecture/0004-workspace-ilo-stewardship.md`
-- Modify: `docs/product/ilo-workspace-stewardship.md`
+- Modify: `docs/architecture/0004-workspace-stewardship.md`
+- Modify: `docs/product/workspace-stewardship.md`
 - Modify: `docs/mcp.md`
 - Modify: `docs/design/pages/finances.md`
 - Modify: `docs/product/implementation-log.md`
@@ -638,7 +638,7 @@ Expected: lint, typecheck, coverage, builds, and desktop/mobile E2E pass. Record
 - [ ] **Step 6: Commit docs and acceptance**
 
 ```bash
-git add docs/architecture/0003-finance-intelligence.md docs/architecture/0004-workspace-ilo-stewardship.md docs/product/ilo-workspace-stewardship.md docs/mcp.md docs/design/pages/finances.md docs/product/implementation-log.md apps/api/src/qa-fixtures.ts apps/api/src/app.integration.test.ts apps/mcp/src/server.test.ts apps/web/src/app.test.tsx
+git add docs/architecture/0003-finance-intelligence.md docs/architecture/0004-workspace-stewardship.md docs/product/workspace-stewardship.md docs/mcp.md docs/design/pages/finances.md docs/product/implementation-log.md apps/api/src/qa-fixtures.ts apps/api/src/app.integration.test.ts apps/mcp/src/server.test.ts apps/web/src/app.test.tsx
 git commit -m "docs(finances): document agent ledger stewardship"
 ```
 

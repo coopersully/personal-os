@@ -23,7 +23,7 @@ describe("connection health presentation", () => {
     ["syncing", "Syncing"],
     ["retrying", "Retrying automatically"],
     ["reconnect", "Reconnect required"],
-    ["service_attention", "nohmi is resolving this"],
+    ["service_attention", "Service issue"],
   ] as const)("renders %s as %s", (state, label) => {
     render(<ConnectionHealthBadge health={{ ...baseHealth, state }} />);
     expect(screen.getByText(label)).toBeInTheDocument();

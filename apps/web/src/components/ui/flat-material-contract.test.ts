@@ -12,6 +12,7 @@ const primitiveFiles = [
   "dialog.tsx",
   "dropdown-menu.tsx",
   "empty.tsx",
+  "hover-card.tsx",
   "input-group.tsx",
   "input-otp.tsx",
   "input.tsx",
@@ -54,6 +55,7 @@ describe("flat material primitive contract", () => {
     ["input.tsx", /\bbg-input(?:\/\d+)?\b/],
     ["item.tsx", /\bbg-(?:card|muted)(?:\/\d+)?\b/],
     ["dialog.tsx", /\bbg-(?:card|popover)\b/],
+    ["hover-card.tsx", /\bbg-popover\b/],
   ] as const)("gives %s a semantic resting fill", (file, fill) => {
     expect(sourceFor(file)).toMatch(fill);
   });

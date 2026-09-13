@@ -34,7 +34,7 @@ partial or blocked outcomes honestly. It may provide informational guidance but 
 trade, pay bills, file taxes, invent missing facts, or claim a licensed professional relationship.
 
 This is the target product contract described by
-[`Ilo workspace stewardship`](../product/ilo-workspace-stewardship.md). The remainder of this ADR
+[`Workspace stewardship`](../product/workspace-stewardship.md). The remainder of this ADR
 also records currently established Finance invariants. Code, tests, migrations, deployed evidence,
 and the implementation log—not this target statement alone—determine which stewardship
 capabilities are shipped.

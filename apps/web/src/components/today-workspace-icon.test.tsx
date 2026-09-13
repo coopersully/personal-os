@@ -42,5 +42,8 @@ describe("TodayWorkspaceIcon", () => {
       todayWeatherKind({ ...weather, observedAt: "2026-08-31T06:00:00.000Z" }, "America/New_York"),
     ).toBe("clear-night");
     expect(todayWeatherKind(undefined, "America/New_York")).toBe("cloudy");
+    expect(todayWeatherKind({ ...weather, condition: "Overcast" }, "America/New_York")).toBe(
+      "cloudy",
+    );
   });
 });

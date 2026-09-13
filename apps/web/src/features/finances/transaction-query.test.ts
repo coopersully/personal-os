@@ -11,4 +11,8 @@ it("keeps filters bounded and does not convert an invalid URL into a failing API
       new URLSearchParams("from=2026-09-01&to=2026-09-30&review=needs_review"),
     ),
   ).toEqual({ from: "2026-09-01", to: "2026-09-30", review: "needs_review" });
+  expect(financeTransactionFilters(new URLSearchParams("pending=pending"))).toEqual({
+    pending: true,
+    review: "all",
+  });
 });

@@ -589,6 +589,34 @@
       "when": 1788868800000,
       "tag": "0077_desktop_mail_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1788900000000,
+      "tag": "0073_mail_workspace_stewardship",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1789070400000,
+      "tag": "0078_mail_workspace_stewardship_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1789156800000,
+      "tag": "0079_mail_stewardship_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1789243200000,
+      "tag": "0080_mail_reply_metadata",
+      "breakpoints": true
     }
   ]
 }

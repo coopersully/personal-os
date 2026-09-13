@@ -2,12 +2,26 @@
 
 ## Repository Purpose
 
-This repository is the nohmi monorepo and also stores personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
+This repository is the `personal-os` monorepo for the user-facing product `nohmi`; it also stores
+personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
 
 ## Product Spelling
 
-- The current product name is `nohmi`, always lowercase, including at the start of a sentence.
-- Never spell the product `nomi`, `Nomi`, or `Nohmi`. Preserve `ilo` only in compatibility identifiers, historical references, and existing tool or protocol names that have not been migrated.
+- The internal repository, package, and infrastructure name is `personal-os`.
+- The user-facing product name is `nohmi`, always lowercase, including at the start of a sentence.
+- Do not introduce former product names in paths, prose, protocol identifiers, examples, fixtures,
+  or agent guidance. The target contains none; remaining current runtime identifiers require an
+  explicit hard-cutover migration rather than new compatibility aliases.
+
+## Product Documentation
+
+- Treat `docs/product/master-design.md`, `docs/product/workspaces.md`,
+  `docs/product/workspace-stewardship.md`, and `docs/product/user-knowledge.md` as the canonical
+  target product contract.
+- Treat `docs/product/implementation-log.md`, code, migrations, tests, and production evidence as
+  the authority for what is currently shipped.
+- When a product conversation settles a durable decision, update the nearest canonical document in
+  the same documentation change and keep target scope separate from implementation claims.
 
 ## Linear Routing
 

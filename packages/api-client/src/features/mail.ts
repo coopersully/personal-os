@@ -3,10 +3,10 @@ import type {
   AttentionItem,
   BulkUpdateMailInput,
   BulkUpdateMailResult,
+  CreateMailDraftInput,
   CreateMailRuleInput,
   Mailbox,
   MailDraft,
-  MailDraftInput,
   MailListQuery,
   MailMessage,
   MailRule,
@@ -15,7 +15,8 @@ import type {
   MailThread,
   PreviewMailRuleInput,
   ReconcileMailDraftInput,
-  SendMailInput,
+  SendMailDraftInput,
+  UpdateMailDraftInput,
   UpdateMailRuleInput,
   UpdateMailThreadInput,
   UpsertMailAttentionItemInput,
@@ -27,8 +28,9 @@ export type MailApiClient = {
     input: ActivateMailRuleInput,
   ): Promise<{ preview: MailRulePreview; rule: MailRule }>;
   bulkUpdateMail(input: BulkUpdateMailInput): Promise<BulkUpdateMailResult>;
-  createMailDraft(input: MailDraftInput): Promise<{ id: string }>;
+  createMailDraft(input: CreateMailDraftInput): Promise<MailDraft>;
   createMailRule(input: CreateMailRuleInput): Promise<MailRule>;
+  deleteMailDraft(id: string): Promise<void>;
   getMailThread(id: string): Promise<MailThread>;
   listMailMessages(threadId: string): Promise<MailMessage[]>;
   listMailDrafts(): Promise<MailDraft[]>;
@@ -37,13 +39,11 @@ export type MailApiClient = {
   listMailboxes(): Promise<Mailbox[]>;
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
-  sendMail(input: SendMailInput): Promise<void>;
   previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
   previewSavedMailRule(id: string): Promise<MailRulePreview>;
-  reconcileMailDraft(
-    id: string,
-    input: ReconcileMailDraftInput,
-  ): Promise<Pick<MailDraft, "id" | "sendStatus">>;
+  reconcileMailDraft(id: string, input: ReconcileMailDraftInput): Promise<MailDraft>;
+  sendMailDraft(input: SendMailDraftInput): Promise<void>;
+  updateMailDraft(id: string, input: UpdateMailDraftInput): Promise<MailDraft>;
   updateMailRule(id: string, input: UpdateMailRuleInput): Promise<MailRule>;
   updateMailThread(id: string, input: UpdateMailThreadInput): Promise<MailThread>;
   upsertMailAttentionItem(
@@ -74,7 +74,7 @@ export function createMailApiClient(
       return response.result;
     },
     async createMailDraft(input) {
-      const response = await request<{ draft: { id: string } }>("/v1/mail/drafts", {
+      const response = await request<{ draft: MailDraft }>("/v1/mail/drafts", {
         body: JSON.stringify(input),
         method: "POST",
       });
@@ -86,6 +86,9 @@ export function createMailApiClient(
         method: "POST",
       });
       return response.rule;
+    },
+    async deleteMailDraft(id) {
+      await request<void>(`/v1/mail/drafts/${id}`, { method: "DELETE" });
     },
     async getMailThread(id) {
       const response = await request<{ thread: MailThread }>(`/v1/mail/threads/${id}`);
@@ -125,13 +128,17 @@ export function createMailApiClient(
       return response.preview;
     },
     async reconcileMailDraft(id, input) {
-      const response = await request<{
-        draft: Pick<MailDraft, "id" | "sendStatus">;
-      }>(`/v1/mail/drafts/${id}/reconcile`, {
+      const response = await request<{ draft: MailDraft }>(`/v1/mail/drafts/${id}/reconcile`, {
         body: JSON.stringify(input),
         method: "POST",
       });
       return response.draft;
+    },
+    async sendMailDraft(input) {
+      await request<void>("/v1/mail/send", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
     },
     async listMailThreads(query = {}) {
       const response = await request<{ threads: MailThread[] }>(
@@ -145,6 +152,13 @@ export function createMailApiClient(
         method: "PATCH",
       });
       return response.thread;
+    },
+    async updateMailDraft(id, input) {
+      const response = await request<{ draft: MailDraft }>(`/v1/mail/drafts/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+      return response.draft;
     },
     async updateMailRule(id, input) {
       const response = await request<{ rule: MailRule }>(`/v1/mail/rules/${id}`, {
@@ -165,9 +179,6 @@ export function createMailApiClient(
         body: JSON.stringify({ until }),
         method: "POST",
       });
-    },
-    async sendMail(input) {
-      await request<void>("/v1/mail/send", { body: JSON.stringify(input), method: "POST" });
     },
   };
 }

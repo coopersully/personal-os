@@ -58,6 +58,11 @@ type RequeueInput = {
   runId: string;
 };
 
+type RestartBlockedInput = {
+  expectedRulebookVersion: string;
+  runId: string;
+};
+
 type CheckpointAndReleaseInput = {
   checkpoint: unknown;
   claimId: string;
@@ -69,6 +74,8 @@ type RenewClaimInput = {
   claimId: string;
   runId: string;
 };
+
+type ReviseCompletedStepInput = CompleteStepInput;
 
 type ReleaseForRetryInput = {
   claimId: string;
@@ -100,7 +107,9 @@ export type WorkspaceMaintenanceService = {
   listStepRecords: (runId: string) => Promise<WorkspaceMaintenanceStepRecord[]>;
   releaseForRetry: (input: ReleaseForRetryInput) => Promise<MaintenanceRun>;
   renewClaim: (input: RenewClaimInput) => Promise<MaintenanceRun>;
+  reviseCompletedStep: (input: ReviseCompletedStepInput) => Promise<void>;
   requeue: (input: RequeueInput) => Promise<MaintenanceRun>;
+  restartBlocked: (input: RestartBlockedInput) => Promise<MaintenanceRun>;
   settle: (input: SettleInput) => Promise<MaintenanceRun>;
 };
 
@@ -542,6 +551,38 @@ export function createWorkspaceMaintenanceService({
       return serializeRun(run);
     },
 
+    async reviseCompletedStep(input) {
+      await db.transaction(async (transaction) => {
+        await fenceClaim(transaction, input, {
+          checkpoint: { completedStep: input.step },
+        });
+        const [step] = await transaction
+          .update(workspaceMaintenanceSteps)
+          .set({
+            attemptClaimId: input.claimId,
+            attemptCount: sql`${workspaceMaintenanceSteps.attemptCount} + 1`,
+            safeResult: input.result,
+            updatedAt: sql`NOW()`,
+          })
+          .where(
+            and(
+              eq(workspaceMaintenanceSteps.runId, input.runId),
+              eq(workspaceMaintenanceSteps.stepName, input.step),
+              eq(workspaceMaintenanceSteps.idempotencyKey, input.idempotencyKey),
+              eq(workspaceMaintenanceSteps.status, "completed"),
+            ),
+          )
+          .returning();
+        if (!step) {
+          throw new AppError(
+            "conflict",
+            "The completed maintenance step no longer matches the revision evidence.",
+            { runId: input.runId, step: input.step },
+          );
+        }
+      });
+    },
+
     async requeue(input) {
       if (input.expectedStatus !== "blocked" && input.expectedStatus !== "awaiting_approval") {
         throw new AppError(
@@ -576,6 +617,65 @@ export function createWorkspaceMaintenanceService({
         );
       }
       return serializeRun(run);
+    },
+
+    async restartBlocked(input) {
+      return db.transaction(async (transaction) => {
+        const [superseded] = await transaction
+          .update(workspaceMaintenanceRuns)
+          .set({
+            leaseClaimId: null,
+            leaseExpiresAt: null,
+            retryAt: null,
+            settledResult: sql`COALESCE(${workspaceMaintenanceRuns.settledResult}, '{}'::jsonb) || ${{
+              recovery: "superseded_by_manual_retry",
+            }}::jsonb`,
+            status: "failed_terminal",
+            updatedAt: sql`NOW()`,
+          })
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, input.runId),
+              eq(workspaceMaintenanceRuns.status, "blocked"),
+              eq(workspaceMaintenanceRuns.rulebookVersion, input.expectedRulebookVersion),
+            ),
+          )
+          .returning();
+        if (!superseded) {
+          throw new AppError(
+            "conflict",
+            "The blocked workspace maintenance run no longer matches the restart evidence.",
+            { runId: input.runId },
+          );
+        }
+        let successor: typeof superseded | undefined;
+        try {
+          [successor] = await transaction
+            .insert(workspaceMaintenanceRuns)
+            .values({
+              domain: superseded.domain,
+              rulebookVersion: superseded.rulebookVersion,
+              scope: superseded.scope,
+              status: "queued",
+              updatedAt: sql`NOW()`,
+              userId: superseded.userId,
+            })
+            .returning();
+        } catch (error) {
+          if (isUniqueViolation(error, "workspace_maintenance_runs_open_user_domain_idx")) {
+            throw new AppError(
+              "conflict",
+              "A concurrent workspace maintenance run was created during restart.",
+              { runId: input.runId },
+            );
+          }
+          throw error;
+        }
+        if (!successor) {
+          throw new AppError("internal_error", "The replacement maintenance run was not created.");
+        }
+        return serializeRun(successor);
+      });
     },
 
     async settle(input) {

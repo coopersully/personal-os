@@ -106,8 +106,9 @@ the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
 controls owned by the feature while placing them in the shared frame. Omit the
 bar or set `enabled={false}` to leave no empty row. Its default layout placement
 stays pinned below the primary bar and shares the body inset. Spatial Calendar
-headers and Mail reader actions use `placement="inline"` to retain their own
-scroll/column alignment, using the same slot anatomy and neutral surface.
+headers may use `placement="inline"` to retain their own scroll/column alignment.
+Controls that govern multiple workspace panes, such as Mail count, density, and
+reader actions, use the default shared full-width slot.
 
 ### Blocks
 
@@ -216,10 +217,14 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A canvas-colored edge fade is allowed only when it keeps fixed navigation legible over scrolling content, as in Setup. |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
+
+Calendar grids use one-pixel `--line` separators owned by the grid container. A
+day cell must not add a second coincident border, and current or selected-day
+color may not replace the grid surface or obscure its time rules.
 
 ### Tonal separation
 
@@ -228,6 +233,14 @@ visible resting border. Shared primitives may reserve transparent border
 geometry so focus, invalid, increased-contrast, or functional data boundaries
 can become visible without layout shift. A legacy `outline` variant names an
 interaction hierarchy, not a requirement to draw an outline.
+
+Raised overlays and bounded floating work use `surface-raised`, never the
+surface directly behind them. Contextual app-bar controls retain a quiet opaque
+resting fill, and interactive highlights use `control-hover-background` so an
+open or hovered control cannot collapse into its parent surface. Avatar
+fallbacks use nested neutral tones so the identity boundary remains legible on
+canvas, selected, and highlighted surfaces without a decorative border or
+shadow.
 
 ### Interface copy
 
@@ -249,9 +262,24 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - Workspace-switcher triggers show the workspace glyph without its frame,
   including the mobile dock. Keep framed workspace icons inside the picker;
   preserve the same glyph and workspace color in both contexts.
-- Desktop account actions live in Settings, reached from the workspace picker.
-  Do not duplicate them with an account avatar in the top bar or an account
-  footer in workspace sidebars.
+- Desktop account-management actions live in Settings, reached from the workspace picker. A
+  workspace may use compact account avatars in its app bar only as a source-visibility filter; that
+  filter must surface health and link to Settings for repair rather than duplicating management.
+- App-bar source filters use the shared `AccountSelectionTrigger`: show compact provider identities,
+  expose the full scope in its accessible name, and use plain inherited typography for the concise
+  visible label (`selected/total accounts`). When a source needs attention, place the shared
+  disconnected glyph immediately before the avatar stack without a badge, border, or shadow; do not
+  recolor or outline the complete trigger. Popovers use `AccountSelectionPopoverContent` action
+  slots, with reconnection rendered as the primary action and labeled with the affected source count.
+- Unified workspaces keep destination navigation separate from source filters: destinations belong
+  in the sidebar, while the less-prominent source filter defaults to all connected sources.
+- Connection management uses the shared `ConnectionCard` slots for identity, status, health
+  summary, capabilities, and actions. Keep account identity separate from operational status; state
+  the user impact and whether action is required in the summary; keep capabilities grouped; and use
+  explicit text labels for sync, reconnect, and removal actions instead of unexplained icon buttons.
+- Device-local density controls change presentation only. Keep the comfortable view as the
+  information-rich default, preserve essential identity and time in compact views, and do not let a
+  density choice change query scope or stored domain data.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
   and description; availability and errors use shared alerts.

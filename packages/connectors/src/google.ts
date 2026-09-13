@@ -810,6 +810,12 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     async sendMail(credentials, input) {
+      if (!googleMailSendGranted(credentials)) {
+        throw new MailSendPreAcceptanceError(
+          "Google Mail send authority is missing. Reconnect the account before sending.",
+          undefined,
+        );
+      }
       let currentCredentials: GoogleCredentials;
       let raw: Buffer;
       try {
@@ -819,6 +825,8 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
             ...(address.name ? { name: address.name } : {}),
           })),
           from: input.from,
+          ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+          ...(input.references?.length ? { references: input.references } : {}),
           subject: input.subject,
           text: input.body,
           to: input.to.map((address) => ({
@@ -836,8 +844,6 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           error,
         );
       }
-      const headers = new Headers({ authorization: `Bearer ${currentCredentials.accessToken}` });
-      headers.set("content-type", "application/json");
       const response = await providerFetch(
         request,
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
@@ -846,11 +852,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
             raw: raw.toString("base64url"),
             ...(input.threadId ? { threadId: input.threadId } : {}),
           }),
-          headers,
+          headers: {
+            authorization: `Bearer ${currentCredentials.accessToken}`,
+            "content-type": "application/json",
+          },
           method: "POST",
         },
       );
-      // Once the send request begins, every response/transport failure is ambiguous.
       await parseResponse(response);
       return currentCredentials;
     },
@@ -901,11 +909,18 @@ export function googleGrantedServices(
     fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
   const fullMail = scopes.has("https://mail.google.com/");
   const mailManage = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
-  const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
   return [
     ...(calendarList && calendarEvents ? (["calendar"] as const) : []),
-    ...(mailManage && mailSend ? (["mail"] as const) : []),
+    ...(mailManage ? (["mail"] as const) : []),
   ];
+}
+
+export function googleMailSendGranted(credentials: GoogleCredentials): boolean {
+  const scopes = new Set(credentials.scope.split(/\s+/).filter(Boolean));
+  return (
+    scopes.has("https://mail.google.com/") ||
+    scopes.has("https://www.googleapis.com/auth/gmail.send")
+  );
 }
 
 function mailboxRole(id: string): RemoteMailbox["role"] {
@@ -935,8 +950,11 @@ function normalizeMailThread(
       cc: splitAddresses(gmailHeader(message, "cc")),
       from: parseMailAddress(gmailHeader(message, "from")),
       mailboxIds: message.labelIds,
+      messageId: gmailHeader(message, "message-id") || null,
       providerRevision: message.historyId ?? message.internalDate ?? null,
       receivedAt: normalizedGmailDate(message.internalDate),
+      references: splitMessageReferences(gmailHeader(message, "references")),
+      replyTo: splitAddresses(gmailHeader(message, "reply-to")),
       remoteMessageId: message.id,
       to: splitAddresses(gmailHeader(message, "to")),
     })),
@@ -1011,6 +1029,10 @@ export function projectGmailAttachments(part: z.infer<typeof gmailPartSchema>) {
 
 function gmailHeader(message: z.infer<typeof gmailMessageSchema>, name: string): string {
   return message.payload.headers.find((header) => header.name.toLowerCase() === name)?.value ?? "";
+}
+
+function splitMessageReferences(value: string): string[] {
+  return value.match(/<[^>]+>/gu) ?? [];
 }
 
 function gmailBody(

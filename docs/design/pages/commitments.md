@@ -12,6 +12,22 @@ These are related commitment surfaces, not interchangeable records. They current
 domain, API, authorization, and MCP contracts even though Task and Reminder rows share transitional
 physical storage.
 
+## Target product direction
+
+Tasks should be a complete, familiar task manager rather than a queue attached to an agent. Its
+target navigation includes Inbox, Today, Upcoming, Open, Later, Projects, long-lived organizational
+containers, Completed, and Trash, with quick capture, strong keyboard control, search, filters,
+progressive details, and capacity-aware planning.
+
+External task providers feed imports into nohmi, after which nohmi is the authoritative working
+workspace. Bidirectional synchronization across multiple task providers remains a possible future
+capability, not a current goal. The long-lived container above Projects is a required concept but
+its final user-facing label is unresolved; product copy must not assume “Areas.”
+
+Tasks owns what the person intends to do and why. Calendar owns when time is committed. User
+Knowledge supplies relevant goals, priorities, relationships, constraints, routines, habits, and
+planning preferences without copying them into each Task.
+
 ## Information hierarchy
 
 ```text

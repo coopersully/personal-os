@@ -65,6 +65,11 @@ import {
 } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  AccountSelectionPopoverContent,
+  AccountSelectionTrigger,
+  reconnectAccountsLabel,
+} from "@/components/account-selection-trigger";
+import {
   EmailField,
   InviteCodeField,
   isValidEmailAddress,
@@ -75,6 +80,7 @@ import {
 import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
+import { ConnectionCard } from "@/components/connection-card";
 import { ErrorPage } from "@/components/error-page";
 import {
   EventCard,
@@ -87,6 +93,7 @@ import {
 } from "@/components/event-card";
 import {
   ActivityIcon,
+  AlertTriangleIcon,
   BankIcon,
   CalendarIcon,
   CalendarPlusIcon,
@@ -156,7 +163,6 @@ import {
   Avatar as ShadcnAvatar,
   AvatarBadge as ShadcnAvatarBadge,
   AvatarFallback as ShadcnAvatarFallback,
-  AvatarGroup as ShadcnAvatarGroup,
   AvatarImage as ShadcnAvatarImage,
 } from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
@@ -304,6 +310,7 @@ import {
   MailSidebar as MailFeatureSidebar,
   MailTopbarSearch,
 } from "./features/mail/mail.js";
+import { MailStewardshipPage } from "./features/mail/stewardship-page.js";
 import {
   ReminderRow,
   RemindersCreateButton,
@@ -328,6 +335,7 @@ import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
+import { notifyError, useErrorNotification } from "./lib/error-notification.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { cn } from "./lib/utils.js";
@@ -903,24 +911,29 @@ function PasswordResetScreen({ token }: { token: string }) {
 
 function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <main className="auth-shell">
-      <div className="auth-entry">
-        <header className="auth-header">
-          <div className="auth-header__brand">
-            <span aria-hidden="true" className="auth-header__symbol">
-              <NohmiBrandMark symbol />
-            </span>
-            <NohmiBrandMark />
-          </div>
-        </header>
-        <section className="auth-form-wrap">{children}</section>
-      </div>
-      <ShadcnCard aria-hidden="true" className="auth-brand-panel">
-        <ShadcnCardContent>
-          <BrandPattern />
-        </ShadcnCardContent>
-      </ShadcnCard>
-    </main>
+    <>
+      <main className="auth-shell">
+        <div className="auth-entry">
+          <header className="auth-header">
+            <div className="auth-header__brand">
+              <span aria-hidden="true" className="auth-header__symbol">
+                <NohmiBrandMark symbol />
+              </span>
+              <NohmiBrandMark />
+            </div>
+          </header>
+          <section className="auth-form-wrap">{children}</section>
+        </div>
+        <ShadcnCard aria-hidden="true" className="auth-brand-panel">
+          <ShadcnCardContent>
+            <BrandPattern />
+          </ShadcnCardContent>
+        </ShadcnCard>
+      </main>
+      {typeof window.matchMedia === "function" ? (
+        <Toaster position="bottom-right" theme="system" />
+      ) : null}
+    </>
   );
 }
 
@@ -946,6 +959,118 @@ function AuthActionShell({
   );
 }
 
+const mailSidebarWidthStorageKey = "ilo.mail.sidebar-width.v1";
+const collapsedMailSidebarWidth = 48;
+const defaultMailSidebarWidth = 256;
+const minimumMailSidebarWidth = 208;
+const maximumMailSidebarWidth = 360;
+
+function clampExpandedMailSidebarWidth(width: number) {
+  return Math.min(maximumMailSidebarWidth, Math.max(minimumMailSidebarWidth, width));
+}
+
+function normalizeMailSidebarWidth(width: number) {
+  return width <= collapsedMailSidebarWidth
+    ? collapsedMailSidebarWidth
+    : clampExpandedMailSidebarWidth(width);
+}
+
+function storedMailSidebarWidth() {
+  try {
+    if (typeof window === "undefined") return defaultMailSidebarWidth;
+    const stored = Number(window.localStorage.getItem(mailSidebarWidthStorageKey));
+    return Number.isFinite(stored) && stored > 0
+      ? normalizeMailSidebarWidth(stored)
+      : defaultMailSidebarWidth;
+  } catch {
+    return defaultMailSidebarWidth;
+  }
+}
+
+function persistMailSidebarWidth(width: number) {
+  try {
+    window.localStorage.setItem(mailSidebarWidthStorageKey, String(width));
+  } catch {
+    // A browser storage restriction must not prevent layout resizing.
+  }
+}
+
+function MailNavigationResizeHandle({
+  onResize,
+  width,
+}: {
+  onResize: (width: number, persist: boolean) => void;
+  width: number;
+}) {
+  const resizeFromKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const next =
+      event.key === "Home"
+        ? collapsedMailSidebarWidth
+        : event.key === "End"
+          ? maximumMailSidebarWidth
+          : event.key === "ArrowLeft"
+            ? width <= minimumMailSidebarWidth
+              ? collapsedMailSidebarWidth
+              : width - 16
+            : event.key === "ArrowRight"
+              ? width === collapsedMailSidebarWidth
+                ? minimumMailSidebarWidth
+                : width + 16
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    onResize(next, true);
+  };
+
+  return (
+    <hr
+      aria-label="Resize mail navigation"
+      aria-orientation="vertical"
+      aria-valuemax={maximumMailSidebarWidth}
+      aria-valuemin={collapsedMailSidebarWidth}
+      aria-valuenow={width}
+      className="mail-sidebar-resize-handle"
+      onDoubleClick={() => onResize(defaultMailSidebarWidth, true)}
+      onKeyDown={resizeFromKeyboard}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        const handle = event.currentTarget;
+        const pointerId = event.pointerId;
+        const startX = event.clientX;
+        const startWidth = width;
+        let finalWidth = width;
+        let finished = false;
+        const move = (moveEvent: PointerEvent) => {
+          finalWidth = Math.min(
+            maximumMailSidebarWidth,
+            Math.max(collapsedMailSidebarWidth, startWidth + moveEvent.clientX - startX),
+          );
+          onResize(finalWidth, false);
+        };
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", finish);
+          handle.removeEventListener("pointercancel", finish);
+          handle.removeEventListener("lostpointercapture", finish);
+          window.removeEventListener("blur", finish);
+          if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+          onResize(finalWidth, true);
+          handle.blur();
+        };
+        handle.setPointerCapture(pointerId);
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", finish, { once: true });
+        handle.addEventListener("pointercancel", finish, { once: true });
+        handle.addEventListener("lostpointercapture", finish, { once: true });
+        window.addEventListener("blur", finish, { once: true });
+      }}
+      tabIndex={0}
+    />
+  );
+}
+
 function AuthenticatedApp({ user }: { user: User }) {
   const queryClient = useQueryClient();
   const [editor, setEditor] = useState<Editor>(null);
@@ -957,6 +1082,9 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
+  const [mailSidebarWidth, setMailSidebarWidth] = useState(storedMailSidebarWidth);
+  const mailSidebarState =
+    mailSidebarWidth === collapsedMailSidebarWidth ? "collapsed" : "expanded";
   const location = useLocation();
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
@@ -1067,7 +1195,13 @@ function AuthenticatedApp({ user }: { user: User }) {
   return (
     <>
       <div
-        className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        data-sidebar-state={sidebarMode === "mail" ? mailSidebarState : undefined}
+        style={
+          sidebarMode === "mail"
+            ? ({ "--mail-sidebar-width": `${mailSidebarWidth}px` } as CSSProperties)
+            : undefined
+        }
       >
         <a className="skip-link" href="#main-content">
           Skip to main content
@@ -1082,7 +1216,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   : "Today Sidebar"
             }
             className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
-            data-state="expanded"
+            data-state={sidebarMode === "mail" ? mailSidebarState : "expanded"}
             id="app-sidebar"
           >
             <ShadcnSidebarHeader className="sidebar__header">
@@ -1118,6 +1252,16 @@ function AuthenticatedApp({ user }: { user: User }) {
               ) : null}
             </ShadcnSidebarContent>
           </aside>
+        ) : null}
+        {!isMobileWorkspaceDock && sidebarMode === "mail" ? (
+          <MailNavigationResizeHandle
+            onResize={(width, persist) => {
+              const normalized = normalizeMailSidebarWidth(width);
+              setMailSidebarWidth(normalized);
+              if (persist) persistMailSidebarWidth(normalized);
+            }}
+            width={mailSidebarWidth}
+          />
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
@@ -1300,6 +1444,7 @@ function WorkspaceRoutes({
         }
       />
       <Route path="/mail" element={<MailFeaturePage user={user} />} />
+      <Route path="/mail/review" element={<MailStewardshipPage />} />
       <Route
         path="/automations"
         element={<Navigate replace to="/settings?section=workspace-access" />}
@@ -1454,6 +1599,10 @@ function WorkspaceAppBarForRoute({
         <span className="workspace-app-bar__title">Today</span>
       )}
     </div>
+  ) : workspace === "mail" ? (
+    <div className="mail-app-bar__identity-cluster">
+      <span className="workspace-app-bar__title">Mail</span>
+    </div>
   ) : (
     <span className="workspace-app-bar__title">
       {/* Account routes always supply a page title, so the workspace registry
@@ -1463,8 +1612,6 @@ function WorkspaceAppBarForRoute({
   );
   const context = isSpatialCalendar ? (
     <CalendarAppBarControls onToday={onCalendarToday} user={user} />
-  ) : workspace === "mail" ? (
-    <MailTopbarSearch />
   ) : pathname === "/today" ? (
     <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
   ) : pathname === "/activity" ||
@@ -1474,6 +1621,8 @@ function WorkspaceAppBarForRoute({
     <RemindersTopbarControls />
   ) : pathname === "/tasks" ? (
     <TasksTopbarControls />
+  ) : workspace === "mail" ? (
+    <MailAppBarControls />
   ) : null;
 
   return (
@@ -1504,11 +1653,10 @@ function WorkspaceAppBarForRoute({
               onCreateReminder={() => setEditor({ kind: "reminder" })}
             />
           ) : workspace === "calendar" ? null : workspace === "mail" ? (
-            <>
-              <MailSyncButton />
-              <MailComposeButton />
-            </>
-          ) : workspace === "finances" || workspace === "account" ? null : (
+            <MailAccountsControl />
+          ) : workspace === "finances" ? (
+            <FinanceAddTransactionButton />
+          ) : workspace === "account" ? null : (
             <CreateMenu setEditor={setEditor} />
           )}
         </>
@@ -1670,6 +1818,21 @@ function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function FinanceAddTransactionButton({ onSelect }: { onSelect?: () => void }) {
+  return (
+    <ShadcnButton
+      aria-label="Add transaction"
+      onClick={() => {
+        onSelect?.();
+        window.location.hash = "finance-add-transaction";
+      }}
+      size="sm"
+    >
+      <PlusIcon aria-hidden="true" data-icon="inline-start" /> <span>Add transaction</span>
+    </ShadcnButton>
   );
 }
 
@@ -2380,6 +2543,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
     return searchParams.get("view") === "completed" ? "Completed reminders" : "Reminders";
   }
   if (pathname === "/tasks") return "Tasks";
+  if (pathname === "/mail/review") return "Mail stewardship";
   if (pathname === "/mail") return "Mail";
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";
@@ -2546,11 +2710,7 @@ function CalendarPage({
         const endsAt = new Date(dayRange.to).getTime();
         return [
           localDateKey(day),
-          records.filter(
-            (event) =>
-              new Date(event.startsAt).getTime() < endsAt &&
-              new Date(event.endsAt).getTime() > startsAt,
-          ),
+          records.filter((event) => calendarEventOccursOnDay(event, day, startsAt, endsAt)),
         ];
       }),
     );
@@ -2922,33 +3082,47 @@ function CalendarAccountsControl() {
   const records = calendars.data ?? [];
   const selectedCount = records.filter((calendar) => calendar.isSelected).length;
   const label = `${selectedCount} of ${records.length} calendars`;
+  const attentionCount = enabledAccounts.filter(
+    (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
+  ).length;
+  const needsAttention = attentionCount > 0;
+  const triggerLabel = `${label}${needsAttention ? ", attention required" : ""}`;
   return (
     <ShadcnPopover>
       <ShadcnPopoverTrigger asChild>
-        <ShadcnButton
-          aria-label={label}
+        <AccountSelectionTrigger
+          ariaLabel={triggerLabel}
           className="calendar-accounts-trigger"
-          size="sm"
-          variant="ghost"
-        >
-          <ShadcnAvatarGroup className="calendar-accounts-trigger__avatars">
-            {enabledAccounts.map((account) => (
-              <ShadcnAvatar key={account.id} size="sm">
-                {account.avatarUrl ? <ShadcnAvatarImage alt="" src={account.avatarUrl} /> : null}
-                <ShadcnAvatarFallback>
-                  {initials(account.label ?? account.email ?? account.provider)}
-                </ShadcnAvatarFallback>
-              </ShadcnAvatar>
-            ))}
-          </ShadcnAvatarGroup>
-          <span>{label}</span>
-        </ShadcnButton>
+          disabled={accounts.isPending || records.length === 0}
+          identities={enabledAccounts.map((account) => ({
+            avatarUrl: account.avatarUrl,
+            fallback: initials(account.label ?? account.email ?? account.provider),
+            id: account.id,
+          }))}
+          needsAttention={needsAttention}
+          selectedCount={selectedCount}
+          totalCount={records.length}
+        />
       </ShadcnPopoverTrigger>
-      <ShadcnPopoverContent align="end" className="calendar-accounts-popover">
-        <ShadcnPopoverHeader>
-          <ShadcnPopoverTitle>Calendars</ShadcnPopoverTitle>
-          <ShadcnPopoverDescription>{label}</ShadcnPopoverDescription>
-        </ShadcnPopoverHeader>
+      <AccountSelectionPopoverContent
+        className="calendar-accounts-popover"
+        description={label}
+        primaryAction={
+          needsAttention ? (
+            <ShadcnButton asChild className="w-full">
+              <Link to="/settings?section=connections">
+                {reconnectAccountsLabel(attentionCount)}
+              </Link>
+            </ShadcnButton>
+          ) : null
+        }
+        secondaryAction={
+          <ShadcnButton asChild className="w-full justify-start" size="sm" variant="ghost">
+            <Link to="/calendar/review">Schedule health</Link>
+          </ShadcnButton>
+        }
+        title="Calendars"
+      >
         {records.length === 0 ? (
           <p className="calendar-accounts-popover__empty">No calendars are available.</p>
         ) : (
@@ -2960,10 +3134,7 @@ function CalendarAccountsControl() {
             )}
           </ShadcnFieldGroup>
         )}
-        <ShadcnButton asChild className="w-full justify-start" size="sm" variant="ghost">
-          <Link to="/calendar/review">Schedule health</Link>
-        </ShadcnButton>
-      </ShadcnPopoverContent>
+      </AccountSelectionPopoverContent>
     </ShadcnPopover>
   );
 }
@@ -3215,19 +3386,15 @@ function DayCalendarView({
                   <CalendarDropPreview preview={dragPreview} />
                 ) : null}
                 {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
-                {timelineEvents.map((layout) => (
-                  <TimelineEvent
-                    blockColors={eventBlockColors(layout.event, calendarsById)}
-                    calendar={calendarsById.get(layout.event.calendarId)}
-                    isDragging={draggedEventId === layout.event.id}
-                    key={layout.event.id}
-                    layout={layout}
-                    onEdit={() => setEditor({ event: layout.event, kind: "event" })}
-                    onDragEnd={clearDrag}
-                    setDraggedEventId={setDraggedEventId}
-                    timeZone={timeZone}
-                  />
-                ))}
+                <TimelineEventCollection
+                  calendarsById={calendarsById}
+                  draggedEventId={draggedEventId}
+                  layouts={timelineEvents}
+                  onDragEnd={clearDrag}
+                  setDraggedEventId={setDraggedEventId}
+                  setEditor={setEditor}
+                  timeZone={timeZone}
+                />
               </section>
             </ContextMenuTrigger>
             <CalendarBlankContextMenu
@@ -3309,6 +3476,10 @@ function WeekCalendarView({
       ),
     [eventsByDay],
   );
+  const allDayLayouts = useMemo(
+    () => positionWeekAllDayEvents(days, eventsByDay),
+    [days, eventsByDay],
+  );
   const scrollContainer = useRef<HTMLDivElement>(null);
   const programmaticScrollPosition = useRef<{ left: number; top: number } | null>(null);
   const includesToday = days.some((day) => sameLocalDate(day, today));
@@ -3379,9 +3550,8 @@ function WeekCalendarView({
             }}
           >
             <div className="week-time-corner">All day</div>
+            <div aria-hidden="true" className="week-all-day-corner" />
             {days.map((day) => {
-              const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
-              const allDayEvents = dayEvents.filter((event) => event.allDay);
               const isToday = sameLocalDate(day, today);
               return (
                 <header
@@ -3405,15 +3575,16 @@ function WeekCalendarView({
                       {day.day}
                     </button>
                   </div>
-                  <AllDayEvents
-                    calendarsById={calendarsById}
-                    compact
-                    events={allDayEvents}
-                    setEditor={setEditor}
-                  />
                 </header>
               );
             })}
+            <WeekAllDayEvents
+              calendarsById={calendarsById}
+              days={days}
+              layouts={allDayLayouts}
+              setEditor={setEditor}
+              today={today}
+            />
           </WorkspaceSecondaryAppBarContent>
         </WorkspaceSecondaryAppBar>
         <TimeAxis />
@@ -3462,20 +3633,21 @@ function WeekCalendarView({
                   timeZone={timeZone}
                 />
               ) : null}
-              {layouts.map((layout) => (
-                <TimelineEvent
-                  blockColors={eventBlockColors(layout.event, calendarsById)}
-                  calendar={calendarsById.get(layout.event.calendarId)}
-                  compact
-                  isDragging={draggedEventId === layout.event.id}
-                  key={layout.event.id}
-                  layout={layout}
-                  onEdit={() => setEditor({ event: layout.event, kind: "event" })}
-                  onDragEnd={clearDrag}
-                  setDraggedEventId={setDraggedEventId}
-                  timeZone={timeZone}
-                />
-              ))}
+              <TimelineEventCollection
+                calendarsById={calendarsById}
+                compact
+                draggedEventId={draggedEventId}
+                layouts={layouts}
+                onDragEnd={clearDrag}
+                {...(dayIndex === 0
+                  ? { orbitHorizontalInset: "start" as const }
+                  : dayIndex === days.length - 1
+                    ? { orbitHorizontalInset: "end" as const }
+                    : {})}
+                setDraggedEventId={setDraggedEventId}
+                setEditor={setEditor}
+                timeZone={timeZone}
+              />
             </section>
           );
         })}
@@ -3498,6 +3670,30 @@ type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> = {
   event: T;
   startMinute: number;
 };
+
+type TimelineEventCluster = {
+  endMinute: number;
+  layouts: TimelineEventLayout[];
+  startMinute: number;
+};
+
+function groupTimelineEventLayouts(layouts: TimelineEventLayout[]): TimelineEventCluster[] {
+  const clusters: TimelineEventCluster[] = [];
+  for (const layout of layouts) {
+    const cluster = clusters.at(-1);
+    if (!cluster || layout.startMinute >= cluster.endMinute) {
+      clusters.push({
+        endMinute: layout.endMinute,
+        layouts: [layout],
+        startMinute: layout.startMinute,
+      });
+      continue;
+    }
+    cluster.layouts.push(layout);
+    cluster.endMinute = Math.max(cluster.endMinute, layout.endMinute);
+  }
+  return clusters;
+}
 
 function TimeAxis() {
   return (
@@ -3651,7 +3847,13 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
   };
   const start = (event: ReactPointerEvent<HTMLElement>, day: LocalDate) => {
     if (event.button !== 0 || event.pointerType === "touch") return;
-    if ((event.target as Element).closest(".calendar-timeline-event")) return;
+    if (
+      (event.target as Element).closest(
+        ".calendar-timeline-event, .calendar-overlap-cluster__toggle",
+      )
+    ) {
+      return;
+    }
     const minute = createRangeMinuteAtPointer(event, event.currentTarget);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     updateSelection({
@@ -3756,6 +3958,286 @@ function eventBlockColors(event: CalendarEvent, calendarsById: CalendarMap): Eve
   });
 }
 
+export function calendarEventOccursOnDay(
+  event: CalendarEvent,
+  day: LocalDate,
+  dayStartsAt: number,
+  dayEndsAt: number,
+) {
+  if (event.allDay && event.provider !== "local") {
+    const date = localDateKey(day);
+    return date >= event.startsAt.slice(0, 10) && date < event.endsAt.slice(0, 10);
+  }
+  return (
+    new Date(event.startsAt).getTime() < dayEndsAt && new Date(event.endsAt).getTime() > dayStartsAt
+  );
+}
+
+export function overlapOrbitPoint(
+  index: number,
+  total: number,
+  compact: boolean,
+  bounds?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
+    eventEndMinute: number;
+    eventStartMinute: number;
+    horizontalInset?: "end" | "start";
+  },
+) {
+  const pointAt = (pointIndex: number) => {
+    if (total === 2) {
+      const offset = compact ? 52 : 76;
+      return {
+        rotation: pointIndex === 0 ? -4 : 4,
+        x: pointIndex === 0 ? -offset : offset,
+        y: 0,
+      };
+    }
+    const radius = compact ? Math.min(64, 40 + total * 4) : Math.min(92, 58 + total * 6);
+    const angle = Math.PI + (pointIndex * Math.PI * 2) / total;
+    return {
+      rotation: Math.round(Math.sin(angle) * 8),
+      x: Math.round(Math.cos(angle) * radius),
+      y: Math.round(Math.sin(angle) * radius),
+    };
+  };
+  const point = pointAt(index);
+  if (!bounds) return point;
+  const orbitXs = Array.from({ length: total }, (_, pointIndex) => pointAt(pointIndex).x);
+  if (bounds.horizontalInset === "start") {
+    point.x -= Math.min(...orbitXs, 0);
+  } else if (bounds.horizontalInset === "end") {
+    point.x -= Math.max(...orbitXs, 0);
+  }
+  const eventHeight = Math.max(
+    minuteToTimelinePixels(bounds.eventEndMinute - bounds.eventStartMinute),
+    18,
+  );
+  const maximumEventWidth = compact ? 160 : 320;
+  const rotationRadians = (Math.abs(point.rotation) * Math.PI) / 180;
+  const transformedEventHeight =
+    eventHeight * Math.cos(rotationRadians) + maximumEventWidth * Math.sin(rotationRadians);
+  const clusterHeight = Math.max(
+    minuteToTimelinePixels(bounds.clusterEndMinute - bounds.clusterStartMinute),
+    48,
+  );
+  const center = minuteToTimelinePixels(bounds.clusterStartMinute) + clusterHeight / 2;
+  const minimumY = transformedEventHeight / 2 - center;
+  const maximumY = calendarTimelineHeight - transformedEventHeight / 2 - center;
+  const clampedY = Math.round(Math.min(maximumY, Math.max(minimumY, point.y)));
+  return {
+    ...point,
+    rotation: point.rotation,
+    y: clampedY || 0,
+  };
+}
+
+export function overlapPinOffset(clusterStartMinute: number, clusterEndMinute: number) {
+  const clusterTop = minuteToTimelinePixels(clusterStartMinute);
+  const clusterHeight = Math.max(minuteToTimelinePixels(clusterEndMinute - clusterStartMinute), 48);
+  const desiredTop = clusterTop + clusterHeight / 2 - 15;
+  const clampedTop = Math.min(calendarTimelineHeight - 30, Math.max(0, desiredTop));
+  return Math.round(clampedTop - desiredTop);
+}
+
+function TimelineEventCollection({
+  calendarsById,
+  compact = false,
+  draggedEventId,
+  layouts,
+  onDragEnd,
+  orbitHorizontalInset,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+}: {
+  calendarsById: CalendarMap;
+  compact?: boolean;
+  draggedEventId: string | null;
+  layouts: TimelineEventLayout[];
+  onDragEnd: () => void;
+  orbitHorizontalInset?: "end" | "start";
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  return groupTimelineEventLayouts(layouts).map((cluster) => {
+    const shared = {
+      calendarsById,
+      compact,
+      draggedEventId,
+      onDragEnd,
+      ...(orbitHorizontalInset ? { orbitHorizontalInset } : {}),
+      setDraggedEventId,
+      setEditor,
+      timeZone,
+    };
+    if (cluster.layouts.length === 1) {
+      const layout = cluster.layouts[0] as TimelineEventLayout;
+      return <TimelineEventItem {...shared} key={layout.event.id} layout={layout} />;
+    }
+    return (
+      <TimelineOverlapCluster
+        {...shared}
+        cluster={cluster}
+        key={cluster.layouts.map((layout) => layout.event.id).join(":")}
+      />
+    );
+  });
+}
+
+function TimelineEventItem({
+  calendarsById,
+  compact,
+  draggedEventId,
+  layout,
+  onDragEnd,
+  orbit,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+  topOffsetMinute,
+}: {
+  calendarsById: CalendarMap;
+  compact: boolean;
+  draggedEventId: string | null;
+  layout: TimelineEventLayout;
+  onDragEnd: () => void;
+  orbit?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
+    horizontalInset?: "end" | "start";
+    index: number;
+    total: number;
+  };
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+  topOffsetMinute?: number;
+}) {
+  return (
+    <TimelineEvent
+      blockColors={eventBlockColors(layout.event, calendarsById)}
+      calendar={calendarsById.get(layout.event.calendarId)}
+      compact={compact}
+      isDragging={draggedEventId === layout.event.id}
+      layout={layout}
+      onEdit={() => setEditor({ event: layout.event, kind: "event" })}
+      onDragEnd={onDragEnd}
+      setDraggedEventId={setDraggedEventId}
+      timeZone={timeZone}
+      {...(orbit ? { orbit } : {})}
+      {...(topOffsetMinute === undefined ? {} : { topOffsetMinute })}
+    />
+  );
+}
+
+function TimelineOverlapCluster({
+  calendarsById,
+  cluster,
+  compact,
+  draggedEventId,
+  onDragEnd,
+  orbitHorizontalInset,
+  setDraggedEventId,
+  setEditor,
+  timeZone,
+}: {
+  calendarsById: CalendarMap;
+  cluster: TimelineEventCluster;
+  compact: boolean;
+  draggedEventId: string | null;
+  onDragEnd: () => void;
+  orbitHorizontalInset?: "end" | "start";
+  setDraggedEventId: (id: string | null) => void;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const hoverLeaveTimer = useRef<number | null>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const clusterId = useId();
+  const count = cluster.layouts.length;
+  useEffect(
+    () => () => {
+      if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
+    },
+    [],
+  );
+  return (
+    <fieldset
+      aria-label={`${count} overlapping events`}
+      className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
+      id={clusterId}
+      onKeyDown={(event) => {
+        const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
+        if (event.key !== "Escape" || (!expanded && !focusedEvent)) return;
+        event.stopPropagation();
+        setExpanded(false);
+        toggle.current?.focus();
+      }}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "touch") return;
+        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
+        hoverLeaveTimer.current = null;
+        setHovered(true);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "touch") return;
+        hoverLeaveTimer.current = window.setTimeout(() => {
+          setHovered(false);
+          hoverLeaveTimer.current = null;
+        }, 160);
+      }}
+      style={
+        {
+          height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
+          top: minuteToTimelinePixels(cluster.startMinute),
+          "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
+        } as CSSProperties
+      }
+    >
+      <button
+        aria-controls={clusterId}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Spread"} ${count} overlapping events`}
+        className="calendar-overlap-cluster__toggle"
+        onClick={(event) => {
+          event.stopPropagation();
+          setExpanded((current) => !current);
+        }}
+        ref={toggle}
+        type="button"
+      >
+        <span className="calendar-overlap-cluster__pin-head">{count}</span>
+      </button>
+      {cluster.layouts.map((layout, index) => (
+        <TimelineEventItem
+          calendarsById={calendarsById}
+          compact={compact}
+          draggedEventId={draggedEventId}
+          key={layout.event.id}
+          layout={layout}
+          onDragEnd={onDragEnd}
+          orbit={{
+            clusterEndMinute: cluster.endMinute,
+            clusterStartMinute: cluster.startMinute,
+            index,
+            total: count,
+            ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
+          }}
+          setDraggedEventId={setDraggedEventId}
+          setEditor={setEditor}
+          timeZone={timeZone}
+          topOffsetMinute={cluster.startMinute}
+        />
+      ))}
+    </fieldset>
+  );
+}
+
 function TimelineEvent({
   blockColors,
   calendar,
@@ -3763,9 +4245,11 @@ function TimelineEvent({
   layout,
   onEdit,
   onDragEnd,
+  orbit,
   setDraggedEventId,
   isDragging = false,
   timeZone,
+  topOffsetMinute = 0,
 }: {
   blockColors: EventBlockColor[];
   calendar: Calendar | undefined;
@@ -3773,9 +4257,17 @@ function TimelineEvent({
   layout: TimelineEventLayout;
   onEdit: () => void;
   onDragEnd: () => void;
+  orbit?: {
+    clusterEndMinute: number;
+    clusterStartMinute: number;
+    horizontalInset?: "end" | "start";
+    index: number;
+    total: number;
+  };
   setDraggedEventId: (id: string | null) => void;
   isDragging?: boolean;
   timeZone: string;
+  topOffsetMinute?: number;
 }) {
   const { column, endMinute, event, startMinute } = layout;
   const writable = calendar?.isWritable ?? false;
@@ -3786,6 +4278,16 @@ function TimelineEvent({
   const blockedMessage = calendar
     ? `${calendar.name} is read-only, so this event can’t be moved.`
     : "This event is read-only and can’t be moved.";
+  const orbitPoint = orbit
+    ? overlapOrbitPoint(orbit.index, orbit.total, compact, {
+        clusterEndMinute: orbit.clusterEndMinute,
+        clusterStartMinute: orbit.clusterStartMinute,
+        eventEndMinute: endMinute,
+        eventStartMinute: startMinute,
+        ...(orbit.horizontalInset ? { horizontalInset: orbit.horizontalInset } : {}),
+      })
+    : null;
+  const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
     window.clearTimeout(blockedHoldTimer.current);
@@ -3847,14 +4349,26 @@ function TimelineEvent({
           blockedHoldTriggered.current = false;
         }}
         onPointerUp={clearBlockedHoldTimer}
-        style={{
-          ...calendarEventColorStyle(calendar?.color),
-          height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 18),
-          left: 3 + column * 12,
-          top: minuteToTimelinePixels(startMinute),
-          width: `calc(100% - ${6 + column * 12}px)`,
-          zIndex: 2 + column,
-        }}
+        style={
+          {
+            ...calendarEventColorStyle(calendar?.color),
+            "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
+            "--calendar-event-left": orbit
+              ? `calc(${(column / laneCount) * 100}% + 2px)`
+              : `${3 + column * 12}px`,
+            "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
+            "--calendar-event-width": orbit
+              ? `calc(${100 / laneCount}% - 4px)`
+              : `calc(100% - ${6 + column * 12}px)`,
+            "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
+            "--overlap-orbit-width": compact
+              ? `clamp(88px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px), 160px)`
+              : `min(320px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px))`,
+            "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
+            "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
+            zIndex: 2 + column,
+          } as CSSProperties
+        }
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
         type="button"
       >
@@ -3968,7 +4482,10 @@ function CalendarEventContextMenu({
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
   const writable = calendar?.isWritable ?? false;
   const destinations = (calendars.data ?? []).filter(
-    (candidate) => candidate.id !== event.calendarId && candidate.isWritable,
+    (candidate) =>
+      !(event.sourceCalendarIds ?? [event.calendarId]).includes(candidate.id) &&
+      !event.blocks.some((eventBlock) => eventBlock.calendarId === candidate.id) &&
+      candidate.isWritable,
   );
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
@@ -4082,6 +4599,146 @@ function AllDayEvents({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+type WeekAllDayEventLayout = {
+  endColumn: number;
+  event: CalendarEvent;
+  row: number;
+  startColumn: number;
+};
+
+function positionWeekAllDayEvents(
+  days: LocalDate[],
+  eventsByDay: Map<string, CalendarEvent[]>,
+): WeekAllDayEventLayout[] {
+  const spans = new Map<string, Omit<WeekAllDayEventLayout, "row">>();
+  days.forEach((day, dayIndex) => {
+    for (const event of eventsByDay.get(localDateKey(day)) ?? []) {
+      if (!event.allDay) continue;
+      const current = spans.get(event.id);
+      spans.set(event.id, {
+        endColumn: dayIndex + 2,
+        event,
+        startColumn: current?.startColumn ?? dayIndex + 1,
+      });
+    }
+  });
+  const rowEnds: number[] = [];
+  return [...spans.values()]
+    .sort(
+      (left, right) =>
+        left.startColumn - right.startColumn ||
+        right.endColumn - right.startColumn - (left.endColumn - left.startColumn),
+    )
+    .map((span) => {
+      let row = rowEnds.findIndex((endColumn) => endColumn <= span.startColumn);
+      if (row === -1) row = rowEnds.length;
+      rowEnds[row] = span.endColumn;
+      return { ...span, row: row + 1 };
+    });
+}
+
+function weekDaySurface(dayIndex: number, isToday: boolean) {
+  if (isToday) {
+    return "color-mix(in srgb, var(--timeline-now) 14%, var(--surface-raised))";
+  }
+  return dayIndex % 2 === 0
+    ? "color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised))"
+    : "color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised))";
+}
+
+function WeekAllDayEvents({
+  calendarsById,
+  days,
+  layouts,
+  setEditor,
+  today,
+}: {
+  calendarsById: CalendarMap;
+  days: LocalDate[];
+  layouts: WeekAllDayEventLayout[];
+  setEditor: (editor: Editor) => void;
+  today: LocalDate;
+}) {
+  const rowCount = Math.max(0, ...layouts.map((layout) => layout.row));
+  const isEmpty = rowCount === 0;
+  return (
+    <div
+      className={`week-all-day-layer${isEmpty ? " is-empty" : ""}`}
+      style={{
+        gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`,
+        gridTemplateRows: isEmpty ? "0px" : `repeat(${rowCount}, 28px)`,
+        paddingBottom: isEmpty ? 0 : undefined,
+      }}
+    >
+      {days.map((day, dayIndex) => (
+        <div
+          aria-hidden="true"
+          className={`week-all-day-day${sameLocalDate(day, today) ? " is-today" : ""}`}
+          key={`all-day-surface-${localDateKey(day)}`}
+          style={
+            {
+              "--week-day-surface": weekDaySurface(dayIndex, sameLocalDate(day, today)),
+              gridColumn: dayIndex + 1,
+              gridRow: `1 / span ${Math.max(rowCount, 1)}`,
+            } as CSSProperties
+          }
+        />
+      ))}
+      {layouts.map((layout) => {
+        const startIndex = layout.startColumn - 1;
+        const endIndex = layout.endColumn - 2;
+        const startDay = days[startIndex] as LocalDate;
+        const endDay = days[endIndex] as LocalDate;
+        const accessibleStart = formatLocalDate(startDay, {
+          day: "numeric",
+          month: "long",
+          weekday: "long",
+        });
+        const accessibleEnd = formatLocalDate(endDay, {
+          day: "numeric",
+          month: "long",
+          weekday: "long",
+        });
+        const accessibleDate = sameLocalDate(startDay, endDay)
+          ? accessibleStart
+          : `${accessibleStart} through ${accessibleEnd}`;
+        const eventStyle = calendarEventColorStyle(
+          calendarsById.get(layout.event.calendarId)?.color,
+        );
+        return (
+          <button
+            aria-label={`All day ${layout.event.title}, ${accessibleDate}`}
+            className="week-all-day-event"
+            key={layout.event.id}
+            onClick={() => setEditor({ event: layout.event, kind: "event" })}
+            style={
+              {
+                ...eventStyle,
+                "--week-all-day-end-surface": weekDaySurface(
+                  endIndex,
+                  sameLocalDate(days[endIndex] as LocalDate, today),
+                ),
+                "--week-all-day-start-surface": weekDaySurface(
+                  startIndex,
+                  sameLocalDate(days[startIndex] as LocalDate, today),
+                ),
+                gridColumn: `${layout.startColumn} / ${layout.endColumn}`,
+                gridRow: layout.row,
+              } as CSSProperties
+            }
+            type="button"
+          >
+            <span>{layout.event.title}</span>
+            {layout.event.blocks.length > 0 ? (
+              <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -4533,6 +5190,173 @@ function MotivesPage() {
   );
 }
 
+function MailAppBarControls() {
+  const [params, setParams] = useSearchParams();
+  return (
+    <div className="mail-app-bar__controls">
+      <MailTopbarSearch
+        onSearch={(query) =>
+          setParams((current) => {
+            const next = new URLSearchParams(current);
+            query ? next.set("q", query) : next.delete("q");
+            next.delete("thread");
+            return next;
+          })
+        }
+        search={params.get("q")?.trim() ?? ""}
+      />
+      <MailSyncButton />
+    </div>
+  );
+}
+
+function MailAccountsControl() {
+  const [params, setParams] = useSearchParams();
+  const accounts = useQuery({
+    queryFn: api.listConnectors,
+    queryKey: ["connectors"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
+  const enabledAccounts = (accounts.data ?? []).filter((account) => account.mailEnabled);
+  const availableIds = new Set(enabledAccounts.map((account) => account.id));
+  const requestedIds = params.getAll("account").filter((id) => availableIds.has(id));
+  const selectedIds = requestedIds.length
+    ? new Set(requestedIds)
+    : new Set(enabledAccounts.map((account) => account.id));
+  const label = `${selectedIds.size} of ${enabledAccounts.length} mail accounts`;
+  const attentionCount = enabledAccounts.filter(
+    (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
+  ).length;
+  const needsAttention = attentionCount > 0;
+  const triggerLabel = accounts.isPending
+    ? "Loading mail accounts"
+    : `${label}${needsAttention ? ", attention required" : ""}`;
+  const setAccountVisible = (accountId: string, visible: boolean) => {
+    const nextIds = new Set(selectedIds);
+    visible ? nextIds.add(accountId) : nextIds.delete(accountId);
+    if (nextIds.size === 0) return;
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("account");
+      next.delete("mailbox");
+      next.delete("thread");
+      if (nextIds.size !== enabledAccounts.length) {
+        for (const id of enabledAccounts.map((account) => account.id)) {
+          if (nextIds.has(id)) next.append("account", id);
+        }
+      }
+      return next;
+    });
+  };
+
+  return (
+    <ShadcnPopover>
+      <ShadcnPopoverTrigger asChild>
+        <AccountSelectionTrigger
+          ariaLabel={triggerLabel}
+          className="mail-accounts-trigger"
+          disabled={accounts.isPending || enabledAccounts.length === 0}
+          identities={enabledAccounts.map((account) => ({
+            avatarUrl: account.avatarUrl,
+            fallback: initials(account.label || account.email || account.provider),
+            id: account.id,
+          }))}
+          needsAttention={needsAttention}
+          selectedCount={selectedIds.size}
+          totalCount={enabledAccounts.length}
+        />
+      </ShadcnPopoverTrigger>
+      <AccountSelectionPopoverContent
+        className="mail-accounts-popover"
+        description={label}
+        primaryAction={
+          needsAttention ? (
+            <ShadcnButton asChild className="w-full">
+              <Link to="/settings?section=connections">
+                {reconnectAccountsLabel(attentionCount)}
+              </Link>
+            </ShadcnButton>
+          ) : null
+        }
+        title="Mail accounts"
+      >
+        <ShadcnFieldGroup className="mail-accounts-popover__list">
+          {enabledAccounts.map((account) => {
+            const health = connectionHealth(account);
+            const accountLabel = account.label || account.email || "Connected account";
+            const selected = selectedIds.has(account.id);
+            return (
+              <ShadcnField
+                className="mail-account-visibility"
+                key={account.id}
+                orientation="horizontal"
+              >
+                <ShadcnCheckbox
+                  aria-label={`${selected ? "Hide" : "Show"} ${accountLabel}`}
+                  checked={selected}
+                  disabled={selected && selectedIds.size === 1}
+                  id={`mail-account-${account.id}`}
+                  onCheckedChange={(checked) => setAccountVisible(account.id, checked === true)}
+                />
+                <ShadcnFieldLabel htmlFor={`mail-account-${account.id}`}>
+                  <ShadcnAvatar size="sm">
+                    {account.avatarUrl ? (
+                      <ShadcnAvatarImage alt="" src={account.avatarUrl} />
+                    ) : null}
+                    <ShadcnAvatarFallback>{initials(accountLabel)}</ShadcnAvatarFallback>
+                  </ShadcnAvatar>
+                  <span className="mail-account-visibility__copy">
+                    <strong>{accountLabel}</strong>
+                    <small>
+                      {account.email || brandTitle(account.provider) || account.provider}
+                    </small>
+                  </span>
+                </ShadcnFieldLabel>
+                <MailAccountHealthIndicator
+                  accountLabel={brandTitle(account.provider) || accountLabel}
+                  health={health}
+                />
+              </ShadcnField>
+            );
+          })}
+        </ShadcnFieldGroup>
+      </AccountSelectionPopoverContent>
+    </ShadcnPopover>
+  );
+}
+
+function MailAccountHealthIndicator({
+  accountLabel,
+  health,
+}: {
+  accountLabel: string;
+  health: ReturnType<typeof connectionHealth>;
+}) {
+  if (health.state === "syncing" || health.state === "retrying") {
+    return (
+      <span
+        aria-label={`${accountLabel} account is syncing`}
+        className="mail-account-visibility__health"
+        data-state="syncing"
+        role="img"
+      >
+        <RefreshIcon aria-hidden="true" className="spin" />
+      </span>
+    );
+  }
+  if (health.state === "ready") return null;
+  return (
+    <span
+      aria-label={`${accountLabel} account needs attention`}
+      className="mail-account-visibility__health"
+      data-state="attention"
+      role="img"
+    >
+      <AlertTriangleIcon aria-hidden="true" />
+    </span>
+  );
+}
+
 function MailSyncButton({
   onSelect,
   variant = "outline",
@@ -4546,8 +5370,28 @@ function MailSyncButton({
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
   );
+  const lastSyncedAt = enabledAccounts
+    .map((account) => account.lastSyncedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
+  const nextSyncAt = enabledAccounts
+    .map((account) => account.nextSyncAt ?? connectionHealth(account).nextSyncAt)
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0];
+  const syncPaused = enabledAccounts.some((account) =>
+    ["reconnect", "service_attention"].includes(connectionHealth(account).state),
+  );
+  const lastSyncLabel = lastSyncedAt
+    ? `Last synced ${formatRelative(lastSyncedAt)}`
+    : "Not synced yet";
+  const nextSyncLabel = syncPaused
+    ? "Sync paused"
+    : nextSyncAt
+      ? `Next ${formatRelative(nextSyncAt)}`
+      : "Next sync not scheduled";
   const sync = useMutation({
     mutationFn: () => Promise.all(enabledAccounts.map((account) => api.syncConnector(account.id))),
+    onError: notifyError,
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
@@ -4557,12 +5401,13 @@ function MailSyncButton({
   });
 
   return (
-    <>
-      {sync.isError ? (
-        <span className="text-destructive text-sm" role="alert">
-          {errorMessage(sync.error)}
-        </span>
-      ) : null}
+    <div className="mail-sync-control">
+      {accounts.isPending || enabledAccounts.length === 0 ? null : (
+        <small className="mail-sync-control__timing">
+          <span>{lastSyncLabel}</span>
+          <span>{nextSyncLabel}</span>
+        </small>
+      )}
       <ShadcnButton
         aria-label="Sync all mail accounts"
         disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
@@ -4576,32 +5421,7 @@ function MailSyncButton({
         <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
         <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
       </ShadcnButton>
-    </>
-  );
-}
-
-function MailComposeButton({ onSelect }: { onSelect?: () => void }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const composing = searchParams.get("compose") === "1";
-
-  return (
-    <ShadcnButton
-      aria-label="Compose mail"
-      aria-pressed={composing}
-      onClick={() => {
-        onSelect?.();
-        setSearchParams((current) => {
-          const next = new URLSearchParams(current);
-          if (composing) next.delete("compose");
-          else next.set("compose", "1");
-          return next;
-        });
-      }}
-      size="sm"
-    >
-      <PlusIcon aria-hidden="true" data-icon="inline-start" />
-      <span>Compose</span>
-    </ShadcnButton>
+    </div>
   );
 }
 
@@ -6192,61 +7012,91 @@ function ConnectorRow({
 }) {
   const health = connectionHealth(account);
   return (
-    <ShadcnItem className="connector-row" size="sm">
-      <ShadcnItemMedia variant="default">
+    <ConnectionCard
+      actions={
+        <>
+          {reconnect ? (
+            <ShadcnButton onClick={reconnect} size="sm" type="button">
+              Reconnect
+            </ShadcnButton>
+          ) : null}
+          <ShadcnButton
+            aria-label={`Sync ${account.label}`}
+            disabled={syncing}
+            onClick={sync}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <RefreshIcon aria-hidden="true" className={syncing ? "spin" : ""} />
+            {syncing ? "Syncing" : "Sync now"}
+          </ShadcnButton>
+          <ShadcnButton
+            aria-label={`Disconnect ${account.label}`}
+            onClick={disconnect}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <TrashIcon aria-hidden="true" />
+            Remove
+          </ShadcnButton>
+        </>
+      }
+      capabilities={
+        <>
+          <span className="connection-card__capabilities-label">Available in</span>
+          <div className="capability-badges">
+            <ConnectorCapabilityBadge enabled={account.calendarEnabled} label="Calendar" />
+            <ConnectorCapabilityBadge
+              enabled={account.mailEnabled}
+              label="Mail"
+              {...(enableMail
+                ? { onEnable: enableMail, onEnableLabel: `Enable Mail for ${account.label}` }
+                : {})}
+            />
+          </div>
+        </>
+      }
+      identity={
         <ConnectedAccountIdentity
           avatarUrl={account.avatarUrl}
           label={account.label}
           provider={account.provider}
           size="default"
         />
-      </ShadcnItemMedia>
-      <ShadcnItemContent>
-        <ShadcnItemTitle>{account.label}</ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {account.email ?? "Connected account"} ·{" "}
-          <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
-        </ShadcnItemDescription>
-        <div className="capability-badges">
-          <ConnectorCapabilityBadge enabled={account.calendarEnabled} label="Calendar" />
-          <ConnectorCapabilityBadge
-            enabled={account.mailEnabled}
-            label="Mail"
-            {...(enableMail
-              ? { onEnable: enableMail, onEnableLabel: `Enable Mail for ${account.label}` }
-              : {})}
-          />
-        </div>
-      </ShadcnItemContent>
-      <ShadcnItemActions>
-        <ConnectionHealthBadge health={health} />
-        {reconnect ? (
-          <ShadcnButton onClick={reconnect} size="sm" type="button" variant="outline">
-            Reconnect
-          </ShadcnButton>
-        ) : null}
-        <ShadcnButton
-          aria-label={`Sync ${account.label}`}
-          disabled={syncing}
-          onClick={sync}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshIcon className={syncing ? "spin" : ""} />
-        </ShadcnButton>
-        <ShadcnButton
-          aria-label={`Disconnect ${account.label}`}
-          onClick={disconnect}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <TrashIcon />
-        </ShadcnButton>
-      </ShadcnItemActions>
-    </ShadcnItem>
+      }
+      state={health.state}
+      status={<ConnectionHealthBadge health={health} />}
+      subtitle={account.email ?? "Connected account"}
+      summary={
+        <>
+          <strong>{connectionHealthTitle(health.state)}</strong>
+          <span>
+            <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
+          </span>
+          <small>{connectionHealthGuidance(health.state)}</small>
+        </>
+      }
+      title={account.label}
+    />
   );
+}
+
+function connectionHealthTitle(state: ReturnType<typeof connectionHealth>["state"]) {
+  if (state === "syncing") return "Syncing now";
+  if (state === "retrying") return "Sync delayed";
+  if (state === "reconnect") return "Reconnect this account";
+  if (state === "service_attention") return "Connection temporarily unavailable";
+  return "Connected and ready";
+}
+
+function connectionHealthGuidance(state: ReturnType<typeof connectionHealth>["state"]) {
+  if (state === "syncing") return "New information will appear when this sync finishes.";
+  if (state === "retrying") return "No action is needed while automatic retries continue.";
+  if (state === "reconnect") return "Use Reconnect below to restore access.";
+  if (state === "service_attention") return "No action is needed. We’ll keep retrying.";
+  return "You can sync now whenever you want to check for new information.";
 }
 
 function ConnectorCapabilityBadge({
@@ -6928,6 +7778,7 @@ function SettingsSection({
 }
 
 function SettingsError({ error }: { error: unknown }) {
+  useErrorNotification(error);
   return (
     <ShadcnAlert variant="destructive">
       <XIcon />
@@ -7060,7 +7911,10 @@ export function TodayEventCard({
       >
         <EventCardContent>
           <DropdownMenuTrigger asChild>
-            <EventCardPrimaryAction aria-label={`${eventLabel}. Open quick actions`}>
+            <EventCardPrimaryAction
+              aria-label={`${eventLabel}. Open quick actions`}
+              className="today-timeline__event-action"
+            >
               <EventCardBody>
                 <EventCardTitle>
                   <span className="min-w-0 truncate">{event.title}</span>
@@ -7169,7 +8023,11 @@ export function TodayTaskTimelineCard({
       style={layoutStyle}
     >
       <EventCardContent>
-        <EventCardPrimaryAction aria-label={`Open task ${task.title}`} onClick={onEdit}>
+        <EventCardPrimaryAction
+          aria-label={`Open task ${task.title}`}
+          className="today-timeline__event-action"
+          onClick={onEdit}
+        >
           <EventCardBody>
             <EventCardTitle>
               <ListChecksIcon aria-hidden="true" />
@@ -7480,23 +8338,31 @@ function EventInspector({
   const [blocks, setBlocks] = useState(event.blocks);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const calendar = calendars.find((record) => record.id === event.calendarId);
-  const blockedCalendars = blocks.flatMap((block) => {
-    const blockedCalendar = calendars.find((record) => record.id === block.calendarId);
-    return blockedCalendar ? [{ block, calendar: blockedCalendar }] : [];
+  const blocksByCalendarId = new Map<string, CalendarEvent["blocks"]>();
+  for (const block of blocks) {
+    blocksByCalendarId.set(block.calendarId, [
+      ...(blocksByCalendarId.get(block.calendarId) ?? []),
+      block,
+    ]);
+  }
+  const blockedCalendars = [...blocksByCalendarId.keys()].flatMap((calendarId) => {
+    const blockedCalendar = calendars.find((record) => record.id === calendarId);
+    return blockedCalendar ? [blockedCalendar] : [];
   });
-  const calendarsWithDetails = blockedCalendars
-    .filter(({ block }) => block.mode === "details")
-    .map(({ calendar: blockedCalendar }) => blockedCalendar);
-  const calendarsWithBusyOnly = blockedCalendars
-    .filter(({ block }) => block.mode === "busy")
-    .map(({ calendar: blockedCalendar }) => blockedCalendar);
+  const calendarsWithDetails = blockedCalendars.filter((blockedCalendar) =>
+    blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "details"),
+  );
+  const calendarsWithBusy = blockedCalendars.filter((blockedCalendar) =>
+    blocksByCalendarId.get(blockedCalendar.id)?.some((block) => block.mode === "busy"),
+  );
   const eventStartsAt = new Date(event.startsAt).getTime();
   const eventEndsAt = new Date(event.endsAt).getTime();
   const eventIsInProgress =
     currentTime.getTime() >= eventStartsAt && currentTime.getTime() < eventEndsAt;
   const remainingMinutes = Math.max(1, Math.ceil((eventEndsAt - currentTime.getTime()) / 60_000));
+  const sourceCalendarIds = new Set(event.sourceCalendarIds ?? [event.calendarId]);
   const blockDestinations = calendars.filter(
-    (record) => record.id !== event.calendarId && record.isWritable,
+    (record) => !sourceCalendarIds.has(record.id) && record.isWritable,
   );
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
@@ -7505,35 +8371,50 @@ function EventInspector({
       close();
     },
   });
+  const replaceSourceBlocks = (sourceEventId: string, updatedBlocks: CalendarEvent["blocks"]) => {
+    setBlocks((current) => [
+      ...current.filter((block) => (block.sourceEventId ?? event.id) !== sourceEventId),
+      ...updatedBlocks,
+    ]);
+  };
   const changeBlock = useMutation({
-    mutationFn: async (
-      input:
-        | {
-            calendarId: string;
-            mode: "busy" | "details";
-            operation: "create";
-          }
-        | {
-            blockId: string;
-            calendarId: string;
-            mode: "busy" | "details";
-            operation: "delete" | "update";
-          },
-    ) => {
-      if (input.operation === "create") {
-        return api.createEventBlock(event.id, {
+    mutationFn: async (input: {
+      blocks: CalendarEvent["blocks"];
+      calendarId: string;
+      mode: "busy" | "details";
+      operation: "remove" | "set";
+    }) => {
+      if (input.blocks.length === 0) {
+        const updated = await api.createEventBlock(event.id, {
           calendarId: input.calendarId,
           mode: input.mode,
         });
+        replaceSourceBlocks(event.id, updated.blocks);
+        return [{ sourceEventId: event.id, updated }];
       }
-      return input.operation === "delete"
-        ? api.deleteEventBlock(event.id, input.blockId)
-        : api.updateEventBlock(event.id, input.blockId, { mode: input.mode });
+      const responses: Array<{ sourceEventId: string; updated: CalendarEvent }> = [];
+      for (const block of input.blocks) {
+        const sourceEventId = block.sourceEventId ?? event.id;
+        const updated =
+          input.operation === "remove"
+            ? await api.deleteEventBlock(sourceEventId, block.eventId)
+            : await api.updateEventBlock(sourceEventId, block.eventId, { mode: input.mode });
+        replaceSourceBlocks(sourceEventId, updated.blocks);
+        responses.push({ sourceEventId, updated });
+      }
+      return responses;
     },
-    onSuccess: async (updated) => {
-      setBlocks(updated.blocks);
+    onSuccess: async (responses) => {
+      const updatedBySourceId = new Map(
+        responses.map(({ sourceEventId, updated }) => [sourceEventId, updated.blocks]),
+      );
+      setBlocks((current) => [
+        ...current.filter((block) => !updatedBySourceId.has(block.sourceEventId ?? event.id)),
+        ...[...updatedBySourceId.values()].flat(),
+      ]);
       await invalidateMaterial(queryClient);
     },
+    onError: () => invalidateMaterial(queryClient),
   });
   useEffect(() => {
     const handleEscape = (keyboardEvent: KeyboardEvent) => {
@@ -7597,24 +8478,20 @@ function EventInspector({
                   disabled={changeBlock.isPending}
                   label="Calendars with details included"
                   mode="details"
-                  onAdd={(calendarId, block) =>
-                    changeBlock.mutate(
-                      block
-                        ? {
-                            blockId: block.eventId,
-                            calendarId,
-                            mode: "details",
-                            operation: "update",
-                          }
-                        : { calendarId, mode: "details", operation: "create" },
-                    )
-                  }
-                  onRemove={(block) =>
+                  onAdd={(calendarId, calendarBlocks) =>
                     changeBlock.mutate({
-                      blockId: block.eventId,
-                      calendarId: block.calendarId,
-                      mode: block.mode,
-                      operation: "delete",
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "details",
+                      operation: "set",
+                    })
+                  }
+                  onRemove={(calendarId, calendarBlocks) =>
+                    changeBlock.mutate({
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "details",
+                      operation: "remove",
                     })
                   }
                 />
@@ -7627,29 +8504,25 @@ function EventInspector({
               <dd>
                 <EventVisibilityList
                   blocks={blocks}
-                  calendars={calendarsWithBusyOnly}
+                  calendars={calendarsWithBusy}
                   destinations={blockDestinations}
                   disabled={changeBlock.isPending}
                   label="Calendars shown as busy"
                   mode="busy"
-                  onAdd={(calendarId, block) =>
-                    changeBlock.mutate(
-                      block
-                        ? {
-                            blockId: block.eventId,
-                            calendarId,
-                            mode: "busy",
-                            operation: "update",
-                          }
-                        : { calendarId, mode: "busy", operation: "create" },
-                    )
-                  }
-                  onRemove={(block) =>
+                  onAdd={(calendarId, calendarBlocks) =>
                     changeBlock.mutate({
-                      blockId: block.eventId,
-                      calendarId: block.calendarId,
-                      mode: block.mode,
-                      operation: "delete",
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "busy",
+                      operation: "set",
+                    })
+                  }
+                  onRemove={(calendarId, calendarBlocks) =>
+                    changeBlock.mutate({
+                      blocks: calendarBlocks,
+                      calendarId,
+                      mode: "busy",
+                      operation: "remove",
                     })
                   }
                 />
@@ -7801,18 +8674,23 @@ function EventVisibilityList({
   disabled: boolean;
   label: string;
   mode: "busy" | "details";
-  onAdd: (calendarId: string, block: CalendarEvent["blocks"][number] | undefined) => void;
-  onRemove: (block: CalendarEvent["blocks"][number]) => void;
+  onAdd: (calendarId: string, blocks: CalendarEvent["blocks"]) => void;
+  onRemove: (calendarId: string, blocks: CalendarEvent["blocks"]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const availableCalendars = destinations.filter(
-    (calendar) => blocks.find((block) => block.calendarId === calendar.id)?.mode !== mode,
-  );
+  const blocksForCalendar = (calendarId: string) =>
+    blocks.filter((block) => block.calendarId === calendarId);
+  const availableCalendars = destinations.filter((calendar) => {
+    const calendarBlocks = blocksForCalendar(calendar.id);
+    return calendarBlocks.length === 0 || calendarBlocks.some((block) => block.mode !== mode);
+  });
   const status = mode === "details" ? "Details Included" : "Shown as Busy";
   return (
     <ul aria-label={label} className="event-details-card__calendar-list">
       {calendars.map((calendar) => {
-        const block = blocks.find((record) => record.calendarId === calendar.id);
+        const calendarBlocks = blocksForCalendar(calendar.id).filter(
+          (block) => block.mode === mode,
+        );
         return (
           <ShadcnBadge asChild key={calendar.id} variant="secondary">
             <li
@@ -7821,12 +8699,12 @@ function EventVisibilityList({
             >
               <i aria-hidden="true" style={{ background: calendar.color ?? "var(--muted)" }} />
               <span>{calendar.name}</span>
-              {block ? (
+              {calendarBlocks.length > 0 ? (
                 <button
                   aria-label={`Remove ${calendar.name} from ${status}`}
                   className="event-details-card__calendar-remove"
                   disabled={disabled}
-                  onClick={() => onRemove(block)}
+                  onClick={() => onRemove(calendar.id, calendarBlocks)}
                   type="button"
                 >
                   <XIcon aria-hidden="true" />
@@ -7864,7 +8742,7 @@ function EventVisibilityList({
                   onClick={() => {
                     onAdd(
                       calendar.id,
-                      blocks.find((block) => block.calendarId === calendar.id),
+                      blocksForCalendar(calendar.id).filter((block) => block.mode !== mode),
                     );
                     setOpen(false);
                   }}
@@ -8101,6 +8979,7 @@ function FormActions({
   pending: boolean;
   submitLabel: string;
 }) {
+  useErrorNotification(error);
   return (
     <>
       {error && (

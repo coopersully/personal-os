@@ -387,6 +387,386 @@ describe.sequential("Calendar commitment proposals", () => {
     ]);
   });
 
+  it("keeps same-time managed busy blocks from different sources distinct", async () => {
+    const [otherAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Other Google",
+        provider: "google",
+        providerAccountId: "other-google-blocks",
+        userId,
+      })
+      .returning();
+    if (!otherAccount) throw new Error("Other account fixture was not created.");
+    const [realEventAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Real event account",
+        provider: "google",
+        providerAccountId: "real-google-busy-event",
+        userId,
+      })
+      .returning();
+    if (!realEventAccount) throw new Error("Real event account fixture was not created.");
+    const [hiddenSourceCalendar, otherDestinationCalendar, realEventCalendar] = await database.db
+      .insert(calendars)
+      .values([
+        {
+          accountId: otherAccount.id,
+          isSelected: false,
+          isWritable: true,
+          name: "Hidden block sources",
+          provider: "google",
+          remoteCalendarId: "hidden-block-sources",
+          timezone: "UTC",
+          userId,
+        },
+        {
+          accountId: otherAccount.id,
+          isWritable: true,
+          name: "Other destination",
+          provider: "google",
+          remoteCalendarId: "other-block-destination",
+          timezone: "UTC",
+          userId,
+        },
+        {
+          accountId: realEventAccount.id,
+          isWritable: true,
+          name: "Real events",
+          provider: "google",
+          remoteCalendarId: "real-events",
+          timezone: "UTC",
+          userId,
+        },
+      ])
+      .returning();
+    if (!hiddenSourceCalendar || !otherDestinationCalendar || !realEventCalendar) {
+      throw new Error("Managed block calendar fixtures were not created.");
+    }
+    const sources = await database.db
+      .insert(calendarEvents)
+      .values([
+        {
+          calendarId: hiddenSourceCalendar.id,
+          endsAt: new Date("2026-08-05T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "hidden-source-one",
+          startsAt: new Date("2026-08-05T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Source one",
+          userId,
+        },
+        {
+          calendarId: hiddenSourceCalendar.id,
+          endsAt: new Date("2026-08-05T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "hidden-source-two",
+          startsAt: new Date("2026-08-05T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Source two",
+          userId,
+        },
+      ])
+      .returning();
+    const firstSource = sources[0];
+    const secondSource = sources[1];
+    if (!firstSource || !secondSource) throw new Error("Managed block sources were not created.");
+    await database.db.insert(calendarEvents).values([
+      {
+        blockMode: "busy",
+        blockSourceEventId: firstSource.id,
+        calendarId: remoteCalendarId,
+        endsAt: firstSource.endsAt,
+        provider: "google",
+        remoteEventId: "managed-busy-one",
+        startsAt: firstSource.startsAt,
+        timezone: "UTC",
+        title: "Busy",
+        userId,
+      },
+      {
+        blockMode: "busy",
+        blockSourceEventId: secondSource.id,
+        calendarId: otherDestinationCalendar.id,
+        endsAt: secondSource.endsAt,
+        provider: "google",
+        remoteEventId: "managed-busy-two",
+        startsAt: secondSource.startsAt,
+        timezone: "UTC",
+        title: "Busy",
+        userId,
+      },
+    ]);
+    await database.db.insert(calendarEvents).values({
+      calendarId: realEventCalendar.id,
+      endsAt: firstSource.endsAt,
+      provider: "google",
+      remoteEventId: "real-busy-event",
+      startsAt: firstSource.startsAt,
+      timezone: "UTC",
+      title: "Busy",
+      userId,
+    });
+
+    const visibleBlocks = await service.listEvents(userId, {
+      from: "2026-08-05T00:00:00.000Z",
+      to: "2026-08-06T00:00:00.000Z",
+    });
+
+    expect(visibleBlocks.map((event) => event.remoteEventId).sort()).toEqual([
+      "managed-busy-one",
+      "managed-busy-two",
+      "real-busy-event",
+    ]);
+  });
+
+  it("exposes backing mirror calendars and refuses to block into them", async () => {
+    const [mirrorAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Mirror account",
+        provider: "google",
+        providerAccountId: "mirror-account",
+        userId,
+      })
+      .returning();
+    if (!mirrorAccount) throw new Error("Mirror account fixture was not created.");
+    const [mirrorCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: mirrorAccount.id,
+        isSelected: false,
+        isWritable: true,
+        name: "Mirrored calendar",
+        provider: "google",
+        remoteCalendarId: "mirrored-calendar",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!mirrorCalendar) throw new Error("Mirror calendar fixture was not created.");
+    const [bridgeAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        label: "Bridge account",
+        provider: "google",
+        providerAccountId: "bridge-account",
+        userId,
+      })
+      .returning();
+    if (!bridgeAccount) throw new Error("Bridge account fixture was not created.");
+    const [bridgeCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: bridgeAccount.id,
+        isSelected: false,
+        isWritable: true,
+        name: "Bridge calendar",
+        provider: "google",
+        remoteCalendarId: "bridge-calendar",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!bridgeCalendar) throw new Error("Bridge calendar fixture was not created.");
+    const [sourceEvent, mirrorEvent, bridgeEvent] = await database.db
+      .insert(calendarEvents)
+      .values([
+        {
+          calendarId: remoteCalendarId,
+          endsAt: new Date("2026-08-06T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "mirror-source-one",
+          startsAt: new Date("2026-08-06T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Mirrored appointment",
+          userId,
+        },
+        {
+          calendarId: mirrorCalendar.id,
+          endsAt: new Date("2026-08-06T17:00:00.000Z"),
+          provider: "google",
+          remoteEventId: "mirror-source-two",
+          raw: { iCalUID: "transitive-bridge" },
+          startsAt: new Date("2026-08-06T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Mirrored appointment",
+          userId,
+        },
+        {
+          calendarId: bridgeCalendar.id,
+          endsAt: new Date("2026-08-06T17:00:00.000Z"),
+          provider: "google",
+          raw: { iCalUID: "transitive-bridge" },
+          remoteEventId: "mirror-source-three",
+          startsAt: new Date("2026-08-06T16:00:00.000Z"),
+          timezone: "UTC",
+          title: "Alternate provider title",
+          userId,
+        },
+      ])
+      .returning();
+    if (!sourceEvent || !mirrorEvent || !bridgeEvent) {
+      throw new Error("Mirror event fixtures were not created.");
+    }
+    const [existingMirrorBlock] = await database.db
+      .insert(calendarEvents)
+      .values({
+        blockMode: "busy",
+        blockSourceEventId: mirrorEvent.id,
+        calendarId: secondRemoteCalendarId,
+        endsAt: mirrorEvent.endsAt,
+        provider: "google",
+        remoteEventId: "existing-mirror-block",
+        startsAt: mirrorEvent.startsAt,
+        timezone: "UTC",
+        title: "Busy",
+        userId,
+      })
+      .returning();
+    if (!existingMirrorBlock) throw new Error("Mirror block fixture was not created.");
+
+    const visible = await service.listEvents(userId, {
+      from: "2026-08-06T00:00:00.000Z",
+      to: "2026-08-07T00:00:00.000Z",
+    });
+
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.sourceCalendarIds?.sort()).toEqual(
+      [remoteCalendarId, mirrorCalendar.id, bridgeCalendar.id].sort(),
+    );
+    expect(visible[0]?.blocks).toEqual([
+      expect.objectContaining({
+        calendarId: secondRemoteCalendarId,
+        eventId: existingMirrorBlock.id,
+        sourceEventId: mirrorEvent.id,
+      }),
+    ]);
+    await expect(
+      service.createEventBlock(
+        visible[0]?.id ?? "",
+        { calendarId: mirrorCalendar.id, mode: "busy" },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "An event cannot block a calendar that already contains this occurrence.",
+    });
+    await expect(
+      service.createEventBlock(
+        visible[0]?.id ?? "",
+        { calendarId: bridgeCalendar.id, mode: "busy" },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "An event cannot block a calendar that already contains this occurrence.",
+    });
+    const idempotent = await service.createEventBlock(
+      visible[0]?.id ?? "",
+      { calendarId: secondRemoteCalendarId, mode: "busy" },
+      context(),
+    );
+    expect(idempotent.blocks).toEqual([
+      expect.objectContaining({ eventId: existingMirrorBlock.id, sourceEventId: mirrorEvent.id }),
+    ]);
+    expect(gateway.create).not.toHaveBeenCalled();
+
+    const [concurrentDestination] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: remoteAccountId,
+        isSelected: true,
+        isWritable: true,
+        name: "Concurrent destination",
+        provider: "google",
+        remoteCalendarId: "concurrent-destination",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!concurrentDestination) throw new Error("Concurrent destination fixture was not created.");
+    const [lateMirrorCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: bridgeAccount.id,
+        isSelected: false,
+        isWritable: true,
+        name: "Late mirror calendar",
+        provider: "google",
+        remoteCalendarId: "late-mirror-calendar",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!lateMirrorCalendar) throw new Error("Late mirror calendar fixture was not created.");
+    let releaseProvider: (() => void) | undefined;
+    const providerStarted = new Promise<void>((resolveStarted) => {
+      gateway.create.mockImplementationOnce(async (...args) => {
+        resolveStarted();
+        await new Promise<void>((resolveProvider) => {
+          releaseProvider = resolveProvider;
+        });
+        return {
+          allDay: sourceEvent.allDay,
+          conferenceUrl: null,
+          endsAt: sourceEvent.endsAt,
+          etag: "concurrent-create",
+          location: args[1].location ?? null,
+          notes: args[1].notes ?? null,
+          raw: { id: "concurrent-create" },
+          recurrence: [],
+          remoteEventId: "concurrent-create",
+          startsAt: sourceEvent.startsAt,
+          status: "confirmed",
+          timezone: args[1].timezone ?? sourceEvent.timezone,
+          title: args[1].title,
+        };
+      });
+    });
+    const firstCreate = service.createEventBlock(
+      sourceEvent.id,
+      { calendarId: concurrentDestination.id, mode: "busy" },
+      context(),
+    );
+    await providerStarted;
+    const [lateMirrorEvent] = await database.db
+      .insert(calendarEvents)
+      .values({
+        calendarId: lateMirrorCalendar.id,
+        endsAt: sourceEvent.endsAt,
+        provider: "google",
+        raw: { iCalUID: "transitive-bridge" },
+        remoteEventId: "late-mirror-source",
+        startsAt: sourceEvent.startsAt,
+        timezone: "UTC",
+        title: "Late provider title",
+        userId,
+      })
+      .returning();
+    if (!lateMirrorEvent) throw new Error("Late mirror event fixture was not created.");
+    const secondCreate = service.createEventBlock(
+      lateMirrorEvent.id,
+      { calendarId: concurrentDestination.id, mode: "busy" },
+      context(),
+    );
+    releaseProvider?.();
+    const concurrentResults = await Promise.all([firstCreate, secondCreate]);
+    expect(gateway.create).toHaveBeenCalledTimes(1);
+    expect(concurrentResults[0].blocks).toEqual(concurrentResults[1].blocks);
+    const concurrentBlocks = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.calendarId, concurrentDestination.id),
+          eq(calendarEvents.blockSourceEventId, sourceEvent.id),
+        ),
+      );
+    expect(concurrentBlocks).toHaveLength(1);
+  });
+
   it("reports profile drift, weak/flexible evidence, and exact projection duplicates", async () => {
     await expect(
       service.createEvent(

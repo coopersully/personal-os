@@ -1,9 +1,9 @@
 ---
 name: personal-os-qa
-description: Apply ilo's repository fixtures and run evidence-backed product QA in the in-app browser. Use when testing a branch or PR, smoke-testing the local app, reviewing responsive UX, validating onboarding or provider states, checking workspace switching, or writing a regression report for Today, Calendar, Tasks, Mail, Finances, Settings, or account setup.
+description: Apply nohmi's repository fixtures and run evidence-backed product QA in the in-app browser. Use when testing a branch or PR, smoke-testing the local app, reviewing responsive UX, validating onboarding or provider states, checking workspace switching, or writing a regression report for Today, Calendar, Tasks, Mail, Finances, Settings, or account setup.
 ---
 
-# ilo product QA
+# nohmi product QA
 
 Use the real local runtime, repository fixtures, production routes, and visible
 browser behavior. Treat QA as a contract check, not a screenshot tour.

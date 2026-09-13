@@ -204,6 +204,7 @@ export function serializeEvent(
   row: CalendarEventRow,
   blocks: CalendarEventBlock[] = [],
   accountId: string | null = null,
+  sourceCalendarIds: string[] = [row.calendarId],
 ): CalendarEvent {
   return {
     allDay: row.allDay,
@@ -232,6 +233,7 @@ export function serializeEvent(
       revision: row.remoteEtag ?? row.updatedAt.toISOString(),
       sourceType: "calendar_event",
     },
+    sourceCalendarIds,
     startsAt: row.startsAt.toISOString(),
     status: row.status,
     transparency: row.transparency,

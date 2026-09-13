@@ -33,7 +33,7 @@ describe("ErrorPage", () => {
   });
 
   it("previews selectable states and falls back safely for unknown query values", async () => {
-    render(
+    const view = render(
       <MemoryRouter initialEntries={["/dev/errors?state=unknown"]}>
         <ErrorPagePreview />
       </MemoryRouter>,
@@ -46,6 +46,16 @@ describe("ErrorPage", () => {
       .selectOptions(screen.getByRole("combobox", { name: "Error preview" }), "503");
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       errorPageStates["503"].title,
+    );
+    view.unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/dev/errors"]}>
+        <ErrorPagePreview />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      errorPageStates["404"].title,
     );
   });
 });

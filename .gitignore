@@ -4,6 +4,7 @@
 !.env.example
 # Personal runtime context and exported user data must never be committed.
 context.md
+.context/
 briefs/
 state/
 private/

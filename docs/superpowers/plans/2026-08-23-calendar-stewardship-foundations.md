@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript 5.8, Node.js 22, Zod 4, PostgreSQL 17, Drizzle ORM 0.45, Hono 4, React 19, TanStack Query 5, Vitest 3, Testing Library, pnpm 11
 
-**Spec:** `docs/superpowers/specs/2026-08-15-calendar-workspace-ilo-design.md`
+**Spec:** `docs/superpowers/specs/2026-08-15-calendar-workspace-stewardship-design.md`
 
 ## Global Constraints
 
@@ -1369,8 +1369,8 @@ git commit -m "feat(calendar): wire stewardship review surface"
 **Files:**
 - Modify: `docs/design/pages/calendar.md`
 - Modify: `docs/product/implementation-log.md`
-- Verify only: `docs/product/ilo-workspace-stewardship.md`
-- Verify only: `docs/architecture/0004-workspace-ilo-stewardship.md`
+- Verify only: `docs/product/workspace-stewardship.md`
+- Verify only: `docs/architecture/0004-workspace-stewardship.md`
 - Verify only: `docs/engineering/external-boundary-reliability.md`
 - Verify only: `docs/engineering/connector-reliability.md`
 

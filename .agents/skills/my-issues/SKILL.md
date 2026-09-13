@@ -1,11 +1,12 @@
 ---
 name: my-issues
-description: Show the authenticated user's ilo GitHub issues, assigned work, authored work, milestone work, backlog, linked pull requests, or issues filtered by state, label, milestone, or review status.
+description: Use when explicitly viewing the authenticated user's legacy nohmi GitHub issues or their linked pull requests.
 ---
 
 # My issues
 
-Show the authenticated user's current GitHub issue queue without changing it.
+Show the authenticated user's legacy GitHub issue queue without changing it. Use `my-tasks` for the
+canonical Nohmi Linear work queue.
 
 ## Workflow
 
@@ -34,4 +35,5 @@ Group `in review`, `draft PR`, `active`, then `planned`:
 | [#123 Title](url) | in review | enhancement | — | [#456](url) | 2026-07-27 |
 ```
 
-End with the unique issue count. If no issues match, say so clearly.
+End with the unique issue count and state that Linear remains authoritative for current delivery
+status. If no issues match, say so clearly.

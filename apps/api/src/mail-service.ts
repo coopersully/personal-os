@@ -19,10 +19,10 @@ import type {
   AttentionItem,
   BulkUpdateMailInput,
   BulkUpdateMailResult,
+  CreateMailDraftInput,
   CreateMailRuleInput,
   Mailbox,
   MailDraft,
-  MailDraftInput,
   MailListQuery,
   MailMessage,
   MailRule,
@@ -30,7 +30,8 @@ import type {
   MailSetupContext,
   MailThread,
   PreviewMailRuleInput,
-  SendMailInput,
+  SendMailDraftInput,
+  UpdateMailDraftInput,
   UpdateMailRuleInput,
   UpdateMailThreadInput,
   UpsertMailAttentionItemInput,
@@ -43,7 +44,7 @@ import {
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import {
   type ConnectedMailGateway,
@@ -488,8 +489,8 @@ export function createMailService({
       await validateMailSourceIds(userId, sourceIds, transaction, true);
     },
 
-    async createDraft(userId: string, input: MailDraftInput) {
-      return db.transaction(async (transaction) => {
+    async createDraft(userId: string, input: CreateMailDraftInput): Promise<MailDraft> {
+      const created = await db.transaction(async (transaction) => {
         const [account] = await transaction
           .select({ id: calendarAccounts.id })
           .from(calendarAccounts)
@@ -500,13 +501,9 @@ export function createMailService({
               eq(calendarAccounts.mailEnabled, true),
             ),
           )
-          .for("share")
           .limit(1);
         if (!account) {
-          throw new AppError(
-            "invalid_request",
-            "Select an owned connected account with Mail enabled.",
-          );
+          throw new AppError("invalid_request", "Select one of your connected Mail accounts.");
         }
         if (input.threadId) {
           const [thread] = await transaction
@@ -520,12 +517,11 @@ export function createMailService({
                 isNull(mailThreads.deletedAt),
               ),
             )
-            .for("share")
             .limit(1);
           if (!thread) {
             throw new AppError(
               "invalid_request",
-              "The draft thread must belong to the selected Mail account.",
+              "The draft conversation must belong to the selected Mail account.",
             );
           }
         }
@@ -533,181 +529,232 @@ export function createMailService({
           (
             await transaction
               .insert(mailDrafts)
-              .values({ ...input, userId })
+              .values({ ...input, threadId: input.threadId ?? null, userId })
               .returning()
           )[0],
           "The Mail draft could not be created.",
         );
       });
+      return serializeMailDraft(created, now());
     },
 
-    async send(userId: string, input: SendMailInput, context: MutationContext) {
-      const recipientsMatch = (
-        left: Array<{ address: string; name: string | null }>,
-        right: Array<{ address: string; name: string | null }>,
-      ) =>
-        left.length === right.length &&
-        left.every(
-          (recipient, index) =>
-            recipient.address === right[index]?.address && recipient.name === right[index]?.name,
+    async updateDraft(userId: string, id: string, input: UpdateMailDraftInput): Promise<MailDraft> {
+      const [before] = await db
+        .select()
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.id, id), eq(mailDrafts.userId, userId)))
+        .limit(1);
+      if (!before) throw new AppError("not_found", "The Mail draft was not found.");
+      if (before.sendStatus !== "draft" || before.sentAt) {
+        throw new AppError("conflict", "This Mail draft is no longer editable.");
+      }
+      if (before.updatedAt.toISOString() !== input.expectedUpdatedAt) {
+        throw new AppError(
+          "conflict",
+          "This draft changed or is no longer editable. Reload it before continuing.",
         );
-      let draft: typeof mailDrafts.$inferSelect | undefined;
-      if (input.draftId) {
-        [draft] = await db
-          .select()
-          .from(mailDrafts)
-          .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+      }
+      const [account] = await db
+        .select({ id: calendarAccounts.id })
+        .from(calendarAccounts)
+        .where(
+          and(
+            eq(calendarAccounts.id, input.accountId),
+            eq(calendarAccounts.userId, userId),
+            eq(calendarAccounts.mailEnabled, true),
+          ),
+        )
+        .limit(1);
+      if (!account) {
+        throw new AppError("invalid_request", "Select one of your connected Mail accounts.");
+      }
+      if (input.threadId) {
+        const [thread] = await db
+          .select({ id: mailThreads.id })
+          .from(mailThreads)
+          .where(
+            and(
+              eq(mailThreads.id, input.threadId),
+              eq(mailThreads.userId, userId),
+              eq(mailThreads.accountId, input.accountId),
+              isNull(mailThreads.deletedAt),
+            ),
+          )
           .limit(1);
-        if (!draft) throw new AppError("not_found", "The mail draft was not found.");
-        if (draft.sentAt) {
-          throw new AppError(
-            "conflict",
-            "This Mail draft was already sent. Do not retry it as a new send.",
-          );
-        }
-        if (
-          draft.accountId !== input.accountId ||
-          draft.threadId !== (input.threadId ?? null) ||
-          draft.subject !== input.subject ||
-          draft.body !== input.body ||
-          !recipientsMatch(draft.to, input.to) ||
-          !recipientsMatch(draft.cc, input.cc)
-        ) {
+        if (!thread) {
           throw new AppError(
             "invalid_request",
-            "Send the draft with its exact saved account, thread, recipients, subject, and body.",
+            "The draft conversation must belong to the selected Mail account.",
           );
         }
       }
-      const remoteThreadId = input.threadId
-        ? (
-            await db
-              .select({ remoteThreadId: mailThreads.remoteThreadId })
-              .from(mailThreads)
-              .where(
-                and(
-                  eq(mailThreads.id, input.threadId),
-                  eq(mailThreads.userId, userId),
-                  eq(mailThreads.accountId, input.accountId),
-                  isNull(mailThreads.deletedAt),
-                ),
-              )
-              .limit(1)
-          )[0]?.remoteThreadId
-        : undefined;
-      if (input.threadId && !remoteThreadId) {
-        throw new AppError("not_found", "The mail conversation was not found.");
-      }
-      const draftErrorDetails = input.draftId ? { draftId: input.draftId } : {};
-      const threadErrorDetails = input.threadId
-        ? { remoteThreadId: remoteThreadId as string, threadId: input.threadId }
-        : {};
-      const claimTime = now();
-      const claimId = randomUUID();
-      if (input.draftId) {
-        const staleBefore = new Date(claimTime.getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS);
-        const [staleClaim] = await db
-          .update(mailDrafts)
-          .set({ sendStatus: "reconcile", updatedAt: claimTime })
-          .where(
-            and(
-              eq(mailDrafts.id, input.draftId),
-              eq(mailDrafts.userId, userId),
-              eq(mailDrafts.sendStatus, "sending"),
-              lt(mailDrafts.sendClaimedAt, staleBefore),
-              isNull(mailDrafts.sentAt),
-            ),
-          )
-          .returning({ id: mailDrafts.id });
-        if (staleClaim) {
-          throw draftNeedsSentMailReconciliation(input.accountId, input.draftId, "stale_claim");
-        }
-        const [claimed] = await db
-          .update(mailDrafts)
-          .set({
-            sendClaimedAt: claimTime,
-            sendClaimId: claimId,
-            sendStatus: "sending",
-            updatedAt: claimTime,
-          })
-          .where(
-            and(
-              eq(mailDrafts.id, input.draftId),
-              eq(mailDrafts.userId, userId),
-              eq(mailDrafts.sendStatus, "draft"),
-              isNull(mailDrafts.sentAt),
-            ),
-          )
-          .returning();
-        if (!claimed) {
-          const [currentDraft] = await db
-            .select({
-              sendClaimedAt: mailDrafts.sendClaimedAt,
-              sendStatus: mailDrafts.sendStatus,
-              sentAt: mailDrafts.sentAt,
-            })
-            .from(mailDrafts)
-            .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
-            .limit(1);
-          if (!currentDraft) throw new AppError("not_found", "The mail draft was not found.");
-          if (currentDraft.sentAt || currentDraft.sendStatus === "sent") {
-            throw new AppError(
-              "conflict",
-              "This Mail draft was already sent. Do not retry it as a new send.",
-            );
-          }
-          if (currentDraft.sendStatus === "reconcile") {
-            throw draftNeedsSentMailReconciliation(
-              input.accountId,
-              input.draftId,
-              "ambiguous_send",
-            );
-          }
-          throw new AppError(
-            "conflict",
-            "This Mail draft already has a send in progress. Wait for it to finish; if it remains in progress, inspect Sent Mail and reconcile the draft before retrying.",
-            {
-              draftId: input.draftId,
-              sendClaimedAt: currentDraft.sendClaimedAt?.toISOString() ?? null,
-              sendStatus: currentDraft.sendStatus,
-            },
-          );
-        }
-        if (
-          claimed.accountId !== input.accountId ||
-          claimed.threadId !== (input.threadId ?? null) ||
-          claimed.subject !== input.subject ||
-          claimed.body !== input.body ||
-          !recipientsMatch(claimed.to, input.to) ||
-          !recipientsMatch(claimed.cc, input.cc)
-        ) {
-          const release = await transitionOwnedDraftClaim(
-            db,
-            input.draftId,
-            userId,
-            claimId,
-            now(),
-            "draft",
-          );
-          if (release === "failed") {
-            throw draftClaimReleaseFailed(input.accountId, input.draftId);
-          }
-          if (release === "lost") {
-            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, false);
-          }
-          throw new AppError(
-            "invalid_request",
-            "The draft changed before its send claim was acquired. Read it again and send its exact saved account, thread, recipients, subject, and body.",
-          );
-        }
-      }
-      try {
-        await gateway.send(userId, input.accountId, {
+      const updatedAt = new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1));
+      const [updated] = await db
+        .update(mailDrafts)
+        .set({
+          accountId: input.accountId,
           body: input.body,
           cc: input.cc,
           subject: input.subject,
+          threadId: input.threadId ?? null,
           to: input.to,
-          ...(remoteThreadId === undefined ? {} : { threadId: remoteThreadId }),
+          updatedAt,
+        })
+        .where(
+          and(
+            eq(mailDrafts.id, id),
+            eq(mailDrafts.userId, userId),
+            eq(mailDrafts.sendStatus, "draft"),
+            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${before.updatedAt}`,
+            isNull(mailDrafts.sentAt),
+          ),
+        )
+        .returning();
+      if (!updated) {
+        throw new AppError(
+          "conflict",
+          "This draft changed or is no longer editable. Reload it before continuing.",
+        );
+      }
+      return serializeMailDraft(updated, now());
+    },
+
+    async listDrafts(userId: string): Promise<MailDraft[]> {
+      const listedAt = now();
+      const drafts = await db
+        .select()
+        .from(mailDrafts)
+        .where(eq(mailDrafts.userId, userId))
+        .orderBy(desc(mailDrafts.updatedAt));
+      return drafts.map((draft) => serializeMailDraft(draft, listedAt));
+    },
+
+    async deleteDraft(userId: string, id: string): Promise<void> {
+      const [deleted] = await db
+        .delete(mailDrafts)
+        .where(
+          and(
+            eq(mailDrafts.id, id),
+            eq(mailDrafts.userId, userId),
+            eq(mailDrafts.sendStatus, "draft"),
+          ),
+        )
+        .returning({ id: mailDrafts.id });
+      if (!deleted) throw new AppError("not_found", "The editable Mail draft was not found.");
+    },
+
+    async sendDraft(
+      userId: string,
+      input: SendMailDraftInput,
+      context: MutationContext,
+    ): Promise<void> {
+      const [draft] = await db
+        .select()
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+        .limit(1);
+      if (!draft) throw new AppError("not_found", "The Mail draft was not found.");
+      if (draft.sentAt || draft.sendStatus === "sent") {
+        throw new AppError(
+          "conflict",
+          "This Mail draft was already sent. Do not retry it as a new send.",
+        );
+      }
+      const staleSending =
+        draft.sendStatus === "sending" &&
+        draft.sendClaimedAt !== null &&
+        draft.sendClaimedAt.getTime() <= now().getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
+      if (draft.sendStatus === "reconcile" || staleSending) {
+        throw draftNeedsSentMailReconciliation(
+          draft.accountId,
+          draft.id,
+          staleSending ? "stale_claim" : "ambiguous_send",
+        );
+      }
+      if (draft.sendStatus !== "draft") {
+        throw new AppError(
+          "conflict",
+          "This Mail draft already has a send in progress. Wait for it to finish; if it remains in progress, inspect Sent Mail and reconcile the draft before retrying.",
+          {
+            draftId: draft.id,
+            sendClaimedAt: draft.sendClaimedAt?.toISOString() ?? null,
+            sendStatus: draft.sendStatus,
+          },
+        );
+      }
+      if (draft.updatedAt.toISOString() !== input.confirmedUpdatedAt) {
+        throw new AppError("conflict", "This draft changed after confirmation. Review it again.");
+      }
+      if (draft.to.length === 0 || (!draft.subject.trim() && !draft.body.trim())) {
+        throw new AppError(
+          "invalid_request",
+          "Add a recipient and a subject or message before sending.",
+        );
+      }
+      const replyContext = draft.threadId
+        ? (
+            await db
+              .select({
+                messageId: mailMessages.messageId,
+                references: mailMessages.references,
+                remoteThreadId: mailThreads.remoteThreadId,
+              })
+              .from(mailThreads)
+              .leftJoin(mailMessages, eq(mailMessages.threadId, mailThreads.id))
+              .where(
+                and(
+                  eq(mailThreads.id, draft.threadId),
+                  eq(mailThreads.userId, userId),
+                  eq(mailThreads.accountId, draft.accountId),
+                  isNull(mailThreads.deletedAt),
+                ),
+              )
+              .orderBy(desc(mailMessages.receivedAt), desc(mailMessages.id))
+              .limit(1)
+          )[0]
+        : undefined;
+      const remoteThreadId = replyContext?.remoteThreadId;
+      if (draft.threadId && !remoteThreadId) {
+        throw new AppError("not_found", "The Mail conversation was not found.");
+      }
+      const claimId = randomUUID();
+      const claimedAt = now();
+      const [claimed] = await db
+        .update(mailDrafts)
+        .set({
+          sendClaimedAt: claimedAt,
+          sendClaimId: claimId,
+          sendStatus: "sending",
+          updatedAt: claimedAt,
+        })
+        .where(
+          and(
+            eq(mailDrafts.id, input.draftId),
+            eq(mailDrafts.userId, userId),
+            eq(mailDrafts.sendStatus, "draft"),
+            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
+            isNull(mailDrafts.sentAt),
+          ),
+        )
+        .returning({ id: mailDrafts.id });
+      if (!claimed) {
+        throw new AppError("conflict", "This draft is already being sent or changed.");
+      }
+      try {
+        await gateway.send(userId, draft.accountId, {
+          body: draft.body,
+          cc: draft.cc,
+          subject: draft.subject,
+          ...(remoteThreadId ? { threadId: remoteThreadId } : {}),
+          ...(replyContext?.messageId
+            ? {
+                inReplyTo: replyContext.messageId,
+                references: [
+                  ...new Set([...(replyContext.references ?? []), replyContext.messageId]),
+                ],
+              }
+            : {}),
+          to: draft.to,
         });
       } catch (error) {
         const structuredProviderEffect =
@@ -722,20 +769,18 @@ export function createMailService({
         const knownPreAcceptanceFailure =
           error instanceof MailProviderRejectedError ||
           (error instanceof AppError && !structuredProviderEffect);
-        if (input.draftId && knownPreAcceptanceFailure) {
+        if (knownPreAcceptanceFailure) {
           const release = await transitionOwnedDraftClaim(
             db,
-            input.draftId,
+            draft.id,
             userId,
             claimId,
             now(),
             "draft",
           );
-          if (release === "failed") {
-            throw draftClaimReleaseFailed(input.accountId, input.draftId);
-          }
+          if (release === "failed") throw draftClaimReleaseFailed(draft.accountId, draft.id);
           if (release === "lost") {
-            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, false);
+            throw draftSendClaimOwnershipLost(draft.accountId, draft.id, false);
           }
         }
         if (error instanceof MailProviderRejectedError) {
@@ -743,7 +788,7 @@ export function createMailService({
             "service_unavailable",
             "The Mail provider rejected the message before accepting it. The draft remains safe to retry.",
             {
-              ...draftErrorDetails,
+              draftId: draft.id,
               partialEffect: false,
               providerAcceptance: "rejected",
               retrySafe: true,
@@ -751,76 +796,67 @@ export function createMailService({
           );
         }
         if (error instanceof AppError && !structuredProviderEffect) throw error;
-        if (input.draftId) {
-          const reconciliation = await transitionOwnedDraftClaim(
-            db,
-            input.draftId,
-            userId,
-            claimId,
-            now(),
-            "reconcile",
-          );
-          if (reconciliation === "lost") {
-            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, true);
-          }
-          throw draftProviderPartialEffectError({
-            accountId: input.accountId,
-            cause: error,
-            credentialsPersisted: !credentialPersistenceMayHaveFailed,
-            draftId: input.draftId,
-            draftReconciliationStatePersisted: reconciliation === "updated",
-            ...threadErrorDetails,
-          });
+        const reconciliation = await transitionOwnedDraftClaim(
+          db,
+          draft.id,
+          userId,
+          claimId,
+          now(),
+          "reconcile",
+        );
+        if (reconciliation === "lost") {
+          throw draftSendClaimOwnershipLost(draft.accountId, draft.id, true);
         }
-        throw mailProviderPartialEffectError({
-          accountId: input.accountId,
+        throw draftProviderPartialEffectError({
+          accountId: draft.accountId,
           cause: error,
           credentialsPersisted: !credentialPersistenceMayHaveFailed,
-          operation: "send",
-          ...threadErrorDetails,
+          draftId: draft.id,
+          draftReconciliationStatePersisted: reconciliation === "updated",
+          ...(remoteThreadId ? { remoteThreadId } : {}),
+          ...(draft.threadId ? { threadId: draft.threadId } : {}),
         });
       }
       try {
         await db.transaction(async (transaction) => {
-          if (input.draftId) {
-            const [sentDraft] = await transaction
-              .update(mailDrafts)
-              .set({
-                sendClaimedAt: null,
-                sendClaimId: null,
-                sendStatus: "sent",
-                sentAt: now(),
-                updatedAt: now(),
-              })
-              .where(
-                and(
-                  eq(mailDrafts.id, input.draftId),
-                  eq(mailDrafts.userId, userId),
-                  eq(mailDrafts.sendClaimId, claimId),
-                  eq(mailDrafts.sendStatus, "sending"),
-                  isNull(mailDrafts.sentAt),
-                ),
-              )
-              .returning({ id: mailDrafts.id });
-            if (!sentDraft) {
-              throw new AppError("not_found", "The mail draft was not found after provider send.");
-            }
+          const [sent] = await transaction
+            .update(mailDrafts)
+            .set({
+              sendClaimedAt: null,
+              sendClaimId: null,
+              sendStatus: "sent",
+              sentAt: now(),
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(mailDrafts.id, draft.id),
+                eq(mailDrafts.userId, userId),
+                eq(mailDrafts.sendClaimId, claimId),
+                eq(mailDrafts.sendStatus, "sending"),
+                isNull(mailDrafts.sentAt),
+              ),
+            )
+            .returning({ id: mailDrafts.id });
+          if (!sent) {
+            throw new AppError(
+              "not_found",
+              "The Mail draft was not found after the provider send.",
+            );
           }
-
           await transaction.insert(auditEvents).values(
             auditValues({
               action: "mail.sent",
               after: {
-                accountId: input.accountId,
-                ccCount: input.cc.length,
-                draftId: input.draftId ?? null,
-                hasDraft: input.draftId !== undefined,
-                hasThread: input.threadId !== undefined,
-                recipientCount: input.to.length,
-                threadId: input.threadId ?? null,
+                accountId: draft.accountId,
+                ccCount: draft.cc.length,
+                draftId: draft.id,
+                hasThread: draft.threadId !== null,
+                recipientCount: draft.to.length,
+                threadId: draft.threadId,
               },
               before: null,
-              entityId: input.draftId ?? input.threadId ?? input.accountId,
+              entityId: draft.id,
               entityType: "mail_send",
               principal: { ...context.principal, userId },
               requestId: context.requestId,
@@ -828,33 +864,25 @@ export function createMailService({
           );
         });
       } catch (error) {
-        if (input.draftId) {
-          const reconciliation = await transitionOwnedDraftClaim(
-            db,
-            input.draftId,
-            userId,
-            claimId,
-            now(),
-            "reconcile",
-          );
-          if (reconciliation === "lost") {
-            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, true);
-          }
-          throw draftProviderPartialEffectError({
-            accountId: input.accountId,
-            cause: error,
-            credentialsPersisted: true,
-            draftId: input.draftId,
-            draftReconciliationStatePersisted: reconciliation === "updated",
-            ...threadErrorDetails,
-          });
+        const reconciliation = await transitionOwnedDraftClaim(
+          db,
+          draft.id,
+          userId,
+          claimId,
+          now(),
+          "reconcile",
+        );
+        if (reconciliation === "lost") {
+          throw draftSendClaimOwnershipLost(draft.accountId, draft.id, true);
         }
-        throw mailProviderPartialEffectError({
-          accountId: input.accountId,
+        throw draftProviderPartialEffectError({
+          accountId: draft.accountId,
           cause: error,
           credentialsPersisted: true,
-          operation: "send",
-          ...threadErrorDetails,
+          draftId: draft.id,
+          draftReconciliationStatePersisted: reconciliation === "updated",
+          ...(remoteThreadId ? { remoteThreadId } : {}),
+          ...(draft.threadId ? { threadId: draft.threadId } : {}),
         });
       }
     },
@@ -864,7 +892,7 @@ export function createMailService({
       id: string,
       outcome: "not_sent" | "sent",
       context: MutationContext,
-    ) {
+    ): Promise<MailDraft> {
       return db.transaction(async (transaction) => {
         const [draft] = await transaction
           .select()
@@ -872,22 +900,13 @@ export function createMailService({
           .where(and(eq(mailDrafts.id, id), eq(mailDrafts.userId, userId)))
           .for("update")
           .limit(1);
-        if (!draft) throw new AppError("not_found", "The mail draft was not found.");
-        if (draft.sentAt || draft.sendStatus === "sent") {
-          throw new AppError("conflict", "This Mail draft is already finalized as sent.");
-        }
-        if (
+        if (!draft) throw new AppError("not_found", "The Mail draft was not found.");
+        const staleSending =
           draft.sendStatus === "sending" &&
-          draft.sendClaimedAt &&
-          draft.sendClaimedAt.getTime() > now().getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS
-        ) {
-          throw new AppError(
-            "conflict",
-            "This Mail draft still has a recent send in progress. Wait before reconciling it.",
-          );
-        }
-        if (draft.sendStatus === "draft") {
-          throw new AppError("conflict", "This Mail draft has no ambiguous send to reconcile.");
+          draft.sendClaimedAt !== null &&
+          draft.sendClaimedAt.getTime() <= now().getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
+        if (draft.sendStatus !== "reconcile" && !staleSending) {
+          throw new AppError("conflict", "This draft has no uncertain delivery to reconcile.");
         }
         const reconciledAt = now();
         const [reconciled] = await transaction
@@ -901,29 +920,20 @@ export function createMailService({
           })
           .where(eq(mailDrafts.id, id))
           .returning();
+        const saved = requireDatabaseRecord(reconciled, "The Mail draft could not be reconciled.");
         await transaction.insert(auditEvents).values(
           auditValues({
-            action: "mail.draft.reconciled",
-            after: { accountId: draft.accountId, outcome },
+            action: "mail.send_reconciled",
+            after: { draftId: id, outcome },
             before: { sendStatus: draft.sendStatus },
             entityId: id,
-            entityType: "mail_draft",
+            entityType: "mail_send",
             principal: { ...context.principal, userId },
             requestId: context.requestId,
           }),
         );
-        return requireDatabaseRecord(reconciled, "The Mail draft could not be reconciled.");
+        return serializeMailDraft(saved, reconciledAt);
       });
-    },
-
-    async listDrafts(userId: string): Promise<MailDraft[]> {
-      const drafts = await db
-        .select()
-        .from(mailDrafts)
-        .where(and(eq(mailDrafts.userId, userId), isNull(mailDrafts.sentAt)))
-        .orderBy(desc(mailDrafts.updatedAt));
-      const listedAt = now();
-      return drafts.map((draft) => serializeMailDraft(draft, listedAt));
     },
 
     async snoozeThread(userId: string, threadId: string, until: Date) {
@@ -1163,6 +1173,23 @@ export function createMailService({
         }
         automationByAccount.set(summary.accountId, current);
       }
+      const sendCapabilities = new Map(
+        await Promise.all(
+          accounts.map(async (account) => {
+            const health = connectionHealthForAccount(account);
+            let capability: "available" | "reconnect" | "unavailable";
+            if (health.state === "reconnect") capability = "reconnect";
+            else {
+              try {
+                capability = (await gateway.sendCapability?.(userId, account.id)) ?? "unavailable";
+              } catch {
+                capability = "unavailable";
+              }
+            }
+            return [account.id, capability] as const;
+          }),
+        ),
+      );
       return {
         accounts: accounts.map((account) => ({
           accountId: account.id,
@@ -1181,6 +1208,7 @@ export function createMailService({
           lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
           mailboxes: mailboxesByAccount.get(account.id) ?? [],
           provider: account.provider as "google" | "icloud",
+          sendCapability: sendCapabilities.get(account.id) ?? "unavailable",
           nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
           syncError: account.syncError,
           syncStatus: account.syncStatus,
@@ -1742,7 +1770,10 @@ export function createMailService({
         cc: message.cc,
         from: message.from,
         id: message.id,
+        messageId: message.messageId,
         receivedAt: message.receivedAt.toISOString(),
+        references: message.references,
+        replyTo: message.replyTo,
         threadId: message.threadId,
         to: message.to,
       }));
@@ -1800,6 +1831,19 @@ export function createMailService({
         conditions.push(
           sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
         );
+      }
+      if (query.mailboxRole) {
+        conditions.push(sql`exists (
+          select 1 from ${mailboxes}
+          inner join ${calendarAccounts}
+            on ${calendarAccounts.id} = ${mailboxes.accountId}
+           and ${calendarAccounts.mailEnabled} = true
+          where ${mailboxes.userId} = ${userId}
+            and ${mailboxes.accountId} = ${mailThreads.accountId}
+            and ${mailboxes.role} = ${query.mailboxRole}
+            and ${mailboxes.deletedAt} is null
+            and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
+        )`);
       }
       const records = await db
         .select()
@@ -2032,33 +2076,6 @@ async function transitionOwnedDraftClaim(
   }
 }
 
-function serializeMailRule(row: typeof mailRules.$inferSelect): MailRule {
-  const resolved = resolveStoredMailRule({
-    action: row.legacyAction,
-    actions: row.actions,
-    condition: row.condition,
-    enabled: row.enabled,
-    policy: row.policy,
-    query: row.legacyQuery,
-  });
-  return {
-    actions: resolved.actions,
-    condition: resolved.condition,
-    confidenceThreshold: null,
-    createdAt: row.createdAt.toISOString(),
-    description: row.description,
-    domain: "mail",
-    enabled: row.enabled,
-    id: row.id,
-    name: row.name,
-    policy: resolved.policy,
-    profileId: row.profileId,
-    sourceIds: row.sourceAccountIds,
-    updatedAt: row.updatedAt.toISOString(),
-    version: row.version,
-  };
-}
-
 function serializeMailDraft(row: typeof mailDrafts.$inferSelect, listedAt: Date): MailDraft {
   const staleSending =
     row.sendStatus === "sending" &&
@@ -2083,6 +2100,33 @@ function serializeMailDraft(row: typeof mailDrafts.$inferSelect, listedAt: Date)
     threadId: row.threadId,
     to: row.to,
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function serializeMailRule(row: typeof mailRules.$inferSelect): MailRule {
+  const resolved = resolveStoredMailRule({
+    action: row.legacyAction,
+    actions: row.actions,
+    condition: row.condition,
+    enabled: row.enabled,
+    policy: row.policy,
+    query: row.legacyQuery,
+  });
+  return {
+    actions: resolved.actions,
+    condition: resolved.condition,
+    confidenceThreshold: null,
+    createdAt: row.createdAt.toISOString(),
+    description: row.description,
+    domain: "mail",
+    enabled: row.enabled,
+    id: row.id,
+    name: row.name,
+    policy: resolved.policy,
+    profileId: row.profileId,
+    sourceIds: row.sourceAccountIds,
+    updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 

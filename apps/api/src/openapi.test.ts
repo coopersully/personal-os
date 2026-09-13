@@ -200,3 +200,29 @@ describe("canonical Tasks OpenAPI surface", () => {
     ).toMatchObject({ maxLength: 200, minLength: 1, type: "string" });
   });
 });
+
+describe("Mail OpenAPI surface", () => {
+  it("declares the required identifier for every parameterized Mail operation", () => {
+    const document = createOpenApiDocument("https://api.example.com");
+    const paths = document.paths as unknown as Record<string, Record<string, OpenApiOperation>>;
+    const operations = [
+      ["/v1/mail/maintenance/{id}", "get"],
+      ["/v1/mail/reviews/{id}", "get"],
+      ["/v1/mail/threads/{id}/stewardship", "get"],
+      ["/v1/mail/threads/{id}/disposition", "put"],
+      ["/v1/mail/threads/{id}/obligations", "post"],
+      ["/v1/mail/threads/{id}/response-brief/preview", "post"],
+      ["/v1/mail/obligations/{id}", "patch"],
+      ["/v1/mail/questions/{id}/answer", "post"],
+    ] as const;
+
+    for (const [path, method] of operations) {
+      expect(paths[path]?.[method]?.parameters).toContainEqual({
+        in: "path",
+        name: "id",
+        required: true,
+        schema: { format: "uuid", type: "string" },
+      });
+    }
+  });
+});

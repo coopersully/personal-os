@@ -2,12 +2,19 @@
 
 - Status: Living master design; shipped and future behavior are labelled explicitly
 - Date: 2026-07-18
-- Last reconciled: 2026-08-12
+- Last reconciled: 2026-09-11
 - Supersedes: the product direction in `docs/product/mvp.md` for future planning. The MVP remains the record of what has already been built.
 
 ## 1. Decision and intentional scope expansion
 
-nohmi will be a private, cross-device operating layer for an individual's commitments, communications, priorities, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
+nohmi will be a private, cross-device autonomous exoskeleton for each person's commitments,
+communications, time, priorities, and money. It is a multi-user product: every account, credential,
+provider projection, knowledge record, run, review, and audit event is isolated to its owner by
+default. It does not replace operating systems or the external
+providers that remain authoritative for connected records; it should replace the person's need to
+visit each provider application for ordinary work. A person owns the data and workflows, operates
+the same material directly in nohmi, and delegates bounded or autonomous work to any authorized
+agent.
 
 This design intentionally expands scope beyond the current MVP. The expansion is necessary to make safe automation usable: a permission prompt alone is not a workflow. Every automated mutation therefore needs a comprehensible UI path, a preview or rule policy, audit evidence, undo/recovery where possible, and a way to stop future runs.
 
@@ -19,15 +26,22 @@ There are no deferred product domains in this document. Delivery is phased for d
 
 It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
 
-Each material workspace has an Ilo: a persistent expert steward that maintains the workspace's
-living ledger, applies its approved rulebook, asks only for irreducible human judgment, learns from
-explicit answers, and produces an evidence-backed review and recommendations. Clients express
-intent; the workspace domain owns the expertise and durable workflow. The shared product doctrine
-is [`nohmi workspace stewardship`](ilo-workspace-stewardship.md).
+Each workspace has a persistent expert steward that maintains its living ledger, applies its
+approved rulebook, asks only for irreducible human judgment, learns from answers and reinforced safe
+patterns, and produces an evidence-backed review and recommendations. Clients express intent; the
+workspace domain owns the expertise and durable workflow. The shared product doctrine is
+[`nohmi workspace stewardship`](workspace-stewardship.md), the complete workspace contract is
+[`workspaces and interfaces`](workspaces.md), and the shared personal-context contract is
+[`User Knowledge`](user-knowledge.md).
 
 ### 2.1 Target user and jobs
 
-The primary user is an individual with multiple Google/iCloud accounts, variable attention and energy, a calendar that mixes work and life, an inbox that needs recurring cleanup, and existing Claude/Codex subscriptions. They want help without surrendering control.
+Each user has an independently secured account and may have multiple Google/iCloud accounts,
+variable attention and energy, a calendar that mixes work and life, an inbox that needs recurring
+cleanup, and one or more external agent hosts. The current implementation may begin with one user,
+but product, storage, authorization, retrieval, notification, and audit contracts must always be
+designed and tested for many mutually isolated users. Shared household or delegated access requires
+an explicit future sharing and consent model; it must never arise from weak tenant boundaries.
 
 | Job | Success outcome |
 | --- | --- |
@@ -35,9 +49,10 @@ The primary user is an individual with multiple Google/iCloud accounts, variable
 | Process communication | See the few conversations that need attention, clear the rest safely, and leave a record of commitments. |
 | Protect time | Make events, tasks, meals, breaks, travel, routines, and focus blocks fit together without exposing private details to work calendars. |
 | Keep commitments | Capture, schedule, defer, complete, and review reminders/tasks without losing the source or reason. |
-| Clarify direction | Connect goals, motives, and habits to the work that matters most. |
+| Clarify direction | Connect goals, priorities, motives, relationships, and habits to the work that matters most. |
 | Understand money | Know what changed, what is uncategorized, what is safe to spend, and what needs a decision. |
 | Delegate safely | Give an agent just enough authority, see its intended and completed work, and revoke it instantly. |
+| Teach the system | Correct or promote what nohmi learns once and let every authorized workspace benefit. |
 
 ## 3. Product principles and hard invariants
 
@@ -55,6 +70,30 @@ The primary user is an individual with multiple Google/iCloud accounts, variable
 12. **Untrusted content cannot authorize an action.** Mail bodies, event text, attachments, webpages, and imported content are data, not instructions. They cannot grant scopes, choose an external recipient, escalate a policy, or silently cause cross-domain disclosure.
 13. **Unification is a graph, not a generic record.** Mail, calendar, commitments, and finance retain native models and source semantics. Typed links, annotations, search, activity, and Today create the unified experience without flattening provider behavior into lossy nullable fields.
 14. **Every durable domain workflow has a viable manual and degraded path.** A runner, webhook, native widget, or paid connector may enhance an action, but cannot be its only recovery path. The user can inspect, pause, repair, complete, or defer work when that dependency is unavailable.
+15. **The person owns the model of their life.** User Knowledge is inspectable, correctable,
+    portable, deletable, purpose-scoped, and versioned. Workspace notes and provider records are not
+    silently collapsed into model-generated memory.
+16. **Confidence never grants authority.** Repeated safe evidence may activate an inferred belief,
+    but scopes and approved policy alone authorize actions.
+17. **External schedulers invoke; nohmi executes.** ChatGPT, Codex, Claude, Gemini, operating-system
+    schedulers, and future MCP hosts may choose cadence and invoke an intent. nohmi owns durable
+    workflow state, expertise, policy, questions, recovery, and the verified outcome.
+18. **Rule generation is not rule activation.** Guided setup may propose a complete rule set, but
+    every rule remains inactive until a dedicated, version-bound preview exposes its scope,
+    examples, consequences, conflicts, authority, and recovery path and the owning domain receives
+    the required approval. Global review bypass cannot activate an action rule.
+19. **Agents receive capability parity without self-escalation.** Everything a person can do in a
+    first-party interface should have a typed API and MCP path when the underlying provider and
+    platform permit it. A connected agent may read or change settings, channels, rules, and
+    workspace material only through scopes the person granted; it cannot grant itself new scopes,
+    replace the account owner, or bypass a stronger approval boundary.
+20. **Tenant isolation is structural.** Every query, mutation, background claim, cache, embedding,
+    search result, deep link, notification, and audit lookup is bound to the authenticated owner.
+    Names, phone numbers, provider IDs, semantic similarity, and model inference are never tenant
+    boundaries.
+21. **Verified success remains true.** A cross-workspace request preserves each verified successful
+    child operation and reports failed, blocked, or uncertain siblings exactly. nohmi does not call
+    partial completion a success or automatically undo useful work merely to manufacture atomicity.
 
 ## 4. Information architecture
 
@@ -63,14 +102,12 @@ The persistent desktop sidebar is fixed-width and never collapses. On small scre
 ```
 App
 ├── Today
-├── Inbox
-├── Calendar
 ├── Tasks
-├── Reminders (legacy compatibility surface)
-├── Tracking (planned)
+├── Calendar
+├── Mail
 ├── Finances
 └── Account menu
-    ├── Profile
+    ├── About you / Your context
     ├── Settings
     ├── Security & sessions
     └── Log out
@@ -78,11 +115,21 @@ App
 Settings
 ├── Back to app
 ├── Account: Profile settings, password, log out
-├── Personal: Goals, Motives, Reviews
+├── Personal: User Knowledge, Goals, Priorities, Motives, Reviews
 ├── Experience: Appearance, wallpaper where supported, locale & time
-├── History & access: Activity, sessions, invitations, recovery, privacy, exports
-├── Workspace: Connections, calendars, mail, notifications, widgets
-└── Agents: Connected agents, Workspace access
+├── History & access: Activity, sessions, invitations, account recovery, privacy, exports
+├── Communications: Shared notification policy, channel connections/defaults, widgets
+└── Agents: Connected agents, Workspace overview
+
+Each workspace
+└── Workspace settings
+    ├── Sources and synchronization
+    ├── Maintain and external check-in health
+    ├── Questions and domain reviews
+    ├── Notification overrides and delivery controls
+    ├── Rules and learned behavior
+    ├── Privacy and domain access posture
+    └── Recovery and workspace data
 ```
 
 ### 4.1 Shared chrome
@@ -109,10 +156,12 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Reminder | A currently separate lightweight actionable record and compatibility surface. The target model treats reminder delivery as a Prompt attached to a Task or Tracking check-in, but Prompt persistence and Reminder migration are not implemented. |
 | Tracker / entry / goal | Planned Tracking material: versioned repeated observation, check-in, habit, entry, and evaluative goal contracts. None of these Tracking contracts is shipped by the 2026-08-12 Task foundation. |
 | Finance | Institution/account, balance, transaction, merchant, category/tag, split, recurring stream, rule, budget, cash-flow forecast, goal, review state and confidence. |
-| Domain profile | Domain, objective, source meanings, categories, durable instructions/preferences, status, and optimistic version. |
+| User Knowledge | Typed facts, relationships, goals, priorities, motives, preferences, constraints, routines, decisions, patterns, provenance, confidence, scope, sensitivity, validity, and immutable revisions. |
+| Transitional domain profile | Current document-style domain objective, source meanings, categories, and preferences; target behavior migrates durable meaning into User Knowledge while policy remains domain-owned. |
 | Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
 | Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
-| Automation | Template, versioned instructions/skill, trigger, schedule/event trigger, inputs, scopes, policy, model host, state, run and approval queue. |
+| External schedule declaration | Immutable nohmi-owned local identity, optional host automation identity, authenticated connection, intended workspace/intent and scope, expected cadence, observed check-in health, revocation, and linked durable runs. It is observational invocation metadata, never a nohmi-owned trigger or schedule. |
+| Maintenance/action run | Owner, invoking actor and authenticated connection, optional validated local schedule identity, intent and requested scope, playbook/rulebook/User Knowledge versions, evidence cutoff, durable steps and effects, policy decisions and approvals, idempotency and recovery state, work nodes, review artifact, and verified terminal state. Runs exist independently of schedule declarations and also represent manual, app, SMS, and other authorized invocations. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
 ## 6. Complete experience design
@@ -197,7 +246,7 @@ Mail policy tiers:
 
 The 2026-08-12 Task organization foundation is implemented. Tasks is one workspace at `/tasks`:
 
-The [Tasks nohmi charter](./tasks-ilo-charter.md) defines how this living ledger and its shipped
+The [Tasks workspace charter](./tasks-workspace-charter.md) defines how this living ledger and its shipped
 surgical operations fit the workspace-stewardship model. It marks maintenance turns, questions and
 learning, domain status, advice, and review artifacts as target behavior rather than claiming this
 foundation already ships them.
@@ -222,6 +271,17 @@ tags, deadline, and reserved time. Lifecycle, Trash, and restore are focused act
 content form. Natural-language classification, Task recurrence/occurrences, attachments, bulk
 editing, Prompt persistence, time-block synchronization, and focus mode remain future work.
 
+The target product performs a one-time import from external task providers and then treats nohmi as
+the authoritative working workspace. The person may explicitly re-trigger a heavily rate-limited
+import to collect new external commitments. Re-import uses stable provider identity and bounded
+content fingerprints to deduplicate unchanged material, never silently overwrites a task already
+owned or edited in nohmi, and surfaces unresolved source conflicts for review. Continuous inbound
+ingestion is not the current contract. Bidirectional synchronization with multiple task providers
+remains an open future option, not a current goal. Keep **Lists** as the provisional user-facing
+name for the long-lived container above Projects because it is familiar and already shipped; do not
+adopt **Areas** by default. The naming decision can change later without changing the settled
+distinction between a durable responsibility/context and a finite Project.
+
 Reminders remain a separate lightweight compatibility domain and `/reminders` surface today. The
 approved target is to model a reminder as delivery behavior attached to a Task or Tracking
 check-in, but nohmi must preserve standalone Reminder behavior until Prompt persistence and a reviewed
@@ -229,30 +289,36 @@ migration exist. Shared storage does not make Reminders and Tasks one domain.
 
 ### 6.6 Tracking, goals, motives, and habits
 
-Tracking is the approved sibling workspace for repeated observations, habits, check-ins, and
-personal measurements. It is a personal ledger, not a wellness or diagnostic product. Habits are
+Tracking is a planned capability for repeated observations, habits, check-ins, and personal
+measurements rather than one of the four core workspaces. It is a personal ledger, not a wellness or diagnostic product. Habits are
 Tracker configurations; food, sleep, exercise, ratings, and other observations use general typed
 tracking primitives rather than dedicated verticals. Goals are evaluative targets that may link to
 Tasks or Trackers without containing them. Immediate motivation belongs in an optional `why`;
 broader preferences belong in the person's profile.
 
-The Tracking workspace, tracker/entry/check-in/goal persistence, classifier, recurrence, Prompt
-delivery, and migration of current Goals/Motives are not implemented. Their normative target and
-research basis live in the two 2026-08-12 Tasks and Tracking specifications.
+Tracker/entry/check-in/goal persistence, classifier, recurrence, Prompt delivery, and migration of
+current Goals/Motives are not implemented. Their normative target and research basis live in the
+two 2026-08-12 Tasks and Tracking specifications. Cross-workspace goals, priorities, motives,
+relationships, circumstances, preferences, constraints, and inferred patterns belong to User
+Knowledge rather than a separate top-level workspace.
 
 ### 6.7 Finances
 
-- The Finance nohmi combines the useful methods of a bookkeeper, accountant/controller, financial
+- The Finance workspace steward combines the useful methods of a bookkeeper, accountant/controller, financial
   planner, investment analyst, auditor, and coach. Its maintenance turn reconciles and classifies a
   selected period, balances it against budgets and goals, updates income/recurring/cash-flow/wealth
-  models, isolates questions, learns only explicitly approved rules, and publishes a period review.
+  models, isolates questions, learns from explicit answers and reinforced safe patterns, and
+  publishes a period review. Learned knowledge never grants financial action authority.
 - Connect Plaid-supported institutions and selected accounts; show connection health, consent, refresh time, duplicate detection, data removal, and the connector's production-cost state. Manual accounts and CSV/OFX import remain first-class so budgeting and review do not require a paid connector.
 - Normalize balances, pending/posted transactions, transfers, merchant, location, category confidence, recurring inflow/outflow, account type, investments, liabilities, and manual transactions.
 - The daily finance queue is: new/uncategorized, low-confidence, split-needed, suspected transfer, recurring/subscription change, unusual spend, bills due, and review-complete. It is never mixed into Today unless it requires a decision.
 - Categorization uses provider categories, deterministic merchant rules, and agent suggestions. The user can correct one transaction, apply a rule to matching future items, split transactions, exclude/transfers, tag projects, and review all changed history.
 - Budgets support category, flexible, envelope/zero-based optional modes, rollovers, targets, recurring bills/income, cash-flow forecast, safe-to-spend/left-this-month, savings goals, watchlists, net worth, investments, subscriptions, and reports.
+- Budget pacing identifies material spending above and below the approved plan. The product
+  explains whether the variance threatens an obligation or leaves a stated goal, need, or
+  quality-of-life priority unfunded, then lets the person choose what to change.
 - The agent may explain and propose categorization/review work under a finance-read scope. The
-  Finance nohmi may provide evidence-backed informational planning, budget, savings, investment, and
+  Finance steward may provide evidence-backed informational planning, budget, savings, investment, and
   market-context recommendations within the product's approved advisory model. It cannot transfer
   money, trade, pay a bill, file a return, or claim a human professional credential.
 - Pending and posted transactions are separate states. Pending categorization is provisional, cannot create durable merchant rules or definitive budget/"safe to spend" claims, and must reconcile against provider removals/replacements before becoming settled data.
@@ -260,25 +326,129 @@ research basis live in the two 2026-08-12 Tasks and Tracking specifications.
 
 ### 6.8 Agent controls, Reviews, and activity
 
-**Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. Settings → Workspace access then explains the actual read, write, approval, source-scope, and unavailable boundaries for Mail, Calendar, Tasks, and Finances while supervising one server-owned setup plan. After authentication the agent calls `get_ilo_setup`, which returns the current semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Personal preferences live in nohmi rather than in a host skill or conversation memory.
+**Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide
+the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped
+personal tokens are an advanced local fallback. Each workspace's own Settings explains its actual
+read, write, approval, source-scope, and unavailable boundaries while supervising one server-owned
+setup plan. Centralized Settings provides a read-only cross-workspace access/readiness overview and
+deep-links to those canonical editors. After authentication the target agent
+flow calls `get_nohmi_context` and `get_nohmi_setup`, which return the current semantic step,
+observed evidence, exact scope, required tools, domain instructions, knowledge requirements, and
+approval boundary. The agent inspects a bounded representative sample, asks only unresolved
+questions, records proposed knowledge or guidance, previews consequential behavior, and calls the
+plan again after every save or signed-in approval. The person handles only unavoidable connection,
+genuine preference decisions, and consequential approval. Versioned host skills may document this
+flow, but they are never a required install or a parallel source of completion state. Personal
+preferences live in User Knowledge rather than in a host skill or conversation memory.
 
-Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
+Current domain profiles use one shared envelope for objectives, source meanings, categories,
+durable instructions, preferences, status, and version. They are transitional inputs to User
+Knowledge, not a complete memory system. Attention items remain outstanding-work records rather
+than memory; rules share version, policy, profile/source selection, confidence, and enabled state
+while retaining domain-owned conditions, actions, validation, and execution.
 
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/settings?section=reviews` is an account-utility destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
+**Reviews:** `/settings?section=reviews` is the account-wide action queue for work that explicitly
+requires the person: questions, approvals, connector failures, recovery steps, and other Review or
+Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
+action routes to the domain that owns the decision. Informational state, routine success, and work
+nohmi can recover automatically do not enter the queue; setup and access configuration never appear
+as queue work merely because they exist.
 
-nohmi does not publish a generic routine catalog, routine-run API, or routine scheduler. Durable background behavior is domain-owned—for example, reviewed Mail rule work—and must expose domain-specific pending, success, reconciliation, and failure state.
+Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
+review bypass, shared notification policy, channel connections/defaults, connected-agent
+credentials/scopes, and User Knowledge controls. Workspace-owned sources, maintenance behavior,
+notification overrides, rules, learning, recovery, data controls, and domain access posture are
+edited only inside Mail, Tasks, Calendar, or Finances. The centralized cross-workspace overview may
+show their effective state, health, override badges, and review counts, but only links to the owning
+workspace for changes.
+
+Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
+an external model host's context are planned but deferred. Credential scopes, purpose-limited API
+results, and existing privacy boundaries govern the initial target; this later control layer must
+not block first-party API/MCP capability parity.
+
+nohmi does not own maintenance schedules. External automation platforms are the sole authority for
+creating, editing, activating, pausing, and invoking recurring maintenance. nohmi may display a
+declared expected cadence, last observed invocation, and overdue or unknown check-in health, but
+that metadata never triggers a run. Once invoked, durable behavior is domain-owned and must expose
+domain-specific pending, success, reconciliation, and failure state; a client-scheduled prompt is
+an invocation mechanism, not the source of workflow logic or completion truth.
 
 The Activity view filters by material, actor, source, result, date, and reversible state. Every event links to the affected material and source evidence.
 
-### 6.9 Desktop overlay, widgets, notifications, and mobile
+### 6.9 Texting: the general nohmi inbox
+
+Texting is a shared conversational channel rather than a fifth workspace. One durable conversation
+accepts free-form requests, exact answers, and reversible reviews; its coordinator routes work to
+Mail, Tasks, Calendar, Finances, or shared services and combines linked child results into one
+coherent response without reproducing domain expertise.
+
+- Inbound messages promptly enqueue durable processing; `maintain_texting` is the manual or scheduled
+  catch-up and recovery intent for unprocessed messages, interrupted child work, and uncertain
+  delivery.
+- Workspace maintenance publishes typed notification intents. The shared notification policy
+  decides eligibility once across channels; Texting applies SMS delivery controls and sends one
+  outcome sentence, up to three directly answerable questions or exact reviews that reasonably fit,
+  and a useful first-party link when additional context or outstanding work requires it.
+- Multi-item texts number each question or review and bind those short references to the exact
+  message and proposal revisions. Replies identify every answered number; a bare bounded answer is
+  accepted only for one unambiguous active item.
+- Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
+  quiet, while a message initiated by the person still receives a response.
+- Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting
+  converts canonical times into the person's time zone and renders nearby dates as `today`,
+  `yesterday`, or `tomorrow` immediately before sending.
+- SMS is formal, short, and concise. It may include as many directly answerable questions or exact
+  reviews as reasonably fit, with a hard cap of three. If even two would make the text difficult to
+  scan, include only one. Every multi-item message includes the unified Settings-owned Reviews link;
+  when more items remain, it summarizes the overflow. Texting does not send separate proactive
+  messages per item or workspace.
+- A self-contained single question omits the link. Texting adds an exact-item or workspace link when
+  that question needs more context or is too long for a reasonable SMS; every multi-item message
+  uses the unified Reviews link.
+- Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
+  texts wait until the window ends unless the person selects `any time`; direct replies to the
+  person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.
+- An actionable item is notified once and is not repeated by later maintenance runs. A reminder is
+  eligible only after the user-configurable interval, which defaults to 7 days, and only after
+  revalidation and deduplication. `Never` disables repeats without hiding the item from Reviews;
+  nohmi prefers silence over notification completeness.
+- Before the reminder interval, an unresolved item becomes notification-eligible again only when
+  its required action or the consequence of acting or not acting materially changes. Changes to
+  wording, evidence, confidence, rediscovery, or internal progress alone do not qualify; quiet
+  hours and send-time revalidation still apply.
+- SMS links require normal nohmi authentication and contain no bearer credential or action
+  authority. After sign-in, the app returns the person to the requested review destination.
+- A global review-bypass setting applies to every channel. When enabled, policy-authorized
+  reversible work may execute directly; when disabled, it enters exact review, which may be
+  approved by a bound, unexpired SMS response.
+- Bypass never widens scopes or permits missing, ambiguous, blocked, unsupported, irreversible,
+  credential, scope-changing, or recipient-changing effects.
+- Privacy-safe messages retain the entity context required to answer but omit account numbers,
+  message bodies, descriptions, and unnecessary sensitive detail unless explicit channel and
+  workspace disclosure preferences allow them.
+- Global communication defaults govern inbound routing and the shared cross-channel notification
+  policy; each workspace inherits them unless the person creates an explicit override. SMS,
+  in-app, push, email, and future channels separately control enablement, destination, interaction,
+  links, format, and medium-appropriate detail, but cannot create notification eligibility, weaken
+  quiet hours or deduplication, widen authority, or exceed the shared privacy ceiling. Workspace
+  maintenance guidance remains domain-specific and applies
+  consistently across app, API, MCP, scheduled, and SMS-initiated runs.
+
+The target product and architecture contracts are
+[`texting and SMS`](texting-operations.md) and
+[`ADR 0006`](../architecture/0006-texting-inbox.md). The current transport foundation does not yet
+ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
+
+### 6.10 Desktop overlay, widgets, notifications, and mobile
 
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
 - The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.
-- Notifications use a per-domain policy, quiet hours, time zone, device selection, escalation/reminder behavior, and source privacy. Calendar/reminder notifications respect platform permissions and are de-duplicated across devices.
+- One notification policy evaluates eligibility, urgency, quiet hours, time zone, escalation/reminder behavior, deduplication, aggregation, and source privacy across SMS, in-app, push, email, and future channels. Each channel separately controls enablement, destination/device, interaction, links, format, and medium-appropriate detail; those controls may suppress delivery but cannot create eligibility, widen authority, or exceed the shared privacy ceiling. Calendar/reminder delivery also respects platform permissions and the shared work-item identity across devices and channels.
 - PWA and native shell preserve core actions offline, visibly queue local changes, reconcile provider material on return, and show conflict/resolution UI.
 
 ## 7. Automation safety and policy engine
@@ -291,6 +461,11 @@ The Activity view filters by material, actor, source, result, date, and reversib
 - **Approve batch:** require confirmation of a bounded homogeneous set.
 - **Rule-authorized:** execute only when a user-created rule, conditions, sources, and confidence floor match.
 - **Blocked:** neither human shortcut nor agent token may perform it through that route.
+
+Global review bypass is a settlement preference, not another policy tier. It allows an otherwise
+policy-authorized reversible action to execute instead of entering review; it cannot alter scopes,
+source selection, provider capability, reversibility, evidence requirements, or a stronger
+approval boundary.
 
 Policies are evaluated by API/domain service, not by web or MCP clients. The policy decision, matching rule, and current scope are audited for every attempted action.
 
@@ -321,15 +496,21 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
 ```
 
 - Mail retention is the first domain-owned durable execution implementation: stable work identity,
-  bounded scheduler claims, lease recovery, exact provider reconciliation, terminal state, and
+  bounded worker claims, lease recovery, exact provider reconciliation, terminal state, and
   redacted audit/attention observations. Other recurring domains still require a shared durable
-  job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before
-  enabling real recurring automation.
+  job queue, worker lease/heartbeats, dead-letter handling, and run/event store before reliably
+  executing externally invoked recurring work. Those internals may continue accepted runs but do
+  not own or originate maintenance schedules.
 - Model native domain records separately and expose a typed material-link/source-reference graph above them. A link carries relation type, source reference, ownership, revision/reconciliation state, and policy/audit references; it never makes a provider record and a local note falsely interchangeable.
+- Maintain a shared User Knowledge graph above native records. Purpose-bound context assembly
+  retrieves only the facts, preferences, inferences, policy, and missing requirements needed for a
+  specific workflow; semantic indexes are rebuildable aids rather than truth.
 - Maintain provider-neutral connectors with capability discovery. Google uses incremental OAuth and Gmail write scopes only when needed; iCloud uses IMAP/CalDAV and app-specific passwords; Plaid uses Link, webhook/sync cursor, and transaction enrichment.
 - Add connector contracts for mail mutations, calendar RSVP/availability, attachments, finance transactions/rules, notification targets, and platform widgets. A capability matrix prevents unsupported controls from appearing enabled. Gmail "delete" means move to Trash unless a provider offers a separately scoped reversible behavior; permanent deletion is never implied by an archive/triage shortcut.
 - Build normalized projections with remote ID, version/etag, original timezone, raw encrypted/provider payload reference, and tombstone state. Webhooks are hints; sync is idempotent reconciliation.
-- Store agent skill templates/versioned instruction packs in the repository and product database registry. A routine records the exact version used for each run.
+- Keep coding-agent skills and host prompts as documentation and invocation aids, never as product
+  expertise or personal memory. A consequential run records its domain playbook, policy, and User
+  Knowledge revisions.
 - Streamable HTTP MCP is an OAuth 2.1 protected resource with protected-resource metadata, audience-bound tokens, incremental scopes, and server-side validation. Local stdio can use a short-lived, revocable environment credential; neither transport trusts client-supplied tool annotations or policy claims.
 - Model data classification and encryption keys per material domain; finance requires stricter export/log/context gates.
 

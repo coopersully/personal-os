@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nohmi Linear Work Sync"
+  short_description: "Sync Nohmi work and PRs to Linear"
+  default_prompt: "Use $linear-work-sync to update Linear with the current Nohmi work and any PR link."

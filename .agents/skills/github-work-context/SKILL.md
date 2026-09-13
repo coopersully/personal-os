@@ -1,12 +1,13 @@
 ---
 name: github-work-context
-description: Apply ilo's GitHub work-tracking conventions when reading or updating GitHub issues, issue relationships, labels, assignees, milestones, Projects, branches, pull requests, or delivery status.
+description: Use when explicitly inspecting, migrating, or annotating legacy nohmi GitHub issues or their pull-request relationships.
 ---
 
 # GitHub work context
 
-Use GitHub Issues as ilo's delivery graph and current repository docs as durable product and
-engineering truth.
+Use GitHub Issues only as historical or source evidence. The live `Nohmi` Linear Project is this
+repository's delivery graph, and current repository docs are durable product and engineering truth.
+Read `../linear-context/SKILL.md` before relating GitHub evidence to current work.
 
 ## Resolve live context
 
@@ -28,9 +29,9 @@ surfaces the connector does not expose, and other documented gaps.
 | --- | --- |
 | Product scope and acceptance | current files under `docs/product` |
 | Architecture and engineering rules | current files under `docs/architecture` and `docs/engineering` |
-| Independently shippable delivery work | GitHub issue |
-| Time-bound release or outcome | existing milestone, when used |
-| Optional cross-issue planning view | existing GitHub Project, when used |
+| Independently shippable delivery work | Nohmi Linear issue |
+| Time-bound release or outcome | Nohmi Linear milestone, when used |
+| Historical request or source evidence | GitHub issue |
 | Implementation and review snapshot | pull request |
 | Code evidence | branch, commit, checks, and deployed release |
 
@@ -38,6 +39,8 @@ Issue comments record material progress or decisions; they are not a second know
 
 ## Issue rules
 
+- Default to read-only. Do not create a new GitHub issue for repository delivery work; use
+  `linear-work-sync` to resolve or create the Nohmi Linear issue instead.
 - Search open and recently closed issues before creating.
 - Prefer a confident existing issue over a duplicate. Report ambiguity instead of guessing.
 - Create one issue per independently shippable concern, not per file, log line, or review comment.
@@ -56,6 +59,8 @@ Issue comments record material progress or decisions; they are not a second know
 
 ## Linking work
 
+- Link a relevant legacy GitHub issue as source evidence from the Nohmi Linear issue. It never
+  replaces the PR Work map or Linear's structured PR backlink.
 - Use `Closes #123` in a PR only when merging it fully completes the issue.
 - Use `Refs #123` when the PR is partial progress, a dependency, or contextual evidence.
 - Do not add both for the same issue.
@@ -89,10 +94,9 @@ reasoning.
 
 ## Write safety and audit
 
-Write only when the user explicitly requests GitHub work tracking or a calling skill grants a
-bounded GitHub write scope. `create-pr` grants issue coverage, linking, and material-status updates
-for that PR. `resolve-pr-comments` grants updates to issues already linked to that PR when review
-changes scope, verification, or a blocker.
+Write only when the user explicitly requests a bounded legacy GitHub issue mutation. `create-pr`,
+`catchup`, `pr-shepherd`, and `resolve-pr-comments` grant no GitHub issue writes; they synchronize
+delivery work through `linear-work-sync`.
 
 For a write run, append sanitized JSONL under `.context/github-work-sync/` with the source, issue and
 PR URLs, changes, duplicate-search result, skipped ambiguities, and tool failures. Never store

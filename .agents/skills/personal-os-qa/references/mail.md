@@ -9,11 +9,16 @@
 
 ## Populated pass
 
-1. Confirm the primary top frame contains Search mail, Sync, and Compose.
-2. Confirm Unified inbox precedes provider-account mailbox groups.
-3. Confirm the provider row keeps display name, service name, unread count, and
-   disclosure geometry separate.
-4. Confirm Inbox, Sent, Drafts, and All mail remain distinct child rows.
+1. Confirm the global app bar keeps Mail identity, Search, and Sync together at
+   the start, with the account avatar filter at the far edge. Compose is the
+   end-justified floating plus action.
+2. Confirm the sidebar contains only unified Inbox, Unread, Starred, Snoozed,
+   Sent, and Drafts destinations and can collapse to an icon-only rail.
+3. Open the account avatar filter. Confirm every account is selected by default,
+   at least one account remains selected, and changing selection filters the
+   unified list without creating provider mailbox navigation.
+4. Confirm the shared secondary app bar contains the conversation count and
+   list-density control, then adds reader actions when a conversation opens.
 5. Confirm the conversation list includes:
    - Board packet for Friday, starred, two messages, attachment;
    - Your July statement is ready;
@@ -21,10 +26,12 @@
    - Action needed: travel approval.
 6. Open Board packet for Friday. Confirm the reader retains subject, sender,
    address, timestamps, both messages, and `board-packet.pdf`.
-7. Confirm reader actions appear in the shared neutral secondary app bar and
+7. Confirm reader actions appear in the shared neutral, full-width secondary app bar and
    have accessible names. Do not execute reply, archive, trash, snooze, or send
    unless that mutation is in scope.
-8. Exercise search and unread filtering when Mail behavior changed.
+8. Exercise search, unread filtering, and Compact/Comfortable/Expanded layouts.
+   Comfortable is the default and shows sender avatars; the density choice
+   persists on the device.
 
 ## Empty and recovery passes
 
@@ -37,7 +44,7 @@
 
 ## Layout and safety
 
-- At normal width, account rail, conversation list, and reader remain separate.
+- At normal width, unified navigation, conversation list, and reader remain separate.
 - At 390 × 844, primary actions stay reachable and the reader becomes the
   focused surface instead of compressing three unreadable columns.
 - Long account identities and subjects truncate; counts remain independently

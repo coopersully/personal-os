@@ -6,9 +6,9 @@
 
 ## Brand idea
 
-**Calm agency.** nohmi makes a person's real commitments tangible and gives them
-clear control over what happens next, including work proposed or performed by an
-agent.
+**Calm agency.** nohmi is an autonomous exoskeleton that makes a person's real
+commitments, communication, time, money, and priorities tangible while keeping
+the person in clear control of work they perform or delegate.
 
 This is a working articulation of the existing product promise, not a claim
 validated by brand research. Keep it only while it continues to explain the
@@ -20,7 +20,7 @@ At any moment, nohmi shows what matters next, what is actively happening, what i
 realistically possible, and what a person or authorized agent changed or
 proposes to change.
 
-The promise has four parts:
+The promise has five parts:
 
 | Part | Experience consequence |
 | --- | --- |
@@ -28,6 +28,7 @@ The promise has four parts:
 | Judgment | The interface distinguishes what matters now from what can wait. |
 | Agency | Direct actions remain available and automation boundaries are visible. |
 | Accountability | Proposals, changes, failures, and recovery retain evidence. |
+| Ownership | The person's data, workflows, knowledge, and agent authority remain portable and controllable. |
 
 ## Character
 
@@ -64,6 +65,14 @@ not an opposite style to be eliminated at any cost.
 7. **Accessibility is product quality.** Keyboard, screen-reader, zoom,
    contrast, reduced-motion, touch, narrow layout, and cognitive clarity are
    normal acceptance conditions.
+8. **Begin with a familiar instrument.** Mail should work like a great mail
+   client, Tasks like a great task manager, Calendar like a great calendar, and
+   Finances like a great budgeting and net-worth application. Intelligence
+   should simplify those models rather than replacing them with a generic chat
+   or dashboard.
+9. **Remember transparently.** Show what nohmi learned, whether the person said
+   it or nohmi inferred it, where it came from, and which purposes may use it.
+   Correction and restriction must be easier than inspecting an internal trace.
 
 ## Voice and language
 

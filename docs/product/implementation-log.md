@@ -2,6 +2,123 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-10 — Complete target product doctrine reconciled
+
+- Reframed nohmi as a user-owned autonomous exoskeleton with four core workspaces: Mail, Tasks,
+  Calendar, and Finances; Today is their cross-workspace operating surface.
+- Defined the direct UI, API, MCP orientation, maintenance, surgical, review, settings, and recovery
+  interfaces for every workspace in [`workspaces.md`](workspaces.md).
+- Accepted the target User Knowledge model: typed and versioned personal context, purpose-bound
+  retrieval, semantic indexing, reinforcement, manual promotion, safe automatic promotion, and a
+  strict separation between knowledge and action authority.
+- Documented external scheduling as an invocation boundary: agent platforms own cadence while
+  nohmi owns the workflow, knowledge, policy, durable state, questions, recovery, and result.
+- Recorded that Tasks imports external provider commitments and becomes the authoritative working
+  workspace; bidirectional provider sync remains possible future work, and the final label for the
+  long-lived container above Projects remains unresolved.
+- This milestone changes target documentation and agent guidance only. It does not claim that User
+  Knowledge, unimplemented workspace maintenance tools, task import, or other target behavior has
+  shipped.
+
+## 2026-09-09 — Native macOS application and Mac production runtime
+
+- The macOS 14+ app supports hosted and validated custom-server sessions, Keychain credentials,
+  resident lifecycle, menu-bar and Dock behavior, launch at login, deep links, native notifications,
+  WidgetKit Tasks and Reminders surfaces, an optional desktop pet, and bounded wallpaper work.
+- Production moved from AWS application infrastructure to a dedicated Mac runtime with isolated
+  containers, internal PostgreSQL, Cloudflare Tunnel, CI-gated continuous deployment, durable
+  switching, recovery, and preserved database and encryption identity.
+- Public app, API, and MCP health plus normal unattended main deployment were verified. Offsite
+  backup and a physical host reboot remain owner-deferred operational evidence.
+
+## 2026-09-07 — Unified workspace experience
+
+- Mail, Calendar, Tasks, Finances, Today, setup, workspace switching, and common responsive states
+  were consolidated around shared product interaction patterns.
+- This shipped UI consolidation does not imply that every target workspace steward or maintenance
+  workflow is complete.
+
+## 2026-09-01 — Task organization foundation
+
+- Tasks now has one protected Inbox, Lists, finite Projects, independently completable Tasks,
+  revision-safe movement, lifecycle, planning fields, archive, and recoverable Trash behavior.
+- API, typed client, web, MCP, audit, migration, and desktop/mobile acceptance coverage use the same
+  canonical records.
+- External task import, recurrence, durable maintenance, questions, learning, health, and review
+  artifacts remain target work.
+
+## 2026-09-01 — Finance playbook and budget buckets
+
+- Finance gained a versioned server-owned expert playbook with source lineage, explicit
+  uncertainty, and a hierarchy spanning cash-flow stability, reserves, obligations, debt,
+  retirement, diversified investing, and a sustainable life.
+- Budget buckets provide stable planning identities across plan revisions while preserving exact
+  allocations and evidence.
+
+## 2026-08-31 — Receipt-aware merchant review
+
+- Ambiguous merchant review can perform an opt-in, bounded Mail evidence lookup for one Finance
+  transaction without returning message bodies.
+- Missing, partial, conflicting, disabled, or degraded evidence becomes a focused question rather
+  than an invented categorization or merchant rule.
+
+## 2026-08-30 — Agent texting lifecycle
+
+- Account-linked agent texting supports verified US and Canadian numbers through one shared Twilio
+  sender, encrypted phone identity, bounded conversation reads, revision-bound sends, delivery
+  state, and authoritative provider opt-out behavior.
+- Verification, consent ordering, duplicate callbacks, pagination, phone reassignment, uncertain
+  sends, and webhook bounds have durable recovery and test coverage; real carrier and production
+  callback behavior remain external operational dependencies.
+
+## 2026-08-29 — Unified Mail and human-confirmed compose
+
+- Made the combined Inbox the direct default, added unified Unread, Starred, Snoozed, Sent, and
+  Drafts destinations, and moved individual provider mailboxes behind a collapsed Accounts control.
+- Kept cached conversations usable while placing reconnect state directly above the message list.
+- Added an end-justified floating plain-text composer, Reply and Forward entry points, durable
+  autosave, exact-revision confirmation, and a Drafts recovery surface for uncertain delivery.
+- Restored explicit Google `gmail.send` and bounded iCloud STARTTLS SMTP delivery with matching
+  production egress. Provider ambiguity is never automatically retried.
+- Kept delivery human-only: no MCP or autonomous stewardship send capability was added.
+
+## 2026-08-25 — Mail workspace stewardship
+
+- Added the owner-scoped Mail stewardship ledger for obligations, versioned dispositions,
+  deduplicated questions, explicit rule proposals, durable feedback, and immutable reviews.
+- Added `mail-playbook-v1` with six bounded professional roles, a renewable research registry,
+  explicit authority tiers, a deterministic assessment engine, and status that reports Clean,
+  Needs work, Needs your input, or Blocked without inferring intent from message prose.
+- Added a recoverable seven-step maintenance turn on the shared lease/checkpoint substrate. The
+  domain/API owns snapshots, assessment, reconciliation, approved-rule dispatch, review
+  publication, verification, retry, and settlement; no external client automation was added.
+- Added first-party status, maintenance, exact-thread surgical operations, learning feedback, and
+  private response-brief APIs plus a typed client. Response briefs are permanently
+  `transmittable: false`.
+- Added the `/mail/review` workspace and exact-thread ledger controls, including immutable review
+  evidence and honest revision-conflict refresh. The UI has no recipient/body composition,
+  copy-to-send, `mailto:`, reply, forward, or send action.
+- Added only two complete-workspace MCP intents—`get_mail_status` and `maintain_mail`. MCP remains a
+  stateless one-call intent surface and owns no playbook, maintenance loop, retry, approval,
+  learning, or completion judgment.
+- Shared Integration changes were kept separate: owner-fenced connector rule-work dispatch,
+  application route/navigation composition, deterministic QA states, and redacted Mail
+  question/blocker projection into Today-owned Reviews. Shared Reviews never owns Mail mutation.
+- At the time of this slice, Mail transmission was unavailable. This boundary was superseded by
+  the 2026-08-29 human-confirmed compose slice; autonomous and MCP transmission remain unavailable.
+
+## 2026-08-25 — Mail no-send boundary
+
+- Removed Gmail send authority, iCloud SMTP delivery, application TCP 587 egress, and every typed
+  client, MCP, and web compose/send affordance. This historical contraction was superseded for the
+  signed-in human Mail surface on 2026-08-29; the MCP boundary remains in force.
+- Retained an authenticated compatibility window for historical Ilo drafts: owners can list,
+  export locally, or permanently delete them, while former mutation endpoints return a permanent
+  `410 feature_unavailable` response.
+- This contraction establishes the safety boundary for the approved Mail steward design; it does
+  not claim that the stewardship ledger, maintenance turn, learning loop, or review artifact have
+  shipped.
+
 ## 2026-08-27 — Trustworthy Finance account semantics
 
 - Persisted provider account evidence separately from user-owned kind, planning inclusion, and

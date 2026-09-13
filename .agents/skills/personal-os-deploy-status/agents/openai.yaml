@@ -1,0 +1,4 @@
+interface:
+  display_name: "nohmi Deploy Status"
+  short_description: "Check nohmi production deployment and health."
+  default_prompt: "Use $personal-os-deploy-status to verify whether the latest nohmi release is healthy and live."

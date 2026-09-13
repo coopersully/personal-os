@@ -2,12 +2,37 @@
 
 ## Repository Purpose
 
-This repository is the nohmi monorepo and also stores personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
+This repository is the `personal-os` monorepo for the user-facing product `nohmi`; it also stores
+personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
 
 ## Product Spelling
 
-- The current product name is `nohmi`, always lowercase, including at the start of a sentence.
-- Never spell the product `nomi`, `Nomi`, or `Nohmi`. Preserve `ilo` only in compatibility identifiers, historical references, and existing tool or protocol names that have not been migrated.
+- The internal repository, package, and infrastructure name is `personal-os`.
+- The user-facing product name is `nohmi`, always lowercase, including at the start of a sentence.
+- Do not introduce former product names in paths, prose, protocol identifiers, examples, fixtures,
+  or agent guidance. The target contains none; remaining current runtime identifiers require an
+  explicit hard-cutover migration rather than new compatibility aliases.
+
+## Product Documentation
+
+- Treat `docs/product/master-design.md`, `docs/product/workspaces.md`,
+  `docs/product/workspace-stewardship.md`, and `docs/product/user-knowledge.md` as the canonical
+  target product contract.
+- Treat `docs/product/implementation-log.md`, code, migrations, tests, and production evidence as
+  the authority for what is currently shipped.
+- When a product conversation settles a durable decision, update the nearest canonical document in
+  the same documentation change and keep target scope separate from implementation claims.
+
+## Linear Routing
+
+- This repository belongs exclusively to the `Nohmi` Project in the Cooper Sullivan Linear workspace.
+- Any Linear issue created from this repository, its branches, commits, pull requests, docs, or task history must be created directly in the live `Nohmi` Project. Repository-derived updates may target only issues already assigned to that Project.
+- Never route repository work to `Cooper Sullivan Games`, `Notepad++ for Mac`, `Portfolio`, `Upper Thought`, another Project, or no Project.
+- Resolve the unique live `Nohmi` Project identifier before every write. If it is missing or ambiguous, fail closed: make no Linear mutation and report the configuration gap.
+- Do not use Linear's `{TEAM}-NEW` GitHub magic-word flow from this repository because the shared team key does not encode product identity. Create and validate the Nohmi issue first, then link only that existing issue ID in a branch or pull request.
+- Before opening or materially refining a pull request, use the repository `create-pr` workflow. Resolve or create the direct Nohmi issue before PR creation, include the required Work map in the PR body, then add the resulting PR as a structured link on every direct Linear issue.
+- An open PR keeps its direct issues `In Progress` unless live Linear metadata exposes a compatible review status. The PR title, body, branch, Linear links, status, and audit record must agree before handoff.
+- Workspace-wide read-only portfolio questions are allowed, but repository-scoped skills and automations must filter their issue results to the `Nohmi` Project.
 
 ## Codex Local Environment
 

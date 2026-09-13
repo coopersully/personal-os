@@ -222,6 +222,7 @@ export const calendarEventBlockSchema = z.object({
   eventId: idSchema,
   mode: eventBlockModeSchema,
   provider: calendarProviderSchema,
+  sourceEventId: idSchema.optional(),
   updatedAt: isoDateTimeSchema,
 });
 export type CalendarEventBlock = z.infer<typeof calendarEventBlockSchema>;
@@ -236,6 +237,7 @@ export const calendarEventSchema = eventFieldsSchema
     blockMode: eventBlockModeSchema.nullable().default(null),
     blocks: z.array(calendarEventBlockSchema).default([]),
     remoteEventId: z.string().nullable(),
+    sourceCalendarIds: z.array(idSchema).min(1).optional(),
     source: materialSourceReferenceSchema.optional(),
     status: calendarEventStatusSchema,
     recurrence: z.array(z.string()),

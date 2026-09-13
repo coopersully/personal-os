@@ -1,6 +1,6 @@
 ---
 name: catchup
-description: Update an ilo branch from its pull request base, make a PR current, inspect upstream changes, resolve conflicts, adapt branch assumptions, verify, commit, and push safely. Use for catch-up, stale-branch, base-sync, rebase, merge-main, or conflict-resolution requests.
+description: Use when updating a nohmi branch from its pull request base, resolving merge conflicts, merging main, or making a published PR current.
 ---
 
 # Catch up branch
@@ -18,21 +18,27 @@ Treat base synchronization as engineering work, not a mechanical Git operation.
 
 ## Workflow
 
-1. Run `git status -sb`; resolve branch, upstream, PR URL, base, draft state, and head SHA.
-2. Fetch the base. Inspect incoming commits, paths, and diff before integration.
-3. Identify overlap in files, domains, public contracts, helpers, dependencies, migrations, tests,
+1. Read `AGENTS.md`, `docs/engineering/pr-rubric.md`, `docs/engineering/work-context.md`,
+   `../linear-context/SKILL.md`, and `../linear-work-sync/SKILL.md` for a published PR.
+2. Run `git status -sb`; resolve branch, upstream, PR URL, base, draft state, and head SHA.
+3. Fetch the base. Inspect incoming commits, paths, and diff before integration.
+4. Identify overlap in files, domains, public contracts, helpers, dependencies, migrations, tests,
    current docs, and composition roots.
-4. Rebase or merge using the safety rule above.
-5. Resolve conflicts by preserving both intents when compatible and adopting newer authoritative
+5. Rebase or merge using the safety rule above.
+6. Resolve conflicts by preserving both intents when compatible and adopting newer authoritative
    contracts/helpers where they supersede branch assumptions. Stop for ambiguous product,
    architecture, migration, or security decisions.
-6. Search for conflict markers and inspect semantic overlap even in automatically merged files.
-7. Update branch code, tests, and current docs when upstream invalidated an assumption.
-8. Run focused checks, `git diff --check`, then `pnpm verify`.
-9. Commit a merge when Git did not create one automatically; do not create an empty catch-up commit.
-10. Push without force, then re-read PR mergeability, head SHA, and checks.
+7. Search for conflict markers and inspect semantic overlap even in automatically merged files.
+8. Update branch code, tests, and current docs when upstream invalidated an assumption.
+9. Run focused checks, `git diff --check`, then `pnpm verify`.
+10. Commit a merge when Git did not create one automatically; do not create an empty catch-up commit.
+11. Push without force, then re-read PR mergeability, head SHA, and checks.
+12. For a published PR, use the `create-pr` reconciliation phase to refresh the Work map and invoke
+    `linear-work-sync` for structured backlink/status repair. The conflict-resolution request grants
+    only those PR-scoped Linear writes unless the user explicitly skips Linear.
 
 ## Output
 
 Use the PR workflow output contract. Include source/base, integration strategy, incoming changes,
-conflicts and resolutions, branch adaptations, commit/push state, exact verification, and blockers.
+conflicts and resolutions, branch adaptations, commit/push state, exact verification, Nohmi Linear
+issue/backlink state, audit path, and blockers.

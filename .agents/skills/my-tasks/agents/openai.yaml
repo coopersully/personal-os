@@ -1,0 +1,4 @@
+interface:
+  display_name: "My Nohmi Tasks"
+  short_description: "Review assigned Nohmi Linear issues"
+  default_prompt: "Use $my-tasks to show my current assigned Nohmi Linear issues."

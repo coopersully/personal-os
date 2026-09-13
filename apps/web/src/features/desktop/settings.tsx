@@ -3,8 +3,14 @@ import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { api, errorMessage } from "../../api.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
+import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "../../components/ui/collapsible.js";
 import {
   Field,
   FieldDescription,
@@ -14,6 +20,14 @@ import {
   FieldSet,
 } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "../../components/ui/item.js";
 import { Switch } from "../../components/ui/switch.js";
 import {
   type DesktopSettings,
@@ -60,10 +74,14 @@ export function DesktopSettingsPanel({
   });
   const [draft, setDraft] = useState<DesktopSettings | null>(null);
   const [tested, setTested] = useState<string | null>(null);
+  const [advancedServerOpen, setAdvancedServerOpen] = useState(false);
   useEffect(() => {
     if (query.data && query.isFetchedAfterMount)
       setDraft((current) => current ?? query.data.settings);
   }, [query.data, query.isFetchedAfterMount]);
+  useEffect(() => {
+    if (query.data && query.data.settings.serverUrl !== hostedServer) setAdvancedServerOpen(true);
+  }, [query.data]);
   const save = useMutation({
     mutationFn: saveDesktopSettings,
     onSuccess: async (value) => {
@@ -120,6 +138,7 @@ export function DesktopSettingsPanel({
     );
   if (!draft) return null;
   const update = (value: Partial<DesktopSettings>) => setDraft({ ...draft, ...value });
+  const usesHostedServer = draft.serverUrl === hostedServer;
   const notification = (value: Partial<DesktopSettings["notifications"]>) =>
     update({ notifications: { ...draft.notifications, ...value } });
   const failure = save.error ?? test.error ?? action.error;
@@ -168,44 +187,81 @@ export function DesktopSettingsPanel({
       >
         {section === "desktop" ? (
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="desktop-server">API server</FieldLabel>
-              <Input
-                id="desktop-server"
-                value={draft.serverUrl}
-                onChange={(event) => {
-                  update({ serverUrl: event.target.value });
-                  setTested(null);
-                }}
-                type="url"
-                required
-              />
-              <FieldDescription>
-                Use Hosted nohmi or the HTTPS address of your own nohmi API. Switching servers signs
-                you out.
-              </FieldDescription>
-            </Field>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  update({ serverUrl: hostedServer });
-                  setTested(null);
-                }}
-              >
-                Use Hosted nohmi
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={test.isPending}
-                onClick={() => test.mutate(draft.serverUrl)}
-              >
-                {test.isPending ? "Testing…" : "Test connection"}
-              </Button>
-            </div>
-            {tested === draft.serverUrl ? <p role="status">Connection verified</p> : null}
+            <ItemGroup>
+              <Item variant="muted">
+                <ItemContent>
+                  <ItemTitle>
+                    Hosted nohmi <Badge variant="secondary">Recommended</Badge>
+                  </ItemTitle>
+                  <ItemDescription>nohmi-api.coopersully.me</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  {usesHostedServer ? (
+                    <Badge variant="secondary">Selected</Badge>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        update({ serverUrl: hostedServer });
+                        setTested(null);
+                      }}
+                    >
+                      Use hosted nohmi
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={test.isPending}
+                    onClick={() => test.mutate(hostedServer)}
+                  >
+                    {test.isPending ? "Testing hosted…" : "Test hosted connection"}
+                  </Button>
+                </ItemActions>
+              </Item>
+            </ItemGroup>
+            {tested === hostedServer ? <p role="status">Hosted connection verified</p> : null}
+            <Collapsible open={advancedServerOpen} onOpenChange={setAdvancedServerOpen}>
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" aria-expanded={advancedServerOpen}>
+                  Advanced server settings
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-3">
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="desktop-server">Custom API server</FieldLabel>
+                    <Input
+                      id="desktop-server"
+                      value={usesHostedServer ? "" : draft.serverUrl}
+                      onChange={(event) => {
+                        update({ serverUrl: event.target.value });
+                        setTested(null);
+                      }}
+                      placeholder="https://nohmi-api.example.com"
+                      type="url"
+                      required={!usesHostedServer}
+                    />
+                    <FieldDescription>
+                      Use the HTTPS origin of a self-hosted nohmi API. Switching servers signs you
+                      out.
+                    </FieldDescription>
+                  </Field>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={test.isPending || usesHostedServer || !draft.serverUrl}
+                    onClick={() => test.mutate(draft.serverUrl)}
+                  >
+                    {test.isPending ? "Testing…" : "Test connection"}
+                  </Button>
+                  {tested === draft.serverUrl && !usesHostedServer ? (
+                    <p role="status">Connection verified</p>
+                  ) : null}
+                </FieldGroup>
+              </CollapsibleContent>
+            </Collapsible>
             {!connectionOnly ? (
               <>
                 <Toggle

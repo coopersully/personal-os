@@ -131,6 +131,16 @@ describe("desktop preferences", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
+  it("promotes hosted nohmi and keeps custom server controls in an advanced disclosure", async () => {
+    mount({ connectionOnly: true });
+    expect(await screen.findByText("Recommended")).toBeInTheDocument();
+    expect(screen.getByText("nohmi-api.coopersully.me")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Custom API server")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
+    expect(screen.getByLabelText("Custom API server")).toHaveValue("");
+  });
+
   it("refreshes fresh cached settings on remount before showing the current server controls", async () => {
     const cache = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 15_000 } },
@@ -141,7 +151,7 @@ describe("desktop preferences", () => {
       </QueryClientProvider>
     );
     const first = render(panel);
-    expect(await screen.findByLabelText("API server")).toHaveValue(hostedServer);
+    expect(await screen.findByText("Recommended")).toBeInTheDocument();
     first.unmount();
 
     const refresh = deferred<DesktopStatus>();
@@ -152,7 +162,7 @@ describe("desktop preferences", () => {
         mocks.invoke.mock.calls.filter(([command]) => command === "desktop_settings"),
       ).toHaveLength(2),
     );
-    expect(screen.queryByLabelText("API server")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
 
     await act(async () =>
       refresh.resolve({
@@ -160,7 +170,7 @@ describe("desktop preferences", () => {
         settings: { ...settings, serverUrl: "https://current-account.example.com" },
       }),
     );
-    expect(await screen.findByLabelText("API server")).toHaveValue(
+    expect(await screen.findByLabelText("Custom API server")).toHaveValue(
       "https://current-account.example.com",
     );
     expect(screen.getByRole("button", { name: "Test connection" })).toBeEnabled();
@@ -171,7 +181,9 @@ describe("desktop preferences", () => {
 
   it("allows custom server testing and switching before login without authenticated queries", async () => {
     const { cache } = mount({ connectionOnly: true });
-    const server = await screen.findByLabelText("API server");
+    await screen.findByText("Recommended");
+    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
+    const server = screen.getByLabelText("Custom API server");
     cache.setQueryData(["private"], "previous account");
     expect(screen.queryByRole("switch", { name: "Open at login" })).not.toBeInTheDocument();
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
@@ -190,20 +202,22 @@ describe("desktop preferences", () => {
 
   it("invalidates the connection test when the address changes or Hosted nohmi is selected", async () => {
     mount({ connectionOnly: true });
-    const server = await screen.findByLabelText("API server");
+    await screen.findByText("Recommended");
+    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
+    const server = screen.getByLabelText("Custom API server");
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
     await screen.findByText("Connection verified");
     fireEvent.change(server, { target: { value: "https://other.example.com" } });
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Use Hosted nohmi" }));
-    expect(server).toHaveValue(hostedServer);
+    await userEvent.click(screen.getByRole("button", { name: "Use hosted nohmi" }));
+    expect(server).toHaveValue("");
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
   });
 
   it("saves login and widget choices independently from pet and notification settings", async () => {
     mount();
-    await screen.findByLabelText("API server");
+    await screen.findByText("Recommended");
     expect(screen.getByText("Login item: notRegistered")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("switch", { name: "Open at login" }));
     const finance = document.getElementById("widget-finances");
@@ -324,7 +338,7 @@ describe("desktop preferences", () => {
     mount();
     expect(await screen.findByText("Keychain unavailable")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByLabelText("API server")).toHaveValue(hostedServer);
+    expect(await screen.findByText("Recommended")).toBeInTheDocument();
   });
 
   it("shows actual native limitations alongside widget availability", async () => {
@@ -344,11 +358,11 @@ describe("desktop preferences", () => {
 
   it("shows connection progress and a failed test without verifying or saving it", async () => {
     mount({ connectionOnly: true });
-    await screen.findByLabelText("API server");
+    await screen.findByText("Recommended");
     const test = deferred<never>();
     mocks.invoke.mockReturnValueOnce(test.promise);
-    await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
-    expect(screen.getByRole("button", { name: "Testing…" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Test hosted connection" }));
+    expect(screen.getByRole("button", { name: "Testing hosted…" })).toBeDisabled();
     await act(async () => test.reject(new Error("This is a website, not a nohmi API")));
     expect(await screen.findByText("This is a website, not a nohmi API")).toBeInTheDocument();
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
@@ -357,7 +371,7 @@ describe("desktop preferences", () => {
 
   it("prevents duplicate saves while the native write is pending", async () => {
     mount();
-    await screen.findByLabelText("API server");
+    await screen.findByText("Recommended");
     const write = deferred<DesktopStatus>();
     mocks.invoke.mockReturnValueOnce(write.promise);
     await userEvent.click(screen.getByRole("button", { name: "Save preferences" }));

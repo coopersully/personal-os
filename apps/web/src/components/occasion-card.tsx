@@ -31,7 +31,7 @@ function OccasionCard({
   return (
     <Item
       asChild
-      className="occasion-card"
+      className="occasion-card min-w-0 max-w-full overflow-hidden [contain:inline-size]"
       size="sm"
       style={{ "--occasion-color": accentColor } as CSSProperties}
       variant="muted"
@@ -45,10 +45,10 @@ function OccasionCard({
         onClick={onOpen}
         type="button"
       >
-        <ItemContent>
-          <ItemHeader>
-            <ItemTitle>
-              <span className="truncate">{title}</span>
+        <ItemContent className="min-w-0 overflow-hidden">
+          <ItemHeader className="min-w-0 overflow-hidden">
+            <ItemTitle className="min-w-0 w-full overflow-hidden">
+              <span className="min-w-0 max-w-full flex-1 truncate">{title}</span>
             </ItemTitle>
             {aside ? <ItemActions>{aside}</ItemActions> : null}
           </ItemHeader>

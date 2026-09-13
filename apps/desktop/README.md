@@ -4,7 +4,7 @@ The desktop app bundles the React interface with a resident Tauri/Rust process a
 
 ## Connection and daily use
 
-Release builds start with `https://api.ilo.coopersully.me`. Settings → Desktop supports a custom HTTPS API origin; HTTP is permitted only for loopback development. The same server controls are available before sign-in and when the selected API is unavailable. Test connection checks the actual nohmi authentication response.
+Release builds start with the hosted API at `https://nohmi-api.coopersully.me`. Settings → Desktop presents hosted nohmi as the recommended default and keeps custom HTTPS API origins under Advanced server settings; HTTP is permitted only for loopback development. Existing installations using the retired hosted origin migrate to the current origin. The same controls are available before sign-in and when the selected API is unavailable. Test connection checks the actual nohmi authentication response.
 
 Requests use the selected origin through native HTTP. Session credentials stay in Keychain; redirects never forward them. Switching servers requires a fresh sign-in and clears the previous account's ambient data. Pet, widget and notification preferences are saved per installation, server and account. Login registration is an installation preference.
 

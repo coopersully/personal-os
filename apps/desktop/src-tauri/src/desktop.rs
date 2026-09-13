@@ -6,7 +6,8 @@ use std::{
 use tauri::{Emitter, Manager};
 use tokio::sync::{watch, Mutex, Notify};
 
-pub const HOSTED_SERVER: &str = "https://api.ilo.coopersully.me";
+pub const HOSTED_SERVER: &str = "https://nohmi-api.coopersully.me";
+const LEGACY_HOSTED_SERVER: &str = "https://api.ilo.coopersully.me";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
@@ -113,6 +114,13 @@ impl DesktopSettings {
         Ok(())
     }
 }
+fn migrate_legacy_hosted_server(settings: &mut DesktopSettings) -> bool {
+    if settings.server_url != LEGACY_HOSTED_SERVER {
+        return false;
+    }
+    settings.server_url = HOSTED_SERVER.into();
+    true
+}
 pub fn canonical_server(input: &str) -> Result<String, String> {
     let url = url::Url::parse(input.trim()).map_err(|_| "Enter a valid API server URL.")?;
     let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -157,7 +165,8 @@ impl DesktopState {
         let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let settings_path = dir.join("desktop.json");
-        let mut settings = if settings_path.exists() {
+        let settings_exist = settings_path.exists();
+        let mut settings = if settings_exist {
             serde_json::from_slice::<DesktopSettings>(
                 &std::fs::read(&settings_path).map_err(|e| e.to_string())?,
             )
@@ -165,12 +174,22 @@ impl DesktopState {
         } else {
             DesktopSettings::default()
         };
-        if cfg!(debug_assertions) && !settings_path.exists() {
+        if cfg!(debug_assertions) && !settings_exist {
             settings.server_url = option_env!("VITE_API_BASE_URL")
                 .unwrap_or("http://localhost:8787")
                 .into();
         }
+        let migrated = migrate_legacy_hosted_server(&mut settings);
         settings.validate()?;
+        if migrated {
+            let temporary = settings_path.with_extension("tmp");
+            std::fs::write(
+                &temporary,
+                serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            std::fs::rename(temporary, &settings_path).map_err(|e| e.to_string())?;
+        }
         Ok(Self {
             settings: Mutex::new(settings),
             settings_path,
@@ -326,6 +345,14 @@ mod tests {
     use super::*;
     #[test]
     fn server_origins_are_canonical_and_transport_safe() {
+        assert_eq!(
+            DesktopSettings::default().server_url,
+            "https://nohmi-api.coopersully.me"
+        );
+        let mut legacy = DesktopSettings::default();
+        legacy.server_url = "https://api.ilo.coopersully.me".into();
+        assert!(migrate_legacy_hosted_server(&mut legacy));
+        assert_eq!(legacy.server_url, "https://nohmi-api.coopersully.me");
         assert_eq!(
             canonical_server("https://EXAMPLE.com:443/").unwrap(),
             "https://example.com"

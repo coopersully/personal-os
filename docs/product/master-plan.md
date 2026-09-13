@@ -258,6 +258,9 @@ flowchart TD
 
 ### Epic 9 — Finance platform, Plaid, budgets, and review queue
 
+The [Finance workspace plan](finance-workspace-plan.md) consolidates the current review branch,
+agreed autonomy boundaries, proposed parallel ownership and decisions still under discussion.
+
 **Implement**
 
 - Add Plaid Link, encrypted access credential handling, webhooks/Transactions sync, source/account selection, data freshness, connection repair, duplicate detection, manual accounts/transactions, data deletion/export. Keep manual, CSV, and OFX imports as first-class no-connector paths; show connector freshness and applicable production-cost state rather than implying that Plaid is free or universally available.

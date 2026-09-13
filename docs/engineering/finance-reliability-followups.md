@@ -29,6 +29,10 @@ Inbox payloads for large histories, and whole-workspace questions or approvals t
 in legacy surfaces. The current list intentionally counts canonical Inbox cases, not every overlapping
 diagnostic or approval as a separate issue.
 
+The consolidated [Finance workspace plan](../product/finance-workspace-plan.md) owns the agreed
+constraints, proposed architecture, delivery lanes and open product decisions. This file retains
+investigation findings and acceptance evidence.
+
 ## Ahead-of-time notes and wallet reimbursements
 
 This is a proposed extension, not shipped functionality. The existing reimbursement create contract
@@ -52,35 +56,26 @@ before a charge exists, or a reimbursement whose amount is not yet known.
 
 ## Venmo connection path
 
-As researched on 2026-09-09, Venmo documents personal-account CSV statements in Settings → Statements
-and on the website. PayPal's published API catalog describes Transaction Search for PayPal accounts
-and Venmo payouts; it does not establish a personal Venmo history API. A live connector therefore
-remains unverified. Start with the supported statement path, preserving a future connector boundary.
+The user clarified that a Venmo-specific integration is worthwhile only if connecting an account
+provides automatic ongoing access to individual transactions. The earlier CSV-first recommendation
+is superseded. Do not implement a Venmo upload workflow or manual-import fallback for this work.
+Generic manual/import paths in the broader product plan remain separate.
+
+As researched on 2026-09-09, Venmo documents personal-account CSV statements, while PayPal's public
+API catalog does not establish a personal Venmo history API. These facts do not prove a supported
+automatic feed exists. A bounded feasibility investigation must establish authorized ongoing access,
+coverage, identity, freshness, refresh/revocation and recovery before connector implementation.
+An unsupported capability is a valid stop outcome, not a reason to ship a manual substitute.
 
 Sources: [Venmo transaction history](https://help.venmo.com/cs/articles/transaction-history-vhel281)
 and [PayPal API catalog](https://developer.paypal.com/api/rest/current-resources/).
 
-The existing `apps/api/src/finance-csv.ts` supports a Venmo provider identifier, but currently assumes
-the first nonempty row is the header, uses a generic amount-sign direction rule, and selects From
-before To regardless of direction. It does not explicitly model wallet cash-outs, fees, status or
-balance reconciliation. Validate against an actual exported statement before importing live data.
-
-Required integration behavior:
-
-1. Maintain a separate Venmo wallet account. Individual incoming payments can be reimbursements;
-   a cash-out to a bank is a transfer. Never count both as income or reimbursements.
-2. Preview parsed rows, currency, signs, counterparties, payment notes, status and fees. Reject
-   unsupported formats visibly. Preserve provider IDs and raw evidence; retry imports idempotently.
-3. Reconcile wallet opening balance plus inflows minus outflows to closing balance. A cash-out may
-   draw on earlier balances, so do not force its amount to equal a nearby group of payments.
-4. Match the two cash-out legs independently from payment-to-expense reimbursement allocations.
-   Handle many-to-many and partial matches, reversals, duplicates and any separately evidenced fee.
-5. Display connection mode and statement coverage/freshness. Email receipts can supplement evidence
-   but do not establish a complete wallet ledger. Require verified provider access before promising
-   continuous sync.
-
-Verification should include pre-event notes with unknown amounts, edits racing maintenance, multiple
-payers and expenses, cash-outs spanning statement periods, repeated imports and tenant isolation.
+If automatic access is established, model individual payments in a separate wallet ledger and
+cash-outs as transfers; preserve provider identity, reconcile balances, and prevent double counting.
+Multiple payments may reimburse multiple expenses and a cash-out can include older wallet balances.
+The existing generic CSV parser is not evidence that these economic semantics or automatic access
+are supported. Its header, direction, counterparty and transfer assumptions remain investigation
+findings, not an approved Venmo implementation path.
 
 An additional MCP inconsistency surfaced: `update_finance_transaction` advertises note correction to
 agents, but production rejects it as requiring an interactive user session. The supported review

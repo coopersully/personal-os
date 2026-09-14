@@ -360,6 +360,22 @@ it("keeps saved notes inspectable when no unanswered question remains", async ()
   expect(screen.queryByText("No open Inbox questions")).not.toBeInTheDocument();
 });
 
+it("keeps legacy clarification evidence inspectable as a saved note", async () => {
+  const data = response([
+    {
+      ...review(),
+      prompt: "Where did this money go?",
+      evidence: { clarification: "A legacy savings transfer note" },
+    },
+  ]);
+  delete data.communication.nextQuestion;
+  data.outcome = "work_remaining";
+  api.getFinanceInbox.mockResolvedValue(data);
+  mount();
+  expect(await screen.findByText("Note saved · awaiting maintenance")).toBeVisible();
+  expect(screen.getByText("A legacy savings transfer note")).toBeVisible();
+});
+
 it("lets the user choose a later case using its own server-authored question", async () => {
   const later = {
     ...review(nextId),

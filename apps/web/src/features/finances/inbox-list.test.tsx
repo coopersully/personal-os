@@ -102,12 +102,13 @@ it("keeps a compact list, includes deferred and noted items, and reveals all on 
   Object.assign(items[2] ?? {}, {
     resolution: { type: "clarify", clarification: "A weekly transfer" },
   });
+  Object.assign(items[3] ?? {}, { evidence: { clarification: "Legacy saved note" } });
   Object.assign(items[6] ?? {}, { status: "resolved" });
   mount(items);
   expect(screen.getByText("Outstanding (6)")).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: /Review Merchant/ })).toHaveLength(5);
   expect(screen.getByText("Deferred")).toBeInTheDocument();
-  expect(screen.getByText("Note saved · awaiting maintenance")).toBeInTheDocument();
+  expect(screen.getAllByText("Note saved · awaiting maintenance")).toHaveLength(2);
   await userEvent.click(screen.getByRole("button", { name: "Show all 6" }));
   expect(screen.getAllByRole("button", { name: /Review Merchant/ })).toHaveLength(6);
   await userEvent.click(screen.getByRole("button", { name: "Show fewer" }));

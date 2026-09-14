@@ -141,6 +141,25 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       const category = rule ? categoryByName.get(rule.category) : undefined;
       if (!rule || !category) continue;
       await db.transaction(async (tx) => {
+        const activeReviews = await tx
+          .select()
+          .from(financeReviewCases)
+          .where(
+            and(
+              eq(financeReviewCases.userId, userId),
+              eq(financeReviewCases.transactionId, transaction.id),
+              inArray(financeReviewCases.status, ["open", "deferred"]),
+            ),
+          )
+          .for("update");
+        if (
+          activeReviews.some(
+            (review) =>
+              review.resolution?.type === "clarify" ||
+              typeof review.evidence.clarification === "string",
+          )
+        )
+          return;
         const version = await nextFinanceTransactionRevision(tx, transaction.id);
         await tx.insert(financeTransactionRevisions).values({
           changes: { category: { after: category.name, before: transaction.category } },

@@ -19,6 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { formatMoney } from "./format.js";
+import { savedClarification } from "./review-note.js";
 import { ReviewQuestion } from "./review-page.js";
 
 export function FinanceInboxList({ result }: { result: FinanceToolResult<FinanceInboxCase[]> }) {
@@ -51,7 +52,7 @@ export function FinanceInboxList({ result }: { result: FinanceToolResult<Finance
                   : "Open for available source details"}
               </ItemDescription>
               <ItemDescription>{item.reason?.replaceAll("_", " ")}</ItemDescription>
-              {item.resolution?.type === "clarify" ? (
+              {savedClarification(item) ? (
                 <Badge variant="secondary">Note saved · awaiting maintenance</Badge>
               ) : item.status === "deferred" ? (
                 <Badge variant="outline">Deferred</Badge>

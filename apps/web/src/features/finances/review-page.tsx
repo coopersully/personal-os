@@ -24,6 +24,7 @@ import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { savedClarification } from "./review-note.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 
 const inboxKey = ["finance-inbox"];
@@ -278,6 +279,7 @@ export function ReviewQuestion({
     (resolutionType === "link_transactions" &&
       (!idSchema.safeParse(relatedTransactionId).success || relatedTransactionId === primaryId));
   const answerLimit = resolutionType === "classify_transaction" ? 500 : 1000;
+  const clarification = savedClarification(review);
   const invalidAnswer =
     (resolutionType !== "classify_transaction" && !answer.trim()) ||
     answer.trim().length > answerLimit;
@@ -325,16 +327,13 @@ export function ReviewQuestion({
             · {review.context.pending ? "Pending" : "Posted"}
           </p>
         ) : null}
-        {review.resolution?.type === "clarify" &&
-        typeof review.resolution.clarification === "string" ? (
+        {clarification ? (
           <Alert>
             <AlertTitle>Note saved · awaiting maintenance</AlertTitle>
-            <AlertDescription>{review.resolution.clarification}</AlertDescription>
+            <AlertDescription>{clarification}</AlertDescription>
           </Alert>
         ) : null}
-        {(
-          ["merchant", "date", "questionReason", "rationale", "summary", "clarification"] as const
-        ).map((key) =>
+        {(["merchant", "date", "questionReason", "rationale", "summary"] as const).map((key) =>
           typeof review.evidence[key] === "string" ? (
             <p className="text-sm" key={key}>
               {review.evidence[key]}

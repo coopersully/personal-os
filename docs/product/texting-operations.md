@@ -222,8 +222,8 @@ The minimum complete journey is:
    review under a durable Finance identity also visible in unified Reviews.
 2. Finance publishes a typed notification intent. Shared policy and Texting validate consent,
    apply privacy, quiet hours and reminder suppression, and send a concise contextual question.
-3. A signed inbound reply is durably claimed and bound to the current question and outbound
-   revision. Free-form facts remain user-authored context; ambiguous answers produce clarification
+3. A provider-authenticated inbound webhook is durably claimed, associated with the verified user's
+   Texting identity, and bound to the current question and outbound revision. Free-form facts remain user-authored context; ambiguous answers produce clarification
    rather than a guessed classification or approval. New prospective context can exist without a
    transaction. General requests outside the delivered slice receive an honest response.
 4. Texting acknowledges accepted context promptly and routes it to Finance. An acknowledgment does

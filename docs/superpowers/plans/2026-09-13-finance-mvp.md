@@ -443,7 +443,7 @@ No user's actual transactions or phone numbers belong in fixtures.
 
 ```json
 [
-  {"case":"partial_reimbursement","purchaseCents":12000,"receivedCents":4000,"expectedUnreceivedCents":2000,"netPostedSpendCents":8000},
+  {"case":"partial_reimbursement","purchaseCents":12000,"expectedReimbursementCents":6000,"receivedCents":4000,"expectedUnreceivedCents":2000,"netPostedSpendCents":8000},
   {"case":"wallet_cashout","receivedReimbursementCents":4000,"cashoutCents":4000,"additionalIncomeFromCashoutCents":0},
   {"case":"own_account_transfer","debitCents":25000,"creditCents":25000,"spendCents":0,"netWorthDeltaCents":0},
   {"case":"position","cashCents":100000,"investmentsCents":50000,"debtCents":20000,"netWorthCents":130000},

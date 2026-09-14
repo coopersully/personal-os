@@ -283,6 +283,13 @@ describe("Finance position pages", () => {
     expect(screen.getByText("Proposed · Version 3")).toBeInTheDocument();
   });
 
+  it("waits for a successful empty Inbox before showing next-step guidance", async () => {
+    api.getFinanceInbox.mockRejectedValue(new Error("Inbox unavailable"));
+    mount(<FinanceOverviewPage />);
+    expect(await screen.findByText("Inbox unavailable")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+  });
+
   it("routes an open review question and exposes recent review and maintenance evidence", async () => {
     api.getFinanceSnapshot.mockResolvedValue(
       envelope({

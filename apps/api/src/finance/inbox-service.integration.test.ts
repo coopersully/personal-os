@@ -282,6 +282,67 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     });
   });
 
+  it("allows only one concurrent clarification to replace an unchanged review", async () => {
+    const service = createInboxService({
+      db: database.db,
+      now: () => new Date("2026-08-24T21:00:00Z"),
+    });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ institution: "Guard Bank", name: "Checking", provider: "manual", userId })
+      .returning();
+    if (!account) throw new Error("Concurrent clarification account missing.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 2500,
+        direction: "expense",
+        merchant: "Concurrent Merchant",
+        transactionDate: "2026-08-24",
+        userId,
+      })
+      .returning();
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({ kind: "purchase", stableKey: `event:concurrent:${transaction?.id}`, userId })
+      .returning();
+    if (!transaction || !event) throw new Error("Concurrent clarification fixture missing.");
+    const review = await service.upsertFinanceReview({
+      economicEventId: event.id,
+      evidence: { merchant: transaction.merchant },
+      impactAmount: 25,
+      reason: "merchant_identity",
+      transactionId: transaction.id,
+      userId,
+    });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: "agent",
+        actorType: "agent",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "concurrent-clarification",
+    });
+    const attempts = await Promise.allSettled(
+      ["first note", "second note"].map((answer, index) =>
+        service.answerFinanceReview(
+          review.id,
+          {
+            answer,
+            idempotencyKey: `concurrent-clarification-${index}`,
+            resolution: { clarification: answer, type: "clarify" },
+          },
+          context,
+        ),
+      ),
+    );
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+  });
+
   it("applies a profile answer and resolves its Inbox row atomically", async () => {
     const service = createInboxService({
       db: database.db,

@@ -18,7 +18,7 @@ import {
   type FinanceToolResult,
   financialProfileChangesSchema,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 import { withFinanceInboxPresentation } from "./presentation-service.js";
@@ -287,6 +287,14 @@ export function createInboxService({ db, now }: Options) {
             if (!review) throw new AppError("not_found", "That Finance Inbox case was not found.");
             if (review.status === "resolved")
               throw new AppError("conflict", "That Finance Inbox case is already resolved.");
+            const unchangedResolution = and(
+              review.resolution === null
+                ? isNull(financeReviewCases.resolution)
+                : eq(financeReviewCases.resolution, review.resolution),
+              review.resolutionProvenance === null
+                ? isNull(financeReviewCases.resolutionProvenance)
+                : eq(financeReviewCases.resolutionProvenance, review.resolutionProvenance),
+            );
             if (input.resolution.type === "clarify") {
               const [saved] = await tx
                 .update(financeReviewCases)
@@ -304,6 +312,7 @@ export function createInboxService({ db, now }: Options) {
                   and(
                     eq(financeReviewCases.id, review.id),
                     inArray(financeReviewCases.status, ["open", "deferred"]),
+                    unchangedResolution,
                   ),
                 )
                 .returning({ id: financeReviewCases.id });
@@ -477,6 +486,7 @@ export function createInboxService({ db, now }: Options) {
                 and(
                   eq(financeReviewCases.id, review.id),
                   inArray(financeReviewCases.status, ["open", "deferred"]),
+                  unchangedResolution,
                 ),
               )
               .returning({ id: financeReviewCases.id });

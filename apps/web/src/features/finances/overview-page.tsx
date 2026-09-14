@@ -72,7 +72,7 @@ export function FinanceOverviewPage() {
       {snapshot.data ? <FinancePositionMaterial result={snapshot.data} /> : null}
       <FinanceSourceState label="Review inbox" query={inbox} />
       {inbox.data ? <FinanceInboxList result={inbox.data} /> : null}
-      {!reviewCount ? (
+      {inbox.isSuccess && reviewCount === 0 ? (
         <section aria-label="Next step" className="flex flex-col gap-3">
           <h2 className="text-base font-medium">Next step</h2>
           <ItemGroup>

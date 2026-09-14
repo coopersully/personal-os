@@ -141,6 +141,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       const category = rule ? categoryByName.get(rule.category) : undefined;
       if (!rule || !category) continue;
       await db.transaction(async (tx) => {
+        const version = await nextFinanceTransactionRevision(tx, transaction.id);
         const activeReviews = await tx
           .select()
           .from(financeReviewCases)
@@ -160,7 +161,6 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
           )
         )
           return;
-        const version = await nextFinanceTransactionRevision(tx, transaction.id);
         await tx.insert(financeTransactionRevisions).values({
           changes: { category: { after: category.name, before: transaction.category } },
           provenance: {
@@ -372,28 +372,6 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       userId: context.userId,
     });
     if (judgment.type === "classify_transaction") {
-      const activeReviews = await executor
-        .select()
-        .from(financeReviewCases)
-        .where(
-          and(
-            eq(financeReviewCases.userId, context.userId),
-            eq(financeReviewCases.transactionId, judgment.transactionId),
-            inArray(financeReviewCases.status, ["open", "deferred"]),
-          ),
-        )
-        .for("update");
-      if (
-        activeReviews.some(
-          (review) =>
-            review.resolution?.type === "clarify" ||
-            typeof review.evidence.clarification === "string",
-        )
-      )
-        throw new AppError(
-          "conflict",
-          "Resolve the active clarification before classifying this transaction.",
-        );
       const category = await executor.query.financeCategories.findFirst({
         where: and(
           eq(financeCategories.id, judgment.categoryId),
@@ -409,6 +387,28 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       if (!category || !transaction)
         throw new AppError("invalid_request", "A classification target was not found.");
       const version = await nextFinanceTransactionRevision(executor, transaction.id);
+      const activeReviews = await executor
+        .select()
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, context.userId),
+            eq(financeReviewCases.transactionId, transaction.id),
+            inArray(financeReviewCases.status, ["open", "deferred"]),
+          ),
+        )
+        .for("update");
+      if (
+        activeReviews.some(
+          (review) =>
+            review.resolution?.type === "clarify" ||
+            typeof review.evidence.clarification === "string",
+        )
+      )
+        throw new AppError(
+          "conflict",
+          "Resolve the active clarification before classifying this transaction.",
+        );
       await executor.insert(financeTransactionRevisions).values({
         changes: {
           category: { after: category.name, before: transaction.category },
@@ -504,6 +504,22 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       const [advanced] = await db
         .update(financeMaintenanceRuns)
         .set({ stage, updatedAt: now(), version: run.version + 1 })
+        .where(
+          and(
+            eq(financeMaintenanceRuns.id, run.id),
+            eq(financeMaintenanceRuns.version, run.version),
+          ),
+        )
+        .returning();
+      if (!advanced) return ownedRun(run.userId, run.id);
+      return advanced;
+    }
+    if (run.stage === "agent_reasoning") {
+      const batch = await reasoningBatch(run.userId, run.scope);
+      if (batch.length) return run;
+      const [advanced] = await db
+        .update(financeMaintenanceRuns)
+        .set({ stage: "agent_audit", updatedAt: now(), version: run.version + 1 })
         .where(
           and(
             eq(financeMaintenanceRuns.id, run.id),

@@ -203,7 +203,7 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       remainingWork: { count: 1, categories: ["finance_inbox"] },
     });
     const saved = (await service.getFinanceInbox(userId)).data.find((item) => item.id === reviewId);
-    if (!saved?.transactionId) throw new Error("Saved review missing.");
+    if (!saved?.transactionId || !saved.context) throw new Error("Saved review missing.");
     expect((await service.getFinanceInbox(userId)).communication.nextQuestion).toBeUndefined();
     await service.upsertFinanceReview({
       economicEventId: saved.economicEventId,
@@ -247,13 +247,17 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     );
     await database.db
       .update(financeTransactions)
+      .set({ needsReview: false })
+      .where(eq(financeTransactions.userId, userId));
+    await database.db
+      .update(financeTransactions)
       .set({ needsReview: true })
       .where(eq(financeTransactions.id, saved.transactionId));
     await database.db
       .insert(financeCategoryRules)
       .values({ userId, merchantNormalized: "small", category: "Dining" });
     const withRule = await maintenance.maintainFinances(
-      { operation: "start", scope: { type: "all_outstanding" } },
+      { operation: "start", scope: { accountIds: [saved.context.accountId], type: "accounts" } },
       context,
     );
     expect(withRule.data.reasoningBatch).toEqual(
@@ -300,6 +304,11 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       ),
     ).resolves.toMatchObject({
       changes: [expect.objectContaining({ type: "finance_review_resolved" })],
+    });
+    await expect(
+      maintenance.maintainFinances({ operation: "resume", runId: withRule.data.runId }, context),
+    ).resolves.toMatchObject({
+      data: { reasoningBatch: [], stage: "agent_audit" },
     });
   });
 

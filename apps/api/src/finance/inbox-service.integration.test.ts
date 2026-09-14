@@ -306,6 +306,27 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       changes: [expect.objectContaining({ type: "finance_review_resolved" })],
     });
     await expect(
+      maintenance.maintainFinances(
+        {
+          expectedVersion: withRule.data.version,
+          idempotencyKey: "stale-maintenance-classification",
+          judgments: [
+            {
+              categoryId: category.id,
+              confidence: 0.99,
+              meaning: "Stale lunch judgment",
+              rationale: "This was prepared before the direct Inbox answer.",
+              transactionId: saved.transactionId,
+              type: "classify_transaction",
+            },
+          ],
+          operation: "submit_judgments",
+          runId: withRule.data.runId,
+        },
+        context,
+      ),
+    ).rejects.toThrow("no longer needs maintenance review");
+    await expect(
       maintenance.maintainFinances({ operation: "resume", runId: withRule.data.runId }, context),
     ).resolves.toMatchObject({
       data: { reasoningBatch: [], stage: "agent_audit" },

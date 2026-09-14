@@ -142,6 +142,18 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       if (!rule || !category) continue;
       await db.transaction(async (tx) => {
         const version = await nextFinanceTransactionRevision(tx, transaction.id);
+        const [currentTransaction] = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.id, transaction.id),
+              eq(financeTransactions.userId, userId),
+              eq(financeTransactions.needsReview, true),
+            ),
+          )
+          .for("update");
+        if (!currentTransaction) return;
         const activeReviews = await tx
           .select()
           .from(financeReviewCases)
@@ -162,7 +174,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         )
           return;
         await tx.insert(financeTransactionRevisions).values({
-          changes: { category: { after: category.name, before: transaction.category } },
+          changes: { category: { after: category.name, before: currentTransaction.category } },
           provenance: {
             actorId: rule.id,
             actorType: "deterministic_rule",
@@ -387,6 +399,19 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       if (!category || !transaction)
         throw new AppError("invalid_request", "A classification target was not found.");
       const version = await nextFinanceTransactionRevision(executor, transaction.id);
+      const [currentTransaction] = await executor
+        .select()
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.id, transaction.id),
+            eq(financeTransactions.userId, context.userId),
+            eq(financeTransactions.needsReview, true),
+          ),
+        )
+        .for("update");
+      if (!currentTransaction)
+        throw new AppError("conflict", "That transaction no longer needs maintenance review.");
       const activeReviews = await executor
         .select()
         .from(financeReviewCases)
@@ -411,7 +436,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
         );
       await executor.insert(financeTransactionRevisions).values({
         changes: {
-          category: { after: category.name, before: transaction.category },
+          category: { after: category.name, before: currentTransaction.category },
           meaning: judgment.meaning,
         },
         provenance: {

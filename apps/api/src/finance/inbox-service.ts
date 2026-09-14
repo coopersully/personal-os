@@ -331,15 +331,30 @@ export function createInboxService({ db, now }: Options) {
                 ),
               });
               if (!category) throw new AppError("invalid_request", "That category was not found.");
-              const transaction = await tx.query.financeTransactions.findFirst({
+              const targetTransaction = await tx.query.financeTransactions.findFirst({
                 where: and(
                   eq(financeTransactions.id, review.transactionId),
                   eq(financeTransactions.userId, context.userId),
                 ),
               });
+              if (!targetTransaction)
+                throw new AppError("not_found", "The reviewed transaction was not found.");
+              const revisionVersion = await nextFinanceTransactionRevision(
+                tx,
+                targetTransaction.id,
+              );
+              const [transaction] = await tx
+                .select()
+                .from(financeTransactions)
+                .where(
+                  and(
+                    eq(financeTransactions.id, targetTransaction.id),
+                    eq(financeTransactions.userId, context.userId),
+                  ),
+                )
+                .for("update");
               if (!transaction)
                 throw new AppError("not_found", "The reviewed transaction was not found.");
-              const revisionVersion = await nextFinanceTransactionRevision(tx, transaction.id);
               await tx.insert(financeTransactionRevisions).values({
                 changes: { category: { after: category.name, before: transaction.category } },
                 provenance: {

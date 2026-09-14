@@ -5,6 +5,12 @@
 
 ## Product decision
 
+The [Finance MVP](finance-workspace-plan.md) requires separate end-to-end maintenance and SMS
+continuation evidence for both Codex and Claude. The capability descriptions below are candidates,
+not interchangeable proof: document the exact supported product surface, unattended permissions,
+continuation mechanism, runtime availability, measured latency and cost. A successful initial MCP
+call does not prove a later SMS reply will wake or resume the host.
+
 nohmi does not own maintenance schedules. The person chooses an external platform and configures
 where and when an automation runs there; the host connects to nohmi through MCP or another
 authenticated API surface and invokes one high-level intent such as `maintain_finances`.

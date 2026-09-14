@@ -208,6 +208,50 @@ Custom maintenance instructions are workspace guidance, not Texting configuratio
 every setup or maintenance invocation regardless of whether it began in the app, MCP, an external
 schedule, or SMS.
 
+## Finance MVP requirement
+
+Two-way Finance maintenance conversations with external agents are in MVP scope. A person can
+answer a bookkeeping question, clarify an earlier answer, provide context before an event, and
+inspect or correct the resulting Finance record in the app. The full cross-workspace general
+inbox remains the larger target; Finance must use shared Texting foundations rather than create
+its own SMS consumer. This is target scope, not delivered behavior.
+
+The minimum complete journey is:
+
+1. An authorized external automation invokes Finance maintenance and persists a question or exact
+   review under a durable Finance identity also visible in unified Reviews.
+2. Finance publishes a typed notification intent. Shared policy and Texting validate consent,
+   apply privacy, quiet hours and reminder suppression, and send a concise contextual question.
+3. A provider-authenticated inbound webhook is durably claimed, associated with the verified user's
+   Texting identity, and bound to the current question and outbound revision. Free-form facts remain user-authored context; ambiguous answers produce clarification
+   rather than a guessed classification or approval. New prospective context can exist without a
+   transaction. General requests outside the delivered slice receive an honest response.
+4. Texting acknowledges accepted context promptly and routes it to Finance. An acknowledgment does
+   not claim bookkeeping completed. The domain applies only authorized operations and records the
+   result, or leaves explicit work awaiting agent reasoning or user review.
+5. An external agent can retrieve and resume the durable work after its original session ended.
+   An approved host adapter may request event-driven continuation where the host supports it;
+   otherwise the reply remains available for its next invocation, with honest waiting status.
+6. Completion updates the same Finance case and app projection. Manual resolution, duplicate SMS,
+   overlapping agents, expired proposals and delayed responses cannot cause duplicate effects.
+
+Both Codex and Claude are required for the Finance MVP. Prove prompt continuation independently
+on each exact supported host surface. MCP read/send tools alone cannot wake a suspended
+third-party task. A recurring next-pass-only integration is useful but cannot be advertised as
+immediate conversational agent support. External hosts retain schedule ownership; continuation
+of an accepted run does not grant nohmi authority to create recurring maintenance schedules.
+
+MVP work includes shared inbound claims/routing, work-bound replies and prospective context,
+notification policy, resumable Finance API/MCP contracts, a proven host continuation path, and
+visible delivery/processing/recovery states. Bounded reversible approvals must follow the existing
+authority contract; ambiguous or stronger approvals go to the authenticated app. Facts supplied by
+SMS cannot change budget boundaries or activate a rule.
+
+Release evidence must exercise a real authorized outbound question, inbound answer after the
+original agent session ends, safe resumption and visible app result, including a duplicate reply,
+manual resolution race, host outage, STOP and uncertain delivery. Existing mocked transport tests
+do not establish this journey. No production test text is authorized by this planning document.
+
 ## Current transport foundation
 
 The shipped implementation uses Twilio Programmable Messaging with one shared toll-free sender,

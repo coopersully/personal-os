@@ -258,6 +258,10 @@ flowchart TD
 
 ### Epic 9 — Finance platform, Plaid, budgets, and review queue
 
+The [Finance MVP specification](finance-workspace-plan.md) defines the first complete user journey,
+agreed autonomy boundaries, both-host SMS requirement and release limits approved on 2026-09-14. Its linked
+delivery plan maps current capabilities and remaining work into independently reviewable milestones.
+
 **Implement**
 
 - Add Plaid Link, encrypted access credential handling, webhooks/Transactions sync, source/account selection, data freshness, connection repair, duplicate detection, manual accounts/transactions, data deletion/export. Keep manual, CSV, and OFX imports as first-class no-connector paths; show connector freshness and applicable production-cost state rather than implying that Plaid is free or universally available.

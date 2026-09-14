@@ -1,0 +1,91 @@
+# Finance reliability follow-ups
+
+These findings came from a real maintenance workflow. They describe reusable product requirements;
+personal account data and merchant judgments belong in the user's ledger, not in this document.
+
+## Addressed in the reviewed source slice; not yet merged
+
+The following behavior belongs to COO-46 at reviewed source commit
+`d309380075d0d881388671df8ece26b57d25a010`. This documentation PR does not ship it.
+
+- Canonical Inbox cases are selectable from the dashboard and Review, with dated account context.
+- A user can leave a note or apply an exact category/relationship correction immediately.
+- Notes survive refreshed findings and are included in maintenance responses outside the current batch.
+- Exact merchant rules defer when a note awaits judgment. A settled run does not claim budget balance.
+- Concurrent resolutions use a conditional write; an already resolved case cannot be resolved twice.
+
+## Highest-priority remaining work
+
+| Priority | Gap | Acceptance evidence |
+| --- | --- | --- |
+| P0 | Spendable cash can resemble all cash when obligations or earmarks are missing. | Return unavailable/qualified guidance with coverage and reasons until protected reserves, earmarks, obligations, and freshness are reconciled. Never silently count reserves as spending capacity. |
+| P0 | Stated profile income, observed deposits, payroll deductions, and proposed/active budget state diverge across surfaces. | One provenance-aware contract exposes each meaning separately; only approved active allocations govern budget maintenance. |
+| P1 | Audit input requires economic-event IDs while recent activity exposes transaction IDs. | Supply the eligible event IDs, their source transactions, scope, and pagination; invalid IDs produce a typed validation error, never a server error. |
+| P1 | Payment date, service period, pending replacement, reimbursement, and account supersession need consistent economic treatment. | Transfers do not create income/spending; reimbursements offset the correct cost; pending replacements do not duplicate spending; service-period allocation and duplicate-account exclusion are explicit and reversible. |
+| P1 | Missing receipt matches can hide stale or disconnected mail sources. | Search reports source coverage/freshness, bounded relevant excerpts, and reconnect paths alongside matches or no-match results. |
+| P1 | Investment balances are insufficient evidence of contributions or ownership. | Structured employee deferrals, employer match, deliberate contributions, ownership shares, and family-seeded capital support separately qualified progress measures. |
+| P1 | Classification and review lifecycle can diverge outside the answer endpoint. | A split is recognized as classified; relevant cases close atomically after a supported correction, while unrelated concerns remain open. |
+| P2 | Generic spending alerts do not reflect a user's protected needs and goals. | Configurable priorities distinguish necessary/protected spending, discretionary pace, recurring-cost changes, and goal shortfalls; present actionable amounts and evidence without moralizing. |
+
+Further hardening should cover note revisions versus concurrent agent judgments, bounded/paginated
+Inbox payloads for large histories, and whole-workspace questions or approvals that currently live
+in legacy surfaces. The current list intentionally counts canonical Inbox cases, not every overlapping
+diagnostic or approval as a separate issue.
+
+The consolidated [Finance workspace plan](../product/finance-workspace-plan.md) owns the agreed
+constraints, approved delivery scope, implementation contracts and remaining evidence gates. This file retains
+investigation findings and acceptance evidence.
+
+## Ahead-of-time notes and wallet reimbursements
+
+This extension is approved MVP scope, not shipped functionality. The existing reimbursement create contract
+requires an active expense allocation and a known expected amount. It cannot represent an outing
+before a charge exists, or a reimbursement whose amount is not yet known.
+
+- Add a durable Finance note, available from the dashboard even with an empty Inbox. Accept freeform
+  context before or after an event, with optional dates, participants, category, payment channel,
+  expected amount and related transactions. Unknown values remain null; do not invent an expense.
+- Separate note states (watching, needs clarification, matched, dismissed) from accounting entries.
+  An expectation does not increase cash, reduce spending, or become a receivable automatically.
+- Maintenance consumes outstanding notes with their revisions and source provenance. Candidate
+  matches show evidence and uncertainty. A repeated pass must not duplicate cases or receipts.
+  A manual edit wins over a judgment based on an older revision.
+- A concise dashboard row should distinguish “Watching for repayment” from “Needs your answer”.
+  Users can edit context, select several expenses/payments, assign partial amounts, or dismiss.
+  Preserve the original note and applied decisions; do not learn a merchant-wide rule from one outing.
+- Support category-known, expense-unallocated reimbursements without requiring a fictional single
+  purchase link. Report gross spending, received reimbursements and unresolved allocation separately;
+  unknown expense periods must not silently reduce the current period's spending.
+
+## Venmo connection path
+
+Updated research: [automatic Venmo access](venmo-automatic-access.md) records the September 13
+Plaid coverage finding and the required wallet-level proof. It supersedes the incomplete September
+9 API-only assessment below. Plaid lists a Transactions-capable personal Venmo institution, but
+the research has not established wallet payment detail or reliable ongoing access.
+
+The user clarified that a Venmo-specific integration is worthwhile only if connecting an account
+provides automatic ongoing access to individual transactions. The earlier CSV-first recommendation
+is superseded. Do not implement a Venmo upload workflow or manual-import fallback for this work.
+Generic manual/import paths in the broader product plan remain separate.
+
+As researched on 2026-09-09, Venmo documents personal-account CSV statements, while PayPal's public
+API catalog does not establish a personal Venmo history API. These facts do not prove a supported
+automatic feed exists. A bounded feasibility investigation must establish authorized ongoing access,
+coverage, identity, freshness, refresh/revocation and recovery before connector implementation.
+An unsupported capability is a valid stop outcome, not a reason to ship a manual substitute.
+
+Sources: [Venmo transaction history](https://help.venmo.com/cs/articles/transaction-history-vhel281)
+and [PayPal API catalog](https://developer.paypal.com/api/rest/current-resources/).
+
+If automatic access is established, model individual payments in a separate wallet ledger and
+cash-outs as transfers; preserve provider identity, reconcile balances, and prevent double counting.
+Multiple payments may reimburse multiple expenses and a cash-out can include older wallet balances.
+The existing generic CSV parser is not evidence that these economic semantics or automatic access
+are supported. Its header, direction, counterparty and transfer assumptions remain investigation
+findings, not an approved Venmo implementation path.
+
+An additional MCP inconsistency surfaced: `update_finance_transaction` advertises note correction to
+agents, but production rejects it as requiring an interactive user session. The supported review
+answer endpoint accepts clarification. Align tool discovery/documentation with actual actor policy;
+provide an authorized annotation contract rather than making agents discover this through failures.

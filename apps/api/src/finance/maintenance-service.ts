@@ -8,6 +8,7 @@ import {
   financeEventTransactions,
   financeMaintenanceJudgments,
   financeMaintenanceRuns,
+  financeReviewCases,
   financeSetupSessions,
   financeTransactionRelationships,
   financeTransactionRevisions,
@@ -50,7 +51,7 @@ function maintenanceResult(
       headline: complete
         ? reviewCount
           ? `Maintenance settled with ${reviewCount} transaction reviews in the Inbox.`
-          : "Maintenance completed and the budget is balanced."
+          : "Maintenance completed with no outstanding Inbox reviews."
         : payload.stage === "agent_reasoning"
           ? `Deterministic rules finished; ${payload.reasoningBatch.length} transactions need agent judgment.`
           : "Categorization and reconciliation finished; audit the recent activity as a whole.",
@@ -68,7 +69,7 @@ function maintenanceResult(
             },
             reason:
               payload.stage === "agent_reasoning"
-                ? "Submit bounded classifications, relationships, or review judgments."
+                ? "Read inboxCases and saved clarification notes before judging. Resolve answered cases with answer_finance_review; submit bounded classifications, relationships, or review judgments for other activity."
                 : "Submit red-team findings after reviewing the supplied recent activity.",
             tool: "maintain_finances",
           },
@@ -106,17 +107,36 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
     runId: string,
     scope: Record<string, unknown>,
   ) {
-    const [rules, transactions, categories] = await Promise.all([
+    const [rules, transactions, categories, reviews] = await Promise.all([
       db.select().from(financeCategoryRules).where(eq(financeCategoryRules.userId, userId)),
       db
         .select()
         .from(financeTransactions)
         .where(and(...scopedTransactionConditions(userId, scope))),
       db.select().from(financeCategories).where(eq(financeCategories.userId, userId)),
+      db
+        .select()
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, userId),
+            inArray(financeReviewCases.status, ["open", "deferred"]),
+          ),
+        ),
     ]);
+    const waitingForJudgment = new Set(
+      reviews
+        .filter(
+          (review) =>
+            review.resolution?.type === "clarify" ||
+            typeof review.evidence.clarification === "string",
+        )
+        .map((review) => review.transactionId),
+    );
     const ruleByMerchant = new Map(rules.map((rule) => [rule.merchantNormalized, rule]));
     const categoryByName = new Map(categories.map((category) => [category.name, category]));
     for (const transaction of transactions) {
+      if (waitingForJudgment.has(transaction.id)) continue;
       const rule = ruleByMerchant.get(normalizeMerchant(transaction.merchant));
       const category = rule ? categoryByName.get(rule.category) : undefined;
       if (!rule || !category) continue;
@@ -268,6 +288,7 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
     executor: FinanceExecutor = db,
   ): Promise<FinanceMaintenancePayload> {
     return {
+      inboxCases: (await inbox.getFinanceInbox(run.userId, executor)).data,
       auditContext: run.stage === "agent_audit" ? await auditContext(run.userId, executor) : null,
       reasoningBatch:
         run.stage === "agent_reasoning"

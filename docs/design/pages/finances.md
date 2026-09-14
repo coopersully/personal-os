@@ -14,7 +14,7 @@ Seven primary destinations serve distinct jobs:
 | Destination | Immediate job |
 | --- | --- |
 | Overview | Understand the ownership-qualified position and next material decision. |
-| Review | Answer the current transaction-backed Inbox question. |
+| Review | Select an outstanding Inbox item and supply context or apply a correction. |
 | Transactions | Inspect exact records with URL-backed filters and server pagination. |
 | Plan | Inspect, create, revise, and approve the complete versioned budget. |
 | Cash flow | Distinguish current evidence, dated forecasts, recurring items, subscriptions, and reimbursements. |
@@ -56,19 +56,26 @@ for the complete plan shared with MCP.
 
 ## Canonical Review contract
 
-Review renders the exact `communication.nextQuestion` returned by the canonical
-Inbox and matches it to its case by ID. It asks one question at a time, displays
-the case evidence and exact transaction links, and never guesses a transaction
-from merchant text or substitutes a client-authored question. Missing or failed
-source evidence is explicit. Typed resolutions support classification,
-transaction relationships, clarification that keeps the case open, and dismissal
-with a reason. Raw JSON is not an answer field.
+Overview includes one compact outstanding list from the canonical Inbox, including
+open and deferred cases. Show five rows initially with an explicit expansion for the rest;
+do not duplicate its first question in a second next-step block. Each row identifies
+the merchant, transaction date, account, amount, direction, posting state, and review reason.
+Amounts from distinct review reasons are not summed into a synthetic financial loss.
 
-The submitted answer and selections remain visible while pending or failed.
-Successful responses replace the Inbox state before the next question appears.
-Ambiguous transport retries reuse the same idempotency key; a confirmed terminal
-failure needs a new attempt. Existing agent questions and prepared approvals
-remain under **Older questions and approvals**, which is closed initially.
+Selecting a row opens the shared review editor. Review also allows choosing any outstanding
+case. The API supplies each case's prompt and transaction context. Exact transaction links
+and same-account activity within seven days are inspectable; nearby activity is not proof of
+a transfer, refund, or reimbursement. Loading, unavailable source context, failed reads,
+and truncated activity remain explicit.
+
+A freeform note is the default action. It stays attached to the case, survives refreshed
+findings, and appears as “Note saved · awaiting maintenance” until a supported resolution is
+applied. Saving it does not start or schedule an agent. The next maintenance response includes
+those saved notes. A user may instead choose a category, link a related transaction, or dismiss
+with a reason immediately using the same authenticated, idempotent answer API as MCP.
+Failed saves preserve input and the retry key; resolved cases disappear only after success.
+
+Legacy questions and approvals remain under the existing disclosure in Review.
 
 ## Financial setup contract
 

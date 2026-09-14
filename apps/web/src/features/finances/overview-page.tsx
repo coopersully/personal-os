@@ -17,6 +17,7 @@ import {
   WorkspaceSecondaryAppBarActions,
 } from "@/components/workspace-secondary-app-bar";
 import { api } from "../../api.js";
+import { FinanceInboxList } from "./inbox-list.js";
 import {
   FinancePositionMaterial,
   FinanceSourceState,
@@ -54,8 +55,7 @@ export function FinanceOverviewPage() {
     queryFn: () => api.getFinanceMaintenanceHistory({ limit: 3 }),
   });
   const plan = budget.data?.data;
-  const reviewCount = inbox.data?.data.filter((item) => item.status === "open").length;
-  const question = inbox.data?.communication.nextQuestion?.prompt;
+  const reviewCount = inbox.data?.data.filter((item) => item.status !== "resolved").length;
   const latestReview = status.data?.details.latestReview;
   const nextPriority =
     playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
@@ -70,58 +70,52 @@ export function FinanceOverviewPage() {
       </WorkspaceSecondaryAppBar>
       <FinanceSourceState label="Financial position" query={snapshot} />
       {snapshot.data ? <FinancePositionMaterial result={snapshot.data} /> : null}
-      <section aria-label="Next step" className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Next step</h2>
-        <FinanceSourceState label="Review inbox" query={inbox} />
-        <ItemGroup>
-          <Item>
-            <ItemContent>
-              <ItemTitle>
-                {question ??
-                  (reviewCount
-                    ? `${reviewCount} ${reviewCount === 1 ? "question needs" : "questions need"} review`
-                    : snapshot.data && !snapshot.data.data.ledger.trustworthy
-                      ? "Confirm the evidence behind your position"
-                      : plan?.status === "proposed"
-                        ? "Inspect your proposed plan"
-                        : "Keep your financial context current")}
-              </ItemTitle>
-              <ItemDescription>
-                {reviewCount
-                  ? "Review the source evidence and answer the next open question."
-                  : snapshot.data && !snapshot.data.data.ledger.trustworthy
+      <FinanceSourceState label="Review inbox" query={inbox} />
+      {inbox.data ? <FinanceInboxList result={inbox.data} /> : null}
+      {!reviewCount ? (
+        <section aria-label="Next step" className="flex flex-col gap-3">
+          <h2 className="text-base font-medium">Next step</h2>
+          <ItemGroup>
+            <Item>
+              <ItemContent>
+                <ItemTitle>
+                  {snapshot.data && !snapshot.data.data.ledger.trustworthy
+                    ? "Confirm the evidence behind your position"
+                    : plan?.status === "proposed"
+                      ? "Inspect your proposed plan"
+                      : "Keep your financial context current"}
+                </ItemTitle>
+                <ItemDescription>
+                  {snapshot.data && !snapshot.data.data.ledger.trustworthy
                     ? "Check account ownership, inclusion, and source freshness."
                     : plan?.status === "proposed"
                       ? "Your proposed version is waiting for a decision."
                       : "Financial setup resumes from your saved progress."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Button asChild size="sm">
-                <Link
-                  to={
-                    reviewCount
-                      ? "/finances/review"
-                      : snapshot.data && !snapshot.data.data.ledger.trustworthy
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button asChild size="sm">
+                  <Link
+                    to={
+                      snapshot.data && !snapshot.data.data.ledger.trustworthy
                         ? "/finances/accounts"
                         : plan?.status === "proposed"
                           ? "/finances/plan"
                           : "/finances/setup"
-                  }
-                >
-                  {reviewCount
-                    ? "Answer next question"
-                    : snapshot.data && !snapshot.data.data.ledger.trustworthy
+                    }
+                  >
+                    {snapshot.data && !snapshot.data.data.ledger.trustworthy
                       ? "Inspect accounts"
                       : plan?.status === "proposed"
                         ? "Review proposal"
                         : "Resume setup"}
-                </Link>
-              </Button>
-            </ItemActions>
-          </Item>
-        </ItemGroup>
-      </section>
+                  </Link>
+                </Button>
+              </ItemActions>
+            </Item>
+          </ItemGroup>
+        </section>
+      ) : null}
       <section aria-label="Complete plan" className="flex flex-col gap-3">
         <h2 className="text-base font-medium">Complete plan</h2>
         <FinanceSourceState label="Complete plan" query={budget} />

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema } from "../common.js";
 import { financeInteractionQuestionSchema } from "./common.js";
+import { financeInboxCaseSchema } from "./inbox.js";
 
 export const financeMaintenanceScopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("all_outstanding") }),
@@ -107,6 +108,7 @@ export const financeReasoningItemSchema = z.object({
 export type FinanceReasoningItem = z.infer<typeof financeReasoningItemSchema>;
 
 export const financeMaintenancePayloadSchema = z.object({
+  inboxCases: z.array(financeInboxCaseSchema).optional(),
   auditContext: z.record(z.string(), z.unknown()).nullable(),
   reasoningBatch: z.array(financeReasoningItemSchema),
   reviewQuestion: financeInteractionQuestionSchema.nullable(),

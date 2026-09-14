@@ -20,6 +20,20 @@ export type FinanceReviewReason = z.infer<typeof financeReviewReasonSchema>;
 
 export const financeInboxCaseSchema = z.object({
   transactionId: idSchema.optional(),
+  context: z
+    .object({
+      accountId: idSchema,
+      accountName: z.string(),
+      institution: z.string(),
+      merchant: z.string(),
+      date: z.iso.date(),
+      amount: z.number(),
+      currencyCode: z.string().nullable(),
+      direction: z.enum(["income", "expense", "transfer"]),
+      pending: z.boolean(),
+    })
+    .optional(),
+  prompt: z.string().optional(),
   economicEventId: idSchema,
   evidence: z.record(z.string(), z.unknown()),
   firstSeenAt: isoDateTimeSchema,

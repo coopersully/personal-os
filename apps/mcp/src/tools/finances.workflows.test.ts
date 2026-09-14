@@ -82,6 +82,49 @@ describe("Finance MCP workflows", () => {
     });
   });
 
+  it("delivers saved Inbox notes and account context to the next maintenance caller", async () => {
+    const inboxCases = [
+      {
+        id,
+        transactionId: id,
+        resolution: { type: "clarify", clarification: "A weekly transfer to savings" },
+        context: {
+          date: "2026-09-08",
+          accountName: "Checking",
+          amount: 99,
+          direction: "expense",
+          pending: false,
+        },
+      },
+    ];
+    const api = {
+      maintainFinances: vi.fn(async () => ({
+        ...base,
+        data: {
+          runId: id,
+          version: 1,
+          stage: "agent_reasoning",
+          reasoningBatch: [],
+          auditContext: null,
+          reviewQuestion: null,
+          inboxCases,
+        },
+      })),
+    };
+    const server = new McpServer({ name: "finance-notes-test", version: "1" });
+    registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const called = await client.callTool({
+      name: "maintain_finances",
+      arguments: { operation: "start", scope: { type: "all_outstanding" } },
+    });
+    expect(called.structuredContent).toMatchObject({ data: { inboxCases } });
+    await client.close();
+    await server.close();
+  });
+
   it("routes natural setup intent and returns one concise question without queue state", async () => {
     const api = {
       setupFinances: vi.fn(async () => ({

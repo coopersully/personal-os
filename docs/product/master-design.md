@@ -304,6 +304,12 @@ Knowledge rather than a separate top-level workspace.
 
 ### 6.7 Finances
 
+The first complete Finance release follows the [Finance MVP specification](finance-workspace-plan.md).
+It includes two-way day-to-day SMS with both Codex and Claude: durable questions and user context,
+safe continuation after an agent session ends, and the same manually editable results in the app.
+Each advertised host requires separate end-to-end evidence; this is target scope, not shipped
+capability. The wider Finance features below remain the master product direction.
+
 - The Finance workspace steward combines the useful methods of a bookkeeper, accountant/controller, financial
   planner, investment analyst, auditor, and coach. Its maintenance turn reconciles and classifies a
   selected period, balances it against budgets and goals, updates income/recurring/cash-flow/wealth

@@ -259,6 +259,27 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     expect(withRule.data.reasoningBatch).toEqual(
       expect.arrayContaining([expect.objectContaining({ transactionId: saved.transactionId })]),
     );
+    await expect(
+      maintenance.maintainFinances(
+        {
+          expectedVersion: withRule.data.version,
+          idempotencyKey: "classify-held-clarification",
+          judgments: [
+            {
+              categoryId: category.id,
+              confidence: 0.99,
+              meaning: "Lunch",
+              rationale: "The saved note needs a direct Inbox answer first.",
+              transactionId: saved.transactionId,
+              type: "classify_transaction",
+            },
+          ],
+          operation: "submit_judgments",
+          runId: withRule.data.runId,
+        },
+        context,
+      ),
+    ).rejects.toThrow("Resolve the active clarification");
     const beforeAnswer = await database.db.query.financeTransactions.findFirst({
       where: eq(financeTransactions.id, saved.transactionId),
     });

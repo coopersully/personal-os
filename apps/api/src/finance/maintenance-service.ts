@@ -372,6 +372,28 @@ export function createMaintenanceService({ db, inbox, now }: Options) {
       userId: context.userId,
     });
     if (judgment.type === "classify_transaction") {
+      const activeReviews = await executor
+        .select()
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, context.userId),
+            eq(financeReviewCases.transactionId, judgment.transactionId),
+            inArray(financeReviewCases.status, ["open", "deferred"]),
+          ),
+        )
+        .for("update");
+      if (
+        activeReviews.some(
+          (review) =>
+            review.resolution?.type === "clarify" ||
+            typeof review.evidence.clarification === "string",
+        )
+      )
+        throw new AppError(
+          "conflict",
+          "Resolve the active clarification before classifying this transaction.",
+        );
       const category = await executor.query.financeCategories.findFirst({
         where: and(
           eq(financeCategories.id, judgment.categoryId),

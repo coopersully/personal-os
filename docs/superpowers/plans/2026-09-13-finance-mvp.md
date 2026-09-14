@@ -187,8 +187,12 @@ type FinanceContext = {
   text: string;
   validFrom: string | null;
   validThrough: string | null;
+  participants: string[];
+  categoryId: string | null;
+  paymentChannel: string | null;
   expectedCents: number | null;
   transactionIds: string[];
+  source: RevisionRef;
   status: "active" | "partially_matched" | "matched" | "disputed" | "expired" | "cancelled";
 };
 type DomainOutcome = {
@@ -211,6 +215,10 @@ MoneyFact reasons are stable validated reason codes, not arbitrary provider text
 opaque evidence tokens; cents require the existing safe integer/range validation. All date/time
 fields use existing ISO schemas and lengths/lists are bounded. The full schemas add actor/provenance
 and source references through existing shared types rather than duplicating authentication models.
+FinanceContext participant and transaction lists are bounded; participant and payment-channel text
+uses bounded normalized user input, categoryId resolves within the authenticated workspace, and
+source preserves the exact originating record revision. Empty participants and null category or
+payment channel mean unknown rather than inferred values.
 
 | Port | Producer | Consumer | Required semantics |
 | --- | --- | --- | --- |

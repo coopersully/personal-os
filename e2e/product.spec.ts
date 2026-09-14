@@ -98,6 +98,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const email = `e2e+${suffix}@example.com`;
   const reminderTitle = `Material reminder ${suffix}`;
   const eventTitle = `Material event ${suffix}`;
+  const allDayTitle = `All-day ${eventTitle} with a long descriptive occasion title`;
   const mobile = testInfo.project.name === "mobile-chromium";
   // The desktop switcher and the narrow dock expose the same five destinations
   // under the same accessible names, so workspace movement is one path.
@@ -204,18 +205,43 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(todayEventLayout.textAlign).toBe("left");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("menuitem", { name: "Event" }).click();
-  await page.getByLabel("Event", { exact: true }).fill(`All-day ${eventTitle}`);
+  await page.getByLabel("Event", { exact: true }).fill(allDayTitle);
   await page.getByLabel("Starts").fill(`${planningDate}T00:00`);
   await page.getByLabel("Ends").fill(`${planningDate}T23:59`);
   await page.getByLabel("All day").check();
   await page.getByRole("button", { name: "Create event" }).click();
-  await expect(page.getByText(`All-day ${eventTitle}`)).toBeVisible();
+  await expect(page.getByText(allDayTitle)).toBeVisible();
   const todayLayout = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
   }));
   expect(todayLayout.documentWidth).toBeLessThanOrEqual(todayLayout.viewportWidth + 1);
+  // Compare with the configured device width: mobile overflow can enlarge
+  // innerWidth too, making documentWidth <= innerWidth a false positive.
+  const viewportWidth = page.viewportSize()?.width;
+  if (!viewportWidth) throw new Error("The acceptance viewport is missing.");
+  expect(todayLayout.documentWidth).toBeLessThanOrEqual(viewportWidth + 1);
+  expect(todayLayout.viewportWidth).toBeLessThanOrEqual(viewportWidth + 1);
 
+  if (mobile) {
+    const eventAction = todayEvent.getByRole("button");
+    await eventAction.tap();
+    await expect(page.getByRole("menuitem", { name: "View Event in Calendar" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(eventAction).toBeFocused();
+    const switcher = page.getByRole("button", { name: "Switch workspace" });
+    const target = await switcher.boundingBox();
+    expect(target?.width).toBeGreaterThanOrEqual(24);
+    expect(target?.height).toBeGreaterThanOrEqual(24);
+    await switcher.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menu", { name: "Switch workspace" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(switcher).toBeFocused();
+    await switcher.tap();
+    await expect(page.getByRole("menu", { name: "Switch workspace" })).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
   await openWorkspace("Calendar");
   if (mobile) {
     await expect(

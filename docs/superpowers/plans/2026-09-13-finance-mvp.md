@@ -189,11 +189,11 @@ type FinanceContext = {
   validThrough: string | null;
   expectedCents: number | null;
   transactionIds: string[];
-  status: "active" | "partially_matched" | "matched" | "disputed" | "expired" | "canceled";
+  status: "active" | "partially_matched" | "matched" | "disputed" | "expired" | "cancelled";
 };
 type DomainOutcome = {
   operationId: string;
-  state: "applied" | "accepted" | "needs_input" | "pending_review" | "blocked" | "failed";
+  state: "applied" | "accepted" | "pending" | "uncertain" | "needs_input" | "pending_review" | "blocked" | "failed";
   work: HumanWorkRef[];
   resultRevision: string | null;
   reasonCode: string | null;
@@ -225,7 +225,10 @@ and source references through existing shared types rather than duplicating auth
 F0 owns final endpoint/tool registration. Each port needs a real API route/client mapping before
 its consumer is advertised; names in this table alone are not an API. Persisted accepted operations
 have status reads and recovery owners. Every producer documents retry semantics, stale revision,
-permission failure, bounds and source-of-truth identity in its contract tests.
+permission failure, bounds and source-of-truth identity in its contract tests. For continuation,
+`accepted` means the request is durably recorded, `pending` means delivery or host work is waiting,
+and `uncertain` means an attempted dispatch has no confirmed outcome. Reconcile uncertain dispatch
+before retrying; test offline recovery and ambiguous delivery without duplicate domain effects.
 
 ## 4. Workstream milestones
 

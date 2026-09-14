@@ -175,7 +175,7 @@ schedule is acceptable if measured latency and required host availability are di
 keeps pending work and safe recovery when the host is offline, revoked or rate limited. No host
 adapter may create new recurring schedules inside nohmi or bypass the external host's controls.
 
-Proposed acceptance budget: inbound acknowledgment within 60 seconds and a continuation attempt
+Approved acceptance budget: inbound acknowledgment within 60 seconds and a continuation attempt
 within 5 minutes while the configured host is available. These are measured release targets, not a
 carrier delivery guarantee. A missed target exposes pending/overdue status and an app recovery path.
 Record p50/p95 latency and host usage/cost during trials; idle checks must avoid repeated reasoning

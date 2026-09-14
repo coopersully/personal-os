@@ -211,6 +211,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByLabel("All day").check();
   await page.getByRole("button", { name: "Create event" }).click();
   await expect(page.getByText(allDayTitle)).toBeVisible();
+  await expect(page.getByRole("button", { name: `All day ${allDayTitle}.` })).toBeVisible();
   const todayLayout = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,

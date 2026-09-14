@@ -164,6 +164,12 @@ without obscuring provider truth.
 
 ## Finances
 
+The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
+journey against this larger target. Both Codex and Claude must support separately verified
+maintenance and two-way Finance SMS at launch, including durable answers and continuation after
+the original agent session ends. Users retain equivalent inspection and manual correction in the
+app. Shared Texting owns the conversation; Finance owns meaning, policy and bookkeeping.
+
 ### Goal
 
 Finances is a unified budget, cash-flow, account-balance, transaction, and net-worth application

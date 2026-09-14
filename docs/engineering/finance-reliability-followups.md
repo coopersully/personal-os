@@ -56,6 +56,11 @@ before a charge exists, or a reimbursement whose amount is not yet known.
 
 ## Venmo connection path
 
+Updated research: [automatic Venmo access](venmo-automatic-access.md) records the September 13
+Plaid coverage finding and the required wallet-level proof. It supersedes the incomplete September
+9 API-only assessment below. Plaid lists a Transactions-capable personal Venmo institution, but
+the research has not established wallet payment detail or reliable ongoing access.
+
 The user clarified that a Venmo-specific integration is worthwhile only if connecting an account
 provides automatic ongoing access to individual transactions. The earlier CSV-first recommendation
 is superseded. Do not implement a Venmo upload workflow or manual-import fallback for this work.

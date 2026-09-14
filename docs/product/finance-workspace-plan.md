@@ -1,239 +1,254 @@
-# Finance workspace plan and parallel delivery charter
+# Finance MVP specification
 
-- Status: Working plan for discussion; agreed constraints are distinguished from proposed design.
-- As of: 2026-09-13
-- Current implementation branch: `cooper/finance-review-context`
-- Delivery state and issue links: Linear; this document owns product and architecture decisions.
+- Status: Proposed release specification for review; accepted constraints are called out below.
+- Baseline inspected: `origin/main` at `3d3306608c4b6f729d0c93e4e887dae2ba930d2d`, 2026-09-13.
+- Planning owner: the Finance orchestration task; implementation belongs to separate workstream tasks.
+- Tracker: [COO-45](https://linear.app/coopersully/issue/COO-45/consolidate-the-finance-stewardship-plan-and-parallel-contracts).
+- Delivery: [implementation plan](../superpowers/plans/2026-09-13-finance-mvp.md) and
+  [execution prompts](../superpowers/plans/finance-mvp-handoffs.md).
 
-## Purpose and relationship to the product vision
+## 1. Product outcome
 
-Finance implements nohmi's promise of an autonomous exoskeleton for the person's money: understand
-what changed, what is committed, what remains possible, and what needs a decision without requiring
-routine visits to every provider. It must remain a useful direct financial application even when
-no external agent is running. The objective is financial resilience and progress toward the
-person's goals and quality-of-life priorities; maximizing net worth or minimizing spending alone
-is not a sufficient objective.
+A new user can connect financial accounts, understand their financial position, establish a realistic
+plan, and let an authorized agent keep records and the plan current. The user answers only questions
+that require their judgment, through the app or SMS, and can always inspect or correct the result.
+Periodic reviews explain progress, risk, uncertainty and useful next decisions.
 
-Governing documents are [master design](master-design.md), [master plan, Epic 9](master-plan.md),
-[Finance interfaces](workspaces.md#finances), [workspace stewardship](workspace-stewardship.md),
-[Finance invariants](../architecture/0003-finance-intelligence.md),
-[stewardship architecture](../architecture/0004-workspace-stewardship.md),
-[User Knowledge](../architecture/0005-user-knowledge.md), and
-[path ownership](../engineering/feature-ownership.md). This charter specializes them rather than
-replacing their shared policy, scheduling, knowledge, Reviews, or Texting contracts.
+Financial resilience, wealth building and quality of life are the objective. Lower spending alone
+is not success. A recommendation must explain its relationship to an obligation, reserve, debt,
+goal or stated priority; it must not moralize about a category or assume every user wants the same
+tradeoff. Better bookkeeping is necessary but does not by itself constitute the Finance MVP.
 
-## Agreed constraints
+This specification narrows the larger [master design](master-design.md#67-finances),
+[workspace contract](workspaces.md#finances), [stewardship doctrine](workspace-stewardship.md),
+[User Knowledge contract](user-knowledge.md), and [Texting contract](texting-operations.md).
+Those remain canonical target contracts. This document replaces the earlier branch-oriented lane
+proposal; the current review changes are one prerequisite, not the organizing center of the MVP.
 
-- Automatic bookkeeping is the default direction within granted authority and sufficient evidence.
-  Budget changes are governed by explicit user-defined boundaries. This agreement does not activate
-  any production rule, choose numerical limits, approve a budget, or authorize money movement.
-- Users can inspect and correct the same records manually, leave context before or after an event,
-  and answer concise, contextual questions. Corrections survive later maintenance.
-- Financial facts, estimates, intentions, policy, and advice remain distinguishable and traceable.
-- A Venmo-specific connection is worth building only if account connection enables automatic ongoing
-  access to individual activity. No upload-based Venmo feature or CSV fallback is in this plan.
-  Generic manual/import paths elsewhere in the master plan are not removed by this constraint.
-- No money movement, trading, bill payment, tax filing, or professional credential claims.
-- All behavior is multi-user with structural tenant isolation. One user's preferences are examples,
-  never platform-wide rules. Joint ownership is not permission to disclose another user's data.
+## 2. Accepted constraints and proposed release boundary
 
-## Current slice and its limits
+### Accepted
 
-The branch implements a compact canonical Finance Inbox list with contextual case selection,
-transaction date/account/direction/posting state, nearby activity, durable clarification notes,
-manual category/link/dismiss actions, and notes included in maintenance responses. Exact merchant
-rules defer to unresolved user notes, duplicate case resolution is guarded, and settlement no longer
-claims that the budget is balanced. API, MCP, component and browser tests accompany it.
+- Automatic bookkeeping within granted authority and sufficient evidence; budget changes only
+  inside explicit user-defined boundaries. No production policy is activated by this specification.
+- App and agent operate on the same records. Users can resolve items themselves and provide
+  free-form context before or after an event. Corrections survive later maintenance.
+- Both Codex and Claude are required at launch. Each needs a separately evidenced unattended
+  maintenance and two-way Finance SMS journey after the original agent session ends.
+- External hosts own recurring schedules. nohmi owns durable domain state, accepted-work recovery,
+  source synchronization, questions, policy and results. Multiple hosts may overlap safely.
+- Venmo-specific access must work automatically after connection. No upload or manually maintained
+  forwarding fallback. It is optional to release until the [feasibility gate](../engineering/venmo-automatic-access.md)
+  proves useful personal-wallet data and ongoing access.
+- No money movement, trading, bill payment, tax filing or professional credential claims.
+- Every record and operation is tenant isolated. One person's habits never become platform defaults.
 
-This is branch implementation, not deployed capability. The list covers canonical Finance cases,
-not all legacy questions, approvals, recovery or shared Reviews. Notes still require an existing
-case. It does not implement prospective expectations, complete User Knowledge, automatic Venmo
-access, policy-bound budget reallocation, or the broader accounting fixes below.
+### Proposed MVP scope
 
-The previous September 10 verification log records 199 passing test files, branch coverage 94.05%,
-and 26 passing browser tests. That evidence predates the September 13 main merge and does not
-establish verification of the current head. Every release still requires fresh `pnpm verify` and
-the appropriate production evidence.
+One person's US/USD financial plan with calendar-month category allocations, dated cash-flow
+forecast, recurring income/bills, debt visibility, basic savings goals, investment balances and net
+worth. Existing manual accounts and supported generic imports remain usable. The app must work
+without an agent, a completed budget, a paid connector or SMS; unavailable automation is explicit.
 
-## Proposed domain model and responsibilities
+Preserve existing supported features rather than remove them to match this boundary. Do not add
+new budget modes, FX consolidation, household sharing, investment execution, tax optimization,
+full portfolio analytics, semantic memory infrastructure or a general multi-workspace SMS agent
+as prerequisites. Account ownership that cannot be established must qualify or exclude affected
+aggregates. A joint account is not authority to disclose another person's records.
 
-| Concept | Canonical owner and meaning | Boundary |
+MVP budget automation is bounded reallocation of existing planned resources. New borrowing, reserve
+withdrawals, increased assumed income, or reduced protected priorities require a new explicit
+proposal. Monthly rollovers and different budget modes remain later product work.
+
+## 3. Current state and the completion gap
+
+Implementation evidence comes from code, migrations, tests, the implementation log and deployed
+observations. The inspected source baseline is not a claim that every path works in production.
+
+| Area | Existing foundation | MVP completion work |
 | --- | --- | --- |
-| Source activity | Finance provider projection with source ID, raw facts, revision, freshness and coverage | A provider label is evidence, not final economic meaning |
-| Economic event and allocation | Finance ledger: purchase, transfer, refund, reimbursement, income, investment contribution | Recognize once across accounts, pending/posted replacements and imports |
-| Operational context | Finance note or expectation linked to zero or more records, with dates and optional participants/amount | Unknown amount stays unknown; intent does not create cash or reduce spending |
-| Personal knowledge | Shared typed User Knowledge with provenance, temporal validity, sensitivity and revisions | Finance requests purpose-bound context; it does not build a parallel global memory store |
-| Action authority | Finance policy with explicit approved rules and immutable preview/activation versions | Knowledge, repetition, setup completion and global review bypass cannot activate rules |
-| Plan | Versioned approved baseline, authorized revisions, proposals and forecasts | Reallocation never erases original targets or historical variance |
-| Human-required work | Finance-owned cases projected to unified Reviews by stable identity | Workspace and central views resolve the same operation; no second queue of copies |
-| Advice and period review | Finance-derived evidence-backed findings, decisions and review artifact | A completed run is not evidence of healthy finances |
+| Sources | Plaid Item synchronization, selected accounts, manual activity/imports, account semantics and health | Verify new-user connection/reconnect, coverage, duplicates, removal and account meaning; close gaps across UI/API/MCP |
+| Ledger | Transactions, economic events, splits, transfers, reimbursement services, merchant rules | One consistent recognition/allocation model across totals, period boundaries, pending replacements, ownership and corrections |
+| Financial position | Snapshot, cashflow, wealth and budget projections | Qualify every affected total; separate cash, commitments, pending exposure, protected money, contributions and spending |
+| Setup and planning | Resumable setup, versioned profile/budget, goal and recurring models | Expand the current short interview into a useful plan; reconcile profile/planned/observed income and obligations; approve boundaries |
+| Questions/context | Canonical cases plus other question/review paths; this branch adds contextual notes and dashboard actions | Complete unified lifecycle, prospective notes, matching, user correction and narrow reusable knowledge |
+| Maintenance | Protocol start/judgment/audit/resume plus older candidate/challenge/settle surfaces | Converge orchestration without losing challenge, authority, fencing or review guarantees; verify honest terminal states |
+| Texting | Verified phone, consent, guarded read/send MCP tools, inbound persistence and delivery tracking | Shared notifications, durable inbound processing, work-bound free-form answers, revision-bound approvals and recovery |
+| Host operation | External scheduling target and generic agent interfaces | Demonstrate Codex and Claude separately, unattended permissions, continuation, overlapping runs and host availability |
+| Review/advice | Period review and planning/report surfaces | One evidence-qualified review tying actuals and forecasts to goals, useful recommendations and unresolved work |
 
-Keep schemas and invariants in `packages/domain`, persistence in `packages/database`, behavior in
-Finance API modules, provider adapters in `packages/connectors`, and typed calls in the API client.
-Web and MCP consume these contracts. MCP does not calculate totals, assemble unrestricted context,
-or decide completion. Use additive feature modules and narrow adapters rather than a wholesale
-rewrite of `finance-service.ts`.
+The existing `cooper/finance-review-context` feature slice must be reviewed and landed independently
+before dependent tasks assume its notes behavior exists on main. Its previous verification evidence
+predates the latest merge; it needs fresh required checks. Do not copy this whole branch into new
+implementation tasks.
 
-There are currently multiple maintenance surfaces: `/v1/finances/maintenance/protocol` and the
-older prepare/challenge/settle path. ADR 0004 describes the latter while this branch changes the
-former. Before new streams modify orchestration, the integration owner must trace live callers,
-agree the canonical lifecycle and compatibility adapters, and test equivalent policy and terminal
-truth. Do not delete or silently substitute one path from documentation alone.
+## 4. User journeys and acceptance requirements
 
-### Contract handshake before parallel implementation
+### F1 — Connect and understand coverage
 
-These are proposed payload responsibilities, not new published API names. Prefer extending an
-existing typed contract when it already expresses the same meaning. Each consumer and owner must
-agree the schema, error cases and revision behavior before either implements a competing shape.
+Connect through the normal consent flow, select accounts, confirm purpose/ownership, and see the
+first useful result with an honest sync state. Pending, stale, reconnect-required, excluded and
+unsupported sources remain visible. Revocation stops future access and data controls have an
+explicit outcome. A failed account does not hide useful work on other accounts. The account UI
+and agent status agree on freshness, repair owner and which totals are incomplete.
 
-| Contract | Producer → consumer | Minimum content |
-| --- | --- | --- |
-| Financial position evidence | B → A/C/review | Scope and cutoff, source coverage, currency, reconciliation status, gross/net components, available-versus-protected cash, ownership and unresolved exposure; unavailable values are explicit |
-| Context candidate | A → B/maintenance | Note identity/revision, optional time window and expected amount, referenced owned records, user-authored evidence, expiry, candidate relationships and unmatched remainder |
-| Accounting match decision | B → A | Input revisions, exact allocations and relationship, evidence/reason, amount/period consequences, applied/proposed/unresolved state and reversal reference |
-| Budget decision | C → maintenance/review | Baseline and active plan revisions, policy/preview revision, proposed moves, cumulative limit usage, source-evidence revision, consequences, authorization result and rollback |
-| Human-work projection | A/Finance → shared Reviews | Stable domain case identity, semantic revision, required action, consequence, safe context, authenticated deep link, lifecycle and exact resolution operation |
-| Context pack | User Knowledge → Finance | Purpose/owner scope, immutable fact/preference/inference revisions, temporal validity, evidence and missing requirements; policy remains separately owned |
+### F2 — Trust the ledger and current position
 
-Every mutation carries an idempotency key bound to its payload, expected relevant revisions and
-authenticated actor. Reads return bounded pages with coverage; a truncated result is not complete
-evidence. Avoid one global revision that would make unrelated edits contend. Cross-currency totals
-require explicit valuation evidence; never silently add unlike currencies. Migrate producers and
-consumers additively with compatibility tests before removing old shapes.
+Recognize an economic event once across provider replays, pending-to-posted replacement, both sides
+of a transfer, imports and split allocations. Show gross purchase, received reimbursement and
+unmatched remainder separately. A repayment expectation is not cash or income. An investment
+contribution moves value between assets; it is not consumption or investment return.
 
-## Bookkeeping, planning and authority
+Expose cash balance, posted spending, expected obligations, pending exposure, protected allocations,
+debt, investments and net worth as distinct measures. Each carries cutoff, coverage, provenance,
+qualification and missing evidence. Budget remaining is not interchangeable with spendable cash.
+Do not publish definitive spending capacity when material obligations, ownership or source evidence
+are missing. Avoid reserving the same obligation or goal dollar more than once.
 
-The proposed Finance policy evaluator takes the actor's scopes, active policy revision, plan
-revision, evidence cutoff and a typed proposed operation. It returns applied, proposed-for-review,
-needs-evidence, or denied with reasons; exact wire vocabulary will follow the existing contracts.
+### F3 — Establish a realistic plan
 
-Budget policy must specify eligible source/destination categories, protected allocations, time
-window, cumulative monetary/percentage limits, reserve floors, and treatment of irregular income.
-Per-operation limits alone are insufficient: several small moves must not evade a period limit.
-Evaluate competing edits against the same revision and enforce limits atomically. A correction or
-reversal remains auditable. If no rule permits a budget change, propose it rather than infer consent.
+Progressively ask about income reliability, bills and timing, debt obligations, reserves, goals and
+protected quality-of-life priorities. Reuse known answers; mark assumptions for confirmation.
+The user can skip unknowns and still bookkeep. A proposed monthly plan distinguishes recurring
+income, uncertain future income and exceptional resources. It must balance exact cents and explain
+unfunded needs instead of inventing money. Approval records the exact profile and plan revisions.
 
-Always preserve original plan, revised plan, actuals and forecast separately. Otherwise automatic
-rebalancing can make persistent overspending disappear. Explain over- and under-plan behavior in
-terms of obligations, goals and user priorities. Distinguish a mistaken charge, an unsustainable
-pattern, and an intentional tradeoff; do not describe every discretionary purchase as harmful.
+A first useful plan includes spending categories, obligations, debt minimums, savings/goal
+allocations and a buffer when the user chooses one. Goals have a target, optional date/priority and
+evidence-backed progress. Planned funding is not proof that money moved or a goal balance grew.
 
-Ledger calculations must distinguish gross/net income, transfers, household reimbursements,
-service period versus posting date, reserve earmarks, liabilities, owned versus reported assets,
-employee contributions, employer contributions, investment returns and seeded capital. Show gross
-spending, received reimbursements and unresolved allocations separately. Balance-only investment
-feeds cannot prove contributions; expected reimbursement cannot fund safe-to-spend.
+### F4 — Maintain within user boundaries
 
-## Context, questions and learning
+Maintenance reconciles sources, applies authorized bookkeeping, evaluates the plan, collects
+questions, and verifies its result. It can cover outstanding work, a bounded period or an exact
+owned target. Repeated invocation resumes compatible work; it never duplicates economic effects.
 
-Capture a freeform heads-up even before an expense exists. Proposed states are watching,
-needs clarification, matched, expired and dismissed; final lifecycle contracts require review.
-Optional amounts, dates and participants must remain optional. Several payments can relate to
-several expenses, with partial matches and explicit unmatched remainder.
+An automatic budget revision requires an active, explicitly approved policy: eligible categories,
+protected allocations, permitted direction, per-change and cumulative monthly limits. The baseline
+stays immutable; the active plan and forecast can differ. Validate current evidence and policy/plan
+revisions under lock. Concurrent small revisions cannot exceed an aggregate cap. Crossing a
+boundary creates a proposal without silently normalizing overspending by changing the baseline.
 
-Maintenance reads the note's exact revision and offers evidence-backed candidates. Manual edits
-invalidate stale judgments. Saving context is not accounting recognition. A category-known but
-expense-unallocated reimbursement is a valid intermediate condition, not a reason to invent a link.
-An expectation should have a review/expiry policy so old notes cannot match unrelated future money.
+A rule stays inactive until an exact preview exposes matches, non-matches, consequences, conflicts,
+authority and disable/recovery. A factual answer, setup completion or global bypass never activates
+it. Read-only agents may explain/propose; mutation execution follows the same domain authority
+through every channel. Default new users to no automatic budget revisions until they approve limits.
 
-Only work explicitly requiring the person enters unified Reviews. Watching and automatic recovery
-stay visible in workspace status without creating repeated questions. Questions include enough
-transaction and consequence context to answer directly; question priority reflects decision impact,
-not just amount or number of uncertain rows. Resolution may propose reusable knowledge, separately
-from any action-rule preview and approval.
+### F5 — Resolve outstanding work once
 
-Required context depends on purpose: bookkeeping needs source/account meaning and exact corrections;
-budget advice additionally needs obligations, income stability, reserves, goals and approved policy.
-Jurisdiction/risk/ownership facts are required only for advice that depends on them. Missing context
-limits the claim rather than preventing unrelated useful work. Unrelated mail, calendar details,
-other tenants' data and credentials must not enter a Finance context pack.
+Show a concise Finance list with a count and a complete review destination. Every question,
+approval or user-required repair has one stable domain identity projected into unified Reviews.
+Show date, amount, direction, account, useful merchant and why the answer matters. Nearby activity
+is context, not proof of a relationship.
 
-## Setup, maintenance and surfaces
+Users can type a note, choose a category, split, link, defer or dismiss as allowed by the item.
+Answering a question records evidence; resolving an item records an applied outcome. Preserve that
+distinction. All surfaces reflect the same lifecycle, including when a manual action races an agent.
 
-Guided setup progressively establishes accounts and ownership, source coverage, income/obligations,
-goals and protected priorities, proposed budget, authority boundaries, review preferences and
-external scheduling handoff. Review and bookkeeping must work without a completed budget. No
-large mandatory questionnaire should precede the first useful result.
+Prospective context can exist before any transaction: original text, optional time window, expected
+amount/participants, referenced records and revision. Unknown values stay unknown. Suggested matches
+retain evidence and confidence; material ambiguity asks the user. Partial reimbursements keep an
+unmatched amount; edited, canceled, expired or contradicted expectations cannot silently keep
+matching. Expiry ends automatic matching but preserves inspectable history. No universal expiry is
+silently imposed on user expectations; setup can propose a user-approved default.
 
-The domain-owned maintenance loop establishes scope/cutoff, reads source health and bounded context,
-reconciles, applies authorized corrections, evaluates budget changes, persists questions, updates
-projections, publishes advice and verifies a period review. Runs retain source/knowledge/policy
-revisions, durable checkpoints, idempotency, leases/fences and recovery. Compatible overlapping
-invocations resume/coalesce; incompatible scopes stay separate without duplicated effects.
+Reusable facts follow the shared typed User Knowledge lifecycle. One-off notes stay with Finance
+records. MVP uses bounded structured retrieval and explicit provenance; it does not require
+embeddings or unrestricted conversation history. Conflicting facts are disputed rather than last
+writer wins. Knowledge can inform recommendations but cannot grant action authority.
 
-External hosts alone originate recurring maintenance. nohmi records declared schedule identity,
-connection binding, expected cadence and observed health; internal retries only continue accepted
-work. Provider synchronization follows its separate connector lifecycle. Do not create a second
-Finance scheduling authority while adding automatic source access.
+### F6 — Text with Codex and Claude during daily maintenance
 
-Finance owns its settings editor, source health, overview, ledger, plan, cash flow, wealth and
-review inspection. Integration owns composition into Today and unified Reviews. Finance emits
-typed notification intents; Texting/channel policy owns delivery, quiet hours, privacy, deduplication
-and reply routing. Stale note revisions cannot be acted on through an old message.
+The [Finance SMS journey](texting-operations.md#finance-mvp-requirement) is a release requirement
+for both hosts. Finance emits a typed intent; shared policy applies consent, disclosure, quiet hours,
+reminders and deduplication. Texting composes at most three clear items with stable internal message
+and proposal bindings. Multi-item messages link to authenticated unified Reviews.
 
-## Maintained-state and acceptance contract
+Inbound SMS is durably recorded and claimed. Replies bind to current work; unnumbered answers are
+accepted only for one unambiguous active item. Free-form context can start a Finance expectation or
+clarify existing work. Receipt acknowledgment reports acceptance, never invented completion.
+Uncertain intent asks one question. Unsupported general-domain requests receive an honest response.
 
-- Maintained: scoped source coverage and reconciliation meet declared requirements, derived totals
-  use current revisions, policy-compliant actions are verified, and no material required work remains.
-- Maintained with questions: supported work is complete but explicit uncertainties remain; affected
-  totals/advice are qualified. A silent queue or zero new changes does not imply maintained.
-- Blocked: missing authority/evidence/provider capability prevents a required outcome; identify the
-  repair owner and allow independent supported work to continue.
-- Failed: an operation failed with durable recovery state; preserve verified earlier successes.
+A reply after the original agent session ends must reach authorized continuation without a user
+copying text into the host. Event-driven continuation is preferred; a host-owned bounded follow-up
+schedule is acceptable if measured latency and required host availability are disclosed. The API
+keeps pending work and safe recovery when the host is offline, revoked or rate limited. No host
+adapter may create new recurring schedules inside nohmi or bypass the external host's controls.
 
-Every period review records scope/cutoff and freshness, completed changes, plan versus actuals,
-cash/wealth assumptions, unresolved exposure, recommendations/tradeoffs, knowledge/rule proposals,
-and recovery or next check-in links. Expert playbooks are versioned server-owned data; bookkeeping,
-planning, investment analysis and coaching claims need primary-source research and applicability
-dates before implementation. This charter supplies no unresearched numerical financial advice.
+Proposed acceptance budget: inbound acknowledgment within 60 seconds and a continuation attempt
+within 5 minutes while the configured host is available. These are measured release targets, not a
+carrier delivery guarantee. A missed target exposes pending/overdue status and an app recovery path.
+Record p50/p95 latency and host usage/cost during trials; idle checks must avoid repeated reasoning
+or identical notifications. Dispatch retries cannot duplicate a completed action or trigger storm.
 
-Acceptance spans tenant isolation, balance/event invariants, partial reimbursements, pending/posting
-replacement, unknown ownership, stale sources, repeated imports, concurrent note edits, cumulative
-budget limits, retries after partial completion, cross-host overlap, manual/agent parity, and
-responsive accessible review flows. Measure unresolved financial exposure, reconciliation coverage,
-repeat-question rate, correction reversals, maintenance latency and user effort—not classification
-percentage or amount saved alone.
+SMS can answer factual questions and approve only an exact unexpired reversible proposal under
+channel/domain policy. New budget authority, credentials and stronger approvals use authenticated
+app review. A stale or ambiguous yes cannot approve anything.
 
-## Proposed parallel delivery map
+### F7 — Review and improve finances
 
-These are workstream boundaries, not authorization to implement all proposed details immediately.
+The user can inspect a durable periodic review containing cutoff/coverage, completed corrections,
+plan versus actuals, cash-flow pressure, debt/goal/wealth progress, unresolved exposure and next
+choices. Explain why spending above or below plan matters for that person's stated goals.
+Recommendations show evidence, assumptions, tradeoffs and uncertainty. A forecast is not booked
+money; net worth changes distinguish contributions, liabilities and valuation where evidence allows.
 
-- [COO-45 — Consolidated plan and contract decisions](https://linear.app/coopersully/issue/COO-45/consolidate-the-finance-stewardship-plan-and-parallel-contracts)
-- [COO-46 — Deliver contextual Finance reviews and durable maintenance notes](https://linear.app/coopersully/issue/COO-46/deliver-contextual-finance-reviews-and-durable-maintenance-notes)
-- [COO-47 — Capture prospective Finance context and reimbursement expectations](https://linear.app/coopersully/issue/COO-47/capture-prospective-finance-context-and-reimbursement-expectations)
-- [COO-48 — Make Finance position and reimbursement totals evidence-qualified](https://linear.app/coopersully/issue/COO-48/make-finance-position-and-reimbursement-totals-evidence-qualified)
-- [COO-49 — Govern automatic budget revisions with explicit user boundaries](https://linear.app/coopersully/issue/COO-49/govern-automatic-budget-revisions-with-explicit-user-boundaries)
-- [COO-50 — Determine whether automatic personal Venmo activity access is viable](https://linear.app/coopersully/issue/COO-50/determine-whether-automatic-personal-venmo-activity-access-is-viable)
+Provide useful basic recommendations without requiring market feeds. Specialist investment, tax
+or jurisdiction-sensitive advice requires separately researched applicability and is not an MVP
+promise. Correcting source evidence recomputes current projections; an issued review remains an
+immutable snapshot with a superseding review when necessary.
 
-| Lane | Outcome and owned paths | Dependencies and exclusions |
-| --- | --- | --- |
-| A — Context and reviews (this chat) | Existing `finance/inbox-service*`, Finance `inbox-list*`/`review-page*`, domain `finance/inbox.ts`; new Finance context/expectation modules after contract agreement | Preserve current branch; consume ledger matching and shared knowledge interfaces; do not own the global knowledge store, budget calculations or provider sync |
-| B — Ledger and financial position | Finance economic-event, reconciliation, cashflow and wealth calculators/tests; proposed narrow position/evidence contract | Own recognition and cents/period/ownership semantics; supply qualified totals to A/C; do not own review UI or policy editor |
-| C — Budget policy and planning | Finance budget/policy modules, plan UI and policy tests | Design and pure rules can proceed alongside B; applying changes depends on B's qualified position and agreed plan/policy revisions |
-| D — Automatic source feasibility | Read-only Venmo capability investigation and boundary record; connector modules only after supported access is demonstrated | No uploads, scraping or invented API; no dependency for A/B/C; account consent and production-equivalent read proof are release gates |
-| Integration coordination (this chat initially) | Charter, interface agreements, maintenance compatibility decision, shared adapters and composition-root handoffs | Coordinate with User Knowledge/Reviews/Texting owners; merge small contract changes before dependent feature branches |
+## 5. Architecture and failure behavior
 
-Do not give several chats simultaneous ownership of `finance-service.ts`, `routes/finances.ts`,
-`packages/domain/src/finance.ts`, `packages/api-client/src/features/finances.ts`, or
-`apps/mcp/src/tools/finances.ts`. Agree additions through one integration owner. Database schema and
-migration journal changes use a single sequencing owner; published migrations remain append-only.
+- `packages/domain`: validated shared contracts and money/lifecycle invariants.
+- `packages/database`: tenant-owned records, revisions, durable claims, audit and migrations.
+- Finance API modules: ledger meaning, setup, plans, policy, reconciliation, work and reviews.
+- Shared Texting: consent, delivery, conversation claims, routing and response composition.
+- Shared notification policy: eligibility once per work identity, then channel suppression.
+- User Knowledge: typed reusable facts and purpose-bound retrieval; Finance owns operational notes.
+- External host adapters: connection-bound delivery/continuation only; no copied finance playbooks.
+- Typed API client, web and MCP: the same domain operations; no competing calculations or authority.
 
-Start with charter and shared interface decisions; land the existing review slice independently.
-Then A context capture, B ledger work and C policy design can proceed concurrently using explicit
-contracts. C's production application and A's automatic matching wait for the required B evidence.
-D remains a bounded research lane until it proves worthwhile. Each future chat gets one issue,
-owned/non-owned paths, a baseline commit, dependency links, acceptance evidence and a handoff owner;
-each uses an isolated worktree. Do not copy this entire branch into every stream by default.
+See the [contract and ownership plan](../superpowers/plans/2026-09-13-finance-mvp.md). There is one
+canonical Finance maintenance lifecycle. The foundation work traces callers and preserves the
+stronger challenge/settlement guarantees while cutting callers over explicitly. Former product
+protocol names require a hard cutover; do not introduce compatibility aliases. Data migration may
+be phased, but new public naming must follow current repository instructions.
 
-## Decisions still to make together
+States distinguish execution progress from financial health. A run can finish with questions and
+qualified totals; maintained requires verified scoped reconciliation. Blocked authority/evidence,
+provider failure, ambiguous external delivery and user input each retain their own repair path.
+Use revision guards, fenced leases, stable operation IDs and transactional outboxes where accepted
+work outlives the request. Verify scope and tenant ownership before lookup or mutation, including
+nested references and knowledge retrieval.
 
-1. Budget policy presets and granularity: what can move, what stays protected, and cumulative limits.
-2. Time model: calendar month, paycheck cycle, rollover and service-period views; maintain one ledger
-   while supporting distinct explainable views.
-3. When uncertainty warrants interruption versus a qualified estimate; choose impact-based defaults.
-4. Expiry and follow-up for expected reimbursements, including uncertain amount or event date.
-5. Investment/wealth scope for the first release and evidence needed for each claim.
-6. Whether occasional provider-required reauthentication is acceptable for an automatic Venmo feed.
+## 6. Release evidence
 
-The agreed bookkeeping/authority principle is settled. These choices remain open and must not be
-silently converted into enabled rules, implementation commitments or user-specific production data.
+| Gate | Observable evidence |
+| --- | --- |
+| Fresh user | Connect or use manual account, understand coverage, create/approve plan, configure authority and both host integrations |
+| Normal month | Receive income, pay bills, spend, contribute to savings/investments and review mutually consistent totals |
+| Ambiguity | Shared expense plus partial reimbursement, prospective note, unmatched remainder, correction and later maintenance |
+| Authority | Read-only rejection, inactive rule, stale approval, cumulative cap race, revoked credential and protected category |
+| Recovery | Provider replay/removal, pending replacement, duplicate invocation/SMS, process interruption, stale source, offline host and uncertain send |
+| Channel parity | App, API, MCP and SMS resolve one case; a manual correction wins without later reversal |
+| Both hosts | Separate real Codex and Claude runs, terminated original session, later SMS reply, resumed domain result and overlapping invocation |
+| Release | Fresh `pnpm verify`, reviewed migration transitions, production-equivalent connector/SMS/host evidence and operator recovery |
+
+Use synthetic multi-tenant fixtures in the repository. Production smoke evidence records only
+sanitized identifiers, timestamps, configuration capabilities and terminal states. Obtain explicit
+authorization for actual SMS/provider connection tests; this plan is not consent to send messages.
+No host, connector or SMS capability is marked shipped from mocks alone.
+
+## 7. Decisions and gates still open
+
+The product direction and both-host requirement are accepted. The proposed release limits above
+remain reviewable: monthly/USD scope, bounded reallocation policy shape, context expiry controls,
+and SMS latency target. Implementation agents cannot change them silently.
+
+Host feasibility must choose and identify the actual supported Codex and Claude surfaces and their
+continuation mechanisms. An SDK runner is not proof that a desktop app automation works; a Claude
+Code routine is not proof of Cowork support. If either required host cannot pass, report a release
+blocker and options to the user rather than dropping it from scope.
+
+Venmo coverage is a separate go/no-go experiment. It must not delay the required Finance journey.

@@ -258,8 +258,9 @@ flowchart TD
 
 ### Epic 9 — Finance platform, Plaid, budgets, and review queue
 
-The [Finance workspace plan](finance-workspace-plan.md) consolidates the current review branch,
-agreed autonomy boundaries, proposed parallel ownership and decisions still under discussion.
+The [Finance MVP specification](finance-workspace-plan.md) defines the first complete user journey,
+agreed autonomy boundaries, both-host SMS requirement and proposed release limits. Its linked
+delivery plan maps current capabilities and remaining work into independently reviewable milestones.
 
 **Implement**
 

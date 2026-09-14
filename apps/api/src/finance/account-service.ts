@@ -3,6 +3,7 @@ import {
   type Database,
   financeAccountConnections,
   financeAccounts,
+  financeProviderItems,
 } from "@personal-os/database";
 import type {
   FinanceAccount,
@@ -11,7 +12,7 @@ import type {
   FinanceAccountQuery,
   FinanceToolResult,
 } from "@personal-os/domain";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { accountMatchesQuery, summarizeFinanceAccounts } from "./account-semantics.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
@@ -248,20 +249,92 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
         context,
         {
           idempotencyKey,
+          lockIdentities: [`finance-provider-topology:${context.userId}`],
           operation: "finance.account.disconnect",
           payload: { id },
         },
         async (tx) => {
+          // Match connection/relink lock order: topology, Item, then accounts.
+          const [candidate] = await tx
+            .select()
+            .from(financeAccounts)
+            .where(and(eq(financeAccounts.id, id), eq(financeAccounts.userId, context.userId)))
+            .limit(1);
+          if (!candidate) throw new AppError("not_found", "The financial account was not found.");
+          const itemId = candidate.providerItemRecordId;
+          let lastLinkedAccount = false;
+          if (itemId) {
+            const [item] = await tx
+              .select({
+                userId: financeProviderItems.userId,
+                activeClaim: sql<boolean>`${financeProviderItems.syncClaimId} IS NOT NULL AND ${financeProviderItems.syncClaimExpiresAt} > CURRENT_TIMESTAMP`,
+              })
+              .from(financeProviderItems)
+              .where(eq(financeProviderItems.id, itemId))
+              .for("update");
+            if (!item || item.userId !== context.userId || candidate.provider !== "plaid") {
+              throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+            }
+            if (item.activeClaim) {
+              throw new AppError(
+                "conflict",
+                "The Plaid connection is synchronizing. Retry disconnection after it finishes.",
+              );
+            }
+            const siblings = await tx
+              .select()
+              .from(financeAccounts)
+              .where(eq(financeAccounts.providerItemRecordId, itemId))
+              .orderBy(financeAccounts.id)
+              .for("update");
+            if (siblings.some((row) => row.userId !== context.userId || row.provider !== "plaid")) {
+              throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+            }
+            lastLinkedAccount = siblings.length === 1;
+          }
           const before = await owned(tx, context.userId, id);
+          if (before.providerItemRecordId !== itemId) {
+            throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
+          }
+          const [activeAccountClaim] = await tx
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.id, id),
+                sql`${financeAccounts.syncClaimId} IS NOT NULL AND ${financeAccounts.syncClaimExpiresAt} > CURRENT_TIMESTAMP`,
+              ),
+            );
+          if (activeAccountClaim) {
+            throw new AppError(
+              "conflict",
+              "The account is synchronizing. Retry disconnection after it finishes.",
+            );
+          }
           const [updated] = await tx
             .update(financeAccounts)
             .set({
               encryptedCredentials: null,
-              providerAccountId: null,
+              // Keep remote identity so a later consented reconnect reuses ledger history.
               providerItemId: null,
+              providerItemRecordId: null,
               status: before.provider === "manual" ? "manual" : "needs_reauth",
               syncCursor: null,
-              updatedAt: now(),
+              syncClaimId: null,
+              syncClaimExpiresAt: null,
+              nextSyncAt: null,
+              ...(before.provider === "plaid"
+                ? {
+                    syncState: "blocked" as const,
+                    syncError:
+                      "This account is disconnected. Connect it again to resume synchronization.",
+                    syncErrorCode: "finance_account_disconnected",
+                    syncErrorCategory: "authorization" as const,
+                    syncRecovery: "reconnect" as const,
+                    syncFailureCount: 1,
+                  }
+                : {}),
+              updatedAt: new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1)),
             })
             .where(eq(financeAccounts.id, before.id))
             .returning();
@@ -270,6 +343,9 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "internal_error",
               "The financial account could not be disconnected.",
             );
+          if (itemId && lastLinkedAccount) {
+            await tx.delete(financeProviderItems).where(eq(financeProviderItems.id, itemId));
+          }
           const connections = await tx
             .select()
             .from(financeAccountConnections)
@@ -279,14 +355,18 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
                 eq(financeAccountConnections.provider, before.provider),
               ),
             );
-          const connectionIds = connections
-            .filter((connection) => connection.accountIds.includes(id))
-            .map((connection) => connection.id);
-          for (const connectionId of connectionIds) {
+          for (const connection of connections.filter((connection) =>
+            connection.accountIds.includes(id),
+          )) {
+            const remainingIds = connection.accountIds.filter((accountId) => accountId !== id);
             await tx
               .update(financeAccountConnections)
-              .set({ status: "disconnected", updatedAt: now() })
-              .where(eq(financeAccountConnections.id, connectionId));
+              .set({
+                accountIds: remainingIds,
+                status: remainingIds.length === 0 ? "disconnected" : connection.status,
+                updatedAt: now(),
+              })
+              .where(eq(financeAccountConnections.id, connection.id));
           }
           await tx.insert(auditEvents).values({
             action: "finance.account_disconnected",
@@ -303,7 +383,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
             {
               affectedEntityId: id,
               description:
-                "Removed provider access while preserving the account and its transactions.",
+                "Stopped local synchronization while preserving the account and its transactions. Provider consent is managed at the institution.",
               reversible: true,
               type: "account_disconnected",
             },

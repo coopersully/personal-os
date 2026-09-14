@@ -71,8 +71,9 @@ export function FinanceAccountsPage() {
             <Alert>
               <AlertTitle>Account interpretation needs attention</AlertTitle>
               <AlertDescription>
-                Confirm ownership and possible duplicates before relying on your personal position.
-                Excluding an account removes it from planning.
+                Check missing balances and source freshness, and confirm ownership and possible
+                duplicates before relying on your personal position. Excluding an account removes it
+                from planning.
               </AlertDescription>
             </Alert>
           ) : null}

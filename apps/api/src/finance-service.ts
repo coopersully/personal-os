@@ -566,7 +566,10 @@ function account(
   row: typeof financeAccounts.$inferSelect,
   item?: typeof financeProviderItems.$inferSelect,
 ): FinanceAccount {
-  const synchronization = item ?? row;
+  // A healthy Item cannot certify an account absent from its latest snapshot.
+  // Item-wide failures still take precedence so repair targets the connection.
+  const synchronization =
+    item?.syncState === "current" && row.syncState === "blocked" ? row : (item ?? row);
   return {
     balance: currency(row.balance),
     createdAt: row.createdAt.toISOString(),
@@ -583,7 +586,12 @@ function account(
     provider: row.provider,
     providerSubtype: row.providerSubtype,
     providerType: row.providerType,
-    status: item ? (item.syncRecovery === "reconnect" ? "needs_reauth" : "connected") : row.status,
+    status:
+      synchronization === row
+        ? row.status
+        : item?.syncRecovery === "reconnect"
+          ? "needs_reauth"
+          : "connected",
     synchronization: {
       failureCode: synchronization.syncErrorCode,
       failureCount: synchronization.syncFailureCount,

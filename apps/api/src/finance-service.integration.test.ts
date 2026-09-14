@@ -9744,7 +9744,8 @@ describe.sequential("finance service", () => {
     await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
       accountSemantics: {
         excludedAccountIds: [otherAccount.id],
-        trustworthy: true,
+        // The included wallet has no observed balance.
+        trustworthy: false,
         unresolvedOwnershipAccountIds: [],
       },
       investments: 250,

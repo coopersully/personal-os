@@ -45,7 +45,7 @@ function OccasionCard({
         onClick={onOpen}
         type="button"
       >
-        <ItemContent>
+        <ItemContent className="min-w-0">
           <ItemHeader>
             <ItemTitle>
               <span className="truncate">{title}</span>

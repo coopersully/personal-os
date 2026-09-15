@@ -405,6 +405,13 @@ describe("Finance position pages", () => {
   });
 
   it("saves joint ownership with the exact account revision and an idempotency key", async () => {
+    let finishUpdate: ((value: unknown) => void) | undefined;
+    api.updateFinanceAccount.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishUpdate = resolve;
+        }),
+    );
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Ownership"), { target: { value: "joint" } });
@@ -423,23 +430,124 @@ describe("Finance position pages", () => {
         }),
       ),
     );
+    expect(screen.getByRole("button", { name: "Saving account…" })).toBeDisabled();
     expect(api.updateFinanceAccount.mock.calls[0]?.[1]).not.toHaveProperty("balance");
     expect(api.updateFinanceAccount.mock.calls[0]?.[1]).not.toHaveProperty("kind");
+    finishUpdate?.(envelope({ ...account, ownershipType: "joint", ownershipShare: 0.5 }));
+  });
+
+  it("shows a confirmed ownership share when opening an account", async () => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [{ ...account, ownershipType: "joint", ownershipShare: 0.5 }],
+      accountSemantics: {
+        trustworthy: true,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [],
+      },
+      totals: { cash: 500, debt: 0, investments: 0, netWorth: 500, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    expect(screen.getByLabelText("Your ownership share (%)")).toHaveValue(50);
+  });
+
+  it("shows the empty account state without an interpretation warning", async () => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [],
+      accountSemantics: {
+        trustworthy: true,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [],
+      },
+      totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    expect(await screen.findByText("No accounts tracked")).toBeVisible();
+    expect(screen.queryByText("Account interpretation needs attention")).not.toBeInTheDocument();
   });
 
   it("lets the signed-in person confirm provider account disconnection", async () => {
+    let finishDisconnect: ((value: unknown) => void) | undefined;
+    api.disconnectFinanceAccount.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDisconnect = resolve;
+        }),
+    );
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
     expect(
       screen.getByText(/Ledger history stays available, and other accounts at this institution/),
     ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Keep connected" }));
+    expect(
+      screen.queryByText(/Ledger history stays available, and other accounts at this institution/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
     await waitFor(() =>
       expect(api.disconnectFinanceAccount).toHaveBeenCalledWith(account.id, {
         idempotencyKey: expect.any(String),
       }),
     );
+    expect(screen.getByRole("button", { name: "Disconnecting…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Keep connected" })).toBeDisabled();
+    finishDisconnect?.(envelope({ ...account, status: "needs_reauth" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Confirm disconnection" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it.each([
+    "finance_account_disconnected",
+    "finance_account_legacy_disconnected",
+  ])("does not offer disconnection for an account already marked %s", async (failureCode) => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [{ ...account, synchronization: { ...account.synchronization, failureCode } }],
+      accountSemantics: {
+        trustworthy: false,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [account.id],
+      },
+      totals: { cash: 1000, debt: 0, investments: 0, netWorth: 1000, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    expect(screen.queryByRole("button", { name: "Disconnect account" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "confirmed",
+    "uncertain",
+  ])("retries a %s account disconnection with the safe idempotency key", async (failure) => {
+    if (failure === "confirmed")
+      api.disconnectFinanceAccount.mockResolvedValueOnce({
+        ...envelope(account),
+        outcome: "failed",
+        communication: {
+          headline: "Disconnection rejected",
+          requiredDisclosures: [],
+          optionalDetails: [],
+        },
+      });
+    else api.disconnectFinanceAccount.mockRejectedValueOnce(new Error("Network response lost"));
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
+    expect(await screen.findByText("Account was not disconnected")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
+    await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
+    const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
+    const secondKey = api.disconnectFinanceAccount.mock.calls[1]?.[1].idempotencyKey;
+    if (failure === "confirmed") expect(secondKey).not.toBe(firstKey);
+    else expect(secondKey).toBe(firstKey);
   });
 
   it("preserves an account correction after a conflict", async () => {

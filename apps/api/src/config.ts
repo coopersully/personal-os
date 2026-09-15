@@ -24,6 +24,7 @@ const configSchema = z
     ),
     AGENT_SKILL_VERSION: semanticVersionSchema.default(officialAgentSkill.version),
     APP_ENCRYPTION_KEY: z.string().min(1),
+    DATABASE_CONNECT_HOST: z.string().trim().min(1).optional(),
     DATABASE_URL: z.string().min(1),
     EMAIL_FROM: z.string().default(""),
     GOOGLE_CLIENT_ID: z.string().default(""),
@@ -217,6 +218,7 @@ export type AppConfig = {
   apiBaseUrl: string;
   apiShutdownTimeoutMs: number;
   appBaseUrl: string;
+  databaseConnectHost?: string;
   databaseUrl: string;
   emailFrom: string;
   encryptionKey: string;
@@ -280,6 +282,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     apiBaseUrl: value.API_BASE_URL,
     apiShutdownTimeoutMs: value.API_SHUTDOWN_TIMEOUT_MS,
     appBaseUrl: value.APP_BASE_URL,
+    ...(value.DATABASE_CONNECT_HOST ? { databaseConnectHost: value.DATABASE_CONNECT_HOST } : {}),
     databaseUrl: value.DATABASE_URL,
     emailFrom: value.EMAIL_FROM,
     encryptionKey: value.APP_ENCRYPTION_KEY,

@@ -283,6 +283,13 @@ describe("Finance position pages", () => {
     expect(screen.getByText("Proposed · Version 3")).toBeInTheDocument();
   });
 
+  it("waits for a successful empty Inbox before showing next-step guidance", async () => {
+    api.getFinanceInbox.mockRejectedValue(new Error("Inbox unavailable"));
+    mount(<FinanceOverviewPage />);
+    expect(await screen.findByText("Inbox unavailable")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+  });
+
   it("routes an open review question and exposes recent review and maintenance evidence", async () => {
     api.getFinanceSnapshot.mockResolvedValue(
       envelope({
@@ -354,11 +361,8 @@ describe("Finance position pages", () => {
       nextCursor: null,
     });
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Was this transfer yours?")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Answer next question" })).toHaveAttribute(
-      "href",
-      "/finances/review",
-    );
+    expect(await screen.findByText("Outstanding (2)")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Review item" })).toHaveLength(2);
     expect(screen.getByText("Active · Version 4")).toBeVisible();
     expect(screen.getByText("Automate savings")).toBeVisible();
     expect(screen.getByRole("link", { name: "Open review" })).toHaveAttribute(

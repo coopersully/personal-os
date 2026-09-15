@@ -182,7 +182,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: true },
       description:
-        "Use this to autonomously categorize outstanding transactions, reconcile relationships, account for the active budget, and red-team audit recent activity. It runs deterministic rules first and returns bounded reasoning or audit work immediately; it never queues an automation or waits for the user. Continue until stage settled. Uncertainty becomes deduplicated transaction-backed Inbox rows.",
+        "Use this to autonomously categorize outstanding transactions, reconcile relationships, account for the active budget, and red-team audit recent activity. It runs deterministic rules first and returns bounded reasoning or audit work immediately; it never queues an automation or waits for the user. Read inboxCases, including saved clarification notes, on every pass. Use answer_finance_review to apply supported answers and close their cases; a note alone is not a classification. Continue until stage settled. Uncertainty becomes deduplicated transaction-backed Inbox rows. Settlement does not establish that the budget is balanced.",
       inputSchema: financeMaintenanceInputSchema,
       title: "Maintain finances",
     },
@@ -435,7 +435,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Call immediately after the user's answer. It applies the change and resolves the row atomically. Briefly acknowledge changes, then ask only the returned next question.",
+        "Record the user's answer against its exact case. A classify or link resolution applies the change and resolves the row atomically. A clarify resolution saves a durable note for the next maintenance pass and keeps the case open. Inspect context for the transaction date, account, direction, and posting status before asking a question; provide supporting context rather than an unexplained amount.",
       inputSchema: answerFinanceReviewToolInputSchema,
       title: "Answer Finance review",
     },

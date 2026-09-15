@@ -119,7 +119,10 @@ import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
-import { createFinanceAccountService } from "./finance/account-service.js";
+import {
+  createFinanceAccountService,
+  serializeFinanceAccountRows,
+} from "./finance/account-service.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
@@ -811,36 +814,7 @@ export function createFinanceService({
   }
 
   async function serializeAccounts(rows: Array<typeof financeAccounts.$inferSelect>) {
-    const itemIds = [
-      ...new Set(
-        rows.flatMap((row) => (row.providerItemRecordId ? [row.providerItemRecordId] : [])),
-      ),
-    ];
-    const items =
-      itemIds.length === 0
-        ? []
-        : await db
-            .select()
-            .from(financeProviderItems)
-            .where(inArray(financeProviderItems.id, itemIds));
-    const itemById = new Map(items.map((item) => [item.id, item]));
-    if (
-      rows.some((row) => {
-        if (!row.providerItemRecordId) return false;
-        const item = itemById.get(row.providerItemRecordId);
-        return (
-          !item ||
-          row.provider !== "plaid" ||
-          item.provider !== "plaid" ||
-          item.userId !== row.userId
-        );
-      })
-    ) {
-      throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
-    }
-    return rows.map((row) =>
-      account(row, row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined),
-    );
+    return serializeFinanceAccountRows(db, rows);
   }
   async function reimbursementProjection(
     userId: string,

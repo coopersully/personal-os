@@ -9950,6 +9950,34 @@ describe.sequential("finance service", () => {
         syncState: "blocked",
       })
       .where(eq(financeProviderItems.userId, owner.id));
+    const [storedAccount] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.userId, owner.id));
+    if (!storedAccount) throw new Error("Blocked Provider Item account was not created.");
+    await expect(
+      service.updateFinanceAccount(
+        storedAccount.id,
+        { idempotencyKey: crypto.randomUUID(), name: "Renamed blocked account" },
+        {
+          actorId: owner.id,
+          actorType: "user",
+          bypassEnabled: false,
+          canMutate: true,
+          canSelfApprove: false,
+          requestId: "blocked-item-summary-update",
+          userId: owner.id,
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        status: "needs_reauth",
+        synchronization: {
+          failureCode: "blocked_item_summary",
+          state: "blocked",
+        },
+      },
+    });
 
     await expect(
       service.listFinanceAccounts(owner.id, { includeExcluded: true }),

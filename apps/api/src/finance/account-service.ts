@@ -104,6 +104,54 @@ function accountAudit(row: typeof financeAccounts.$inferSelect) {
   };
 }
 
+type AccountWithProviderItem = {
+  account: typeof financeAccounts.$inferSelect;
+  item: typeof financeProviderItems.$inferSelect | null;
+};
+
+function serializeAccountPairs(pairs: AccountWithProviderItem[]): FinanceAccount[] {
+  if (
+    pairs.some(
+      ({ account: row, item }) =>
+        row.providerItemRecordId !== null &&
+        (!item ||
+          row.provider !== "plaid" ||
+          item.provider !== "plaid" ||
+          item.userId !== row.userId),
+    )
+  ) {
+    throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+  }
+  return pairs.map(({ account: row, item }) => account(row, item ?? undefined));
+}
+
+export async function serializeFinanceAccountRows(
+  executor: Pick<Database, "select">,
+  rows: Array<typeof financeAccounts.$inferSelect>,
+): Promise<FinanceAccount[]> {
+  if (rows.length === 0) return [];
+  const pairs = await executor
+    .select({ account: financeAccounts, item: financeProviderItems })
+    .from(financeAccounts)
+    .leftJoin(
+      financeProviderItems,
+      eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
+    )
+    .where(
+      inArray(
+        financeAccounts.id,
+        rows.map((row) => row.id),
+      ),
+    );
+  const pairById = new Map(pairs.map((pair) => [pair.account.id, pair]));
+  return serializeAccountPairs(
+    rows.flatMap((row) => {
+      const pair = pairById.get(row.id);
+      return pair ? [pair] : [];
+    }),
+  );
+}
+
 function connection(row: typeof financeAccountConnections.$inferSelect): FinanceAccountConnection {
   const lastError = row.lastError;
   return {
@@ -145,45 +193,17 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
 
   return {
     async list(userId: string, query: FinanceAccountQuery): Promise<FinanceAccountList> {
-      const rows = await db
-        .select()
+      const pairs = await db
+        .select({ account: financeAccounts, item: financeProviderItems })
         .from(financeAccounts)
-        .where(eq(financeAccounts.userId, userId));
-      const itemIds = [
-        ...new Set(
-          rows.flatMap((row) => (row.providerItemRecordId ? [row.providerItemRecordId] : [])),
-        ),
-      ];
-      const items =
-        itemIds.length === 0
-          ? []
-          : await db
-              .select()
-              .from(financeProviderItems)
-              .where(inArray(financeProviderItems.id, itemIds));
-      const itemById = new Map(items.map((item) => [item.id, item]));
-      if (
-        rows.some((row) => {
-          if (!row.providerItemRecordId) return false;
-          const item = itemById.get(row.providerItemRecordId);
-          return (
-            !item ||
-            row.provider !== "plaid" ||
-            item.provider !== "plaid" ||
-            item.userId !== row.userId
-          );
-        })
-      ) {
-        throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
-      }
-      const matching = rows
-        .map((row) =>
-          account(
-            row,
-            row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined,
-          ),
+        .leftJoin(
+          financeProviderItems,
+          eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
         )
-        .filter((item) => accountMatchesQuery(item, query));
+        .where(eq(financeAccounts.userId, userId));
+      const matching = serializeAccountPairs(pairs).filter((item) =>
+        accountMatchesQuery(item, query),
+      );
       const { accountSemantics, totals } = summarizeFinanceAccounts(matching);
       return {
         accounts: query.includeExcluded
@@ -269,6 +289,10 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "conflict",
               "This account changed. Reload it before saving your changes.",
             );
+          const [serialized] = await serializeFinanceAccountRows(tx, [updated]);
+          if (!serialized) {
+            throw new AppError("internal_error", "The financial account could not be loaded.");
+          }
           await tx.insert(auditEvents).values({
             action: "finance.account_updated",
             actorId: context.actorId,
@@ -280,7 +304,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
             requestId: context.requestId,
             userId: context.userId,
           });
-          return result(account(updated), "Account updated.", [
+          return result(serialized, "Account updated.", [
             {
               affectedEntityId: id,
               description: "Updated the account details.",

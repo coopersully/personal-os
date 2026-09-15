@@ -479,28 +479,28 @@ describe("Finance position pages", () => {
     );
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
-    expect(
-      screen.getByText(/Ledger history stays available, and other accounts at this institution/),
-    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    expect(screen.getByText(/nohmi will stop using this account locally/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Keep connected" }));
     expect(
-      screen.queryByText(/Ledger history stays available, and other accounts at this institution/),
+      screen.queryByText(/nohmi will stop using this account locally/),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    expect(screen.getByText(/Plaid may continue sending this account's data/)).toBeVisible();
+    expect(screen.getByText(/This does not revoke access at your institution/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     await waitFor(() =>
       expect(api.disconnectFinanceAccount).toHaveBeenCalledWith(account.id, {
         idempotencyKey: expect.any(String),
       }),
     );
-    expect(screen.getByRole("button", { name: "Disconnecting…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Keep connected" })).toBeDisabled();
     expect(screen.getByText("Cancel").closest("button")).toBeDisabled();
     finishDisconnect?.(envelope({ ...account, status: "needs_reauth" }));
     await waitFor(() =>
       expect(
-        screen.queryByRole("button", { name: "Confirm disconnection" }),
+        screen.queryByRole("button", { name: "Stop tracking account" }),
       ).not.toBeInTheDocument(),
     );
   });
@@ -521,7 +521,7 @@ describe("Finance position pages", () => {
     });
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
-    expect(screen.queryByRole("button", { name: "Disconnect account" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -542,7 +542,7 @@ describe("Finance position pages", () => {
     });
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
-    expect(screen.queryByRole("button", { name: "Disconnect account" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -572,10 +572,10 @@ describe("Finance position pages", () => {
     else api.disconnectFinanceAccount.mockRejectedValueOnce(new Error("Network response lost"));
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
-    expect(await screen.findByText("Account was not disconnected")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    expect(await screen.findByText("Account is still tracked")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
     const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
     const secondKey = api.disconnectFinanceAccount.mock.calls[1]?.[1].idempotencyKey;

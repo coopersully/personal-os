@@ -26,6 +26,13 @@ describe.sequential("Finance source lifecycle migration", () => {
       );
       const userId = user.rows[0]?.id;
       if (!userId) throw new Error("Finance source repair user was not created.");
+      const foreignUser = await database.pool.query<{ id: string }>(
+        `INSERT INTO users (email, password_hash, display_name)
+         VALUES ('finance-source-repair-foreign@example.com', 'unused', 'Foreign source owner')
+         RETURNING id`,
+      );
+      const foreignUserId = foreignUser.rows[0]?.id;
+      if (!foreignUserId) throw new Error("Foreign source owner was not created.");
 
       const items = await database.pool.query<{ id: string; provider_item_id: string }>(
         `INSERT INTO finance_provider_items (
@@ -42,6 +49,15 @@ describe.sequential("Finance source lifecycle migration", () => {
         (row) => row.provider_item_id === "legacy-siblings",
       )?.id;
       if (!finalItemId || !siblingItemId) throw new Error("Finance source repair Items missing.");
+      const foreignItem = await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_provider_items (
+           user_id, provider, provider_item_id, encrypted_credentials, sync_state, next_sync_at
+         ) VALUES ($1, 'plaid', 'foreign-orphan', '{"value":"foreign"}'::jsonb, 'current', NOW())
+         RETURNING id`,
+        [foreignUserId],
+      );
+      const foreignItemId = foreignItem.rows[0]?.id;
+      if (!foreignItemId) throw new Error("Foreign source Item was not created.");
 
       await database.pool.query(
         `INSERT INTO finance_accounts (
@@ -52,9 +68,11 @@ describe.sequential("Finance source lifecycle migration", () => {
             $2, NULL, 'current', NOW()),
            ($1, 'Fixture Bank', 'Legacy sibling', 'plaid', 'needs_reauth', NULL, NULL,
             $3, NULL, 'current', NOW()),
+           ($1, 'Fixture Bank', 'Legacy foreign pointer', 'plaid', 'needs_reauth', NULL, NULL,
+            $4, NULL, 'current', NOW()),
            ($1, 'Fixture Bank', 'Connected sibling', 'plaid', 'connected', 'remote-sibling',
             'legacy-siblings', $3, NULL, 'current', NOW())`,
-        [userId, finalItemId, siblingItemId],
+        [userId, finalItemId, siblingItemId, foreignItemId],
       );
 
       await migrateDatabase(database.db, migrationsFolder);
@@ -93,6 +111,14 @@ describe.sequential("Finance source lifecycle migration", () => {
             sync_state: "blocked",
           },
           {
+            name: "Legacy foreign pointer",
+            next_sync_at: null,
+            provider_item_record_id: null,
+            sync_error_code: "finance_account_legacy_disconnected",
+            sync_recovery: "reconnect",
+            sync_state: "blocked",
+          },
+          {
             name: "Legacy sibling",
             next_sync_at: null,
             provider_item_record_id: null,
@@ -112,6 +138,12 @@ describe.sequential("Finance source lifecycle migration", () => {
       ).resolves.toMatchObject({
         rows: [{ provider_item_id: "legacy-siblings" }, { provider_item_id: "unrelated-orphan" }],
       });
+      await expect(
+        database.pool.query<{ provider_item_id: string }>(
+          `SELECT provider_item_id FROM finance_provider_items WHERE user_id = $1`,
+          [foreignUserId],
+        ),
+      ).resolves.toMatchObject({ rows: [{ provider_item_id: "foreign-orphan" }] });
     } finally {
       await database.close();
       await container.stop();

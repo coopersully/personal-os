@@ -3,7 +3,7 @@
 -- only that exact legacy shape so healthy and recoverable Plaid accounts keep
 -- their source topology.
 CREATE TEMPORARY TABLE "finance_legacy_disconnected_items" ON COMMIT DROP AS
-SELECT DISTINCT "provider_item_record_id" AS "id"
+SELECT DISTINCT "provider_item_record_id" AS "id", "user_id"
 FROM "finance_accounts"
 WHERE "provider" = 'plaid'
   AND "status" = 'needs_reauth'
@@ -34,7 +34,13 @@ WHERE "provider" = 'plaid'
   AND "encrypted_credentials" IS NULL;
 --> statement-breakpoint
 DELETE FROM "finance_provider_items" AS "item"
-WHERE "item"."id" IN (SELECT "id" FROM "finance_legacy_disconnected_items")
+WHERE "item"."provider" = 'plaid'
+  AND EXISTS (
+  SELECT 1
+  FROM "finance_legacy_disconnected_items" AS "legacy"
+  WHERE "legacy"."id" = "item"."id"
+    AND "legacy"."user_id" = "item"."user_id"
+)
   AND NOT EXISTS (
   SELECT 1
   FROM "finance_accounts" AS "account"

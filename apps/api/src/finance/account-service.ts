@@ -12,7 +12,7 @@ import type {
   FinanceAccountQuery,
   FinanceToolResult,
 } from "@personal-os/domain";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { accountMatchesQuery, summarizeFinanceAccounts } from "./account-semantics.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
@@ -43,7 +43,14 @@ function result<T>(
   };
 }
 
-function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
+function account(
+  row: typeof financeAccounts.$inferSelect,
+  item?: typeof financeProviderItems.$inferSelect,
+): FinanceAccount {
+  // A healthy Item cannot certify an account absent from its latest snapshot.
+  // Item-wide failures still take precedence so repair targets the connection.
+  const synchronization =
+    item?.syncState === "current" && row.syncState === "blocked" ? row : (item ?? row);
   return {
     balance: row.balance === null ? null : row.balance / 100,
     createdAt: row.createdAt.toISOString(),
@@ -53,23 +60,31 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
     institution: row.institution,
     kind: row.kind,
     kindSource: row.kindSource,
-    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+    lastSyncedAt: synchronization.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
     ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
     ownershipType: row.ownershipType,
     provider: row.provider,
     providerSubtype: row.providerSubtype,
     providerType: row.providerType,
-    status: row.status,
+    status:
+      synchronization === row
+        ? row.status
+        : item?.syncRecovery === "reconnect"
+          ? "needs_reauth"
+          : "connected",
     synchronization: {
-      failureCode: row.syncErrorCode,
-      failureCount: row.syncFailureCount,
-      lastAttemptAt: row.lastSyncAttemptAt?.toISOString() ?? null,
-      lastSuccessAt: row.lastSyncedAt?.toISOString() ?? null,
-      message: row.syncError,
-      nextRetryAt: row.syncFailureCount > 0 ? (row.nextSyncAt?.toISOString() ?? null) : null,
-      recovery: row.syncRecovery,
-      state: row.syncState,
+      failureCode: synchronization.syncErrorCode,
+      failureCount: synchronization.syncFailureCount,
+      lastAttemptAt: synchronization.lastSyncAttemptAt?.toISOString() ?? null,
+      lastSuccessAt: synchronization.lastSyncedAt?.toISOString() ?? null,
+      message: synchronization.syncError,
+      nextRetryAt:
+        synchronization.syncFailureCount > 0
+          ? (synchronization.nextSyncAt?.toISOString() ?? null)
+          : null,
+      recovery: synchronization.syncRecovery,
+      state: synchronization.syncState,
     },
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -134,7 +149,41 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
         .select()
         .from(financeAccounts)
         .where(eq(financeAccounts.userId, userId));
-      const matching = rows.map(account).filter((item) => accountMatchesQuery(item, query));
+      const itemIds = [
+        ...new Set(
+          rows.flatMap((row) => (row.providerItemRecordId ? [row.providerItemRecordId] : [])),
+        ),
+      ];
+      const items =
+        itemIds.length === 0
+          ? []
+          : await db
+              .select()
+              .from(financeProviderItems)
+              .where(inArray(financeProviderItems.id, itemIds));
+      const itemById = new Map(items.map((item) => [item.id, item]));
+      if (
+        rows.some((row) => {
+          if (!row.providerItemRecordId) return false;
+          const item = itemById.get(row.providerItemRecordId);
+          return (
+            !item ||
+            row.provider !== "plaid" ||
+            item.provider !== "plaid" ||
+            item.userId !== row.userId
+          );
+        })
+      ) {
+        throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+      }
+      const matching = rows
+        .map((row) =>
+          account(
+            row,
+            row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined,
+          ),
+        )
+        .filter((item) => accountMatchesQuery(item, query));
       const { accountSemantics, totals } = summarizeFinanceAccounts(matching);
       return {
         accounts: query.includeExcluded

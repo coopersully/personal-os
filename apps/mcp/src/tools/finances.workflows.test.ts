@@ -161,6 +161,7 @@ describe("Finance MCP workflows", () => {
     expect(maintenance?.description).toContain("never queues an automation");
     expect(tools.tools.map((tool) => tool.name)).not.toContain("get_finance_review_queue");
     expect(tools.tools.map((tool) => tool.name)).not.toContain("apply_finance_categorizations");
+    expect(tools.tools.map((tool) => tool.name)).not.toContain("disconnect_finance_account");
     expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual(
       financeCapabilityManifest.map((capability) => capability.mcpTool).toSorted(),
     );

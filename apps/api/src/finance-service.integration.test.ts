@@ -9921,6 +9921,17 @@ describe.sequential("finance service", () => {
       .set({ lastSyncedAt: now, nextSyncAt: null, syncState: "current" })
       .where(eq(financeProviderItems.userId, owner.id));
     const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.listFinanceAccounts(owner.id, { includeExcluded: true }),
+    ).resolves.toMatchObject({
+      accountSemantics: { trustworthy: true },
+      accounts: [
+        expect.objectContaining({
+          status: "connected",
+          synchronization: expect.objectContaining({ state: "current" }),
+        }),
+      ],
+    });
     await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
       accountSemantics: {
         trustworthy: true,
@@ -9940,6 +9951,20 @@ describe.sequential("finance service", () => {
       })
       .where(eq(financeProviderItems.userId, owner.id));
 
+    await expect(
+      service.listFinanceAccounts(owner.id, { includeExcluded: true }),
+    ).resolves.toMatchObject({
+      accountSemantics: { trustworthy: false },
+      accounts: [
+        expect.objectContaining({
+          status: "needs_reauth",
+          synchronization: expect.objectContaining({
+            failureCode: "blocked_item_summary",
+            state: "blocked",
+          }),
+        }),
+      ],
+    });
     await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
       accountSemantics: {
         trustworthy: false,

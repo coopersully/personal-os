@@ -320,11 +320,6 @@ export const iloToolCatalog = {
     idempotent: true,
     policy: "approved_rule",
   }),
-  disconnect_finance_account: write("finances", ["finances:write"], {
-    destructive: true,
-    idempotent: true,
-    policy: "approved_rule",
-  }),
   add_finance_transaction: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),

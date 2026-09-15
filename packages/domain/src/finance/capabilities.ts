@@ -147,13 +147,6 @@ export const financeCapabilityManifest = [
     requiredScope: "finances:write",
   },
   {
-    apiOperation: "disconnectFinanceAccount",
-    capability: "account.disconnect",
-    mcpTool: "disconnect_finance_account",
-    mode: "external",
-    requiredScope: "finances:write",
-  },
-  {
     apiOperation: "listFinanceTransactions",
     capability: "ledger.transaction_list",
     mcpTool: "list_finance_transactions",

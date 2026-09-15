@@ -615,6 +615,29 @@ describe("Finance position pages", () => {
     );
   });
 
+  it("keeps manual account creation open while the request is pending", async () => {
+    let finishCreate: ((value: unknown) => void) | undefined;
+    api.createFinanceAccount.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCreate = resolve;
+        }),
+    );
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Track account manually" }));
+    fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Cash reserve" } });
+    fireEvent.change(screen.getByLabelText("Institution"), {
+      target: { value: "Personal records" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    expect(await screen.findByRole("button", { name: "Adding account…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    finishCreate?.({ ...account, id: "manual-pending", provider: "manual" });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Adding account…" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("edits manual account semantics and keeps failed account creation recoverable", async () => {
     const manual = {
       ...account,

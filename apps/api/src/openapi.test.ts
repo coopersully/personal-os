@@ -279,7 +279,12 @@ describe("Finance maintenance OpenAPI surface", () => {
 
   it("documents the synchronous POST tool result envelope", () => {
     const operation = paths["/v1/finances/maintenance"]?.post;
-    expect(Object.keys(operation?.responses ?? {}).toSorted()).toEqual(["200", "403", "409"]);
+    expect(Object.keys(operation?.responses ?? {}).toSorted()).toEqual([
+      "200",
+      "403",
+      "404",
+      "409",
+    ]);
     expect(operation?.responses?.[200]).toMatchObject({
       content: {
         "application/json": {
@@ -287,6 +292,9 @@ describe("Finance maintenance OpenAPI surface", () => {
         },
       },
       description: "Finance maintenance result with current durable run state",
+    });
+    expect(operation?.responses?.[404]).toEqual({
+      description: "Finance maintenance run not found for this user",
     });
     expect(schemas.FinanceMaintenanceResult).toMatchObject({
       properties: {

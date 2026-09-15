@@ -363,5 +363,99 @@ describe.sequential("guided Finance setup", () => {
         arguments: { operation: "start", scope: { type: "all_outstanding" } },
       },
     });
+
+    await database.db
+      .update(financeSetupSessions)
+      .set({ canonicalMaintenanceRunId: null })
+      .where(eq(financeSetupSessions.id, session.id));
+    await database.db
+      .update(financeMaintenanceRuns)
+      .set({
+        canonicalRunId: canonical.id,
+        recovery: {
+          legacyRunId: legacy.id,
+          originalScope: legacy.scope,
+          originalStage: legacy.stage,
+          reason: "Adopted by the canonical maintenance lifecycle.",
+          state: "adopted",
+          throughDate: null,
+        },
+        stage: "superseded",
+      })
+      .where(eq(financeMaintenanceRuns.id, legacy.id));
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: session.id }, context),
+    ).resolves.toMatchObject({
+      data: { canonicalMaintenanceRunId: canonical.id },
+      nextAction: {
+        arguments: { operation: "start", scope: { type: "all_outstanding" } },
+      },
+    });
+  });
+
+  it("does not reopen an older legacy setup after a newer canonical session settled", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Settled setup history",
+        email: "settled-setup-history@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Fixture user was not created.");
+    const now = () => new Date("2026-08-23T20:00:00Z");
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const service = createSetupService({ db: database.db, now, planning });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId: owner.id,
+      },
+      requestId: "settled-setup-history",
+    });
+    const [canonical] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner.id,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        status: "completed",
+        rulebookVersion: "test-v1",
+      })
+      .returning();
+    if (!canonical) throw new Error("Canonical maintenance fixture was not created.");
+    const [older, latest] = await database.db
+      .insert(financeSetupSessions)
+      .values([
+        {
+          userId: owner.id,
+          status: "settled",
+          updatedAt: new Date("2026-08-20T12:00:00Z"),
+        },
+        {
+          userId: owner.id,
+          status: "settled",
+          canonicalMaintenanceRunId: canonical.id,
+          updatedAt: new Date("2026-08-21T12:00:00Z"),
+        },
+      ])
+      .returning();
+    if (!older || !latest) throw new Error("Setup history fixtures were not created.");
+
+    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
+      data: {
+        canonicalMaintenanceRunId: canonical.id,
+        sessionId: latest.id,
+        stage: "settled",
+      },
+      outcome: "completed",
+    });
+    const savedOlder = await database.db.query.financeSetupSessions.findFirst({
+      where: eq(financeSetupSessions.id, older.id),
+    });
+    expect(savedOlder?.status).toBe("settled");
   });
 });

@@ -14,7 +14,7 @@ import type {
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
 import { NOHMI_FINANCE_PLAYBOOK } from "@personal-os/domain";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
   executeFinanceIdempotently,
@@ -167,13 +167,12 @@ export function createSetupService({ db, now, planning }: Options) {
     });
   }
 
-  async function recoverableSettledSession(userId: string) {
+  async function latestSettledSession(userId: string) {
     return db.query.financeSetupSessions.findFirst({
       orderBy: [desc(financeSetupSessions.updatedAt)],
       where: and(
         eq(financeSetupSessions.userId, userId),
         eq(financeSetupSessions.status, "settled"),
-        isNull(financeSetupSessions.canonicalMaintenanceRunId),
       ),
     });
   }
@@ -381,10 +380,11 @@ export function createSetupService({ db, now, planning }: Options) {
             ),
           })
         : null;
-      const canonical = session.canonicalMaintenanceRunId
+      const canonicalRunId = session.canonicalMaintenanceRunId ?? legacy?.canonicalRunId ?? null;
+      const canonical = canonicalRunId
         ? await db.query.workspaceMaintenanceRuns.findFirst({
             where: and(
-              eq(workspaceMaintenanceRuns.id, session.canonicalMaintenanceRunId),
+              eq(workspaceMaintenanceRuns.id, canonicalRunId),
               eq(workspaceMaintenanceRuns.userId, context.userId),
               eq(workspaceMaintenanceRuns.domain, "finances"),
             ),
@@ -402,7 +402,7 @@ export function createSetupService({ db, now, planning }: Options) {
       return setupResult({
         budgetVersionId: session.budgetVersionId,
         maintenanceRunId: session.maintenanceRunId,
-        canonicalMaintenanceRunId: session.canonicalMaintenanceRunId,
+        canonicalMaintenanceRunId: canonicalRunId,
         headline: "Your profile and budget are set; maintenance is the next step.",
         nextAction: {
           arguments: resumeId
@@ -439,7 +439,7 @@ export function createSetupService({ db, now, planning }: Options) {
       requireFinanceMutation(context);
       if (input.operation === "start") {
         let session = await activeSession(context.userId);
-        session ??= await recoverableSettledSession(context.userId);
+        session ??= await latestSettledSession(context.userId);
         if (!session) {
           const question = nextQuestion(await profile(context.userId));
           const [created] = await db

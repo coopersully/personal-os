@@ -170,7 +170,9 @@ function AccountEditor({
   );
   const [included, setIncluded] = useState(account.includeInPlanning);
   const [balance, setBalance] = useState(account.balance === null ? "" : String(account.balance));
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const lastAttempt = useRef<{ payload: string; key: string } | null>(null);
+  const disconnectKey = useRef<string | null>(null);
   const ownershipShare =
     ownership === "individual" ? 1 : ownership === "unknown" ? null : Number(share) / 100;
   const manualBalance = balance.trim() === "" ? null : Number(balance);
@@ -208,6 +210,28 @@ function AccountEditor({
       onClose();
     },
   });
+  const disconnect = useMutation({
+    mutationFn: async () => {
+      disconnectKey.current ??= crypto.randomUUID();
+      return requireFinanceMutationResult(
+        await api.disconnectFinanceAccount(account.id, {
+          idempotencyKey: disconnectKey.current,
+        }),
+      );
+    },
+    onError: (error) => {
+      if (isConfirmedFinanceMutationFailure(error)) disconnectKey.current = null;
+      void refreshFinancePosition(client);
+    },
+    onSuccess: async () => {
+      await refreshFinancePosition(client);
+      onClose();
+    },
+  });
+  const canDisconnect =
+    account.provider !== "manual" &&
+    account.synchronization.failureCode !== "finance_account_disconnected" &&
+    account.synchronization.failureCode !== "finance_account_legacy_disconnected";
   const validShare =
     ownership !== "joint" ||
     (share.trim() !== "" &&
@@ -218,7 +242,7 @@ function AccountEditor({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !save.isPending) onClose();
+        if (!open && !save.isPending && !disconnect.isPending) onClose();
       }}
     >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
@@ -326,6 +350,16 @@ function AccountEditor({
             </Alert>
           ) : null}
           <DialogFooter>
+            {canDisconnect ? (
+              <Button
+                disabled={save.isPending || disconnect.isPending}
+                onClick={() => setConfirmingDisconnect(true)}
+                type="button"
+                variant="destructive"
+              >
+                Disconnect account
+              </Button>
+            ) : null}
             <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
               Cancel
             </Button>
@@ -339,6 +373,46 @@ function AccountEditor({
             </Button>
           </DialogFooter>
         </form>
+        <Dialog
+          open={confirmingDisconnect}
+          onOpenChange={(open) => {
+            if (!disconnect.isPending) setConfirmingDisconnect(open);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Disconnect {account.name}?</DialogTitle>
+              <DialogDescription>
+                Ledger history stays available, and other accounts at this institution stay
+                connected. Reconnecting later requires your consent.
+              </DialogDescription>
+            </DialogHeader>
+            {disconnect.isError ? (
+              <Alert variant="destructive">
+                <AlertTitle>Account was not disconnected</AlertTitle>
+                <AlertDescription>{errorMessage(disconnect.error)}</AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter>
+              <Button
+                disabled={disconnect.isPending}
+                onClick={() => setConfirmingDisconnect(false)}
+                type="button"
+                variant="outline"
+              >
+                Keep connected
+              </Button>
+              <Button
+                disabled={disconnect.isPending}
+                onClick={() => disconnect.mutate()}
+                type="button"
+                variant="destructive"
+              >
+                {disconnect.isPending ? "Disconnecting…" : "Confirm disconnection"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

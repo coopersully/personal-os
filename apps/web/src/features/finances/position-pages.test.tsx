@@ -18,6 +18,7 @@ import { FinanceWealthPage } from "./wealth-page.js";
 
 const api = vi.hoisted(() => ({
   createFinanceAccount: vi.fn(),
+  disconnectFinanceAccount: vi.fn(),
   getFinanceBudget: vi.fn(),
   getFinanceInbox: vi.fn(),
   getFinanceMaintenanceHistory: vi.fn(),
@@ -155,6 +156,7 @@ beforeEach(() => {
     envelope({ ...account, ownershipType: "joint", ownershipShare: 0.5 }),
   );
   api.createFinanceAccount.mockResolvedValue({ ...account, provider: "manual" });
+  api.disconnectFinanceAccount.mockResolvedValue(envelope({ ...account, status: "needs_reauth" }));
 });
 
 describe("Finance position pages", () => {
@@ -423,6 +425,21 @@ describe("Finance position pages", () => {
     );
     expect(api.updateFinanceAccount.mock.calls[0]?.[1]).not.toHaveProperty("balance");
     expect(api.updateFinanceAccount.mock.calls[0]?.[1]).not.toHaveProperty("kind");
+  });
+
+  it("lets the signed-in person confirm provider account disconnection", async () => {
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
+    expect(
+      screen.getByText(/Ledger history stays available, and other accounts at this institution/),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm disconnection" }));
+    await waitFor(() =>
+      expect(api.disconnectFinanceAccount).toHaveBeenCalledWith(account.id, {
+        idempotencyKey: expect.any(String),
+      }),
+    );
   });
 
   it("preserves an account correction after a conflict", async () => {

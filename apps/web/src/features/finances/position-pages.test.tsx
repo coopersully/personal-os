@@ -481,6 +481,11 @@ describe("Finance position pages", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     expect(screen.getByText(/nohmi will stop using this account locally/)).toBeVisible();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.queryByText(/nohmi will stop using this account locally/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     fireEvent.click(screen.getByRole("button", { name: "Keep connected" }));
     expect(
       screen.queryByText(/nohmi will stop using this account locally/),

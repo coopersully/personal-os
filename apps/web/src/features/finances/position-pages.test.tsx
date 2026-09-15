@@ -546,7 +546,8 @@ describe("Finance position pages", () => {
 
   it.each([
     "confirmed",
-    "server response",
+    "application rejection",
+    "server failure",
     "uncertain",
   ])("retries a %s account disconnection with the safe idempotency key", async (failure) => {
     if (failure === "confirmed")
@@ -559,9 +560,13 @@ describe("Finance position pages", () => {
           optionalDetails: [],
         },
       });
-    else if (failure === "server response")
+    else if (failure === "application rejection")
       api.disconnectFinanceAccount.mockRejectedValueOnce(
         new ApiClientError({ code: "conflict", message: "Synchronization active", status: 409 }),
+      );
+    else if (failure === "server failure")
+      api.disconnectFinanceAccount.mockRejectedValueOnce(
+        new ApiClientError({ code: "internal_error", message: "Response failed", status: 503 }),
       );
     else api.disconnectFinanceAccount.mockRejectedValueOnce(new Error("Network response lost"));
     mount(<FinanceAccountsPage />);
@@ -573,7 +578,8 @@ describe("Finance position pages", () => {
     await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
     const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
     const secondKey = api.disconnectFinanceAccount.mock.calls[1]?.[1].idempotencyKey;
-    if (failure !== "uncertain") expect(secondKey).not.toBe(firstKey);
+    if (failure === "confirmed" || failure === "application rejection")
+      expect(secondKey).not.toBe(firstKey);
     else expect(secondKey).toBe(firstKey);
   });
 

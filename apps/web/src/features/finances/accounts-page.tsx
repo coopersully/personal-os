@@ -360,7 +360,12 @@ function AccountEditor({
                 Disconnect account
               </Button>
             ) : null}
-            <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
+            <Button
+              disabled={save.isPending || disconnect.isPending}
+              onClick={onClose}
+              type="button"
+              variant="outline"
+            >
               Cancel
             </Button>
             <Button

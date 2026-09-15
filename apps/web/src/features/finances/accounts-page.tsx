@@ -229,7 +229,7 @@ function AccountEditor({
     },
   });
   const canDisconnect =
-    account.provider !== "manual" &&
+    account.provider === "plaid" &&
     account.synchronization.failureCode !== "finance_account_disconnected" &&
     account.synchronization.failureCode !== "finance_account_legacy_disconnected";
   const validShare =

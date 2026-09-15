@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -452,11 +453,11 @@ describe("Finance position pages", () => {
     expect(screen.getByLabelText("Your ownership share (%)")).toHaveValue(50);
   });
 
-  it("shows the empty account state without an interpretation warning", async () => {
+  it("shows the empty account state with its missing-evidence warning", async () => {
     api.listFinanceAccounts.mockResolvedValue({
       accounts: [],
       accountSemantics: {
-        trustworthy: true,
+        trustworthy: false,
         possibleDuplicateGroups: [],
         excludedAccountIds: [],
         unresolvedOwnershipAccountIds: [],
@@ -465,7 +466,7 @@ describe("Finance position pages", () => {
     });
     mount(<FinanceAccountsPage />);
     expect(await screen.findByText("No accounts tracked")).toBeVisible();
-    expect(screen.queryByText("Account interpretation needs attention")).not.toBeInTheDocument();
+    expect(screen.getByText("Account interpretation needs attention")).toBeVisible();
   });
 
   it("lets the signed-in person confirm provider account disconnection", async () => {
@@ -523,7 +524,29 @@ describe("Finance position pages", () => {
   });
 
   it.each([
+    "manual",
+    "paypal",
+    "venmo",
+    "zelle",
+  ])("does not offer Provider Item disconnection for a %s account", async (provider) => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [{ ...account, provider }],
+      accountSemantics: {
+        trustworthy: false,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [account.id],
+      },
+      totals: { cash: 1000, debt: 0, investments: 0, netWorth: 1000, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    expect(screen.queryByRole("button", { name: "Disconnect account" })).not.toBeInTheDocument();
+  });
+
+  it.each([
     "confirmed",
+    "server response",
     "uncertain",
   ])("retries a %s account disconnection with the safe idempotency key", async (failure) => {
     if (failure === "confirmed")
@@ -536,6 +559,10 @@ describe("Finance position pages", () => {
           optionalDetails: [],
         },
       });
+    else if (failure === "server response")
+      api.disconnectFinanceAccount.mockRejectedValueOnce(
+        new ApiClientError({ code: "conflict", message: "Synchronization active", status: 409 }),
+      );
     else api.disconnectFinanceAccount.mockRejectedValueOnce(new Error("Network response lost"));
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
@@ -546,7 +573,7 @@ describe("Finance position pages", () => {
     await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
     const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
     const secondKey = api.disconnectFinanceAccount.mock.calls[1]?.[1].idempotencyKey;
-    if (failure === "confirmed") expect(secondKey).not.toBe(firstKey);
+    if (failure !== "uncertain") expect(secondKey).not.toBe(firstKey);
     else expect(secondKey).toBe(firstKey);
   });
 

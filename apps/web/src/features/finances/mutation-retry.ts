@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceToolResult } from "@personal-os/domain";
 
 class ConfirmedFinanceMutationFailure extends Error {}
@@ -6,6 +7,7 @@ class ConfirmedFinanceMutationFailure extends Error {}
 export function isConfirmedFinanceMutationFailure(error: unknown): boolean {
   return (
     error instanceof ConfirmedFinanceMutationFailure ||
+    error instanceof ApiClientError ||
     (error instanceof Error &&
       error.message.includes("previously failed; use a new idempotency key"))
   );

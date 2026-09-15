@@ -16,7 +16,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
     const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
     const textingOnlyMigrations = await migrationsWithout(
       migrationsFolder,
-      "ilo-finance-account-semantics-recovery-",
+      "nohmi-finance-account-semantics-recovery-",
       [
         "0072_finance_account_semantics",
         "0073_finance_account_semantics_recovery",
@@ -29,6 +29,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
         "0079_mail_stewardship_integrity",
         "0080_mail_reply_metadata",
         "0081_finance_legacy_disconnect_repair",
+        "0082_finance_maintenance_lineage",
       ],
     );
 

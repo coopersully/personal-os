@@ -48,6 +48,7 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import { createDesktopActivityService } from "./desktop-activity-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
@@ -558,6 +559,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const financePeriodReviews = createFinancePeriodReviewService({
     db: dependencies.db,
+    finances,
     now,
     status: financeStatus,
   });
@@ -569,6 +571,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     periodReviews: financePeriodReviews,
     status: financeStatus,
+  });
+  const canonicalFinanceMaintenance = createFinanceMaintenanceIntentService({
+    db: dependencies.db,
+    maintenance: financeMaintenance,
+    status: financeStatus,
+    recoverHandoff: financeActions.recoverFinanceMaintenanceHandoff,
+    now,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
   const twilio =
@@ -1249,6 +1258,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     app,
     db: dependencies.db,
     financeChallenges,
+    canonicalFinanceMaintenance,
     financeMaintenance,
     financePeriodReviews,
     financePlaybook,
@@ -1429,7 +1439,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async dispatchDueFinanceMaintenance() {
+      const recovery = await canonicalFinanceMaintenance.recoverAcceptedWork();
       await financeMaintenance.dispatchDue(5);
+      if (recovery.failedRecoveries)
+        throw new Error("Some Finance maintenance handoffs could not be recovered.");
     },
   });
 }

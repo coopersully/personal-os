@@ -357,9 +357,17 @@ describe("Finance position pages", () => {
     });
     api.getFinanceMaintenanceHistory.mockResolvedValue({
       items: [
-        { runId: "a", stage: "settled", reviewQuestion: null },
-        { runId: "b", stage: "failed", reviewQuestion: null },
-        { runId: "c", stage: "agent_audit", reviewQuestion: { prompt: "Check merchant" } },
+        { run: { id: "a", status: "completed" }, recovery: null, nextAction: null },
+        {
+          run: null,
+          recovery: { legacyRunId: "b", state: "blocked", reason: "This run needs recovery." },
+          nextAction: null,
+        },
+        {
+          run: { id: "c", status: "awaiting_agent_challenge" },
+          recovery: null,
+          nextAction: { reason: "Check merchant" },
+        },
       ],
       nextCursor: null,
     });
@@ -373,7 +381,7 @@ describe("Finance position pages", () => {
       "/finances/reviews/review-1",
     );
     fireEvent.click(screen.getByRole("button", { name: "Recent maintenance (3)" }));
-    expect(screen.getByText("The recorded maintenance run settled.")).toBeVisible();
+    expect(screen.getByText("The recorded maintenance run completed.")).toBeVisible();
     expect(screen.getByText("This run needs recovery.")).toBeVisible();
     expect(screen.getByText("Check merchant")).toBeVisible();
   });

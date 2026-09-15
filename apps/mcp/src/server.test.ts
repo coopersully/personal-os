@@ -412,7 +412,16 @@ function mockApi() {
         optionalDetails: [],
         requiredDisclosures: [],
       },
-      data: { runId: id, stage: "agent_reasoning" as const },
+      data: {
+        run: { id, status: "awaiting_agent_challenge" as const },
+        challengeId: id,
+        nextAction: {
+          tool: "get_finance_ledger_challenge",
+          arguments: { challengeId: id },
+          reason: "Complete the ledger challenge.",
+        },
+        recovery: null,
+      },
       outcome: "work_remaining" as const,
       remainingWork: { categories: ["reasoning"], count: 1 },
       schemaVersion: 1 as const,
@@ -2504,20 +2513,25 @@ describe("ilo MCP server", () => {
           readOnly: false,
           stage: "commit",
         },
-        data: { runId: id, stage: "agent_reasoning" },
+        data: {
+          run: { id, status: "awaiting_agent_challenge" },
+          challengeId: id,
+          nextAction: { tool: "get_finance_ledger_challenge", arguments: { challengeId: id } },
+          recovery: null,
+        },
       },
     });
 
     await client.callTool({
       arguments: {
         operation: "start",
-        scope: { from: "2026-08-01", type: "since" },
+        scope: { start: "2026-08-01", end: "2026-08-31", type: "window" },
       },
       name: "maintain_finances",
     });
     expect(api.maintainFinances).toHaveBeenLastCalledWith({
       operation: "start",
-      scope: { from: "2026-08-01", type: "since" },
+      scope: { start: "2026-08-01", end: "2026-08-31", type: "window" },
     });
     await client.callTool({
       arguments: { scope: { entityType: "finance_transaction", id, type: "target" } },
@@ -2656,6 +2670,15 @@ describe("ilo MCP server", () => {
       name: "maintain_finances",
     });
     expect(unsupported.isError).toBe(true);
+    for (const arguments_ of [
+      { operation: "submit_judgments", runId: id, expectedVersion: 1, judgments: [] },
+      { operation: "submit_audit", runId: id, expectedVersion: 1, findings: [] },
+      { operation: "start", scope: { type: "since", from: "2026-08-01" } },
+      { operation: "start", scope: { type: "account", accountId: id } },
+    ]) {
+      const rejected = await client.callTool({ name: "maintain_finances", arguments: arguments_ });
+      expect(rejected.isError).toBe(true);
+    }
     expect(api.maintainFinances).toHaveBeenCalledTimes(2);
 
     await client.close();
@@ -2836,6 +2859,7 @@ describe("ilo MCP server", () => {
     const limitedAccessOptions: Array<{ readOnly: boolean; scopes: Set<AccessScope> }> = [
       { readOnly: true, scopes: new Set(["finances:read", "finances:maintain"]) },
       { readOnly: false, scopes: new Set(["finances:read"]) },
+      { readOnly: false, scopes: new Set(["finances:read", "finances:write"]) },
     ];
     for (const options of limitedAccessOptions) {
       const api = mockApi();

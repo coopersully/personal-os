@@ -133,7 +133,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: writeAnnotations,
       description:
-        "Submit complete structured coverage of a Finance maintenance candidate. Keep supported items, remove or replace corrections, and surface genuine questions or blockers. nohmi then resumes the same durable maintenance run and applies or queues the batch according to the app review setting.",
+        "Submit complete structured coverage of a Finance maintenance candidate. Keep supported items, remove or replace corrections, and surface genuine questions or blockers. nohmi then resumes the same durable maintenance run and applies or queues the batch according to the app review setting. Required action approval is separate from challenge coverage; verify the run and its immutable period review afterward.",
       inputSchema: submitFinanceLedgerChallengeInputSchema,
       title: "Submit Finance ledger challenge",
     },

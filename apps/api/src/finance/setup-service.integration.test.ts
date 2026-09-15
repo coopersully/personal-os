@@ -3,9 +3,11 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAgentSettings,
+  financeMaintenanceRuns,
   financeSetupSessions,
   migrateDatabase,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
@@ -265,8 +267,92 @@ describe.sequential("guided Finance setup", () => {
     await expect(
       service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
     ).resolves.toMatchObject({
-      data: { sessionId: response.data.sessionId, stage: "settled" },
-      outcome: "completed",
+      data: {
+        sessionId: response.data.sessionId,
+        stage: "initial_maintenance",
+        canonicalMaintenanceRunId: null,
+      },
+      nextAction: {
+        tool: "maintain_finances",
+        arguments: { operation: "start", scope: { type: "all_outstanding" } },
+      },
+      outcome: "work_remaining",
+    });
+  });
+
+  it("resumes only live maintenance evidence and restarts after a terminal canonical run", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Maintenance handoff",
+        email: "maintenance-handoff@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Fixture user was not created.");
+    const now = () => new Date("2026-08-23T20:00:00Z");
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const service = createSetupService({ db: database.db, now, planning });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId: owner.id,
+      },
+      requestId: "maintenance-handoff",
+    });
+    const [legacy] = await database.db
+      .insert(financeMaintenanceRuns)
+      .values({ userId: owner.id, scope: { type: "all_outstanding" }, stage: "agent_audit" })
+      .returning();
+    const [session] = await database.db
+      .insert(financeSetupSessions)
+      .values({
+        userId: owner.id,
+        status: "initial_maintenance",
+        maintenanceRunId: legacy?.id,
+      })
+      .returning();
+    if (!legacy || !session) throw new Error("Maintenance handoff fixture was not created.");
+
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: session.id }, context),
+    ).resolves.toMatchObject({
+      nextAction: { arguments: { operation: "resume", runId: legacy.id } },
+    });
+
+    const [canonical] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner.id,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        rulebookVersion: "test-v1",
+      })
+      .returning();
+    if (!canonical) throw new Error("Canonical maintenance fixture was not created.");
+    await database.db
+      .update(financeSetupSessions)
+      .set({ canonicalMaintenanceRunId: canonical.id })
+      .where(eq(financeSetupSessions.id, session.id));
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: session.id }, context),
+    ).resolves.toMatchObject({
+      nextAction: { arguments: { operation: "resume", runId: canonical.id } },
+    });
+
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "completed_with_questions" })
+      .where(eq(workspaceMaintenanceRuns.id, canonical.id));
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: session.id }, context),
+    ).resolves.toMatchObject({
+      nextAction: {
+        arguments: { operation: "start", scope: { type: "all_outstanding" } },
+      },
     });
   });
 });

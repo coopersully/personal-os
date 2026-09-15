@@ -2960,7 +2960,7 @@ export const financeReviewCases = pgTable(
   ],
 );
 
-/** Synchronous, caller-resumable maintenance protocol state; never a background job queue. */
+/** Retained historical protocol evidence; live execution uses workspaceMaintenanceRuns. */
 export const financeMaintenanceRuns = pgTable(
   "finance_maintenance_runs",
   {
@@ -2976,16 +2976,49 @@ export const financeMaintenanceRuns = pgTable(
         | "failed"
         | "reconciliation"
         | "settled"
+        | "superseded"
       >()
       .notNull()
       .default("deterministic_processing"),
     scope: jsonb("scope").$type<Record<string, unknown>>().notNull(),
+    canonicalRunId: uuid("canonical_run_id"),
+    recovery: jsonb("recovery").$type<{
+      legacyRunId: string;
+      state: "adopted" | "blocked";
+      originalStage: string;
+      originalScope: Record<string, unknown>;
+      throughDate: string | null;
+      reason: string;
+    }>(),
     version: integer("version").notNull().default(1),
     error: jsonb("error").$type<Record<string, unknown>>(),
     settledAt: timestamp("settled_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [index("finance_maintenance_runs_user_stage_idx").on(table.userId, table.stage)],
+  (table) => [
+    index("finance_maintenance_runs_user_stage_idx").on(table.userId, table.stage),
+    check(
+      "finance_maintenance_runs_stage_check",
+      sql`${table.stage} IN ('agent_audit', 'agent_reasoning', 'deterministic_processing', 'failed', 'reconciliation', 'settled', 'superseded')`,
+    ),
+    foreignKey({
+      columns: [table.canonicalRunId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+      name: "finance_maintenance_runs_canonical_user_fk",
+    }),
+    check(
+      "finance_maintenance_runs_recovery_check",
+      sql`(
+      (${table.recovery} IS NULL AND ${table.canonicalRunId} IS NULL AND ${table.stage} <> 'superseded')
+      OR (${table.recovery} IS NOT NULL AND ${table.stage} = 'superseded'
+        AND ${table.recovery}->>'legacyRunId' = ${table.id}::text
+        AND ${table.recovery}->'originalScope' = ${table.scope}
+        AND ${table.recovery}->>'originalStage' IN ('deterministic_processing', 'agent_reasoning', 'reconciliation', 'agent_audit')
+        AND ((${table.recovery}->>'state' = 'adopted' AND ${table.canonicalRunId} IS NOT NULL)
+          OR (${table.recovery}->>'state' = 'blocked' AND ${table.canonicalRunId} IS NULL)))
+    ) IS TRUE`,
+    ),
+  ],
 );
 
 export const financeMaintenanceJudgments = pgTable(
@@ -3320,6 +3353,7 @@ export const financeSetupSessions = pgTable(
     budgetVersionId: uuid("budget_version_id").references(() => financeBudgetVersions.id, {
       onDelete: "set null",
     }),
+    canonicalMaintenanceRunId: uuid("canonical_maintenance_run_id"),
     maintenanceRunId: uuid("maintenance_run_id").references(() => financeMaintenanceRuns.id, {
       onDelete: "set null",
     }),
@@ -3327,6 +3361,11 @@ export const financeSetupSessions = pgTable(
     ...timestamps,
   },
   (table) => [
+    foreignKey({
+      columns: [table.canonicalMaintenanceRunId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+      name: "finance_setup_sessions_canonical_user_fk",
+    }),
     index("finance_setup_sessions_user_status_idx").on(table.userId, table.status),
     uniqueIndex("finance_setup_sessions_user_active_idx")
       .on(table.userId)

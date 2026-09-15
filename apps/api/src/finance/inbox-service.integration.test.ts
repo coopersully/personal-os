@@ -13,10 +13,10 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createInboxService } from "./inbox-service.js";
-import { createMaintenanceService } from "./maintenance-service.js";
 
 describe.sequential("transaction-backed Finance Inbox", () => {
   let container: StartedPostgreSqlContainer;
@@ -225,69 +225,21 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       },
       evidence: { merchant: "Updated provider label" },
     });
-    const maintenance = createMaintenanceService({ db: database.db, now, inbox: service });
-    const nextPass = await maintenance.maintainFinances(
-      { operation: "start", scope: { type: "since", from: "2026-09-01" } },
-      context,
-    );
-    expect(nextPass.data.inboxCases).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: reviewId, resolution: refreshed?.resolution }),
-      ]),
-    );
-    await maintenance.maintainFinances(
-      {
-        operation: "submit_audit",
-        runId: nextPass.data.runId,
-        expectedVersion: nextPass.data.version,
-        idempotencyKey: "notes-audit",
-        findings: [],
-      },
-      context,
-    );
-    await database.db
-      .update(financeTransactions)
-      .set({ needsReview: false })
-      .where(eq(financeTransactions.userId, userId));
-    await database.db
-      .update(financeTransactions)
-      .set({ needsReview: true })
-      .where(eq(financeTransactions.id, saved.transactionId));
+    const finances = createFinanceService({ db: database.db, now });
     await database.db
       .insert(financeCategoryRules)
       .values({ userId, merchantNormalized: "small", category: "Dining" });
-    const withRule = await maintenance.maintainFinances(
-      { operation: "start", scope: { accountIds: [saved.context.accountId], type: "accounts" } },
-      context,
-    );
-    expect(withRule.data.reasoningBatch).toEqual(
-      expect.arrayContaining([expect.objectContaining({ transactionId: saved.transactionId })]),
-    );
-    await expect(
-      maintenance.maintainFinances(
-        {
-          expectedVersion: withRule.data.version,
-          idempotencyKey: "classify-held-clarification",
-          judgments: [
-            {
-              categoryId: category.id,
-              confidence: 0.99,
-              meaning: "Lunch",
-              rationale: "The saved note needs a direct Inbox answer first.",
-              transactionId: saved.transactionId,
-              type: "classify_transaction",
-            },
-          ],
-          operation: "submit_judgments",
-          runId: withRule.data.runId,
-        },
-        context,
-      ),
-    ).rejects.toThrow("Resolve the active clarification");
+    const contexts = await finances.getMaintenanceCandidateQuestionContexts(userId, [
+      saved.transactionId,
+    ]);
+    expect(contexts[saved.transactionId]).toMatchObject({
+      underlyingAction: "transaction",
+      why: expect.stringContaining("I need the merchant name."),
+    });
     const beforeAnswer = await database.db.query.financeTransactions.findFirst({
       where: eq(financeTransactions.id, saved.transactionId),
     });
-    expect(beforeAnswer?.needsReview).toBe(true);
+    expect(beforeAnswer?.categoryId).not.toBe(category.id);
     await expect(
       service.answerFinanceReview(
         reviewId,
@@ -305,32 +257,13 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     ).resolves.toMatchObject({
       changes: [expect.objectContaining({ type: "finance_review_resolved" })],
     });
-    await expect(
-      maintenance.maintainFinances(
-        {
-          expectedVersion: withRule.data.version,
-          idempotencyKey: "stale-maintenance-classification",
-          judgments: [
-            {
-              categoryId: category.id,
-              confidence: 0.99,
-              meaning: "Stale lunch judgment",
-              rationale: "This was prepared before the direct Inbox answer.",
-              transactionId: saved.transactionId,
-              type: "classify_transaction",
-            },
-          ],
-          operation: "submit_judgments",
-          runId: withRule.data.runId,
-        },
-        context,
-      ),
-    ).rejects.toThrow("no longer needs maintenance review");
-    await expect(
-      maintenance.maintainFinances({ operation: "resume", runId: withRule.data.runId }, context),
-    ).resolves.toMatchObject({
-      data: { reasoningBatch: [], stage: "agent_audit" },
+    expect(
+      await finances.getMaintenanceCandidateQuestionContexts(userId, [saved.transactionId]),
+    ).toEqual({});
+    const afterAnswer = await database.db.query.financeTransactions.findFirst({
+      where: eq(financeTransactions.id, saved.transactionId),
     });
+    expect(afterAnswer).toMatchObject({ categoryId: category.id, needsReview: false });
   });
 
   it("allows only one concurrent clarification to replace an unchanged review", async () => {

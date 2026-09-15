@@ -1,5 +1,6 @@
 import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
+import { errorResponse } from "../errors.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -444,15 +445,32 @@ describe("finance routes", () => {
     );
   });
 
-  it("allows a scoped agent to start and read its durable Finance maintenance run", async () => {
+  it("uses one canonical maintenance route with separate read and maintain scope guards", async () => {
     const app = new Hono<AppEnv>();
     let grantedScopes: Set<AccessScope> = new Set(["finances:read", "finances:write"]);
-    const run = { id, scope: { type: "all_outstanding" }, status: "queued", userId: id };
-    const financeMaintenance = {
-      dispatchRun: vi.fn(async () => ({ ...run, status: "completed" })),
-      getRun: vi.fn(async () => ({ ...run, status: "completed" })),
-      startOrResume: vi.fn(async () => run),
+    const run = {
+      id,
+      scope: { type: "all_outstanding" },
+      status: "awaiting_agent_challenge",
+      userId: id,
     };
+    const payload = {
+      run,
+      challengeId: id,
+      nextAction: {
+        tool: "get_finance_ledger_challenge",
+        arguments: { challengeId: id },
+        reason: "Complete the challenge.",
+      },
+      recovery: null,
+    };
+    const envelope = { data: payload, outcome: "work_remaining" };
+    const canonicalFinanceMaintenance = {
+      maintainFinances: vi.fn(async () => envelope),
+      getRun: vi.fn(async () => payload),
+      history: vi.fn(async () => ({ items: [payload], nextCursor: null })),
+    };
+    const financeMaintenance = { startOrResume: vi.fn(), dispatchRun: vi.fn(), getRun: vi.fn() };
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -463,11 +481,10 @@ describe("finance routes", () => {
       context.set("requestId", "request-maintenance");
       await next();
     });
-    app.onError((error, context) =>
-      context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
-    );
+    app.onError(errorResponse);
     registerFinanceRoutes({
       app,
+      canonicalFinanceMaintenance: canonicalFinanceMaintenance as never,
       financeMaintenance: financeMaintenance as unknown as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: {} as ReturnType<typeof createFinanceService>,
@@ -476,24 +493,110 @@ describe("finance routes", () => {
         requestId: context.get("requestId"),
       }),
     });
+    const post = (input: unknown, path = "/v1/finances/maintenance") =>
+      app.request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
 
-    const legacyStart = await app.request("/v1/finances/maintenance", { method: "POST" });
-    expect(legacyStart.status).toBe(403);
-    expect(financeMaintenance.startOrResume).not.toHaveBeenCalled();
+    expect((await post({ operation: "start" })).status).toBe(403);
+    expect(canonicalFinanceMaintenance.maintainFinances).not.toHaveBeenCalled();
+    grantedScopes = new Set(["finances:maintain"]);
+    const started = await post({ operation: "start" });
+    expect(started.status).toBe(200);
+    await expect(started.json()).resolves.toEqual(envelope);
+    expect(canonicalFinanceMaintenance.maintainFinances).toHaveBeenCalledWith(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      { actorId: id, actorType: "agent", scopes: grantedScopes, userId: id },
+    );
+    expect((await app.request(`/v1/finances/maintenance/${id}`)).status).toBe(403);
+    expect((await app.request("/v1/finances/maintenance")).status).toBe(403);
+    expect(canonicalFinanceMaintenance.getRun).not.toHaveBeenCalled();
+    expect(canonicalFinanceMaintenance.history).not.toHaveBeenCalled();
 
-    grantedScopes = new Set(["finances:read", "finances:maintain"]);
-    const started = await app.request("/v1/finances/maintenance", { method: "POST" });
-    expect(started.status).toBe(202);
-    await expect(started.json()).resolves.toEqual({ run });
-    expect(financeMaintenance.startOrResume).toHaveBeenCalledWith(id, {
-      type: "all_outstanding",
-    });
-    expect(financeMaintenance.dispatchRun).not.toHaveBeenCalled();
+    grantedScopes = new Set(["finances:read", "finances:maintain", "finances:write"]);
+    expect((await post({ operation: "resume", runId: id })).status).toBe(200);
+    expect(canonicalFinanceMaintenance.maintainFinances).toHaveBeenLastCalledWith(
+      { operation: "resume", runId: id },
+      expect.objectContaining({ userId: id }),
+    );
+    for (const input of [
+      {},
+      { scope: { type: "all_outstanding" } },
+      { operation: "start", scope: { type: "since", from: "2026-08-01" } },
+      { operation: "start", scope: { type: "account", accountId: id } },
+      { operation: "submit_judgments", runId: id, judgments: [] },
+      { operation: "submit_audit", runId: id, findings: [] },
+      { operation: "resume", runId: "not-an-id" },
+    ])
+      expect((await post(input)).status).toBe(400);
+    expect(canonicalFinanceMaintenance.maintainFinances).toHaveBeenCalledTimes(2);
+    expect((await post({ operation: "start" }, "/v1/finances/maintenance/protocol")).status).toBe(
+      404,
+    );
+    expect((await app.request(`/v1/finances/maintenance/protocol/${id}`)).status).toBe(404);
+    expect((await app.request("/v1/finances/maintenance/not-an-id")).status).toBe(400);
+    expect((await app.request("/v1/finances/maintenance?status=agent_audit")).status).toBe(400);
+    expect(canonicalFinanceMaintenance.getRun).not.toHaveBeenCalled();
 
     const read = await app.request(`/v1/finances/maintenance/${id}`);
     expect(read.status).toBe(200);
-    await expect(read.json()).resolves.toEqual({ run: { ...run, status: "completed" } });
-    expect(financeMaintenance.getRun).toHaveBeenCalledWith(id, id);
+    await expect(read.json()).resolves.toEqual(payload);
+    expect(canonicalFinanceMaintenance.getRun).toHaveBeenCalledWith(id, id);
+    const history = await app.request(
+      "/v1/finances/maintenance?status=awaiting_agent_challenge&limit=3",
+    );
+    expect(history.status).toBe(200);
+    await expect(history.json()).resolves.toEqual({ items: [payload], nextCursor: null });
+    expect(canonicalFinanceMaintenance.history).toHaveBeenCalledWith(id, {
+      status: "awaiting_agent_challenge",
+      limit: 3,
+    });
+    for (const method of Object.values(financeMaintenance)) expect(method).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for canonical maintenance routes when their service is absent", async () => {
+    const app = new Hono<AppEnv>();
+    const financeMaintenance = { startOrResume: vi.fn(), getRun: vi.fn() };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read", "finances:maintain"]),
+        userId: id,
+      });
+      context.set("requestId", "missing-canonical-maintenance");
+      await next();
+    });
+    app.onError((error, context) => context.json({ error: error.message }, 500));
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: financeMaintenance as unknown as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+    const responses = await Promise.all([
+      app.request("/v1/finances/maintenance", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operation: "start" }),
+      }),
+      app.request("/v1/finances/maintenance"),
+      app.request(`/v1/finances/maintenance/${id}`),
+    ]);
+    for (const response of responses) {
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "The canonical Finance maintenance service is required.",
+      });
+    }
+    expect(financeMaintenance.startOrResume).not.toHaveBeenCalled();
+    expect(financeMaintenance.getRun).not.toHaveBeenCalled();
   });
 
   it("lists only public pending Finance questions and rejects malformed action IDs", async () => {

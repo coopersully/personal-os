@@ -15,6 +15,7 @@ describe.sequential("Finance source lifecycle migration", () => {
     const database = createDatabaseClient(container.getConnectionUri());
     const beforeRepair = await migrationsWithout(migrationsFolder, "nohmi-source-repair-", [
       migrationTag,
+      "0082_finance_maintenance_lineage",
     ]);
 
     try {

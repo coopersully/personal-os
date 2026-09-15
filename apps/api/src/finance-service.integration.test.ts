@@ -361,7 +361,7 @@ describe.sequential("finance service", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
-    const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
+    const legacyMigrations = await migrationsWithout(migrationsFolder, "nohmi-finance-legacy-", [
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
@@ -416,6 +416,7 @@ describe.sequential("finance service", () => {
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
       "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

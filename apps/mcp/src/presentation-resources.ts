@@ -38,7 +38,7 @@ const main=document.querySelector('main');
 let initialized=false;
 let currentLinks=null;
 let requestNumber=0;
-const initializeId='ilo-finance-'+String(Date.now());
+const initializeId='nohmi-finance-'+String(Date.now());
 function send(message){parent.postMessage(message,'*')}
 function node(tag,className,text){const value=document.createElement(tag);if(className)value.className=className;if(text!==undefined)value.textContent=String(text);return value}
 function clearMain(){main.replaceChildren()}
@@ -69,7 +69,7 @@ function applyHostContext(context){if(context&&context.theme)document.documentEl
 function reportSize(){if(!initialized)return;send({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth}})}
 addEventListener('message',event=>{if(event.source!==parent)return;const message=event.data;if(!message||message.jsonrpc!=='2.0')return;if(message.id===initializeId&&message.result){initialized=true;applyHostContext(message.result.hostContext);send({jsonrpc:'2.0',method:'ui/notifications/initialized',params:{}});reportSize();return}if(message.method==='ui/notifications/tool-result'){render(message.params);return}if(message.method==='ui/notifications/host-context-changed'){applyHostContext(message.params);reportSize();return}if(message.method==='ui/resource-teardown'&&message.id!==undefined){send({id:message.id,jsonrpc:'2.0',result:{}})}});
 new ResizeObserver(()=>requestAnimationFrame(reportSize)).observe(document.documentElement);
-send({id:initializeId,jsonrpc:'2.0',method:'ui/initialize',params:{appCapabilities:{},appInfo:{name:'ilo-finance-presentation',title:APP_TITLE,version:'0.1.0'},protocolVersion:'2026-01-26'}});
+send({id:initializeId,jsonrpc:'2.0',method:'ui/initialize',params:{appCapabilities:{},appInfo:{name:'nohmi-finance-presentation',title:APP_TITLE,version:'0.1.0'},protocolVersion:'2026-01-26'}});
 })();
 </script></body></html>`;
 }

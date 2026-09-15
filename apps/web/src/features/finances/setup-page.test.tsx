@@ -32,6 +32,7 @@ function setupResponse(
   const data: FinanceSetupPayload = {
     budgetVersionId: null,
     maintenanceRunId: null,
+    canonicalMaintenanceRunId: null,
     question: {
       id: "profile:location",
       prompt: "Where do you live for tax purposes?",
@@ -44,6 +45,21 @@ function setupResponse(
   };
   return {
     data,
+    ...(data.stage === "initial_maintenance"
+      ? {
+          nextAction: {
+            tool: "maintain_finances",
+            arguments:
+              data.canonicalMaintenanceRunId || data.maintenanceRunId
+                ? {
+                    operation: "resume",
+                    runId: data.canonicalMaintenanceRunId ?? data.maintenanceRunId,
+                  }
+                : { operation: "start", scope: { type: "all_outstanding" } },
+            reason: "Continue the authoritative maintenance action.",
+          },
+        }
+      : {}),
     changes: [],
     communication: {
       headline: "Your saved financial setup",
@@ -215,11 +231,14 @@ it("keeps maintenance judgment visibly pending and resumes the same run without 
   );
   api.maintainFinances.mockResolvedValue({
     data: {
-      runId: categoryId,
-      version: 3,
-      stage: "agent_reasoning",
-      reasoningBatch: [{ transactionId: sessionId }],
-      reviewQuestion: null,
+      run: { id: categoryId, status: "awaiting_agent_challenge" },
+      challengeId: sessionId,
+      nextAction: {
+        tool: "get_finance_ledger_challenge",
+        arguments: { challengeId: sessionId },
+        reason: "Complete the ledger challenge.",
+      },
+      recovery: null,
     },
     communication: { headline: "Reasoning remains.", requiredDisclosures: [] },
     outcome: "work_remaining",
@@ -231,7 +250,7 @@ it("keeps maintenance judgment visibly pending and resumes the same run without 
     operation: "start",
     scope: { type: "all_outstanding" },
   });
-  expect(await screen.findByText("Transaction judgment required")).toBeInTheDocument();
+  expect(await screen.findByText("Ledger challenge required")).toBeInTheDocument();
   expect(screen.queryByText("Setup complete")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
   expect(api.maintainFinances).toHaveBeenLastCalledWith({ operation: "resume", runId: categoryId });
@@ -338,11 +357,10 @@ it("renders every resumable setup state and its conservative fallback evidence",
   api.maintainFinances
     .mockResolvedValueOnce({
       data: {
-        runId: categoryId,
-        version: 4,
-        stage: "agent_audit",
-        reasoningBatch: [],
-        reviewQuestion: { id: sessionId },
+        run: { id: categoryId, status: "awaiting_approval" },
+        challengeId: null,
+        nextAction: null,
+        recovery: null,
       },
       communication: {
         headline: "Audit pending",
@@ -373,9 +391,130 @@ it("renders every resumable setup state and its conservative fallback evidence",
   await user.click(screen.getByRole("button", { name: "Resume saved progress" }));
   await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
   expect(api.maintainFinances).toHaveBeenCalledWith({ operation: "resume", runId: categoryId });
-  expect(await screen.findByText("Audit judgment required")).toBeVisible();
+  expect(await screen.findByText("Action approval required")).toBeVisible();
   expect(screen.getByRole("link", { name: "Answer in Review" })).toBeVisible();
   expect(screen.getByText("No changes were applied.")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
   expect(await screen.findByText("Maintenance unavailable")).toBeVisible();
+});
+
+it("prefers the canonical setup run and keeps blocked legacy recovery visible", async () => {
+  const user = userEvent.setup();
+  api.setupFinances.mockResolvedValue(
+    setupResponse({
+      stage: "initial_maintenance",
+      question: null,
+      maintenanceRunId: sessionId,
+      canonicalMaintenanceRunId: categoryId,
+    }),
+  );
+  api.maintainFinances.mockResolvedValue({
+    data: {
+      run: null,
+      challengeId: null,
+      nextAction: null,
+      recovery: {
+        legacyRunId: categoryId,
+        state: "blocked",
+        originalScope: { type: "since" },
+        throughDate: null,
+        reason: "Choose an explicit supported scope to recover this work.",
+      },
+    },
+    communication: { headline: "Saved maintenance needs recovery.", requiredDisclosures: [] },
+    outcome: "work_remaining",
+  });
+  mount();
+  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  await user.click(await screen.findByRole("button", { name: "Check maintenance progress" }));
+  expect(api.maintainFinances).toHaveBeenCalledWith({ operation: "resume", runId: categoryId });
+  expect(await screen.findByText("Maintenance recovery")).toBeVisible();
+  expect(
+    screen.getByText("Choose an explicit supported scope to recover this work."),
+  ).toBeVisible();
+  expect(screen.queryByText("Setup complete")).not.toBeInTheDocument();
+});
+
+it.each([
+  "legacy",
+  "canonical",
+])("honors a new start despite a retained %s run ID", async (kind) => {
+  const user = userEvent.setup();
+  const response = setupResponse({
+    stage: "initial_maintenance",
+    question: null,
+    maintenanceRunId: sessionId,
+    canonicalMaintenanceRunId: kind === "canonical" ? categoryId : null,
+  });
+  response.nextAction = {
+    tool: "maintain_finances",
+    arguments: { operation: "start", scope: { type: "all_outstanding" } },
+    reason: "The previous run is historical. Start current maintenance.",
+  };
+  api.setupFinances.mockResolvedValue(response);
+  api.maintainFinances.mockResolvedValue({
+    data: {
+      run: { id: budgetVersionId, status: "running" },
+      challengeId: null,
+      nextAction: null,
+      recovery: null,
+    },
+    communication: { headline: "Current maintenance started.", requiredDisclosures: [] },
+    outcome: "work_remaining",
+  });
+  mount();
+  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
+  expect(api.maintainFinances).toHaveBeenCalledWith({
+    operation: "start",
+    scope: { type: "all_outstanding" },
+  });
+  await user.click(await screen.findByRole("button", { name: "Check maintenance progress" }));
+  expect(api.maintainFinances).toHaveBeenLastCalledWith({
+    operation: "resume",
+    runId: budgetVersionId,
+  });
+});
+
+it("does not execute retained IDs without an authoritative maintenance action", async () => {
+  const user = userEvent.setup();
+  const response = setupResponse({
+    stage: "initial_maintenance",
+    question: null,
+    canonicalMaintenanceRunId: categoryId,
+    maintenanceRunId: sessionId,
+  });
+  delete response.nextAction;
+  api.setupFinances.mockResolvedValue(response);
+  mount();
+  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  expect(await screen.findByRole("button", { name: "Start initial maintenance" })).toBeDisabled();
+  expect(api.maintainFinances).not.toHaveBeenCalled();
+});
+
+it("refreshes the maintenance instruction after a terminal result even when setup version is unchanged", async () => {
+  const user = userEvent.setup();
+  api.setupFinances.mockResolvedValue(
+    setupResponse({ stage: "initial_maintenance", question: null }),
+  );
+  api.maintainFinances.mockResolvedValue({
+    data: {
+      run: { id: categoryId, status: "completed_with_questions" },
+      challengeId: null,
+      nextAction: null,
+      recovery: null,
+    },
+    communication: { headline: "Questions remain.", requiredDisclosures: [] },
+    outcome: "user_input_required",
+  });
+  mount();
+  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
+  expect(await screen.findByText("Maintenance complete with questions")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Resume saved progress" }));
+  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
+  expect(api.maintainFinances).toHaveBeenLastCalledWith({
+    operation: "start",
+    scope: { type: "all_outstanding" },
+  });
 });

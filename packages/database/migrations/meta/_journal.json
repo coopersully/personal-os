@@ -624,6 +624,13 @@
       "when": 1789436708000,
       "tag": "0081_finance_legacy_disconnect_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1789492918800,
+      "tag": "0082_finance_maintenance_lineage",
+      "breakpoints": true
     }
   ]
 }

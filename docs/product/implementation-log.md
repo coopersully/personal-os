@@ -2,6 +2,22 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-15 — Canonical Finance maintenance lifecycle
+
+- The live maintenance intent now uses shared durable runs, staged candidates, complete evidence
+  challenges, action settlement, verification and immutable period reviews. The old direct
+  judgment/audit protocol is retired; existing clients must use the canonical start/resume contract
+  and explicitly authorize `finances:maintain` when reconnecting.
+- Question-bearing candidates publish a qualified review of the actual ledger after health refresh
+  and verification. Unapplied proposals remain excluded, and setup stays incomplete.
+- Historical runs, judgments, findings and economic effects remain unverified evidence. In-flight
+  adoption preserves exact account/date scope and durable lineage; multiple-account runs receive
+  an explicit per-account repair path. Unverified historical effects block maintained claims until
+  supported canonical validation or an explicit later user decision.
+- Setup completion requires its exact full canonical run, completed verification and the matching
+  immutable review. Finance-local recovery handles accepted challenge handoffs and setup settlement
+  after a crash. This source change does not establish production or external-host journey proof.
+
 ## 2026-09-10 — Complete target product doctrine reconciled
 
 - Reframed nohmi as a user-owned autonomous exoskeleton with four core workspaces: Mail, Tasks,

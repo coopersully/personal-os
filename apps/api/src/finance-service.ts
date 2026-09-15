@@ -127,7 +127,6 @@ import { createFinanceBudgetBucketService } from "./finance/budget-bucket-servic
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
-import { createMaintenanceService } from "./finance/maintenance-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
@@ -764,7 +763,6 @@ export function createFinanceService({
   const budgetBuckets = createFinanceBudgetBucketService({ db, now });
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
-  const maintenance = createMaintenanceService({ db, inbox, now });
   const planning = createProfileBudgetService({ db, now });
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
@@ -3944,7 +3942,6 @@ export function createFinanceService({
     classifyFinanceTransactions: canonicalLedger.classifyTransactions,
     linkFinanceTransactions: canonicalLedger.linkTransactions,
     ...inbox,
-    ...maintenance,
     ...planning,
     ...setup,
     async listReimbursements(userId: string) {
@@ -5822,6 +5819,7 @@ export function createFinanceService({
       const rows = await db
         .select({
           rationale: financeReviewCases.rationale,
+          resolution: financeReviewCases.resolution,
           reason: financeReviewCases.reason,
           transactionId: financeReviewCases.transactionId,
         })
@@ -5831,7 +5829,11 @@ export function createFinanceService({
             eq(financeReviewCases.userId, userId),
             inArray(financeReviewCases.transactionId, transactionIds),
             inArray(financeReviewCases.status, ["deferred", "open"]),
-            inArray(financeReviewCases.reason, ["possible_reimbursement", "possible_transfer"]),
+            or(
+              inArray(financeReviewCases.reason, ["possible_reimbursement", "possible_transfer"]),
+              sql`${financeReviewCases.resolution}->>'type' = 'clarify'`,
+              sql`jsonb_typeof(${financeReviewCases.evidence}->'clarification') = 'string'`,
+            ),
           ),
         )
         .orderBy(desc(financeReviewCases.updatedAt));
@@ -5845,10 +5847,15 @@ export function createFinanceService({
           underlyingAction:
             row.reason === "possible_reimbursement" ? "reimbursement" : "transaction",
           why:
-            row.rationale ??
-            (row.reason === "possible_reimbursement"
-              ? "This transaction may be reimbursable and needs a bounded reimbursement decision."
-              : "This transaction may be a transfer and needs a bounded transfer decision."),
+            row.resolution?.type === "clarify"
+              ? `Resolve the saved clarification through the Finance Inbox before changing this transaction: ${String(row.resolution.answer ?? row.resolution.clarification ?? "User context is awaiting an explicit decision.")}`.slice(
+                  0,
+                  1000,
+                )
+              : (row.rationale ??
+                (row.reason === "possible_reimbursement"
+                  ? "This transaction may be reimbursable and needs a bounded reimbursement decision."
+                  : "This transaction may be a transfer and needs a bounded transfer decision.")),
         };
       }
       return contexts;

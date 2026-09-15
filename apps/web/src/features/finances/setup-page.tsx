@@ -5,6 +5,7 @@ import type {
   FinanceSetupPayload,
   FinanceToolResult,
 } from "@personal-os/domain";
+import { financeMaintenanceInputSchema } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -29,18 +30,22 @@ const setupStages: Record<FinanceSetupPayload["stage"], string> = {
   initial_maintenance: "Initial maintenance remains",
   settled: "Setup complete",
 };
-const maintenanceStages: Record<FinanceMaintenancePayload["stage"], string> = {
-  deterministic_processing: "Processing transaction evidence",
-  agent_reasoning: "Transaction judgment required",
-  reconciliation: "Reconciliation remains",
-  agent_audit: "Audit judgment required",
-  settled: "Maintenance settled",
-  failed: "Maintenance failed",
+const maintenanceStages: Record<NonNullable<FinanceMaintenancePayload["run"]>["status"], string> = {
+  queued: "Maintenance queued",
+  running: "Processing transaction evidence",
+  completed: "Maintenance complete",
+  completed_with_questions: "Maintenance complete with questions",
+  awaiting_agent_challenge: "Ledger challenge required",
+  awaiting_approval: "Action approval required",
+  blocked: "Maintenance blocked",
+  failed_recoverable: "Maintenance needs recovery",
+  failed_terminal: "Maintenance failed",
 };
 
 export function FinanceSetupPage() {
   const queryClient = useQueryClient();
   const [result, setResult] = useState<FinanceToolResult<FinanceSetupPayload> | null>(null);
+  const [maintenanceInstructionVersion, setMaintenanceInstructionVersion] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const requestKey = useRef({ signature: "", key: "" });
   const session = result?.data;
@@ -60,6 +65,7 @@ export function FinanceSetupPage() {
         return;
       }
       setResult(response);
+      setMaintenanceInstructionVersion((version) => version + 1);
       if (input.operation === "answer")
         setAnswers((current) => ({ ...current, [`${input.sessionId}:${input.questionId}`]: "" }));
       requestKey.current = { signature: "", key: "" };
@@ -250,7 +256,9 @@ export function FinanceSetupPage() {
               </Button>
             </div>
           ) : null}
-          {session?.stage === "initial_maintenance" ? <SetupMaintenance session={session} /> : null}
+          {session?.stage === "initial_maintenance" ? (
+            <SetupMaintenance key={maintenanceInstructionVersion} nextAction={result?.nextAction} />
+          ) : null}
           {session?.stage === "settled" &&
           (result?.outcome !== "completed" || (result?.remainingWork.count ?? 0) > 0) ? (
             <Alert>
@@ -367,21 +375,30 @@ function SetupBudget({
   );
 }
 
-function SetupMaintenance({ session }: { session: FinanceSetupPayload }) {
+function SetupMaintenance({
+  nextAction,
+}: {
+  nextAction: FinanceToolResult<FinanceSetupPayload>["nextAction"];
+}) {
   const queryClient = useQueryClient();
   const [run, setRun] = useState<FinanceMaintenancePayload | null>(null);
   const [communication, setCommunication] = useState<
     FinanceToolResult<FinanceMaintenancePayload>["communication"] | null
   >(null);
+  const instructedInput =
+    nextAction?.tool === "maintain_finances"
+      ? financeMaintenanceInputSchema.safeParse(nextAction.arguments)
+      : null;
+  const input = run?.run
+    ? { operation: "resume" as const, runId: run.run.id }
+    : instructedInput?.success
+      ? instructedInput.data
+      : null;
   const maintenance = useMutation({
-    mutationFn: async () =>
-      requireFinanceResult(
-        await api.maintainFinances(
-          run || session.maintenanceRunId
-            ? { operation: "resume", runId: run?.runId ?? session.maintenanceRunId ?? "" }
-            : { operation: "start", scope: { type: "all_outstanding" } },
-        ),
-      ),
+    mutationFn: async () => {
+      if (!input) throw new Error("Refresh setup progress to load the next maintenance action.");
+      return requireFinanceResult(await api.maintainFinances(input));
+    },
     onSuccess: (response) => {
       setRun(response.data);
       setCommunication(response.communication);
@@ -394,24 +411,20 @@ function SetupMaintenance({ session }: { session: FinanceSetupPayload }) {
   return (
     <section className="grid gap-3" aria-label="Initial maintenance">
       <h3 className="font-medium">
-        {run ? maintenanceStages[run.stage] : "Maintain transaction evidence"}
+        {run?.run
+          ? maintenanceStages[run.run.status]
+          : run?.recovery
+            ? "Maintenance recovery"
+            : "Maintain transaction evidence"}
       </h3>
       <p className="text-sm text-muted-foreground">
         {communication?.headline ??
           "Your profile and budget are saved. Categorization, reconciliation, and audit still need to run."}
       </p>
-      {run?.stage === "agent_reasoning" ? (
-        <p className="text-sm">
-          {run.reasoningBatch.length} transactions need judgment from a connected Finance agent.
-          This page does not supply those judgments.
-        </p>
-      ) : null}
-      {run?.stage === "agent_audit" ? (
-        <p className="text-sm">
-          The audit needs a connected Finance agent to inspect the evidence and submit findings.
-        </p>
-      ) : null}
-      {run?.reviewQuestion ? (
+      {run?.recovery ? <p className="text-sm">{run.recovery.reason}</p> : null}
+      {run?.nextAction ? <p className="text-sm">{run.nextAction.reason}</p> : null}
+      {run?.run?.status === "awaiting_approval" ||
+      run?.run?.status === "completed_with_questions" ? (
         <Button asChild variant="outline">
           <Link to="/finances/review">Answer in Review</Link>
         </Button>
@@ -424,17 +437,17 @@ function SetupMaintenance({ session }: { session: FinanceSetupPayload }) {
       {maintenance.error ? <InlineError error={maintenance.error} /> : null}
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={maintenance.isPending}
+          disabled={maintenance.isPending || !input}
           onClick={() => maintenance.mutate()}
           variant="outline"
         >
           {maintenance.isPending
             ? "Checking maintenance…"
-            : run || session.maintenanceRunId
+            : input?.operation === "resume"
               ? "Check maintenance progress"
               : "Start initial maintenance"}
         </Button>
-        {run?.stage === "agent_reasoning" || run?.stage === "agent_audit" ? (
+        {run?.nextAction?.tool === "get_finance_ledger_challenge" ? (
           <Button asChild variant="ghost">
             <Link to="/settings?section=agent-connections">Connected agents</Link>
           </Button>

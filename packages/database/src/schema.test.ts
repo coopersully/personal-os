@@ -359,6 +359,7 @@ describe("database schema contracts", () => {
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
       "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
     ]);
   });
 

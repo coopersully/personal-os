@@ -35,6 +35,7 @@ import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
+import { findUnverifiedLegacyFinanceEffects } from "./finance/legacy-maintenance-evidence.js";
 import {
   activeAllocationsByTransaction,
   excludedReimbursementCentsByAllocation,
@@ -63,6 +64,7 @@ const openRunStatuses = [
   "queued",
   "running",
   "awaiting_approval",
+  "awaiting_agent_challenge",
   "blocked",
   "failed_recoverable",
 ] as const;
@@ -748,11 +750,26 @@ export function createFinanceStatusService({ db, now }: Options) {
               : currentCount > 0
                 ? "partial"
                 : "stale";
-        const blockers = blockedSources.map((source) => ({
+        const legacyEffects = await findUnverifiedLegacyFinanceEffects(tx, userId, scope);
+        const firstLegacyEffect = legacyEffects[0];
+        const blockers: FinanceStatus["freshness"]["blockers"] = blockedSources.map((source) => ({
           code: source.synchronization.failureCode ?? "finance_account_blocked",
           message: source.synchronization.message ?? "A Finance account is blocked.",
           recovery: source.synchronization.recovery,
         }));
+        for (const code of [
+          "legacy_maintenance_unverified",
+          "finance_maintenance_evidence_missing",
+        ] as const) {
+          const effects = legacyEffects.filter((effect) => effect.code === code);
+          const first = effects[0];
+          if (!first) continue;
+          blockers.push({
+            code,
+            message: `${effects.length} Finance effect(s) ${code === "finance_maintenance_evidence_missing" ? "have unresolved maintenance provenance" : "still need an explicit financial decision"}. Review transaction ${first.transactionIds[0]}.`,
+            recovery: `${first.repair.label}: ${first.repair.href}. Notes and clarifications do not verify this financial change.`,
+          });
+        }
         const byReason: Record<string, number> = {};
         for (const review of scopedReviews)
           byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
@@ -894,20 +911,22 @@ export function createFinanceStatusService({ db, now }: Options) {
           .map((row) => row.transactionDate)
           .toSorted()[0];
         const reconciledThrough =
-          scopedTransactions
-            .filter(
-              (row) =>
-                !unresolvedTransactions.some((unresolved) => unresolved.id === row.id) &&
-                (earliestUnresolvedDate === undefined ||
-                  row.transactionDate < earliestUnresolvedDate),
-            )
-            .at(-1)?.transactionDate ?? null;
+          legacyEffects.length > 0
+            ? null
+            : (scopedTransactions
+                .filter(
+                  (row) =>
+                    !unresolvedTransactions.some((unresolved) => unresolved.id === row.id) &&
+                    (earliestUnresolvedDate === undefined ||
+                      row.transactionDate < earliestUnresolvedDate),
+                )
+                .at(-1)?.transactionDate ?? null);
         const oldestOutstandingAt = outstandingReviews[0]?.createdAt.toISOString() ?? null;
         const work = {
           actionable: scopedReviews.length,
           awaitingApproval: latestRun?.status === "awaiting_approval" ? 1 : 0,
           awaitingInput: questions.length,
-          blocked: blockedCount + (latestRun?.status === "blocked" ? 1 : 0),
+          blocked: blockedCount + legacyEffects.length + (latestRun?.status === "blocked" ? 1 : 0),
           oldestOutstandingAt,
         };
         const evidenceCurrent = freshnessState === "current";
@@ -1002,8 +1021,9 @@ export function createFinanceStatusService({ db, now }: Options) {
             cadence: item.cadence,
           })),
         });
-        const recommendedNextOperation =
-          blockers.length > 0
+        const recommendedNextOperation = firstLegacyEffect
+          ? firstLegacyEffect.repair
+          : blockers.length > 0
             ? {
                 href: "/finances/accounts",
                 label: "Reconnect Finance account",
@@ -1061,7 +1081,10 @@ export function createFinanceStatusService({ db, now }: Options) {
               ).length,
               possibleDuplicates: [...possibleDuplicateKeys.values()].filter((count) => count > 1)
                 .length,
-              ready: scopedReviews.length === 0 && unresolvedTransactions.length === 0,
+              ready:
+                legacyEffects.length === 0 &&
+                scopedReviews.length === 0 &&
+                unresolvedTransactions.length === 0,
               reconciledThrough,
               unansweredExceptions: scopedReviews.length,
               uncategorized: scopedTransactions.filter(

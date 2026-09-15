@@ -27,7 +27,6 @@ import {
   financeTransactionQuerySchema,
   idSchema,
   linkFinanceTransactionsInputSchema,
-  maintenanceRequestSchema,
   maintenanceScopeQuerySchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
@@ -55,6 +54,7 @@ import {
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { loadFinanceAuthorization } from "../finance/context.js";
+import type { createFinanceMaintenanceIntentService } from "../finance/maintenance-intent-service.js";
 import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
@@ -68,13 +68,7 @@ import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import {
-  parseBody,
-  parseOptionalBody,
-  requireFeatureAccess,
-  requireHuman,
-  requireScope,
-} from "./support.js";
+import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = {
   principal: Principal;
@@ -87,6 +81,7 @@ type FinanceRouteOptions = {
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
   financeMaintenance: FinanceMaintenanceService;
+  canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
   financePeriodReviews?: FinancePeriodReviewService;
   financePlaybook?: ReturnType<typeof createFinancePlaybookService>;
   financeStatus: FinanceStatusService;
@@ -100,13 +95,18 @@ export function registerFinanceRoutes({
   actions,
   db,
   financeChallenges,
-  financeMaintenance,
+  canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
   financeStatus,
   finances,
   mutationContext,
 }: FinanceRouteOptions) {
+  const canonicalMaintenance = () => {
+    if (!canonicalFinanceMaintenance)
+      throw new Error("The canonical Finance maintenance service is required.");
+    return canonicalFinanceMaintenance;
+  };
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
   const requireFinanceMaintenance = requireScope("finances:maintain");
@@ -160,21 +160,21 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
-  app.post("/v1/finances/maintenance", async (context) => {
-    const request = await parseOptionalBody(context, maintenanceRequestSchema);
-    const created = await financeMaintenance.startOrResume(
-      context.get("principal").userId,
-      request.scope,
-    );
-    return context.json({ run: created }, 202);
-  });
+  app.post("/v1/finances/maintenance", async (context) =>
+    context.json(
+      await canonicalMaintenance().maintainFinances(
+        await parseBody(context, financeMaintenanceInputSchema),
+        context.get("principal"),
+      ),
+    ),
+  );
   app.get("/v1/finances/maintenance/:id", async (context) =>
-    context.json({
-      run: await financeMaintenance.getRun(
+    context.json(
+      await canonicalMaintenance().getRun(
         context.get("principal").userId,
         idSchema.parse(context.req.param("id")),
       ),
-    }),
+    ),
   );
   app.get("/v1/finances/maintenance/challenges/:id", async (context) => {
     if (!financeChallenges) throw new Error("Finance challenge service is unavailable.");
@@ -555,27 +555,11 @@ export function registerFinanceRoutes({
   app.get("/v1/finances/inbox", async (context) =>
     context.json(await finances.getFinanceInbox(context.get("principal").userId)),
   );
-  app.post("/v1/finances/maintenance/protocol", async (context) =>
-    context.json(
-      await finances.maintainFinances(
-        await parseBody(context, financeMaintenanceInputSchema),
-        await financeContext(context),
-      ),
-    ),
-  );
   app.get("/v1/finances/maintenance", async (context) =>
     context.json(
-      await finances.getFinanceMaintenanceHistory(
+      await canonicalMaintenance().history(
         context.get("principal").userId,
         financeMaintenanceHistoryQuerySchema.parse(context.req.query()),
-      ),
-    ),
-  );
-  app.get("/v1/finances/maintenance/protocol/:id", async (context) =>
-    context.json(
-      await finances.getFinanceMaintenanceRun(
-        context.get("principal").userId,
-        context.req.param("id"),
       ),
     ),
   );

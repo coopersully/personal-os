@@ -112,3 +112,12 @@ must never originate a new recurring maintenance invocation.
 Platform behavior is an external boundary and must be reverified before nohmi advertises a setup
 flow as currently supported. A passing nohmi test cannot prove that a third-party plan, account,
 machine, connector, or scheduler is available to the person.
+
+## Finance host repair after the maintenance cutover
+
+Old protocol payloads and direct judgment/audit submissions are unsupported. Refresh tool
+discovery or reconnect the host, then explicitly grant `finances:maintain`. Read and write
+access remain separate grants; neither migration nor reconnect grants permission automatically.
+Resume persisted work with `maintain_finances` using `operation: resume` and the run ID.
+Follow typed challenge next actions and inspect any blocked legacy recovery before starting a
+new scope. Required action approval and final verification remain part of the same durable run.

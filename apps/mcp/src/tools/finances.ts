@@ -7,6 +7,7 @@ import {
   financeMaintenanceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
+  maintenanceRunStatusSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
@@ -140,7 +141,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read Ilo's approved, versioned Finance playbook and current assessment before setup, recommendations, or maintenance. It defaults toward cash-flow stability, resilience, risk protection, costly-debt removal, retirement, diversified long-term investing, and a sustainable good life. Use native web search for current tax, retirement, insurance, accounting, or product facts; never imply research occurred without recorded evidence.",
+        "Read nohmi's approved, versioned Finance playbook and current assessment before setup, recommendations, or maintenance. It defaults toward cash-flow stability, resilience, risk protection, costly-debt removal, retirement, diversified long-term investing, and a sustainable good life. Use native web search for current tax, retirement, insurance, accounting, or product facts; never imply research occurred without recorded evidence.",
       inputSchema: {},
       title: "Get Finance playbook",
     },
@@ -169,7 +170,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, show the proposed budget, accept a plain approval or authorized bypass self-approval, then continue into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, show the proposed budget, accept a plain approval or authorized bypass self-approval, then continue into maintenance. Do not ask the user to name a tool or visit the nohmi web app.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -182,7 +183,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: true },
       description:
-        "Use this to autonomously categorize outstanding transactions, reconcile relationships, account for the active budget, and red-team audit recent activity. It runs deterministic rules first and returns bounded reasoning or audit work immediately; it never queues an automation or waits for the user. Read inboxCases, including saved clarification notes, on every pass. Use answer_finance_review to apply supported answers and close their cases; a note alone is not a classification. Continue until stage settled. Uncertainty becomes deduplicated transaction-backed Inbox rows. Settlement does not establish that the budget is balanced.",
+        "Start or resume durable Finance maintenance with finances:maintain. This tool never queues an automation; recurring schedules belong to the external host. Follow the returned typed next action: inspect the candidate, complete its ledger challenge, obtain required action approval, then verify the result and immutable period review. Resume persisted work by run ID; questions, approval, and recovery states remain explicit.",
       inputSchema: financeMaintenanceInputSchema,
       title: "Maintain finances",
     },
@@ -195,10 +196,10 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read resumable and settled Finance maintenance runs. These are caller-driven protocol stages, never queued jobs.",
+        "Read resumable and settled Finance maintenance runs. Results expose canonical run status, typed next actions, and legacy recovery.",
       inputSchema: {
         limit: z.number().int().min(1).max(100).default(20),
-        status: z.enum(["agent_reasoning", "agent_audit", "settled", "failed"]).optional(),
+        status: maintenanceRunStatusSchema.optional(),
       },
       title: "Get Finance maintenance history",
     },

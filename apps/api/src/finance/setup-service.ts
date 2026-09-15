@@ -1,4 +1,10 @@
-import { type Database, financeCategories, financeSetupSessions } from "@personal-os/database";
+import {
+  type Database,
+  financeCategories,
+  financeMaintenanceRuns,
+  financeSetupSessions,
+  workspaceMaintenanceRuns,
+} from "@personal-os/database";
 import type {
   FinanceInteractionQuestion,
   FinanceProfileVersion,
@@ -7,8 +13,8 @@ import type {
   FinanceToolResult,
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
-import { ILO_FINANCE_PLAYBOOK } from "@personal-os/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { NOHMI_FINANCE_PLAYBOOK } from "@personal-os/domain";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
   executeFinanceIdempotently,
@@ -98,6 +104,7 @@ export function setupResult(input: {
   disclosures?: Array<{ importance: "critical" | "important"; message: string }>;
   headline: string;
   maintenanceRunId?: string | null;
+  canonicalMaintenanceRunId?: string | null;
   nextAction?: FinanceToolResult<unknown>["nextAction"];
   optionalDetails?: string[];
   question?: FinanceInteractionQuestion | null;
@@ -108,6 +115,7 @@ export function setupResult(input: {
   const payload: FinanceSetupPayload = {
     budgetVersionId: input.budgetVersionId,
     maintenanceRunId: input.maintenanceRunId ?? null,
+    canonicalMaintenanceRunId: input.canonicalMaintenanceRunId ?? null,
     question: input.question ?? null,
     sessionId: input.sessionId,
     stage: input.stage,
@@ -119,7 +127,7 @@ export function setupResult(input: {
       headline: input.headline,
       ...(input.question ? { nextQuestion: input.question } : {}),
       optionalDetails: [
-        `Priorities follow approved Ilo Finance playbook ${ILO_FINANCE_PLAYBOOK.version}: cash-flow stability, resilience, risk protection, costly debt, retirement, diversified investing, and a sustainable good life.`,
+        `Priorities follow approved nohmi Finance playbook ${NOHMI_FINANCE_PLAYBOOK.version}: cash-flow stability, resilience, risk protection, costly debt, retirement, diversified investing, and a sustainable good life.`,
         ...(input.optionalDetails ?? []),
       ],
       requiredDisclosures: input.disclosures ?? [],
@@ -259,6 +267,51 @@ export function createSetupService({ db, now, planning }: Options) {
     session: typeof financeSetupSessions.$inferSelect,
     context: FinanceMutationContext,
   ): Promise<FinanceToolResult<FinanceSetupPayload>> {
+    // An old terminal protocol run never establishes canonical setup completion.
+    if (session.status === "settled" && !session.canonicalMaintenanceRunId) {
+      const recovered = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${context.userId}`}, 0))`,
+        );
+        const current = await tx.query.financeSetupSessions.findFirst({
+          where: and(
+            eq(financeSetupSessions.id, session.id),
+            eq(financeSetupSessions.userId, context.userId),
+          ),
+        });
+        if (!current) throw new AppError("not_found", "That Finance setup session was not found.");
+        if (current.status !== "settled" || current.canonicalMaintenanceRunId) return current;
+        const active = await tx.query.financeSetupSessions.findFirst({
+          where: and(
+            eq(financeSetupSessions.userId, context.userId),
+            inArray(financeSetupSessions.status, [
+              "collecting_profile",
+              "budget_proposal",
+              "budget_approval",
+              "initial_maintenance",
+            ]),
+          ),
+        });
+        if (active) return active;
+        const [updated] = await tx
+          .update(financeSetupSessions)
+          .set({ status: "initial_maintenance", updatedAt: now(), version: current.version + 1 })
+          .where(
+            and(
+              eq(financeSetupSessions.id, current.id),
+              eq(financeSetupSessions.version, current.version),
+            ),
+          )
+          .returning();
+        if (!updated)
+          throw new AppError(
+            "conflict",
+            "Financial setup changed. Resume saved progress to continue.",
+          );
+        return updated;
+      });
+      return continueSession(recovered, context);
+    }
     if (session.status === "budget_approval") {
       // The same plan can be revised or approved through the portal or MCP.
       // Reconcile saved setup progress with that canonical decision on resume.
@@ -309,15 +362,43 @@ export function createSetupService({ db, now, planning }: Options) {
       });
     }
     if (session.status === "initial_maintenance") {
+      const legacy = session.maintenanceRunId
+        ? await db.query.financeMaintenanceRuns.findFirst({
+            where: and(
+              eq(financeMaintenanceRuns.id, session.maintenanceRunId),
+              eq(financeMaintenanceRuns.userId, context.userId),
+            ),
+          })
+        : null;
+      const canonical = session.canonicalMaintenanceRunId
+        ? await db.query.workspaceMaintenanceRuns.findFirst({
+            where: and(
+              eq(workspaceMaintenanceRuns.id, session.canonicalMaintenanceRunId),
+              eq(workspaceMaintenanceRuns.userId, context.userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+            ),
+          })
+        : null;
+      const resumeId = canonical
+        ? ["completed_with_questions", "failed_terminal"].includes(canonical.status)
+          ? null
+          : canonical.id
+        : legacy &&
+            !["settled", "failed"].includes(legacy.stage) &&
+            legacy.recovery?.state !== "blocked"
+          ? legacy.id
+          : null;
       return setupResult({
         budgetVersionId: session.budgetVersionId,
         maintenanceRunId: session.maintenanceRunId,
+        canonicalMaintenanceRunId: session.canonicalMaintenanceRunId,
         headline: "Your profile and budget are set; maintenance is the next step.",
         nextAction: {
-          arguments: session.maintenanceRunId
-            ? { operation: "resume", runId: session.maintenanceRunId }
+          arguments: resumeId
+            ? { operation: "resume", runId: resumeId }
             : { operation: "start", scope: { type: "all_outstanding" } },
-          reason: "Categorize, reconcile, and audit current activity.",
+          reason:
+            "Prepare and challenge current evidence, then verify the approved result and period review.",
           tool: "maintain_finances",
         },
         sessionId: session.id,
@@ -330,6 +411,7 @@ export function createSetupService({ db, now, planning }: Options) {
         budgetVersionId: session.budgetVersionId,
         headline: "Your Finance setup session is complete.",
         maintenanceRunId: session.maintenanceRunId,
+        canonicalMaintenanceRunId: session.canonicalMaintenanceRunId,
         sessionId: session.id,
         stage: "settled",
         version: session.version,

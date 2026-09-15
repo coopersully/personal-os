@@ -19,9 +19,9 @@ const playbookStepSchema = z.object({
 });
 
 export const financePlaybookSchema = z.object({
-  id: z.literal("ilo-finance"),
+  id: z.literal("nohmi-finance"),
   version: z.literal("1.0.0"),
-  owner: z.literal("ilo-finance"),
+  owner: z.literal("nohmi-finance"),
   status: z.literal("approved"),
   defaultBias: z.literal("healthy_wealth_building"),
   steps: z.array(playbookStepSchema).length(8),
@@ -51,10 +51,10 @@ export const financePlaybookResponseSchema = z.object({
 });
 export type FinancePlaybookResponse = z.infer<typeof financePlaybookResponseSchema>;
 
-export const ILO_FINANCE_PLAYBOOK: FinancePlaybook = {
-  id: "ilo-finance",
+export const NOHMI_FINANCE_PLAYBOOK: FinancePlaybook = {
+  id: "nohmi-finance",
   version: "1.0.0",
-  owner: "ilo-finance",
+  owner: "nohmi-finance",
   status: "approved",
   defaultBias: "healthy_wealth_building",
   steps: [
@@ -239,6 +239,6 @@ export function assessFinancePlaybook(input: {
     nextActions,
     readiness: blockers.length === 0 ? "on_track" : input.profile ? "incomplete" : "not_ready",
     uncertainty,
-    playbookVersion: ILO_FINANCE_PLAYBOOK.version,
+    playbookVersion: NOHMI_FINANCE_PLAYBOOK.version,
   });
 }

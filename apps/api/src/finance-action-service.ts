@@ -3578,6 +3578,66 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .limit(1);
         if (!review) throw new AppError("not_found", "The Finance action review was not found.");
         if (review.status === "pending") {
+          if (review.actionKind === "maintenance_turn") {
+            const payload = review.privatePayload as {
+              candidateId?: string;
+              runId?: string;
+            };
+            if (!payload.candidateId || !payload.runId)
+              throw new AppError(
+                "conflict",
+                "The Finance maintenance review payload is incomplete.",
+              );
+            const [candidate] = await tx
+              .update(financeMaintenanceCandidates)
+              .set({ state: "superseded", updatedAt: now() })
+              .where(
+                and(
+                  eq(financeMaintenanceCandidates.id, payload.candidateId),
+                  eq(financeMaintenanceCandidates.userId, context.principal.userId),
+                  eq(financeMaintenanceCandidates.runId, payload.runId),
+                  eq(financeMaintenanceCandidates.state, "awaiting_approval"),
+                ),
+              )
+              .returning({ id: financeMaintenanceCandidates.id });
+            if (!candidate)
+              throw new AppError(
+                "conflict",
+                "The Finance maintenance candidate is no longer awaiting approval.",
+              );
+            const [run] = await tx
+              .update(workspaceMaintenanceRuns)
+              .set({
+                checkpoint: {
+                  candidateId: payload.candidateId,
+                  phase: "approval_dismissed",
+                  reviewId: review.id,
+                },
+                lastSafeError: {
+                  code: "finance_maintenance_review_dismissed",
+                  message: "The user dismissed the proposed Finance maintenance turn.",
+                },
+                leaseClaimId: null,
+                leaseExpiresAt: null,
+                retryAt: null,
+                status: "failed_terminal",
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(workspaceMaintenanceRuns.id, payload.runId),
+                  eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+                  eq(workspaceMaintenanceRuns.domain, "finances"),
+                  eq(workspaceMaintenanceRuns.status, "awaiting_approval"),
+                ),
+              )
+              .returning({ id: workspaceMaintenanceRuns.id });
+            if (!run)
+              throw new AppError(
+                "conflict",
+                "The Finance maintenance run is no longer awaiting approval.",
+              );
+          }
           const [dismissed] = await tx
             .update(financeAgentActionReviews)
             .set({ status: "dismissed", updatedAt: now() })

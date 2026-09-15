@@ -221,7 +221,7 @@ describe.sequential("Finance period review service", () => {
     ).resolves.toHaveLength(1);
   });
 
-  it("rejects incomplete packets and publishes an immutable qualified question review only after full challenge", async () => {
+  it("rejects incomplete packets and post-challenge drift before publishing a qualified question review", async () => {
     const [owner] = await database.db
       .insert(users)
       .values({
@@ -466,6 +466,37 @@ describe.sequential("Finance period review service", () => {
     await expect(currentService.createForRun(crypto.randomUUID(), run.id)).rejects.toMatchObject({
       code: "not_found",
     });
+    snapshot.mockResolvedValueOnce({
+      assumptions: [],
+      projection: actualProjection,
+      revision: `sha256:${"9".repeat(64)}`,
+      sourceRevision: `sha256:${"8".repeat(64)}`,
+    });
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(snapshot).toHaveBeenLastCalledWith(
+      owner.id,
+      run.scope,
+      [
+        expect.objectContaining({ id: question.id, ordinal: 0 }),
+        expect.objectContaining({ id: prepared.id, ordinal: 1 }),
+      ],
+      candidate.discoveryRevision,
+      expect.anything(),
+    );
+    await expect(
+      database.db
+        .select({ id: financePeriodReviews.id })
+        .from(financePeriodReviews)
+        .where(eq(financePeriodReviews.runId, run.id)),
+    ).resolves.toHaveLength(0);
+    snapshot.mockResolvedValueOnce({
+      assumptions: [],
+      projection: actualProjection,
+      revision: candidate.revision,
+      sourceRevision: `sha256:${"2".repeat(64)}`,
+    });
     const completedWithQuestions = await currentService.createForRun(owner.id, run.id);
     expect(completedWithQuestions).toMatchObject({
       challenge: { checked: financeLedgerChallengeChecks, findings: 0, observations: 0 },
@@ -476,7 +507,16 @@ describe.sequential("Finance period review service", () => {
       closeReadiness: { ready: false },
       work: { approvals: 0, rulesAndActions: 0, questions: 1 },
     });
-    expect(snapshot).toHaveBeenLastCalledWith(owner.id, run.scope, [], null, expect.anything());
+    expect(snapshot).toHaveBeenLastCalledWith(
+      owner.id,
+      run.scope,
+      [
+        expect.objectContaining({ id: question.id, ordinal: 0 }),
+        expect.objectContaining({ id: prepared.id, ordinal: 1 }),
+      ],
+      null,
+      expect.anything(),
+    );
     expect(completedWithQuestions.recommendations[0]).toMatchObject({ disposition: "needs_input" });
     expect(completedWithQuestions.recommendations[0]?.evidence).toContain(
       `Candidate revision: ${candidate.revision}`,

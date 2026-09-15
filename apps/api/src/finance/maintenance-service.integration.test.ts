@@ -69,13 +69,14 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     await database?.close();
     await container?.stop();
   });
-  async function fixture() {
+  async function fixture(options?: { now?: () => Date; planningTimezone?: string }) {
     const [user] = await database.db
       .insert(users)
       .values({
         displayName: "Recovery",
         email: `${randomUUID()}@example.com`,
         passwordHash: "unused",
+        planningTimezone: options?.planningTimezone,
       })
       .returning();
     if (!user) throw new Error("Missing user");
@@ -97,7 +98,7 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     );
     const service = createFinanceMaintenanceIntentService({
       db: database.db,
-      now,
+      now: options?.now ?? now,
       maintenance: { dispatchRun } as unknown as FinanceMaintenanceService,
       recoverHandoff,
       status: { getFinanceStatus } as unknown as FinanceStatusService,
@@ -211,6 +212,21 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     expect(adopted.data).toMatchObject({
       run: { scope: { type: "window", start: "2026-09-01", end: "2026-09-15" } },
       recovery: { throughDate: "2026-09-15" },
+    });
+  });
+  it("freezes a legacy since cutoff in the owner's planning timezone", async () => {
+    const f = await fixture({
+      now: () => new Date("2026-09-16T02:00:00Z"),
+      planningTimezone: "America/New_York",
+    });
+    const since = await legacy(f.userId, { type: "since", from: "2026-09-01" });
+    await expect(
+      f.service.maintainFinances({ operation: "resume", runId: since.id }, f.principal),
+    ).resolves.toMatchObject({
+      data: {
+        recovery: { throughDate: "2026-09-15" },
+        run: { scope: { type: "window", start: "2026-09-01", end: "2026-09-15" } },
+      },
     });
   });
   it("never adopts a legacy terminal stage as canonical completion", async () => {

@@ -264,9 +264,7 @@ describe.sequential("guided Finance setup", () => {
       .update(financeSetupSessions)
       .set({ status: "settled" })
       .where(eq(financeSetupSessions.id, response.data.sessionId));
-    await expect(
-      service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
-    ).resolves.toMatchObject({
+    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
       data: {
         sessionId: response.data.sessionId,
         stage: "initial_maintenance",

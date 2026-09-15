@@ -212,11 +212,20 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             ? await finances.maintenanceCandidateSnapshot(
                 userId,
                 run.scope,
-                [],
+                items,
                 candidate.discoveryRevision,
                 tx,
               )
             : null;
+          if (
+            actualSnapshot &&
+            (actualSnapshot.revision !== candidate.revision ||
+              actualSnapshot.revision !== challenge.candidateRevision)
+          )
+            throw new AppError(
+              "conflict",
+              "The challenged Finance candidate no longer matches current ledger evidence.",
+            );
           const projection = financeCandidateLedgerProjectionSchema.parse(
             actualSnapshot?.projection ?? candidate.projection,
           );

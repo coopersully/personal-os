@@ -934,6 +934,45 @@ describe.sequential("finance action service", () => {
           ),
         ),
     ).toEqual(Array.from({ length: 101 }, () => ({ categoryId: null })));
+    await expect(
+      fixture.actions.dismiss(first.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "settlement-review-dismiss",
+      }),
+    ).resolves.toMatchObject({ status: "dismissed" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({
+          lastSafeError: workspaceMaintenanceRuns.lastSafeError,
+          status: workspaceMaintenanceRuns.status,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, fixture.run.id)),
+    ).resolves.toEqual([
+      {
+        lastSafeError: expect.objectContaining({
+          code: "finance_maintenance_review_dismissed",
+        }),
+        status: "failed_terminal",
+      },
+    ]);
+    await expect(
+      database.db
+        .insert(workspaceMaintenanceRuns)
+        .values({
+          domain: "finances",
+          rulebookVersion: "test-v1",
+          scope: { type: "all_outstanding" },
+          userId: fixture.ownerId,
+        })
+        .returning({ id: workspaceMaintenanceRuns.id }),
+    ).resolves.toHaveLength(1);
   });
 
   it("commits a human-approved maintenance turn once and requeues the same run", async () => {
@@ -1009,6 +1048,59 @@ describe.sequential("finance action service", () => {
         status: "queued",
       },
     ]);
+  });
+
+  it("keeps a maintenance review pending when its dismissal lineage is incomplete or stale", async () => {
+    const fixture = await createSettlementFixture({ bypass: false, label: "Dismissal lineage" });
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "dismissal-lineage-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a maintenance review.");
+    const [stored] = await database.db
+      .select({ privatePayload: financeAgentActionReviews.privatePayload })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.id, queued.review.id));
+    if (!stored) throw new Error("Expected the maintenance review payload.");
+
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({ privatePayload: { candidateId: fixture.candidate.id } })
+      .where(eq(financeAgentActionReviews.id, queued.review.id));
+    await expect(
+      fixture.actions.dismiss(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "dismissal-lineage-incomplete",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({ privatePayload: stored.privatePayload })
+      .where(eq(financeAgentActionReviews.id, queued.review.id));
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, fixture.run.id));
+    await expect(
+      fixture.actions.dismiss(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "dismissal-lineage-stale-run",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "awaiting_approval" }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "pending" }]);
   });
 
   it("commits the same real candidate directly when review bypass is enabled", async () => {

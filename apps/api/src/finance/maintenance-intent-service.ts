@@ -7,6 +7,7 @@ import {
   financeMaintenanceRuns,
   financePeriodReviews,
   financeSetupSessions,
+  users,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "@personal-os/database";
@@ -18,6 +19,8 @@ import {
   type FinanceToolResult,
   financeMaintenanceInputSchema,
   idSchema,
+  localDateAt,
+  localDateToIso,
   type MaintenanceRun,
   maintenanceRunSchema,
 } from "@personal-os/domain";
@@ -353,7 +356,15 @@ export function createFinanceMaintenanceIntentService({
       }
       if (["settled", "failed"].includes(legacy.stage))
         return { run: null, recovery: historicalRecovery(legacy) };
-      const mapped = legacyMaintenanceScope(legacy.scope, now().toISOString().slice(0, 10));
+      const [owner] = await tx
+        .select({ planningTimezone: users.planningTimezone })
+        .from(users)
+        .where(eq(users.id, userId));
+      if (!owner) throw new AppError("not_found", "The Finance owner was not found.");
+      const mapped = legacyMaintenanceScope(
+        legacy.scope,
+        localDateToIso(localDateAt(now(), owner.planningTimezone)),
+      );
       // Check each saved account before exposing a repair set or adopting any target.
       if (legacy.scope.type === "accounts") {
         const ids = Array.isArray(legacy.scope.accountIds)

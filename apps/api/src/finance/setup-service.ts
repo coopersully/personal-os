@@ -14,7 +14,7 @@ import type {
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
 import { NOHMI_FINANCE_PLAYBOOK } from "@personal-os/domain";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
   executeFinanceIdempotently,
@@ -163,6 +163,17 @@ export function createSetupService({ db, now, planning }: Options) {
           "budget_approval",
           "initial_maintenance",
         ]),
+      ),
+    });
+  }
+
+  async function recoverableSettledSession(userId: string) {
+    return db.query.financeSetupSessions.findFirst({
+      orderBy: [desc(financeSetupSessions.updatedAt)],
+      where: and(
+        eq(financeSetupSessions.userId, userId),
+        eq(financeSetupSessions.status, "settled"),
+        isNull(financeSetupSessions.canonicalMaintenanceRunId),
       ),
     });
   }
@@ -428,6 +439,7 @@ export function createSetupService({ db, now, planning }: Options) {
       requireFinanceMutation(context);
       if (input.operation === "start") {
         let session = await activeSession(context.userId);
+        session ??= await recoverableSettledSession(context.userId);
         if (!session) {
           const question = nextQuestion(await profile(context.userId));
           const [created] = await db

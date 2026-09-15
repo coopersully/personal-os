@@ -243,7 +243,12 @@ describe.sequential("Finance maintenance service", () => {
 
   function status(
     rulebookVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    options: { blocked?: boolean; nonCurrent?: boolean; questions?: number } = {},
+    options: {
+      blocked?: boolean;
+      nonCurrent?: boolean;
+      questions?: number;
+      state?: FinanceStatus["state"];
+    } = {},
   ) {
     return {
       asOf: now.toISOString(),
@@ -259,7 +264,7 @@ describe.sequential("Finance maintenance service", () => {
           : [],
         state: options.blocked ? "unavailable" : options.nonCurrent ? "stale" : "current",
       },
-      state: options.blocked ? "blocked" : "needs_work",
+      state: options.blocked ? "blocked" : (options.state ?? "needs_work"),
     } as unknown as FinanceStatus;
   }
 
@@ -2189,7 +2194,7 @@ describe.sequential("Finance maintenance service", () => {
   });
 
   it("rechecks freshness and rulebook after verify process loss and reuses the period review", async () => {
-    for (const mode of ["healthy", "stale", "blocked", "rulebook"] as const) {
+    for (const mode of ["healthy", "state_changed", "stale", "blocked", "rulebook"] as const) {
       const ownerId = await createUser(`Verify recovery ${mode}`);
       const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
       const deps = requiredServices();
@@ -2201,6 +2206,7 @@ describe.sequential("Finance maintenance service", () => {
             blocked: recovering && mode === "blocked",
             nonCurrent: recovering && mode === "stale",
             questions: 1,
+            state: recovering && mode === "state_changed" ? "clean" : "needs_work",
           }),
       };
       const input = {
@@ -2238,7 +2244,7 @@ describe.sequential("Finance maintenance service", () => {
       const recovered = createFinanceMaintenanceService(input);
       await expect(recovered.dispatchRun(run.id)).resolves.toMatchObject({
         status:
-          mode === "healthy"
+          mode === "healthy" || mode === "state_changed"
             ? "completed_with_questions"
             : mode === "blocked"
               ? "blocked"

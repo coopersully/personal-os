@@ -391,7 +391,7 @@ export function createSetupService({ db, now, planning }: Options) {
           })
         : null;
       const resumeId = canonical
-        ? ["completed_with_questions", "failed_terminal"].includes(canonical.status)
+        ? ["completed", "completed_with_questions", "failed_terminal"].includes(canonical.status)
           ? null
           : canonical.id
         : legacy &&

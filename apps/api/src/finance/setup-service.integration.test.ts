@@ -352,5 +352,16 @@ describe.sequential("guided Finance setup", () => {
         arguments: { operation: "start", scope: { type: "all_outstanding" } },
       },
     });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, canonical.id));
+    await expect(
+      service.setupFinances({ operation: "resume", sessionId: session.id }, context),
+    ).resolves.toMatchObject({
+      nextAction: {
+        arguments: { operation: "start", scope: { type: "all_outstanding" } },
+      },
+    });
   });
 });

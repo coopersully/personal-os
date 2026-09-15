@@ -489,6 +489,20 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
       .where(eq(financeMaintenanceCandidates.id, f.candidateId));
     expect(await f.service.getRun(f.userId, f.runId)).toMatchObject({ challengeId: null });
   });
+  it("returns a resume action for an accepted resolved challenge handoff", async () => {
+    const f = await acceptedFixture("resolved", "2026-08-01T00:00:00.123456Z");
+    await expect(f.service.getRun(f.userId, f.runId)).resolves.toMatchObject({
+      challengeId: f.challengeId,
+      nextAction: {
+        tool: "maintain_finances",
+        arguments: { operation: "resume", runId: f.runId },
+      },
+    });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, f.runId));
+  });
   it("isolates and rotates failed accepted handoffs so later work is reached", async () => {
     const prepared = await acceptedFixture("prepared", "2026-07-01T00:00:00Z");
     const failed = await acceptedFixture("resolved", "2026-08-01T00:00:00.123456Z");

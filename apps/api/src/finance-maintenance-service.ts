@@ -513,14 +513,16 @@ export function createFinanceMaintenanceService({
           }
           throw new AppError("conflict", "Finance source freshness must recover before verify.");
         }
-        await maintenance.completeStep({
-          claimId,
-          idempotencyKey: `finances:${run.rulebookVersion}:verify`,
-          result: { state: observed.state },
-          runId,
-          step: "verify",
-        });
-        completed.add("verify");
+        if (!completed.has("verify")) {
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey: `finances:${run.rulebookVersion}:verify`,
+            result: { state: observed.state },
+            runId,
+            step: "verify",
+          });
+          completed.add("verify");
+        }
         if (!completed.has("period_review")) {
           currentStep = "period_review";
           const periodReview = await periodReviews.createForRun(run.userId, runId);

@@ -205,6 +205,7 @@ export function createFinanceMaintenanceIntentService({
     recovery: FinanceMaintenanceRecovery | null = null,
   ): Promise<FinanceMaintenancePayload> {
     let challengeId: string | null = null;
+    let challengeNeedsReading = false;
     if (run?.status === "awaiting_agent_challenge") {
       const checkpoint = run.checkpoint as {
         candidateId?: string;
@@ -213,7 +214,11 @@ export function createFinanceMaintenanceIntentService({
       } | null;
       if (checkpoint?.phase === "challenge" && checkpoint.candidateId && checkpoint.revision) {
         const [challenge] = await db
-          .select({ id: financeLedgerChallenges.id })
+          .select({
+            candidateState: financeMaintenanceCandidates.state,
+            id: financeLedgerChallenges.id,
+            state: financeLedgerChallenges.state,
+          })
           .from(financeLedgerChallenges)
           .innerJoin(
             financeMaintenanceCandidates,
@@ -222,7 +227,7 @@ export function createFinanceMaintenanceIntentService({
               eq(financeMaintenanceCandidates.userId, userId),
               eq(financeMaintenanceCandidates.runId, run.id),
               eq(financeMaintenanceCandidates.revision, checkpoint.revision),
-              eq(financeMaintenanceCandidates.state, "ready_for_challenge"),
+              inArray(financeMaintenanceCandidates.state, ["ready_for_challenge", "challenged"]),
             ),
           )
           .where(
@@ -231,26 +236,51 @@ export function createFinanceMaintenanceIntentService({
               eq(financeLedgerChallenges.runId, run.id),
               eq(financeLedgerChallenges.candidateId, checkpoint.candidateId),
               eq(financeLedgerChallenges.candidateRevision, checkpoint.revision),
-              eq(financeLedgerChallenges.state, "prepared"),
+              inArray(financeLedgerChallenges.state, ["prepared", "resolved"]),
             ),
           );
-        challengeId = challenge?.id ?? null;
+        if (challenge?.state === "prepared" && challenge.candidateState === "ready_for_challenge") {
+          challengeId = challenge.id;
+          challengeNeedsReading = true;
+        } else if (challenge?.state === "resolved" && challenge.candidateState === "challenged") {
+          const [resolution] = await db
+            .select({ id: workspaceMaintenanceSteps.id })
+            .from(workspaceMaintenanceSteps)
+            .where(
+              and(
+                eq(workspaceMaintenanceSteps.runId, run.id),
+                eq(workspaceMaintenanceSteps.stepName, "challenge_resolve"),
+                eq(workspaceMaintenanceSteps.status, "completed"),
+                sql`${workspaceMaintenanceSteps.safeResult}->>'candidateId' = ${checkpoint.candidateId}`,
+                sql`${workspaceMaintenanceSteps.safeResult}->>'candidateRevision' = ${checkpoint.revision}`,
+                sql`${workspaceMaintenanceSteps.safeResult}->>'questions' = '0'`,
+              ),
+            );
+          challengeId = resolution ? challenge.id : null;
+        }
       }
     }
-    const nextAction: FinanceMaintenancePayload["nextAction"] = challengeId
-      ? {
-          tool: "get_finance_ledger_challenge",
-          arguments: { challengeId },
-          reason:
-            "Read every evidence page, then submit complete challenge coverage before settlement.",
-        }
-      : run && ["queued", "running", "blocked", "failed_recoverable"].includes(run.status)
-        ? {
-            tool: "maintain_finances",
-            arguments: { operation: "resume", runId: run.id },
-            reason: "Resume this durable run; committed steps are retained.",
-          }
-        : null;
+    const nextAction: FinanceMaintenancePayload["nextAction"] =
+      challengeId && run
+        ? challengeNeedsReading
+          ? {
+              tool: "get_finance_ledger_challenge",
+              arguments: { challengeId },
+              reason:
+                "Read every evidence page, then submit complete challenge coverage before settlement.",
+            }
+          : {
+              tool: "maintain_finances",
+              arguments: { operation: "resume", runId: run.id },
+              reason: "Resume the accepted challenge handoff and settle its exact candidate.",
+            }
+        : run && ["queued", "running", "blocked", "failed_recoverable"].includes(run.status)
+          ? {
+              tool: "maintain_finances",
+              arguments: { operation: "resume", runId: run.id },
+              reason: "Resume this durable run; committed steps are retained.",
+            }
+          : null;
     return { run, challengeId, nextAction, recovery };
   }
   function result(data: FinanceMaintenancePayload): FinanceToolResult<FinanceMaintenancePayload> {

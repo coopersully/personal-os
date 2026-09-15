@@ -7,7 +7,7 @@ class ConfirmedFinanceMutationFailure extends Error {}
 export function isConfirmedFinanceMutationFailure(error: unknown): boolean {
   return (
     error instanceof ConfirmedFinanceMutationFailure ||
-    (error instanceof ApiClientError && error.status >= 400 && error.status < 500) ||
+    (error instanceof ApiClientError && Math.floor(error.status / 100) === 4) ||
     (error instanceof Error &&
       error.message.includes("previously failed; use a new idempotency key"))
   );

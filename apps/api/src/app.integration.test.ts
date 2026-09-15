@@ -6125,6 +6125,14 @@ describe.sequential("ilo API", () => {
     expect(agentToken).toMatch(/^pos_/);
     expect(
       (
+        await request(`/v1/finances/accounts/${paypalAccount.id}/disconnect`, {
+          auth: "agent",
+          body: { idempotencyKey: "agent-route-disconnect" },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
         await request("/v1/access-tokens", {
           body: { name: "Legacy writer", scopes: ["automations:write"] },
         })

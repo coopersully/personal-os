@@ -8129,7 +8129,7 @@ export function createFinanceService({
         this.getProfile(userId, nowDate.toISOString().slice(0, 10)),
       ]);
       const { accountSemantics, totals } = summarizeFinanceAccounts(
-        accounts.map((item) => account(item)),
+        await serializeAccounts(accounts),
       );
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =

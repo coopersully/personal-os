@@ -37,6 +37,12 @@ Item and accounts in that order. An active Item or legacy account sync claim rej
 with a retry-after-sync message; it does not report completion while provider work remains active.
 Repeated requests with the same idempotency key return the recorded result without another audit.
 
+The deployment migration detaches accounts left in the exact legacy disconnected shape and deletes
+only Items with no remaining account pointer. Healthy siblings keep their Item. The former disconnect
+path erased the remote account ID, so those existing accounts cannot automatically recover ledger
+identity; reconnect remains explicit and may create a new account record when the provider identity
+cannot be matched.
+
 This is local disconnection, not proof of institution-side consent revocation. Manage provider
 consent at the institution. The connector does not implement an Item-removal API, and synthetic
 tests do not establish real consent, production coverage, reconnect frequency or remote revocation.

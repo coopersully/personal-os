@@ -172,6 +172,7 @@ describe.sequential("Finance maintenance service", () => {
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
+      "0081_finance_legacy_disconnect_repair",
     ]);
     const upgradeContainer = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")

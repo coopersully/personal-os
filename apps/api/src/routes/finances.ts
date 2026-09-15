@@ -952,7 +952,7 @@ export function registerFinanceRoutes({
       ),
     ),
   );
-  app.post("/v1/finances/accounts/:id/disconnect", async (context) => {
+  app.post("/v1/finances/accounts/:id/disconnect", requireHuman, async (context) => {
     const input = await parseBody(context, disconnectFinanceAccountInputSchema);
     return context.json(
       await finances.disconnectFinanceAccount(

@@ -270,7 +270,8 @@ Inbox, and goal mutations require `finances:write`. Budgets can be created, revi
 through MCP. `approve_finance_budget` accepts explicit person approval as `user_instruction`;
 `agent_self_approval` additionally requires the persisted Finance bypass setting. Only the
 signed-in person can change that setting. Connection handoffs, synchronization, account
-corrections/disconnection, and transaction import have scoped tools; provider authentication
+corrections, and transaction import have scoped tools; disconnection remains a signed-in-person
+portal action, and provider authentication
 and consent may still require the person. Money movement, bill payment, trading, and external
 subscription cancellation are not supported Finance effects.
 

@@ -1,11 +1,13 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceToolResult } from "@personal-os/domain";
 
 class ConfirmedFinanceMutationFailure extends Error {}
 
-/** A transport error is ambiguous; only these server results permit a fresh retry key. */
+/** Only definitive application rejections permit a fresh retry key. */
 export function isConfirmedFinanceMutationFailure(error: unknown): boolean {
   return (
     error instanceof ConfirmedFinanceMutationFailure ||
+    (error instanceof ApiClientError && Math.floor(error.status / 100) === 4) ||
     (error instanceof Error &&
       error.message.includes("previously failed; use a new idempotency key"))
   );

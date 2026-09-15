@@ -630,19 +630,6 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
-    "disconnect_finance_account",
-    {
-      annotations: { idempotentHint: true, openWorldHint: true },
-      description:
-        "Disconnect a provider account and remove its stored provider credentials while preserving the account and every historical ledger transaction. Use only when the user asks to disconnect or provider access must be revoked.",
-      inputSchema: { accountId: id, idempotencyKey },
-      title: "Disconnect Finance account",
-    },
-    async ({ accountId, ...input }) =>
-      financeApiResult(() => api.disconnectFinanceAccount(accountId, input)),
-  );
-
-  server.registerTool(
     "list_finance_transactions",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },

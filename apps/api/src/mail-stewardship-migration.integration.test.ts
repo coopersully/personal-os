@@ -25,6 +25,7 @@ describe.sequential("Mail stewardship migration reconciliation", { timeout: 15_0
         "0078_mail_workspace_stewardship_reconciliation",
         "0079_mail_stewardship_integrity",
         "0080_mail_reply_metadata",
+        "0081_finance_legacy_disconnect_repair",
       ],
     );
     await migrateDatabase(database.db, migrationsThroughDesktopMail);

@@ -71,8 +71,9 @@ export function FinanceAccountsPage() {
             <Alert>
               <AlertTitle>Account interpretation needs attention</AlertTitle>
               <AlertDescription>
-                Confirm ownership and possible duplicates before relying on your personal position.
-                Excluding an account removes it from planning.
+                Check missing balances and source freshness, and confirm ownership and possible
+                duplicates before relying on your personal position. Excluding an account removes it
+                from planning.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -169,7 +170,9 @@ function AccountEditor({
   );
   const [included, setIncluded] = useState(account.includeInPlanning);
   const [balance, setBalance] = useState(account.balance === null ? "" : String(account.balance));
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const lastAttempt = useRef<{ payload: string; key: string } | null>(null);
+  const disconnectKey = useRef<string | null>(null);
   const ownershipShare =
     ownership === "individual" ? 1 : ownership === "unknown" ? null : Number(share) / 100;
   const manualBalance = balance.trim() === "" ? null : Number(balance);
@@ -207,6 +210,28 @@ function AccountEditor({
       onClose();
     },
   });
+  const disconnect = useMutation({
+    mutationFn: async () => {
+      disconnectKey.current ??= crypto.randomUUID();
+      return requireFinanceMutationResult(
+        await api.disconnectFinanceAccount(account.id, {
+          idempotencyKey: disconnectKey.current,
+        }),
+      );
+    },
+    onError: (error) => {
+      if (isConfirmedFinanceMutationFailure(error)) disconnectKey.current = null;
+      void refreshFinancePosition(client);
+    },
+    onSuccess: async () => {
+      await refreshFinancePosition(client);
+      onClose();
+    },
+  });
+  const canDisconnect =
+    account.provider === "plaid" &&
+    account.synchronization.failureCode !== "finance_account_disconnected" &&
+    account.synchronization.failureCode !== "finance_account_legacy_disconnected";
   const validShare =
     ownership !== "joint" ||
     (share.trim() !== "" &&
@@ -217,7 +242,7 @@ function AccountEditor({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !save.isPending) onClose();
+        if (!open && !save.isPending && !disconnect.isPending) onClose();
       }}
     >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
@@ -325,7 +350,22 @@ function AccountEditor({
             </Alert>
           ) : null}
           <DialogFooter>
-            <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
+            {canDisconnect ? (
+              <Button
+                disabled={save.isPending || disconnect.isPending}
+                onClick={() => setConfirmingDisconnect(true)}
+                type="button"
+                variant="destructive"
+              >
+                Stop tracking account
+              </Button>
+            ) : null}
+            <Button
+              disabled={save.isPending || disconnect.isPending}
+              onClick={onClose}
+              type="button"
+              variant="outline"
+            >
               Cancel
             </Button>
             <Button
@@ -338,6 +378,48 @@ function AccountEditor({
             </Button>
           </DialogFooter>
         </form>
+        <Dialog
+          open={confirmingDisconnect}
+          onOpenChange={(open) => {
+            if (!disconnect.isPending) setConfirmingDisconnect(open);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Stop tracking {account.name}?</DialogTitle>
+              <DialogDescription>
+                nohmi will stop using this account locally and keep its ledger history. Other
+                accounts at this institution stay connected, so Plaid may continue sending this
+                account's data through their shared connection. This does not revoke access at your
+                institution. Reconnecting later requires your consent.
+              </DialogDescription>
+            </DialogHeader>
+            {disconnect.isError ? (
+              <Alert variant="destructive">
+                <AlertTitle>Account is still tracked</AlertTitle>
+                <AlertDescription>{errorMessage(disconnect.error)}</AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter>
+              <Button
+                disabled={disconnect.isPending}
+                onClick={() => setConfirmingDisconnect(false)}
+                type="button"
+                variant="outline"
+              >
+                Keep connected
+              </Button>
+              <Button
+                disabled={disconnect.isPending}
+                onClick={() => disconnect.mutate()}
+                type="button"
+                variant="destructive"
+              >
+                {disconnect.isPending ? "Stopping…" : "Stop tracking account"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

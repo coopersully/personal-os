@@ -415,6 +415,7 @@ describe.sequential("finance service", () => {
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
+      "0081_finance_legacy_disconnect_repair",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -9744,7 +9745,8 @@ describe.sequential("finance service", () => {
     await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
       accountSemantics: {
         excludedAccountIds: [otherAccount.id],
-        trustworthy: true,
+        // The included wallet has no observed balance.
+        trustworthy: false,
         unresolvedOwnershipAccountIds: [],
       },
       investments: 250,
@@ -9868,6 +9870,135 @@ describe.sequential("finance service", () => {
     await expect(
       service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
     ).resolves.toEqual({ reviewBypassEnabled: true });
+  });
+
+  it("treats a current account snapshot as untrustworthy when its Provider Item is blocked", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Blocked Provider Item summary",
+        email: `blocked-item-summary-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Blocked Provider Item summary owner was not created.");
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    await providerItems.upsertConnection({
+      accessToken: "blocked-item-summary-token",
+      accounts: [
+        {
+          accountId: "blocked-item-summary-account",
+          balanceCurrent: 100,
+          currencyCode: "USD",
+          name: "Blocked Item checking",
+          officialName: null,
+        },
+      ],
+      context: {
+        principal: financePrincipal(owner.id),
+        requestId: "blocked-item-summary-connect",
+      },
+      institution: "Blocked Item Bank",
+      itemId: "blocked-item-summary",
+    });
+    await database.db
+      .update(financeAccounts)
+      .set({
+        lastSyncedAt: now,
+        nextSyncAt: null,
+        ownershipShareBps: 10_000,
+        ownershipType: "individual",
+        syncState: "current",
+      })
+      .where(eq(financeAccounts.userId, owner.id));
+    await database.db
+      .update(financeProviderItems)
+      .set({ lastSyncedAt: now, nextSyncAt: null, syncState: "current" })
+      .where(eq(financeProviderItems.userId, owner.id));
+    const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.listFinanceAccounts(owner.id, { includeExcluded: true }),
+    ).resolves.toMatchObject({
+      accountSemantics: { trustworthy: true },
+      accounts: [
+        expect.objectContaining({
+          status: "connected",
+          synchronization: expect.objectContaining({ state: "current" }),
+        }),
+      ],
+    });
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      accountSemantics: {
+        trustworthy: true,
+      },
+      cash: 100,
+    });
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: null,
+        syncError: "The source needs attention.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "blocked_item_summary",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncState: "blocked",
+      })
+      .where(eq(financeProviderItems.userId, owner.id));
+    const [storedAccount] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.userId, owner.id));
+    if (!storedAccount) throw new Error("Blocked Provider Item account was not created.");
+    await expect(
+      service.updateFinanceAccount(
+        storedAccount.id,
+        { idempotencyKey: crypto.randomUUID(), name: "Renamed blocked account" },
+        {
+          actorId: owner.id,
+          actorType: "user",
+          bypassEnabled: false,
+          canMutate: true,
+          canSelfApprove: false,
+          requestId: "blocked-item-summary-update",
+          userId: owner.id,
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        status: "needs_reauth",
+        synchronization: {
+          failureCode: "blocked_item_summary",
+          state: "blocked",
+        },
+      },
+    });
+
+    await expect(
+      service.listFinanceAccounts(owner.id, { includeExcluded: true }),
+    ).resolves.toMatchObject({
+      accountSemantics: { trustworthy: false },
+      accounts: [
+        expect.objectContaining({
+          status: "needs_reauth",
+          synchronization: expect.objectContaining({
+            failureCode: "blocked_item_summary",
+            state: "blocked",
+          }),
+        }),
+      ],
+    });
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      accountSemantics: {
+        trustworthy: false,
+      },
+      cash: 100,
+    });
   });
 
   it("runs and replays each canonical Finance compatibility mutation", async () => {

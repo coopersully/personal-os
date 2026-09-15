@@ -42,6 +42,55 @@ function account(overrides: Partial<FinanceAccount> = {}): FinanceAccount {
 
 describe("Finance account planning semantics", () => {
   it.each([
+    "stale",
+    "retrying",
+    "blocked",
+  ] as const)("qualifies totals for a %s source while preserving useful account balances", (state) => {
+    const healthy = account({ name: "Healthy", balance: 250 });
+    const failed = account({ name: "Failed", balance: 100 });
+    failed.synchronization.state = state;
+    expect(summarizeFinanceAccounts([healthy, failed])).toMatchObject({
+      accountSemantics: { trustworthy: false },
+      totals: { cash: 350 },
+    });
+    failed.includeInPlanning = false;
+    expect(summarizeFinanceAccounts([healthy, failed])).toMatchObject({
+      accountSemantics: { trustworthy: true },
+      totals: { cash: 250 },
+    });
+  });
+
+  it("does not verify a missing balance as zero", () => {
+    expect(summarizeFinanceAccounts([account({ balance: null })])).toMatchObject({
+      accountSemantics: { trustworthy: false },
+    });
+  });
+
+  it("does not verify empty coverage or a connected source without a successful sync", () => {
+    expect(summarizeFinanceAccounts([]).accountSemantics.trustworthy).toBe(false);
+    expect(
+      summarizeFinanceAccounts([account({ includeInPlanning: false })]).accountSemantics
+        .trustworthy,
+    ).toBe(false);
+    expect(
+      summarizeFinanceAccounts([account({ provider: "plaid", status: "connected" })])
+        .accountSemantics.trustworthy,
+    ).toBe(false);
+  });
+
+  it("keeps duplicate warnings but stops qualifying totals once the duplicate is excluded", () => {
+    const included = account();
+    const excluded = account({ includeInPlanning: false });
+    expect(summarizeFinanceAccounts([included, excluded])).toMatchObject({
+      accountSemantics: {
+        trustworthy: true,
+        possibleDuplicateGroups: [{ accountIds: [included.id, excluded.id].sort() }],
+      },
+      totals: { cash: 100 },
+    });
+  });
+
+  it.each([
     ["depository", "cash"],
     ["investment", "investment"],
     ["brokerage", "investment"],

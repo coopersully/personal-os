@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -18,6 +19,7 @@ import { FinanceWealthPage } from "./wealth-page.js";
 
 const api = vi.hoisted(() => ({
   createFinanceAccount: vi.fn(),
+  disconnectFinanceAccount: vi.fn(),
   getFinanceBudget: vi.fn(),
   getFinanceInbox: vi.fn(),
   getFinanceMaintenanceHistory: vi.fn(),
@@ -155,6 +157,7 @@ beforeEach(() => {
     envelope({ ...account, ownershipType: "joint", ownershipShare: 0.5 }),
   );
   api.createFinanceAccount.mockResolvedValue({ ...account, provider: "manual" });
+  api.disconnectFinanceAccount.mockResolvedValue(envelope({ ...account, status: "needs_reauth" }));
 });
 
 describe("Finance position pages", () => {
@@ -403,6 +406,13 @@ describe("Finance position pages", () => {
   });
 
   it("saves joint ownership with the exact account revision and an idempotency key", async () => {
+    let finishUpdate: ((value: unknown) => void) | undefined;
+    api.updateFinanceAccount.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishUpdate = resolve;
+        }),
+    );
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Ownership"), { target: { value: "joint" } });
@@ -421,8 +431,164 @@ describe("Finance position pages", () => {
         }),
       ),
     );
+    expect(screen.getByRole("button", { name: "Saving account…" })).toBeDisabled();
     expect(api.updateFinanceAccount.mock.calls[0]?.[1]).not.toHaveProperty("balance");
     expect(api.updateFinanceAccount.mock.calls[0]?.[1]).not.toHaveProperty("kind");
+    finishUpdate?.(envelope({ ...account, ownershipType: "joint", ownershipShare: 0.5 }));
+  });
+
+  it("shows a confirmed ownership share when opening an account", async () => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [{ ...account, ownershipType: "joint", ownershipShare: 0.5 }],
+      accountSemantics: {
+        trustworthy: true,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [],
+      },
+      totals: { cash: 500, debt: 0, investments: 0, netWorth: 500, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    expect(screen.getByLabelText("Your ownership share (%)")).toHaveValue(50);
+  });
+
+  it("shows the empty account state with its missing-evidence warning", async () => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [],
+      accountSemantics: {
+        trustworthy: false,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [],
+      },
+      totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    expect(await screen.findByText("No accounts tracked")).toBeVisible();
+    expect(screen.getByText("Account interpretation needs attention")).toBeVisible();
+  });
+
+  it("lets the signed-in person confirm provider account disconnection", async () => {
+    let finishDisconnect: ((value: unknown) => void) | undefined;
+    api.disconnectFinanceAccount.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDisconnect = resolve;
+        }),
+    );
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    expect(screen.getByText(/nohmi will stop using this account locally/)).toBeVisible();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.queryByText(/nohmi will stop using this account locally/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep connected" }));
+    expect(
+      screen.queryByText(/nohmi will stop using this account locally/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    expect(screen.getByText(/Plaid may continue sending this account's data/)).toBeVisible();
+    expect(screen.getByText(/This does not revoke access at your institution/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    await waitFor(() =>
+      expect(api.disconnectFinanceAccount).toHaveBeenCalledWith(account.id, {
+        idempotencyKey: expect.any(String),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Keep connected" })).toBeDisabled();
+    expect(screen.getByText("Cancel").closest("button")).toBeDisabled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeVisible();
+    finishDisconnect?.(envelope({ ...account, status: "needs_reauth" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Stop tracking account" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it.each([
+    "finance_account_disconnected",
+    "finance_account_legacy_disconnected",
+  ])("does not offer disconnection for an account already marked %s", async (failureCode) => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [{ ...account, synchronization: { ...account.synchronization, failureCode } }],
+      accountSemantics: {
+        trustworthy: false,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [account.id],
+      },
+      totals: { cash: 1000, debt: 0, investments: 0, netWorth: 1000, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "manual",
+    "paypal",
+    "venmo",
+    "zelle",
+  ])("does not offer Provider Item disconnection for a %s account", async (provider) => {
+    api.listFinanceAccounts.mockResolvedValue({
+      accounts: [{ ...account, provider }],
+      accountSemantics: {
+        trustworthy: false,
+        possibleDuplicateGroups: [],
+        excludedAccountIds: [],
+        unresolvedOwnershipAccountIds: [account.id],
+      },
+      totals: { cash: 1000, debt: 0, investments: 0, netWorth: 1000, otherAssets: 0 },
+    });
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "confirmed",
+    "application rejection",
+    "server failure",
+    "uncertain",
+  ])("retries a %s account disconnection with the safe idempotency key", async (failure) => {
+    if (failure === "confirmed")
+      api.disconnectFinanceAccount.mockResolvedValueOnce({
+        ...envelope(account),
+        outcome: "failed",
+        communication: {
+          headline: "Disconnection rejected",
+          requiredDisclosures: [],
+          optionalDetails: [],
+        },
+      });
+    else if (failure === "application rejection")
+      api.disconnectFinanceAccount.mockRejectedValueOnce(
+        new ApiClientError({ code: "conflict", message: "Synchronization active", status: 409 }),
+      );
+    else if (failure === "server failure")
+      api.disconnectFinanceAccount.mockRejectedValueOnce(
+        new ApiClientError({ code: "internal_error", message: "Response failed", status: 503 }),
+      );
+    else api.disconnectFinanceAccount.mockRejectedValueOnce(new Error("Network response lost"));
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    expect(await screen.findByText("Account is still tracked")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
+    await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
+    const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
+    const secondKey = api.disconnectFinanceAccount.mock.calls[1]?.[1].idempotencyKey;
+    if (failure === "confirmed" || failure === "application rejection")
+      expect(secondKey).not.toBe(firstKey);
+    else expect(secondKey).toBe(firstKey);
   });
 
   it("preserves an account correction after a conflict", async () => {
@@ -454,6 +620,29 @@ describe("Finance position pages", () => {
         kind: "cash",
         balance: null,
       }),
+    );
+  });
+
+  it("keeps manual account creation open while the request is pending", async () => {
+    let finishCreate: ((value: unknown) => void) | undefined;
+    api.createFinanceAccount.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCreate = resolve;
+        }),
+    );
+    mount(<FinanceAccountsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Track account manually" }));
+    fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Cash reserve" } });
+    fireEvent.change(screen.getByLabelText("Institution"), {
+      target: { value: "Personal records" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    expect(await screen.findByRole("button", { name: "Adding account…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    finishCreate?.({ ...account, id: "manual-pending", provider: "manual" });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Adding account…" })).not.toBeInTheDocument(),
     );
   });
 

@@ -497,6 +497,8 @@ describe("Finance position pages", () => {
     expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Keep connected" })).toBeDisabled();
     expect(screen.getByText("Cancel").closest("button")).toBeDisabled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeVisible();
     finishDisconnect?.(envelope({ ...account, status: "needs_reauth" }));
     await waitFor(() =>
       expect(

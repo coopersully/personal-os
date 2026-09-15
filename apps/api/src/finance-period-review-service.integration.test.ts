@@ -67,7 +67,7 @@ describe.sequential("Finance period review service", () => {
         displayName: "Period review owner",
         email: `period-review-${crypto.randomUUID()}@example.com`,
         passwordHash: "unused",
-        planningTimezone: "UTC",
+        planningTimezone: "America/Los_Angeles",
       })
       .returning();
     if (!owner) throw new Error("Period review owner was not created.");
@@ -77,7 +77,7 @@ describe.sequential("Finance period review service", () => {
       .values({
         domain: "finances",
         rulebookVersion,
-        scope: { end: "2026-08-31", start: "2026-08-01", type: "window" },
+        scope: { type: "all_outstanding" },
         status: "queued",
         userId: owner.id,
       })
@@ -179,7 +179,7 @@ describe.sequential("Finance period review service", () => {
     const service = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
+      now: () => new Date("2026-09-01T00:30:00.000Z"),
       status: {
         getFinanceStatus: async (_userId, _scope, executor) => {
           snapshotExecutor = executor;

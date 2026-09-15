@@ -9,6 +9,7 @@ import {
   financeReimbursements,
   financeTransactionAllocations,
   financeTransactions,
+  users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
@@ -17,6 +18,8 @@ import {
   financeCandidateLedgerProjectionSchema,
   financeLedgerChallengeChecks,
   financePeriodReviewSchema,
+  type LocalDate,
+  localDateAt,
   type MaintenanceScope,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
@@ -61,9 +64,11 @@ async function retrySerializationFailure<Result>(
   throw new Error("Unreachable serialization retry state.");
 }
 
-function periodFor(scope: MaintenanceScope, now: Date) {
+function periodFor(scope: MaintenanceScope, localDate: LocalDate) {
   if (scope.type === "window") return { end: scope.end, start: scope.start };
-  const month = now.toISOString().slice(0, 7);
+  const month = `${localDate.year.toString().padStart(4, "0")}-${localDate.month
+    .toString()
+    .padStart(2, "0")}`;
   const start = `${month}-01`;
   const endDate = new Date(`${start}T00:00:00.000Z`);
   endDate.setUTCMonth(endDate.getUTCMonth() + 1);
@@ -111,6 +116,12 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             )
             .limit(1);
           if (!run) throw new AppError("not_found", "The Finance maintenance run was not found.");
+          const [owner] = await tx
+            .select({ planningTimezone: users.planningTimezone })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+          if (!owner) throw new AppError("not_found", "The Finance owner was not found.");
           const observed = await status.getFinanceStatus(userId, run.scope, tx);
           if (
             observed.freshness.state !== "current" ||
@@ -320,7 +331,7 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             ...findings.map((finding) => finding.id),
           ];
           const reviewStatus = questions > 0 ? "completed_with_questions" : "completed";
-          const period = periodFor(run.scope, now());
+          const period = periodFor(run.scope, localDateAt(now(), owner.planningTimezone));
           const [created] = await tx
             .insert(financePeriodReviews)
             .values({

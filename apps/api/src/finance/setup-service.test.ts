@@ -24,6 +24,29 @@ describe("Finance setup answer parsing", () => {
     expect(() => parseSetupMoney("-1")).toThrow("non-negative");
   });
 
+  it.each([
+    "1.001",
+    "1e3",
+    "0x10",
+    "Infinity",
+    "100000000.01",
+    "1,00",
+    "1 00",
+    "$$10",
+  ])("rejects ambiguous or out-of-range money without inventing cents: %s", (answer) => {
+    expect(() => parseSetupMoney(answer)).toThrow();
+  });
+
+  it.each([
+    ["$8,000.25", 8000.25],
+    [" 100.01 ", 100.01],
+    ["0.01", 0.01],
+    ["100000000", 100000000],
+    ["0", 0],
+  ])("preserves explicitly entered cents for %s", (answer, expected) => {
+    expect(parseSetupMoney(answer)).toBe(expected);
+  });
+
   it("maps each deterministic question to exactly one profile fact", () => {
     expect(setupProfileChange("profile:location", "New York")).toEqual({
       jurisdiction: "US-NY",

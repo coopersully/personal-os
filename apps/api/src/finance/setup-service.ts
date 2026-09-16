@@ -63,11 +63,17 @@ function nextQuestion(profile: FinanceProfileVersion | null): FinanceInteraction
 }
 
 export function parseSetupMoney(answer: string): number {
-  const normalized = answer.replace(/[$,\s]/g, "");
-  const value = normalized === "" ? Number.NaN : Number(normalized);
-  if (!Number.isFinite(value) || value < 0)
-    throw new AppError("invalid_request", "Enter a non-negative amount.");
-  return Math.round(value * 100) / 100;
+  const normalized = answer.trim();
+  if (!/^\$?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(normalized))
+    throw new AppError(
+      "invalid_request",
+      "Enter a non-negative amount with at most two decimal places.",
+    );
+  const [whole = "0", fraction = ""] = normalized.replace(/[$,]/g, "").split(".");
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  if (!Number.isSafeInteger(cents) || cents > 10_000_000_000)
+    throw new AppError("invalid_request", "Enter an amount no greater than 100,000,000.");
+  return cents / 100;
 }
 
 export function parseSetupJurisdiction(answer: string): string {

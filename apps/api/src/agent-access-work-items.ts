@@ -23,7 +23,7 @@ import {
   agentAccessDomains,
   featureAccessPolicies,
 } from "@personal-os/domain";
-import { and, eq, gt, lte, or } from "drizzle-orm";
+import { and, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "./errors.js";
 import { readFinanceEffectWork } from "./finance/review-effect-projection.js";
@@ -154,8 +154,8 @@ export function createAgentAccessWorkItemService({
           and(
             eq(financeAccounts.userId, userId),
             or(
-              eq(financeAccounts.status, "needs_reauth"),
               eq(financeAccounts.syncRecovery, "reconnect"),
+              and(eq(financeAccounts.status, "needs_reauth"), isNull(financeAccounts.syncRecovery)),
             ),
             lte(financeAccounts.updatedAt, snapshotAt),
           ),

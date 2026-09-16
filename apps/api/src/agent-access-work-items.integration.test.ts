@@ -901,4 +901,83 @@ describe.sequential("Agent Access work-item projection", () => {
       expect(page.unavailableDomains).toEqual(["finances"]);
     }
   });
+  it("uses explicit Finance recovery guidance before the legacy needs_reauth status", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Recovery projection",
+        email: "recovery-projection@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing recovery owner");
+    const before = new Date("2026-08-11T10:00:00Z");
+    const common = {
+      userId: owner.id,
+      provider: "plaid" as const,
+      institution: "Fixture bank",
+      status: "needs_reauth" as const,
+      createdAt: before,
+      updatedAt: before,
+    };
+    const rows = await database.db
+      .insert(financeAccounts)
+      .values([
+        { ...common, name: "Legacy authorization", syncRecovery: null },
+        {
+          ...common,
+          name: "Explicit reconnect",
+          status: "connected",
+          syncState: "blocked",
+          syncRecovery: "reconnect",
+          syncError: "Authorization required",
+          syncErrorCategory: "authorization",
+          syncErrorCode: "ITEM_LOGIN_REQUIRED",
+          syncFailureCount: 1,
+        },
+        // Actual missing-membership state emitted by finance-provider-item-sync-service.
+        {
+          ...common,
+          name: "Missing Item membership",
+          balance: null,
+          nextSyncAt: null,
+          syncState: "blocked",
+          syncRecovery: "operator",
+          syncError: "Account missing from Item",
+          syncErrorCategory: "not_found",
+          syncErrorCode: "plaid_account_missing_from_item",
+          syncFailureCount: 1,
+        },
+        {
+          ...common,
+          name: "Automatic retry",
+          syncState: "retrying",
+          syncRecovery: "automatic",
+          syncError: "Temporary failure",
+          syncErrorCategory: "temporary",
+          syncErrorCode: "temporary",
+          syncFailureCount: 1,
+        },
+        { ...common, name: "Healthy", status: "connected", syncState: "current" },
+      ])
+      .returning();
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => snapshot,
+      cursorSigningKey: "test",
+    });
+    const page = await service.list(
+      { ...principal, userId: owner.id, actorId: owner.id },
+      { domain: "finances", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(page.items.map((item) => item.id).sort()).toEqual(
+      rows
+        .slice(0, 2)
+        .map((row) => `finance-reconnect:${row.id}`)
+        .sort(),
+    );
+    expect(page.filteredTotal).toBe(2);
+    expect(page.summary.byDomain.finances).toBe(2);
+  });
 });

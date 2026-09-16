@@ -13,8 +13,33 @@ import { type FinanceStatus, financeLedgerChallengeChecks } from "@personal-os/d
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
+import type { createFinanceService } from "./finance-service.js";
 
 const now = new Date("2026-08-21T12:00:00.000Z");
+const actualProjection = {
+  budgetActual: 20,
+  budgetTotal: 100,
+  budgetVariance: -80,
+  grossCashSpending: 30,
+  matchedReimbursementIncome: 10,
+  monthlyCapacity: 100,
+  personalSpending: 20,
+  plannedIncome: 200,
+  profileExpectedNetIncome: 200,
+  questions: 0,
+  recurringCommittedOutflow: 100,
+  reimbursementsOutstanding: 0,
+  workItems: 0,
+};
+const snapshot = vi.fn<ReturnType<typeof createFinanceService>["maintenanceCandidateSnapshot"]>(
+  async () => ({
+    assumptions: [],
+    projection: actualProjection,
+    revision: `sha256:${"1".repeat(64)}`,
+    sourceRevision: `sha256:${"2".repeat(64)}`,
+  }),
+);
+const finances = { maintenanceCandidateSnapshot: snapshot };
 
 describe.sequential("Finance period review service", () => {
   let container: StartedPostgreSqlContainer;
@@ -42,7 +67,7 @@ describe.sequential("Finance period review service", () => {
         displayName: "Period review owner",
         email: `period-review-${crypto.randomUUID()}@example.com`,
         passwordHash: "unused",
-        planningTimezone: "UTC",
+        planningTimezone: "America/Los_Angeles",
       })
       .returning();
     if (!owner) throw new Error("Period review owner was not created.");
@@ -52,7 +77,7 @@ describe.sequential("Finance period review service", () => {
       .values({
         domain: "finances",
         rulebookVersion,
-        scope: { end: "2026-08-31", start: "2026-08-01", type: "window" },
+        scope: { type: "all_outstanding" },
         status: "queued",
         userId: owner.id,
       })
@@ -143,25 +168,14 @@ describe.sequential("Finance period review service", () => {
     } as unknown as FinanceStatus;
     let snapshotExecutor: unknown;
     let statusReads = 0;
-    let markBothSnapshotsRead!: () => void;
-    let releaseSnapshots!: () => void;
-    const bothSnapshotsRead = new Promise<void>((resolve) => {
-      markBothSnapshotsRead = resolve;
-    });
-    const snapshotsReleased = new Promise<void>((resolve) => {
-      releaseSnapshots = resolve;
-    });
     const service = createFinancePeriodReviewService({
       db: database.db,
-      now: () => now,
+      finances,
+      now: () => new Date("2026-09-01T00:30:00.000Z"),
       status: {
         getFinanceStatus: async (_userId, _scope, executor) => {
           snapshotExecutor = executor;
           statusReads += 1;
-          if (statusReads <= 2) {
-            if (statusReads === 2) markBothSnapshotsRead();
-            await snapshotsReleased;
-          }
           return observed;
         },
       },
@@ -170,10 +184,9 @@ describe.sequential("Finance period review service", () => {
       service.createForRun(owner.id, run.id),
       service.createForRun(owner.id, run.id),
     ]);
-    await bothSnapshotsRead;
-    releaseSnapshots();
     const [first, concurrentReplay] = await concurrent;
     expect(snapshotExecutor).toBeDefined();
+    expect(statusReads).toBeGreaterThan(0);
     expect(concurrentReplay).toEqual(first);
     const replay = await service.createForRun(owner.id, run.id);
     expect(replay).toEqual(first);
@@ -195,7 +208,7 @@ describe.sequential("Finance period review service", () => {
     ).resolves.toHaveLength(1);
   });
 
-  it("keeps missing, stale, and incomplete close packets unpublished", async () => {
+  it("rejects incomplete packets and post-challenge drift before publishing a qualified question review", async () => {
     const [owner] = await database.db
       .insert(users)
       .values({
@@ -242,6 +255,7 @@ describe.sequential("Finance period review service", () => {
     } as unknown as FinanceStatus;
     const service = createFinancePeriodReviewService({
       db: database.db,
+      finances,
       now: () => now,
       status: { getFinanceStatus: async () => observed },
     });
@@ -299,6 +313,7 @@ describe.sequential("Finance period review service", () => {
 
     const staleService = createFinancePeriodReviewService({
       db: database.db,
+      finances,
       now: () => now,
       status: {
         getFinanceStatus: async () => ({
@@ -323,6 +338,7 @@ describe.sequential("Finance period review service", () => {
 
     const wrongRulebookService = createFinancePeriodReviewService({
       db: database.db,
+      finances,
       now: () => now,
       status: {
         getFinanceStatus: async () => ({
@@ -352,6 +368,7 @@ describe.sequential("Finance period review service", () => {
     if (!challenge) throw new Error("Incomplete period challenge was not created.");
     const currentService = createFinancePeriodReviewService({
       db: database.db,
+      finances,
       now: () => now,
       status: { getFinanceStatus: async () => observed },
     });
@@ -362,13 +379,160 @@ describe.sequential("Finance period review service", () => {
       .update(financeLedgerChallenges)
       .set({ candidateRevision: candidate.revision })
       .where(eq(financeLedgerChallenges.id, challenge.id));
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "challenged" })
+      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    const [question] = await database.db
+      .insert(financeMaintenanceCandidateItems)
+      .values({
+        candidateId: candidate.id,
+        actionKind: "question",
+        disposition: "question",
+        fingerprint: `sha256:${"3".repeat(64)}`,
+        ordinal: 0,
+        privatePayload: { question: "Who owns this expense?" },
+      })
+      .returning();
+    if (!question) throw new Error("Missing question.");
+    const [prepared] = await database.db
+      .insert(financeMaintenanceCandidateItems)
+      .values({
+        candidateId: candidate.id,
+        actionKind: "alert",
+        disposition: "prepared",
+        fingerprint: `sha256:${"4".repeat(64)}`,
+        ordinal: 1,
+        privatePayload: { actionKind: "alert", input: { operation: "refresh" } },
+      })
+      .returning();
+    if (!prepared) throw new Error("Missing prepared action.");
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(financeLedgerChallenges)
+      .set({
+        coverage: { checked: financeLedgerChallengeChecks, reviewedItemIds: [question.id] },
+      })
+      .where(eq(financeLedgerChallenges.id, challenge.id));
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(financeLedgerChallenges)
+      .set({
+        coverage: {
+          checked: financeLedgerChallengeChecks,
+          reviewedItemIds: [question.id, prepared.id],
+        },
+        state: "submitted",
+      })
+      .where(eq(financeLedgerChallenges.id, challenge.id));
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(financeLedgerChallenges)
+      .set({ state: "resolved" })
+      .where(eq(financeLedgerChallenges.id, challenge.id));
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "ready_for_challenge" })
+      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "challenged" })
+      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+    await expect(currentService.createForRun(crypto.randomUUID(), run.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    snapshot.mockResolvedValueOnce({
+      assumptions: [],
+      projection: actualProjection,
+      revision: `sha256:${"9".repeat(64)}`,
+      sourceRevision: `sha256:${"8".repeat(64)}`,
+    });
+    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(snapshot).toHaveBeenLastCalledWith(
+      owner.id,
+      run.scope,
+      [
+        expect.objectContaining({ id: question.id, ordinal: 0 }),
+        expect.objectContaining({ id: prepared.id, ordinal: 1 }),
+      ],
+      candidate.discoveryRevision,
+      expect.anything(),
+    );
+    await expect(
+      database.db
+        .select({ id: financePeriodReviews.id })
+        .from(financePeriodReviews)
+        .where(eq(financePeriodReviews.runId, run.id)),
+    ).resolves.toHaveLength(0);
+    snapshot.mockResolvedValueOnce({
+      assumptions: [],
+      projection: actualProjection,
+      revision: candidate.revision,
+      sourceRevision: `sha256:${"2".repeat(64)}`,
+    });
     const completedWithQuestions = await currentService.createForRun(owner.id, run.id);
     expect(completedWithQuestions).toMatchObject({
-      challenge: { checked: [], findings: 0, observations: 0 },
+      challenge: { checked: financeLedgerChallengeChecks, findings: 0, observations: 0 },
       period: { end: "2026-08-31", start: "2026-08-01" },
       position: { closing: null, opening: null },
-      spending: { savings: null },
-      status: "completed",
+      spending: { gross: 30, personal: 20, budgetVariance: -80, savings: null },
+      status: "completed_with_questions",
+      closeReadiness: { ready: false },
+      work: { approvals: 0, rulesAndActions: 0, questions: 1 },
     });
+    expect(snapshot).toHaveBeenLastCalledWith(
+      owner.id,
+      run.scope,
+      [
+        expect.objectContaining({ id: question.id, ordinal: 0 }),
+        expect.objectContaining({ id: prepared.id, ordinal: 1 }),
+      ],
+      null,
+      expect.anything(),
+    );
+    expect(completedWithQuestions.recommendations[0]).toMatchObject({ disposition: "needs_input" });
+    expect(completedWithQuestions.recommendations[0]?.evidence).toContain(
+      `Candidate revision: ${candidate.revision}`,
+    );
+    expect(completedWithQuestions.recommendations[0]?.evidence).toContain(
+      `Source revision: sha256:${"2".repeat(64)}`,
+    );
+    expect(completedWithQuestions.sourceIds).toEqual(
+      expect.arrayContaining([candidate.id, challenge.id, question.id, prepared.id]),
+    );
+    await expect(
+      currentService.getOwned(crypto.randomUUID(), completedWithQuestions.id),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ revision: `sha256:${"5".repeat(64)}` })
+      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+    await expect(currentService.createForRun(owner.id, run.id)).resolves.toEqual(
+      completedWithQuestions,
+    );
+    const [unchangedRun] = await database.db
+      .select()
+      .from(workspaceMaintenanceRuns)
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    expect(unchangedRun?.status).toBe("queued");
+    const [unchangedCandidate] = await database.db
+      .select()
+      .from(financeMaintenanceCandidates)
+      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+    expect(unchangedCandidate?.state).toBe("challenged");
   });
 });

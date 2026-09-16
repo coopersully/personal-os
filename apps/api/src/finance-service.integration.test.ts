@@ -19,7 +19,10 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeMerchants,
+  financePeriodReviews,
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
@@ -361,7 +364,7 @@ describe.sequential("finance service", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
-    const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
+    const legacyMigrations = await migrationsWithout(migrationsFolder, "nohmi-finance-legacy-", [
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
@@ -416,6 +419,7 @@ describe.sequential("finance service", () => {
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
       "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -8325,6 +8329,438 @@ describe.sequential("finance service", () => {
         .from(auditEvents)
         .where(eq(auditEvents.requestId, requestId)),
     ).resolves.toEqual([]);
+  });
+
+  it("publishes challenged connected-provider questions into one canonical Inbox case", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Candidate question owner",
+        email: `candidate-question-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Candidate question owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const userContext = {
+      principal: financePrincipal(owner.id),
+      requestId: "candidate-question-fixture",
+    };
+    const account = await service.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      userContext,
+    );
+    await database.db
+      .update(financeAccounts)
+      .set({ provider: "plaid", providerAccountId: "connected-account" })
+      .where(eq(financeAccounts.id, account.id));
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 6_301,
+        direction: "income",
+        merchant: "Venmo",
+        needsReview: true,
+        pending: false,
+        providerTransactionId: "provider-venmo-credit",
+        transactionDate: "2026-08-20",
+        userId: owner.id,
+      })
+      .returning();
+    if (!transaction) throw new Error("Candidate question transaction was not created.");
+    const [legacyReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        evidence: { clarification: "Friends paid me back for dinner." },
+        rationale: "This credit may reimburse a shared meal.",
+        reason: "possible_reimbursement",
+        resolution: {
+          answer: "Friends paid me back for dinner.",
+          clarification: "Friends paid me back for dinner.",
+          type: "clarify",
+        },
+        status: "open",
+        transactionId: transaction.id,
+        userId: owner.id,
+      })
+      .returning();
+    if (!legacyReview) throw new Error("Legacy review case was not created.");
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: owner.id,
+    });
+    const candidateRevision = `sha256:${"a".repeat(64)}`;
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        revision: candidateRevision,
+        runId,
+        state: "challenged",
+        userId: owner.id,
+      })
+      .returning();
+    if (!candidate) throw new Error("Candidate question packet was not created.");
+    const exactPrompt = "Was this Venmo credit repayment for a shared meal?";
+    await database.db.insert(financeMaintenanceCandidateItems).values({
+      actionKind: "question",
+      candidateId: candidate.id,
+      disposition: "question",
+      expectedRevision: transaction.updatedAt.toISOString(),
+      fingerprint: `sha256:${"b".repeat(64)}`,
+      ordinal: 0,
+      privatePayload: {
+        choices: [],
+        prompt: exactPrompt,
+        reviewCaseId: legacyReview.id,
+        reviewReason: "possible_reimbursement",
+        transactionId: transaction.id,
+        underlyingAction: "reimbursement",
+        why: "This credit may reimburse a shared meal.",
+      },
+      sourceRefs: [
+        {
+          accountId: account.id,
+          provider: "plaid",
+          remoteId: "provider-venmo-credit",
+          revision: transaction.updatedAt.toISOString(),
+          sourceType: "finance_transaction",
+        },
+      ],
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:challenge_resolve",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(owner.id),
+      requestId: `maintenance:${runId}:challenge_resolve`,
+    };
+    const input = {
+      candidateId: candidate.id,
+      candidateRevision,
+      context: maintenanceContext,
+      runId,
+      userId: owner.id,
+    };
+
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 1,
+      total: 1,
+    });
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 1,
+      total: 1,
+    });
+    const inbox = await service.getFinanceInbox(owner.id);
+    expect(inbox.communication.nextQuestion).toBeUndefined();
+    expect(inbox.data).toHaveLength(1);
+    expect(inbox.data[0]).toMatchObject({
+      economicEventId: expect.any(String),
+      evidence: { clarification: "Friends paid me back for dinner." },
+      id: legacyReview.id,
+      prompt: exactPrompt,
+      reason: "reimbursement",
+      transactionId: transaction.id,
+    });
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, owner.id),
+            inArray(financeReviewCases.status, ["open", "deferred"]),
+          ),
+        ),
+    ).resolves.toEqual([{ id: legacyReview.id }]);
+
+    const [category] = await service.listCategories(owner.id);
+    if (!category) throw new Error("Default Finance categories were not seeded.");
+    const financeContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: financePrincipal(owner.id),
+      requestId: "candidate-question-answer",
+    });
+    await database.db.insert(financePeriodReviews).values({
+      cutoff: now,
+      periodEnd: "2026-08-31",
+      periodStart: "2026-08-01",
+      report: {},
+      runId,
+      sourceIds: [],
+      status: "completed_with_questions",
+      userId: owner.id,
+    });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        leaseClaimId: null,
+        leaseExpiresAt: null,
+        settledResult: { questions: { created: 1, total: 1 } },
+        status: "completed_with_questions",
+      })
+      .where(eq(workspaceMaintenanceRuns.id, runId));
+    const [existingSuccessor] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        domain: "finances",
+        leaseClaimId: crypto.randomUUID(),
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+        rulebookVersion: "rules:v1",
+        scope: {
+          entityType: "finance_transaction",
+          id: crypto.randomUUID(),
+          type: "target",
+        },
+        status: "running",
+        userId: owner.id,
+      })
+      .returning({ id: workspaceMaintenanceRuns.id });
+    if (!existingSuccessor) throw new Error("Existing successor run was not created.");
+    const [committedSuccessorCandidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        revision: `sha256:${"9".repeat(64)}`,
+        runId: existingSuccessor.id,
+        state: "committed",
+        userId: owner.id,
+      })
+      .returning({ id: financeMaintenanceCandidates.id });
+    if (!committedSuccessorCandidate)
+      throw new Error("Committed successor candidate was not created.");
+    const [pendingSuccessorApproval] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "maintenance_turn",
+        fingerprint: `sha256:${"8".repeat(64)}`,
+        maintenanceRunId: existingSuccessor.id,
+        privatePayload: {},
+        requestingAgentId: "successor-agent",
+        userId: owner.id,
+      })
+      .returning({ id: financeAgentActionReviews.id });
+    if (!pendingSuccessorApproval) throw new Error("Pending successor approval was not created.");
+    await expect(
+      service.answerFinanceReview(
+        legacyReview.id,
+        {
+          answer: "Treat this as dining reimbursement context.",
+          idempotencyKey: "candidate-question-answer",
+          resolution: {
+            categoryId: category.id,
+            meaning: "Dining reimbursement",
+            type: "classify_transaction",
+          },
+        },
+        financeContext,
+      ),
+    ).resolves.toMatchObject({ outcome: "completed" });
+    await expect(service.getFinanceInbox(owner.id)).resolves.toMatchObject({
+      data: [],
+      outcome: "completed",
+    });
+    await expect(
+      database.db
+        .select({ needsReview: financeTransactions.needsReview })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ needsReview: false }]);
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({ id: workspaceMaintenanceRuns.id, status: workspaceMaintenanceRuns.status })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.userId, owner.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: runId, status: "completed_with_questions" },
+        { id: existingSuccessor.id, status: "failed_terminal" },
+        { id: expect.any(String), status: "queued" },
+      ]),
+    );
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, committedSuccessorCandidate.id)),
+    ).resolves.toEqual([{ state: "committed" }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, pendingSuccessorApproval.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+  });
+
+  it("rebuilds a challenged question packet when its transaction changes after projection", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Stale candidate question owner",
+        email: `stale-candidate-question-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Stale candidate question owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const account = await service.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      { principal: financePrincipal(owner.id), requestId: "stale-candidate-question" },
+    );
+    const [transaction, laterTransaction] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 4_200,
+          direction: "expense",
+          merchant: "Restaurant",
+          needsReview: true,
+          pending: false,
+          transactionDate: "2026-08-20",
+          userId: owner.id,
+        },
+        {
+          accountId: account.id,
+          amount: 900,
+          direction: "expense",
+          merchant: "Coffee shop",
+          needsReview: true,
+          pending: false,
+          transactionDate: "2026-08-21",
+          userId: owner.id,
+        },
+      ])
+      .returning();
+    if (!transaction || !laterTransaction)
+      throw new Error("Stale candidate transactions were not created.");
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: owner.id,
+    });
+    const candidateRevision = `sha256:${"c".repeat(64)}`;
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({ revision: candidateRevision, runId, state: "challenged", userId: owner.id })
+      .returning();
+    if (!candidate) throw new Error("Stale candidate packet was not created.");
+    await database.db.insert(financeMaintenanceCandidateItems).values([
+      {
+        actionKind: "question",
+        candidateId: candidate.id,
+        disposition: "question",
+        expectedRevision: transaction.updatedAt.toISOString(),
+        fingerprint: `sha256:${"d".repeat(64)}`,
+        ordinal: 0,
+        privatePayload: {
+          choices: [],
+          prompt: "How should this restaurant charge be recorded?",
+          reviewCaseId: null,
+          reviewReason: "category_ambiguity",
+          transactionId: transaction.id,
+          underlyingAction: "categorization",
+          why: "The category is ambiguous.",
+        },
+        sourceRefs: [],
+      },
+      {
+        actionKind: "question",
+        candidateId: candidate.id,
+        disposition: "question",
+        expectedRevision: laterTransaction.updatedAt.toISOString(),
+        fingerprint: `sha256:${"f".repeat(64)}`,
+        ordinal: 1,
+        privatePayload: {
+          choices: [],
+          prompt: "How should this coffee charge be recorded?",
+          reviewCaseId: null,
+          reviewReason: "merchant_identity",
+          transactionId: laterTransaction.id,
+          underlyingAction: "categorization",
+          why: "The merchant identity is ambiguous.",
+        },
+        sourceRefs: [],
+      },
+    ]);
+    const input = {
+      candidateId: candidate.id,
+      candidateRevision,
+      context: {
+        maintenance: {
+          idempotencyKey: "finances:rules:v1:challenge_resolve",
+          policy: "approved_rule" as const,
+          rulebookVersion: "rules:v1",
+          runId,
+        },
+        maintenanceClaim: { claimId, runId },
+        principal: financeAgentPrincipal(owner.id),
+        requestId: `maintenance:${runId}:challenge_resolve`,
+      },
+      runId,
+      userId: owner.id,
+    };
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 2,
+      total: 2,
+    });
+    const projectedInbox = await service.getFinanceInbox(owner.id);
+    expect(projectedInbox.data).toHaveLength(2);
+    expect(projectedInbox.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: "category_ambiguity" }),
+        expect.objectContaining({ reason: "merchant_identity" }),
+      ]),
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ updatedAt: new Date(now.getTime() + 1_000) })
+      .where(eq(financeTransactions.id, laterTransaction.id));
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 0,
+      rebuild: true,
+      successorRunId: null,
+      total: 0,
+    });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({ status: workspaceMaintenanceRuns.status })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, runId)),
+    ).resolves.toEqual([{ status: "queued" }]);
+    await expect(service.getFinanceInbox(owner.id)).resolves.toMatchObject({ data: [] });
   });
 
   it("repairs legacy heuristic transfers in bounded resumable claim-fenced slices", async () => {

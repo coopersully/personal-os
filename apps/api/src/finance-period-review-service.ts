@@ -9,17 +9,22 @@ import {
   financeReimbursements,
   financeTransactionAllocations,
   financeTransactions,
+  users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   type FinancePeriodReview,
   type FinanceStatus,
   financeCandidateLedgerProjectionSchema,
+  financeLedgerChallengeChecks,
   financePeriodReviewSchema,
+  type LocalDate,
+  localDateAt,
   type MaintenanceScope,
 } from "@personal-os/domain";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import type { createFinanceService } from "./finance-service.js";
 
 type StatusReader = {
   getFinanceStatus: (
@@ -28,7 +33,12 @@ type StatusReader = {
     executor?: Parameters<Parameters<Database["transaction"]>[0]>[0],
   ) => Promise<FinanceStatus>;
 };
-type Options = { db: Database; now: () => Date; status: StatusReader };
+type Options = {
+  db: Database;
+  finances: Pick<ReturnType<typeof createFinanceService>, "maintenanceCandidateSnapshot">;
+  now: () => Date;
+  status: StatusReader;
+};
 
 function isSerializationFailure(error: unknown): boolean {
   let current = error;
@@ -54,9 +64,11 @@ async function retrySerializationFailure<Result>(
   throw new Error("Unreachable serialization retry state.");
 }
 
-function periodFor(scope: MaintenanceScope, now: Date) {
+function periodFor(scope: MaintenanceScope, localDate: LocalDate) {
   if (scope.type === "window") return { end: scope.end, start: scope.start };
-  const month = now.toISOString().slice(0, 7);
+  const month = `${localDate.year.toString().padStart(4, "0")}-${localDate.month
+    .toString()
+    .padStart(2, "0")}`;
   const start = `${month}-01`;
   const endDate = new Date(`${start}T00:00:00.000Z`);
   endDate.setUTCMonth(endDate.getUTCMonth() + 1);
@@ -78,21 +90,13 @@ function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriod
   });
 }
 
-/** Reproducible, immutable close report created only after challenged work commits. */
-export function createFinancePeriodReviewService({ db, now, status }: Options) {
+/** Immutable review of committed work or a fully challenged turn awaiting user answers. */
+export function createFinancePeriodReviewService({ db, finances, now, status }: Options) {
   return {
     async createForRun(userId: string, runId: string): Promise<FinancePeriodReview> {
       return retrySerializationFailure(
         db,
         async (tx) => {
-          const [existing] = await tx
-            .select()
-            .from(financePeriodReviews)
-            .where(
-              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
-            )
-            .limit(1);
-          if (existing) return serialize(existing);
           const [run] = await tx
             .select()
             .from(workspaceMaintenanceRuns)
@@ -102,8 +106,23 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
                 eq(workspaceMaintenanceRuns.userId, userId),
               ),
             )
+            .for("update")
             .limit(1);
           if (!run) throw new AppError("not_found", "The Finance maintenance run was not found.");
+          const [existing] = await tx
+            .select()
+            .from(financePeriodReviews)
+            .where(
+              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
+            )
+            .limit(1);
+          if (existing) return serialize(existing);
+          const [owner] = await tx
+            .select({ planningTimezone: users.planningTimezone })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+          if (!owner) throw new AppError("not_found", "The Finance owner was not found.");
           const observed = await status.getFinanceStatus(userId, run.scope, tx);
           if (
             observed.freshness.state !== "current" ||
@@ -121,12 +140,15 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
               and(
                 eq(financeMaintenanceCandidates.runId, runId),
                 eq(financeMaintenanceCandidates.userId, userId),
-                eq(financeMaintenanceCandidates.state, "committed"),
+                inArray(financeMaintenanceCandidates.state, ["committed", "challenged"]),
               ),
             )
             .limit(1);
           if (!candidate)
-            throw new AppError("conflict", "A committed Finance candidate is required.");
+            throw new AppError(
+              "conflict",
+              "A committed or fully challenged Finance candidate is required.",
+            );
           const [challenge] = await tx
             .select()
             .from(financeLedgerChallenges)
@@ -146,6 +168,23 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             .from(financeMaintenanceCandidateItems)
             .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
             .orderBy(asc(financeMaintenanceCandidateItems.ordinal));
+          const questionReview = candidate.state !== "committed";
+          const coverage = challenge.coverage as {
+            checked?: string[];
+            reviewedItemIds?: string[];
+          };
+          if (
+            questionReview &&
+            (!items.some((item) => item.disposition === "question") ||
+              !challenge.submittedAt ||
+              !challenge.submittingAgentId ||
+              !financeLedgerChallengeChecks.every((check) => coverage.checked?.includes(check)) ||
+              !items.every((item) => coverage.reviewedItemIds?.includes(item.id)))
+          )
+            throw new AppError(
+              "conflict",
+              "Complete question candidate challenge coverage is required.",
+            );
           const findings = await tx
             .select()
             .from(financeLedgerChallengeFindings)
@@ -181,7 +220,27 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             .select()
             .from(financeAgentActionReviews)
             .where(eq(financeAgentActionReviews.maintenanceRunId, runId));
-          const projection = financeCandidateLedgerProjectionSchema.parse(candidate.projection);
+          const actualSnapshot = questionReview
+            ? await finances.maintenanceCandidateSnapshot(
+                userId,
+                run.scope,
+                items,
+                candidate.discoveryRevision,
+                tx,
+              )
+            : null;
+          if (
+            actualSnapshot &&
+            (actualSnapshot.revision !== candidate.revision ||
+              actualSnapshot.revision !== challenge.candidateRevision)
+          )
+            throw new AppError(
+              "conflict",
+              "The challenged Finance candidate no longer matches current ledger evidence.",
+            );
+          const projection = financeCandidateLedgerProjectionSchema.parse(
+            actualSnapshot?.projection ?? candidate.projection,
+          );
           const cash = observed.details.wealth.cash;
           const net = observed.details.cashFlow.net;
           const closing = cash;
@@ -197,7 +256,9 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
               findings: findings.length,
               observations: findings.filter((finding) => finding.kind === "observation").length,
             },
-            closeReadiness: observed.details.closeReadiness,
+            closeReadiness: questionReview
+              ? { ...observed.details.closeReadiness, ready: false }
+              : observed.details.closeReadiness,
             goalsAndDebt: {
               activeGoals: observed.details.activeGoals.length,
               debt: observed.details.wealth.debt,
@@ -216,15 +277,37 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             },
             recommendations: [
               {
-                assumptions: ["Only posted, current ledger evidence is treated as reliable."],
-                disposition: observed.details.closeReadiness.ready ? "ready" : "monitor",
+                assumptions: [
+                  "Only posted, current ledger evidence is treated as reliable.",
+                  ...(questionReview
+                    ? [
+                        "The candidate has not committed. Totals reflect the current ledger; prepared changes remain unapplied.",
+                      ]
+                    : []),
+                ],
+                disposition: questionReview
+                  ? "needs_input"
+                  : observed.details.closeReadiness.ready
+                    ? "ready"
+                    : "monitor",
                 evidence: [
                   `${observed.details.closeReadiness.uncategorized} uncategorized transactions`,
                   `${observed.details.reimbursements.outstanding} outstanding reimbursements`,
+                  ...(questionReview
+                    ? [
+                        `Candidate revision: ${candidate.revision}`,
+                        `Challenge candidate revision: ${challenge.candidateRevision}`,
+                        `Source revision: ${actualSnapshot?.sourceRevision}`,
+                        `Discovery revision: ${candidate.discoveryRevision ?? "unavailable"}`,
+                        `${items.filter((item) => item.disposition === "prepared").length} prepared actions remain unapplied`,
+                      ]
+                    : []),
                 ],
-                recommendation: observed.details.closeReadiness.ready
-                  ? "Keep the current plan and review new exceptions as they arrive."
-                  : "Resolve the remaining ledger exceptions before treating the period as closed.",
+                recommendation: questionReview
+                  ? "Answer the remaining Finance questions before the candidate can commit or the period can be considered maintained."
+                  : observed.details.closeReadiness.ready
+                    ? "Keep the current plan and review new exceptions as they arrive."
+                    : "Resolve the remaining ledger exceptions before treating the period as closed.",
                 tradeoffs: ["Waiting for evidence preserves ledger accuracy."],
               },
             ],
@@ -249,7 +332,7 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             ...findings.map((finding) => finding.id),
           ];
           const reviewStatus = questions > 0 ? "completed_with_questions" : "completed";
-          const period = periodFor(run.scope, now());
+          const period = periodFor(run.scope, localDateAt(now(), owner.planningTimezone));
           const [created] = await tx
             .insert(financePeriodReviews)
             .values({
@@ -268,7 +351,9 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
           const [replayed] = await tx
             .select()
             .from(financePeriodReviews)
-            .where(eq(financePeriodReviews.runId, runId))
+            .where(
+              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
+            )
             .limit(1);
           if (!replayed) throw new Error("The Finance period review could not be published.");
           return serialize(replayed);

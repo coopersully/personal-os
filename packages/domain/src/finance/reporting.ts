@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
+import { maintenanceRunStatusSchema } from "../maintenance.js";
 
 export const financeSnapshotSchema = z.object({
   accounts: z.object({
@@ -29,8 +30,8 @@ export const financeSnapshotSchema = z.object({
 export type FinanceSnapshot = z.infer<typeof financeSnapshotSchema>;
 
 export const financeMaintenanceHistoryQuerySchema = z.object({
-  cursor: z.string().min(1).max(600).optional(),
+  cursor: idSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  status: z.enum(["agent_reasoning", "agent_audit", "settled", "failed"]).optional(),
+  status: maintenanceRunStatusSchema.optional(),
 });
 export type FinanceMaintenanceHistoryQuery = z.infer<typeof financeMaintenanceHistoryQuerySchema>;

@@ -22,6 +22,7 @@ const migrationsAfterTaskOrganization = [
   "0079_mail_stewardship_integrity",
   "0080_mail_reply_metadata",
   "0081_finance_legacy_disconnect_repair",
+  "0082_finance_maintenance_lineage",
 ];
 
 function databaseUri(connectionUri: string, databaseName: string): string {
@@ -416,7 +417,7 @@ describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
     const database = await createIsolatedDatabase("finance_after_task_parallel_history");
     const taskHistory = await migrationsWithout(
       migrationsFolder,
-      "ilo-finance-after-task-parallel-history-",
+      "nohmi-finance-after-task-parallel-history-",
       [
         "0055_finance_sync_health",
         "0059_finance_automation_settings",

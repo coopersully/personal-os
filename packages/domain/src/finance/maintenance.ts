@@ -1,121 +1,47 @@
 import { z } from "zod";
 import { idSchema } from "../common.js";
+import { maintenanceRunSchema, maintenanceScopeSchema } from "../maintenance.js";
 import { financeInteractionQuestionSchema } from "./common.js";
-import { financeInboxCaseSchema } from "./inbox.js";
 
-export const financeMaintenanceScopeSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("all_outstanding") }),
-  z.object({ accountIds: z.array(idSchema).min(1).max(100), type: z.literal("accounts") }),
-  z.object({ from: z.iso.date(), type: z.literal("since") }),
-]);
-export type FinanceMaintenanceScope = z.infer<typeof financeMaintenanceScopeSchema>;
-
-export const financeMaintenanceJudgmentSchema = z.discriminatedUnion("type", [
-  z.object({
-    categoryId: idSchema,
-    confidence: z.number().min(0).max(1),
-    meaning: z.string().trim().min(1).max(500),
-    rationale: z.string().trim().min(1).max(1_000),
-    transactionId: idSchema,
-    type: z.literal("classify_transaction"),
-  }),
-  z.object({
-    confidence: z.number().min(0).max(1),
-    rationale: z.string().trim().min(1).max(1_000),
-    relationship: z.enum(["transfer", "reimbursement", "refund", "reversal", "duplicate"]),
-    transactionIds: z.array(idSchema).min(2).max(20),
-    type: z.literal("link_transactions"),
-  }),
-  z.object({
-    confidence: z.number().min(0).max(1),
-    questionReason: z.string().trim().min(1).max(1_000),
-    transactionId: idSchema,
-    type: z.literal("needs_user_review"),
-  }),
-]);
-export type FinanceMaintenanceJudgment = z.infer<typeof financeMaintenanceJudgmentSchema>;
-
-export const financeAuditFindingInputSchema = z.object({
-  economicEventId: idSchema,
-  evidence: z.record(z.string(), z.unknown()),
-  impactAmount: z.number().finite().nonnegative(),
-  rationale: z.string().trim().min(1).max(2_000),
-  reason: z.enum([
-    "category_ambiguity",
-    "possible_duplicate",
-    "reimbursement",
-    "unusual_amount",
-    "budget_variance",
-  ]),
-});
-export type FinanceAuditFindingInput = z.infer<typeof financeAuditFindingInputSchema>;
-
+/** The only live Finance maintenance entrypoint; historical judgments are evidence only. */
 export const financeMaintenanceInputSchema = z.discriminatedUnion("operation", [
   z
     .object({
       operation: z.literal("start"),
-      scope: financeMaintenanceScopeSchema.default({ type: "all_outstanding" }),
+      scope: maintenanceScopeSchema.default({ type: "all_outstanding" }),
     })
     .strict(),
-  z
-    .object({
-      expectedVersion: z.number().int().positive(),
-      idempotencyKey: z.string().trim().min(1).max(200),
-      judgments: z.array(financeMaintenanceJudgmentSchema).min(1).max(100),
-      operation: z.literal("submit_judgments"),
-      runId: idSchema,
-    })
-    .strict(),
-  z
-    .object({
-      expectedVersion: z.number().int().positive(),
-      findings: z.array(financeAuditFindingInputSchema).max(100),
-      idempotencyKey: z.string().trim().min(1).max(200),
-      operation: z.literal("submit_audit"),
-      runId: idSchema,
-    })
-    .strict(),
-  z
-    .object({
-      operation: z.literal("resume"),
-      runId: idSchema,
-    })
-    .strict(),
+  z.object({ operation: z.literal("resume"), runId: idSchema }).strict(),
 ]);
 export type FinanceMaintenanceInput = z.infer<typeof financeMaintenanceInputSchema>;
 
-export const financeMaintenanceStageSchema = z.enum([
-  "deterministic_processing",
-  "agent_reasoning",
-  "reconciliation",
-  "agent_audit",
-  "settled",
-  "failed",
-]);
-export type FinanceMaintenanceStage = z.infer<typeof financeMaintenanceStageSchema>;
-
-export const financeReasoningItemSchema = z.object({
-  accountId: idSchema,
-  amount: z.number().finite(),
-  budgetContext: z.record(z.string(), z.unknown()),
-  candidateRelationships: z.array(z.record(z.string(), z.unknown())),
-  categoryChoices: z.array(z.object({ id: idSchema, name: z.string().min(1) })),
-  date: z.iso.date(),
-  existingPreferences: z.array(z.string().min(1).max(1_000)),
-  merchant: z.string().min(1).max(240),
-  transactionId: idSchema,
+export const financeMaintenanceRecoverySchema = z.object({
+  legacyRunId: idSchema,
+  state: z.enum(["adopted", "blocked", "historical"]),
+  originalScope: z.record(z.string(), z.unknown()),
+  originalStage: z.string().min(1).max(100),
+  throughDate: z.iso.date().nullable(),
+  reason: z.string().min(1).max(1000),
 });
-export type FinanceReasoningItem = z.infer<typeof financeReasoningItemSchema>;
+export type FinanceMaintenanceRecovery = z.infer<typeof financeMaintenanceRecoverySchema>;
 
+export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
+  z.object({
+    tool: z.literal("get_finance_ledger_challenge"),
+    arguments: z.object({ challengeId: idSchema }),
+    reason: z.string().min(1).max(1000),
+  }),
+  z.object({
+    tool: z.literal("maintain_finances"),
+    arguments: z.object({ operation: z.literal("resume"), runId: idSchema }),
+    reason: z.string().min(1).max(1000),
+  }),
+]);
 export const financeMaintenancePayloadSchema = z.object({
-  inboxCases: z.array(financeInboxCaseSchema).optional(),
-  auditContext: z.record(z.string(), z.unknown()).nullable(),
-  reasoningBatch: z.array(financeReasoningItemSchema),
-  reviewQuestion: financeInteractionQuestionSchema.nullable(),
-  playbookVersion: z.literal("1.0.0").default("1.0.0"),
-  runId: idSchema,
-  stage: financeMaintenanceStageSchema,
-  version: z.number().int().positive(),
+  run: maintenanceRunSchema.nullable(),
+  challengeId: idSchema.nullable(),
+  nextAction: financeMaintenanceNextActionSchema.nullable(),
+  recovery: financeMaintenanceRecoverySchema.nullable(),
 });
 export type FinanceMaintenancePayload = z.infer<typeof financeMaintenancePayloadSchema>;
 
@@ -144,6 +70,7 @@ export type FinanceSetupInput = z.infer<typeof financeSetupInputSchema>;
 export const financeSetupPayloadSchema = z.object({
   budgetVersionId: idSchema.nullable(),
   maintenanceRunId: idSchema.nullable(),
+  canonicalMaintenanceRunId: idSchema.nullable(),
   question: financeInteractionQuestionSchema.nullable(),
   sessionId: idSchema,
   stage: z.enum([

@@ -1338,6 +1338,19 @@ describe.sequential("Finance status service", () => {
     expect(reviewStatus.details.review).toEqual({ byReason: { low_confidence: 1 }, total: 1 });
     expect(transactionStatus.activeRun).toMatchObject({ id: run.id, status: "awaiting_approval" });
     expect(transactionStatus.work.awaitingApproval).toBe(1);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "awaiting_agent_challenge", checkpoint: { phase: "challenge" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const awaitingChallenge = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(awaitingChallenge.activeRun).toMatchObject({
+      id: run.id,
+      status: "awaiting_agent_challenge",
+    });
+    const otherOwner = await makeUser("Challenge status tenant isolation");
+    expect(
+      (await service().getFinanceStatus(otherOwner, { type: "all_outstanding" })).activeRun,
+    ).toBeNull();
 
     await expect(
       service().getFinanceStatus(userId, {

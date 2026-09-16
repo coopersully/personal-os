@@ -27,12 +27,15 @@ import {
 } from "./position-material.js";
 
 const maintenanceLabels = {
-  deterministic_processing: "Processing records",
-  agent_reasoning: "Awaiting agent reasoning",
-  reconciliation: "Reconciling records",
-  agent_audit: "Awaiting agent audit",
-  settled: "Settled",
-  failed: "Failed",
+  queued: "Maintenance queued",
+  running: "Processing transaction evidence",
+  completed: "Maintenance complete",
+  completed_with_questions: "Maintenance complete with questions",
+  awaiting_agent_challenge: "Ledger challenge required",
+  awaiting_approval: "Action approval required",
+  blocked: "Maintenance blocked",
+  failed_recoverable: "Maintenance needs recovery",
+  failed_terminal: "Maintenance failed",
 };
 
 export function FinanceOverviewPage() {
@@ -255,16 +258,17 @@ export function FinanceOverviewPage() {
             <CollapsibleContent>
               <ItemGroup>
                 {maintenance.data.items.map((run) => (
-                  <Item key={run.runId}>
+                  <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
                     <ItemContent>
-                      <ItemTitle>{maintenanceLabels[run.stage]}</ItemTitle>
+                      <ItemTitle>
+                        {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
+                      </ItemTitle>
                       <ItemDescription>
-                        {run.reviewQuestion?.prompt ??
-                          (run.stage === "settled"
-                            ? "The recorded maintenance run settled."
-                            : run.stage === "failed"
-                              ? "This run needs recovery."
-                              : "This run still has outstanding work.")}
+                        {run.recovery?.reason ??
+                          run.nextAction?.reason ??
+                          (run.run?.status === "completed"
+                            ? "The recorded maintenance run completed."
+                            : "Inspect the recorded run and its evidence.")}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>

@@ -18,7 +18,7 @@ export const financeCapabilityManifest = [
     capability: "workflow.maintain",
     mcpTool: "maintain_finances",
     mode: "write",
-    requiredScope: "finances:write",
+    requiredScope: "finances:maintain",
   },
   {
     apiOperation: "getFinanceSnapshot",
@@ -319,7 +319,7 @@ export const financeCapabilityManifest = [
   capability: string;
   mcpTool: string;
   mode: "external" | "read" | "write";
-  requiredScope: "finances:read" | "finances:write";
+  requiredScope: "finances:read" | "finances:write" | "finances:maintain";
 }>;
 
 export type FinanceCapability = (typeof financeCapabilityManifest)[number]["capability"];

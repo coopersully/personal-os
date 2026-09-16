@@ -70,7 +70,6 @@ import type {
   FinanceTransactionRelationship,
   FinanceWealthSummary,
   LinkFinanceTransactionsInput,
-  MaintenanceRun,
   MaintenanceScope,
   ManageFinanceGoalInput,
   ManageFinanceRecurringItemInput,
@@ -101,7 +100,6 @@ import {
   financeLedgerChallengeSchema,
   financePeriodReviewSchema,
   financeStatusSchema,
-  maintenanceRunSchema,
 } from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -315,21 +313,6 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "POST",
       });
       return actionResult(response, "reimbursement");
-    },
-    async startFinanceMaintenance(
-      scope: MaintenanceScope = { type: "all_outstanding" },
-    ): Promise<MaintenanceRun> {
-      const response = await request<{ run: unknown }>("/v1/finances/maintenance", {
-        body: JSON.stringify({ scope }),
-        method: "POST",
-      });
-      return maintenanceRunSchema.parse(response.run);
-    },
-    async getWorkspaceFinanceMaintenanceRun(id: string): Promise<MaintenanceRun> {
-      const response = await request<{ run: unknown }>(
-        `/v1/finances/maintenance/${encodeURIComponent(id)}`,
-      );
-      return maintenanceRunSchema.parse(response.run);
     },
     async getFinanceLedgerChallenge(
       id: string,
@@ -581,7 +564,7 @@ export function createFinanceApi(request: FinanceRequest) {
     async maintainFinances(
       input: FinanceMaintenanceInput,
     ): Promise<FinanceToolResult<FinanceMaintenancePayload>> {
-      return request("/v1/finances/maintenance/protocol", {
+      return request("/v1/finances/maintenance", {
         body: JSON.stringify(input),
         method: "POST",
       });
@@ -599,7 +582,7 @@ export function createFinanceApi(request: FinanceRequest) {
       return request(`/v1/finances/maintenance${search.size ? `?${search}` : ""}`);
     },
     async getFinanceMaintenanceRun(id: string): Promise<FinanceMaintenancePayload> {
-      return request(`/v1/finances/maintenance/protocol/${encodeURIComponent(id)}`);
+      return request(`/v1/finances/maintenance/${encodeURIComponent(id)}`);
     },
     async listFinanceTransactions(query: Partial<FinanceTransactionQuery> = {}): Promise<{
       items: FinanceTransaction[];

@@ -138,14 +138,19 @@ describe("pagination, errors, and OpenAPI", () => {
         content: {
           "application/json": {
             examples: {
-              allOutstanding: { value: { scope: { type: "all_outstanding" } } },
+              allOutstanding: {
+                value: { operation: "start", scope: { type: "all_outstanding" } },
+              },
             },
+            schema: { $ref: "#/components/schemas/FinanceMaintenanceInput" },
           },
         },
+        required: true,
       },
       responses: {
-        202: { description: "Finance maintenance run durably accepted for background work" },
+        200: { description: "Finance maintenance result with current durable run state" },
         403: { description: "The caller lacks finances:maintain" },
+        404: { description: "Finance maintenance run not found for this user" },
         409: { description: "A conflicting Finance maintenance run or rulebook is active" },
       },
     });
@@ -161,22 +166,17 @@ describe("pagination, errors, and OpenAPI", () => {
       200: {
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+            schema: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
           },
         },
-        description: "Owned Finance maintenance run",
+        description: "Owned Finance maintenance payload",
       },
       404: { description: "Finance maintenance run not found for this user" },
     });
     expect(document.components.schemas.FinanceMaintenanceResult).toMatchObject({
       properties: {
-        health: {
-          properties: {
-            applicability: { enum: ["not_run", "applied", "skipped_scoped"], type: "string" },
-            refreshed: { type: "boolean" },
-          },
-          required: ["applicability", "confidence", "refreshed"],
-        },
+        data: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+        schemaVersion: { const: 1, type: "number" },
       },
     });
     expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({

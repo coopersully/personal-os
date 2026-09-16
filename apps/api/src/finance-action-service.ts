@@ -13,6 +13,7 @@ import {
   financeCategoryRules,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeLedgerChallenges,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
@@ -3093,6 +3094,186 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         sourceRefs: result.sourceRefs,
       });
     },
+    /** Recover only the persisted, fully challenged handoff; this never creates new work. */
+    async recoverFinanceMaintenanceHandoff(userId: string, runId: string) {
+      return db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${userId}`}, 0))`,
+        );
+        const bypass = await readBypass(tx, userId, true);
+        const [run] = await tx
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.userId, userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+              eq(workspaceMaintenanceRuns.id, runId),
+            ),
+          );
+        const checkpoint = run?.checkpoint as {
+          candidateId?: string;
+          revision?: string;
+          phase?: string;
+        } | null;
+        if (
+          run?.status !== "awaiting_agent_challenge" ||
+          run.leaseClaimId ||
+          run.leaseExpiresAt ||
+          checkpoint?.phase !== "challenge" ||
+          !checkpoint.candidateId ||
+          !checkpoint.revision
+        )
+          return { recovered: false };
+        const [candidate] = await tx
+          .select()
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.userId, userId),
+              eq(financeMaintenanceCandidates.runId, runId),
+              eq(financeMaintenanceCandidates.id, checkpoint.candidateId),
+              eq(financeMaintenanceCandidates.revision, checkpoint.revision),
+              eq(financeMaintenanceCandidates.state, "challenged"),
+            ),
+          )
+          .for("update");
+        if (!candidate) return { recovered: false };
+        // Keep the settlement lock order: bypass setting, candidate, then run.
+        // The first run read only locates the candidate; authority is checked
+        // again while holding the run lock before resetting any durable work.
+        const [lockedRun] = await tx
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.userId, userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+              eq(workspaceMaintenanceRuns.id, runId),
+            ),
+          )
+          .for("update");
+        const lockedCheckpoint = lockedRun?.checkpoint as typeof checkpoint;
+        if (
+          lockedRun?.status !== "awaiting_agent_challenge" ||
+          lockedRun.leaseClaimId ||
+          lockedRun.leaseExpiresAt ||
+          lockedCheckpoint?.phase !== "challenge" ||
+          lockedCheckpoint.candidateId !== candidate.id ||
+          lockedCheckpoint.revision !== candidate.revision
+        )
+          return { recovered: false };
+
+        const [challenge] = await tx
+          .select()
+          .from(financeLedgerChallenges)
+          .where(
+            and(
+              eq(financeLedgerChallenges.userId, userId),
+              eq(financeLedgerChallenges.runId, runId),
+              eq(financeLedgerChallenges.candidateId, candidate.id),
+              eq(financeLedgerChallenges.candidateRevision, candidate.revision),
+              eq(financeLedgerChallenges.state, "resolved"),
+            ),
+          );
+        if (!challenge?.submittingAgentId) return { recovered: false };
+        const [resolved] = await tx
+          .select()
+          .from(workspaceMaintenanceSteps)
+          .where(
+            and(
+              eq(workspaceMaintenanceSteps.runId, runId),
+              eq(workspaceMaintenanceSteps.stepName, "challenge_resolve"),
+              eq(workspaceMaintenanceSteps.status, "completed"),
+            ),
+          );
+        const resolution = resolved?.safeResult as {
+          candidateId?: string;
+          candidateRevision?: string;
+          questions?: number;
+        } | null;
+        if (
+          resolution?.candidateId !== candidate.id ||
+          resolution.candidateRevision !== candidate.revision ||
+          resolution.questions !== 0
+        )
+          return { recovered: false };
+        const items = await tx
+          .select()
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
+          .orderBy(asc(financeMaintenanceCandidateItems.ordinal))
+          .for("update");
+        if (items.some((item) => item.disposition === "committed")) return { recovered: false };
+        const snapshot = await finances.maintenanceCandidateSnapshot(
+          userId,
+          lockedRun.scope,
+          items,
+          candidate.discoveryRevision,
+          tx,
+        );
+        if (snapshot.revision !== candidate.revision) {
+          await tx
+            .update(financeMaintenanceCandidates)
+            .set({ state: "superseded", updatedAt: now() })
+            .where(
+              and(
+                eq(financeMaintenanceCandidates.id, candidate.id),
+                eq(financeMaintenanceCandidates.userId, userId),
+                eq(financeMaintenanceCandidates.runId, runId),
+                eq(financeMaintenanceCandidates.state, "challenged"),
+                eq(financeMaintenanceCandidates.revision, candidate.revision),
+              ),
+            );
+          await tx
+            .update(workspaceMaintenanceRuns)
+            .set({
+              checkpoint: {
+                candidateId: candidate.id,
+                phase: "prepare",
+                reason: "candidate_drift",
+              },
+              leaseClaimId: null,
+              leaseExpiresAt: null,
+              retryAt: null,
+              lastSafeError: null,
+              status: "queued",
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(workspaceMaintenanceRuns.id, runId),
+                eq(workspaceMaintenanceRuns.userId, userId),
+              ),
+            );
+          await tx
+            .delete(workspaceMaintenanceSteps)
+            .where(eq(workspaceMaintenanceSteps.runId, runId));
+          return {
+            recovered: true,
+            outcome: { candidateId: candidate.id, status: "superseded" as const },
+          };
+        }
+        const outcome = await settleMaintenanceCandidateInTransaction({
+          candidateId: candidate.id,
+          context: {
+            principal: {
+              actorId: challenge.submittingAgentId,
+              actorType: "agent",
+              scopes: new Set(["finances:maintain", "finances:write"]),
+              userId,
+            },
+            requestId: `finance-handoff-recovery:${runId}:${challenge.id}`,
+          },
+          expectedRevision: candidate.revision,
+          expectedRunId: runId,
+          expectedState: "challenged",
+          executor: tx,
+          mode: bypass ? "apply" : "queue",
+        });
+        return { recovered: true, outcome };
+      });
+    },
     async settleFinanceMaintenanceCandidate(
       candidateId: string,
       expectedRevision: string,
@@ -3397,6 +3578,66 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .limit(1);
         if (!review) throw new AppError("not_found", "The Finance action review was not found.");
         if (review.status === "pending") {
+          if (review.actionKind === "maintenance_turn") {
+            const payload = review.privatePayload as {
+              candidateId?: string;
+              runId?: string;
+            };
+            if (!payload.candidateId || !payload.runId)
+              throw new AppError(
+                "conflict",
+                "The Finance maintenance review payload is incomplete.",
+              );
+            const [candidate] = await tx
+              .update(financeMaintenanceCandidates)
+              .set({ state: "superseded", updatedAt: now() })
+              .where(
+                and(
+                  eq(financeMaintenanceCandidates.id, payload.candidateId),
+                  eq(financeMaintenanceCandidates.userId, context.principal.userId),
+                  eq(financeMaintenanceCandidates.runId, payload.runId),
+                  eq(financeMaintenanceCandidates.state, "awaiting_approval"),
+                ),
+              )
+              .returning({ id: financeMaintenanceCandidates.id });
+            if (!candidate)
+              throw new AppError(
+                "conflict",
+                "The Finance maintenance candidate is no longer awaiting approval.",
+              );
+            const [run] = await tx
+              .update(workspaceMaintenanceRuns)
+              .set({
+                checkpoint: {
+                  candidateId: payload.candidateId,
+                  phase: "approval_dismissed",
+                  reviewId: review.id,
+                },
+                lastSafeError: {
+                  code: "finance_maintenance_review_dismissed",
+                  message: "The user dismissed the proposed Finance maintenance turn.",
+                },
+                leaseClaimId: null,
+                leaseExpiresAt: null,
+                retryAt: null,
+                status: "failed_terminal",
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(workspaceMaintenanceRuns.id, payload.runId),
+                  eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+                  eq(workspaceMaintenanceRuns.domain, "finances"),
+                  eq(workspaceMaintenanceRuns.status, "awaiting_approval"),
+                ),
+              )
+              .returning({ id: workspaceMaintenanceRuns.id });
+            if (!run)
+              throw new AppError(
+                "conflict",
+                "The Finance maintenance run is no longer awaiting approval.",
+              );
+          }
           const [dismissed] = await tx
             .update(financeAgentActionReviews)
             .set({ status: "dismissed", updatedAt: now() })

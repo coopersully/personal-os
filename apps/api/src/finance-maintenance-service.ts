@@ -105,7 +105,29 @@ export type FinanceMaintenanceOperations = {
   getMaintenanceCandidateQuestionContexts: (
     userId: string,
     transactionIds: string[],
-  ) => Promise<Record<string, { underlyingAction: "reimbursement" | "transaction"; why: string }>>;
+  ) => Promise<
+    Record<
+      string,
+      {
+        reviewCaseId: string;
+        reviewReason: string;
+        underlyingAction: "reimbursement" | "transaction";
+        why: string;
+      }
+    >
+  >;
+  projectMaintenanceCandidateQuestionsForUser: (input: {
+    candidateId: string;
+    candidateRevision: string;
+    context: MutationContext;
+    runId: string;
+    userId: string;
+  }) => Promise<{
+    created: number;
+    rebuild?: true;
+    successorRunId?: string | null;
+    total: number;
+  }>;
   repairHeuristicTransfersForUser: (
     userId: string,
     scope: MaintenanceScope,
@@ -254,7 +276,12 @@ function preparedCandidateItems(
   page: FinanceCategorizationProposalPage,
   questionContexts: Record<
     string,
-    { underlyingAction: "reimbursement" | "transaction"; why: string }
+    {
+      reviewCaseId: string;
+      reviewReason: string;
+      underlyingAction: "reimbursement" | "transaction";
+      why: string;
+    }
   > = {},
 ) {
   return page.items.map((proposal) => {
@@ -291,6 +318,8 @@ function preparedCandidateItems(
               ? `Is ${proposal.transaction.merchant} personal or reimbursable?`
               : `How should ${proposal.transaction.merchant} be recorded?`,
           transactionId: proposal.transaction.id,
+          reviewCaseId: context?.reviewCaseId ?? null,
+          reviewReason: context?.reviewReason ?? null,
           underlyingAction: context?.underlyingAction ?? ("categorization" as const),
           why: context?.why ?? proposal.rationale,
         },
@@ -369,7 +398,11 @@ export function createFinanceMaintenanceService({
   async function resultFor(run: FinanceMaintenanceRun, verificationStatus: FinanceStatus) {
     const records = await maintenance.listStepRecords(run.id);
     const resolution = records.find((record) => record.step === "challenge_resolve")?.result as
-      | { questions: number }
+      | {
+          questionReviewsCreated?: number;
+          questionReviewsTotal?: number;
+          questions: number;
+        }
       | undefined;
     const questions = records.find((record) => record.step === "questions")?.result as
       | { created?: number; total?: number }
@@ -402,13 +435,11 @@ export function createFinanceMaintenanceService({
       health: reportedHealth,
       questions: {
         created:
-          questions === undefined
+          resolution?.questionReviewsCreated ??
+          (questions === undefined
             ? (durableEffects?.questionStepCreations ?? durableEffects?.questions ?? 0)
-            : (questions.created ?? 0),
-        total: Math.max(
-          resolution?.questions ?? questions?.total ?? 0,
-          verificationStatus.details.review.total,
-        ),
+            : (questions.created ?? 0)),
+        total: verificationStatus.details.review.total,
       },
       verification: {
         duplicateActions: durableEffects.duplicateActions,
@@ -445,6 +476,7 @@ export function createFinanceMaintenanceService({
         finances.appendMaintenanceCandidatePage,
         finances.finalizeMaintenanceCandidatePreparation,
         finances.getMaintenanceCandidateQuestionContexts,
+        finances.projectMaintenanceCandidateQuestionsForUser,
         finances.reconcileExactTransfersForUser,
         finances.summarizeMaintenanceEffectsForRun,
         finances.refreshCashflowForUser,
@@ -471,6 +503,24 @@ export function createFinanceMaintenanceService({
         completed.has("commit_or_queue_review") ||
         completed.has("health_refresh")
       ) {
+        const questionResolution = records.find(
+          (record) => record.step === "challenge_resolve" && record.status === "completed",
+        )?.result as
+          | { candidateId: string; candidateRevision?: string; questions: number }
+          | undefined;
+        if (questionResolution && questionResolution.questions > 0) {
+          if (!questionResolution.candidateRevision)
+            throw new AppError("conflict", "The challenged Finance candidate is unavailable.");
+          const replayedQuestions = await finances.projectMaintenanceCandidateQuestionsForUser({
+            candidateId: questionResolution.candidateId,
+            candidateRevision: questionResolution.candidateRevision,
+            context: mutationContext(run, "challenge_resolve", claimId),
+            runId,
+            userId: run.userId,
+          });
+          if (replayedQuestions.rebuild)
+            return maintenance.getOwnedRun(run.userId, replayedQuestions.successorRunId ?? runId);
+        }
         if (!completed.has("health_refresh")) {
           currentStep = "health_refresh";
           await assertCurrentRulebook(run);
@@ -762,13 +812,31 @@ export function createFinanceMaintenanceService({
             : await challenge.resolve(run.userId, runId);
           if (!resolution.candidateRevision)
             throw new AppError("conflict", "The challenged Finance candidate is unavailable.");
-          await maintenance.completeStep({
-            claimId,
-            idempotencyKey,
-            result: resolution,
-            runId,
-            step,
-          });
+          const projectedQuestions =
+            resolution.questions > 0
+              ? await finances.projectMaintenanceCandidateQuestionsForUser({
+                  candidateId: resolution.candidateId,
+                  candidateRevision: resolution.candidateRevision,
+                  context: mutationContext(run, step, claimId),
+                  runId,
+                  userId: run.userId,
+                })
+              : { created: 0, total: 0 };
+          if (projectedQuestions.rebuild)
+            return maintenance.getOwnedRun(run.userId, projectedQuestions.successorRunId ?? runId);
+          if (!completed.has("challenge_resolve")) {
+            await maintenance.completeStep({
+              claimId,
+              idempotencyKey,
+              result: {
+                ...resolution,
+                questionReviewsCreated: projectedQuestions.created,
+                questionReviewsTotal: projectedQuestions.total,
+              },
+              runId,
+              step,
+            });
+          }
           if (resolution.questions > 0) {
             await maintenance.completeStep({
               claimId,

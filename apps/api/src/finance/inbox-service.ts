@@ -21,6 +21,11 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import {
+  financeMaintenanceLineage,
+  lockFinanceMaintenanceLineage,
+  supersedeFinanceMaintenanceLineage,
+} from "./maintenance-rebuild.js";
 import { withFinanceInboxPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
@@ -71,6 +76,9 @@ export function financeReviewPrompt(
   reason: FinanceReviewReason,
   evidence: Record<string, unknown>,
 ): string {
+  if (typeof evidence.prompt === "string" && evidence.prompt.trim()) {
+    return evidence.prompt.trim().slice(0, 1_000);
+  }
   const merchant = typeof evidence.merchant === "string" ? ` at ${evidence.merchant}` : "";
   const prompts: Record<FinanceReviewReason, string> = {
     budget_variance: "Was this budget variance expected, and should the budget change?",
@@ -287,6 +295,19 @@ export function createInboxService({ db, now }: Options) {
             if (!review) throw new AppError("not_found", "That Finance Inbox case was not found.");
             if (review.status === "resolved")
               throw new AppError("conflict", "That Finance Inbox case is already resolved.");
+            const maintenanceLineage = financeMaintenanceLineage(review.evidence);
+            const maintenanceRun = maintenanceLineage
+              ? await lockFinanceMaintenanceLineage(tx, context.userId, maintenanceLineage)
+              : null;
+            if (maintenanceLineage && maintenanceRun && input.resolution.type !== "clarify") {
+              await supersedeFinanceMaintenanceLineage(
+                tx,
+                context.userId,
+                maintenanceLineage,
+                now(),
+                review.id,
+              );
+            }
             const unchangedResolution = and(
               review.resolution === null
                 ? isNull(financeReviewCases.resolution)

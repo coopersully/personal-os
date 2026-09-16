@@ -21,6 +21,7 @@ import {
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
+  workspaceMaintenanceSteps,
 } from "@personal-os/database";
 import type {
   FinanceCategorizationProposal,
@@ -332,6 +333,7 @@ describe.sequential("Finance maintenance service", () => {
         };
       },
       getMaintenanceCandidateQuestionContexts: async () => ({}),
+      projectMaintenanceCandidateQuestionsForUser: async () => ({ created: 0, total: 0 }),
       reconcileExactTransfersForUser: async () => ({ paired: 0, transfers: 0 }),
       summarizeMaintenanceEffectsForRun: async () => ({
         categorizations: 0,
@@ -1882,6 +1884,7 @@ describe.sequential("Finance maintenance service", () => {
       "appendMaintenanceCandidatePage",
       "finalizeMaintenanceCandidatePreparation",
       "getMaintenanceCandidateQuestionContexts",
+      "projectMaintenanceCandidateQuestionsForUser",
       "reconcileExactTransfersForUser",
       "summarizeMaintenanceEffectsForRun",
       "refreshCashflowForUser",
@@ -1948,6 +1951,7 @@ describe.sequential("Finance maintenance service", () => {
       finances: operations({
         applyApprovedRules: direct,
         applyApprovedOneOffs: direct,
+        projectMaintenanceCandidateQuestionsForUser: async () => ({ created: 2, total: 2 }),
         proposeOutstandingCategorizations: async () => ({
           items: [
             proposal(crypto.randomUUID(), { confidence: 1 }),
@@ -1969,7 +1973,7 @@ describe.sequential("Finance maintenance service", () => {
       }),
       maintenance: workspace,
       now: () => now,
-      status: { getFinanceStatus: async () => status() },
+      status: { getFinanceStatus: async () => status(undefined, { questions: 2 }) },
     });
     const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
     await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
@@ -1986,7 +1990,7 @@ describe.sequential("Finance maintenance service", () => {
     await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
       status: "completed_with_questions",
       settledResult: {
-        questions: { created: 0, total: 2 },
+        questions: { created: 2, total: 2 },
         applied: { categorizations: 0, transfers: 2 },
         health: { applicability: "applied", refreshed: true },
         verification: { duplicateActions: 0, freshness: "current" },
@@ -2007,6 +2011,118 @@ describe.sequential("Finance maintenance service", () => {
     );
     await expect(service.dispatchRun(run.id)).resolves.toBeNull();
     expect(deps.periodReviews.createForRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("rebuilds when projected questions were answered before recovery", async () => {
+    const ownerId = await createUser("Answered projected questions");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    deps.challenge.resolve.mockResolvedValue({
+      candidateId: crypto.randomUUID(),
+      candidateRevision: `sha256:${"e".repeat(64)}`,
+      questions: 1,
+    });
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations({
+        projectMaintenanceCandidateQuestionsForUser: async (input) => {
+          await database.db
+            .update(workspaceMaintenanceRuns)
+            .set({
+              checkpoint: {
+                candidateId: input.candidateId,
+                phase: "prepare",
+                reason: "candidate_drift",
+              },
+              leaseClaimId: null,
+              leaseExpiresAt: null,
+              status: "queued",
+            })
+            .where(eq(workspaceMaintenanceRuns.id, input.runId));
+          await database.db
+            .delete(workspaceMaintenanceSteps)
+            .where(eq(workspaceMaintenanceSteps.runId, input.runId));
+          return { created: 0, rebuild: true, total: 0 };
+        },
+        proposeOutstandingCategorizations: async () => ({
+          items: [proposal(crypto.randomUUID(), { confidence: 0 })],
+          nextCursor: null,
+        }),
+      }),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    await resumeAfterChallenge(workspace, run.id);
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      checkpoint: { phase: "prepare" },
+      status: "queued",
+    });
+    expect(await workspace.listStepRecords(run.id)).toEqual([]);
+  });
+
+  it("revalidates and rebuilds when a question is answered after projection", async () => {
+    const ownerId = await createUser("Question answered after projection");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    deps.challenge.resolve.mockResolvedValue({
+      candidateId: crypto.randomUUID(),
+      candidateRevision: `sha256:${"f".repeat(64)}`,
+      questions: 1,
+    });
+    let outstandingQuestions = 1;
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations({
+        projectMaintenanceCandidateQuestionsForUser: async (input) => {
+          if (outstandingQuestions > 0) return { created: 1, total: 1 };
+          await database.db
+            .update(workspaceMaintenanceRuns)
+            .set({
+              checkpoint: {
+                candidateId: input.candidateId,
+                phase: "prepare",
+                reason: "candidate_drift",
+              },
+              leaseClaimId: null,
+              leaseExpiresAt: null,
+              status: "queued",
+            })
+            .where(eq(workspaceMaintenanceRuns.id, input.runId));
+          await database.db
+            .delete(workspaceMaintenanceSteps)
+            .where(eq(workspaceMaintenanceSteps.runId, input.runId));
+          return { created: 0, rebuild: true, total: 0 };
+        },
+        proposeOutstandingCategorizations: async () => ({
+          items: [proposal(crypto.randomUUID(), { confidence: 0 })],
+          nextCursor: null,
+        }),
+      }),
+      maintenance: workspace,
+      now: () => now,
+      status: {
+        getFinanceStatus: async () => status(undefined, { questions: outstandingQuestions }),
+      },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await service.dispatchRun(run.id);
+    await resumeAfterChallenge(workspace, run.id);
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      checkpoint: { phase: "health_refresh" },
+      status: "queued",
+    });
+    outstandingQuestions = 0;
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      checkpoint: { phase: "prepare" },
+      settledResult: null,
+      status: "queued",
+    });
+    expect(await workspace.listStepRecords(run.id)).toEqual([]);
   });
 
   it("persists a 50-item candidate cursor across runtimes before any semantic writes", async () => {
@@ -2313,6 +2429,7 @@ describe.sequential("Finance maintenance service", () => {
       const service = createFinanceMaintenanceService({
         ...deps,
         finances: operations({
+          projectMaintenanceCandidateQuestionsForUser: async () => ({ created: 1, total: 1 }),
           syncDueAccountsForUser: async (_userId, scope) => {
             observed.push(scope);
             return { attempted: 0, failed: 0, recovered: 0, skipped: 0, succeeded: 0 };
@@ -2332,7 +2449,7 @@ describe.sequential("Finance maintenance service", () => {
         }),
         maintenance: workspace,
         now: () => now,
-        status: { getFinanceStatus: async () => status() },
+        status: { getFinanceStatus: async () => status(undefined, { questions: 1 }) },
       });
       const run = await service.startOrResume(ownerId, scope);
       await service.dispatchRun(run.id);

@@ -117,6 +117,7 @@ describe.sequential("Finance ledger challenge", () => {
         } satisfies Principal,
         requestId: "challenge-submit",
       },
+      finances,
       item,
       owner,
       ready,
@@ -185,8 +186,11 @@ describe.sequential("Finance ledger challenge", () => {
       questions: 0,
       submittingAgentId: "connected-finance-agent",
     });
-    await expect(setup.challenge.resolve(setup.owner.id, setup.run.id)).rejects.toMatchObject({
-      code: "conflict",
+    await expect(setup.challenge.resolve(setup.owner.id, setup.run.id)).resolves.toMatchObject({
+      candidateId: setup.ready.id,
+      candidateRevision: setup.ready.revision,
+      questions: 0,
+      submittingAgentId: "connected-finance-agent",
     });
   });
 
@@ -326,6 +330,54 @@ describe.sequential("Finance ledger challenge", () => {
     ];
     for (const itemCase of cases) {
       const setup = await fixture();
+      const localTransactionId = crypto.randomUUID();
+      if (itemCase.kind === "question") {
+        await database.db
+          .update(financeMaintenanceCandidateItems)
+          .set({
+            actionKind: "categorization",
+            privatePayload: {
+              actionKind: "categorization",
+              input: { decisions: [{ transactionId: localTransactionId }] },
+            },
+            sourceRefs: [
+              {
+                accountId: crypto.randomUUID(),
+                provider: "plaid",
+                remoteId: "provider-transaction-id",
+                revision: now.toISOString(),
+                sourceType: "finance_transaction",
+              },
+            ],
+          })
+          .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
+        const [updatedItem] = await database.db
+          .select()
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
+        if (!updatedItem) throw new Error("Connected-provider challenge item was not updated.");
+        const snapshot = await setup.finances.maintenanceCandidateSnapshot(
+          setup.owner.id,
+          setup.run.scope,
+          [updatedItem],
+          setup.ready.discoveryRevision,
+        );
+        await database.db
+          .update(financeMaintenanceCandidates)
+          .set({ projection: snapshot.projection, revision: snapshot.revision })
+          .where(eq(financeMaintenanceCandidates.id, setup.ready.id));
+        await database.db
+          .update(workspaceMaintenanceRuns)
+          .set({
+            checkpoint: {
+              candidateId: setup.ready.id,
+              phase: "challenge",
+              revision: snapshot.revision,
+            },
+          })
+          .where(eq(workspaceMaintenanceRuns.id, setup.run.id));
+        setup.ready.revision = snapshot.revision;
+      }
       const prepared = await setup.challenge.prepare(setup.owner.id, setup.run.id, setup.ready.id);
       await expect(
         setup.challenge.submit(
@@ -352,10 +404,20 @@ describe.sequential("Finance ledger challenge", () => {
       ).resolves.toMatchObject({ state: "submitted" });
       await expect(
         database.db
-          .select({ disposition: financeMaintenanceCandidateItems.disposition })
+          .select({
+            disposition: financeMaintenanceCandidateItems.disposition,
+            privatePayload: financeMaintenanceCandidateItems.privatePayload,
+          })
           .from(financeMaintenanceCandidateItems)
           .where(eq(financeMaintenanceCandidateItems.id, setup.item.id)),
-      ).resolves.toEqual([{ disposition: itemCase.disposition }]);
+      ).resolves.toEqual([expect.objectContaining({ disposition: itemCase.disposition })]);
+      if (itemCase.kind === "question") {
+        const [saved] = await database.db
+          .select({ privatePayload: financeMaintenanceCandidateItems.privatePayload })
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
+        expect(saved?.privatePayload).toMatchObject({ transactionId: localTransactionId });
+      }
     }
   });
 
@@ -382,6 +444,20 @@ describe.sequential("Finance ledger challenge", () => {
           why: "Test.",
         },
         severity: "info" as const,
+        sourceRefs: [],
+      },
+      {
+        candidateItemId: "OWNED_ITEM",
+        evidence: "This question has no transaction lineage.",
+        kind: "question" as const,
+        rationale: "Nontransaction questions cannot be projected into the Finance Inbox.",
+        resolution: {
+          choices: ["Yes", "No"],
+          prompt: "Should this alert refresh continue?",
+          type: "question" as const,
+          why: "The alert is not tied to one transaction.",
+        },
+        severity: "warning" as const,
         sourceRefs: [],
       },
     ];

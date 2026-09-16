@@ -97,14 +97,6 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
       return retrySerializationFailure(
         db,
         async (tx) => {
-          const [existing] = await tx
-            .select()
-            .from(financePeriodReviews)
-            .where(
-              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
-            )
-            .limit(1);
-          if (existing) return serialize(existing);
           const [run] = await tx
             .select()
             .from(workspaceMaintenanceRuns)
@@ -114,8 +106,17 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
                 eq(workspaceMaintenanceRuns.userId, userId),
               ),
             )
+            .for("update")
             .limit(1);
           if (!run) throw new AppError("not_found", "The Finance maintenance run was not found.");
+          const [existing] = await tx
+            .select()
+            .from(financePeriodReviews)
+            .where(
+              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
+            )
+            .limit(1);
+          if (existing) return serialize(existing);
           const [owner] = await tx
             .select({ planningTimezone: users.planningTimezone })
             .from(users)

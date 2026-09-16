@@ -595,7 +595,10 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
       },
       outcome: "user_input_required",
     });
-    expect(required(active.data.run).scope).toEqual({ type: "all_outstanding" });
+    const activeRunId = required(active.data.run).id;
+    await expect(f.service.getRun(f.userId, activeRunId)).resolves.toMatchObject({
+      run: { id: activeRunId, scope: { type: "all_outstanding" } },
+    });
   });
   it("keeps setup unsettled when period-review step evidence is missing or stale", async () => {
     const f = await fixture();

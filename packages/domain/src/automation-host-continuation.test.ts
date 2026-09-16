@@ -1,11 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  type AutomationHostSchedule,
+  type AutomationHostScheduleCreateInput,
   automationHostScheduleCreateInputSchema,
   automationHostScheduleSchema,
   automationHostScheduleUpdateInputSchema,
   automationHostSurfaceSchema,
   observeAutomationHostScheduleHealth,
 } from "./automation-host-continuation.js";
+
+type TriggerForHost<Schedule, Host> = Schedule extends {
+  hostSurface: Host;
+  trigger: infer Trigger;
+}
+  ? Trigger
+  : never;
 
 const scheduleId = "00000000-0000-4000-8000-000000000001";
 const connectionId = "00000000-0000-4000-8000-000000000002";
@@ -15,6 +24,16 @@ describe("automation host schedule contract", () => {
     expect(automationHostSurfaceSchema.options).toEqual(["codex_desktop", "claude_code_routine"]);
     expect(automationHostSurfaceSchema.safeParse("claude_cowork").success).toBe(false);
     expect(automationHostSurfaceSchema.safeParse("codex_sdk").success).toBe(false);
+  });
+
+  it("preserves host and trigger correlation in exported types", () => {
+    expectTypeOf<
+      TriggerForHost<AutomationHostScheduleCreateInput, "codex_desktop">
+    >().toEqualTypeOf<{ type: "recurring"; expectedIntervalMinutes: number }>();
+    expectTypeOf<TriggerForHost<AutomationHostSchedule, "claude_code_routine">>().toEqualTypeOf<{
+      type: "event";
+      expectedMaximumLatencyMinutes: number;
+    }>();
   });
 
   it("binds a declaration to one connection and requires Finance maintenance authority", () => {

@@ -5,56 +5,59 @@ import { idSchema, isoDateTimeSchema } from "./common.js";
 export const automationHostSurfaceSchema = z.enum(["codex_desktop", "claude_code_routine"]);
 export type AutomationHostSurface = z.infer<typeof automationHostSurfaceSchema>;
 
+const recurringAutomationHostTriggerSchema = z
+  .object({
+    type: z.literal("recurring"),
+    expectedIntervalMinutes: z.int().min(1).max(10_080),
+  })
+  .strict();
+const eventAutomationHostTriggerSchema = z
+  .object({
+    type: z.literal("event"),
+    expectedMaximumLatencyMinutes: z.int().min(1).max(60),
+  })
+  .strict();
+
 export const automationHostTriggerSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.literal("recurring"),
-      expectedIntervalMinutes: z.int().min(1).max(10_080),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("event"),
-      expectedMaximumLatencyMinutes: z.int().min(1).max(60),
-    })
-    .strict(),
+  recurringAutomationHostTriggerSchema,
+  eventAutomationHostTriggerSchema,
 ]);
 export type AutomationHostTrigger = z.infer<typeof automationHostTriggerSchema>;
 
+const automationHostScheduleCommonFields = {
+  connectionId: idSchema,
+  hostAutomationId: z.string().trim().min(1).max(240).nullable().default(null),
+  label: z.string().trim().min(1).max(100),
+  scopes: z
+    .array(accessScopeSchema)
+    .min(1)
+    .max(accessScopeSchema.options.length)
+    .transform((values) => [...new Set(values)]),
+};
+
 const automationHostScheduleFieldsSchema = z
-  .object({
-    connectionId: idSchema,
-    hostSurface: automationHostSurfaceSchema,
-    hostAutomationId: z.string().trim().min(1).max(240).nullable().default(null),
-    label: z.string().trim().min(1).max(100),
-    scopes: z
-      .array(accessScopeSchema)
-      .min(1)
-      .max(accessScopeSchema.options.length)
-      .transform((values) => [...new Set(values)]),
-    trigger: automationHostTriggerSchema,
-  })
-  .strict()
+  .discriminatedUnion("hostSurface", [
+    z
+      .object({
+        ...automationHostScheduleCommonFields,
+        hostSurface: z.literal("codex_desktop"),
+        trigger: recurringAutomationHostTriggerSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...automationHostScheduleCommonFields,
+        hostSurface: z.literal("claude_code_routine"),
+        trigger: eventAutomationHostTriggerSchema,
+      })
+      .strict(),
+  ])
   .superRefine((input, context) => {
     if (!input.scopes.includes("finances:maintain")) {
       context.addIssue({
         code: "custom",
         message: "A Finance automation schedule requires finances:maintain authority.",
         path: ["scopes"],
-      });
-    }
-    if (input.hostSurface === "codex_desktop" && input.trigger.type !== "recurring") {
-      context.addIssue({
-        code: "custom",
-        message: "The selected Codex desktop surface uses a host-owned recurring follow-up.",
-        path: ["trigger"],
-      });
-    }
-    if (input.hostSurface === "claude_code_routine" && input.trigger.type !== "event") {
-      context.addIssue({
-        code: "custom",
-        message: "The selected Claude Code routine surface uses its API event trigger.",
-        path: ["trigger"],
       });
     }
   });

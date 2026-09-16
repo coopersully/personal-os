@@ -136,12 +136,30 @@ does not certify another. Channels and session-scoped loops also require a runni
 do not satisfy continuation after the original process ends.
 
 The domain contract currently recognizes only `codex_desktop` with a recurring trigger and
-`claude_code_routine` with an event trigger. It validates a connection-bound declaration,
-`finances:maintain` authority, immutable local identity boundaries, and observational health.
-Persistence, API/client/MCP registration, setup UI, maintenance-input schedule identity, Texting's
-accepted-reply event, encrypted trigger credentials, dispatch/outbox behavior, and production proof
-are not implemented by that contract. Until those dependencies land, runtime dispatch remains
-disabled and health metadata must never originate, pause, repair, or reschedule host work.
+`claude_code_routine` with an event trigger. A create declaration carries a stable, nohmi-owned
+tenant authorization-connection ID and requested scopes. That ID must resolve to durable tenant
+authorization state; it is not an OAuth access-token row, refreshed credential record, or external
+`mcp_client_*` identifier. The schema checks only the shape of the ID and request. Before any record
+is stored, the future application boundary must authenticate the caller, resolve tenant ownership,
+and derive `effectiveScopes` as the permitted subset of the current connection or principal. A
+caller-supplied `finances:maintain` request is never proof of authority.
+
+Stored declarations keep only those server-resolved effective scopes and start in
+`setup_pending`. Host setup binds the host automation identity exactly once through an atomic
+version- and state-guarded null-to-value transition. Generic updates cannot replace that identity
+or change authority; replacement host routines require a new local schedule. Active, paused, and
+revoked declarations therefore always retain a non-null host target. Recurring declarations also
+persist their timezone-aware recurrence basis and the host's next expected schedule slot. Health is
+evaluated against that slot, including before the first observed invocation, rather than shifting
+the schedule from a late observation. Advancing a slot remains a future persistence concern and
+must use host schedule evidence so local-time behavior remains honest across daylight-saving
+changes.
+
+Persistence, authorization-connection ownership resolution, API/client/MCP registration, setup
+UI, maintenance-input schedule identity, Texting's accepted-reply event, encrypted trigger
+credentials, dispatch/outbox behavior, schedule-slot advancement, and production proof are not
+implemented by this contract. Until those dependencies land, runtime dispatch remains disabled and
+health metadata must never originate, pause, repair, or reschedule host work.
 
 ## Finance host repair after the maintenance cutover
 

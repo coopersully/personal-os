@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   type AutomationHostSchedule,
   type AutomationHostScheduleCreateInput,
+  automationHostScheduleBindInputSchema,
   automationHostScheduleCreateInputSchema,
   automationHostScheduleSchema,
   automationHostScheduleUpdateInputSchema,
@@ -17,7 +18,16 @@ type TriggerForHost<Schedule, Host> = Schedule extends {
   : never;
 
 const scheduleId = "00000000-0000-4000-8000-000000000001";
-const connectionId = "00000000-0000-4000-8000-000000000002";
+const tenantAuthorizationConnectionId = "00000000-0000-4000-8000-000000000002";
+
+const recurringTrigger = {
+  type: "recurring" as const,
+  recurrence: {
+    type: "interval" as const,
+    everyMinutes: 2,
+    timeZone: "America/New_York",
+  },
+};
 
 describe("automation host schedule contract", () => {
   it("accepts only the two H0-selected host surfaces", () => {
@@ -26,66 +36,179 @@ describe("automation host schedule contract", () => {
     expect(automationHostSurfaceSchema.safeParse("codex_sdk").success).toBe(false);
   });
 
-  it("preserves host and trigger correlation in exported types", () => {
+  it("preserves host, trigger and bound identity correlation in exported types", () => {
     expectTypeOf<
       TriggerForHost<AutomationHostScheduleCreateInput, "codex_desktop">
-    >().toEqualTypeOf<{ type: "recurring"; expectedIntervalMinutes: number }>();
+    >().toEqualTypeOf<{
+      type: "recurring";
+      recurrence: { type: "interval"; everyMinutes: number; timeZone: string };
+    }>();
     expectTypeOf<TriggerForHost<AutomationHostSchedule, "claude_code_routine">>().toEqualTypeOf<{
       type: "event";
       expectedMaximumLatencyMinutes: number;
     }>();
+    expectTypeOf<
+      Extract<
+        AutomationHostSchedule,
+        { hostSurface: "claude_code_routine"; state: "active" }
+      >["hostAutomationId"]
+    >().toEqualTypeOf<string>();
+    expectTypeOf<
+      Extract<AutomationHostSchedule, { state: "setup_pending" }>["hostAutomationId"]
+    >().toEqualTypeOf<null>();
   });
 
-  it("binds a declaration to one connection and requires Finance maintenance authority", () => {
+  it("treats requested scopes as a non-authoritative create request", () => {
     expect(
       automationHostScheduleCreateInputSchema.parse({
-        connectionId,
+        tenantAuthorizationConnectionId,
         hostSurface: "codex_desktop",
         label: "Finance follow-up",
-        scopes: ["finances:read", "finances:maintain", "finances:read"],
-        trigger: { type: "recurring", expectedIntervalMinutes: 2 },
+        requestedScopes: ["finances:read", "finances:maintain", "finances:read"],
+        trigger: recurringTrigger,
       }),
     ).toEqual({
-      connectionId,
-      hostAutomationId: null,
+      tenantAuthorizationConnectionId,
       hostSurface: "codex_desktop",
       label: "Finance follow-up",
-      scopes: ["finances:read", "finances:maintain"],
-      trigger: { type: "recurring", expectedIntervalMinutes: 2 },
+      requestedScopes: ["finances:read", "finances:maintain"],
+      trigger: recurringTrigger,
     });
-
     expect(
       automationHostScheduleCreateInputSchema.safeParse({
-        connectionId,
+        tenantAuthorizationConnectionId,
         hostSurface: "codex_desktop",
         label: "Read-only poll",
-        scopes: ["finances:read"],
-        trigger: { type: "recurring", expectedIntervalMinutes: 2 },
+        requestedScopes: ["finances:read"],
+        trigger: recurringTrigger,
       }).success,
     ).toBe(false);
     expect(
       automationHostScheduleCreateInputSchema.safeParse({
-        connectionId,
+        tenantAuthorizationConnectionId,
         hostSurface: "claude_code_routine",
         label: "Invalid scheduled routine",
-        scopes: ["finances:maintain"],
-        trigger: { type: "recurring", expectedIntervalMinutes: 60 },
+        requestedScopes: ["finances:maintain"],
+        trigger: recurringTrigger,
       }).success,
     ).toBe(false);
     expect(
       automationHostScheduleCreateInputSchema.safeParse({
-        connectionId,
+        tenantAuthorizationConnectionId,
         hostSurface: "claude_code_routine",
-        hostAutomationId: "routine-1",
         label: "Finance continuation",
-        scopes: ["finances:maintain"],
+        requestedScopes: ["finances:maintain"],
         trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
-        callbackUrl: "https://example.com/fire",
+        effectiveScopes: ["finances:maintain"],
       }).success,
     ).toBe(false);
   });
 
-  it("keeps local identity, connection, host and trigger out of schedule updates", () => {
+  it("rejects labels made only from default-ignorable code points", () => {
+    expect(
+      automationHostScheduleCreateInputSchema.safeParse({
+        tenantAuthorizationConnectionId,
+        hostSurface: "codex_desktop",
+        label: "\u200B\u200C\u2060",
+        requestedScopes: ["finances:maintain"],
+        trigger: recurringTrigger,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("stores only server-resolved effective authority on a durable tenant connection", () => {
+    expect(
+      automationHostScheduleSchema.parse({
+        id: scheduleId,
+        tenantAuthorizationConnectionId,
+        hostSurface: "claude_code_routine",
+        hostAutomationId: null,
+        label: "Finance continuation",
+        effectiveScopes: ["finances:read", "finances:maintain", "finances:read"],
+        trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
+        state: "setup_pending",
+        lastObservedAt: null,
+        nextExpectedAt: null,
+        version: 1,
+        createdAt: "2026-09-15T11:00:00.000Z",
+        updatedAt: "2026-09-15T11:00:00.000Z",
+      }),
+    ).toMatchObject({
+      tenantAuthorizationConnectionId,
+      effectiveScopes: ["finances:read", "finances:maintain"],
+      hostAutomationId: null,
+      state: "setup_pending",
+    });
+    expect(
+      automationHostScheduleSchema.safeParse({
+        id: scheduleId,
+        tenantAuthorizationConnectionId,
+        hostSurface: "claude_code_routine",
+        hostAutomationId: null,
+        label: "Finance continuation",
+        effectiveScopes: ["finances:maintain"],
+        trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
+        state: "active",
+        lastObservedAt: null,
+        nextExpectedAt: null,
+        version: 1,
+        createdAt: "2026-09-15T11:00:00.000Z",
+        updatedAt: "2026-09-15T11:00:00.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleSchema.safeParse({
+        id: scheduleId,
+        tenantAuthorizationConnectionId,
+        hostSurface: "claude_code_routine",
+        hostAutomationId: null,
+        label: "Finance continuation",
+        effectiveScopes: ["finances:read"],
+        trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
+        state: "setup_pending",
+        lastObservedAt: null,
+        nextExpectedAt: null,
+        version: 1,
+        createdAt: "2026-09-15T11:00:00.000Z",
+        updatedAt: "2026-09-15T11:00:00.000Z",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("defines a version-guarded one-time setup binding", () => {
+    expect(
+      automationHostScheduleBindInputSchema.parse({
+        expectedVersion: 1,
+        expectedState: "setup_pending",
+        hostSurface: "claude_code_routine",
+        hostAutomationId: "routine-1",
+      }),
+    ).toEqual({
+      expectedVersion: 1,
+      expectedState: "setup_pending",
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "routine-1",
+    });
+    expect(
+      automationHostScheduleBindInputSchema.parse({
+        expectedVersion: 1,
+        expectedState: "setup_pending",
+        hostSurface: "codex_desktop",
+        hostAutomationId: "automation-1",
+        nextExpectedAt: "2026-09-15T12:02:00.000Z",
+      }),
+    ).toMatchObject({ nextExpectedAt: "2026-09-15T12:02:00.000Z" });
+    expect(
+      automationHostScheduleBindInputSchema.safeParse({
+        expectedVersion: 1,
+        expectedState: "active",
+        hostSurface: "claude_code_routine",
+        hostAutomationId: "replacement-routine",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps identity and authority out of generic schedule updates", () => {
     expect(
       automationHostScheduleUpdateInputSchema.parse({
         expectedVersion: 3,
@@ -93,39 +216,35 @@ describe("automation host schedule contract", () => {
         state: "paused",
       }),
     ).toEqual({ expectedVersion: 3, label: "Paused Finance follow-up", state: "paused" });
-    expect(
-      automationHostScheduleUpdateInputSchema.safeParse({
-        expectedVersion: 3,
-        id: scheduleId,
-        state: "paused",
-      }).success,
-    ).toBe(false);
-    expect(
-      automationHostScheduleUpdateInputSchema.safeParse({
-        expectedVersion: 3,
-        scopes: ["finances:read"],
-      }).success,
-    ).toBe(false);
-    expect(
-      automationHostScheduleUpdateInputSchema.safeParse({
-        connectionId,
-        expectedVersion: 3,
-        state: "paused",
-      }).success,
-    ).toBe(false);
+    for (const forbiddenChange of [
+      { id: scheduleId },
+      { tenantAuthorizationConnectionId },
+      { requestedScopes: ["finances:maintain"] },
+      { effectiveScopes: ["finances:maintain"] },
+      { hostAutomationId: "replacement-routine" },
+    ]) {
+      expect(
+        automationHostScheduleUpdateInputSchema.safeParse({
+          expectedVersion: 3,
+          state: "paused",
+          ...forbiddenChange,
+        }).success,
+      ).toBe(false);
+    }
   });
 
-  it("reports observational health without starting or changing a host schedule", () => {
+  it("evaluates recurring health from the persisted host slot", () => {
     const active = automationHostScheduleSchema.parse({
       id: scheduleId,
-      connectionId,
+      tenantAuthorizationConnectionId,
       hostSurface: "codex_desktop",
-      hostAutomationId: null,
+      hostAutomationId: "automation-1",
       label: "Finance follow-up",
-      scopes: ["finances:maintain"],
-      trigger: { type: "recurring", expectedIntervalMinutes: 2 },
+      effectiveScopes: ["finances:maintain"],
+      trigger: recurringTrigger,
       state: "active",
-      lastObservedAt: "2026-09-15T12:00:00.000Z",
+      lastObservedAt: "2026-09-15T11:59:30.000Z",
+      nextExpectedAt: "2026-09-15T12:02:00.000Z",
       version: 1,
       createdAt: "2026-09-15T11:00:00.000Z",
       updatedAt: "2026-09-15T12:00:00.000Z",
@@ -134,46 +253,37 @@ describe("automation host schedule contract", () => {
       observeAutomationHostScheduleHealth(active, new Date("2026-09-15T12:01:59.000Z")),
     ).toEqual({
       state: "expected",
-      lastObservedAt: "2026-09-15T12:00:00.000Z",
+      lastObservedAt: "2026-09-15T11:59:30.000Z",
       nextExpectedAt: "2026-09-15T12:02:00.000Z",
       observedAt: "2026-09-15T12:01:59.000Z",
       repairOwner: null,
     });
     expect(
-      observeAutomationHostScheduleHealth(active, new Date("2026-09-15T12:02:01.000Z")),
+      observeAutomationHostScheduleHealth(
+        { ...active, lastObservedAt: null },
+        new Date("2026-09-15T12:02:01.000Z"),
+      ),
     ).toEqual({
       state: "overdue",
-      lastObservedAt: "2026-09-15T12:00:00.000Z",
+      lastObservedAt: null,
       nextExpectedAt: "2026-09-15T12:02:00.000Z",
       observedAt: "2026-09-15T12:02:01.000Z",
       repairOwner: "host",
     });
-
-    expect(
-      observeAutomationHostScheduleHealth(
-        { ...active, lastObservedAt: null },
-        new Date("2026-09-15T12:02:01.000Z"),
-      ).state,
-    ).toBe("unknown");
-    expect(
-      observeAutomationHostScheduleHealth(
-        { ...active, state: "paused" },
-        new Date("2026-09-15T12:02:01.000Z"),
-      ).state,
-    ).toBe("paused");
   });
 
   it("treats event-triggered health as observed rather than inventing a cadence", () => {
     const event = automationHostScheduleSchema.parse({
       id: scheduleId,
-      connectionId,
+      tenantAuthorizationConnectionId,
       hostSurface: "claude_code_routine",
       hostAutomationId: "routine-1",
       label: "Finance continuation",
-      scopes: ["finances:maintain"],
+      effectiveScopes: ["finances:maintain"],
       trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
       state: "active",
       lastObservedAt: "2026-09-15T12:00:00.000Z",
+      nextExpectedAt: null,
       version: 1,
       createdAt: "2026-09-15T11:00:00.000Z",
       updatedAt: "2026-09-15T12:00:00.000Z",

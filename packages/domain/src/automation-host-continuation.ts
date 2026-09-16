@@ -1,14 +1,45 @@
 import { z } from "zod";
 import { accessScopeSchema } from "./auth.js";
-import { idSchema, isoDateTimeSchema } from "./common.js";
+import { idSchema, isoDateTimeSchema, timeZoneSchema } from "./common.js";
 
 export const automationHostSurfaceSchema = z.enum(["codex_desktop", "claude_code_routine"]);
 export type AutomationHostSurface = z.infer<typeof automationHostSurfaceSchema>;
 
+const automationHostTimeZoneSchema = timeZoneSchema.refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Use a valid IANA timezone.");
+
+const automationHostLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .refine(
+    (value) => value.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim().length > 0,
+    "Label must contain visible characters.",
+  );
+
+const accessScopesSchema = z
+  .array(accessScopeSchema)
+  .min(1)
+  .max(accessScopeSchema.options.length)
+  .transform((values) => [...new Set(values)]);
+
 const recurringAutomationHostTriggerSchema = z
   .object({
     type: z.literal("recurring"),
-    expectedIntervalMinutes: z.int().min(1).max(10_080),
+    recurrence: z
+      .object({
+        type: z.literal("interval"),
+        everyMinutes: z.int().min(1).max(10_080),
+        timeZone: automationHostTimeZoneSchema,
+      })
+      .strict(),
   })
   .strict();
 const eventAutomationHostTriggerSchema = z
@@ -24,95 +55,181 @@ export const automationHostTriggerSchema = z.discriminatedUnion("type", [
 ]);
 export type AutomationHostTrigger = z.infer<typeof automationHostTriggerSchema>;
 
-const automationHostScheduleCommonFields = {
-  connectionId: idSchema,
-  hostAutomationId: z.string().trim().min(1).max(240).nullable().default(null),
-  label: z.string().trim().min(1).max(100),
-  scopes: z
-    .array(accessScopeSchema)
-    .min(1)
-    .max(accessScopeSchema.options.length)
-    .transform((values) => [...new Set(values)]),
+const automationHostScheduleCreateCommonFields = {
+  tenantAuthorizationConnectionId: idSchema,
+  label: automationHostLabelSchema,
+  requestedScopes: accessScopesSchema,
 };
 
-const automationHostScheduleFieldsSchema = z
+export const automationHostScheduleCreateInputSchema = z
   .discriminatedUnion("hostSurface", [
     z
       .object({
-        ...automationHostScheduleCommonFields,
+        ...automationHostScheduleCreateCommonFields,
         hostSurface: z.literal("codex_desktop"),
         trigger: recurringAutomationHostTriggerSchema,
       })
       .strict(),
     z
       .object({
-        ...automationHostScheduleCommonFields,
+        ...automationHostScheduleCreateCommonFields,
         hostSurface: z.literal("claude_code_routine"),
         trigger: eventAutomationHostTriggerSchema,
       })
       .strict(),
   ])
   .superRefine((input, context) => {
-    if (!input.scopes.includes("finances:maintain")) {
+    if (!input.requestedScopes.includes("finances:maintain")) {
       context.addIssue({
         code: "custom",
-        message: "A Finance automation schedule requires finances:maintain authority.",
-        path: ["scopes"],
+        message: "A Finance automation schedule must request finances:maintain authority.",
+        path: ["requestedScopes"],
       });
     }
   });
-
-export const automationHostScheduleCreateInputSchema = automationHostScheduleFieldsSchema;
 export type AutomationHostScheduleCreateInput = z.infer<
   typeof automationHostScheduleCreateInputSchema
 >;
 
-export const automationHostScheduleStateSchema = z.enum(["active", "paused", "revoked"]);
+export const automationHostScheduleStateSchema = z.enum([
+  "setup_pending",
+  "active",
+  "paused",
+  "revoked",
+]);
 export type AutomationHostScheduleState = z.infer<typeof automationHostScheduleStateSchema>;
 
-export const automationHostScheduleSchema = automationHostScheduleFieldsSchema.and(
+const boundAutomationHostScheduleStateSchema = z.enum(["active", "paused", "revoked"]);
+const hostAutomationIdSchema = z.string().trim().min(1).max(240);
+const automationHostScheduleStoredCommonFields = {
+  id: idSchema,
+  tenantAuthorizationConnectionId: idSchema,
+  label: automationHostLabelSchema,
+  effectiveScopes: accessScopesSchema,
+  lastObservedAt: isoDateTimeSchema.nullable(),
+  version: z.int().positive(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+};
+const codexBoundScheduleFields = {
+  ...automationHostScheduleStoredCommonFields,
+  hostSurface: z.literal("codex_desktop"),
+  hostAutomationId: hostAutomationIdSchema,
+  trigger: recurringAutomationHostTriggerSchema,
+  nextExpectedAt: isoDateTimeSchema,
+};
+const claudeBoundScheduleFields = {
+  ...automationHostScheduleStoredCommonFields,
+  hostSurface: z.literal("claude_code_routine"),
+  hostAutomationId: hostAutomationIdSchema,
+  trigger: eventAutomationHostTriggerSchema,
+  nextExpectedAt: z.null(),
+};
+
+export const automationHostScheduleSchema = z
+  .union([
+    z
+      .object({
+        ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("codex_desktop"),
+        hostAutomationId: z.null(),
+        trigger: recurringAutomationHostTriggerSchema,
+        state: z.literal("setup_pending"),
+        nextExpectedAt: z.null(),
+      })
+      .strict(),
+    z
+      .object({
+        ...codexBoundScheduleFields,
+        state: z.literal("active"),
+      })
+      .strict(),
+    z
+      .object({
+        ...codexBoundScheduleFields,
+        state: z.literal("paused"),
+      })
+      .strict(),
+    z
+      .object({
+        ...codexBoundScheduleFields,
+        state: z.literal("revoked"),
+      })
+      .strict(),
+    z
+      .object({
+        ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("claude_code_routine"),
+        hostAutomationId: z.null(),
+        trigger: eventAutomationHostTriggerSchema,
+        state: z.literal("setup_pending"),
+        nextExpectedAt: z.null(),
+      })
+      .strict(),
+    z
+      .object({
+        ...claudeBoundScheduleFields,
+        state: z.literal("active"),
+      })
+      .strict(),
+    z
+      .object({
+        ...claudeBoundScheduleFields,
+        state: z.literal("paused"),
+      })
+      .strict(),
+    z
+      .object({
+        ...claudeBoundScheduleFields,
+        state: z.literal("revoked"),
+      })
+      .strict(),
+  ])
+  .superRefine((input, context) => {
+    if (!input.effectiveScopes.includes("finances:maintain")) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "A stored Finance automation schedule requires effective finances:maintain authority.",
+        path: ["effectiveScopes"],
+      });
+    }
+  });
+export type AutomationHostSchedule = z.infer<typeof automationHostScheduleSchema>;
+
+const automationHostScheduleBindCommonFields = {
+  expectedVersion: z.int().positive(),
+  expectedState: z.literal("setup_pending"),
+  hostAutomationId: hostAutomationIdSchema,
+};
+
+export const automationHostScheduleBindInputSchema = z.discriminatedUnion("hostSurface", [
   z
     .object({
-      id: idSchema,
-      state: automationHostScheduleStateSchema,
-      lastObservedAt: isoDateTimeSchema.nullable(),
-      version: z.int().positive(),
-      createdAt: isoDateTimeSchema,
-      updatedAt: isoDateTimeSchema,
+      ...automationHostScheduleBindCommonFields,
+      hostSurface: z.literal("codex_desktop"),
+      nextExpectedAt: isoDateTimeSchema,
     })
     .strict(),
-);
-export type AutomationHostSchedule = z.infer<typeof automationHostScheduleSchema>;
+  z
+    .object({
+      ...automationHostScheduleBindCommonFields,
+      hostSurface: z.literal("claude_code_routine"),
+    })
+    .strict(),
+]);
+export type AutomationHostScheduleBindInput = z.infer<typeof automationHostScheduleBindInputSchema>;
 
 export const automationHostScheduleUpdateInputSchema = z
   .object({
     expectedVersion: z.int().positive(),
-    hostAutomationId: z.string().trim().min(1).max(240).nullable().optional(),
-    label: z.string().trim().min(1).max(100).optional(),
-    scopes: z
-      .array(accessScopeSchema)
-      .min(1)
-      .max(accessScopeSchema.options.length)
-      .transform((values) => [...new Set(values)])
-      .optional(),
-    state: automationHostScheduleStateSchema.optional(),
+    label: automationHostLabelSchema.optional(),
+    state: boundAutomationHostScheduleStateSchema.optional(),
   })
   .strict()
   .superRefine((input, context) => {
-    if (
-      input.hostAutomationId === undefined &&
-      input.label === undefined &&
-      input.scopes === undefined &&
-      input.state === undefined
-    ) {
+    if (input.label === undefined && input.state === undefined) {
       context.addIssue({ code: "custom", message: "Provide at least one schedule change." });
-    }
-    if (input.scopes !== undefined && !input.scopes.includes("finances:maintain")) {
-      context.addIssue({
-        code: "custom",
-        message: "A Finance automation schedule requires finances:maintain authority.",
-        path: ["scopes"],
-      });
     }
   });
 export type AutomationHostScheduleUpdateInput = z.infer<
@@ -120,7 +237,15 @@ export type AutomationHostScheduleUpdateInput = z.infer<
 >;
 
 export const automationHostScheduleHealthSchema = z.object({
-  state: z.enum(["unknown", "observed", "expected", "overdue", "paused", "revoked"]),
+  state: z.enum([
+    "setup_pending",
+    "unknown",
+    "observed",
+    "expected",
+    "overdue",
+    "paused",
+    "revoked",
+  ]),
   lastObservedAt: isoDateTimeSchema.nullable(),
   nextExpectedAt: isoDateTimeSchema.nullable(),
   observedAt: isoDateTimeSchema,
@@ -135,6 +260,15 @@ export function observeAutomationHostScheduleHealth(
 ): AutomationHostScheduleHealth {
   const schedule = automationHostScheduleSchema.parse(rawSchedule);
   const observedAt = now.toISOString();
+  if (schedule.state === "setup_pending") {
+    return automationHostScheduleHealthSchema.parse({
+      state: "setup_pending",
+      lastObservedAt: schedule.lastObservedAt,
+      nextExpectedAt: null,
+      observedAt,
+      repairOwner: null,
+    });
+  }
   if (schedule.state !== "active") {
     return automationHostScheduleHealthSchema.parse({
       state: schedule.state,
@@ -144,32 +278,23 @@ export function observeAutomationHostScheduleHealth(
       repairOwner: schedule.state === "revoked" ? "host" : null,
     });
   }
-  if (schedule.lastObservedAt === null) {
-    return automationHostScheduleHealthSchema.parse({
-      state: "unknown",
-      lastObservedAt: null,
-      nextExpectedAt: null,
-      observedAt,
-      repairOwner: "host",
-    });
-  }
   if (schedule.trigger.type === "event") {
     return automationHostScheduleHealthSchema.parse({
-      state: "observed",
+      state: schedule.lastObservedAt === null ? "unknown" : "observed",
       lastObservedAt: schedule.lastObservedAt,
       nextExpectedAt: null,
       observedAt,
-      repairOwner: null,
+      repairOwner: schedule.lastObservedAt === null ? "host" : null,
     });
   }
-  const nextExpectedAt = new Date(
-    new Date(schedule.lastObservedAt).getTime() + schedule.trigger.expectedIntervalMinutes * 60_000,
-  ).toISOString();
-  const overdue = now.getTime() > new Date(nextExpectedAt).getTime();
+  if (schedule.nextExpectedAt === null) {
+    throw new Error("A bound recurring schedule requires its next expected host slot.");
+  }
+  const overdue = now.getTime() > new Date(schedule.nextExpectedAt).getTime();
   return automationHostScheduleHealthSchema.parse({
     state: overdue ? "overdue" : "expected",
     lastObservedAt: schedule.lastObservedAt,
-    nextExpectedAt,
+    nextExpectedAt: schedule.nextExpectedAt,
     observedAt,
     repairOwner: overdue ? "host" : null,
   });

@@ -9,12 +9,27 @@ export const financeRevisionRefSchema = z
   .strict();
 export type FinanceRevisionRef = z.infer<typeof financeRevisionRefSchema>;
 
+/** Public evidence classifications only; never provider messages or private source text. */
+export const financeMoneyFactReasonCodeSchema = z.enum([
+  "dependency_unavailable",
+  "source_unavailable",
+  "stale_evidence",
+  "incomplete_evidence",
+  "pending_transactions",
+  "unresolved_allocation",
+  "unresolved_reimbursement",
+  "missing_commitments",
+  "missing_protection_policy",
+  "unsupported_account_type",
+]);
+export type FinanceMoneyFactReasonCode = z.infer<typeof financeMoneyFactReasonCodeSchema>;
+
 export const financeMoneyFactSchema = z
   .object({
     cents: centsSchema.nullable(),
     currency: z.literal("USD"),
     quality: z.enum(["verified", "qualified", "unavailable"]),
-    reasons: z.array(z.string().trim().min(1).max(500)).max(20),
+    reasons: z.array(financeMoneyFactReasonCodeSchema).max(20),
     sources: z.array(financeRevisionRefSchema).max(100),
   })
   .strict();

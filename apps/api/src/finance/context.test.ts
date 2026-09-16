@@ -47,7 +47,7 @@ describe.sequential("trusted Finance mutation context", () => {
     await container.stop();
   });
 
-  it("allows a fully scoped bypass agent and preserves its identity", async () => {
+  it("allows scoped bookkeeping without conferring budget self-approval", async () => {
     const principal: Principal = {
       actorId: "finance-agent",
       actorType: "agent",
@@ -61,7 +61,7 @@ describe.sequential("trusted Finance mutation context", () => {
       actorType: "agent",
       bypassEnabled: true,
       canMutate: true,
-      canSelfApprove: true,
+      canSelfApprove: false,
       requestId: "request-1",
       userId,
     });

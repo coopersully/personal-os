@@ -33,7 +33,9 @@ export async function loadFinanceAuthorization(input: {
     actorType: input.principal.actorType,
     bypassEnabled,
     canMutate,
-    canSelfApprove: input.principal.actorType === "agent" && canMutate && bypassEnabled,
+    // Review bypass controls timing, not authority to activate a budget.
+    // Fail closed until the explicit Finance budget policy supplies that authority.
+    canSelfApprove: false,
     requestId: input.requestId,
     userId: input.principal.userId,
   };
@@ -49,7 +51,7 @@ export function requireFinanceMutation(
   if (options.approvalSource === "agent_self_approval" && !context.canSelfApprove) {
     throw new AppError(
       "forbidden",
-      "Agent self-approval requires Finance bypass mode and the finances:write scope.",
+      "Agent self-approval requires an explicit Finance budget activation policy.",
     );
   }
 }

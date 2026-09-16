@@ -165,9 +165,20 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       ]),
     );
 
+    await expect(
+      service.approveFinanceBudget(
+        {
+          approvalSource: "agent_self_approval",
+          budgetVersionId: proposed.data.id,
+          expectedVersion: proposed.data.version,
+          idempotencyKey: "approve-1-denied",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
     const active = await service.approveFinanceBudget(
       {
-        approvalSource: "agent_self_approval",
+        approvalSource: "user_instruction",
         budgetVersionId: proposed.data.id,
         expectedVersion: proposed.data.version,
         idempotencyKey: "approve-1",

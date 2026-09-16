@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   financeDomainOutcomeSchema,
+  financeMoneyFactReasonCodeSchema,
+  financeMoneyFactSchema,
   financeRevisionRefSchema,
   financeWorkflowPortManifest,
   financeWorkflowPortResultSchema,
@@ -27,11 +29,29 @@ describe("Finance workflow contracts", () => {
   });
 
   it("rejects tenant authority smuggled across a producer boundary", () => {
+    const reference = { id: "00000000-0000-4000-8000-000000000001", revision: "revision-1" };
+    expect(financeRevisionRefSchema.safeParse(reference).success).toBe(true);
     expect(
       financeRevisionRefSchema.safeParse({
-        id: "source-1",
-        revision: "revision-1",
+        ...reference,
         userId: "another-user",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts only canonical reason codes at the money evidence boundary", () => {
+    const fact = { cents: null, currency: "USD", quality: "unavailable", sources: [] };
+    for (const reason of financeMoneyFactReasonCodeSchema.options) {
+      expect(financeMoneyFactSchema.safeParse({ ...fact, reasons: [reason] }).success).toBe(true);
+    }
+    for (const reason of ["future_unknown_code", "Provider error: private account 123", ""]) {
+      expect(financeMoneyFactSchema.safeParse({ ...fact, reasons: [reason] }).success).toBe(false);
+    }
+    expect(
+      financeMoneyFactSchema.safeParse({
+        ...fact,
+        reasons: ["stale_evidence"],
+        providerText: "private",
       }).success,
     ).toBe(false);
   });
@@ -69,7 +89,11 @@ describe("Finance workflow contracts", () => {
     expect(
       resultSchema.safeParse({
         state: "available",
-        value: { id: "source-1", revision: "revision-1", userId: "other-user" },
+        value: {
+          id: "00000000-0000-4000-8000-000000000001",
+          revision: "revision-1",
+          userId: "other-user",
+        },
       }).success,
     ).toBe(false);
   });

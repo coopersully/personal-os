@@ -9,8 +9,8 @@ CREATE TABLE "execution_policy_settings" (
 --> statement-breakpoint
 ALTER TABLE "execution_policy_settings" ADD CONSTRAINT "execution_policy_settings_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
--- Preserve every previously granted Finance bypass during the hard cutover. If the two
--- legacy controls drifted, the safer compatibility rule is to retain an explicit grant.
+-- Enable only aligned explicit legacy grants. A missing setting means the legacy
+-- default OFF, and any true/false conflict resolves OFF at the global boundary.
 INSERT INTO "execution_policy_settings" (
 	"user_id",
 	"review_bypass_enabled",
@@ -20,7 +20,7 @@ INSERT INTO "execution_policy_settings" (
 )
 SELECT
 	"legacy"."user_id",
-	bool_or("legacy"."review_bypass_enabled"),
+	count(*) = 2 AND bool_and("legacy"."review_bypass_enabled"),
 	1,
 	min("legacy"."created_at"),
 	max("legacy"."updated_at")

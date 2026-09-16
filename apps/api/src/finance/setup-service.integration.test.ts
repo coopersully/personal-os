@@ -237,9 +237,22 @@ describe.sequential("guided Finance setup", () => {
     const profile = await planning.getFinancialProfile(userId);
     expect(profile.data).toMatchObject({ expectedMonthlyTakeHome: 8000, jurisdiction: "US-NY" });
 
+    await expect(
+      service.setupFinances(
+        {
+          approvalSource: "agent_self_approval",
+          budgetVersionId: response.data.budgetVersionId as string,
+          expectedVersion: response.data.version,
+          idempotencyKey: "setup-agent-denied",
+          operation: "approve_budget",
+          sessionId: response.data.sessionId,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
     const approved = await service.setupFinances(
       {
-        approvalSource: "agent_self_approval",
+        approvalSource: "user_instruction",
         budgetVersionId: response.data.budgetVersionId as string,
         expectedVersion: response.data.version,
         idempotencyKey: "setup-approve",

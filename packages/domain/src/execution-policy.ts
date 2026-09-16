@@ -108,7 +108,12 @@ export function evaluateExecutionPolicy(
   const bypassRegistered =
     action.domain === "finances" &&
     (executionPolicyBypassOperations.finances as readonly string[]).includes(action.operation);
-  if (settings.reviewBypassEnabled && bypassRegistered && action.effect === "reversible") {
+  if (
+    settings.reviewBypassEnabled &&
+    action.authority === "policy_authorized" &&
+    bypassRegistered &&
+    action.effect === "reversible"
+  ) {
     return { state: "execute", reasonCode: "registered_bypass" };
   }
   return { state: "queue_review", reasonCode: "review_required" };

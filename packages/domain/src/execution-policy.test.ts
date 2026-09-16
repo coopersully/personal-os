@@ -12,6 +12,19 @@ const financeAction: ExecutionPolicyAction = {
 };
 
 describe("global execution policy", () => {
+  it("requires affirmative policy authority for effects, even with a registered bypass", () => {
+    expect(evaluateExecutionPolicy(settings, { ...financeAction, authority: "read_only" })).toEqual(
+      { state: "queue_review", reasonCode: "review_required" },
+    );
+    expect(
+      evaluateExecutionPolicy(settings, {
+        ...financeAction,
+        authority: "read_only",
+        effect: "none",
+      }),
+    ).toEqual({ state: "execute", reasonCode: "read_only" });
+  });
+
   it("enables bypass only for a registered reversible Finance action", () => {
     expect(evaluateExecutionPolicy(settings, financeAction)).toEqual({
       state: "execute",

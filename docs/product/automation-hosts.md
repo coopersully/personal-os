@@ -146,8 +146,13 @@ caller-supplied `finances:maintain` request is never proof of authority.
 
 Stored declarations keep only those server-resolved effective scopes and start in
 `setup_pending`. Host setup binds the host automation identity exactly once through an atomic
-version- and state-guarded null-to-value transition. Generic updates cannot replace that identity
-or change authority; replacement host routines require a new local schedule. Active, paused, and
+version- and state-guarded null-to-value transition. Generic updates can change only the label; they
+cannot replace identity, change authority, or assign host state. Active and paused state comes only
+from verified host setup or observation evidence. A recurring pause clears the expected host slot,
+and a later observed resume must atomically persist a fresh `nextExpectedAt`, so stale pre-pause
+slots cannot report an immediate false overdue state. Revocation is a separate version- and
+prior-state-guarded local operation. It is terminal for that declaration, carries no host repair
+owner, and requires a new declaration and setup to replace the host routine. Active, paused, and
 revoked declarations therefore always retain a non-null host target. Recurring declarations also
 persist their timezone-aware recurrence basis and the host's next expected schedule slot. Health is
 evaluated against that slot, including before the first observed invocation, rather than shifting

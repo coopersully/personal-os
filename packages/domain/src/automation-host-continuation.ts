@@ -99,7 +99,6 @@ export const automationHostScheduleStateSchema = z.enum([
 ]);
 export type AutomationHostScheduleState = z.infer<typeof automationHostScheduleStateSchema>;
 
-const boundAutomationHostScheduleStateSchema = z.enum(["active", "paused", "revoked"]);
 const hostAutomationIdSchema = z.string().trim().min(1).max(240);
 const automationHostScheduleStoredCommonFields = {
   id: idSchema,
@@ -116,7 +115,6 @@ const codexBoundScheduleFields = {
   hostSurface: z.literal("codex_desktop"),
   hostAutomationId: hostAutomationIdSchema,
   trigger: recurringAutomationHostTriggerSchema,
-  nextExpectedAt: isoDateTimeSchema,
 };
 const claudeBoundScheduleFields = {
   ...automationHostScheduleStoredCommonFields,
@@ -142,18 +140,21 @@ export const automationHostScheduleSchema = z
       .object({
         ...codexBoundScheduleFields,
         state: z.literal("active"),
+        nextExpectedAt: isoDateTimeSchema,
       })
       .strict(),
     z
       .object({
         ...codexBoundScheduleFields,
         state: z.literal("paused"),
+        nextExpectedAt: z.null(),
       })
       .strict(),
     z
       .object({
         ...codexBoundScheduleFields,
         state: z.literal("revoked"),
+        nextExpectedAt: z.null(),
       })
       .strict(),
     z
@@ -224,16 +225,67 @@ export const automationHostScheduleUpdateInputSchema = z
   .object({
     expectedVersion: z.int().positive(),
     label: automationHostLabelSchema.optional(),
-    state: boundAutomationHostScheduleStateSchema.optional(),
   })
   .strict()
   .superRefine((input, context) => {
-    if (input.label === undefined && input.state === undefined) {
+    if (input.label === undefined) {
       context.addIssue({ code: "custom", message: "Provide at least one schedule change." });
     }
   });
 export type AutomationHostScheduleUpdateInput = z.infer<
   typeof automationHostScheduleUpdateInputSchema
+>;
+
+export const automationHostScheduleRevokeInputSchema = z
+  .object({
+    expectedVersion: z.int().positive(),
+    expectedState: z.enum(["active", "paused"]),
+  })
+  .strict();
+export type AutomationHostScheduleRevokeInput = z.infer<
+  typeof automationHostScheduleRevokeInputSchema
+>;
+
+const automationHostScheduleObservationCommonFields = {
+  expectedVersion: z.int().positive(),
+  expectedState: z.enum(["active", "paused"]),
+  observedAt: isoDateTimeSchema,
+};
+
+export const automationHostScheduleObservationInputSchema = z.union([
+  z
+    .object({
+      ...automationHostScheduleObservationCommonFields,
+      hostSurface: z.literal("codex_desktop"),
+      observedState: z.literal("active"),
+      nextExpectedAt: isoDateTimeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...automationHostScheduleObservationCommonFields,
+      hostSurface: z.literal("codex_desktop"),
+      observedState: z.literal("paused"),
+      nextExpectedAt: z.null().default(null),
+    })
+    .strict(),
+  z
+    .object({
+      ...automationHostScheduleObservationCommonFields,
+      hostSurface: z.literal("claude_code_routine"),
+      observedState: z.literal("active"),
+    })
+    .strict(),
+  z
+    .object({
+      ...automationHostScheduleObservationCommonFields,
+      hostSurface: z.literal("claude_code_routine"),
+      observedState: z.literal("paused"),
+    })
+    .strict(),
+]);
+export type AutomationHostScheduleObservationInput = z.infer<
+  typeof automationHostScheduleObservationInputSchema
 >;
 
 export const automationHostScheduleHealthSchema = z.object({
@@ -275,7 +327,7 @@ export function observeAutomationHostScheduleHealth(
       lastObservedAt: schedule.lastObservedAt,
       nextExpectedAt: null,
       observedAt,
-      repairOwner: schedule.state === "revoked" ? "host" : null,
+      repairOwner: null,
     });
   }
   if (schedule.trigger.type === "event") {

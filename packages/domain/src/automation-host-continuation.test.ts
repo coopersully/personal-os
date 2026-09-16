@@ -4,6 +4,8 @@ import {
   type AutomationHostScheduleCreateInput,
   automationHostScheduleBindInputSchema,
   automationHostScheduleCreateInputSchema,
+  automationHostScheduleObservationInputSchema,
+  automationHostScheduleRevokeInputSchema,
   automationHostScheduleSchema,
   automationHostScheduleUpdateInputSchema,
   automationHostSurfaceSchema,
@@ -213,24 +215,93 @@ describe("automation host schedule contract", () => {
       automationHostScheduleUpdateInputSchema.parse({
         expectedVersion: 3,
         label: "Paused Finance follow-up",
-        state: "paused",
       }),
-    ).toEqual({ expectedVersion: 3, label: "Paused Finance follow-up", state: "paused" });
+    ).toEqual({ expectedVersion: 3, label: "Paused Finance follow-up" });
     for (const forbiddenChange of [
       { id: scheduleId },
       { tenantAuthorizationConnectionId },
       { requestedScopes: ["finances:maintain"] },
       { effectiveScopes: ["finances:maintain"] },
       { hostAutomationId: "replacement-routine" },
+      { state: "active" },
+      { state: "paused" },
+      { state: "revoked" },
     ]) {
       expect(
         automationHostScheduleUpdateInputSchema.safeParse({
           expectedVersion: 3,
-          state: "paused",
+          label: "Finance follow-up",
           ...forbiddenChange,
         }).success,
       ).toBe(false);
     }
+  });
+
+  it("keeps revocation terminal and host state changes evidence-owned", () => {
+    expect(
+      automationHostScheduleRevokeInputSchema.parse({
+        expectedVersion: 3,
+        expectedState: "paused",
+      }),
+    ).toEqual({ expectedVersion: 3, expectedState: "paused" });
+    expect(
+      automationHostScheduleRevokeInputSchema.safeParse({
+        expectedVersion: 4,
+        expectedState: "revoked",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleObservationInputSchema.safeParse({
+        expectedVersion: 4,
+        expectedState: "revoked",
+        hostSurface: "claude_code_routine",
+        observedState: "active",
+        observedAt: "2026-09-15T12:10:00.000Z",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a fresh recurring host slot when observation resumes a paused schedule", () => {
+    expect(
+      automationHostScheduleObservationInputSchema.parse({
+        expectedVersion: 3,
+        expectedState: "paused",
+        hostSurface: "codex_desktop",
+        observedState: "active",
+        observedAt: "2026-09-15T12:10:00.000Z",
+        nextExpectedAt: "2026-09-15T12:12:00.000Z",
+      }),
+    ).toMatchObject({
+      expectedState: "paused",
+      observedState: "active",
+      nextExpectedAt: "2026-09-15T12:12:00.000Z",
+    });
+    expect(
+      automationHostScheduleObservationInputSchema.safeParse({
+        expectedVersion: 3,
+        expectedState: "paused",
+        hostSurface: "codex_desktop",
+        observedState: "active",
+        observedAt: "2026-09-15T12:10:00.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleSchema.safeParse({
+        id: scheduleId,
+        tenantAuthorizationConnectionId,
+        hostSurface: "codex_desktop",
+        hostAutomationId: "automation-1",
+        label: "Finance follow-up",
+        effectiveScopes: ["finances:maintain"],
+        trigger: recurringTrigger,
+        state: "paused",
+        lastObservedAt: "2026-09-15T12:00:00.000Z",
+        nextExpectedAt: "2026-09-15T12:02:00.000Z",
+        version: 3,
+        createdAt: "2026-09-15T11:00:00.000Z",
+        updatedAt: "2026-09-15T12:10:00.000Z",
+      }).success,
+    ).toBe(false);
   });
 
   it("evaluates recurring health from the persisted host slot", () => {
@@ -297,5 +368,26 @@ describe("automation host schedule contract", () => {
       observedAt: "2026-09-16T12:00:00.000Z",
       repairOwner: null,
     });
+  });
+
+  it("treats revocation as terminal without assigning host repair", () => {
+    const revoked = automationHostScheduleSchema.parse({
+      id: scheduleId,
+      tenantAuthorizationConnectionId,
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "routine-1",
+      label: "Finance continuation",
+      effectiveScopes: ["finances:maintain"],
+      trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
+      state: "revoked",
+      lastObservedAt: "2026-09-15T12:00:00.000Z",
+      nextExpectedAt: null,
+      version: 4,
+      createdAt: "2026-09-15T11:00:00.000Z",
+      updatedAt: "2026-09-15T12:10:00.000Z",
+    });
+    expect(
+      observeAutomationHostScheduleHealth(revoked, new Date("2026-09-15T12:11:00.000Z")),
+    ).toMatchObject({ state: "revoked", repairOwner: null });
   });
 });

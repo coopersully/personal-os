@@ -1,7 +1,7 @@
 # External automation hosts
 
-- Status: Target interoperability contract
-- Last verified against official platform documentation: 2026-09-11
+- Status: Target interoperability contract; H0 feasibility completed, launch proof still blocked
+- Last verified against official platform documentation: 2026-09-14
 
 ## Product decision
 
@@ -101,10 +101,11 @@ must never originate a new recurring maintenance invocation.
 ## Platform references
 
 - [ChatGPT scheduled tasks](https://learn.chatgpt.com/docs/automations)
-- [OpenAI Codex automations](https://developers.openai.com/codex/app/automations)
-- [OpenAI Codex MCP configuration](https://developers.openai.com/codex/mcp/)
+- [OpenAI Codex automations](https://learn.chatgpt.com/docs/automations?surface=app)
+- [OpenAI Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 - [Claude recurring tasks in Cowork](https://support.claude.com/en/articles/13854387-schedule-recurring-tasks-in-claude-cowork)
-- [Claude Code routines](https://claude.com/blog/introducing-routines-in-claude-code)
+- [Claude Code routines](https://code.claude.com/docs/en/routines)
+- [Claude Code routine trigger API](https://platform.claude.com/docs/en/api/claude-code/routines-fire)
 - [Gemini scheduled actions](https://support.google.com/gemini/answer/16316416?hl=en)
 - [Gemini CLI MCP servers](https://geminicli.com/docs/tools/mcp-server/)
 - [Gemini CLI headless automation](https://geminicli.com/docs/cli/tutorials/automation/)
@@ -112,6 +113,35 @@ must never originate a new recurring maintenance invocation.
 Platform behavior is an external boundary and must be reverified before nohmi advertises a setup
 flow as currently supported. A passing nohmi test cannot prove that a third-party plan, account,
 machine, connector, or scheduler is available to the person.
+
+## Finance H0 feasibility outcome
+
+Neither required host is launch-certified. Current official evidence establishes two bounded proof
+candidates, not the complete post-session SMS continuation journey:
+
+- **Codex local desktop app:** use a host-owned recurring follow-up while durable Finance work is
+  open. The app's machine/runtime availability, unattended nohmi permissions, schedule delay, idle
+  usage, late replies, and restart or sleep behavior still require measurement. Codex CLI, SDK, and
+  app-server support are separate developer surfaces and do not prove this app journey.
+- **Claude Code cloud routine:** use the supported per-routine API trigger to start a new cloud
+  session. The trigger has no idempotency key, so an ambiguous dispatch cannot be retried blindly;
+  nohmi must preserve an uncertain outcome for reconciliation even when domain effects themselves
+  are idempotent. Account entitlement, least-privilege connector access, latency, usage, revocation,
+  rate limits, and recovery still require a real bounded proof.
+
+Claude Cowork is excluded from the current Finance proof because its documented recurring cadence
+is hourly or slower and no arbitrary event trigger has been established for that product surface.
+Claude Code Desktop, CLI, Channels, and the Agent SDK remain different surfaces; evidence from one
+does not certify another. Channels and session-scoped loops also require a running session, so they
+do not satisfy continuation after the original process ends.
+
+The domain contract currently recognizes only `codex_desktop` with a recurring trigger and
+`claude_code_routine` with an event trigger. It validates a connection-bound declaration,
+`finances:maintain` authority, immutable local identity boundaries, and observational health.
+Persistence, API/client/MCP registration, setup UI, maintenance-input schedule identity, Texting's
+accepted-reply event, encrypted trigger credentials, dispatch/outbox behavior, and production proof
+are not implemented by that contract. Until those dependencies land, runtime dispatch remains
+disabled and health metadata must never originate, pause, repair, or reschedule host work.
 
 ## Finance host repair after the maintenance cutover
 

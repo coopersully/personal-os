@@ -1285,3 +1285,14 @@ describe("Finance section states", () => {
     budget.unmount();
   }, 10_000);
 });
+
+it("does not fall back from an exact legacy review to unrelated transactions", async () => {
+  api.getFinanceReviewQueue.mockResolvedValue([]);
+  renderPage("/finances/review/legacy?item=11111111-1111-4111-8111-111111111111");
+  expect(await screen.findByText("Requested review unavailable")).toBeInTheDocument();
+  expect(api.getFinanceReviewQueue).toHaveBeenCalledWith(
+    50,
+    "11111111-1111-4111-8111-111111111111",
+  );
+  expect(api.resolveFinanceReview).not.toHaveBeenCalled();
+});

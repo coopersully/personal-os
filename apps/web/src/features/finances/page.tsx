@@ -117,6 +117,7 @@ export function FinancesPage() {
   const transactionParams = new URLSearchParams(location.search);
   const transactionFilters = financeTransactionFilters(transactionParams);
   const linkedTransactionId = transactionParams.get("transactionId");
+  const linkedReviewId = transactionParams.get("item") ?? undefined;
   const queryClient = useQueryClient();
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
@@ -201,8 +202,8 @@ export function FinancesPage() {
   });
   const reviewQueue = useQuery({
     enabled: section === "review",
-    queryFn: () => api.getFinanceReviewQueue(),
-    queryKey: ["finance-review-queue"],
+    queryFn: () => api.getFinanceReviewQueue(50, linkedReviewId),
+    queryKey: ["finance-review-queue", linkedReviewId],
   });
   const [reviewOnly, setReviewOnly] = useState(true);
   const [institution, setInstitution] = useState("");
@@ -252,7 +253,9 @@ export function FinancesPage() {
   }>({ sortBy: "date", sortDirection: "desc" });
   const refresh = () =>
     queryClient.invalidateQueries({
-      predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
+      predicate: (query) =>
+        String(query.queryKey[0]).startsWith("finance-") ||
+        query.queryKey[0] === "agent-access-work-items",
     });
   const transactionList = useQuery({
     enabled: section === "transactions",
@@ -640,6 +643,14 @@ export function FinancesPage() {
                   }
                   onDefer={(id) => resolveReview.mutate({ action: "defer", id })}
                 />
+              ) : section === "review" && linkedReviewId !== undefined ? (
+                reviewQueue.isPending ? (
+                  <p role="status">Loading requested review…</p>
+                ) : reviewQueue.error ? null : (
+                  <EmptyState icon={<CircleCheckIcon />} title="Requested review unavailable">
+                    This item may have been resolved or may not belong to this account.
+                  </EmptyState>
+                )
               ) : visibleTransactions.length === 0 ? (
                 <EmptyState
                   icon={<CircleCheckIcon />}

@@ -112,22 +112,31 @@ export function FinanceReviewPage() {
   const result = inbox.data;
   const question = result?.communication.nextQuestion;
   const [searchParams, setSearchParams] = useSearchParams();
+  const requestedItem = searchParams.get("item");
+  const requestedQuestion = searchParams.get("question") ?? undefined;
+  const requestedApproval = searchParams.get("approval") ?? undefined;
   const review =
-    result?.data.find((item) => item.id === searchParams.get("item")) ??
-    result?.data.find((item) => item.id === question?.id) ??
-    (!question
-      ? result?.data.find(
-          (item) =>
-            item.resolution?.type === "clarify" || typeof item.evidence.clarification === "string",
-        )
-      : undefined);
+    requestedItem !== null
+      ? result?.data.find((item) => item.id === requestedItem)
+      : requestedQuestion !== undefined || requestedApproval !== undefined
+        ? undefined
+        : (result?.data.find((item) => item.id === question?.id) ??
+          (!question
+            ? result?.data.find(
+                (item) =>
+                  item.resolution?.type === "clarify" ||
+                  typeof item.evidence.clarification === "string",
+              )
+            : undefined));
   const [olderOpen, setOlderOpen] = useState(false);
+  const targetedAgentWork = requestedQuestion !== undefined || requestedApproval !== undefined;
   function acceptResponse(response: FinanceToolResult<FinanceInboxCase[]>) {
     queryClient.setQueryData(inboxKey, response);
     void queryClient.invalidateQueries({
       predicate: (query) =>
         typeof query.queryKey[0] === "string" &&
-        query.queryKey[0].startsWith("finance-") &&
+        (query.queryKey[0].startsWith("finance-") ||
+          query.queryKey[0] === "agent-access-work-items") &&
         query.queryKey[0] !== "finance-inbox",
     });
   }
@@ -178,24 +187,31 @@ export function FinanceReviewPage() {
           headline={result?.communication.headline ?? ""}
         />
       ) : null}
-      {result && !question && result.data.length === 0 ? (
+      {result &&
+      !question &&
+      result.data.length === 0 &&
+      requestedItem === null &&
+      !targetedAgentWork ? (
         <EmptyState icon={<CircleCheckIcon />} title="No open Inbox questions">
           {result.communication.headline}
         </EmptyState>
       ) : null}
-      {result && result.data.length > 0 && !review ? (
+      {result &&
+      !review &&
+      !targetedAgentWork &&
+      (requestedItem !== null || result.data.length > 0) ? (
         <Alert>
           <AlertTitle>Review question unavailable</AlertTitle>
           <AlertDescription>
-            The Inbox has work, but its current question and evidence could not be matched. Reload
-            to request the current state.
+            The requested item is no longer available. It may have been resolved or may not belong
+            to this account. Reload to request its current state.
           </AlertDescription>
           <Button onClick={() => void inbox.refetch()} variant="outline">
             Reload review
           </Button>
         </Alert>
       ) : null}
-      <Collapsible onOpenChange={setOlderOpen} open={olderOpen}>
+      <Collapsible onOpenChange={setOlderOpen} open={olderOpen || targetedAgentWork}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost">Older questions and approvals</Button>
         </CollapsibleTrigger>
@@ -203,7 +219,12 @@ export function FinanceReviewPage() {
           <Button asChild variant="outline" className="justify-self-start">
             <Link to="/finances/review/legacy">Earlier transaction reviews</Link>
           </Button>
-          {olderOpen ? <FinanceAgentReviewQueue /> : null}
+          {olderOpen || targetedAgentWork ? (
+            <FinanceAgentReviewQueue
+              questionId={requestedQuestion}
+              approvalId={requestedApproval}
+            />
+          ) : null}
         </CollapsibleContent>
       </Collapsible>
     </section>

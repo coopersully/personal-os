@@ -5735,7 +5735,7 @@ export function createFinanceService({
     async listTransactions(userId: string, query: TransactionListQuery) {
       return listTransactionsPage(userId, query);
     },
-    async listReviewQueue(userId: string, limit = 50): Promise<FinanceReviewCase[]> {
+    async listReviewQueue(userId: string, limit = 50, id?: string): Promise<FinanceReviewCase[]> {
       const categories = new Map((await existingCategories(userId)).map((item) => [item.id, item]));
       const reviews = await db
         .select()
@@ -5743,6 +5743,7 @@ export function createFinanceService({
         .where(
           and(
             eq(financeReviewCases.userId, userId),
+            id ? eq(financeReviewCases.id, id) : undefined,
             inArray(financeReviewCases.status, ["deferred", "open"]),
           ),
         )

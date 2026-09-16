@@ -549,6 +549,7 @@ export function registerFinanceRoutes({
       reviews: await finances.listReviewQueue(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+        idSchema.optional().parse(context.req.query("id")),
       ),
     }),
   );
@@ -604,6 +605,7 @@ export function registerFinanceRoutes({
       reviews: await requireActions().listReviews(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+        idSchema.optional().parse(context.req.query("id")),
       ),
     }),
   );
@@ -612,6 +614,7 @@ export function registerFinanceRoutes({
       questions: await requireActions().listQuestions(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+        idSchema.optional().parse(context.req.query("id")),
       ),
     }),
   );

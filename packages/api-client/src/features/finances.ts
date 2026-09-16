@@ -543,9 +543,9 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return response.budgets;
     },
-    async getFinanceReviewQueue(limit = 50): Promise<FinanceReviewCase[]> {
+    async getFinanceReviewQueue(limit = 50, id?: string): Promise<FinanceReviewCase[]> {
       const response = await request<{ reviews: FinanceReviewCase[] }>(
-        `/v1/finances/review?limit=${encodeURIComponent(limit)}`,
+        `/v1/finances/review?limit=${encodeURIComponent(limit)}${id === undefined ? "" : `&id=${encodeURIComponent(id)}`}`,
       );
       return response.reviews;
     },
@@ -792,15 +792,15 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return response.outcome;
     },
-    async listFinanceActionReviews(limit = 50): Promise<FinanceActionReview[]> {
+    async listFinanceActionReviews(limit = 50, id?: string): Promise<FinanceActionReview[]> {
       const response = await request<{ reviews: FinanceActionReview[] }>(
-        `/v1/finances/action-reviews?limit=${encodeURIComponent(limit)}`,
+        `/v1/finances/action-reviews?limit=${encodeURIComponent(limit)}${id === undefined ? "" : `&id=${encodeURIComponent(id)}`}`,
       );
       return response.reviews;
     },
-    async listFinanceQuestions(limit = 50): Promise<FinanceQuestion[]> {
+    async listFinanceQuestions(limit = 50, id?: string): Promise<FinanceQuestion[]> {
       const response = await request<{ questions: FinanceQuestion[] }>(
-        `/v1/finances/questions?limit=${encodeURIComponent(limit)}`,
+        `/v1/finances/questions?limit=${encodeURIComponent(limit)}${id === undefined ? "" : `&id=${encodeURIComponent(id)}`}`,
       );
       return response.questions;
     },

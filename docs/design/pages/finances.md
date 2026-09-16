@@ -75,7 +75,23 @@ those saved notes. A user may instead choose a category, link a related transact
 with a reason immediately using the same authenticated, idempotent answer API as MCP.
 Failed saves preserve input and the retry key; resolved cases disappear only after success.
 
-Legacy questions and approvals remain under the existing disclosure in Review.
+Legacy questions and approvals remain under the existing disclosure in Review. Unified Reviews
+projects each pending question/approval with its persisted action-review ID and each open/deferred
+case with its case ID. Canonical cases use `?item=`, earlier cases use the legacy review destination,
+and `?question=` or `?approval=` opens the exact corresponding work in the disclosure. Targeted
+reads apply ownership and identity before the list limit. A missing, resolved, or inaccessible
+item never substitutes another item; invalid IDs reject at the API boundary. Saved notes remain
+open work rather than completed operations.
+
+Finance accounts requiring renewed authorization also appear in Reviews, linking to their existing
+account row. Automatic retries and operator-only failures do not become user reconnect requests.
+The shared list retains redacted summaries; source evidence and mutation controls stay in Finance.
+Historical effects use the authoritative Finance evidence helper and its explicit manual repair.
+They remain visible even when a transaction no longer has `needsReview`. Identical repair actions
+for the same transaction set appear once; a note or unrelated edit cannot clear them. Only the
+helper's exact superseding evidence retires the repair. Operator-only changes retain their explicit
+operator repair label rather than offering an invented approval.
+If a Finance projection fails, available sibling work remains visible and affected counts are unknown.
 
 ## Financial setup contract
 

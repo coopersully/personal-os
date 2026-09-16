@@ -5,6 +5,8 @@ import {
   calendarAccounts,
   type Database,
   domainProfiles,
+  financeAccounts,
+  financeAgentActionReviews,
   financeReviewCases,
   mailRules,
   mailStewardshipQuestions,
@@ -24,12 +26,18 @@ import {
 import { and, eq, gt, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "./errors.js";
+import { readFinanceEffectWork } from "./finance/review-effect-projection.js";
 import type { Principal } from "./types.js";
 
 type SourceInput = { snapshotAt: Date; userId: string };
 type SourceReaders = {
   accounts: (input: SourceInput) => Promise<Array<typeof calendarAccounts.$inferSelect>>;
   attention: (input: SourceInput) => Promise<Array<typeof attentionItems.$inferSelect>>;
+  financeEffects: (input: SourceInput) => Promise<AgentAccessWorkItem[]>;
+  financeAccounts: (input: SourceInput) => Promise<Array<typeof financeAccounts.$inferSelect>>;
+  financeActions: (
+    input: SourceInput,
+  ) => Promise<Array<typeof financeAgentActionReviews.$inferSelect>>;
   financeReviews: (input: SourceInput) => Promise<Array<typeof financeReviewCases.$inferSelect>>;
   mailQuestions: (
     input: SourceInput,
@@ -43,6 +51,9 @@ type SourceKey = keyof SourceReaders;
 type SourceResult = {
   accounts: Awaited<ReturnType<SourceReaders["accounts"]>>;
   attention: Awaited<ReturnType<SourceReaders["attention"]>>;
+  financeEffects: Awaited<ReturnType<SourceReaders["financeEffects"]>>;
+  financeAccounts: Awaited<ReturnType<SourceReaders["financeAccounts"]>>;
+  financeActions: Awaited<ReturnType<SourceReaders["financeActions"]>>;
   financeReviews: Awaited<ReturnType<SourceReaders["financeReviews"]>>;
   mailQuestions: Awaited<ReturnType<SourceReaders["mailQuestions"]>>;
   mailRules: Awaited<ReturnType<SourceReaders["mailRules"]>>;
@@ -80,6 +91,9 @@ const sourceImpact: Record<
     domains: [...agentAccessDomains],
     kinds: ["attention"],
   },
+  financeEffects: { domains: ["finances"], kinds: ["review"] },
+  financeAccounts: { domains: ["finances"], kinds: ["review"] },
+  financeActions: { domains: ["finances"], kinds: ["review"] },
   financeReviews: { domains: ["finances"], kinds: ["review"] },
   mailQuestions: { domains: ["mail"], kinds: ["review"] },
   mailRules: { domains: ["mail"], kinds: ["review"] },
@@ -129,6 +143,32 @@ export function createAgentAccessWorkItemService({
             eq(attentionItems.userId, userId),
             eq(attentionItems.status, "open"),
             lte(attentionItems.updatedAt, snapshotAt),
+          ),
+        ),
+    financeEffects: (input) => readFinanceEffectWork(db, input),
+    financeAccounts: async ({ snapshotAt, userId }) =>
+      db
+        .select()
+        .from(financeAccounts)
+        .where(
+          and(
+            eq(financeAccounts.userId, userId),
+            or(
+              eq(financeAccounts.status, "needs_reauth"),
+              eq(financeAccounts.syncRecovery, "reconnect"),
+            ),
+            lte(financeAccounts.updatedAt, snapshotAt),
+          ),
+        ),
+    financeActions: async ({ snapshotAt, userId }) =>
+      db
+        .select()
+        .from(financeAgentActionReviews)
+        .where(
+          and(
+            eq(financeAgentActionReviews.userId, userId),
+            eq(financeAgentActionReviews.status, "pending"),
+            lte(financeAgentActionReviews.updatedAt, snapshotAt),
           ),
         ),
     financeReviews: async ({ snapshotAt, userId }) =>
@@ -444,18 +484,65 @@ function projectItems({
   }
 
   if (accessibleDomains.has("finances")) {
+    items.push(...(results.financeEffects ?? []));
     for (const review of results.financeReviews ?? []) {
       items.push({
-        action: { label: "Open Finance review", to: "/finances/review" },
+        action: {
+          label: "Open Finance review",
+          to: review.economicEventId
+            ? `/finances/review?item=${review.id}`
+            : `/finances/review/legacy?item=${review.id}`,
+        },
         actionAt: null,
         domain: "finances",
         id: `finance-review:${review.id}`,
         kind: "review",
         priority: "person_review",
         source: null,
-        summary: "A Finance decision needs signed-in judgment; nohmi will not guess.",
+        summary:
+          review.resolution?.type === "clarify" || typeof review.evidence.clarification === "string"
+            ? "A note is saved for maintenance. This Finance decision remains open."
+            : "A Finance decision needs signed-in judgment; nohmi will not guess.",
         title: "Review a Finance decision",
         updatedAt: review.updatedAt.toISOString(),
+      });
+    }
+    for (const review of results.financeActions ?? []) {
+      const question = review.actionKind === "question";
+      items.push({
+        action: {
+          label: question ? "Answer Finance question" : "Review Finance approval",
+          to: `/finances/review?${question ? "question" : "approval"}=${review.id}`,
+        },
+        actionAt: null,
+        domain: "finances",
+        id: `finance-action:${review.id}`,
+        kind: "review",
+        priority: "person_review",
+        source: null,
+        summary: question
+          ? "A Finance question needs your judgment. Open its current evidence before answering."
+          : "A proposed Finance change needs signed-in approval of its current evidence.",
+        title: question ? "Answer a Finance question" : "Approve a Finance change",
+        updatedAt: review.updatedAt.toISOString(),
+      });
+    }
+    for (const account of results.financeAccounts ?? []) {
+      items.push({
+        action: {
+          label: "Inspect Finance account",
+          to: `/finances/accounts#account-${account.id}`,
+        },
+        actionAt: null,
+        domain: "finances",
+        id: `finance-reconnect:${account.id}`,
+        kind: "review",
+        priority: "blocked",
+        source: null,
+        summary:
+          "This Finance source needs renewed authorization before synchronization can continue.",
+        title: "Reconnect a Finance account",
+        updatedAt: account.updatedAt.toISOString(),
       });
     }
     for (const profile of results.profiles ?? []) {

@@ -3388,13 +3388,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       }
       return { result: (await applyPrepared(prepared, context)) as T, status: "applied" };
     },
-    async listReviews(userId: string, limit = 50) {
+    async listReviews(userId: string, limit = 50, id?: string) {
       const rows = await db
         .select()
         .from(financeAgentActionReviews)
         .where(
           and(
             eq(financeAgentActionReviews.userId, userId),
+            id ? eq(financeAgentActionReviews.id, id) : undefined,
             ne(financeAgentActionReviews.actionKind, "question"),
           ),
         )
@@ -3402,13 +3403,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         .limit(limit);
       return rows.map(reviewFromRow);
     },
-    async listQuestions(userId: string, limit = 50) {
+    async listQuestions(userId: string, limit = 50, id?: string) {
       const rows = await db
         .select()
         .from(financeAgentActionReviews)
         .where(
           and(
             eq(financeAgentActionReviews.userId, userId),
+            id ? eq(financeAgentActionReviews.id, id) : undefined,
             eq(financeAgentActionReviews.actionKind, "question"),
             eq(financeAgentActionReviews.status, "pending"),
           ),

@@ -2,6 +2,20 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-16 — Exact Finance work in unified Reviews
+
+- Unified Reviews now includes pending Finance questions and approvals alongside open/deferred
+  cases, account authorization repairs, and unverified historical-effect repairs. Stable IDs reference the existing domain records;
+  no second work store or migration is introduced. Notes remain evidence on open cases.
+  Historical repairs reuse authoritative effect identity and repair actions, deduplicate identical
+  actions, and disappear only when the domain evidence helper confirms exact superseding evidence.
+- Case, question, and approval links select exact owned work. Existing bounded question, approval,
+  and earlier-review reads accept an optional validated ID before applying their limit. A stale or
+  inaccessible destination never falls back to another actionable record. Existing Finance action
+  handlers retain authority, evidence validation and idempotency behavior.
+- Prospective context, the F0b answer port, matching, User Knowledge, and Texting routing remain
+  later milestones. This change provides no production Finance or host-journey proof.
+
 ## 2026-09-15 — Canonical Finance maintenance lifecycle
 
 - The live maintenance intent now uses shared durable runs, staged candidates, complete evidence

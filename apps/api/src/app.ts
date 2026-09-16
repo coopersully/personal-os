@@ -48,6 +48,7 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import { createDesktopActivityService } from "./desktop-activity-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
@@ -398,6 +399,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const audit = createAuditService(dependencies.db);
+  const executionPolicy = createExecutionPolicyService({ db: dependencies.db, now });
   const mail = createMailService({
     db: dependencies.db,
     gateway: connectors.mailGateway,
@@ -1248,6 +1250,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     app,
     assistant,
     connectionGuide: agentConnectionGuide,
+    executionPolicy,
     mutationContext,
   });
 

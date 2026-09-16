@@ -364,7 +364,10 @@ function mockApi() {
       },
       suggestedWorkflows: [],
     })),
-    getFinanceAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: true })),
+    getExecutionPolicySettings: vi.fn(async () => ({
+      reviewBypassEnabled: true,
+      version: 1,
+    })),
     getFinanceStatus: vi.fn(async () => ({
       activeRun: null,
       domain: "finances",

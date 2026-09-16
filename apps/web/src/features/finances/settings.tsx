@@ -1,6 +1,5 @@
 import type {
   FinanceAccount,
-  FinanceAutomationSettings,
   FinanceGuidedSetupContext,
   FinanceProfile,
 } from "@personal-os/domain";
@@ -17,13 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Item,
@@ -34,7 +27,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Switch } from "@/components/ui/switch";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { FinanceProfileEditor } from "./profile-editor.js";
@@ -104,10 +96,6 @@ export function FinanceSettings() {
     queryFn: api.getFinanceGuidedSetup,
     queryKey: ["finance-guided-setup"],
   });
-  const automation = useQuery({
-    queryFn: api.getFinanceAutomationSettings,
-    queryKey: ["finance-automation-settings"],
-  });
   const agentProfile = useQuery({
     queryFn: () => api.getDomainProfile("finances"),
     queryKey: ["domain-profile", "finances"],
@@ -172,30 +160,6 @@ export function FinanceSettings() {
       ]);
     },
   });
-  const updateAutomation = useMutation<
-    FinanceAutomationSettings,
-    Error,
-    boolean,
-    { previous: FinanceAutomationSettings | undefined }
-  >({
-    mutationFn: (reviewBypassEnabled: boolean) =>
-      api.updateFinanceAutomationSettings({ reviewBypassEnabled }),
-    onError: (_error, _reviewBypassEnabled, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["finance-automation-settings"], context.previous);
-      }
-    },
-    onMutate: async (reviewBypassEnabled) => {
-      await queryClient.cancelQueries({ queryKey: ["finance-automation-settings"] });
-      const previous = queryClient.getQueryData<{ reviewBypassEnabled: boolean }>([
-        "finance-automation-settings",
-      ]);
-      queryClient.setQueryData(["finance-automation-settings"], { reviewBypassEnabled });
-      return { previous };
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["finance-automation-settings"] }),
-  });
-
   useEffect(() => {
     if (!financialProfile.data || formDirty) return;
     setForm(financeProfileForm(financialProfile.data));
@@ -204,13 +168,6 @@ export function FinanceSettings() {
   return (
     <div className="agent-access" id="guidance">
       <FinanceProfileEditor />
-      <FinanceAutomationPanel
-        enabled={automation.data?.reviewBypassEnabled ?? false}
-        error={automation.error ?? updateAutomation.error}
-        loading={automation.isPending}
-        onChange={(enabled) => updateAutomation.mutate(enabled)}
-        saving={updateAutomation.isPending}
-      />
       <FinanceAgentGuidancePanel
         activating={activate.isPending}
         activationEligible={
@@ -235,52 +192,6 @@ export function FinanceSettings() {
         saving={saveProfile.isPending}
       />
     </div>
-  );
-}
-
-function FinanceAutomationPanel({
-  enabled,
-  error,
-  loading,
-  onChange,
-  saving,
-}: {
-  enabled: boolean;
-  error: Error | null;
-  loading: boolean;
-  onChange: (enabled: boolean) => void;
-  saving: boolean;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Agent review</CardTitle>
-        <CardDescription>
-          This setting applies to Finance ledger changes from every connected agent.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {error ? <InlineError error={error} /> : null}
-        <Field data-disabled={loading || saving} orientation="horizontal">
-          <FieldContent>
-            <FieldLabel htmlFor="finance-review-bypass">
-              Let agents apply confident Finance changes
-            </FieldLabel>
-            <FieldDescription>
-              {enabled
-                ? "Confident changes apply immediately. Questions and ambiguous activity still come to Review."
-                : "Agents still do the work, but confident changes wait in Review."}
-            </FieldDescription>
-          </FieldContent>
-          <Switch
-            checked={enabled}
-            disabled={loading || saving}
-            id="finance-review-bypass"
-            onCheckedChange={onChange}
-          />
-        </Field>
-      </CardContent>
-    </Card>
   );
 }
 

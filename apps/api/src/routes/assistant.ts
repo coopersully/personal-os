@@ -9,6 +9,7 @@ import {
   featureAccessPolicies,
   financeGuidedPreferencesSchema,
   updateAttentionItemInputSchema,
+  updateExecutionPolicySettingsInputSchema,
   upsertDomainProfileInputSchema,
   upsertMailProfileInputSchema,
 } from "@personal-os/domain";
@@ -16,8 +17,9 @@ import type { Context, Hono } from "hono";
 import type { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import type { createAssistantService } from "../assistant-service.js";
 import { AppError } from "../errors.js";
+import type { createExecutionPolicyService } from "../execution-policy-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody } from "./support.js";
+import { parseBody, requireHuman } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -25,6 +27,7 @@ type AssistantRouteOptions = {
   connectionGuide: AgentConnectionGuide;
   app: Hono<AppEnv>;
   assistant: ReturnType<typeof createAssistantService>;
+  executionPolicy: ReturnType<typeof createExecutionPolicyService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
   workItems: ReturnType<typeof createAgentAccessWorkItemService>;
 };
@@ -33,9 +36,23 @@ export function registerAssistantRoutes({
   app,
   assistant,
   connectionGuide,
+  executionPolicy,
   mutationContext,
   workItems,
 }: AssistantRouteOptions) {
+  app.get("/v1/assistant/execution-policy", async (context) =>
+    context.json({
+      settings: await executionPolicy.get(context.get("principal").userId),
+    }),
+  );
+  app.patch("/v1/assistant/execution-policy", requireHuman, async (context) =>
+    context.json({
+      settings: await executionPolicy.update(
+        await parseBody(context, updateExecutionPolicySettingsInputSchema),
+        mutationContext(context),
+      ),
+    }),
+  );
   app.get("/v1/assistant/connection-guide", (context) => context.json({ guide: connectionGuide }));
   app.get("/v1/assistant/context", async (context) =>
     context.json({ context: await assistant.getContext(context.get("principal")) }),

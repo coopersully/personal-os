@@ -2277,6 +2277,7 @@ export const financeProviderItems = pgTable(
   ],
 );
 
+/** @deprecated Migration-only source retained for historical rows after the 0083 cutover. */
 export const financeAutomationSettings = pgTable("finance_automation_settings", {
   userId: uuid("user_id")
     .primaryKey()
@@ -2284,6 +2285,20 @@ export const financeAutomationSettings = pgTable("finance_automation_settings", 
   reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
   ...timestamps,
 });
+
+/** Account-wide review bypass; domains must still be registered by the execution-policy seam. */
+export const executionPolicySettings = pgTable(
+  "execution_policy_settings",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [check("execution_policy_settings_version_check", sql`${table.version} > 0`)],
+);
 
 export const financeAccounts = pgTable(
   "finance_accounts",
@@ -3162,7 +3177,7 @@ export const financeBudgets = pgTable(
   ],
 );
 
-/** Per-user controls for agent-initiated Finance mutations. */
+/** @deprecated Migration-only source retained for historical rows after the 0083 cutover. */
 export const financeAgentSettings = pgTable("finance_agent_settings", {
   userId: uuid("user_id")
     .primaryKey()

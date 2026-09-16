@@ -2,6 +2,21 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-15 — Finance workflow authority foundation
+
+- Published strict, versioned Finance workflow contracts for position evidence, human work,
+  outcomes, continuations, and the seven approved cross-domain ports. Only the existing canonical
+  Finance maintenance resume route is registered as available; every other port reports
+  `producer_not_registered` until its owning stream supplies a real implementation.
+- Replaced two drifting Finance review-bypass controls with one revisioned account execution
+  policy. Migration `0083` preserves any explicit legacy grant, and Settings is the sole editing
+  surface. Finance consumers read the global value; the former Finance endpoint and editor are
+  removed.
+- The shared evaluator permits direct execution only for exact registered, reversible Finance
+  operations that are already policy-authorized and within the caller's scopes. Missing
+  capabilities, missing information, blocked work, irreversible actions, and Mail, Calendar,
+  Reminders, Tasks, and Goals remain unavailable, blocked, or review-bound as appropriate.
+
 ## 2026-09-15 — Canonical Finance maintenance lifecycle
 
 - The live maintenance intent now uses shared durable runs, staged candidates, complete evidence

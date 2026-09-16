@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
-  financeAgentSettings,
+  executionPolicySettings,
   financeMaintenanceRuns,
   financeSetupSessions,
   migrateDatabase,
@@ -35,7 +35,7 @@ describe.sequential("guided Finance setup", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
-    await database.db.insert(financeAgentSettings).values({ reviewBypassEnabled: true, userId });
+    await database.db.insert(executionPolicySettings).values({ reviewBypassEnabled: true, userId });
   }, 120_000);
 
   afterAll(async () => {

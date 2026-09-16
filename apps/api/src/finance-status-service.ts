@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import {
   type Database,
   domainProfileApprovals,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
-  financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
   financeCategoryRules,
@@ -300,9 +300,9 @@ export function createFinanceStatusService({ db, now }: Options) {
           .orderBy(desc(financeBudgetPlans.updatedAt), desc(financeBudgetPlans.version))
           .limit(1);
         const [automationSettings] = await tx
-          .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-          .from(financeAutomationSettings)
-          .where(eq(financeAutomationSettings.userId, userId))
+          .select({ reviewBypassEnabled: executionPolicySettings.reviewBypassEnabled })
+          .from(executionPolicySettings)
+          .where(eq(executionPolicySettings.userId, userId))
           .limit(1);
         const incomeStreams = await tx
           .select()

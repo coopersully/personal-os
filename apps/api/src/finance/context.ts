@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { type Database, financeAgentSettings, financeMutationRecords } from "@personal-os/database";
+import {
+  type Database,
+  executionPolicySettings,
+  financeMutationRecords,
+} from "@personal-os/database";
 import { and, eq, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -19,8 +23,8 @@ export async function loadFinanceAuthorization(input: {
   principal: Principal;
   requestId: string;
 }): Promise<FinanceMutationContext> {
-  const setting = await input.db.query.financeAgentSettings.findFirst({
-    where: eq(financeAgentSettings.userId, input.principal.userId),
+  const setting = await input.db.query.executionPolicySettings.findFirst({
+    where: eq(executionPolicySettings.userId, input.principal.userId),
   });
   const canMutate = input.principal.scopes.has("finances:write");
   const bypassEnabled = setting?.reviewBypassEnabled ?? false;

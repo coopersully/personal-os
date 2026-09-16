@@ -518,7 +518,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
   getFinancePlaybook: vi.fn(),
-  getFinanceAutomationSettings: vi.fn(),
+  getExecutionPolicySettings: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
@@ -541,7 +541,7 @@ const mocks = vi.hoisted(() => ({
   getPlaidStatus: vi.fn(),
   invoke: vi.fn(),
   updateFinanceTransaction: vi.fn(),
-  updateFinanceAutomationSettings: vi.fn(),
+  updateExecutionPolicySettings: vi.fn(),
   setFinanceTransactionBreakdown: vi.fn(),
   answerFinanceQuestion: vi.fn(),
   approveFinanceActionReview: vi.fn(),
@@ -823,8 +823,11 @@ function defaults() {
     assessment: { blockers: [], nextActions: [], readiness: "on_track", uncertainty: [] },
     playbook: { steps: [], version: "1.0.0" },
   });
-  mocks.getFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
-  mocks.updateFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
+  mocks.getExecutionPolicySettings.mockResolvedValue({ reviewBypassEnabled: false, version: 1 });
+  mocks.updateExecutionPolicySettings.mockResolvedValue({
+    reviewBypassEnabled: false,
+    version: 1,
+  });
   mocks.listFinanceActionReviews.mockResolvedValue([]);
   mocks.listFinanceQuestions.mockResolvedValue([]);
   mocks.listFinanceReimbursements.mockResolvedValue({ reimbursements: [], unmatchedCredits: [] });

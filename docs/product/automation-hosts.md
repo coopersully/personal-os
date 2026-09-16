@@ -149,11 +149,15 @@ Stored declarations keep only those server-resolved effective scopes and start i
 version- and state-guarded null-to-value transition. Generic updates can change only the label; they
 cannot replace identity, change authority, or assign host state. Active and paused state comes only
 from verified host setup or observation evidence. A recurring pause clears the expected host slot,
-and a later observed resume must atomically persist a fresh `nextExpectedAt`, so stale pre-pause
-slots cannot report an immediate false overdue state. Revocation is a separate version- and
-prior-state-guarded local operation. It is terminal for that declaration, carries no host repair
-owner, and requires a new declaration and setup to replace the host routine. Active, paused, and
-revoked declarations therefore always retain a non-null host target. Recurring declarations also
+and a later observed resume must atomically persist a fresh `nextExpectedAt` later than the
+observation time, so stale pre-pause slots cannot report an immediate false overdue state. An
+abandoned `setup_pending` declaration uses a separate version- and prior-state-guarded cancellation
+operation. Its terminal `cancelled` representation remains unbound with a null host automation ID,
+preserving the distinction from a host routine that was created and later revoked. Revocation is a
+separate version- and prior-state-guarded local operation for active or paused bound declarations.
+Both terminal states carry no host repair owner and require a new declaration and setup before work
+can become active. Active, paused, and revoked declarations therefore always retain a non-null host
+target, while setup-pending and cancelled declarations remain unbound. Recurring declarations also
 persist their timezone-aware recurrence basis and the host's next expected schedule slot. Health is
 evaluated against that slot, including before the first observed invocation, rather than shifting
 the schedule from a late observation. Advancing a slot remains a future persistence concern and

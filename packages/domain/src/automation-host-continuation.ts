@@ -95,6 +95,7 @@ export const automationHostScheduleStateSchema = z.enum([
   "setup_pending",
   "active",
   "paused",
+  "cancelled",
   "revoked",
 ]);
 export type AutomationHostScheduleState = z.infer<typeof automationHostScheduleStateSchema>;
@@ -138,6 +139,16 @@ export const automationHostScheduleSchema = z
       .strict(),
     z
       .object({
+        ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("codex_desktop"),
+        hostAutomationId: z.null(),
+        trigger: recurringAutomationHostTriggerSchema,
+        state: z.literal("cancelled"),
+        nextExpectedAt: z.null(),
+      })
+      .strict(),
+    z
+      .object({
         ...codexBoundScheduleFields,
         state: z.literal("active"),
         nextExpectedAt: isoDateTimeSchema,
@@ -164,6 +175,16 @@ export const automationHostScheduleSchema = z
         hostAutomationId: z.null(),
         trigger: eventAutomationHostTriggerSchema,
         state: z.literal("setup_pending"),
+        nextExpectedAt: z.null(),
+      })
+      .strict(),
+    z
+      .object({
+        ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("claude_code_routine"),
+        hostAutomationId: z.null(),
+        trigger: eventAutomationHostTriggerSchema,
+        state: z.literal("cancelled"),
         nextExpectedAt: z.null(),
       })
       .strict(),
@@ -236,6 +257,16 @@ export type AutomationHostScheduleUpdateInput = z.infer<
   typeof automationHostScheduleUpdateInputSchema
 >;
 
+export const automationHostScheduleCancelInputSchema = z
+  .object({
+    expectedVersion: z.int().positive(),
+    expectedState: z.literal("setup_pending"),
+  })
+  .strict();
+export type AutomationHostScheduleCancelInput = z.infer<
+  typeof automationHostScheduleCancelInputSchema
+>;
+
 export const automationHostScheduleRevokeInputSchema = z
   .object({
     expectedVersion: z.int().positive(),
@@ -252,15 +283,26 @@ const automationHostScheduleObservationCommonFields = {
   observedAt: isoDateTimeSchema,
 };
 
+const activeCodexScheduleObservationInputSchema = z
+  .object({
+    ...automationHostScheduleObservationCommonFields,
+    hostSurface: z.literal("codex_desktop"),
+    observedState: z.literal("active"),
+    nextExpectedAt: isoDateTimeSchema,
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (new Date(input.nextExpectedAt).getTime() <= new Date(input.observedAt).getTime()) {
+      context.addIssue({
+        code: "custom",
+        message: "An active recurring schedule requires a future expected host slot.",
+        path: ["nextExpectedAt"],
+      });
+    }
+  });
+
 export const automationHostScheduleObservationInputSchema = z.union([
-  z
-    .object({
-      ...automationHostScheduleObservationCommonFields,
-      hostSurface: z.literal("codex_desktop"),
-      observedState: z.literal("active"),
-      nextExpectedAt: isoDateTimeSchema,
-    })
-    .strict(),
+  activeCodexScheduleObservationInputSchema,
   z
     .object({
       ...automationHostScheduleObservationCommonFields,
@@ -296,6 +338,7 @@ export const automationHostScheduleHealthSchema = z.object({
     "expected",
     "overdue",
     "paused",
+    "cancelled",
     "revoked",
   ]),
   lastObservedAt: isoDateTimeSchema.nullable(),

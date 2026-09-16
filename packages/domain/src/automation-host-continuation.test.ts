@@ -3,6 +3,7 @@ import {
   type AutomationHostSchedule,
   type AutomationHostScheduleCreateInput,
   automationHostScheduleBindInputSchema,
+  automationHostScheduleCancelInputSchema,
   automationHostScheduleCreateInputSchema,
   automationHostScheduleObservationInputSchema,
   automationHostScheduleRevokeInputSchema,
@@ -57,6 +58,9 @@ describe("automation host schedule contract", () => {
     >().toEqualTypeOf<string>();
     expectTypeOf<
       Extract<AutomationHostSchedule, { state: "setup_pending" }>["hostAutomationId"]
+    >().toEqualTypeOf<null>();
+    expectTypeOf<
+      Extract<AutomationHostSchedule, { state: "cancelled" }>["hostAutomationId"]
     >().toEqualTypeOf<null>();
   });
 
@@ -261,6 +265,74 @@ describe("automation host schedule contract", () => {
     ).toBe(false);
   });
 
+  it("cancels abandoned setup without inventing a bound host identity", () => {
+    expect(
+      automationHostScheduleCancelInputSchema.parse({
+        expectedVersion: 2,
+        expectedState: "setup_pending",
+      }),
+    ).toEqual({ expectedVersion: 2, expectedState: "setup_pending" });
+    expect(
+      automationHostScheduleCancelInputSchema.safeParse({
+        expectedVersion: 0,
+        expectedState: "setup_pending",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleCancelInputSchema.safeParse({
+        expectedVersion: 2,
+        expectedState: "active",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleCancelInputSchema.safeParse({
+        expectedVersion: 2,
+        expectedState: "cancelled",
+      }).success,
+    ).toBe(false);
+
+    const cancelled = automationHostScheduleSchema.parse({
+      id: scheduleId,
+      tenantAuthorizationConnectionId,
+      hostSurface: "claude_code_routine",
+      hostAutomationId: null,
+      label: "Abandoned Finance continuation",
+      effectiveScopes: ["finances:maintain"],
+      trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
+      state: "cancelled",
+      lastObservedAt: null,
+      nextExpectedAt: null,
+      version: 3,
+      createdAt: "2026-09-15T11:00:00.000Z",
+      updatedAt: "2026-09-15T11:05:00.000Z",
+    });
+    expect(cancelled).toMatchObject({
+      state: "cancelled",
+      hostAutomationId: null,
+      tenantAuthorizationConnectionId,
+    });
+    expect(
+      automationHostScheduleBindInputSchema.safeParse({
+        expectedVersion: 3,
+        expectedState: "cancelled",
+        hostSurface: "claude_code_routine",
+        hostAutomationId: "routine-after-cancellation",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleObservationInputSchema.safeParse({
+        expectedVersion: 3,
+        expectedState: "cancelled",
+        hostSurface: "claude_code_routine",
+        observedState: "active",
+        observedAt: "2026-09-15T11:06:00.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      observeAutomationHostScheduleHealth(cancelled, new Date("2026-09-15T11:06:00.000Z")),
+    ).toMatchObject({ state: "cancelled", repairOwner: null });
+  });
+
   it("requires a fresh recurring host slot when observation resumes a paused schedule", () => {
     expect(
       automationHostScheduleObservationInputSchema.parse({
@@ -283,6 +355,16 @@ describe("automation host schedule contract", () => {
         hostSurface: "codex_desktop",
         observedState: "active",
         observedAt: "2026-09-15T12:10:00.000Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      automationHostScheduleObservationInputSchema.safeParse({
+        expectedVersion: 3,
+        expectedState: "paused",
+        hostSurface: "codex_desktop",
+        observedState: "active",
+        observedAt: "2026-09-15T12:10:00.000Z",
+        nextExpectedAt: "2026-09-15T12:10:00.000Z",
       }).success,
     ).toBe(false);
     expect(

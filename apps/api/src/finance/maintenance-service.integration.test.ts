@@ -280,6 +280,35 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     await expect(other.service.history(other.userId, { limit: 1, cursor: old.id })).rejects.toThrow(
       "not found",
     );
+
+    const sharedCreatedAt = new Date("2026-08-03T00:00:00Z");
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ createdAt: sharedCreatedAt })
+      .where(eq(workspaceMaintenanceRuns.id, required(started.data.run).id));
+    await database.db
+      .update(financeMaintenanceRuns)
+      .set({ createdAt: sharedCreatedAt })
+      .where(eq(financeMaintenanceRuns.id, old.id));
+    const tiedLegacyIds = [
+      "00000000-0000-4000-8000-000000000000",
+      "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    ];
+    await database.db.insert(financeMaintenanceRuns).values(
+      tiedLegacyIds.map((id) => ({
+        createdAt: sharedCreatedAt,
+        id,
+        scope: { type: "all_outstanding" },
+        stage: "settled" as const,
+        userId: f.userId,
+      })),
+    );
+    const tied = await f.service.history(f.userId, { limit: 10 });
+    expect(tied.items.map((item) => required(item.run?.id ?? item.recovery?.legacyRunId))).toEqual(
+      [required(started.data.run).id, old.id, ...tiedLegacyIds].sort((a, b) =>
+        a < b ? 1 : a > b ? -1 : 0,
+      ),
+    );
   });
   it("does not attach a narrow canonical scope to full setup", async () => {
     const f = await fixture();
@@ -415,6 +444,204 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
       )?.version,
     ).toBe(settled?.version);
   });
+  it("reports completed and failed terminal runs with their exact remaining work", async () => {
+    const completed = await fixture();
+    const completedStart = await completed.service.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      completed.principal,
+    );
+    const completedRunId = required(completedStart.data.run).id;
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, completedRunId));
+    await expect(
+      completed.service.maintainFinances(
+        { operation: "resume", runId: completedRunId },
+        completed.principal,
+      ),
+    ).resolves.toMatchObject({
+      communication: {
+        headline: "Finance maintenance completed with a verified period review.",
+      },
+      outcome: "completed",
+      remainingWork: { categories: [], count: 0 },
+    });
+
+    const failed = await fixture();
+    const failedStart = await failed.service.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      failed.principal,
+    );
+    const failedRunId = required(failedStart.data.run).id;
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        settledResult: { code: "terminal_fixture", message: "Terminal fixture failure." },
+        status: "failed_terminal",
+      })
+      .where(eq(workspaceMaintenanceRuns.id, failedRunId));
+    await expect(
+      failed.service.maintainFinances(
+        { operation: "resume", runId: failedRunId },
+        failed.principal,
+      ),
+    ).resolves.toMatchObject({
+      data: { run: { id: failedRunId, status: "failed_terminal" } },
+      outcome: "failed",
+      remainingWork: { categories: ["finance_maintenance"], count: 1 },
+    });
+  });
+  it("serializes active lease and retry evidence and filters history by canonical status", async () => {
+    const running = await fixture();
+    const runningStart = await running.service.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      running.principal,
+    );
+    const runningRunId = required(runningStart.data.run).id;
+    const leaseExpiresAt = new Date("2026-09-15T12:05:00Z");
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        leaseClaimId: randomUUID(),
+        leaseExpiresAt,
+        status: "running",
+      })
+      .where(eq(workspaceMaintenanceRuns.id, runningRunId));
+    await expect(running.service.getRun(running.userId, runningRunId)).resolves.toMatchObject({
+      run: { leaseExpiresAt: leaseExpiresAt.toISOString(), retryAt: null, status: "running" },
+    });
+
+    const retryAt = new Date("2026-09-15T12:10:00Z");
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        leaseClaimId: null,
+        leaseExpiresAt: null,
+        retryAt,
+        status: "failed_recoverable",
+      })
+      .where(eq(workspaceMaintenanceRuns.id, runningRunId));
+    await expect(running.service.getRun(running.userId, runningRunId)).resolves.toMatchObject({
+      run: { leaseExpiresAt: null, retryAt: retryAt.toISOString(), status: "failed_recoverable" },
+    });
+    await expect(
+      running.service.history(running.userId, { limit: 10, status: "failed_recoverable" }),
+    ).resolves.toMatchObject({
+      items: [{ run: { id: runningRunId, status: "failed_recoverable" } }],
+      nextCursor: null,
+    });
+    await legacy(running.userId, { type: "all_outstanding" }, "settled");
+    await expect(
+      running.service.history(running.userId, { limit: 10, status: "completed" }),
+    ).resolves.toEqual({ items: [], nextCursor: null });
+  });
+  it("rejects missing legacy resumes and unavailable saved accounts without widening scope", async () => {
+    const f = await fixture();
+    await expect(
+      f.service.maintainFinances({ operation: "resume", runId: randomUUID() }, f.principal),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const unavailable = await legacy(f.userId, {
+      accountIds: [randomUUID()],
+      type: "accounts",
+    });
+    await expect(
+      f.service.maintainFinances({ operation: "resume", runId: unavailable.id }, f.principal),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    const invalidSavedAccount = await legacy(f.userId, {
+      accountIds: ["not-a-finance-account-id"],
+      type: "accounts",
+    });
+    await expect(
+      f.service.maintainFinances(
+        { operation: "resume", runId: invalidSavedAccount.id },
+        f.principal,
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        recovery: {
+          originalScope: invalidSavedAccount.scope,
+          state: "blocked",
+        },
+        run: null,
+      },
+      outcome: "user_input_required",
+    });
+
+    const active = await f.service.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      f.principal,
+    );
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Fixture",
+        name: "Narrow account",
+        provider: "manual",
+        userId: f.userId,
+      })
+      .returning();
+    const narrow = await legacy(f.userId, {
+      accountIds: [required(account).id],
+      type: "accounts",
+    });
+    await expect(
+      f.service.maintainFinances({ operation: "resume", runId: narrow.id }, f.principal),
+    ).resolves.toMatchObject({
+      data: {
+        recovery: { state: "blocked" },
+        run: null,
+      },
+      outcome: "user_input_required",
+    });
+    expect(required(active.data.run).scope).toEqual({ type: "all_outstanding" });
+  });
+  it("keeps setup unsettled when period-review step evidence is missing or stale", async () => {
+    const f = await fixture();
+    const [session] = await database.db
+      .insert(financeSetupSessions)
+      .values({ userId: f.userId, status: "initial_maintenance" })
+      .returning();
+    const started = await f.service.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      f.principal,
+    );
+    const runId = required(started.data.run).id;
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, runId));
+    await database.db.insert(workspaceMaintenanceSteps).values([
+      {
+        attemptClaimId: randomUUID(),
+        idempotencyKey: `verify:${runId}`,
+        runId,
+        safeResult: { state: "clean" },
+        status: "completed",
+        stepName: "verify",
+      },
+      {
+        attemptClaimId: randomUUID(),
+        idempotencyKey: `review:${runId}`,
+        runId,
+        safeResult: {},
+        status: "completed",
+        stepName: "period_review",
+      },
+    ]);
+    await f.service.maintainFinances({ operation: "resume", runId }, f.principal);
+    await database.db
+      .update(workspaceMaintenanceSteps)
+      .set({ safeResult: { id: randomUUID() } })
+      .where(eq(workspaceMaintenanceSteps.runId, runId));
+    await f.service.maintainFinances({ operation: "resume", runId }, f.principal);
+    await expect(
+      database.db.query.financeSetupSessions.findFirst({
+        where: eq(financeSetupSessions.id, required(session).id),
+      }),
+    ).resolves.toMatchObject({ status: "initial_maintenance" });
+  });
   async function acceptedFixture(state: "prepared" | "resolved", updatedAt: string) {
     const f = await fixture();
     const started = await f.service.maintainFinances(
@@ -475,6 +702,14 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
         arguments: { challengeId: f.challengeId },
       },
     });
+    await expect(
+      f.service.maintainFinances({ operation: "resume", runId: f.runId }, f.principal),
+    ).resolves.toMatchObject({
+      communication: {
+        headline: "The Finance candidate is ready for a complete evidence challenge.",
+      },
+      data: { challengeId: f.challengeId },
+    });
     await database.db
       .update(financeMaintenanceCandidates)
       .set({ revision: "changed" })
@@ -497,6 +732,13 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
         tool: "maintain_finances",
         arguments: { operation: "resume", runId: f.runId },
       },
+    });
+    await database.db
+      .delete(workspaceMaintenanceSteps)
+      .where(eq(workspaceMaintenanceSteps.runId, f.runId));
+    await expect(f.service.getRun(f.userId, f.runId)).resolves.toMatchObject({
+      challengeId: null,
+      nextAction: null,
     });
     await database.db
       .update(workspaceMaintenanceRuns)

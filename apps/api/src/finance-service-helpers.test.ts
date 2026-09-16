@@ -5,6 +5,7 @@ import {
   categorization,
   categoryGroup,
   categorySlug,
+  dateAfter,
   daysInCalendarMonth,
   decodeCandidateItemCursor,
   decodeTransactionCursor,
@@ -149,9 +150,12 @@ describe("Finance service deterministic helpers", () => {
     expect(nextMonth("2026-12")).toBe("2027-01");
     expect(nextMonth("2026-01")).toBe("2026-02");
     expect(nextMonth("2026")).toBe("2026-01");
+    expect(nextMonth("")).toBe("1900-01");
+    expect(dateAfter("2026-08-19", 1.6)).toBe("2026-08-21");
     expect(daysInCalendarMonth("2028-02")).toBe(29);
     expect(daysInCalendarMonth("2026-02")).toBe(28);
     expect(daysInCalendarMonth("2026")).toBe(31);
+    expect(daysInCalendarMonth("")).toBe(31);
     expect(budgetPaceDates("week", "2026-08-19")).toHaveLength(7);
     expect(budgetPaceDates("month", "2026-02-11")).toHaveLength(28);
     expect(budgetPaceDates("year", "2026-08-19")).toHaveLength(365);
@@ -218,6 +222,10 @@ describe("Finance service deterministic helpers", () => {
       "",
       Buffer.from("{}").toString("base64url"),
       Buffer.from('{"sortBy":"date","direction":"ascending","id":"x","value":1}').toString(
+        "base64url",
+      ),
+      Buffer.from('{"sortBy":"date","direction":"asc","id":1,"value":1}').toString("base64url"),
+      Buffer.from('{"sortBy":"date","direction":"asc","id":"x","value":null}').toString(
         "base64url",
       ),
     ]) {

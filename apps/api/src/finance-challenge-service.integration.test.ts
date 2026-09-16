@@ -212,6 +212,27 @@ describe.sequential("Finance ledger challenge", () => {
     ).rejects.toBeDefined();
   });
 
+  it("rejects preparation when candidate readiness or revision evidence changes", async () => {
+    const notReady = await fixture();
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "preparing" })
+      .where(eq(financeMaintenanceCandidates.id, notReady.ready.id));
+    await expect(
+      notReady.challenge.prepare(notReady.owner.id, notReady.run.id, notReady.ready.id),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    const stale = await fixture();
+    await stale.challenge.prepare(stale.owner.id, stale.run.id, stale.ready.id);
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ revision: `sha256:${"f".repeat(64)}` })
+      .where(eq(financeMaintenanceCandidates.id, stale.ready.id));
+    await expect(
+      stale.challenge.prepare(stale.owner.id, stale.run.id, stale.ready.id),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("rejects foreign, stale, duplicate, and non-agent challenge submissions", async () => {
     const missing = await fixture();
     await expect(
@@ -421,6 +442,94 @@ describe.sequential("Finance ledger challenge", () => {
     }
   });
 
+  it("preserves direct transaction and review lineage when challenge evidence becomes a question", async () => {
+    const setup = await fixture();
+    const transactionId = crypto.randomUUID();
+    const reviewCaseId = crypto.randomUUID();
+    await database.db
+      .update(financeMaintenanceCandidateItems)
+      .set({
+        actionKind: "categorization",
+        privatePayload: {
+          actionKind: "categorization",
+          input: { decisions: [{ transactionId }] },
+          reviewCaseId,
+          reviewReason: "merchant_identity",
+          transactionId,
+        },
+      })
+      .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
+    const [updatedItem] = await database.db
+      .select()
+      .from(financeMaintenanceCandidateItems)
+      .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
+    if (!updatedItem) throw new Error("Direct-lineage challenge item was not updated.");
+    const snapshot = await setup.finances.maintenanceCandidateSnapshot(
+      setup.owner.id,
+      setup.run.scope,
+      [updatedItem],
+      setup.ready.discoveryRevision,
+    );
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ projection: snapshot.projection, revision: snapshot.revision })
+      .where(eq(financeMaintenanceCandidates.id, setup.ready.id));
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        checkpoint: {
+          candidateId: setup.ready.id,
+          phase: "challenge",
+          revision: snapshot.revision,
+        },
+      })
+      .where(eq(workspaceMaintenanceRuns.id, setup.run.id));
+    const prepared = await setup.challenge.prepare(setup.owner.id, setup.run.id, setup.ready.id);
+
+    await expect(
+      setup.challenge.submit(
+        {
+          candidateRevision: snapshot.revision,
+          challengeId: prepared.id,
+          checked: [...financeLedgerChallengeChecks],
+          findings: [
+            {
+              candidateItemId: setup.item.id,
+              evidence: "The category still depends on the person's merchant context.",
+              kind: "question",
+              rationale: "Preserve the exact review lineage while asking for clarification.",
+              resolution: {
+                choices: ["Keep", "Change"],
+                prompt: "How should this merchant be categorized?",
+                type: "question",
+                why: "The merchant identity is ambiguous.",
+              },
+              severity: "warning",
+              sourceRefs: [],
+            },
+          ],
+          reviewedItemIds: [setup.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        setup.context,
+      ),
+    ).resolves.toMatchObject({ state: "submitted" });
+    await expect(
+      database.db
+        .select({ privatePayload: financeMaintenanceCandidateItems.privatePayload })
+        .from(financeMaintenanceCandidateItems)
+        .where(eq(financeMaintenanceCandidateItems.id, setup.item.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        privatePayload: expect.objectContaining({
+          reviewCaseId,
+          reviewReason: "merchant_identity",
+          transactionId,
+        }),
+      }),
+    ]);
+  });
+
   it("rejects findings outside the challenged packet and unsupported resolutions", async () => {
     const cases = [
       {
@@ -456,6 +565,53 @@ describe.sequential("Finance ledger challenge", () => {
           prompt: "Should this alert refresh continue?",
           type: "question" as const,
           why: "The alert is not tied to one transaction.",
+        },
+        severity: "warning" as const,
+        sourceRefs: [],
+      },
+      {
+        candidateItemId: null,
+        evidence: "Actionable findings require exact candidate lineage.",
+        kind: "blocker" as const,
+        rationale: "The finding is missing its candidate item.",
+        resolution: {
+          choices: ["Retry"],
+          prompt: "Retry this item?",
+          type: "question" as const,
+          why: "The item identity is required.",
+        },
+        severity: "blocker" as const,
+        sourceRefs: [],
+      },
+      {
+        candidateItemId: "OWNED_ITEM",
+        evidence: "Foreign source evidence must not enter this challenge.",
+        kind: "observation" as const,
+        rationale: "The source reference is outside the packet.",
+        resolution: { type: "keep" as const },
+        severity: "info" as const,
+        sourceRefs: [
+          {
+            accountId: crypto.randomUUID(),
+            provider: "plaid" as const,
+            remoteId: "foreign-transaction",
+            revision: now.toISOString(),
+            sourceType: "finance_transaction" as const,
+          },
+        ],
+      },
+      {
+        candidateItemId: "OWNED_ITEM",
+        evidence: "Replacement questions need one exact transaction lineage.",
+        kind: "correction" as const,
+        rationale: "A missing transaction cannot produce an actionable replacement question.",
+        resolution: {
+          actionKind: "transaction" as const,
+          input: {
+            category: "Missing transaction",
+            id: crypto.randomUUID(),
+          },
+          type: "replace" as const,
         },
         severity: "warning" as const,
         sourceRefs: [],
@@ -510,5 +666,32 @@ describe.sequential("Finance ledger challenge", () => {
         staleRun.context,
       ),
     ).rejects.toMatchObject({ code: "conflict" });
+
+    const drifted = await fixture();
+    const driftedChallenge = await drifted.challenge.prepare(
+      drifted.owner.id,
+      drifted.run.id,
+      drifted.ready.id,
+    );
+    await database.db
+      .update(financeMaintenanceCandidateItems)
+      .set({ fingerprint: `sha256:${"e".repeat(64)}` })
+      .where(eq(financeMaintenanceCandidateItems.id, drifted.item.id));
+    await expect(
+      drifted.challenge.submit(
+        {
+          candidateRevision: drifted.ready.revision,
+          challengeId: driftedChallenge.id,
+          checked: [...financeLedgerChallengeChecks],
+          findings: [],
+          reviewedItemIds: [drifted.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        drifted.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(drifted.challenge.resolve(drifted.owner.id, drifted.run.id)).rejects.toMatchObject(
+      { code: "conflict" },
+    );
   });
 });

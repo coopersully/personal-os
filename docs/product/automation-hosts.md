@@ -1,7 +1,7 @@
 # External automation hosts
 
-- Status: Target interoperability contract
-- Last verified against official platform documentation: 2026-09-11
+- Status: Target interoperability contract; H0 feasibility completed, launch proof still blocked
+- Last verified against official platform documentation: 2026-09-14
 
 ## Product decision
 
@@ -101,10 +101,11 @@ must never originate a new recurring maintenance invocation.
 ## Platform references
 
 - [ChatGPT scheduled tasks](https://learn.chatgpt.com/docs/automations)
-- [OpenAI Codex automations](https://developers.openai.com/codex/app/automations)
-- [OpenAI Codex MCP configuration](https://developers.openai.com/codex/mcp/)
+- [OpenAI Codex automations](https://learn.chatgpt.com/docs/automations?surface=app)
+- [OpenAI Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
 - [Claude recurring tasks in Cowork](https://support.claude.com/en/articles/13854387-schedule-recurring-tasks-in-claude-cowork)
-- [Claude Code routines](https://claude.com/blog/introducing-routines-in-claude-code)
+- [Claude Code routines](https://code.claude.com/docs/en/routines)
+- [Claude Code routine trigger API](https://platform.claude.com/docs/en/api/claude-code/routines-fire)
 - [Gemini scheduled actions](https://support.google.com/gemini/answer/16316416?hl=en)
 - [Gemini CLI MCP servers](https://geminicli.com/docs/tools/mcp-server/)
 - [Gemini CLI headless automation](https://geminicli.com/docs/cli/tutorials/automation/)
@@ -112,6 +113,62 @@ must never originate a new recurring maintenance invocation.
 Platform behavior is an external boundary and must be reverified before nohmi advertises a setup
 flow as currently supported. A passing nohmi test cannot prove that a third-party plan, account,
 machine, connector, or scheduler is available to the person.
+
+## Finance H0 feasibility outcome
+
+Neither required host is launch-certified. Current official evidence establishes two bounded proof
+candidates, not the complete post-session SMS continuation journey:
+
+- **Codex local desktop app:** use a host-owned recurring follow-up while durable Finance work is
+  open. The app's machine/runtime availability, unattended nohmi permissions, schedule delay, idle
+  usage, late replies, and restart or sleep behavior still require measurement. Codex CLI, SDK, and
+  app-server support are separate developer surfaces and do not prove this app journey.
+- **Claude Code cloud routine:** use the supported per-routine API trigger to start a new cloud
+  session. The trigger has no idempotency key, so an ambiguous dispatch cannot be retried blindly;
+  nohmi must preserve an uncertain outcome for reconciliation even when domain effects themselves
+  are idempotent. Account entitlement, least-privilege connector access, latency, usage, revocation,
+  rate limits, and recovery still require a real bounded proof.
+
+Claude Cowork is excluded from the current Finance proof because its documented recurring cadence
+is hourly or slower and no arbitrary event trigger has been established for that product surface.
+Claude Code Desktop, CLI, Channels, and the Agent SDK remain different surfaces; evidence from one
+does not certify another. Channels and session-scoped loops also require a running session, so they
+do not satisfy continuation after the original process ends.
+
+The domain contract currently recognizes only `codex_desktop` with a recurring trigger and
+`claude_code_routine` with an event trigger. A create declaration carries a stable, nohmi-owned
+tenant authorization-connection ID and requested scopes. That ID must resolve to durable tenant
+authorization state; it is not an OAuth access-token row, refreshed credential record, or external
+`mcp_client_*` identifier. The schema checks only the shape of the ID and request. Before any record
+is stored, the future application boundary must authenticate the caller, resolve tenant ownership,
+and derive `effectiveScopes` as the permitted subset of the current connection or principal. A
+caller-supplied `finances:maintain` request is never proof of authority.
+
+Stored declarations keep only those server-resolved effective scopes and start in
+`setup_pending`. Host setup binds the host automation identity exactly once through an atomic
+version- and state-guarded null-to-value transition. Generic updates can change only the label; they
+cannot replace identity, change authority, or assign host state. Active and paused state comes only
+from verified host setup or observation evidence. A recurring pause clears the expected host slot,
+and a later observed resume must atomically persist a fresh `nextExpectedAt` later than the
+observation time, so stale pre-pause slots cannot report an immediate false overdue state. An
+abandoned `setup_pending` declaration uses a separate version- and prior-state-guarded cancellation
+operation. Its terminal `cancelled` representation remains unbound with a null host automation ID,
+preserving the distinction from a host routine that was created and later revoked. Revocation is a
+separate version- and prior-state-guarded local operation for active or paused bound declarations.
+Both terminal states carry no host repair owner and require a new declaration and setup before work
+can become active. Active, paused, and revoked declarations therefore always retain a non-null host
+target, while setup-pending and cancelled declarations remain unbound. Recurring declarations also
+persist their timezone-aware recurrence basis and the host's next expected schedule slot. Health is
+evaluated against that slot, including before the first observed invocation, rather than shifting
+the schedule from a late observation. Advancing a slot remains a future persistence concern and
+must use host schedule evidence so local-time behavior remains honest across daylight-saving
+changes.
+
+Persistence, authorization-connection ownership resolution, API/client/MCP registration, setup
+UI, maintenance-input schedule identity, Texting's accepted-reply event, encrypted trigger
+credentials, dispatch/outbox behavior, schedule-slot advancement, and production proof are not
+implemented by this contract. Until those dependencies land, runtime dispatch remains disabled and
+health metadata must never originate, pause, repair, or reschedule host work.
 
 ## Finance host repair after the maintenance cutover
 

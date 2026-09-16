@@ -49,7 +49,7 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
-  it("stores the global execution policy with revision guards and preserves legacy grants", async () => {
+  it("stores revisioned global policy and preserves only aligned explicit legacy grants", async () => {
     const policy = getTableConfig(executionPolicySettings);
     expect(policy.columns.map((column) => column.name)).toEqual(
       expect.arrayContaining(["user_id", "review_bypass_enabled", "version"]),
@@ -63,7 +63,8 @@ describe("database schema contracts", () => {
       "utf8",
     );
     expect(migrationSql).toContain('CREATE TABLE "execution_policy_settings"');
-    expect(migrationSql).toContain('bool_or("legacy"."review_bypass_enabled")');
+    expect(migrationSql).toContain('"review_bypass_enabled" boolean DEFAULT false NOT NULL');
+    expect(migrationSql).toContain('count(*) = 2 AND bool_and("legacy"."review_bypass_enabled")');
     expect(migrationSql).toContain('FROM "finance_automation_settings"');
     expect(migrationSql).toContain('FROM "finance_agent_settings"');
     expect(migrationSql).toContain('GROUP BY "legacy"."user_id"');

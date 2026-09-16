@@ -20,8 +20,10 @@ const automationHostLabelSchema = z
   .min(1)
   .max(100)
   .refine(
-    (value) => value.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim().length > 0,
-    "Label must contain visible characters.",
+    (value) =>
+      !/\p{Cc}/u.test(value) &&
+      value.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim().length > 0,
+    "Label must contain visible characters without controls.",
   );
 
 const accessScopesSchema = z

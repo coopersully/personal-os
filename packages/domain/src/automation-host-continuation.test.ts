@@ -122,6 +122,29 @@ describe("automation host schedule contract", () => {
     ).toBe(false);
   });
 
+  it("rejects control-only labels in create and update while preserving visible Unicode", () => {
+    for (const label of ["\u0000", "\u0007", "\u0000\u200B\u0007"]) {
+      expect(
+        automationHostScheduleCreateInputSchema.safeParse({
+          tenantAuthorizationConnectionId,
+          hostSurface: "codex_desktop",
+          label,
+          requestedScopes: ["finances:maintain"],
+          trigger: recurringTrigger,
+        }).success,
+      ).toBe(false);
+      expect(
+        automationHostScheduleUpdateInputSchema.safeParse({ expectedVersion: 2, label }).success,
+      ).toBe(false);
+    }
+    expect(
+      automationHostScheduleUpdateInputSchema.parse({
+        expectedVersion: 2,
+        label: "財務 café 👩‍💻",
+      }),
+    ).toMatchObject({ label: "財務 café 👩‍💻" });
+  });
+
   it("stores only server-resolved effective authority on a durable tenant connection", () => {
     expect(
       automationHostScheduleSchema.parse({

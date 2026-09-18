@@ -97,7 +97,10 @@ export function createFinancePositionService(input: { db: Database; now: () => D
             ? itemById.get(row.providerItemRecordId)
             : undefined;
           const sync =
-            item?.syncState === "current" && row.syncState === "blocked" ? row : (item ?? row);
+            item?.syncState === "current" &&
+            (row.syncState === "blocked" || row.syncState === "retrying")
+              ? row
+              : (item ?? row);
           const reasons: PositionAccount["reasons"] = [];
           if (
             row.status === "needs_reauth" ||

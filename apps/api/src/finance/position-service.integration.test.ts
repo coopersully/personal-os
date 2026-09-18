@@ -313,23 +313,25 @@ describe.sequential("Finance position persistence boundary", () => {
     expect((await service.readPosition(owner.id, dates)).cash.reasons).toEqual([
       "source_unavailable",
     ]);
-    // A blocked account must not borrow a healthy sibling Item's freshness.
-    await database.db
-      .update(financeAccounts)
-      .set({
-        status: "connected",
-        syncState: "blocked",
-        syncError: "Synthetic reconnect",
-        syncErrorCode: "synthetic_authorization",
-        syncErrorCategory: "authorization",
-        syncFailureCount: 1,
-        syncRecovery: "reconnect",
-      })
-      .where(eq(financeAccounts.id, linked.id));
-    expect((await service.readPosition(owner.id, dates)).cash.reasons).toEqual([
-      "source_unavailable",
-      "stale_evidence",
-    ]);
+    // An account failure must not borrow a healthy sibling Item's freshness.
+    for (const syncState of ["retrying", "blocked"] as const) {
+      await database.db
+        .update(financeAccounts)
+        .set({
+          status: "connected",
+          syncState,
+          syncError: "Synthetic reconnect",
+          syncErrorCode: "synthetic_authorization",
+          syncErrorCategory: "authorization",
+          syncFailureCount: 1,
+          syncRecovery: syncState === "retrying" ? "automatic" : "reconnect",
+        })
+        .where(eq(financeAccounts.id, linked.id));
+      expect((await service.readPosition(owner.id, dates)).cash.reasons).toEqual([
+        "source_unavailable",
+        "stale_evidence",
+      ]);
+    }
     await database.db
       .update(financeAccounts)
       .set({

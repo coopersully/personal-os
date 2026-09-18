@@ -395,10 +395,12 @@ export function createSetupService({ db, now, planning, executor }: Options) {
       else await spending(item);
     }
     for (const debt of currentProfile?.debts ?? []) {
-      const matched = inputs.obligations?.some((item) =>
-        debt.accountId
-          ? item.debtAccountId === debt.accountId
-          : item.name.trim().toLowerCase() === debt.name.trim().toLowerCase(),
+      const matched = inputs.obligations?.some(
+        (item) =>
+          item.amountCents !== null &&
+          (debt.accountId
+            ? item.debtAccountId === debt.accountId
+            : item.name.trim().toLowerCase() === debt.name.trim().toLowerCase()),
       );
       if (matched) continue;
       const key = `debt-${debt.accountId ?? createHash("sha256").update(debt.name.trim().toLowerCase()).digest("hex").slice(0, 32)}`;

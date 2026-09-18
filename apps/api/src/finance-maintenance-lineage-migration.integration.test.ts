@@ -124,7 +124,7 @@ describe.sequential("Finance maintenance lineage migration", () => {
         ]) {
           result[table] = (
             await database.pool.query(
-              `SELECT to_jsonb(row) - 'canonical_run_id' - 'canonical_maintenance_run_id' - 'recovery' AS record FROM ${table} AS row ORDER BY id`,
+              `SELECT to_jsonb(row) - 'canonical_run_id' - 'canonical_maintenance_run_id' - 'recovery' - 'skipped_questions' - 'question_profile_version_id' - 'proposal_profile_version_id' AS record FROM ${table} AS row ORDER BY id`,
             )
           ).rows;
         }

@@ -3,6 +3,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   executionPolicySettings,
+  financeAccounts,
   financeBudgetVersions,
   financeGoals,
   financeMaintenanceRuns,
@@ -303,10 +304,22 @@ describe.sequential("guided Finance setup", () => {
     ).toHaveLength(1);
   });
 
-  it("builds an exact deficit from stated needs, reuses debt minimums once, and never funds goals", async () => {
+  it.each([
+    { amount: 10000, linked: false },
+    { amount: null, linked: false },
+    { amount: 10000, linked: true },
+    { amount: null, linked: true },
+  ])("reuses known debt minimums once with obligation $amount and account link $linked", async ({
+    amount: obligationAmount,
+    linked,
+  }) => {
     const [owner] = await database.db
       .insert(users)
-      .values({ displayName: "Deficit", email: "deficit@example.com", passwordHash: "unused" })
+      .values({
+        displayName: "Deficit",
+        email: `deficit-${obligationAmount}-${linked}@example.com`,
+        passwordHash: "unused",
+      })
       .returning();
     if (!owner) throw new Error("Missing fixture");
     const [goal] = await database.db
@@ -314,6 +327,17 @@ describe.sequential("guided Finance setup", () => {
       .values({ userId: owner.id, name: "Reserve goal", targetAmount: 500000 })
       .returning();
     if (!goal) throw new Error("Missing goal");
+    const [debtAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Lender",
+        kind: "debt",
+        name: "Known debt",
+        provider: "manual",
+        userId: owner.id,
+      })
+      .returning();
+    if (!debtAccount) throw new Error("Missing debt account");
     const now = () => new Date("2026-09-18T12:00:00Z");
     const planning = createProfileBudgetService({ db: database.db, now });
     const context = await loadFinanceAuthorization({
@@ -355,7 +379,7 @@ describe.sequential("guided Finance setup", () => {
           incomeStability: "variable",
           debts: [
             {
-              accountId: null,
+              accountId: linked ? debtAccount.id : null,
               name: "Known debt",
               balance: 1500,
               minimumMonthlyPayment: 100,
@@ -390,7 +414,11 @@ describe.sequential("guided Finance setup", () => {
             ],
             obligations: [
               { ...item(3, "Rent", 80000), debtAccountId: null },
-              { ...item(4, "Known debt", 10000), debtAccountId: null },
+              {
+                ...item(4, "Known debt", 10000),
+                amountCents: obligationAmount,
+                debtAccountId: linked ? debtAccount.id : null,
+              },
             ],
             contributions: [{ ...item(5, "Reserve goal", 20000), goalId: goal.id }],
             priorities: [
@@ -402,7 +430,14 @@ describe.sequential("guided Finance setup", () => {
       context,
     );
     const service = createSetupService({ db: database.db, now, planning });
-    const result = await service.setupFinances({ operation: "start" }, context);
+    const result = await skipRemaining(
+      service,
+      await service.setupFinances({ operation: "start" }, context),
+      context,
+    );
+    expect(
+      (await planning.getFinancialProfile(owner.id)).data?.planning?.obligations?.[1]?.amountCents,
+    ).toBe(obligationAmount);
     expect(result.data).toMatchObject({
       stage: "budget_proposal",
       profileVersionId: profile.data.id,
@@ -418,6 +453,8 @@ describe.sequential("guided Finance setup", () => {
     expect(
       draft.allocations.filter((allocation) => allocation.description === "Known debt"),
     ).toHaveLength(1);
+    if (obligationAmount === null)
+      expect(draft.assumptions).toContain("Known debt: amount unknown.");
     expect(draft.resources).toEqual([{ amount: 1000, key: "recurring-floor", kind: "income" }]);
     expect((await planning.listFinanceGoals(owner.id)).data[0]?.currentAmount).toBe(0);
   });

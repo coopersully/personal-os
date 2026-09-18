@@ -687,6 +687,28 @@ describe.sequential("guided Finance setup", () => {
     ).rejects.toMatchObject({ code: "conflict" });
     const saved = await skipRemaining(service, first, context);
     expect((await planning.getFinancialProfile(owner.id)).data).toBeNull();
+    const assumptions = (await planning.getFinanceBudget(owner.id)).data?.assumptions ?? [];
+    expect(assumptions).toContain(
+      "Verified financial position is not available yet. Available cash is unknown.",
+    );
+    for (const label of [
+      "Reliable recurring income",
+      "Uncertain income",
+      "One-time resources",
+      "Bills and debt minimums",
+      "Planned goal contributions",
+      "Spending priorities",
+    ])
+      expect(assumptions).toContain(
+        `${label}: unknown; skipping did not confirm an amount or absence.`,
+      );
+    expect(assumptions.join(" ")).not.toMatch(
+      /producer_not_registered|recurringIncome|uncertainIncome|exceptionalResources/,
+    );
+    expect(saved.data.position).toMatchObject({
+      state: "unavailable",
+      reasonCode: "producer_not_registered",
+    });
     expect((await planning.getFinanceBudget(owner.id)).data).toMatchObject({
       profileVersionId: null,
       resources: [],

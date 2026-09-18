@@ -345,7 +345,7 @@ export function createSetupService({ db, now, planning, executor }: Options) {
     const inputs = financeSetupPlanningSchema.parse(currentProfile?.planning ?? {});
     const allocations: import("@personal-os/domain").FinanceBudgetAllocation[] = [];
     const assumptions = [
-      "Qualified position is unavailable: producer_not_registered. Available cash is unknown.",
+      "Verified financial position is not available yet. Available cash is unknown.",
       "Uncertain income and one-time resources are excluded from recurring funding. Planned contributions are not actual funding.",
     ];
     const spending = async (
@@ -445,16 +445,16 @@ export function createSetupService({ db, now, planning, executor }: Options) {
         amount: currentProfile.preferences.bufferTarget,
         kind: "buffer",
       });
-    for (const key of [
-      "recurringIncome",
-      "uncertainIncome",
-      "exceptionalResources",
-      "obligations",
-      "contributions",
-      "priorities",
+    for (const [key, label] of [
+      ["recurringIncome", "Reliable recurring income"],
+      ["uncertainIncome", "Uncertain income"],
+      ["exceptionalResources", "One-time resources"],
+      ["obligations", "Bills and debt minimums"],
+      ["contributions", "Planned goal contributions"],
+      ["priorities", "Spending priorities"],
     ] as const)
       if (inputs[key] === null)
-        assumptions.push(`${key}: unknown; skipping did not confirm an amount or absence.`);
+        assumptions.push(`${label}: unknown; skipping did not confirm an amount or absence.`);
     const proposal = await planning.createFinanceBudget(
       {
         status: "incomplete",

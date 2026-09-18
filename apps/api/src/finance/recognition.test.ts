@@ -731,6 +731,65 @@ describe("Finance economic recognition", () => {
     });
   });
 
+  it.each([
+    { received: 600, credit: 2_000, share: 10_000, total: 1_000, spend: 0, income: 1_000 },
+    { received: 1_000, credit: 2_000, share: 10_000, total: 1_000, spend: 0, income: 1_000 },
+    { received: 600, credit: 800, share: 10_000, total: 800, spend: 200, income: 0 },
+    { received: 600, credit: 2_000, share: 5_000, total: 500, spend: 0, income: 500 },
+  ])("caps allocation and relationship receipts at owned expense capacity: $received/$credit/$share", ({
+    received,
+    credit,
+    share,
+    total,
+    spend,
+    income,
+  }) => {
+    const result = recognizeFinanceActivity({
+      accounts: accounts.map((account) => ({ ...account, ownershipShareBps: share })),
+      allocations: [
+        {
+          id: "shared",
+          transactionId: "purchase",
+          amount: 1_000,
+          treatment: "reimbursable",
+          state: "active",
+        },
+      ],
+      reimbursements: [
+        {
+          id: "repayment",
+          allocationId: "shared",
+          expectedAmount: 1_000,
+          receivedAmount: received,
+          status: received === 1_000 ? "received" : "partially_received",
+        },
+      ],
+      matches: [{ amount: received, creditTransactionId: "credit", reimbursementId: "repayment" }],
+      relationships: [
+        {
+          id: "repayment-link",
+          eventId: "repayment-event",
+          eventUserId: userId,
+          userId,
+          createdAt: "2026-09-15T12:00:00.000Z",
+          provenance: { actorType: "user" },
+          provenanceValidated: true,
+          relationship: "reimbursement",
+          transactionIds: ["purchase", "credit"],
+        },
+      ],
+      transactions: [
+        transaction("purchase"),
+        transaction("credit", { amount: credit, direction: "income", providerDirection: "income" }),
+      ],
+      userId,
+    });
+    expect(result).toMatchObject({
+      reimbursementReceivedCents: total,
+      postedSpendCents: spend,
+      observedIncomeCents: income,
+    });
+  });
   it("keeps invalidated allocations and their reimbursements unresolved", () => {
     const result = recognizeFinanceActivity({
       accounts,

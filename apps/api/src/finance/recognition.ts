@@ -245,6 +245,11 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
       .filter((reimbursement) => activeAllocationAccount.has(reimbursement.allocationId))
       .map((reimbursement) => reimbursement.id),
   );
+  const receivedByAllocation = new Map<string, number>();
+  for (const reimbursement of input.reimbursements) {
+    if (validReimbursementIds.has(reimbursement.id))
+      addCents(receivedByAllocation, reimbursement.allocationId, reimbursement.receivedAmount);
+  }
   const matchedByCredit = matchedReimbursementCentsByCredit(
     input.matches.filter((match) => validReimbursementIds.has(match.reimbursementId)),
   );
@@ -381,6 +386,13 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
             ? Math.max(
                 0,
                 ownedCents(transaction.amount, account) -
+                  ownedCents(
+                    (activeAllocations.get(transaction.id) ?? []).reduce(
+                      (total, allocation) => total + (receivedByAllocation.get(allocation.id) ?? 0),
+                      0,
+                    ),
+                    account,
+                  ) -
                   (relationshipReimbursementByExpense.get(transaction.id) ?? 0),
               )
             : 0,
@@ -438,7 +450,6 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
       .map(([transactionId]) => transactionId),
   );
   const unresolvedReimbursementIds = new Set<string>();
-  const receivedByAllocation = new Map<string, number>();
   const reimbursementByAccount = new Map<
     string,
     { account: RecognitionAccount; expected: number; received: number }
@@ -462,7 +473,6 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
         : reimbursement.expectedAmount;
     totals.received += reimbursement.receivedAmount;
     reimbursementByAccount.set(account.id, totals);
-    addCents(receivedByAllocation, reimbursement.allocationId, reimbursement.receivedAmount);
   }
   const reimbursementExpectedCents =
     [...reimbursementByAccount.values()].reduce(

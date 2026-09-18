@@ -82,7 +82,7 @@ export type FinanceActivityRecognition = {
   reimbursementReceivedCents: number;
 };
 
-type RecognitionInput = {
+export type RecognitionInput = {
   accounts: RecognitionAccount[];
   allocations: AllocationProjection[];
   matches: ReimbursementMatch[];
@@ -90,6 +90,7 @@ type RecognitionInput = {
   reimbursements: ReimbursementProjection[];
   transactions: RecognitionTransaction[];
   userId: string;
+  period?: { from: string; through: string };
 };
 
 function direction(transaction: RecognitionTransaction) {
@@ -119,6 +120,7 @@ function transferContribution(
   transactionIds: readonly string[],
   transactionById: ReadonlyMap<string, RecognitionTransaction>,
   accountById: ReadonlyMap<string, RecognitionAccount>,
+  period?: RecognitionInput["period"],
 ): { amount: number; complete: boolean; directionKnown: boolean } {
   let cashOut = 0;
   let investmentIn = 0;
@@ -144,7 +146,13 @@ function transferContribution(
       if (account.kind === "cash") cashOut += amount;
     } else {
       incoming += amount;
-      if (account.kind === "investment") investmentIn += amount;
+      if (
+        account.kind === "investment" &&
+        (!period ||
+          (transaction.transactionDate >= period.from &&
+            transaction.transactionDate <= period.through))
+      )
+        investmentIn += amount;
     }
   }
   return {
@@ -208,14 +216,18 @@ function addCents(map: Map<string, number>, id: string, amount: number): void {
 }
 
 /**
- * Canonical, API-owned recognition oracle. It intentionally returns an internal
- * shape until F0b publishes the shared PositionEvidence contract.
+ * Canonical, API-owned recognition oracle. Position producers map its detailed
+ * qualifications to the shared validating MoneyFact reason codes.
  */
 export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivityRecognition {
   const accountById = new Map(input.accounts.map((account) => [account.id, account]));
   const transactions = input.transactions.filter(
     (transaction) => transaction.userId === input.userId,
   );
+  const inPeriod = (transaction: RecognitionTransaction) =>
+    !input.period ||
+    (transaction.transactionDate >= input.period.from &&
+      transaction.transactionDate <= input.period.through);
   const transactionById = new Map(transactions.map((transaction) => [transaction.id, transaction]));
   const activeAllocations = activeAllocationsByTransaction(input.allocations);
   const activeAllocationAccount = new Map(
@@ -238,7 +250,9 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
   );
   const replacedPendingIds = new Set(
     transactions.flatMap((transaction) =>
-      !transaction.pending && transaction.pendingTransactionId
+      !transaction.pending &&
+      transaction.pendingTransactionId &&
+      (!input.period || transaction.transactionDate <= input.period.through)
         ? [transaction.pendingTransactionId]
         : [],
     ),
@@ -253,10 +267,23 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
   let investmentContributionsCents = 0;
   const relationships = currentRelationships(input, transactionById);
   const recognizeTransfer = (sourceId: string, transactionIds: readonly string[]) => {
+    if (
+      input.period &&
+      !transactionIds.some((id) => {
+        const transaction = transactionById.get(id);
+        return transaction !== undefined && inPeriod(transaction);
+      })
+    )
+      return;
     const key = relationshipSetKey(transactionIds);
     if (recognizedTransferSets.has(key)) return;
     recognizedTransferSets.add(key);
-    const contribution = transferContribution(transactionIds, transactionById, accountById);
+    const contribution = transferContribution(
+      transactionIds,
+      transactionById,
+      accountById,
+      input.period,
+    );
     if (!contribution.directionKnown) transferDirectionUnknown.add(sourceId);
     if (!contribution.complete) {
       transferEvidenceIncomplete.add(sourceId);
@@ -326,10 +353,23 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
       .filter((transaction): transaction is RecognitionTransaction => transaction !== undefined);
     if (related.length !== relationship.transactionIds.length) continue;
     const expenses = related
-      .filter((transaction) => movementDirection(transaction) === "expense")
+      .filter(
+        (transaction) =>
+          movementDirection(transaction) === "expense" &&
+          !transaction.pending &&
+          !excludedTransactionIds.has(transaction.id) &&
+          !transferTransactionIds.has(transaction.id) &&
+          activeAllocations.get(transaction.id)?.length !== 0,
+      )
       .toSorted((left, right) => left.id.localeCompare(right.id));
     const credits = related
-      .filter((transaction) => movementDirection(transaction) === "income")
+      .filter(
+        (transaction) =>
+          movementDirection(transaction) === "income" &&
+          !transaction.pending &&
+          !excludedTransactionIds.has(transaction.id) &&
+          !transferTransactionIds.has(transaction.id),
+      )
       .toSorted((left, right) => left.id.localeCompare(right.id));
     if (expenses.length === 0 || credits.length === 0) continue;
     const expenseCapacity = expenses.map((transaction) => {
@@ -391,7 +431,10 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
   const allocationMismatchIds = new Set<string>();
   const unresolvedAllocationTransactionIds = new Set(
     [...activeAllocations.entries()]
-      .filter(([, allocations]) => allocations.length === 0)
+      .filter(([transactionId, allocations]) => {
+        const transaction = transactionById.get(transactionId);
+        return allocations.length === 0 && transaction !== undefined && inPeriod(transaction);
+      })
       .map(([transactionId]) => transactionId),
   );
   const unresolvedReimbursementIds = new Set<string>();
@@ -403,7 +446,9 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
   for (const reimbursement of input.reimbursements) {
     const account = activeAllocationAccount.get(reimbursement.allocationId);
     if (!account) {
-      unresolvedReimbursementIds.add(reimbursement.id);
+      const allocation = input.allocations.find((item) => item.id === reimbursement.allocationId);
+      const transaction = allocation ? transactionById.get(allocation.transactionId) : undefined;
+      if (!transaction || inPeriod(transaction)) unresolvedReimbursementIds.add(reimbursement.id);
       continue;
     }
     const totals = reimbursementByAccount.get(account.id) ?? {
@@ -436,6 +481,7 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
   let refundCreditsCents = 0;
 
   for (const transaction of transactions) {
+    if (!inPeriod(transaction)) continue;
     const account = accountById.get(transaction.accountId);
     if (!account?.includeInPlanning || excludedTransactionIds.has(transaction.id)) continue;
     if (

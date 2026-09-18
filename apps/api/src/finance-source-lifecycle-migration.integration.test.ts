@@ -16,6 +16,7 @@ describe.sequential("Finance source lifecycle migration", () => {
     const beforeRepair = await migrationsWithout(migrationsFolder, "nohmi-source-repair-", [
       migrationTag,
       "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
     ]);
 
     try {

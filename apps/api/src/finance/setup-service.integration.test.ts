@@ -639,4 +639,248 @@ describe.sequential("guided Finance setup", () => {
     });
     expect(savedOlder?.status).toBe("settled");
   });
+
+  async function setupFixture(label: string) {
+    const [owner] = await database.db
+      .insert(users)
+      .values({ displayName: label, email: `${label}@example.com`, passwordHash: "unused" })
+      .returning();
+    if (!owner) throw new Error("Missing setup owner");
+    const now = () => new Date("2026-09-18T12:00:00Z");
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        userId: owner.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: label,
+    });
+    return {
+      owner,
+      planning,
+      context,
+      service: createSetupService({ db: database.db, now, planning }),
+    };
+  }
+
+  it("keeps a completely unknown profile absent and invalidates old skips after a profile edit", async () => {
+    const { owner, planning, context, service } = await setupFixture("unknown-profile");
+    const first = await service.setupFinances({ operation: "start" }, context);
+    const input = {
+      operation: "skip" as const,
+      sessionId: first.data.sessionId,
+      questionId: "profile:location",
+      expectedVersion: first.data.version,
+      idempotencyKey: "unknown-skip",
+    };
+    await expect(
+      service.setupFinances({ ...input, sessionId: crypto.randomUUID() }, context),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.setupFinances({ ...input, expectedVersion: first.data.version + 1 }, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.setupFinances({ ...input, questionId: "profile:missing" }, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const saved = await skipRemaining(service, first, context);
+    expect((await planning.getFinancialProfile(owner.id)).data).toBeNull();
+    expect((await planning.getFinanceBudget(owner.id)).data).toMatchObject({
+      profileVersionId: null,
+      resources: [],
+      allocations: [],
+      status: "incomplete",
+    });
+    expect(
+      (
+        await service.setupFinances(
+          { operation: "resume", sessionId: first.data.sessionId },
+          context,
+        )
+      ).data.budgetVersionId,
+    ).toBe(saved.data.budgetVersionId);
+    await expect(
+      service.setupFinances({ ...input, expectedVersion: saved.data.version }, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await planning.updateFinancialProfile(
+      { changes: { householdSize: 1 }, idempotencyKey: "known-household", expectedVersion: 0 },
+      context,
+    );
+    const resumed = await service.setupFinances(
+      { operation: "resume", sessionId: first.data.sessionId },
+      context,
+    );
+    expect(resumed.data.question?.id).toBe("profile:location");
+    const answered = await service.setupFinances(
+      {
+        operation: "answer",
+        sessionId: resumed.data.sessionId,
+        questionId: "profile:location",
+        expectedVersion: resumed.data.version,
+        answer: "New York",
+        idempotencyKey: "known-location",
+      },
+      context,
+    );
+    expect(answered.data.question?.id).toBe("profile:monthly_take_home");
+  });
+
+  it("bounds first-plan disclosure while preserving all partial planning facts", async () => {
+    const { owner, planning, context, service } = await setupFixture("partial-profile");
+    const goal = (
+      await planning.manageFinanceGoal(
+        {
+          operation: "create",
+          name: "Emergency fund",
+          targetAmount: 1000,
+          deadline: null,
+          priority: "high",
+          idempotencyKey: "partial-goal",
+        },
+        context,
+      )
+    ).data;
+    const provenance = {
+      actorId: owner.id,
+      actorType: "user" as const,
+      confidence: 1,
+      evidence: {},
+      maintenanceRunId: null,
+      observedAt: "2026-09-18T12:00:00Z",
+      requestId: "partial-profile",
+      sourceId: null,
+    };
+    const need = (name: string) => ({
+      id: crypto.randomUUID(),
+      name,
+      amountCents: null,
+      dueDay: null,
+      provenance,
+    });
+    await planning.updateFinancialProfile(
+      {
+        expectedVersion: 0,
+        idempotencyKey: "partial-input",
+        changes: {
+          planning: {
+            recurringIncome: { amountCents: 100000, nextDate: null, provenance },
+            uncertainIncome: [],
+            exceptionalResources: [],
+            obligations: Array.from({ length: 100 }, (_, index) => ({
+              ...need(`Unconfirmed obligation ${index}`),
+              debtAccountId: null,
+            })),
+            contributions: [{ ...need("Goal contribution"), goalId: goal.id }],
+            priorities: [
+              {
+                ...need("Flexible priority"),
+                amountCents: 10000,
+                categoryId: null,
+                protected: false,
+              },
+            ],
+          },
+        },
+      },
+      context,
+    );
+    const saved = await skipRemaining(
+      service,
+      await service.setupFinances({ operation: "start" }, context),
+      context,
+    );
+    expect(saved.data.stage).toBe("budget_proposal");
+    const draft = (await planning.getFinanceBudget(owner.id)).data;
+    expect(draft).toMatchObject({
+      status: "incomplete",
+      expectedResources: 1000,
+      allocatedTotal: 100,
+    });
+    expect(draft?.assumptions).toHaveLength(100);
+    expect(draft?.assumptions[99]).toContain("further unknowns");
+    expect(
+      saved.communication.requiredDisclosures.every((item) => item.message.length <= 2000),
+    ).toBe(true);
+    expect(
+      saved.communication.requiredDisclosures.some((item) =>
+        item.message.includes("Read the full assumptions"),
+      ),
+    ).toBe(true);
+    expect((await planning.getFinancialProfile(owner.id)).data?.planning?.obligations).toHaveLength(
+      100,
+    );
+    expect(
+      (await planning.getFinancialProfile(owner.id)).data?.planning?.contributions?.[0]
+        ?.amountCents,
+    ).toBeNull();
+    expect((await planning.listFinanceGoals(owner.id)).data[0]?.currentAmount).toBe(0);
+  });
+
+  it("carries unknown skips through real answers and authenticates structured planning provenance", async () => {
+    const { owner, planning, context, service } = await setupFixture("answered-profile");
+    let result = await service.setupFinances({ operation: "start" }, context);
+    const answers: Record<string, string> = {
+      "profile:location": "New York",
+      "profile:monthly_take_home": "0",
+      "profile:income_stability": "stable",
+      "profile:debts": "[]",
+      "profile:buffer_target": "25",
+      "planning:recurringIncome": JSON.stringify({ amountCents: 0, nextDate: "2026-10-01" }),
+      "planning:uncertainIncome": "[]",
+      "planning:exceptionalResources": "[]",
+      "planning:obligations": "[]",
+      "planning:contributions": "[]",
+      "planning:priorities": "[]",
+    };
+    for (let count = 0; result.data.question && count < 20; count++) {
+      const questionId = result.data.question.id;
+      const common = {
+        sessionId: result.data.sessionId,
+        expectedVersion: result.data.version,
+        questionId,
+        idempotencyKey: `answer-${count}`,
+      };
+      result = await service.setupFinances(
+        answers[questionId] === undefined
+          ? { ...common, operation: "skip" }
+          : { ...common, operation: "answer", answer: answers[questionId] },
+        context,
+      );
+    }
+    expect(result.data.stage).toBe("budget_proposal");
+    const current = (await planning.getFinancialProfile(owner.id)).data;
+    expect(current).toMatchObject({
+      householdSize: null,
+      liquidReserves: null,
+      expectedMonthlyTakeHome: 0,
+      preferences: { bufferTarget: 25 },
+      planning: {
+        recurringIncome: {
+          amountCents: 0,
+          provenance: {
+            actorId: owner.id,
+            actorType: "user",
+            sourceId: result.data.sessionId,
+            evidence: { sessionId: result.data.sessionId, questionId: "planning:recurringIncome" },
+          },
+        },
+      },
+    });
+    expect((await planning.getFinanceBudget(owner.id)).data).toMatchObject({
+      status: "incomplete",
+      expectedResources: 0,
+      allocatedTotal: 25,
+      balanceDelta: -25,
+    });
+    expect(
+      (
+        await service.setupFinances(
+          { operation: "resume", sessionId: result.data.sessionId },
+          context,
+        )
+      ).data.question,
+    ).toBeNull();
+  });
 });

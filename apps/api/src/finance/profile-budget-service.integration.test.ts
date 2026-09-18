@@ -131,11 +131,11 @@ describe.sequential("Finance profile and budget lifecycle", () => {
                 actorId: "forged",
                 actorType: "agent",
                 confidence: 1,
-                evidence: {},
+                evidence: { sessionId: "forged-session" },
                 maintenanceRunId: null,
                 observedAt: now.toISOString(),
                 requestId: "forged",
-                sourceId: null,
+                sourceId: "forged-session",
               },
             },
             uncertainIncome: [],
@@ -152,7 +152,13 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       recurringIncome: {
         amountCents: 100_000,
         nextDate: null,
-        provenance: { actorId: owner.id, actorType: "user", requestId: "planning-facts" },
+        provenance: {
+          actorId: owner.id,
+          actorType: "user",
+          requestId: "planning-facts",
+          sourceId: null,
+          evidence: {},
+        },
       },
       obligations: [],
     });
@@ -749,5 +755,117 @@ describe.sequential("Finance profile and budget lifecycle", () => {
         context,
       ),
     ).resolves.toMatchObject({ data: { status: "removed" } });
+  });
+
+  it("rejects invalid cents and stale proposals while preserving incomplete revisions", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Exact cents",
+        email: "exact-cents@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        userId: owner.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "exact-cents",
+    });
+    const service = createProfileBudgetService({ db: database.db, now: () => now });
+    const input = {
+      allocations: [],
+      resources: [],
+      assumptions: [],
+      effectiveFrom: "2026-09",
+      name: "Unfinished plan",
+      rationale: "Unknown income",
+      status: "incomplete" as const,
+      idempotencyKey: "incomplete-first",
+    };
+    for (const amount of [-1, 0.001, Infinity, 21_474_836.48]) {
+      await expect(
+        service.createFinanceBudget(
+          {
+            ...input,
+            idempotencyKey: `invalid-${amount}`,
+            resources: [{ key: "income", kind: "income", amount }],
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    expect((await service.getFinanceBudget(owner.id)).data).toBeNull();
+    const draft = (await service.createFinanceBudget(input, context)).data;
+    const revision = await service.reviseFinanceBudget(
+      {
+        ...input,
+        idempotencyKey: "incomplete-revision",
+        expectedVersion: draft.version,
+        planId: draft.planId,
+      },
+      context,
+    );
+    expect(revision.data).toMatchObject({
+      status: "incomplete",
+      profileVersionId: null,
+      version: 2,
+    });
+    expect(revision.communication.headline).toContain("incomplete");
+    const complete = {
+      ...input,
+      resources: [{ key: "income", kind: "income" as const, amount: 100 }],
+      allocations: [{ key: "buffer", kind: "buffer" as const, amount: 100 }],
+      status: "proposed" as const,
+      planId: draft.planId,
+      expectedVersion: 2,
+      idempotencyKey: "complete-first",
+    };
+    const proposal = (await service.reviseFinanceBudget(complete, context)).data;
+    await expect(
+      service.approveFinanceBudget(
+        {
+          budgetVersionId: proposal.id,
+          expectedVersion: proposal.version + 1,
+          approvalSource: "user_instruction",
+          idempotencyKey: "wrong-proposal-revision",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const newer = (
+      await service.reviseFinanceBudget(
+        { ...complete, expectedVersion: proposal.version, idempotencyKey: "complete-successor" },
+        context,
+      )
+    ).data;
+    await expect(
+      service.approveFinanceBudget(
+        {
+          budgetVersionId: proposal.id,
+          expectedVersion: proposal.version,
+          approvalSource: "user_instruction",
+          idempotencyKey: "superseded-proposal",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.approveFinanceBudget(
+        {
+          budgetVersionId: newer.id,
+          expectedVersion: newer.version,
+          approvalSource: "user_instruction",
+          expectedProfileVersionId: null,
+          idempotencyKey: "current-proposal",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ data: { status: "active", profileVersionId: null } });
   });
 });

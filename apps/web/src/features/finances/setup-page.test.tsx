@@ -544,3 +544,43 @@ it("skips without inventing an answer and keeps incomplete deficit plans unappro
   expect(await screen.findByText("Unfunded known needs: $250.00")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument();
 });
+
+it("submits structured income without turning an unknown payment date into a fact", async () => {
+  api.setupFinances.mockResolvedValue(
+    setupResponse({
+      question: {
+        id: "planning:recurringIncome",
+        prompt: "Reliable income",
+        answerType: "planning:recurringIncome",
+      },
+    }),
+  );
+  mount();
+  await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  await userEvent.type(await screen.findByLabelText("Reliable monthly take-home (USD)"), "1000.25");
+  await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() =>
+    expect(api.setupFinances).toHaveBeenLastCalledWith({
+      operation: "answer",
+      sessionId,
+      questionId: "planning:recurringIncome",
+      expectedVersion: 7,
+      answer: JSON.stringify({ amountCents: 100025, nextDate: null }),
+      idempotencyKey: expect.any(String),
+    }),
+  );
+});
+
+it("keeps setup recoverable when plan and category reads fail", async () => {
+  api.setupFinances.mockResolvedValue(
+    setupResponse({ stage: "budget_proposal", question: null, budgetVersionId }),
+  );
+  api.getFinanceBudget.mockRejectedValue(new Error("Plan unavailable"));
+  api.getFinanceCategories.mockRejectedValue(new Error("Categories unavailable"));
+  mount();
+  await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  expect(await screen.findByText("Plan unavailable")).toBeInTheDocument();
+  expect(await screen.findByText("Categories unavailable")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Continue bookkeeping" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument();
+});

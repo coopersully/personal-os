@@ -795,6 +795,10 @@ export function createSetupService({ db, now, planning, executor }: Options) {
                 idempotencyKey: `${input.idempotencyKey}:profile`,
               },
               context,
+              {
+                sourceId: session.id,
+                evidence: { sessionId: session.id, questionId: input.questionId },
+              },
             );
             const skippedQuestions = session.skippedQuestions
               .filter((entry) => entry.profileVersion === (current?.version ?? 0))

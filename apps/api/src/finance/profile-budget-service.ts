@@ -17,6 +17,7 @@ import type {
   FinanceBudgetVersion,
   FinanceChange,
   FinanceGoal,
+  FinanceProvenance,
   FinanceToolResult,
   ManageFinanceGoalInput,
   ReviseFinanceBudgetInput,
@@ -346,6 +347,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     async updateFinancialProfile(
       input: UpdateFinancialProfileInput,
       context: FinanceMutationContext,
+      source?: Pick<FinanceProvenance, "sourceId" | "evidence">,
     ) {
       return executeFinanceIdempotently(
         db,
@@ -354,10 +356,10 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           idempotencyKey: input.idempotencyKey,
           operation: "update_financial_profile",
           lockIdentities: [`finance-profile:${context.userId}`],
-          payload: input,
+          payload: source ? { ...input, source } : input,
         },
         async (tx) => {
-          const data = await appendFinanceProfile(tx, input, context, now());
+          const data = await appendFinanceProfile(tx, input, context, now(), source);
           return result({
             changes: [
               {

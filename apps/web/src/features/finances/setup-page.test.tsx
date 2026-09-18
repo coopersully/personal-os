@@ -202,6 +202,7 @@ it("shows complete allocations and assumptions before approving the displayed bu
   await user.click(screen.getByRole("button", { name: "Approve displayed budget" }));
   expect(api.setupFinances).toHaveBeenLastCalledWith({
     approvalSource: "user_instruction",
+    expectedProfileVersionId: null,
     budgetVersionId,
     expectedVersion: 12,
     idempotencyKey: expect.any(String),
@@ -517,4 +518,29 @@ it("refreshes the maintenance instruction after a terminal result even when setu
     operation: "start",
     scope: { type: "all_outstanding" },
   });
+});
+
+it("skips without inventing an answer and keeps incomplete deficit plans unapprovable", async () => {
+  mount();
+  await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
+  await screen.findByLabelText("Where do you live for tax purposes?");
+  api.getFinanceBudget.mockResolvedValue({
+    data: { ...plan(), status: "incomplete", balanceDelta: -250, allocatedTotal: 5250 },
+  });
+  api.setupFinances.mockResolvedValue(
+    setupResponse({ stage: "budget_proposal", question: null, budgetVersionId, version: 8 }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Skip for now — keep unknown" }));
+  expect(api.setupFinances).toHaveBeenLastCalledWith({
+    operation: "skip",
+    sessionId,
+    questionId: "profile:location",
+    expectedVersion: 7,
+    idempotencyKey: expect.any(String),
+  });
+  expect(
+    await screen.findByText("First plan saved; evidence remains incomplete"),
+  ).toBeInTheDocument();
+  expect(await screen.findByText("Unfunded known needs: $250.00")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument();
 });

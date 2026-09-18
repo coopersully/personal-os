@@ -3207,6 +3207,7 @@ export const financeProfileVersions = pgTable(
     liquidReserves: integer("liquid_reserves_cents"),
     debts: jsonb("debts").$type<Record<string, unknown>[]>().notNull().default([]),
     insurance: jsonb("insurance").$type<Record<string, unknown>[]>().notNull().default([]),
+    planning: jsonb("planning").$type<Record<string, unknown>>(),
     preferences: jsonb("preferences")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -3220,6 +3221,7 @@ export const financeProfileVersions = pgTable(
   },
   (table) => [
     uniqueIndex("finance_profile_versions_user_version_idx").on(table.userId, table.version),
+    uniqueIndex("finance_profile_versions_id_user_idx").on(table.id, table.userId),
     index("finance_profile_versions_user_created_idx").on(table.userId, table.createdAt),
   ],
 );
@@ -3282,6 +3284,7 @@ export const financeBudgetVersions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
+    profileVersionId: uuid("profile_version_id"),
     status: text("status")
       .$type<"active" | "incomplete" | "proposed" | "retired">()
       .notNull()
@@ -3302,6 +3305,11 @@ export const financeBudgetVersions = pgTable(
   },
   (table) => [
     uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
+    foreignKey({
+      columns: [table.profileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+      name: "finance_budget_versions_profile_user_fk",
+    }),
     index("finance_budget_versions_user_status_idx").on(
       table.userId,
       table.status,
@@ -3365,6 +3373,12 @@ export const financeSetupSessions = pgTable(
       .notNull()
       .default("collecting_profile"),
     currentQuestionKey: text("current_question_key"),
+    skippedQuestions: jsonb("skipped_questions")
+      .$type<Array<{ questionId: string; profileVersion: number }>>()
+      .notNull()
+      .default([]),
+    questionProfileVersionId: uuid("question_profile_version_id"),
+    proposalProfileVersionId: uuid("proposal_profile_version_id"),
     budgetVersionId: uuid("budget_version_id").references(() => financeBudgetVersions.id, {
       onDelete: "set null",
     }),
@@ -3376,6 +3390,16 @@ export const financeSetupSessions = pgTable(
     ...timestamps,
   },
   (table) => [
+    foreignKey({
+      columns: [table.questionProfileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+      name: "finance_setup_sessions_question_profile_user_fk",
+    }),
+    foreignKey({
+      columns: [table.proposalProfileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+      name: "finance_setup_sessions_proposal_profile_user_fk",
+    }),
     foreignKey({
       columns: [table.canonicalMaintenanceRunId, table.userId],
       foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],

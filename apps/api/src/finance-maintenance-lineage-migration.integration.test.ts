@@ -14,6 +14,7 @@ describe.sequential("Finance maintenance lineage migration", () => {
     const beforeLineage = await migrationsWithout(migrationsFolder, "nohmi-maintenance-lineage-", [
       migrationTag,
       "0083_global_execution_policy",
+      "0084_finance_setup_profile_lineage",
     ]);
     try {
       await migrateDatabase(database.db, beforeLineage);

@@ -22,6 +22,7 @@ import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { SetupAnswerFields } from "./setup-answer-fields.js";
 
 const setupStages: Record<FinanceSetupPayload["stage"], string> = {
   collecting_profile: "Building your financial profile",
@@ -98,14 +99,24 @@ export function FinanceSetupPage() {
       session ? { operation: "resume", sessionId: session.sessionId } : { operation: "start" },
     );
   }
-  function submitAnswer() {
-    if (!session || !question || setup.isPending || !answer.trim()) return;
+  function submitAnswer(value = answer) {
+    if (!session || !question || setup.isPending || !value.trim()) return;
     const input = {
-      answer: answer.trim(),
+      answer: value.trim(),
       expectedVersion: session.version,
       operation: "answer" as const,
       questionId: question.id,
       sessionId: session.sessionId,
+    };
+    setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
+  }
+  function skip() {
+    if (!session || !question || setup.isPending) return;
+    const input = {
+      operation: "skip" as const,
+      sessionId: session.sessionId,
+      expectedVersion: session.version,
+      questionId: question.id,
     };
     setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
   }
@@ -123,6 +134,7 @@ export function FinanceSetupPage() {
     const input = {
       approvalSource: "user_instruction" as const,
       budgetVersionId: exactPlan.id,
+      expectedProfileVersionId: exactPlan.profileVersionId ?? null,
       expectedVersion: session.version,
       operation: "approve_budget" as const,
       sessionId: session.sessionId,
@@ -145,7 +157,7 @@ export function FinanceSetupPage() {
           </CardTitle>
           <CardDescription>
             {result?.communication.headline ??
-              "Answer one question at a time, review the complete budget, then approve it. Existing progress will resume."}
+              "Build your first plan one question at a time. Unknown details can wait, and existing progress will resume."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -174,7 +186,19 @@ export function FinanceSetupPage() {
               {setup.isPending ? "Loading saved progress…" : "Start or resume setup"}
             </Button>
           ) : null}
-          {session?.stage === "collecting_profile" && question ? (
+          {session?.stage === "collecting_profile" &&
+          question &&
+          (question.id.startsWith("planning:") || question.id === "profile:debts") ? (
+            <section aria-label={question.prompt}>
+              <p>{question.prompt}</p>
+              <SetupAnswerFields
+                key={`${session.sessionId}:${question.id}`}
+                questionId={question.id}
+                pending={setup.isPending}
+                onSubmit={submitAnswer}
+              />
+            </section>
+          ) : session?.stage === "collecting_profile" && question ? (
             <form
               key={question.id}
               className="grid gap-4"
@@ -212,6 +236,20 @@ export function FinanceSetupPage() {
                 {setup.isPending ? "Saving answer…" : "Save answer"}
               </Button>
             </form>
+          ) : null}
+          {session?.stage === "collecting_profile" && question ? (
+            <Button variant="ghost" disabled={setup.isPending} onClick={skip}>
+              Skip for now — keep unknown
+            </Button>
+          ) : null}
+          {session?.stage === "budget_proposal" ? (
+            <Alert>
+              <AlertTitle>First plan saved; evidence remains incomplete</AlertTitle>
+              <AlertDescription>
+                Unknown amounts stay unknown. Planned contributions do not mean money moved. You can
+                keep bookkeeping while qualified position evidence is unavailable.
+              </AlertDescription>
+            </Alert>
           ) : null}
           {session?.budgetVersionId ? (
             <>
@@ -304,6 +342,9 @@ export function FinanceSetupPage() {
         <Button asChild variant="ghost">
           <Link to="/finances/accounts">Manage accounts</Link>
         </Button>
+        <Button asChild variant="ghost">
+          <Link to="/finances/transactions">Continue bookkeeping</Link>
+        </Button>
       </nav>
     </section>
   );
@@ -325,7 +366,9 @@ function SetupBudget({
         </Badge>
       </div>
       <p className="text-sm">{plan.rationale}</p>
-      <h4 className="font-medium">Resources · {formatMoney(plan.expectedResources)}</h4>
+      <h4 className="font-medium">
+        Known planned resources · {formatMoney(plan.expectedResources)}
+      </h4>
       <ItemGroup>
         {plan.resources.map((resource) => (
           <Item key={resource.key}>
@@ -360,7 +403,10 @@ function SetupBudget({
           </Item>
         ))}
       </ItemGroup>
-      <p className="text-sm">Unallocated: {formatMoney(plan.balanceDelta)}</p>
+      <p className="text-sm">
+        {plan.balanceDelta < 0 ? "Unfunded known needs" : "Unallocated known resources"}:{" "}
+        {formatMoney(Math.abs(plan.balanceDelta))}
+      </p>
       <h4 className="font-medium">Assumptions</h4>
       {plan.assumptions.length ? (
         <ul className="list-disc pl-5 text-sm grid gap-2">

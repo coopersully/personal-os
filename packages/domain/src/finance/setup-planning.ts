@@ -13,6 +13,10 @@ const statedNeedSchema = z
   })
   .strict();
 
+const statedResourceSchema = statedNeedSchema
+  .omit({ dueDay: true })
+  .extend({ expectedDate: z.iso.date().nullable() });
+
 /** Stated monthly planning inputs, never an account-position or funding projection. */
 export const financeSetupPlanningSchema = z
   .object({
@@ -25,8 +29,8 @@ export const financeSetupPlanningSchema = z
       .strict()
       .nullable()
       .default(null),
-    uncertainIncome: z.array(statedNeedSchema).max(100).nullable().default(null),
-    exceptionalResources: z.array(statedNeedSchema).max(100).nullable().default(null),
+    uncertainIncome: z.array(statedResourceSchema).max(100).nullable().default(null),
+    exceptionalResources: z.array(statedResourceSchema).max(100).nullable().default(null),
     obligations: z
       .array(statedNeedSchema.extend({ debtAccountId: idSchema.nullable() }))
       .max(100)
@@ -126,6 +130,11 @@ function unknownFields(planning: FinanceSetupPlanning): PlanningField[] {
         planning.recurringIncome === null ||
         planning.recurringIncome.amountCents === null ||
         planning.recurringIncome.nextDate === null
+      );
+    if (key === "uncertainIncome" || key === "exceptionalResources")
+      return (
+        planning[key] === null ||
+        planning[key].some((item) => item.amountCents === null || item.expectedDate === null)
       );
     return (
       planning[key] === null ||

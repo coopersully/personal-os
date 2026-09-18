@@ -5,6 +5,7 @@ import {
   financePositiveMoneySchema,
   financeProvenanceSchema,
 } from "./common.js";
+import { financeSetupPlanningSchema } from "./setup-planning.js";
 
 export const financeIncomeStabilitySchema = z.enum(["stable", "variable", "seasonal", "unknown"]);
 
@@ -43,6 +44,7 @@ export const financeProfileVersionSchema = z.object({
   jurisdiction: z.string().trim().min(1).max(120).nullable(),
   liquidReserves: financePositiveMoneySchema.nullable(),
   preferences: financePlanningPreferencesSchema,
+  planning: financeSetupPlanningSchema.nullable().optional(),
   provenance: z.record(z.string(), financeProvenanceSchema),
   userId: idSchema,
   version: z.number().int().positive(),
@@ -60,6 +62,7 @@ export const financialProfileChangesSchema = z
     jurisdiction: z.string().trim().min(1).max(120).nullable().optional(),
     liquidReserves: financePositiveMoneySchema.nullable().optional(),
     preferences: financePlanningPreferencesSchema.optional(),
+    planning: financeSetupPlanningSchema.nullable().optional(),
   })
   .refine((changes) => Object.keys(changes).length > 0, "Provide at least one profile change.");
 

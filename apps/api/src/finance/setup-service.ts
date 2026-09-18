@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type Database,
   financeCategories,
@@ -13,7 +14,13 @@ import type {
   FinanceToolResult,
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
-import { NOHMI_FINANCE_PLAYBOOK } from "@personal-os/domain";
+import {
+  financeSetupPlanningSchema,
+  financeWorkflowUnavailableSchema,
+  financialProfileChangesSchema,
+  NOHMI_FINANCE_PLAYBOOK,
+  nextFinancePlanningQuestion,
+} from "@personal-os/domain";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
@@ -21,15 +28,33 @@ import {
   type FinanceMutationContext,
   requireFinanceMutation,
 } from "./context.js";
-import type { createProfileBudgetService } from "./profile-budget-service.js";
+import { createProfileBudgetService } from "./profile-budget-service.js";
 
+type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Options = {
+  executor?: FinanceTransaction;
   db: Database;
   now: () => Date;
   planning: ReturnType<typeof createProfileBudgetService>;
 };
 
 const questions = {
+  "profile:income_stability": {
+    answerType: "income_stability",
+    id: "profile:income_stability",
+    prompt: "Is your income stable, variable, seasonal, or unknown?",
+  },
+  "profile:debts": {
+    answerType: "debts",
+    id: "profile:debts",
+    prompt: "Which debts and minimum monthly payments should this plan consider?",
+  },
+  "profile:buffer_target": {
+    answerType: "currency",
+    id: "profile:buffer_target",
+    prompt:
+      "How much monthly buffer would you like to plan for? Enter zero if you do not want one.",
+  },
   "profile:household_size": {
     answerType: "positive_integer",
     id: "profile:household_size",
@@ -52,14 +77,31 @@ const questions = {
   },
 } satisfies Record<string, FinanceInteractionQuestion>;
 
-type QuestionId = keyof typeof questions;
-
-function nextQuestion(profile: FinanceProfileVersion | null): FinanceInteractionQuestion | null {
-  if (!profile?.jurisdiction) return questions["profile:location"];
-  if (!profile.householdSize) return questions["profile:household_size"];
-  if (!profile.expectedMonthlyTakeHome) return questions["profile:monthly_take_home"];
-  if (profile.liquidReserves === null) return questions["profile:liquid_reserves"];
-  return null;
+function nextQuestion(
+  profile: FinanceProfileVersion | null,
+  skipped: Array<{ questionId: string; profileVersion: number }> = [],
+): FinanceInteractionQuestion | null {
+  const version = profile?.version ?? 0;
+  const isSkipped = (id: string) =>
+    skipped.some((entry) => entry.questionId === id && entry.profileVersion === version);
+  const missing = [
+    ["profile:location", !profile?.jurisdiction],
+    ["profile:household_size", profile?.householdSize == null],
+    ["profile:monthly_take_home", profile?.expectedMonthlyTakeHome == null],
+    ["profile:liquid_reserves", profile?.liquidReserves == null],
+    ["profile:income_stability", !profile?.provenance.incomeStability],
+    ["profile:debts", !profile?.provenance.debts],
+    ["profile:buffer_target", profile?.preferences.bufferTarget == null],
+  ] as const;
+  for (const [key, absent] of missing) if (absent && !isSkipped(key)) return questions[key];
+  const question = nextFinancePlanningQuestion(
+    financeSetupPlanningSchema.parse(profile?.planning ?? {}),
+    skipped.filter((entry) => entry.questionId.startsWith("planning:")) as Parameters<
+      typeof nextFinancePlanningQuestion
+    >[1],
+    version,
+  );
+  return question ? { ...question, answerType: question.id } : null;
 }
 
 export function parseSetupMoney(answer: string): number {
@@ -85,10 +127,60 @@ export function parseSetupJurisdiction(answer: string): string {
   return answer.trim().slice(0, 120);
 }
 
+function parseStructuredAnswer(answer: string): unknown {
+  try {
+    return JSON.parse(answer);
+  } catch {
+    throw new AppError("invalid_request", "Check the structured setup answer.");
+  }
+}
+
 export function setupProfileChange(
-  questionId: QuestionId,
+  questionId: string,
   answer: string,
+  current?: FinanceProfileVersion | null,
+  source?: import("@personal-os/domain").FinanceProvenance,
 ): UpdateFinancialProfileInput["changes"] {
+  if (questionId.startsWith("planning:")) {
+    const key = questionId.slice("planning:".length);
+    if (
+      ![
+        "recurringIncome",
+        "uncertainIncome",
+        "exceptionalResources",
+        "obligations",
+        "contributions",
+        "priorities",
+      ].includes(key)
+    )
+      throw new AppError("invalid_request", "Unknown planning question.");
+    const value: unknown = parseStructuredAnswer(answer);
+    const sourced = Array.isArray(value)
+      ? value.map((item) => ({ ...item, ...(source ? { provenance: source } : {}) }))
+      : value && typeof value === "object"
+        ? { ...value, ...(source ? { provenance: source } : {}) }
+        : value;
+    return {
+      planning: financeSetupPlanningSchema.parse({
+        ...financeSetupPlanningSchema.parse(current?.planning ?? {}),
+        [key]: sourced,
+      }),
+    };
+  }
+  if (questionId === "profile:income_stability")
+    return financialProfileChangesSchema.parse({ incomeStability: answer.trim().toLowerCase() });
+  if (questionId === "profile:debts")
+    return financialProfileChangesSchema.parse({ debts: parseStructuredAnswer(answer) });
+  if (questionId === "profile:buffer_target")
+    return {
+      preferences: {
+        debtPriority: null,
+        emergencyReserveMonths: null,
+        notes: [],
+        ...current?.preferences,
+        bufferTarget: parseSetupMoney(answer),
+      },
+    };
   if (questionId === "profile:location") return { jurisdiction: parseSetupJurisdiction(answer) };
   if (questionId === "profile:household_size") {
     const value = Number(answer);
@@ -98,15 +190,15 @@ export function setupProfileChange(
   }
   if (questionId === "profile:monthly_take_home") {
     const value = parseSetupMoney(answer);
-    if (value <= 0)
-      throw new AppError("invalid_request", "Monthly take-home income must be positive.");
     return { expectedMonthlyTakeHome: value };
   }
-  return { liquidReserves: parseSetupMoney(answer) };
+  if (questionId === "profile:liquid_reserves") return { liquidReserves: parseSetupMoney(answer) };
+  throw new AppError("invalid_request", "Unknown setup question.");
 }
 
 export function setupResult(input: {
   budgetVersionId: string | null;
+  profileVersionId?: string | null;
   disclosures?: Array<{ importance: "critical" | "important"; message: string }>;
   headline: string;
   maintenanceRunId?: string | null;
@@ -120,6 +212,12 @@ export function setupResult(input: {
 }): FinanceToolResult<FinanceSetupPayload> {
   const payload: FinanceSetupPayload = {
     budgetVersionId: input.budgetVersionId,
+    profileVersionId: input.profileVersionId ?? null,
+    position: financeWorkflowUnavailableSchema.parse({
+      state: "unavailable",
+      reasonCode: "producer_not_registered",
+      retryable: false,
+    }),
     maintenanceRunId: input.maintenanceRunId ?? null,
     canonicalMaintenanceRunId: input.canonicalMaintenanceRunId ?? null,
     question: input.question ?? null,
@@ -144,16 +242,24 @@ export function setupResult(input: {
       ? "user_input_required"
       : input.nextAction
         ? "work_remaining"
-        : "completed",
+        : input.stage === "budget_proposal"
+          ? "work_remaining"
+          : "completed",
     remainingWork: {
-      categories: input.question ? [input.stage] : input.nextAction ? ["maintenance"] : [],
-      count: input.question || input.nextAction ? 1 : 0,
+      categories: input.question
+        ? [input.stage]
+        : input.nextAction
+          ? ["maintenance"]
+          : input.stage === "budget_proposal"
+            ? ["qualified_position"]
+            : [],
+      count: input.question || input.nextAction || input.stage === "budget_proposal" ? 1 : 0,
     },
     schemaVersion: 1,
   };
 }
 
-export function createSetupService({ db, now, planning }: Options) {
+export function createSetupService({ db, now, planning, executor }: Options) {
   async function profile(userId: string) {
     return (await planning.getFinancialProfile(userId)).data;
   }
@@ -188,15 +294,20 @@ export function createSetupService({ db, now, planning }: Options) {
     currentProfile: FinanceProfileVersion | null,
     context: FinanceMutationContext,
   ) {
-    const question = nextQuestion(currentProfile);
+    const question = nextQuestion(currentProfile, session.skippedQuestions);
     if (question) {
       const [updated] = await db
         .update(financeSetupSessions)
         .set({
           currentQuestionKey: question.id,
+          questionProfileVersionId: currentProfile?.id ?? null,
           status: "collecting_profile",
           updatedAt: now(),
-          version: session.version + 1,
+          version:
+            session.currentQuestionKey === question.id &&
+            session.questionProfileVersionId === (currentProfile?.id ?? null)
+              ? session.version
+              : session.version + 1,
         })
         .where(eq(financeSetupSessions.id, session.id))
         .returning();
@@ -210,71 +321,188 @@ export function createSetupService({ db, now, planning }: Options) {
         version: updated.version,
       });
     }
-    if (!currentProfile?.expectedMonthlyTakeHome || currentProfile.expectedMonthlyTakeHome <= 0)
-      throw new AppError("invalid_request", "Monthly take-home income is required for a budget.");
-    const [category] = await db
-      .insert(financeCategories)
-      .values({
-        group: "Plan",
-        isSystem: true,
-        name: "Living expenses",
-        slug: "living-expenses",
-        userId: context.userId,
-      })
-      .onConflictDoUpdate({
-        set: { updatedAt: now() },
-        target: [financeCategories.userId, financeCategories.slug],
-      })
-      .returning();
-    if (!category) throw new AppError("internal_error", "The planning category was not created.");
-    const income = currentProfile.expectedMonthlyTakeHome;
-    const living = Math.round(income * 0.8 * 100) / 100;
-    const savings = Math.round(income * 0.15 * 100) / 100;
-    const buffer = Math.round((income - living - savings) * 100) / 100;
+    const existing = (await planning.getFinanceBudget(context.userId)).data;
+    if (
+      session.budgetVersionId &&
+      existing?.id === session.budgetVersionId &&
+      existing.profileVersionId === (currentProfile?.id ?? null)
+    )
+      return setupResult({
+        budgetVersionId: existing.id,
+        profileVersionId: existing.profileVersionId,
+        headline: "Your first plan is saved. Missing evidence remains explicit.",
+        stage: "budget_proposal",
+        sessionId: session.id,
+        version: session.version,
+        disclosures: [
+          {
+            importance: "important",
+            message:
+              "Qualified financial position is unavailable. This incomplete plan is not available cash and cannot be activated.",
+          },
+        ],
+      });
+    const inputs = financeSetupPlanningSchema.parse(currentProfile?.planning ?? {});
+    const allocations: import("@personal-os/domain").FinanceBudgetAllocation[] = [];
+    const assumptions = [
+      "Qualified position is unavailable: producer_not_registered. Available cash is unknown.",
+      "Uncertain income and one-time resources are excluded from recurring funding. Planned contributions are not actual funding.",
+    ];
+    const spending = async (
+      item: { id: string; name: string; amountCents: number | null },
+      categoryId?: string | null,
+    ) => {
+      if (item.amountCents === null) {
+        assumptions.push(`${item.name}: amount unknown.`);
+        return;
+      }
+      if (!categoryId) {
+        const [category] = await db
+          .insert(financeCategories)
+          .values({
+            group: "Plan",
+            isSystem: true,
+            name: item.name,
+            slug: `setup-${item.id}`,
+            userId: context.userId,
+          })
+          .onConflictDoUpdate({
+            set: { updatedAt: now() },
+            target: [financeCategories.userId, financeCategories.slug],
+          })
+          .returning();
+        if (!category)
+          throw new AppError("internal_error", "The planning category was not created.");
+        categoryId = category.id;
+      }
+      allocations.push({
+        amount: item.amountCents / 100,
+        categoryId,
+        key: item.id,
+        kind: "spending",
+        description: item.name,
+      });
+    };
+    for (const item of inputs.obligations ?? []) {
+      if (item.debtAccountId && item.amountCents !== null)
+        allocations.push({
+          amount: item.amountCents / 100,
+          accountId: item.debtAccountId,
+          key: item.id,
+          kind: "debt",
+          description: item.name,
+        });
+      else await spending(item);
+    }
+    for (const debt of currentProfile?.debts ?? []) {
+      const matched = inputs.obligations?.some((item) =>
+        debt.accountId
+          ? item.debtAccountId === debt.accountId
+          : item.name.trim().toLowerCase() === debt.name.trim().toLowerCase(),
+      );
+      if (matched) continue;
+      const key = `debt-${debt.accountId ?? createHash("sha256").update(debt.name.trim().toLowerCase()).digest("hex").slice(0, 32)}`;
+      if (debt.accountId)
+        allocations.push({
+          key,
+          kind: "debt",
+          accountId: debt.accountId,
+          amount: debt.minimumMonthlyPayment,
+          description: debt.name,
+        });
+      else
+        await spending({
+          id: key,
+          name: debt.name,
+          amountCents: Math.round(debt.minimumMonthlyPayment * 100),
+        });
+      assumptions.push(
+        `${debt.name}: minimum reused from the current profile; confirm payment timing.`,
+      );
+    }
+    for (const item of inputs.priorities ?? [])
+      await spending(
+        { ...item, name: item.protected ? `${item.name} (protected)` : item.name },
+        item.categoryId,
+      );
+    for (const item of inputs.contributions ?? []) {
+      if (item.amountCents === null)
+        assumptions.push(`${item.name}: planned contribution unknown.`);
+      else
+        allocations.push({
+          amount: item.amountCents / 100,
+          goalId: item.goalId,
+          key: item.id,
+          kind: "goal",
+          description: item.name,
+        });
+    }
+    if (currentProfile?.preferences.bufferTarget != null)
+      allocations.push({
+        key: "chosen-buffer",
+        amount: currentProfile.preferences.bufferTarget,
+        kind: "buffer",
+      });
+    for (const key of [
+      "recurringIncome",
+      "uncertainIncome",
+      "exceptionalResources",
+      "obligations",
+      "contributions",
+      "priorities",
+    ] as const)
+      if (inputs[key] === null)
+        assumptions.push(`${key}: unknown; skipping did not confirm an amount or absence.`);
     const proposal = await planning.createFinanceBudget(
       {
-        allocations: [
-          { amount: living, categoryId: category.id, key: "living", kind: "spending" },
-          { amount: savings, key: "savings", kind: "savings" },
-          { amount: buffer, key: "buffer", kind: "buffer" },
-        ],
-        assumptions: [
-          "Initial allocations are conservative defaults and should be revised as categorized activity becomes reliable.",
-          "Unknown income variability, debt, insurance, and fixed obligations remain review items until supported by profile or ledger evidence.",
-        ],
+        status: "incomplete",
+        allocations,
+        assumptions:
+          assumptions.length <= 100
+            ? assumptions
+            : [
+                ...assumptions.slice(0, 99),
+                `${assumptions.length - 99} further unknowns remain in the financial profile. Review all planning facts before completing the plan.`,
+              ],
         effectiveFrom: now().toISOString().slice(0, 7),
         idempotencyKey: `setup-budget:${session.id}:${session.version}`,
-        name: "Initial monthly plan",
+        name: "First monthly plan",
         rationale:
-          "Provide a balanced starting plan, then refine it from maintained transaction evidence.",
-        resources: [{ amount: income, key: "take-home", kind: "income" }],
+          "Stated obligations, priorities and planned contributions, with missing evidence kept explicit.",
+        resources:
+          inputs.recurringIncome?.amountCents == null
+            ? []
+            : [
+                {
+                  amount: inputs.recurringIncome.amountCents / 100,
+                  key: "recurring-floor",
+                  kind: "income",
+                },
+              ],
       },
       context,
     );
-    const approvalQuestion: FinanceInteractionQuestion = {
-      answerType: "approval",
-      id: "budget:approval",
-      prompt: "Approve this balanced starting budget?",
-    };
     const [updated] = await db
       .update(financeSetupSessions)
       .set({
         budgetVersionId: proposal.data.id,
-        currentQuestionKey: approvalQuestion.id,
-        status: "budget_approval",
+        proposalProfileVersionId: currentProfile?.id ?? null,
+        currentQuestionKey: null,
+        status: "budget_proposal",
         updatedAt: now(),
         version: session.version + 1,
       })
       .where(eq(financeSetupSessions.id, session.id))
       .returning();
-    if (!updated) throw new AppError("internal_error", "Finance setup did not save the proposal.");
+    if (!updated)
+      throw new AppError("internal_error", "Finance setup did not save the first plan.");
     return setupResult({
       budgetVersionId: proposal.data.id,
+      profileVersionId: currentProfile?.id ?? null,
+      headline: "Your first plan is saved with its unfunded needs and unknowns.",
       disclosures: proposal.communication.requiredDisclosures,
-      headline: "I created a balanced starting budget proposal.",
-      question: approvalQuestion,
-      sessionId: updated.id,
-      stage: "budget_approval",
+      sessionId: session.id,
+      stage: "budget_proposal",
       version: updated.version,
     });
   }
@@ -328,7 +556,10 @@ export function createSetupService({ db, now, planning }: Options) {
       });
       return continueSession(recovered, context);
     }
-    if (session.status === "budget_approval") {
+    if (session.status === "budget_approval" || session.status === "budget_proposal") {
+      const currentProfile = await profile(context.userId);
+      if (session.proposalProfileVersionId !== (currentProfile?.id ?? null))
+        return advance(session, currentProfile, context);
       // The same plan can be revised or approved through the portal or MCP.
       // Reconcile saved setup progress with that canonical decision on resume.
       const currentBudget = (await planning.getFinanceBudget(context.userId)).data;
@@ -336,6 +567,9 @@ export function createSetupService({ db, now, planning }: Options) {
         currentBudget &&
         (currentBudget.id !== session.budgetVersionId || currentBudget.status === "active")
       ) {
+        if (currentBudget.status === "incomplete") return advance(session, currentProfile, context);
+        if (currentBudget.profileVersionId !== (currentProfile?.id ?? null))
+          return advance(session, currentProfile, context);
         if (currentBudget.status !== "proposed" && currentBudget.status !== "active")
           throw new AppError(
             "conflict",
@@ -345,6 +579,7 @@ export function createSetupService({ db, now, planning }: Options) {
           .update(financeSetupSessions)
           .set({
             budgetVersionId: currentBudget.id,
+            proposalProfileVersionId: currentProfile?.id ?? null,
             currentQuestionKey: currentBudget.status === "active" ? null : "budget:approval",
             status: currentBudget.status === "active" ? "initial_maintenance" : "budget_approval",
             updatedAt: now(),
@@ -364,8 +599,10 @@ export function createSetupService({ db, now, planning }: Options) {
           );
         return continueSession(updated, context);
       }
+      if (session.status === "budget_proposal") return advance(session, currentProfile, context);
       return setupResult({
         budgetVersionId: session.budgetVersionId,
+        profileVersionId: currentProfile?.id ?? null,
         headline: "Your balanced budget proposal is ready for approval.",
         question: {
           answerType: "approval",
@@ -443,6 +680,25 @@ export function createSetupService({ db, now, planning }: Options) {
       context: FinanceMutationContext,
     ): Promise<FinanceToolResult<FinanceSetupPayload>> {
       requireFinanceMutation(context);
+      if (!executor)
+        return db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-profile:${context.userId}`}, 0))`,
+          );
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-setup:${context.userId}`}, 0))`,
+          );
+          return createSetupService({
+            db: tx as unknown as Database,
+            now,
+            executor: tx,
+            planning: createProfileBudgetService({
+              db: tx as unknown as Database,
+              now,
+              executor: tx,
+            }),
+          }).setupFinances(input, context);
+        });
       if (input.operation === "start") {
         let session = await activeSession(context.userId);
         session ??= await latestSettledSession(context.userId);
@@ -459,16 +715,6 @@ export function createSetupService({ db, now, planning }: Options) {
             .returning();
           session = created ?? (await activeSession(context.userId));
           if (!session) throw new AppError("internal_error", "Finance setup did not start.");
-        }
-        if (session.status === "collecting_profile" && session.version === 1) {
-          return setupResult({
-            budgetVersionId: session.budgetVersionId,
-            headline: "I need one answer to continue your financial setup.",
-            question: nextQuestion(await profile(context.userId)),
-            sessionId: session.id,
-            stage: "collecting_profile",
-            version: session.version,
-          });
         }
         return continueSession(session, context);
       }
@@ -504,22 +750,60 @@ export function createSetupService({ db, now, planning }: Options) {
               "conflict",
               `Finance setup is at version ${session.version}; resume it before continuing.`,
             );
-          if (input.operation === "answer") {
+          if (input.operation === "answer" || input.operation === "skip") {
             if (
               session.status !== "collecting_profile" ||
               session.currentQuestionKey !== input.questionId
             )
               throw new AppError("conflict", "That is not the current Finance setup question.");
             const current = await profile(context.userId);
+            if (session.questionProfileVersionId !== (current?.id ?? null))
+              throw new AppError(
+                "conflict",
+                "Your financial profile changed. Resume setup before answering.",
+              );
+            if (input.operation === "skip") {
+              const skippedQuestions = [
+                ...session.skippedQuestions.filter(
+                  (entry) => entry.questionId !== input.questionId,
+                ),
+                { questionId: input.questionId, profileVersion: current?.version ?? 0 },
+              ];
+              const [updated] = await db
+                .update(financeSetupSessions)
+                .set({ skippedQuestions, version: session.version + 1, updatedAt: now() })
+                .where(eq(financeSetupSessions.id, session.id))
+                .returning();
+              if (!updated) throw new AppError("conflict", "Setup changed.");
+              return advance(updated, current, context);
+            }
             const saved = await planning.updateFinancialProfile(
               {
-                changes: setupProfileChange(input.questionId as QuestionId, input.answer),
+                changes: setupProfileChange(input.questionId, input.answer, current, {
+                  actorId: context.actorId,
+                  actorType: context.actorType,
+                  confidence: 1,
+                  evidence: { sessionId: session.id, questionId: input.questionId },
+                  maintenanceRunId: null,
+                  observedAt: now().toISOString(),
+                  requestId: context.requestId,
+                  sourceId: session.id,
+                }),
                 expectedVersion: current?.version ?? 0,
                 idempotencyKey: `${input.idempotencyKey}:profile`,
               },
               context,
             );
-            return advance(session, saved.data, context);
+            const skippedQuestions = session.skippedQuestions
+              .filter((entry) => entry.profileVersion === (current?.version ?? 0))
+              .map((entry) => ({ ...entry, profileVersion: saved.data.version }));
+            const [updated] = await db
+              .update(financeSetupSessions)
+              .set({ skippedQuestions })
+              .where(eq(financeSetupSessions.id, session.id))
+              .returning();
+            if (!updated) throw new AppError("conflict", "Setup changed.");
+            return advance(updated, saved.data, context);
           }
           if (
             session.status !== "budget_approval" ||
@@ -537,6 +821,7 @@ export function createSetupService({ db, now, planning }: Options) {
               approvalSource: input.approvalSource,
               budgetVersionId: input.budgetVersionId,
               expectedVersion: budget.data.version,
+              expectedProfileVersionId: input.expectedProfileVersionId,
               idempotencyKey: `${input.idempotencyKey}:budget`,
             },
             context,
@@ -567,6 +852,7 @@ export function createSetupService({ db, now, planning }: Options) {
             version: updated.version,
           });
         },
+        executor,
       );
     },
   };

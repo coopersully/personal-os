@@ -3,7 +3,10 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   executionPolicySettings,
+  financeBudgetVersions,
+  financeGoals,
   financeMaintenanceRuns,
+  financeProfileVersions,
   financeSetupSessions,
   migrateDatabase,
   users,
@@ -11,10 +14,29 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
-import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createProfileBudgetService } from "./profile-budget-service.js";
 import { createSetupService } from "./setup-service.js";
+
+async function skipRemaining(
+  service: ReturnType<typeof createSetupService>,
+  initial: Awaited<ReturnType<ReturnType<typeof createSetupService>["setupFinances"]>>,
+  context: Awaited<ReturnType<typeof loadFinanceAuthorization>>,
+) {
+  let result = initial;
+  for (let count = 0; result.data.question && count < 20; count++) {
+    const input = {
+      operation: "skip" as const,
+      sessionId: result.data.sessionId,
+      expectedVersion: result.data.version,
+      questionId: result.data.question.id,
+      idempotencyKey: `skip:${result.data.sessionId}:${result.data.version}`,
+    };
+    result = await service.setupFinances(input, context);
+    expect(await service.setupFinances(input, context)).toEqual(result);
+  }
+  return result;
+}
 
 describe.sequential("guided Finance setup", () => {
   let container: StartedPostgreSqlContainer;
@@ -79,7 +101,11 @@ describe.sequential("guided Finance setup", () => {
       },
       context,
     );
-    const started = await service.setupFinances({ operation: "start" }, context);
+    const started = await skipRemaining(
+      service,
+      await service.setupFinances({ operation: "start" }, context),
+      context,
+    );
     const original = (await planning.getFinanceBudget(owner.id)).data;
     if (!original) throw new Error("Setup proposal missing.");
     const revised = await planning.reviseFinanceBudget(
@@ -89,8 +115,8 @@ describe.sequential("guided Finance setup", () => {
         idempotencyKey: "cross-revise",
         effectiveFrom: original.effectiveFrom,
         name: "Updated portal plan",
-        resources: original.resources,
-        allocations: original.allocations,
+        resources: [{ amount: 4000, key: "income", kind: "income" }],
+        allocations: [{ amount: 4000, key: "buffer", kind: "buffer" }],
         assumptions: original.assumptions,
         rationale: "Revised in the portal.",
       },
@@ -110,6 +136,7 @@ describe.sequential("guided Finance setup", () => {
         budgetVersionId: revised.data.id,
         expectedVersion: revised.data.version,
         approvalSource: "user_instruction",
+        expectedProfileVersionId: revised.data.profileVersionId,
         idempotencyKey: "cross-approve",
       },
       context,
@@ -134,161 +161,265 @@ describe.sequential("guided Finance setup", () => {
     ).toBe(ready.data.version);
   });
 
-  it("persists each answer, proposes a budget, and hands approval into maintenance", async () => {
+  it("persists unknown skips, recovers interruptions, and keeps an absent position incomplete", async () => {
     const now = () => new Date("2026-08-23T20:00:00Z");
     const planning = createProfileBudgetService({ db: database.db, now });
-    const service = createSetupService({ db: database.db, now, planning });
-    const principal: Principal = {
-      actorId: "agent",
-      actorType: "agent",
-      scopes: new Set(["finances:write"]),
-      userId,
-    };
+    let service = createSetupService({ db: database.db, now, planning });
     const context = await loadFinanceAuthorization({
       db: database.db,
-      principal,
+      principal: {
+        actorId: "agent",
+        actorType: "agent",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
       requestId: "setup",
     });
-    const concurrentStarts = await Promise.all([
+    const starts = await Promise.all([
       service.setupFinances({ operation: "start" }, context),
       service.setupFinances({ operation: "start" }, context),
     ]);
-    expect(concurrentStarts[1]?.data.sessionId).toBe(concurrentStarts[0]?.data.sessionId);
-    let response = concurrentStarts[0] as NonNullable<(typeof concurrentStarts)[number]>;
-    expect(response.communication.nextQuestion?.id).toBe("profile:location");
+    expect(starts[1]?.data).toEqual(starts[0]?.data);
+    let response = starts[0];
+    if (!response) throw new Error("Missing setup response");
+    const stale = response;
+    await planning.updateFinancialProfile(
+      { expectedVersion: 0, idempotencyKey: "outside-profile", changes: { jurisdiction: "US-NY" } },
+      context,
+    );
     await expect(
       service.setupFinances(
         {
-          answer: "Brooklyn, New York",
-          expectedVersion: response.data.version + 1,
-          idempotencyKey: "setup-stale-version",
           operation: "answer",
+          answer: "US-CA",
+          expectedVersion: stale.data.version,
           questionId: "profile:location",
-          sessionId: response.data.sessionId,
+          sessionId: stale.data.sessionId,
+          idempotencyKey: "stale-answer",
         },
         context,
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    await expect(
-      service.setupFinances(
-        {
-          answer: "Wrong question",
-          expectedVersion: response.data.version,
-          idempotencyKey: "setup-wrong-question",
-          operation: "answer",
-          questionId: "profile:household_size",
-          sessionId: response.data.sessionId,
-        },
-        context,
-      ),
-    ).rejects.toMatchObject({ code: "conflict" });
-    await expect(
-      service.setupFinances(
-        {
-          operation: "resume",
-          sessionId: "00000000-0000-4000-8000-000000000000",
-        },
-        context,
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-
-    const answers: Record<string, string> = {
-      "profile:location": "Brooklyn, New York",
-      "profile:household_size": "1",
-      "profile:monthly_take_home": "$8,000",
-      "profile:liquid_reserves": "$20,000",
-    };
-    for (const [index, [questionId, answer]] of Object.entries(answers).entries()) {
-      response = await service.setupFinances(
-        {
-          answer,
-          expectedVersion: response.data.version,
-          idempotencyKey: `setup-answer-${index}`,
-          operation: "answer",
-          questionId,
-          sessionId: response.data.sessionId,
-        },
-        context,
-      );
-    }
+    response = await service.setupFinances(
+      { operation: "resume", sessionId: response.data.sessionId },
+      context,
+    );
+    expect(response.data.question?.id).toBe("profile:household_size");
+    const skipped = await service.setupFinances(
+      {
+        operation: "skip",
+        expectedVersion: response.data.version,
+        questionId: "profile:household_size",
+        sessionId: response.data.sessionId,
+        idempotencyKey: "skip-household",
+      },
+      context,
+    );
+    service = createSetupService({ db: database.db, now, planning });
+    response = await service.setupFinances(
+      { operation: "resume", sessionId: skipped.data.sessionId },
+      context,
+    );
+    expect(response.data.question?.id).toBe("profile:monthly_take_home");
+    response = await skipRemaining(service, response, context);
     expect(response).toMatchObject({
-      data: { budgetVersionId: expect.any(String), stage: "budget_approval" },
+      outcome: "work_remaining",
+      data: {
+        stage: "budget_proposal",
+        position: { state: "unavailable", reasonCode: "producer_not_registered" },
+      },
     });
-    expect(response.communication.nextQuestion?.id).toBe("budget:approval");
-    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
-      data: { stage: "budget_approval" },
+    const draft = (await planning.getFinanceBudget(userId)).data;
+    if (!draft) throw new Error("Missing first plan");
+    expect(draft).toMatchObject({
+      status: "incomplete",
+      allocations: [],
+      resources: [],
+      expectedResources: 0,
+      profileVersionId: expect.any(String),
     });
+    expect((await planning.getFinancialProfile(userId)).data).toMatchObject({
+      householdSize: null,
+      expectedMonthlyTakeHome: null,
+      planning: null,
+    });
+    expect(
+      (
+        await service.setupFinances(
+          { operation: "resume", sessionId: response.data.sessionId },
+          context,
+        )
+      ).data.budgetVersionId,
+    ).toBe(draft.id);
+    expect(
+      await database.db
+        .select()
+        .from(financeBudgetVersions)
+        .where(eq(financeBudgetVersions.userId, userId)),
+    ).toHaveLength(1);
     await expect(
-      service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
-    ).resolves.toMatchObject({ data: { stage: "budget_approval" } });
-    await expect(
-      service.setupFinances(
+      planning.approveFinanceBudget(
         {
-          approvalSource: "agent_self_approval",
-          budgetVersionId: "00000000-0000-4000-8000-000000000000",
-          expectedVersion: response.data.version,
-          idempotencyKey: "setup-wrong-budget",
-          operation: "approve_budget",
-          sessionId: response.data.sessionId,
-        },
-        context,
-      ),
-    ).rejects.toMatchObject({ code: "conflict" });
-    const profile = await planning.getFinancialProfile(userId);
-    expect(profile.data).toMatchObject({ expectedMonthlyTakeHome: 8000, jurisdiction: "US-NY" });
-
-    await expect(
-      service.setupFinances(
-        {
-          approvalSource: "agent_self_approval",
-          budgetVersionId: response.data.budgetVersionId as string,
-          expectedVersion: response.data.version,
-          idempotencyKey: "setup-agent-denied",
-          operation: "approve_budget",
-          sessionId: response.data.sessionId,
+          approvalSource: "user_instruction",
+          budgetVersionId: draft.id,
+          expectedVersion: draft.version,
+          expectedProfileVersionId: draft.profileVersionId,
+          idempotencyKey: "agent-forged-user",
         },
         context,
       ),
     ).rejects.toMatchObject({ code: "forbidden" });
-    const approved = await service.setupFinances(
+    await expect(
+      planning.approveFinanceBudget(
+        {
+          approvalSource: "user_instruction",
+          budgetVersionId: draft.id,
+          expectedVersion: draft.version,
+          expectedProfileVersionId: draft.profileVersionId,
+          idempotencyKey: "user-incomplete",
+        },
+        { ...context, actorType: "user", actorId: userId },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const [other] = await database.db
+      .insert(users)
+      .values({ displayName: "Other", email: "setup-other@example.com", passwordHash: "unused" })
+      .returning();
+    if (!other) throw new Error("Missing fixture");
+    await expect(
+      service.setupFinances(
+        { operation: "resume", sessionId: response.data.sessionId },
+        { ...context, userId: other.id },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.setupFinances({ operation: "start" }, { ...context, canMutate: false }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(
+      await database.db
+        .select()
+        .from(financeProfileVersions)
+        .where(eq(financeProfileVersions.userId, userId)),
+    ).toHaveLength(1);
+  });
+
+  it("builds an exact deficit from stated needs, reuses debt minimums once, and never funds goals", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({ displayName: "Deficit", email: "deficit@example.com", passwordHash: "unused" })
+      .returning();
+    if (!owner) throw new Error("Missing fixture");
+    const [goal] = await database.db
+      .insert(financeGoals)
+      .values({ userId: owner.id, name: "Reserve goal", targetAmount: 500000 })
+      .returning();
+    if (!goal) throw new Error("Missing goal");
+    const now = () => new Date("2026-09-18T12:00:00Z");
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        userId: owner.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "deficit",
+    });
+    const provenance = {
+      actorId: owner.id,
+      actorType: "user" as const,
+      confidence: 1,
+      evidence: {},
+      maintenanceRunId: null,
+      observedAt: now().toISOString(),
+      requestId: "deficit",
+      sourceId: null,
+    };
+    const item = (n: number, name: string, amountCents: number) => ({
+      id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+      name,
+      amountCents,
+      dueDay: 1,
+      provenance,
+    });
+    const profile = await planning.updateFinancialProfile(
       {
-        approvalSource: "user_instruction",
-        budgetVersionId: response.data.budgetVersionId as string,
-        expectedVersion: response.data.version,
-        idempotencyKey: "setup-approve",
-        operation: "approve_budget",
-        sessionId: response.data.sessionId,
+        expectedVersion: 0,
+        idempotencyKey: "deficit-profile",
+        changes: {
+          jurisdiction: "US-NY",
+          householdSize: 1,
+          expectedMonthlyTakeHome: 2000,
+          liquidReserves: 10000,
+          incomeStability: "variable",
+          debts: [
+            {
+              accountId: null,
+              name: "Known debt",
+              balance: 1500,
+              minimumMonthlyPayment: 100,
+              interestRate: null,
+            },
+          ],
+          preferences: {
+            bufferTarget: 50,
+            debtPriority: "minimums",
+            emergencyReserveMonths: null,
+            notes: [],
+          },
+          planning: {
+            recurringIncome: { amountCents: 100000, nextDate: "2026-10-01", provenance },
+            uncertainIncome: [
+              {
+                id: item(1, "", 0).id,
+                name: "Uncertain pay",
+                amountCents: 50000,
+                expectedDate: "2026-10-01",
+                provenance,
+              },
+            ],
+            exceptionalResources: [
+              {
+                id: item(2, "", 0).id,
+                name: "One-time resource",
+                amountCents: 200000,
+                expectedDate: "2026-10-01",
+                provenance,
+              },
+            ],
+            obligations: [
+              { ...item(3, "Rent", 80000), debtAccountId: null },
+              { ...item(4, "Known debt", 10000), debtAccountId: null },
+            ],
+            contributions: [{ ...item(5, "Reserve goal", 20000), goalId: goal.id }],
+            priorities: [
+              { ...item(6, "Quality of life", 10000), categoryId: null, protected: true },
+            ],
+          },
+        },
       },
       context,
     );
-    expect(approved).toMatchObject({
-      data: { stage: "initial_maintenance" },
-      nextAction: { tool: "maintain_finances" },
+    const service = createSetupService({ db: database.db, now, planning });
+    const result = await service.setupFinances({ operation: "start" }, context);
+    expect(result.data).toMatchObject({
+      stage: "budget_proposal",
+      profileVersionId: profile.data.id,
     });
-    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
-      data: { stage: "initial_maintenance" },
-      nextAction: { tool: "maintain_finances" },
+    const draft = (await planning.getFinanceBudget(owner.id)).data;
+    if (!draft) throw new Error("Missing first plan");
+    expect(draft).toMatchObject({
+      status: "incomplete",
+      expectedResources: 1000,
+      allocatedTotal: 1250,
+      balanceDelta: -250,
     });
-    await expect(
-      service.setupFinances({ operation: "resume", sessionId: response.data.sessionId }, context),
-    ).resolves.toMatchObject({ data: { stage: "initial_maintenance" } });
-
-    await database.db
-      .update(financeSetupSessions)
-      .set({ status: "settled" })
-      .where(eq(financeSetupSessions.id, response.data.sessionId));
-    await expect(service.setupFinances({ operation: "start" }, context)).resolves.toMatchObject({
-      data: {
-        sessionId: response.data.sessionId,
-        stage: "initial_maintenance",
-        canonicalMaintenanceRunId: null,
-      },
-      nextAction: {
-        tool: "maintain_finances",
-        arguments: { operation: "start", scope: { type: "all_outstanding" } },
-      },
-      outcome: "work_remaining",
-    });
+    expect(
+      draft.allocations.filter((allocation) => allocation.description === "Known debt"),
+    ).toHaveLength(1);
+    expect(draft.resources).toEqual([{ amount: 1000, key: "recurring-floor", kind: "income" }]);
+    expect((await planning.listFinanceGoals(owner.id)).data[0]?.currentAmount).toBe(0);
   });
 
   it("resumes only live maintenance evidence and restarts after a terminal canonical run", async () => {

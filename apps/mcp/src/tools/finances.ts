@@ -170,7 +170,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, show the proposed budget, accept a plain approval or authorized bypass self-approval, then continue into maintenance. Do not ask the user to name a tool or visit the nohmi web app.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation requires an authenticated user decision bound to the current profile and proposal; agent tokens cannot activate it. Do not ask the user to name a tool.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -361,10 +361,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Activate a shown balanced proposal. When the user says approve, call with user_instruction. A fully scoped bypass agent may use agent_self_approval autonomously.",
+        "Submit an exact displayed proposal and profile revision for approval. Activation requires an authenticated user decision; agent tokens cannot activate a budget by claiming user_instruction or enabling review bypass.",
       inputSchema: {
         approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
         budgetVersionId: id,
+        expectedProfileVersionId: id.nullable().optional(),
         expectedVersion: z.number().int().positive(),
         idempotencyKey,
       },

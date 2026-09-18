@@ -1,3 +1,4 @@
+import { createFinanceBudgetVersionInputSchema } from "./budget.js";
 import {
   financeSetupPlanningSchema,
   nextFinancePlanningQuestion,
@@ -57,8 +58,24 @@ describe("progressive Finance planning", () => {
 
   it("keeps uncertain income and exceptional resources out of recurring funding", () => {
     const planning = complete();
-    planning.uncertainIncome = [item(2, 50000)];
-    planning.exceptionalResources = [item(3, 250000)];
+    planning.uncertainIncome = [
+      {
+        id: id(2),
+        name: "Uncertain",
+        amountCents: 50000,
+        expectedDate: "2026-10-01",
+        provenance: source,
+      },
+    ];
+    planning.exceptionalResources = [
+      {
+        id: id(3),
+        name: "One-time",
+        amountCents: 250000,
+        expectedDate: "2026-10-01",
+        provenance: source,
+      },
+    ];
     planning.obligations = [{ ...item(4, 110001), debtAccountId: null }];
     expect(summarizeFinancePlanning(planning)).toMatchObject({
       recurringFloorCents: 100001,
@@ -160,4 +177,22 @@ describe("progressive Finance planning", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+it("allows unknown first-plan resources without making an empty proposal approvable", () => {
+  const draft = {
+    allocations: [],
+    assumptions: ["Income unknown"],
+    effectiveFrom: "2026-09",
+    resources: [],
+    rationale: "Incomplete first plan",
+    idempotencyKey: "first-plan",
+  };
+  expect(
+    createFinanceBudgetVersionInputSchema.safeParse({ ...draft, status: "incomplete" }).success,
+  ).toBe(true);
+  expect(createFinanceBudgetVersionInputSchema.safeParse(draft).success).toBe(false);
+  expect(
+    createFinanceBudgetVersionInputSchema.safeParse({ ...draft, status: "proposed" }).success,
+  ).toBe(false);
 });

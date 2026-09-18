@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idSchema } from "../common.js";
 import { maintenanceRunSchema, maintenanceScopeSchema } from "../maintenance.js";
 import { financeInteractionQuestionSchema } from "./common.js";
+import { financeWorkflowUnavailableSchema } from "./workflow-contracts.js";
 
 /** The only live Finance maintenance entrypoint; historical judgments are evidence only. */
 export const financeMaintenanceInputSchema = z.discriminatedUnion("operation", [
@@ -56,8 +57,16 @@ export const financeSetupInputSchema = z.discriminatedUnion("operation", [
     sessionId: idSchema,
   }),
   z.object({
+    expectedVersion: z.number().int().positive(),
+    idempotencyKey: z.string().trim().min(1).max(200),
+    operation: z.literal("skip"),
+    questionId: z.string().min(1).max(240),
+    sessionId: idSchema,
+  }),
+  z.object({
     approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
     budgetVersionId: idSchema,
+    expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),
     idempotencyKey: z.string().trim().min(1).max(200),
     operation: z.literal("approve_budget"),
@@ -69,6 +78,8 @@ export type FinanceSetupInput = z.infer<typeof financeSetupInputSchema>;
 
 export const financeSetupPayloadSchema = z.object({
   budgetVersionId: idSchema.nullable(),
+  profileVersionId: idSchema.nullable().optional(),
+  position: financeWorkflowUnavailableSchema.optional(),
   maintenanceRunId: idSchema.nullable(),
   canonicalMaintenanceRunId: idSchema.nullable(),
   question: financeInteractionQuestionSchema.nullable(),

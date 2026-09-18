@@ -4,9 +4,9 @@ import {
   type DatabaseClient,
   domainProfileApprovals,
   domainProfiles,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
-  financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
@@ -411,7 +411,7 @@ describe.sequential("Finance status service", () => {
     const userId = await makeUser("Planning evidence Finance");
     const source = await account(userId, "current");
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId });
     await database.db.insert(financeProfiles).values({
       effectiveDate: "2026-08-01",

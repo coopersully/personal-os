@@ -10,6 +10,7 @@ import {
   connectorSubscriptions,
   connectorSyncTriggers,
   domainProfileApprovals,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
@@ -48,6 +49,27 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("stores revisioned global policy and preserves only aligned explicit legacy grants", async () => {
+    const policy = getTableConfig(executionPolicySettings);
+    expect(policy.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["user_id", "review_bypass_enabled", "version"]),
+    );
+    expect(policy.checks.map((constraint) => constraint.name)).toContain(
+      "execution_policy_settings_version_check",
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0083_global_execution_policy.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "execution_policy_settings"');
+    expect(migrationSql).toContain('"review_bypass_enabled" boolean DEFAULT false NOT NULL');
+    expect(migrationSql).toContain('count(*) = 2 AND bool_and("legacy"."review_bypass_enabled")');
+    expect(migrationSql).toContain('FROM "finance_automation_settings"');
+    expect(migrationSql).toContain('FROM "finance_agent_settings"');
+    expect(migrationSql).toContain('GROUP BY "legacy"."user_id"');
+  });
+
   it("keeps the Mail stewardship ledger owned, revisioned, and historically reviewable", async () => {
     const obligations = getTableConfig(mailObligations);
     const dispositions = getTableConfig(mailThreadDispositions);
@@ -360,6 +382,7 @@ describe("database schema contracts", () => {
       "0080_mail_reply_metadata",
       "0081_finance_legacy_disconnect_repair",
       "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
     ]);
   });
 

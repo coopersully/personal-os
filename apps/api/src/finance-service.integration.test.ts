@@ -9,11 +9,11 @@ import {
   type DatabaseClient,
   domainProfileApprovals,
   domainProfiles,
+  executionPolicySettings,
   financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
-  financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
@@ -39,6 +39,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
@@ -420,6 +421,7 @@ describe.sequential("finance service", () => {
       "0080_mail_reply_metadata",
       "0081_finance_legacy_disconnect_repair",
       "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -906,17 +908,21 @@ describe.sequential("finance service", () => {
 
   it("keeps review bypass off until a signed-in user explicitly enables it", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
+    const executionPolicy = createExecutionPolicyService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "finance-review-bypass" };
 
     await expect(service.getAutomationSettings(userId)).resolves.toEqual({
       reviewBypassEnabled: false,
     });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
     await expect(service.getAutomationSettings(userId)).resolves.toEqual({
       reviewBypassEnabled: true,
     });
+    await expect(
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
+    ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
       humanOnlyActions: [
         "connect_or_disconnect_source",
@@ -927,16 +933,16 @@ describe.sequential("finance service", () => {
     });
     await expect(
       database.db
-        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-        .from(financeAutomationSettings)
-        .where(eq(financeAutomationSettings.userId, userId)),
+        .select({ reviewBypassEnabled: executionPolicySettings.reviewBypassEnabled })
+        .from(executionPolicySettings)
+        .where(eq(executionPolicySettings.userId, userId)),
     ).resolves.toEqual([{ reviewBypassEnabled: true }]);
     await expect(
       database.db
         .select({ action: auditEvents.action, actorType: auditEvents.actorType })
         .from(auditEvents)
         .where(eq(auditEvents.requestId, context.requestId)),
-    ).resolves.toEqual([{ action: "finance.review_bypass_updated", actorType: "user" }]);
+    ).resolves.toEqual([{ action: "execution_policy.review_bypass_updated", actorType: "user" }]);
   });
 
   it("logs receipt Mail search failures without exposing the error", async () => {
@@ -10128,6 +10134,7 @@ describe.sequential("finance service", () => {
       .returning();
     if (!owner) throw new Error("Finance summary owner was not created.");
     const service = createFinanceService({ db: database.db, now: () => now });
+    const executionPolicy = createExecutionPolicyService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(owner.id), requestId: "finance-summary" };
     const accounts = await Promise.all([
       service.createAccount(
@@ -10298,14 +10305,14 @@ describe.sequential("finance service", () => {
       spendingThisMonth: expect.any(Number),
     });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: false }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: false });
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: false, version: 1 });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      executionPolicy.update({ expectedVersion: 2, reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
   });
 
   it("treats a current account snapshot as untrustworthy when its Provider Item is blocked", async () => {

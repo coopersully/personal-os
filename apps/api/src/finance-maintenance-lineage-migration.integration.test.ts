@@ -13,6 +13,7 @@ describe.sequential("Finance maintenance lineage migration", () => {
     const database = createDatabaseClient(container.getConnectionUri());
     const beforeLineage = await migrationsWithout(migrationsFolder, "nohmi-maintenance-lineage-", [
       migrationTag,
+      "0083_global_execution_policy",
     ]);
     try {
       await migrateDatabase(database.db, beforeLineage);

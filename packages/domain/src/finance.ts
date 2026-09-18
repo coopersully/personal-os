@@ -53,18 +53,6 @@ export const financeProviderItemHealthSchema = z.object({
 });
 export type FinanceProviderItemHealth = z.infer<typeof financeProviderItemHealthSchema>;
 
-export const financeAutomationSettingsSchema = z.object({
-  reviewBypassEnabled: z.boolean().default(false),
-});
-export type FinanceAutomationSettings = z.infer<typeof financeAutomationSettingsSchema>;
-
-export const updateFinanceAutomationSettingsInputSchema = z
-  .object({ reviewBypassEnabled: z.boolean() })
-  .strict();
-export type UpdateFinanceAutomationSettingsInput = z.infer<
-  typeof updateFinanceAutomationSettingsInputSchema
->;
-
 const maxFinanceAmount = 100_000_000;
 
 /** Converts a user-facing USD amount to integer cents without floating-point drift. */
@@ -1343,3 +1331,4 @@ export * from "./finance/playbook.js";
 export * from "./finance/presentation.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";
+export * from "./finance/workflow-contracts.js";

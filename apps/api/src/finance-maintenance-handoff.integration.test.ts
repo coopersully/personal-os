@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  executionPolicySettings,
   financeAgentActionReviews,
-  financeAgentSettings,
   financeLedgerChallenges,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
@@ -54,7 +54,7 @@ describe.sequential("Finance maintenance handoff recovery", () => {
       .returning();
     if (!owner) throw new Error("Missing handoff owner.");
     await database.db
-      .insert(financeAgentSettings)
+      .insert(executionPolicySettings)
       .values({ userId: owner.id, reviewBypassEnabled: false });
     const finances = createFinanceService({ db: database.db, now: () => now });
     const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
@@ -318,9 +318,9 @@ describe.sequential("Finance maintenance handoff recovery", () => {
   ])("restarts stale preparation once without economic apply when bypass=%s", async (bypass) => {
     const setup = await fixture();
     await database.db
-      .update(financeAgentSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: bypass })
-      .where(eq(financeAgentSettings.userId, setup.owner.id));
+      .where(eq(executionPolicySettings.userId, setup.owner.id));
     await setup.finances.createAccount(
       {
         balance: 100,

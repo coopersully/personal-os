@@ -611,6 +611,8 @@ describe("finance routes", () => {
       },
     ];
     const listQuestions = vi.fn(async () => questions);
+    const listReviews = vi.fn(async () => []);
+    const listReviewQueue = vi.fn(async () => []);
     const approve = vi.fn();
     const answerQuestion = vi.fn(async () => ({
       result: { reimbursementId: id },
@@ -630,11 +632,11 @@ describe("finance routes", () => {
       context.json({ error: error instanceof Error ? error.message : "unknown" }, 400),
     );
     registerFinanceRoutes({
-      actions: { answerQuestion, approve, listQuestions } as never,
+      actions: { answerQuestion, approve, listQuestions, listReviews } as never,
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
-      finances: {} as ReturnType<typeof createFinanceService>,
+      finances: { listReviewQueue } as unknown as ReturnType<typeof createFinanceService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -644,7 +646,19 @@ describe("finance routes", () => {
     const listed = await app.request("/v1/finances/questions?limit=2");
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toEqual({ questions });
-    expect(listQuestions).toHaveBeenLastCalledWith(id, 2);
+    expect(listQuestions).toHaveBeenLastCalledWith(id, 2, undefined);
+    for (const [path, read] of [
+      ["review", listReviewQueue],
+      ["action-reviews", listReviews],
+      ["questions", listQuestions],
+    ] as const) {
+      expect((await app.request(`/v1/finances/${path}?limit=1&id=${id}`)).status).toBe(200);
+      expect(read).toHaveBeenLastCalledWith(id, 1, id);
+      const calls = read.mock.calls.length;
+      expect((await app.request(`/v1/finances/${path}?id=invalid`)).status).toBe(400);
+      expect((await app.request(`/v1/finances/${path}?id=`)).status).toBe(400);
+      expect(read.mock.calls).toHaveLength(calls);
+    }
     const answered = await app.request(`/v1/finances/questions/${id}/answer`, {
       body: JSON.stringify({ answer: JSON.stringify({ answer: { kind: "not_reimbursement" } }) }),
       headers: { "content-type": "application/json" },

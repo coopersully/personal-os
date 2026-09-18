@@ -1936,6 +1936,26 @@ describe("ilo API client", () => {
     );
   });
 
+  it("targets exact Finance reads without losing the bounded limit", async () => {
+    const paths: string[] = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        paths.push(`${url.pathname}${url.search}`);
+        return json({ reviews: [], questions: [] });
+      },
+    });
+    await api.getFinanceReviewQueue(1, id);
+    await api.listFinanceActionReviews(1, id);
+    await api.listFinanceQuestions(1, id);
+    expect(paths).toEqual(
+      ["review", "action-reviews", "questions"].map(
+        (path) => `/v1/finances/${path}?limit=1&id=${id}`,
+      ),
+    );
+  });
+
   it("uses exact action-review transport paths and result envelopes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const review = { id, status: "dismissed" };

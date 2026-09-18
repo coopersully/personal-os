@@ -1296,3 +1296,11 @@ it("does not fall back from an exact legacy review to unrelated transactions", a
   );
   expect(api.resolveFinanceReview).not.toHaveBeenCalled();
 });
+
+it("shows a failed exact legacy review request instead of an unavailable record", async () => {
+  api.getFinanceReviewQueue.mockRejectedValue(new Error("Review request failed"));
+  renderPage("/finances/review/legacy?item=11111111-1111-4111-8111-111111111111");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Review request failed");
+  expect(screen.queryByText("Requested review unavailable")).not.toBeInTheDocument();
+  expect(api.resolveFinanceReview).not.toHaveBeenCalled();
+});

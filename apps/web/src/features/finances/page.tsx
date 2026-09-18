@@ -646,7 +646,9 @@ export function FinancesPage() {
               ) : section === "review" && linkedReviewId !== undefined ? (
                 reviewQueue.isPending ? (
                   <p role="status">Loading requested review…</p>
-                ) : reviewQueue.error ? null : (
+                ) : reviewQueue.error ? (
+                  <InlineError error={reviewQueue.error} />
+                ) : (
                   <EmptyState icon={<CircleCheckIcon />} title="Requested review unavailable">
                     This item may have been resolved or may not belong to this account.
                   </EmptyState>

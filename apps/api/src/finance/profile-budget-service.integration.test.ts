@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  executionPolicySettings,
   financeAccounts,
-  financeAgentSettings,
   financeCategories,
   migrateDatabase,
   users,
@@ -38,7 +38,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
-    await database.db.insert(financeAgentSettings).values({
+    await database.db.insert(executionPolicySettings).values({
       reviewBypassEnabled: true,
       userId,
     });
@@ -165,9 +165,20 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       ]),
     );
 
+    await expect(
+      service.approveFinanceBudget(
+        {
+          approvalSource: "agent_self_approval",
+          budgetVersionId: proposed.data.id,
+          expectedVersion: proposed.data.version,
+          idempotencyKey: "approve-1-denied",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
     const active = await service.approveFinanceBudget(
       {
-        approvalSource: "agent_self_approval",
+        approvalSource: "user_instruction",
         budgetVersionId: proposed.data.id,
         expectedVersion: proposed.data.version,
         idempotencyKey: "approve-1",
@@ -195,9 +206,9 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       context,
     );
     await database.db
-      .update(financeAgentSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, version: 2 })
-      .where(eq(financeAgentSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const noBypass = await loadFinanceAuthorization({
       db: database.db,
       principal,

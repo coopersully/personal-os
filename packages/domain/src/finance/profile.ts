@@ -69,16 +69,3 @@ export const updateFinancialProfileInputSchema = z
   })
   .and(financeMutationMetaSchema.required({ expectedVersion: true }));
 export type UpdateFinancialProfileInput = z.infer<typeof updateFinancialProfileInputSchema>;
-
-export const financeAgentSettingsSchema = z.object({
-  reviewBypassEnabled: z.boolean(),
-  updatedAt: isoDateTimeSchema,
-  userId: idSchema,
-  version: z.number().int().positive(),
-});
-export type FinanceAgentSettings = z.infer<typeof financeAgentSettingsSchema>;
-
-export const updateFinanceAgentSettingsInputSchema = z
-  .object({ reviewBypassEnabled: z.boolean() })
-  .and(financeMutationMetaSchema.required({ expectedVersion: true }));
-export type UpdateFinanceAgentSettingsInput = z.infer<typeof updateFinanceAgentSettingsInputSchema>;

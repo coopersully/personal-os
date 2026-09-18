@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   deleteAccessToken: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getExecutionPolicySettings: vi.fn(),
   getIloSetup: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   previewSavedMailRule: vi.fn(),
   revokeOAuthClient: vi.fn(),
   toastError: vi.fn(),
+  updateExecutionPolicySettings: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -89,6 +91,14 @@ function readinessOverview(label: string) {
 describe("agent access settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getExecutionPolicySettings.mockResolvedValue({
+      reviewBypassEnabled: false,
+      version: 1,
+    });
+    mocks.updateExecutionPolicySettings.mockResolvedValue({
+      reviewBypassEnabled: true,
+      version: 2,
+    });
     mocks.getAgentConnectionGuide.mockResolvedValue({
       domains: [
         {
@@ -538,6 +548,21 @@ describe("agent access settings", () => {
       },
       unavailableDomains: [],
     });
+  });
+
+  it("edits the global execution policy from the account access surface", async () => {
+    renderSettings();
+    const bypass = await screen.findByRole("switch", {
+      name: "Apply eligible work without waiting in Review",
+    });
+    expect(bypass).not.toBeChecked();
+    await userEvent.setup().click(bypass);
+    await waitFor(() =>
+      expect(mocks.updateExecutionPolicySettings).toHaveBeenCalledWith({
+        expectedVersion: 1,
+        reviewBypassEnabled: true,
+      }),
+    );
   });
 
   it("keeps workspace access limited to agent authority and separates connected agents", async () => {

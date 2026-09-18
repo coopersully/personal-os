@@ -97,6 +97,7 @@ import {
 } from "../finances/agent-access.js";
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
+import { ExecutionPolicySettingsCard } from "./execution-policy.js";
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
@@ -180,7 +181,12 @@ export function ConnectedAgentsSettings() {
 }
 
 export function WorkspaceAccessSettings() {
-  return <AgentAccessSettings view="access" />;
+  return (
+    <>
+      <ExecutionPolicySettingsCard />
+      <AgentAccessSettings view="access" />
+    </>
+  );
 }
 
 export function WorkspaceSettings({ domain }: { domain: SetupDomain }) {

@@ -238,8 +238,9 @@ question or blocked result rather than an inferred permission.
 ## Current implementation boundary
 
 Current settings are distributed across account settings, connections, workspace access, domain
-profiles, Finance settings, Texting, and feature-specific pages. Finances has a workspace-specific
-review-bypass control, while the approved target is one global review-bypass policy. The complete
-shared per-workspace structure, canonical workspace editors, centralized read-only overview,
-maintenance guidance model, and SMS controls above are target behavior and must not be presented as
-shipped.
+profiles, Finance settings, Texting, and feature-specific pages. Review bypass is one revisioned
+global account policy edited beside workspace access. Its current direct-execution registration is
+limited to exact reversible Finance operations; it cannot grant scopes, activate rules, override
+stronger approvals, or authorize another domain. The complete shared per-workspace structure,
+canonical workspace editors, centralized read-only overview, maintenance guidance model, and SMS
+controls above are target behavior and must not be presented as shipped.

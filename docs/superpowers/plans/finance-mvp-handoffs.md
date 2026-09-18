@@ -64,6 +64,11 @@ Own L0–L2 and the bounded LV experiment. Begin with L0 under COO-53: verify ex
 new-user account setup and honest coverage. Continue with L1/L2 under COO-48 after F0 contracts land.
 Reuse existing provider Item, event, allocation and reimbursement models. Return one qualified
 position contract; all cashflow, budget-input and wealth facts must derive from it consistently.
+The F0b `financeMoneyFactReasonCodeSchema` defines the validating reason-code handshake: dependency
+or source unavailable, stale or incomplete evidence, pending transactions, unresolved allocation
+or reimbursement, missing commitments or protection policy, and unsupported account type. Map
+provider failures to those codes; do not forward provider messages or private source text. Extend
+the shared enum with its boundary tests before producing a new classification.
 Test the exact financial oracle and overlap cases in the plan. UI ownership is Accounts, Cashflow,
 Wealth and domain position components; coordinate Overview with F.
 

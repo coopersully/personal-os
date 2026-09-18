@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import type { createAssistantService } from "../assistant-service.js";
+import type { createExecutionPolicyService } from "../execution-policy-service.js";
 import type { AppEnv } from "../types.js";
 import { registerAssistantRoutes } from "./assistant.js";
 
@@ -118,6 +119,10 @@ describe("assistant setup routes", () => {
           version: "0.1.0",
         },
       },
+      executionPolicy: {
+        get: vi.fn(async () => ({ reviewBypassEnabled: false, version: 1 })),
+        update: vi.fn(),
+      } as unknown as ReturnType<typeof createExecutionPolicyService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -127,6 +132,16 @@ describe("assistant setup routes", () => {
     const json = { headers: { "content-type": "application/json" } };
 
     expect((await app.request("/v1/assistant/connection-guide")).status).toBe(200);
+    expect((await app.request("/v1/assistant/execution-policy")).status).toBe(200);
+    expect(
+      (
+        await app.request("/v1/assistant/execution-policy", {
+          body: JSON.stringify({ expectedVersion: 1, reviewBypassEnabled: true }),
+          headers: json.headers,
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(403);
     expect((await app.request("/v1/assistant/context")).status).toBe(200);
     expect((await app.request("/v1/assistant/setup-status")).status).toBe(200);
     expect(

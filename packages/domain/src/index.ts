@@ -7,6 +7,7 @@ export * from "./calendar-stewardship.js";
 export * from "./common.js";
 export * from "./connection.js";
 export * from "./desktop.js";
+export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
 export * from "./finance.js";
 export * from "./finance-maintenance.js";

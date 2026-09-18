@@ -68,11 +68,11 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
     {
       annotations: readAnnotations,
       description:
-        "Read whether the signed-in person has enabled Finance review bypass. The setting is informational only: nohmi decides whether justified Finance work applies, queues for review, or needs more input.",
+        "Read the account-wide review policy inherited by Finance. The setting is informational only: nohmi still enforces scopes, registered actions, and stronger approval requirements.",
       inputSchema: z.object({}),
       title: "Get Finance automation settings",
     },
-    async () => apiResult(() => api.getFinanceAutomationSettings()),
+    async () => apiResult(() => api.getExecutionPolicySettings()),
   );
 
   server.registerTool(

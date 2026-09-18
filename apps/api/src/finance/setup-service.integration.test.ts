@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
-  financeAgentSettings,
+  executionPolicySettings,
   financeMaintenanceRuns,
   financeSetupSessions,
   migrateDatabase,
@@ -35,7 +35,7 @@ describe.sequential("guided Finance setup", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
-    await database.db.insert(financeAgentSettings).values({ reviewBypassEnabled: true, userId });
+    await database.db.insert(executionPolicySettings).values({ reviewBypassEnabled: true, userId });
   }, 120_000);
 
   afterAll(async () => {
@@ -237,9 +237,22 @@ describe.sequential("guided Finance setup", () => {
     const profile = await planning.getFinancialProfile(userId);
     expect(profile.data).toMatchObject({ expectedMonthlyTakeHome: 8000, jurisdiction: "US-NY" });
 
+    await expect(
+      service.setupFinances(
+        {
+          approvalSource: "agent_self_approval",
+          budgetVersionId: response.data.budgetVersionId as string,
+          expectedVersion: response.data.version,
+          idempotencyKey: "setup-agent-denied",
+          operation: "approve_budget",
+          sessionId: response.data.sessionId,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
     const approved = await service.setupFinances(
       {
-        approvalSource: "agent_self_approval",
+        approvalSource: "user_instruction",
         budgetVersionId: response.data.budgetVersionId as string,
         expectedVersion: response.data.version,
         idempotencyKey: "setup-approve",

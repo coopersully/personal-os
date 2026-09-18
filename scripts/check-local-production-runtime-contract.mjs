@@ -31,14 +31,14 @@ function resourceBlock(source, declaration) {
 const required = [
   [runtime, /resource "aws_security_group" "local_production_tunnel"/, "tunnel security group"],
   [
-    runtime,
-    /resource "aws_security_group_rule" "database_from_local_production_tunnel"/,
+    network,
+    /security_groups\s*=\s*\[aws_security_group\.local_production_tunnel\.id\]/,
     "database SG-to-SG ingress",
   ],
   [
     runtime,
-    /source_security_group_id\s*=\s*aws_security_group\.local_production_tunnel\.id/,
-    "database source security group",
+    /cidr_blocks\s*=\s*aws_subnet\.database\[\*\]\.cidr_block/,
+    "tunnel egress limited to database subnets",
   ],
   [runtime, /resource "aws_instance" "local_production_tunnel"/, "tunnel instance"],
   [runtime, /http_tokens\s*=\s*"required"/, "required IMDSv2"],
@@ -48,6 +48,9 @@ const required = [
   [runtime, /resource "aws_iam_role" "local_production_runtime"/, "scoped operator role"],
   [runtime, /values\(local\.runtime_parameter_arns\)/, "exact runtime parameter resources"],
   [runtime, /"ssm:StartSession"/, "Session Manager start authority"],
+  [runtime, /"ssm:DescribeSessions"/, "Session Manager inspection authority"],
+  [runtime, /"ssm:TerminateSession"/, "Session Manager termination authority"],
+  [runtime, /session\/ilo-local-\*/, "locally owned Session Manager resource boundary"],
   [runtime, /"ec2:StartInstances"/, "tunnel start authority"],
   [runtime, /"ec2:StopInstances"/, "tunnel stop authority"],
   [runtime, /"rds:DescribeDBInstances"/, "RDS validation authority"],
@@ -68,6 +71,11 @@ const tunnelSecurityGroup = resourceBlock(
 if (!tunnelSecurityGroup) throw new Error("Could not inspect the tunnel security group.");
 if (/\bingress\s*\{/.test(tunnelSecurityGroup)) {
   throw new Error("The local production tunnel security group must not have ingress rules.");
+}
+if (/resource "aws_security_group_rule" "database_from_local_production_tunnel"/.test(runtime)) {
+  throw new Error(
+    "The production database security group must not mix inline and standalone ingress ownership.",
+  );
 }
 if (/resource "aws_security_group" "database"[\s\S]*cidr_blocks/.test(network)) {
   throw new Error("The production database security group must remain source-SG-only.");

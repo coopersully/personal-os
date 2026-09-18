@@ -1,3 +1,4 @@
+import { Socket } from "node:net";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool, type PoolConfig } from "pg";
@@ -11,9 +12,30 @@ export type DatabaseClient = {
   pool: Pool;
 };
 
-export function createDatabaseClient(config: string | PoolConfig): DatabaseClient {
-  const pool = new Pool(typeof config === "string" ? { connectionString: config } : config);
+export type DatabaseConnectionOptions = {
+  connectHost?: string;
+};
+
+export function createDatabaseClient(
+  config: string | PoolConfig,
+  options: DatabaseConnectionOptions = {},
+): DatabaseClient {
+  const poolConfig: PoolConfig =
+    typeof config === "string" ? { connectionString: config } : { ...config };
+  const connectHost = options.connectHost;
+  if (connectHost) {
+    poolConfig.stream = () => createTransportStream(connectHost);
+  }
+  const pool = new Pool(poolConfig);
   return createDatabaseClientFromPool(pool);
+}
+
+function createTransportStream(connectHost: string): Socket {
+  const socket = new Socket();
+  const connect = socket.connect.bind(socket);
+  socket.connect = ((port: number, _logicalHost?: string, listener?: () => void) =>
+    connect(port, connectHost, listener)) as typeof socket.connect;
+  return socket;
 }
 
 export function createDatabaseClientFromPool(pool: Pool): DatabaseClient {

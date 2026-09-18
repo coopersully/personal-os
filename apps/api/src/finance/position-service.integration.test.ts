@@ -4,6 +4,7 @@ import {
   type DatabaseClient,
   financeAccounts,
   financeEconomicEvents,
+  financeProviderItems,
   financeTransactionRelationships,
   financeTransactions,
   migrateDatabase,
@@ -197,6 +198,152 @@ describe.sequential("Finance position persistence boundary", () => {
       .set({ includeInPlanning: false, updatedAt: timestamp })
       .where(eq(financeAccounts.id, cashId));
     expect((await service.readPosition(userId, dates)).cash.cents).toBeNull();
+  });
+  it("qualifies provider failures and stale cutoffs, then recovers without poisoning manual assets", async () => {
+    const owner = required(
+      (
+        await database.db
+          .insert(users)
+          .values({
+            displayName: "Freshness",
+            email: "freshness-position@example.com",
+            passwordHash: "unused",
+          })
+          .returning()
+      )[0],
+    );
+    const item = required(
+      (
+        await database.db
+          .insert(financeProviderItems)
+          .values({
+            userId: owner.id,
+            provider: "plaid",
+            providerItemId: "synthetic-position-item",
+            encryptedCredentials: { ciphertext: "unused", iv: "unused", tag: "unused", version: 1 },
+            syncState: "current",
+            lastSyncedAt: timestamp,
+          })
+          .returning()
+      )[0],
+    );
+    const linked = required(
+      (
+        await database.db
+          .insert(financeAccounts)
+          .values({
+            userId: owner.id,
+            provider: "plaid",
+            providerItemRecordId: item.id,
+            institution: "Synthetic",
+            name: "Linked cash",
+            balance: 10_000,
+            currencyCode: "USD",
+            ownershipType: "individual",
+            ownershipShareBps: 10_000,
+            status: "connected",
+            syncState: "stale",
+            lastSyncedAt: null,
+          })
+          .returning()
+      )[0],
+    );
+    await database.db.insert(financeAccounts).values({
+      userId: owner.id,
+      provider: "manual",
+      institution: "Synthetic",
+      name: "Manual debt",
+      kind: "debt",
+      balance: -2_000,
+      currencyCode: "USD",
+      ownershipType: "individual",
+      ownershipShareBps: 10_000,
+    });
+    const healthy = await service.readPosition(owner.id, dates);
+    // The authoritative healthy Item wins over a stale account shadow.
+    expect(healthy.cash).toMatchObject({ cents: 10_000, quality: "verified", reasons: [] });
+    for (const syncState of ["retrying", "blocked"] as const) {
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          syncState,
+          syncError: "Synthetic failure",
+          syncErrorCode: "synthetic_failure",
+          syncErrorCategory: "temporary",
+          syncFailureCount: 1,
+          syncRecovery: syncState === "retrying" ? "automatic" : "reconnect",
+        })
+        .where(eq(financeProviderItems.id, item.id));
+      const failed = await service.readPosition(owner.id, dates);
+      expect(failed.cash).toMatchObject({
+        quality: "qualified",
+        reasons: ["source_unavailable", "stale_evidence"],
+      });
+      expect(failed.debt).toMatchObject({ cents: 2_000, quality: "verified", reasons: [] });
+      expect(failed.revision).not.toBe(healthy.revision);
+      expect(failed.spendable.cents).toBeNull();
+    }
+    for (const lastSyncedAt of [null, new Date(timestamp.getTime() - 86_400_001)]) {
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          syncState: "current",
+          lastSyncedAt,
+          syncError: null,
+          syncErrorCode: null,
+          syncErrorCategory: null,
+          syncFailureCount: 0,
+          syncRecovery: null,
+        })
+        .where(eq(financeProviderItems.id, item.id));
+      expect((await service.readPosition(owner.id, dates)).cash).toMatchObject({
+        quality: "qualified",
+        reasons: ["stale_evidence"],
+      });
+    }
+    // The exact 24-hour cutoff is current; reauthorization still independently blocks the source.
+    await database.db
+      .update(financeProviderItems)
+      .set({ lastSyncedAt: new Date(timestamp.getTime() - 86_400_000) })
+      .where(eq(financeProviderItems.id, item.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "needs_reauth" })
+      .where(eq(financeAccounts.id, linked.id));
+    expect((await service.readPosition(owner.id, dates)).cash.reasons).toEqual([
+      "source_unavailable",
+    ]);
+    // A blocked account must not borrow a healthy sibling Item's freshness.
+    await database.db
+      .update(financeAccounts)
+      .set({
+        status: "connected",
+        syncState: "blocked",
+        syncError: "Synthetic reconnect",
+        syncErrorCode: "synthetic_authorization",
+        syncErrorCategory: "authorization",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+      })
+      .where(eq(financeAccounts.id, linked.id));
+    expect((await service.readPosition(owner.id, dates)).cash.reasons).toEqual([
+      "source_unavailable",
+      "stale_evidence",
+    ]);
+    await database.db
+      .update(financeAccounts)
+      .set({
+        syncState: "current",
+        syncError: null,
+        syncErrorCode: null,
+        syncErrorCategory: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+      })
+      .where(eq(financeAccounts.id, linked.id));
+    const recovered = await service.readPosition(owner.id, dates);
+    expect(recovered.cash).toMatchObject({ quality: "verified", reasons: [] });
+    expect(recovered.debt.cents).toBe(2_000);
   });
   it("preserves exactly 100 requested accounts and reports an explicit omitted-all limit", async () => {
     const [owner] = await database.db

@@ -1227,8 +1227,10 @@ describe("Finance section states", () => {
     });
     subscriptions.unmount();
 
-    const accounts = renderPage("/finances/accounts");
-    fireEvent.click(await screen.findByRole("button", { name: "Sync" }));
+    const accounts = renderPage("/finances/accounts#account-checking");
+    const syncAccount = await screen.findByRole("button", { name: "Sync" });
+    expect(document.getElementById("account-checking")).toContainElement(syncAccount);
+    fireEvent.click(syncAccount);
     fireEvent.click(screen.getByRole("button", { name: "Track account" }));
     fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Cash Box" } });
     fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Wallet" } });

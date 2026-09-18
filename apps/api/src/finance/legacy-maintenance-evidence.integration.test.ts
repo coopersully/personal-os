@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import * as databaseSchema from "@personal-os/database";
 import {
   createDatabaseClient,
   financeAccounts,
@@ -15,6 +16,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import { createFinanceService } from "../finance-service.js";
 import { createFinanceStatusService } from "../finance-status-service.js";
@@ -582,6 +584,76 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
         kind: "relationship",
       }),
     ]);
+  });
+  it("looks up timestamps only for outstanding effects of each record type and owner", async () => {
+    const setup = await fixture();
+    const foreign = await fixture();
+    const [unrelated] = await database.db
+      .insert(financeTransactionRevisions)
+      .values({
+        userId: setup.userId,
+        transactionId: setup.third.id,
+        version: 1,
+        changes: { category: { before: null, after: "Groceries" } },
+        provenance: { actorType: "user" },
+        createdAt: legacyAt,
+      })
+      .returning();
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({
+        userId: setup.userId,
+        kind: "transfer",
+        stableKey: crypto.randomUUID(),
+      })
+      .returning();
+    if (!event || !unrelated) throw new Error("Fixture missing.");
+    const [relationship] = await database.db
+      .insert(financeTransactionRelationships)
+      .values({
+        userId: setup.userId,
+        economicEventId: event.id,
+        relationship: "transfer",
+        transactionIds: [setup.second.id, setup.third.id],
+        rationale: "Historical transfer",
+        provenance: { actorType: "agent", maintenanceRunId: setup.legacyRunId },
+        createdAt: legacyAt,
+      })
+      .returning();
+    if (!relationship) throw new Error("Relationship missing.");
+    const queries: { query: string; params: unknown[] }[] = [];
+    const observedDb = drizzle(database.pool, {
+      schema: databaseSchema,
+      logger: {
+        logQuery: (query, params) => {
+          queries.push({ query, params });
+        },
+      },
+    });
+    const work = await readFinanceEffectWork(observedDb, {
+      userId: setup.userId,
+      snapshotAt: laterAt,
+    });
+    expect(work.map((item) => item.id).sort()).toEqual(
+      [
+        `finance-effect:classification:${setup.revision.id}`,
+        `finance-effect:relationship:${relationship.id}`,
+      ].sort(),
+    );
+    expect(work.every((item) => item.updatedAt === legacyAt.toISOString())).toBe(true);
+    const timestamps = queries.filter(({ query }) => query.startsWith('select "id", "created_at"'));
+    expect(timestamps).toHaveLength(2);
+    for (const [table, id] of [
+      ["finance_transaction_revisions", setup.revision.id],
+      ["finance_transaction_relationships", relationship.id],
+    ]) {
+      const lookup = timestamps.find(({ query }) => query.includes(`from "${table}"`));
+      expect(lookup?.params).toEqual([setup.userId, id]);
+      expect(lookup?.query).toContain('"user_id" =');
+      expect(lookup?.query).toContain('"id" in');
+      expect(lookup?.params).not.toContain(unrelated.id);
+      expect(lookup?.params).not.toContain(foreign.revision.id);
+    }
   });
   it("deduplicates identical repair actions and paginates exact affected identities", async () => {
     const setup = await fixture();

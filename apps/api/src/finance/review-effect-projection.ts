@@ -4,7 +4,7 @@ import {
   financeTransactionRevisions,
 } from "@personal-os/database";
 import type { AgentAccessWorkItem } from "@personal-os/domain";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { findUnverifiedLegacyFinanceEffects } from "./legacy-maintenance-evidence.js";
 
 /** Project authoritative repair evidence without changing or reinterpreting ledger truth. */
@@ -18,20 +18,40 @@ export async function readFinanceEffectWork(
       type: "all_outstanding",
     });
     if (!effects.length) return [];
-    const revisions = await tx
-      .select({
-        id: financeTransactionRevisions.id,
-        createdAt: financeTransactionRevisions.createdAt,
-      })
-      .from(financeTransactionRevisions)
-      .where(eq(financeTransactionRevisions.userId, userId));
-    const relationships = await tx
-      .select({
-        id: financeTransactionRelationships.id,
-        createdAt: financeTransactionRelationships.createdAt,
-      })
-      .from(financeTransactionRelationships)
-      .where(eq(financeTransactionRelationships.userId, userId));
+    const revisionIds = effects
+      .filter((effect) => effect.kind !== "relationship")
+      .map((effect) => effect.effectId);
+    const relationshipIds = effects
+      .filter((effect) => effect.kind === "relationship")
+      .map((effect) => effect.effectId);
+    const revisions = revisionIds.length
+      ? await tx
+          .select({
+            id: financeTransactionRevisions.id,
+            createdAt: financeTransactionRevisions.createdAt,
+          })
+          .from(financeTransactionRevisions)
+          .where(
+            and(
+              eq(financeTransactionRevisions.userId, userId),
+              inArray(financeTransactionRevisions.id, revisionIds),
+            ),
+          )
+      : [];
+    const relationships = relationshipIds.length
+      ? await tx
+          .select({
+            id: financeTransactionRelationships.id,
+            createdAt: financeTransactionRelationships.createdAt,
+          })
+          .from(financeTransactionRelationships)
+          .where(
+            and(
+              eq(financeTransactionRelationships.userId, userId),
+              inArray(financeTransactionRelationships.id, relationshipIds),
+            ),
+          )
+      : [];
     const observed = new Map(
       [...revisions, ...relationships].map((row) => [row.id, row.createdAt]),
     );

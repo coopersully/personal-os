@@ -862,7 +862,7 @@ export function FinancesPage() {
               ) : (
                 <ShadcnItemGroup>
                   {finance.accounts.map((item) => (
-                    <ShadcnItem key={item.id} variant="outline">
+                    <ShadcnItem id={`account-${item.id}`} key={item.id} variant="outline">
                       <ShadcnItemContent>
                         <ShadcnItemTitle>{item.name}</ShadcnItemTitle>
                         <ShadcnItemDescription>

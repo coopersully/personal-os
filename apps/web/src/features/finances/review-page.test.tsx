@@ -64,13 +64,13 @@ function response(
     schemaVersion: 1,
   };
 }
-function mount() {
+function mount(path = "/finances/review") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
         <FinanceReviewPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -399,4 +399,43 @@ it("lets the user choose a later case using its own server-authored question", a
   expect(
     screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
   ).not.toBeInTheDocument();
+});
+
+it("does not substitute another question for an inaccessible exact case", async () => {
+  mount("/finances/review?item=99999999-9999-4999-8999-999999999999");
+  expect(await screen.findByText("Review question unavailable")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).not.toBeInTheDocument();
+  expect(api.answerFinanceReview).not.toHaveBeenCalled();
+});
+
+it("opens an exact legacy question without showing the canonical question", async () => {
+  api.listFinanceQuestions.mockResolvedValue([
+    {
+      id: nextId,
+      actionKind: "profile",
+      prompt: "Exact question",
+      why: "Needs evidence",
+      choices: [],
+      sourceRefs: [],
+      expectedAnswer: [],
+    },
+  ]);
+  mount(`/finances/review?question=${nextId}`);
+  expect(await screen.findByText("Exact question")).toBeInTheDocument();
+  expect(api.listFinanceQuestions).toHaveBeenCalledWith(50, nextId);
+  expect(api.listFinanceActionReviews).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows an unavailable exact approval without offering another pending approval", async () => {
+  api.listFinanceActionReviews.mockResolvedValue([{ id: reviewId, status: "pending" }]);
+  mount(`/finances/review?approval=${nextId}`);
+  expect(await screen.findByText("Requested review unavailable")).toBeInTheDocument();
+  expect(api.listFinanceActionReviews).toHaveBeenCalledWith(50, nextId);
+  expect(api.listFinanceQuestions).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
 });

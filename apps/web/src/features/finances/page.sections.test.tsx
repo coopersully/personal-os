@@ -1227,8 +1227,10 @@ describe("Finance section states", () => {
     });
     subscriptions.unmount();
 
-    const accounts = renderPage("/finances/accounts");
-    fireEvent.click(await screen.findByRole("button", { name: "Sync" }));
+    const accounts = renderPage("/finances/accounts#account-checking");
+    const syncAccount = await screen.findByRole("button", { name: "Sync" });
+    expect(document.getElementById("account-checking")).toContainElement(syncAccount);
+    fireEvent.click(syncAccount);
     fireEvent.click(screen.getByRole("button", { name: "Track account" }));
     fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Cash Box" } });
     fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Wallet" } });
@@ -1284,4 +1286,23 @@ describe("Finance section states", () => {
     );
     budget.unmount();
   }, 10_000);
+});
+
+it("does not fall back from an exact legacy review to unrelated transactions", async () => {
+  api.getFinanceReviewQueue.mockResolvedValue([]);
+  renderPage("/finances/review/legacy?item=11111111-1111-4111-8111-111111111111");
+  expect(await screen.findByText("Requested review unavailable")).toBeInTheDocument();
+  expect(api.getFinanceReviewQueue).toHaveBeenCalledWith(
+    50,
+    "11111111-1111-4111-8111-111111111111",
+  );
+  expect(api.resolveFinanceReview).not.toHaveBeenCalled();
+});
+
+it("shows a failed exact legacy review request instead of an unavailable record", async () => {
+  api.getFinanceReviewQueue.mockRejectedValue(new Error("Review request failed"));
+  renderPage("/finances/review/legacy?item=11111111-1111-4111-8111-111111111111");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Review request failed");
+  expect(screen.queryByText("Requested review unavailable")).not.toBeInTheDocument();
+  expect(api.resolveFinanceReview).not.toHaveBeenCalled();
 });

@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import * as databaseSchema from "@personal-os/database";
 import {
   createDatabaseClient,
   financeAccounts,
@@ -15,9 +16,12 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import { createFinanceService } from "../finance-service.js";
 import { createFinanceStatusService } from "../finance-status-service.js";
 import { findUnverifiedLegacyFinanceEffects } from "./legacy-maintenance-evidence.js";
+import { readFinanceEffectWork } from "./review-effect-projection.js";
 
 const legacyAt = new Date("2026-07-15T12:00:00Z");
 const laterAt = new Date("2026-08-15T12:00:00Z");
@@ -116,6 +120,24 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
         },
       }),
     ]);
+    const projected = await readFinanceEffectWork(database.db, {
+      userId: setup.userId,
+      snapshotAt: laterAt,
+    });
+    expect(projected).toEqual([
+      expect.objectContaining({
+        id: `finance-effect:classification:${setup.revision.id}`,
+        action: { label: effects[0]?.repair.label, to: effects[0]?.repair.href },
+        priority: "blocked",
+        updatedAt: legacyAt.toISOString(),
+      }),
+    ]);
+    expect(
+      await readFinanceEffectWork(database.db, {
+        userId: setup.userId,
+        snapshotAt: new Date("2026-07-01T00:00:00Z"),
+      }),
+    ).toEqual([]);
     const status = createFinanceStatusService({
       db: database.db,
       now: () => laterAt,
@@ -186,6 +208,9 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
         type: "all_outstanding",
       }),
     ).toHaveLength(1);
+    expect(
+      await readFinanceEffectWork(database.db, { userId: setup.userId, snapshotAt: laterAt }),
+    ).toHaveLength(1);
     await database.db.insert(financeTransactionRevisions).values({
       userId: setup.userId,
       transactionId: setup.first.id,
@@ -198,6 +223,9 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
       await findUnverifiedLegacyFinanceEffects(database.db, setup.userId, {
         type: "all_outstanding",
       }),
+    ).toEqual([]);
+    expect(
+      await readFinanceEffectWork(database.db, { userId: setup.userId, snapshotAt: laterAt }),
     ).toEqual([]);
   });
 
@@ -251,6 +279,12 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
   it("binds account, window, transaction and review scopes to the owner", async () => {
     const setup = await fixture();
     const other = await fixture();
+    const projected = await readFinanceEffectWork(database.db, {
+      userId: setup.userId,
+      snapshotAt: laterAt,
+    });
+    expect(JSON.stringify(projected)).not.toContain(other.first.id);
+    expect(JSON.stringify(projected)).not.toContain(other.revision.id);
     expect(
       await findUnverifiedLegacyFinanceEffects(database.db, setup.userId, {
         type: "window",
@@ -550,5 +584,136 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
         kind: "relationship",
       }),
     ]);
+  });
+  it("looks up timestamps only for outstanding effects of each record type and owner", async () => {
+    const setup = await fixture();
+    const foreign = await fixture();
+    const [unrelated] = await database.db
+      .insert(financeTransactionRevisions)
+      .values({
+        userId: setup.userId,
+        transactionId: setup.third.id,
+        version: 1,
+        changes: { category: { before: null, after: "Groceries" } },
+        provenance: { actorType: "user" },
+        createdAt: legacyAt,
+      })
+      .returning();
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({
+        userId: setup.userId,
+        kind: "transfer",
+        stableKey: crypto.randomUUID(),
+      })
+      .returning();
+    if (!event || !unrelated) throw new Error("Fixture missing.");
+    const [relationship] = await database.db
+      .insert(financeTransactionRelationships)
+      .values({
+        userId: setup.userId,
+        economicEventId: event.id,
+        relationship: "transfer",
+        transactionIds: [setup.second.id, setup.third.id],
+        rationale: "Historical transfer",
+        provenance: { actorType: "agent", maintenanceRunId: setup.legacyRunId },
+        createdAt: legacyAt,
+      })
+      .returning();
+    if (!relationship) throw new Error("Relationship missing.");
+    const queries: { query: string; params: unknown[] }[] = [];
+    const observedDb = drizzle(database.pool, {
+      schema: databaseSchema,
+      logger: {
+        logQuery: (query, params) => {
+          queries.push({ query, params });
+        },
+      },
+    });
+    const work = await readFinanceEffectWork(observedDb, {
+      userId: setup.userId,
+      snapshotAt: laterAt,
+    });
+    expect(work.map((item) => item.id).sort()).toEqual(
+      [
+        `finance-effect:classification:${setup.revision.id}`,
+        `finance-effect:relationship:${relationship.id}`,
+      ].sort(),
+    );
+    expect(work.every((item) => item.updatedAt === legacyAt.toISOString())).toBe(true);
+    const timestamps = queries.filter(({ query }) => query.startsWith('select "id", "created_at"'));
+    expect(timestamps).toHaveLength(2);
+    for (const [table, id] of [
+      ["finance_transaction_revisions", setup.revision.id],
+      ["finance_transaction_relationships", relationship.id],
+    ]) {
+      const lookup = timestamps.find(({ query }) => query.includes(`from "${table}"`));
+      expect(lookup?.params).toEqual([setup.userId, id]);
+      expect(lookup?.query).toContain('"user_id" =');
+      expect(lookup?.query).toContain('"id" in');
+      expect(lookup?.params).not.toContain(unrelated.id);
+      expect(lookup?.params).not.toContain(foreign.revision.id);
+    }
+  });
+  it("deduplicates identical repair actions and paginates exact affected identities", async () => {
+    const setup = await fixture();
+    await database.db.insert(financeTransactionRevisions).values(
+      [2, 3].map((version) => ({
+        userId: setup.userId,
+        transactionId: setup.first.id,
+        version,
+        changes: { splitPartIds: [setup.second.id] },
+        provenance: { actorType: "agent", maintenanceRunId: setup.legacyRunId },
+        createdAt: legacyAt,
+      })),
+    );
+    const work = await readFinanceEffectWork(database.db, {
+      userId: setup.userId,
+      snapshotAt: laterAt,
+    });
+    expect(work).toHaveLength(2);
+    expect(work.map((item) => item.action?.label)).toContain(
+      "Inspect transaction change; operator repair required",
+    );
+    expect(
+      await readFinanceEffectWork(database.db, { userId: setup.userId, snapshotAt: laterAt }),
+    ).toEqual(work);
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      cursorSigningKey: "test",
+      now: () => laterAt,
+    });
+    const principal = {
+      actorType: "user" as const,
+      actorId: setup.userId,
+      userId: setup.userId,
+      scopes: new Set<"finances:read">(["finances:read"]),
+    };
+    const domains = [
+      {
+        domain: "finances" as const,
+        readScope: "finances:read" as const,
+        writeScope: "finances:write" as const,
+        support: "profile_and_attention" as const,
+      },
+    ];
+    const first = await service.list(principal, { domain: "finances", limit: 1 }, domains);
+    expect(first.filteredTotal).toBe(2);
+    expect(first.items).toHaveLength(1);
+    if (!first.nextCursor) throw new Error("Missing cursor");
+    const second = await service.list(
+      principal,
+      { domain: "finances", limit: 1, cursor: first.nextCursor },
+      domains,
+    );
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]?.id).not.toBe(first.items[0]?.id);
+    expect(second.nextCursor).toBeNull();
+    const inaccessible = await service.list(
+      { ...principal, scopes: new Set() },
+      { limit: 10 },
+      domains,
+    );
+    expect(inaccessible.items).toEqual([]);
   });
 });

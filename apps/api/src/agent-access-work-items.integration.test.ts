@@ -7,6 +7,8 @@ import {
   type DatabaseClient,
   domainProfiles,
   financeAccounts,
+  financeAgentActionReviews,
+  financeEconomicEvents,
   financeReviewCases,
   financeTransactions,
   mailRules,
@@ -21,6 +23,8 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { asc, eq } from "drizzle-orm";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { AppError } from "./errors.js";
+import { createFinanceActionService } from "./finance-action-service.js";
+import { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
 
 const snapshot = new Date("2026-08-11T18:00:00.000Z");
@@ -654,5 +658,326 @@ describe.sequential("Agent Access work-item projection", () => {
       publishedDomains,
     );
     expect(cleanPage.items.some((item) => item.id.startsWith("mail-run:"))).toBe(false);
+  });
+  it("projects exact Finance work once, preserves notes, and retires resolved work", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance projection",
+        email: "finance-projection@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const actor = { ...principal, userId: owner.id, actorId: owner.id };
+    const before = new Date("2026-08-11T10:00:00Z");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: owner.id,
+        provider: "plaid",
+        institution: "Private bank",
+        name: "Private account",
+        status: "needs_reauth",
+        createdAt: before,
+        updatedAt: before,
+      })
+      .returning();
+    if (!account) throw new Error("Missing account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: owner.id,
+        accountId: account.id,
+        amount: 4200,
+        merchant: "Private merchant",
+        direction: "expense",
+        transactionDate: "2026-08-10",
+      })
+      .returning();
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({
+        userId: owner.id,
+        kind: "purchase",
+        stableKey: "event",
+      })
+      .returning();
+    if (!transaction || !event) throw new Error("Missing transaction evidence");
+    const cases = await database.db
+      .insert(financeReviewCases)
+      .values([
+        {
+          userId: owner.id,
+          transactionId: transaction.id,
+          economicEventId: event.id,
+          stableKey: "canonical",
+          resolution: { type: "clarify", clarification: "Private note" },
+          updatedAt: before,
+        },
+        { userId: owner.id, transactionId: transaction.id, stableKey: "legacy", updatedAt: before },
+      ])
+      .returning();
+    const actions = await database.db
+      .insert(financeAgentActionReviews)
+      .values([
+        {
+          userId: owner.id,
+          requestingAgentId: "agent",
+          actionKind: "question",
+          fingerprint: "question",
+          privatePayload: {
+            secret: "Private payload",
+            rationale: "Evidence",
+            question: {
+              actionKind: "profile",
+              choices: [],
+              expectedAnswer: [],
+              sourceRefs: [],
+              prompt: "Private question",
+              why: "Evidence",
+            },
+          },
+          updatedAt: before,
+        },
+        {
+          userId: owner.id,
+          requestingAgentId: "agent",
+          actionKind: "categorization",
+          fingerprint: "approval",
+          safeChanges: [
+            {
+              entityId: transaction.id,
+              entityType: "finance_transaction",
+              summary: "Private proposed category",
+            },
+          ],
+          privatePayload: { secret: "Private payload", rationale: "Evidence" },
+          updatedAt: before,
+        },
+      ])
+      .returning();
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => snapshot,
+      cursorSigningKey: "test",
+    });
+    const query = { domain: "finances" as const, limit: 10 };
+    const first = await service.list(actor, query, publishedDomains);
+    expect(first.items).toHaveLength(5);
+    const finances = createFinanceService({ db: database.db, now: () => snapshot });
+    const actionService = createFinanceActionService({
+      db: database.db,
+      finances,
+      now: () => snapshot,
+    });
+    const caseId = cases[1]?.id;
+    const questionId = actions[0]?.id;
+    const approvalId = actions[1]?.id;
+    if (!caseId || !questionId || !approvalId) throw new Error("Missing work identities");
+    // Newer work beyond the projection cutoff must not displace an exact older target.
+    for (const row of actions) {
+      await database.db.insert(financeAgentActionReviews).values({
+        userId: owner.id,
+        actionKind: row.actionKind,
+        requestingAgentId: row.requestingAgentId,
+        fingerprint: `${row.fingerprint}-newer`,
+        privatePayload: row.privatePayload,
+        safeChanges: row.safeChanges,
+        createdAt: new Date("2026-08-12T10:00:00Z"),
+        updatedAt: new Date("2026-08-12T10:00:00Z"),
+      });
+      await database.db
+        .update(financeAgentActionReviews)
+        .set({ createdAt: before })
+        .where(eq(financeAgentActionReviews.id, row.id));
+    }
+    // A one-row limit must still find the exact target rather than the newest row.
+    expect((await finances.listReviewQueue(owner.id, 1, caseId)).map((row) => row.id)).toEqual([
+      caseId,
+    ]);
+    expect(
+      (await actionService.listQuestions(owner.id, 1, questionId)).map((row) => row.id),
+    ).toEqual([questionId]);
+    expect((await actionService.listReviews(owner.id, 1, approvalId)).map((row) => row.id)).toEqual(
+      [approvalId],
+    );
+    expect(await finances.listReviewQueue(otherPrincipal.userId, 1, caseId)).toEqual([]);
+    expect(await actionService.listQuestions(otherPrincipal.userId, 1, questionId)).toEqual([]);
+    expect(await actionService.listReviews(otherPrincipal.userId, 1, approvalId)).toEqual([]);
+    expect(await actionService.listQuestions(owner.id, 1, approvalId)).toEqual([]);
+    expect(await actionService.listReviews(owner.id, 1, questionId)).toEqual([]);
+    expect(first.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `finance-review:${cases[0]?.id}`,
+          action: {
+            label: "Open Finance review",
+            to: `/finances/review?item=${cases[0]?.id}`,
+          },
+          summary: expect.stringContaining("note"),
+        }),
+        expect.objectContaining({
+          id: `finance-review:${cases[1]?.id}`,
+          action: {
+            label: "Open Finance review",
+            to: `/finances/review/legacy?item=${cases[1]?.id}`,
+          },
+        }),
+        expect.objectContaining({
+          id: `finance-action:${actions[0]?.id}`,
+          action: {
+            label: "Answer Finance question",
+            to: `/finances/review?question=${actions[0]?.id}`,
+          },
+        }),
+        expect.objectContaining({
+          id: `finance-action:${actions[1]?.id}`,
+          action: {
+            label: "Review Finance approval",
+            to: `/finances/review?approval=${actions[1]?.id}`,
+          },
+        }),
+        expect.objectContaining({
+          id: `finance-reconnect:${account.id}`,
+          action: {
+            label: "Inspect Finance account",
+            to: `/finances/accounts#account-${account.id}`,
+          },
+          kind: "review",
+          priority: "blocked",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(first.items)).not.toContain("Private");
+    expect((await service.list(actor, query, publishedDomains)).items).toEqual(first.items);
+    expect(
+      (
+        await service.list(
+          { ...actor, scopes: new Set<AccessScope>(["tasks:read"]) },
+          query,
+          publishedDomains,
+        )
+      ).items,
+    ).toEqual([]);
+    expect((await service.list(otherPrincipal, query, publishedDomains)).items).toEqual([]);
+    await database.db
+      .update(financeReviewCases)
+      .set({ status: "resolved" })
+      .where(eq(financeReviewCases.userId, owner.id));
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({ status: "superseded" })
+      .where(eq(financeAgentActionReviews.userId, owner.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "connected" })
+      .where(eq(financeAccounts.id, account.id));
+    expect((await service.list(actor, query, publishedDomains)).items).toEqual([]);
+    expect(await finances.listReviewQueue(owner.id, 1, caseId)).toEqual([]);
+    expect(await actionService.listQuestions(owner.id, 1, questionId)).toEqual([]);
+  });
+  it("keeps Finance cases visible and marks counts unknown when action or repair reads fail", async () => {
+    for (const key of ["financeActions", "financeAccounts", "financeEffects"] as const) {
+      const service = createAgentAccessWorkItemService({
+        db: database.db,
+        now: () => snapshot,
+        cursorSigningKey: "test",
+        sourceReaders: {
+          [key]: async () => {
+            throw new Error("unavailable");
+          },
+        },
+      });
+      const page = await service.list(
+        principal,
+        { domain: "finances", limit: 10 },
+        publishedDomains,
+      );
+      expect(page.items.some((item) => item.id.startsWith("finance-review:"))).toBe(true);
+      expect(page.filteredTotal).toBeNull();
+      expect(page.summary.byDomain.finances).toBeNull();
+      expect(page.summary.byKind.review).toBeNull();
+      expect(page.unavailableDomains).toEqual(["finances"]);
+    }
+  });
+  it("uses explicit Finance recovery guidance before the legacy needs_reauth status", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Recovery projection",
+        email: "recovery-projection@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing recovery owner");
+    const before = new Date("2026-08-11T10:00:00Z");
+    const common = {
+      userId: owner.id,
+      provider: "plaid" as const,
+      institution: "Fixture bank",
+      status: "needs_reauth" as const,
+      createdAt: before,
+      updatedAt: before,
+    };
+    const rows = await database.db
+      .insert(financeAccounts)
+      .values([
+        { ...common, name: "Legacy authorization", syncRecovery: null },
+        {
+          ...common,
+          name: "Explicit reconnect",
+          status: "connected",
+          syncState: "blocked",
+          syncRecovery: "reconnect",
+          syncError: "Authorization required",
+          syncErrorCategory: "authorization",
+          syncErrorCode: "ITEM_LOGIN_REQUIRED",
+          syncFailureCount: 1,
+        },
+        // Actual missing-membership state emitted by finance-provider-item-sync-service.
+        {
+          ...common,
+          name: "Missing Item membership",
+          balance: null,
+          nextSyncAt: null,
+          syncState: "blocked",
+          syncRecovery: "operator",
+          syncError: "Account missing from Item",
+          syncErrorCategory: "not_found",
+          syncErrorCode: "plaid_account_missing_from_item",
+          syncFailureCount: 1,
+        },
+        {
+          ...common,
+          name: "Automatic retry",
+          syncState: "retrying",
+          syncRecovery: "automatic",
+          syncError: "Temporary failure",
+          syncErrorCategory: "temporary",
+          syncErrorCode: "temporary",
+          syncFailureCount: 1,
+        },
+        { ...common, name: "Healthy", status: "connected", syncState: "current" },
+      ])
+      .returning();
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => snapshot,
+      cursorSigningKey: "test",
+    });
+    const page = await service.list(
+      { ...principal, userId: owner.id, actorId: owner.id },
+      { domain: "finances", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(page.items.map((item) => item.id).sort()).toEqual(
+      rows
+        .slice(0, 2)
+        .map((row) => `finance-reconnect:${row.id}`)
+        .sort(),
+    );
+    expect(page.filteredTotal).toBe(2);
+    expect(page.summary.byDomain.finances).toBe(2);
   });
 });

@@ -341,7 +341,6 @@ describe("finance routes", () => {
     const finances = {
       createBudget: vi.fn(async () => budget),
       getAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: true })),
-      updateAutomationSettings: vi.fn(),
     };
     app.use("*", async (context, next) => {
       context.set("principal", {
@@ -385,8 +384,7 @@ describe("finance routes", () => {
       headers: { "content-type": "application/json" },
       method: "PATCH",
     });
-    expect(selfEnable.status).toBe(403);
-    expect(finances.updateAutomationSettings).not.toHaveBeenCalled();
+    expect(selfEnable.status).toBe(404);
   });
 
   it("keeps POST proposal compatibility on the Finance read scope", async () => {

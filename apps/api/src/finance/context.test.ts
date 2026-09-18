@@ -3,7 +3,7 @@ import {
   createDatabaseClient,
   type Database,
   type DatabaseClient,
-  financeAgentSettings,
+  executionPolicySettings,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -39,7 +39,7 @@ describe.sequential("trusted Finance mutation context", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
-    await database.db.insert(financeAgentSettings).values({ reviewBypassEnabled: true, userId });
+    await database.db.insert(executionPolicySettings).values({ reviewBypassEnabled: true, userId });
   }, 120_000);
 
   afterAll(async () => {
@@ -47,7 +47,7 @@ describe.sequential("trusted Finance mutation context", () => {
     await container.stop();
   });
 
-  it("allows a fully scoped bypass agent and preserves its identity", async () => {
+  it("allows scoped bookkeeping without conferring budget self-approval", async () => {
     const principal: Principal = {
       actorId: "finance-agent",
       actorType: "agent",
@@ -61,7 +61,7 @@ describe.sequential("trusted Finance mutation context", () => {
       actorType: "agent",
       bypassEnabled: true,
       canMutate: true,
-      canSelfApprove: true,
+      canSelfApprove: false,
       requestId: "request-1",
       userId,
     });
@@ -257,15 +257,15 @@ describe.sequential("trusted Finance mutation context", () => {
     await expect(
       executeFinanceIdempotently(database.db, userContext, rollbackOperation, async (tx) => {
         await tx
-          .update(financeAgentSettings)
+          .update(executionPolicySettings)
           .set({ reviewBypassEnabled: false })
-          .where(eq(financeAgentSettings.userId, userId));
+          .where(eq(executionPolicySettings.userId, userId));
         throw new Error("rollback fixture");
       }),
     ).rejects.toThrow("rollback fixture");
     await expect(
-      database.db.query.financeAgentSettings.findFirst({
-        where: eq(financeAgentSettings.userId, userId),
+      database.db.query.executionPolicySettings.findFirst({
+        where: eq(executionPolicySettings.userId, userId),
       }),
     ).resolves.toMatchObject({ reviewBypassEnabled: true });
 

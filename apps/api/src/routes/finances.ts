@@ -41,7 +41,6 @@ import {
   startFinanceAccountConnectionInputSchema,
   submitFinanceLedgerChallengeInputSchema,
   updateFinanceAccountInputSchema,
-  updateFinanceAutomationSettingsInputSchema,
   updateFinanceBudgetBucketInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
@@ -280,19 +279,6 @@ export function registerFinanceRoutes({
         await financeContext(context),
       ),
     ),
-  );
-  app.get("/v1/finances/automation-settings", async (context) =>
-    context.json({
-      settings: await finances.getAutomationSettings(context.get("principal").userId),
-    }),
-  );
-  app.patch("/v1/finances/automation-settings", requireHuman, async (context) =>
-    context.json({
-      settings: await finances.updateAutomationSettings(
-        await parseBody(context, updateFinanceAutomationSettingsInputSchema),
-        financeMutationContext(context),
-      ),
-    }),
   );
   app.get("/v1/finances/guided-setup", async (context) =>
     context.json({

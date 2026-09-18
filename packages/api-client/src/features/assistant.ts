@@ -10,8 +10,10 @@ import type {
   AttentionItemQuery,
   CreateAttentionItemInput,
   DomainProfile,
+  ExecutionPolicySettings,
   IloAgentContext,
   UpdateAttentionItemInput,
+  UpdateExecutionPolicySettingsInput,
   UpsertDomainProfileInput,
 } from "@personal-os/domain";
 import { agentAccessWorkItemPageSchema } from "@personal-os/domain";
@@ -22,6 +24,21 @@ type ToQuery = (query: object) => string;
 /** Shared agent-setup operations; domain services still own executable behavior. */
 export function createAssistantApiClient(request: Request, toQuery: ToQuery) {
   return {
+    async getExecutionPolicySettings(): Promise<ExecutionPolicySettings> {
+      const response = await request<{ settings: ExecutionPolicySettings }>(
+        "/v1/assistant/execution-policy",
+      );
+      return response.settings;
+    },
+    async updateExecutionPolicySettings(
+      input: UpdateExecutionPolicySettingsInput,
+    ): Promise<ExecutionPolicySettings> {
+      const response = await request<{ settings: ExecutionPolicySettings }>(
+        "/v1/assistant/execution-policy",
+        { body: JSON.stringify(input), method: "PATCH" },
+      );
+      return response.settings;
+    },
     async getIloContext(): Promise<IloAgentContext> {
       const response = await request<{ context: IloAgentContext }>("/v1/assistant/context");
       return response.context;

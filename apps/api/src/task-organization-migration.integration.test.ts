@@ -23,6 +23,7 @@ const migrationsAfterTaskOrganization = [
   "0080_mail_reply_metadata",
   "0081_finance_legacy_disconnect_repair",
   "0082_finance_maintenance_lineage",
+  "0083_global_execution_policy",
 ];
 
 function databaseUri(connectionUri: string, databaseName: string): string {

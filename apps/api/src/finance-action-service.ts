@@ -2,10 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   auditEvents,
   type Database,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
-  financeAutomationSettings,
   financeBudgetBuckets,
   financeBudgetPlans,
   financeBudgets,
@@ -2212,9 +2212,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
 
   async function readBypass(executor: FinanceExecutor, userId: string, lock = false) {
     const query = executor
-      .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-      .from(financeAutomationSettings)
-      .where(eq(financeAutomationSettings.userId, userId));
+      .select({ reviewBypassEnabled: executionPolicySettings.reviewBypassEnabled })
+      .from(executionPolicySettings)
+      .where(eq(executionPolicySettings.userId, userId));
     const [settings] = lock ? await query.for("update").limit(1) : await query.limit(1);
     return settings?.reviewBypassEnabled === true;
   }

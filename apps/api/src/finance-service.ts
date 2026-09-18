@@ -6,11 +6,11 @@ import {
   type Database,
   domainProfileApprovals,
   domainProfiles,
+  executionPolicySettings,
   financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
-  financeAutomationSettings,
   financeBudgetBucketCategories,
   financeBudgetBuckets,
   financeBudgetPlans,
@@ -47,7 +47,6 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAlert,
-  FinanceAutomationSettings,
   FinanceBudget,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
@@ -83,7 +82,6 @@ import type {
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
-  UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
@@ -3964,55 +3962,13 @@ export function createFinanceService({
       }
       return reimbursements.reconcile(input, context, executor);
     },
-    async getAutomationSettings(userId: string): Promise<FinanceAutomationSettings> {
+    async getAutomationSettings(userId: string) {
       const [settings] = await db
-        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-        .from(financeAutomationSettings)
-        .where(eq(financeAutomationSettings.userId, userId))
+        .select({ reviewBypassEnabled: executionPolicySettings.reviewBypassEnabled })
+        .from(executionPolicySettings)
+        .where(eq(executionPolicySettings.userId, userId))
         .limit(1);
       return settings ?? { reviewBypassEnabled: false };
-    },
-    async updateAutomationSettings(
-      input: UpdateFinanceAutomationSettingsInput,
-      context: MutationContext,
-    ): Promise<FinanceAutomationSettings> {
-      return db.transaction(async (tx) => {
-        const [existing] = await tx
-          .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-          .from(financeAutomationSettings)
-          .where(eq(financeAutomationSettings.userId, context.principal.userId))
-          .for("update")
-          .limit(1);
-        const before = existing ?? { reviewBypassEnabled: false };
-        if (before.reviewBypassEnabled === input.reviewBypassEnabled) return before;
-        const [saved] = await tx
-          .insert(financeAutomationSettings)
-          .values({
-            reviewBypassEnabled: input.reviewBypassEnabled,
-            userId: context.principal.userId,
-          })
-          .onConflictDoUpdate({
-            set: { reviewBypassEnabled: input.reviewBypassEnabled, updatedAt: now() },
-            target: financeAutomationSettings.userId,
-          })
-          .returning({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled });
-        const settings = requireDatabaseRecord(
-          saved,
-          "Finance automation settings were not saved.",
-        );
-        await tx.insert(auditEvents).values(
-          auditValues({
-            action: "finance.review_bypass_updated",
-            after: settings,
-            before,
-            entityId: context.principal.userId,
-            entityType: "finance_automation_settings",
-            principal: context.principal,
-            requestId: context.requestId,
-          }),
-        );
-        return settings;
-      });
     },
     async upsertAttentionItem(
       transactionId: string,

@@ -18,7 +18,6 @@ import type {
   FinanceActionOutcome,
   FinanceActionReview,
   FinanceAlert,
-  FinanceAutomationSettings,
   FinanceBudget,
   FinanceBudgetBucketList,
   FinanceBudgetPace,
@@ -85,7 +84,6 @@ import type {
   StartFinanceAccountConnectionInput,
   SubmitFinanceLedgerChallengeInput,
   UpdateFinanceAccountInput,
-  UpdateFinanceAutomationSettingsInput,
   UpdateFinanceBudgetBucketInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
@@ -230,21 +228,6 @@ export function createFinanceApi(request: FinanceRequest) {
     async getFinanceOverview(): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>("/v1/finances");
       return response.overview;
-    },
-    async getFinanceAutomationSettings(): Promise<FinanceAutomationSettings> {
-      const response = await request<{ settings: FinanceAutomationSettings }>(
-        "/v1/finances/automation-settings",
-      );
-      return response.settings;
-    },
-    async updateFinanceAutomationSettings(
-      input: UpdateFinanceAutomationSettingsInput,
-    ): Promise<FinanceAutomationSettings> {
-      const response = await request<{ settings: FinanceAutomationSettings }>(
-        "/v1/finances/automation-settings",
-        { body: JSON.stringify(input), method: "PATCH" },
-      );
-      return response.settings;
     },
     async getFinanceGuidedSetup(): Promise<FinanceGuidedSetupContext> {
       const response = await request<{ setup: FinanceGuidedSetupContext }>(

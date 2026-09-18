@@ -942,9 +942,9 @@ function apiFetch() {
           version: 1,
         }),
       );
-    if (url.pathname === "/v1/finances/automation-settings")
+    if (url.pathname === "/v1/assistant/execution-policy")
       return json({
-        settings: { reviewBypassEnabled: method === "PATCH" },
+        settings: { reviewBypassEnabled: method === "PATCH", version: method === "PATCH" ? 2 : 1 },
       });
     if (url.pathname === "/v1/finances/guided-setup")
       return json({
@@ -2638,12 +2638,13 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
-    await expect(api.getFinanceAutomationSettings()).resolves.toEqual({
+    await expect(api.getExecutionPolicySettings()).resolves.toEqual({
       reviewBypassEnabled: false,
+      version: 1,
     });
     await expect(
-      api.updateFinanceAutomationSettings({ reviewBypassEnabled: true }),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      api.updateExecutionPolicySettings({ expectedVersion: 1, reviewBypassEnabled: true }),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
     await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
       accountSources: [financeAccount],
       humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),

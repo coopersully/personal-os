@@ -2,6 +2,17 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-20 — Hypothetical Finance budget-policy groundwork
+
+- Strict policy contracts require explicit period, timezone, baseline, caps, directions,
+  protections, rollover and gross-usage accounting terms. The pure evaluator compares supplied
+  profile/plan/policy/evidence revisions and returns an exact hypothetical preview or denial.
+- Resource changes, protected releases, missing or unqualified evidence, stale revisions and
+  cap violations are denied. Previewing does not change baseline, plan or cumulative usage.
+- This is unregistered source groundwork: no saved policy, persistence, activation, automatic
+  revision, API route, MCP capability or user interface is available. Every result explicitly
+  keeps execution unavailable pending reviewed authority and position commit fencing.
+
 ## 2026-09-18 — Progressive Finance first-plan source implementation
 
 - Setup reuses canonical profile facts and records optional planning answers as typed,

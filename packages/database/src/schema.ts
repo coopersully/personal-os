@@ -31,6 +31,7 @@ import type {
   ConnectorSyncStatus,
   ConnectorSyncTriggerReason,
   DomainProfile,
+  FinanceHumanWorkRef,
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
@@ -51,6 +52,8 @@ import type {
   MaintenanceRunStatus,
   MaintenanceScope,
   MaterialSourceReference,
+  NotificationDeliveryState,
+  NotificationPreferences,
   TaskContainerAvailability,
   TaskLifecycle,
   TaskListIcon,
@@ -3631,6 +3634,7 @@ export const textingConnections = pgTable(
   },
   (table) => [
     uniqueIndex("texting_connections_user_idx").on(table.userId),
+    uniqueIndex("texting_connections_owner_id_idx").on(table.userId, table.id),
     uniqueIndex("texting_connections_active_phone_idx")
       .on(table.phoneFingerprint)
       .where(sql`${table.state} <> 'disconnected'`),
@@ -3690,6 +3694,7 @@ export const textMessages = pgTable(
   },
   (table) => [
     uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
+    uniqueIndex("text_messages_owner_id_idx").on(table.userId, table.id),
     index("text_messages_conversation_idx").on(table.connectionId, table.occurredAt, table.id),
     index("text_messages_user_outbound_idx").on(table.userId, table.direction, table.createdAt),
   ],
@@ -3709,7 +3714,7 @@ export const textingConsentEvents = pgTable(
         "verified_opt_in" | "provider_stop" | "provider_start" | "provider_block" | "disconnected"
       >()
       .notNull(),
-    source: text("source").$type<"ilo" | "twilio">().notNull(),
+    source: text("source").$type<"nohmi" | "twilio">().notNull(),
     providerEventId: text("provider_event_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3887,5 +3892,158 @@ export const financeContextRevisions = pgTable(
       "finance_context_revisions_provenance_check",
       sql`(${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent') OR (${table.sourceKind}='expiry' AND ${table.actorType}='system' AND ${table.actorId}='finance-context-expiry')`,
     ),
+  ],
+);
+
+function notificationReferenceCheck(column: AnyPgColumn) {
+  return sql`COALESCE(jsonb_typeof(${column}) = 'object'
+    AND ${column} ?& ARRAY['id','domain','kind','revision','actionRevision']
+    AND (${column} - ARRAY['id','domain','kind','revision','actionRevision']) = '{}'::jsonb
+    AND ${column}->>'id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    AND ${column}->>'domain' = 'finances'
+    AND ${column}->>'kind' IN ('question','approval','repair')
+    AND jsonb_typeof(${column}->'revision') = 'string'
+    AND char_length(btrim(${column}->>'revision')) BETWEEN 1 AND 200
+    AND jsonb_typeof(${column}->'actionRevision') = 'string'
+    AND char_length(btrim(${column}->>'actionRevision')) BETWEEN 1 AND 200, false)`;
+}
+
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scope: text("scope").$type<"global" | "finances">().notNull(),
+    revision: integer("revision").notNull(),
+    preferences: jsonb("preferences").$type<NotificationPreferences>().notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notification_preferences_owner_scope_idx").on(table.userId, table.scope),
+    check("notification_preferences_scope_check", sql`${table.scope} IN ('global', 'finances')`),
+    check("notification_preferences_revision_check", sql`${table.revision} > 0`),
+    check(
+      "notification_preferences_value_check",
+      sql`COALESCE(
+    jsonb_typeof(${table.preferences}) = 'object'
+    AND ${table.preferences} ?& ARRAY['enabled','quietMode','quietStartMinute','quietEndMinute','reminderDays','detail']
+    AND (${table.preferences} - ARRAY['enabled','quietMode','quietStartMinute','quietEndMinute','reminderDays','detail']) = '{}'::jsonb
+    AND jsonb_typeof(${table.preferences}->'enabled') = 'boolean'
+    AND ${table.preferences}->>'quietMode' IN ('window','any_time')
+    AND ${table.preferences}->>'detail' IN ('minimal','context')
+    AND (${table.preferences}->>'quietStartMinute')::numeric BETWEEN 0 AND 1439
+    AND mod((${table.preferences}->>'quietStartMinute')::numeric, 1) = 0
+    AND jsonb_typeof(${table.preferences}->'quietStartMinute') = 'number'
+    AND (${table.preferences}->>'quietEndMinute')::numeric BETWEEN 0 AND 1439
+    AND mod((${table.preferences}->>'quietEndMinute')::numeric, 1) = 0
+    AND jsonb_typeof(${table.preferences}->'quietEndMinute') = 'number'
+    AND (${table.preferences}->>'quietMode' = 'any_time' OR ${table.preferences}->>'quietStartMinute' <> ${table.preferences}->>'quietEndMinute')
+    AND (${table.preferences}->'reminderDays' = 'null'::jsonb OR
+      (jsonb_typeof(${table.preferences}->'reminderDays') = 'number' AND (${table.preferences}->>'reminderDays')::numeric BETWEEN 1 AND 365 AND mod((${table.preferences}->>'reminderDays')::numeric, 1) = 0)), false)`,
+    ),
+  ],
+);
+
+export const notificationIntents = pgTable(
+  "notification_intents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<"finances">().notNull(),
+    workId: uuid("work_id").notNull(),
+    work: jsonb("work").$type<FinanceHumanWorkRef>().notNull(),
+    state: text("state").notNull().default("pending"),
+    reason: text("reason"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notification_intents_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("notification_intents_work_idx").on(table.userId, table.domain, table.workId),
+    check(
+      "notification_intents_work_check",
+      sql`${table.domain} = 'finances' AND ${table.work}->>'domain' = ${table.domain} AND ${table.work}->>'id' = ${table.workId}::text`,
+    ),
+    check(
+      "notification_intents_state_check",
+      sql`${table.state} IN ('pending','deferred','blocked','resolved')`,
+    ),
+    check("notification_intents_ref_check", notificationReferenceCheck(table.work)),
+    index("notification_intents_owner_state_idx").on(table.userId, table.state),
+  ],
+);
+
+export const notificationDeliveryAttempts = pgTable(
+  "notification_delivery_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: text("state").$type<NotificationDeliveryState>().notNull(),
+    reason: text("reason"),
+    claimId: uuid("claim_id").notNull(),
+    generation: integer("generation").notNull().default(1),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }).notNull(),
+    connectionId: uuid("connection_id"),
+    consentEpoch: integer("consent_epoch"),
+    messageId: uuid("message_id"),
+    timeZone: text("time_zone"),
+    timezoneRevision: timestamp("timezone_revision", { withTimezone: true }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notification_attempts_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("notification_attempts_message_idx").on(table.messageId),
+    foreignKey({
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }),
+    foreignKey({
+      columns: [table.userId, table.messageId],
+      foreignColumns: [textMessages.userId, textMessages.id],
+    }),
+    index("notification_attempts_due_idx").on(table.userId, table.state, table.leaseUntil),
+    check(
+      "notification_attempts_generation_check",
+      sql`${table.generation} > 0 AND ${table.consentEpoch} > 0`,
+    ),
+    check(
+      "notification_attempts_connection_check",
+      sql`${table.connectionId} IS NOT NULL AND ${table.consentEpoch} IS NOT NULL`,
+    ),
+    check(
+      "notification_attempts_state_check",
+      sql`${table.state} IN ('claimed','submitting','accepted','uncertain','failed','suppressed')`,
+    ),
+    check(
+      "notification_attempts_submission_check",
+      sql`${table.state} IN ('claimed','suppressed') OR (${table.messageId} IS NOT NULL AND ${table.connectionId} IS NOT NULL AND ${table.consentEpoch} IS NOT NULL AND ${table.submittedAt} IS NOT NULL AND ${table.timeZone} IS NOT NULL AND ${table.timezoneRevision} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const notificationAttemptItems = pgTable(
+  "notification_attempt_items",
+  {
+    userId: uuid("user_id").notNull(),
+    attemptId: uuid("attempt_id").notNull(),
+    intentId: uuid("intent_id").notNull(),
+    work: jsonb("work").$type<FinanceHumanWorkRef>().notNull(),
+  },
+  (table) => [
+    uniqueIndex("notification_attempt_items_idx").on(table.attemptId, table.intentId),
+    check("notification_attempt_items_ref_check", notificationReferenceCheck(table.work)),
+    foreignKey({
+      columns: [table.userId, table.attemptId],
+      foreignColumns: [notificationDeliveryAttempts.userId, notificationDeliveryAttempts.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.intentId],
+      foreignColumns: [notificationIntents.userId, notificationIntents.id],
+    }).onDelete("cascade"),
   ],
 );

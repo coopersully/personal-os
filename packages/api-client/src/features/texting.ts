@@ -1,5 +1,7 @@
 import type {
   CheckTextingVerificationInput,
+  NotificationPreferences,
+  NotificationStatus,
   SendTextMessageInput,
   StartTextingVerificationInput,
   TextConversationPage,
@@ -13,6 +15,25 @@ type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export function createTextingApiClient(request: Request, toQuery: (query: object) => string) {
   return {
+    async getNotificationStatus(): Promise<NotificationStatus> {
+      return request("/v1/texting/notifications");
+    },
+    async saveNotificationPreferences(
+      scope: "global" | "finances",
+      input: {
+        expectedRevision: number | null;
+        preferences: NotificationPreferences;
+      },
+    ): Promise<{
+      scope: "global" | "finances";
+      revision: number;
+      preferences: NotificationPreferences;
+    }> {
+      return request(`/v1/texting/notifications/preferences/${scope}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
+    },
     async checkTextingVerification(
       id: string,
       input: CheckTextingVerificationInput,

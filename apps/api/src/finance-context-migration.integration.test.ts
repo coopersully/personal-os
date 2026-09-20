@@ -17,6 +17,7 @@ describe.sequential("Finance context migration integrity", () => {
     const prior = await migrationsWithout(folder, "nohmi-context-", [
       "0085_finance_context_capture",
       "0086_notification_foundation",
+      "0087_finance_budget_policy_management",
     ]);
     try {
       await migrateDatabase(database.db, prior);

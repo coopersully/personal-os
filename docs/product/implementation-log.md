@@ -2,16 +2,24 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
-## 2026-09-20 — Hypothetical Finance budget-policy groundwork
+## 2026-09-20 — Finance budget-policy management groundwork
 
 - Strict policy contracts require explicit period, timezone, baseline, caps, directions,
   protections, rollover and gross-usage accounting terms. The pure evaluator compares supplied
   profile/plan/policy/evidence revisions and returns an exact hypothetical preview or denial.
 - Resource changes, protected releases, missing or unqualified evidence, stale revisions and
   cap violations are denied. Previewing does not change baseline, plan or cumulative usage.
-- This is unregistered source groundwork: no saved policy, persistence, activation, automatic
-  revision, API route, MCP capability or user interface is available. Every result explicitly
-  keeps execution unavailable pending reviewed authority and position commit fencing.
+- Migration `0087` and the management service add explicit human-confirmed monthly baselines,
+  draft policy versions, inactive revision proposals, immutable saved preview packets, and
+  revision-checked disable/withdraw. Tenant-constrained history, audit, and idempotency receipts
+  use owner admission followed by the shared profile mutex. No historical policy is inferred.
+- Saved packets retain their original evidence; history reads calculate current stale/expired
+  and lifecycle status separately. Missing position and cumulative usage producers remain
+  unavailable, including when a caller supplies plausible evidence or global bypass is enabled.
+- This remains unregistered source groundwork pending Integration review and full verification:
+  no policy HTTP route, MCP capability, or user interface is available. No activation, automatic
+  revision, usage ledger, scheduler, or commit-time position fence is implemented. Every result
+  explicitly keeps execution unavailable.
 
 ## 2026-09-18 — Progressive Finance first-plan source implementation
 

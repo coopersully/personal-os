@@ -21,6 +21,7 @@ describe.sequential("notification migration integrity", () => {
     const folder = resolve(process.cwd(), "packages/database/migrations");
     const prior = await migrationsWithout(folder, "nohmi-notifications-", [
       "0086_notification_foundation",
+      "0087_finance_budget_policy_management",
     ]);
     try {
       await migrateDatabase(database.db, prior);

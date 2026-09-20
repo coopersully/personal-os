@@ -10,6 +10,7 @@ it("preserves legacy setup/profile rows without inferred lineage and enforces te
     "0084_finance_setup_profile_lineage",
     "0085_finance_context_capture",
     "0086_notification_foundation",
+    "0087_finance_budget_policy_management",
   ]);
   const container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
   const database = createDatabaseClient(container.getConnectionUri());

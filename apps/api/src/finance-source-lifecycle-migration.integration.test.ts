@@ -18,6 +18,7 @@ describe.sequential("Finance source lifecycle migration", () => {
       "0082_finance_maintenance_lineage",
       "0083_global_execution_policy",
       "0084_finance_setup_profile_lineage",
+      "0085_finance_context_capture",
     ]);
 
     try {

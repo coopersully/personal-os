@@ -14,6 +14,7 @@ describe.sequential("global execution policy migration", () => {
     const beforePolicy = await migrationsWithout(migrationsFolder, "nohmi-execution-policy-", [
       "0083_global_execution_policy",
       "0084_finance_setup_profile_lineage",
+      "0085_finance_context_capture",
     ]);
     try {
       await migrateDatabase(database.db, beforePolicy);

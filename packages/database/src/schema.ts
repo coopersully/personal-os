@@ -67,6 +67,7 @@ import type {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   bigserial,
   boolean,
   check,
@@ -75,6 +76,7 @@ import {
   index,
   integer,
   jsonb,
+  type PgTableExtraConfigValue,
   pgTable,
   text,
   timestamp,
@@ -3770,5 +3772,120 @@ export const desktopMailActivity = pgTable(
   (table) => [
     uniqueIndex("desktop_mail_activity_remote_idx").on(table.accountId, table.remoteMessageId),
     index("desktop_mail_activity_user_sequence_idx").on(table.userId, table.sequence),
+  ],
+);
+
+/** Capture pointers and immutable snapshots; migration 0085 defers both cycle FKs. */
+export const financeContexts = pgTable(
+  "finance_contexts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    currentRevision: bigint("current_revision", { mode: "bigint" }).notNull(),
+    ...timestamps,
+  },
+  (table): PgTableExtraConfigValue[] => [
+    uniqueIndex("finance_contexts_user_id_unique").on(table.userId, table.id),
+    index("finance_contexts_user_updated_idx").on(table.userId, table.updatedAt, table.id),
+    check("finance_contexts_revision_check", sql`${table.currentRevision} > 0`),
+    // Drizzle does not express DEFERRABLE INITIALLY DEFERRED; 0085 supplies it.
+    foreignKey({
+      name: "finance_contexts_current_revision_fk",
+      columns: [table.userId, table.id, table.currentRevision],
+      foreignColumns: [
+        financeContextRevisions.userId,
+        financeContextRevisions.contextId,
+        financeContextRevisions.revision,
+      ],
+    }),
+  ],
+);
+
+export const financeContextRevisions = pgTable(
+  "finance_context_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    contextId: uuid("context_id").notNull(),
+    revision: bigint("revision", { mode: "bigint" }).notNull(),
+    text: text("text").notNull(),
+    validFrom: timestamp("valid_from", { withTimezone: true }),
+    validThrough: timestamp("valid_through", { withTimezone: true }),
+    participants: jsonb("participants").$type<string[]>().notNull().default([]),
+    paymentChannel: text("payment_channel"),
+    expectedCents: bigint("expected_cents", { mode: "bigint" }),
+    categoryId: uuid("category_id"),
+    transactionIds: jsonb("transaction_ids").$type<string[]>().notNull().default([]),
+    status: text("status").$type<"active" | "expired" | "cancelled">().notNull(),
+    sourceKind: text("source_kind").$type<"app" | "agent" | "expiry">().notNull(),
+    actorType: text("actor_type").$type<"user" | "agent" | "system">().notNull(),
+    actorId: text("actor_id").notNull(),
+    requestId: text("request_id").notNull(),
+    operationId: uuid("operation_id"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    uniqueIndex("finance_context_revisions_user_context_revision_unique").on(
+      table.userId,
+      table.contextId,
+      table.revision,
+    ),
+    foreignKey({
+      name: "finance_context_revisions_context_fk",
+      columns: [table.userId, table.contextId],
+      foreignColumns: [financeContexts.userId, financeContexts.id],
+    }).onDelete("cascade"),
+    check("finance_context_revisions_revision_check", sql`${table.revision} > 0`),
+    check(
+      "finance_context_revisions_text_check",
+      sql`char_length(${table.text}) BETWEEN 1 AND 10000 AND ${table.text}=btrim(${table.text})`,
+    ),
+    check(
+      "finance_context_revisions_window_check",
+      sql`${table.validFrom} IS NULL OR ${table.validThrough} IS NULL OR ${table.validFrom} <= ${table.validThrough}`,
+    ),
+    check(
+      "finance_context_revisions_participants_check",
+      sql`COALESCE(finance_context_participants_valid(${table.participants}), false)`,
+    ),
+    check(
+      "finance_context_revisions_payment_check",
+      sql`${table.paymentChannel} IS NULL OR (char_length(${table.paymentChannel}) BETWEEN 1 AND 100 AND ${table.paymentChannel}=btrim(${table.paymentChannel}))`,
+    ),
+    check(
+      "finance_context_revisions_cents_check",
+      sql`${table.expectedCents} IS NULL OR ${table.expectedCents} BETWEEN -9007199254740991 AND 9007199254740991`,
+    ),
+    check("finance_context_revisions_category_check", sql`${table.categoryId} IS NULL`),
+    check(
+      "finance_context_revisions_transactions_check",
+      sql`${table.transactionIds} = '[]'::jsonb`,
+    ),
+    check(
+      "finance_context_revisions_status_check",
+      sql`${table.status} IN ('active','expired','cancelled')`,
+    ),
+    check(
+      "finance_context_revisions_source_check",
+      sql`${table.sourceKind} IN ('app','agent','expiry')`,
+    ),
+    check(
+      "finance_context_revisions_actor_check",
+      sql`${table.actorType} IN ('user','agent','system') AND char_length(${table.actorId}) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "finance_context_revisions_request_check",
+      sql`char_length(${table.requestId}) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "finance_context_revisions_operation_check",
+      sql`(${table.sourceKind}='expiry')=(${table.operationId} IS NULL)`,
+    ),
+    check(
+      "finance_context_revisions_provenance_check",
+      sql`(${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent') OR (${table.sourceKind}='expiry' AND ${table.actorType}='system' AND ${table.actorId}='finance-context-expiry')`,
+    ),
   ],
 );

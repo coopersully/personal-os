@@ -532,3 +532,15 @@ This log records delivered vertical slices against the master plan. It does not 
   CVS, and other mixed retailers remain transaction-specific; optional bounded
   Mail evidence is sanitized and review-only, with a person question when it
   is absent or ambiguous.
+
+### Finance context capture foundation
+
+- Added the internal zero-link context adapter: immutable capture revisions, exact historical
+  receipts, revision-checked replacement/cancellation, and synchronous expiry on current read.
+- Migration 0085 enforces same-tenant pointer/snapshot integrity and snapshot update rejection.
+  Capture provenance identifies a server-owned snapshot; expected amounts do not create money.
+- The opt-in user admission fence preserves standalone failure receipts and caller-owned transaction
+  atomicity. Existing Finance writers retain their previous helper behavior.
+- This source slice does not register HTTP/MCP/SMS operations or ship matching, work answers,
+  disputes, reopening, connector evidence intake or production activation. See the
+  [capture contract](../engineering/finance-context-capture.md) for exact authority and transaction rules.

@@ -1,12 +1,27 @@
 import { randomUUID } from "node:crypto";
 import {
   createFinanceBudgetPolicySchema,
+  financeBudgetPolicyHashSchema,
   financeBudgetPolicyLifecycleSchema,
   financeBudgetPolicyListSchema,
   saveFinanceBudgetPolicyPreviewSchema,
 } from "./budget-policy-management.js";
 
 describe("policy management commands", () => {
+  it("accepts only canonical complete SHA-256 identities", () => {
+    const valid = `sha256:${"a1".repeat(32)}`;
+    expect(financeBudgetPolicyHashSchema.parse(valid)).toBe(valid);
+    for (const value of [
+      "",
+      `sha256:${"A".repeat(64)}`,
+      `md5:${"a".repeat(64)}`,
+      `sha256:${"a".repeat(63)}`,
+      `sha256:${"g".repeat(64)}`,
+      `${valid}x`,
+      `${valid}\n`,
+    ])
+      expect(financeBudgetPolicyHashSchema.safeParse(value).success).toBe(false);
+  });
   it("requires explicit expected state and rejects authority/evidence injection", () => {
     const lifecycle = { idempotencyKey: "disable-1", expectedLifecycleRevision: 1 };
     expect(financeBudgetPolicyLifecycleSchema.parse(lifecycle)).toEqual(lifecycle);

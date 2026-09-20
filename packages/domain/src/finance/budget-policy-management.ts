@@ -11,6 +11,10 @@ import { financeMutationMetaSchema } from "./common.js";
 import { financeRevisionRefSchema } from "./workflow-contracts.js";
 
 const mutation = { idempotencyKey: financeMutationMetaSchema.shape.idempotencyKey };
+export const financeBudgetPolicyHashSchema = z
+  .string()
+  .length(71)
+  .regex(/^sha256:[0-9a-f]{64}$/);
 const revision = z.number().int().min(1).max(2_147_483_647);
 export const financeBudgetPolicyCapabilitySchema = z
   .object({
@@ -99,7 +103,7 @@ export const financeBudgetRevisionProposalRecordSchema = financeBudgetPolicyCapa
     state: z.enum(["inactive", "withdrawn"]),
     lifecycleRevision: revision,
     candidate: financeBudgetPolicyPlanSnapshotSchema,
-    candidateHash: z.string(),
+    candidateHash: financeBudgetPolicyHashSchema,
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })
@@ -108,7 +112,7 @@ export const financeBudgetPolicyPreviewRecordSchema = financeBudgetPolicyCapabil
   .extend({
     id: idSchema,
     proposalId: idSchema,
-    previewHash: z.string(),
+    previewHash: financeBudgetPolicyHashSchema,
     result: financeBudgetPolicyEvaluationSchema,
     expiresAt: isoDateTimeSchema,
     createdAt: isoDateTimeSchema,

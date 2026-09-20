@@ -84,6 +84,7 @@ describe.sequential("trusted Finance mutation context", () => {
       idempotencyKey: "key-1",
       operation: "create_finance_goal",
       payload: { name: "Reserve" },
+      requireUserAdmission: true,
     };
 
     await expect(
@@ -110,6 +111,64 @@ describe.sequential("trusted Finance mutation context", () => {
         mutate,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("admits the owner before receipt work without changing the receipt hash", async () => {
+    const missingUserId = "00000000-0000-4000-8000-000000000099";
+    const missingContext = {
+      actorId: missingUserId,
+      actorType: "user" as const,
+      bypassEnabled: false,
+      canMutate: true,
+      canSelfApprove: false,
+      requestId: "missing-owner",
+      userId: missingUserId,
+    };
+    const mutate = vi.fn(async () => ({ unexpected: true }));
+    await expect(
+      executeFinanceIdempotently(
+        database.db,
+        missingContext,
+        {
+          idempotencyKey: "missing-owner",
+          operation: "finance.owner-admission",
+          payload: {},
+          requireUserAdmission: true,
+        },
+        mutate,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(mutate).not.toHaveBeenCalled();
+
+    const ownerContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "owner-admission",
+    });
+    const operation = {
+      idempotencyKey: "admission-hash",
+      operation: "finance.owner-admission",
+      payload: { stable: true },
+      requireUserAdmission: true,
+    };
+    const admittedMutation = vi.fn(async () => ({ admitted: true }));
+    await expect(
+      executeFinanceIdempotently(database.db, ownerContext, operation, admittedMutation),
+    ).resolves.toEqual({ admitted: true });
+    await expect(
+      executeFinanceIdempotently(
+        database.db,
+        ownerContext,
+        { ...operation, requireUserAdmission: false },
+        admittedMutation,
+      ),
+    ).resolves.toEqual({ admitted: true });
+    expect(admittedMutation).toHaveBeenCalledOnce();
   });
 
   it("holds shared semantic locks before running an idempotent mutation", async () => {
@@ -210,6 +269,7 @@ describe.sequential("trusted Finance mutation context", () => {
       idempotencyKey: "failed-operation",
       operation: "finance.failure",
       payload: { test: true },
+      requireUserAdmission: true,
     };
     await expect(
       executeFinanceIdempotently(database.db, userContext, failed, async () => {
@@ -285,6 +345,7 @@ describe.sequential("trusted Finance mutation context", () => {
           idempotencyKey: "expired-operation",
           operation: "finance.expired",
           payload: { test: true },
+          requireUserAdmission: true,
         },
         async () => ({ reclaimed: true }),
       ),
@@ -306,6 +367,7 @@ describe.sequential("trusted Finance mutation context", () => {
           idempotencyKey: "expired-failure",
           operation: "finance.expired",
           payload: { test: true },
+          requireUserAdmission: true,
         },
         async () => {
           throw new Error("reclaimed failure");

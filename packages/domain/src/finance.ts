@@ -1327,6 +1327,7 @@ export * from "./finance/buckets.js";
 export * from "./finance/budget.js";
 export * from "./finance/capabilities.js";
 export * from "./finance/common.js";
+export * from "./finance/context.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";

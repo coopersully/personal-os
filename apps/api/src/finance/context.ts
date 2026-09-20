@@ -3,6 +3,7 @@ import {
   type Database,
   executionPolicySettings,
   financeMutationRecords,
+  users,
 } from "@personal-os/database";
 import { and, eq, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
@@ -61,8 +62,20 @@ type IdempotentOperation = {
   lockIdentities?: string[];
   operation: string;
   payload: unknown;
+  /** Acquire owner deletion/key-change admission before every receipt or child lock. */
+  requireUserAdmission?: boolean;
 };
-type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+export type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+async function admitFinanceUser(tx: FinanceTransaction, userId: string): Promise<boolean> {
+  const [owner] = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, userId))
+    .for("key share")
+    .limit(1);
+  return owner !== undefined;
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -112,6 +125,9 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   );
 
   const execute = async (tx: FinanceTransaction, markClaimed: () => void) => {
+    if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId))) {
+      throw new AppError("not_found", "Account not found.");
+    }
     // Agent actions acquire semantic locks while revalidating. Direct writers
     // must take those same locks before their idempotency lock so the two paths
     // cannot form a reversed-order advisory-lock cycle.
@@ -197,6 +213,10 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
       if (isUniqueViolation(error) && !claimed && attempt === 0) continue;
       if (claimed) {
         await db.transaction(async (tx) => {
+          // The owner may have been deleted after the operation rolled back. In that case a
+          // user-owned failure receipt cannot survive, so preserve the original operation error.
+          if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId)))
+            return;
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
           const existing = await tx.query.financeMutationRecords.findFirst({ where: whereKey });
           if (existing?.status === "completed" || existing?.status === "failed") return;

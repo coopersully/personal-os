@@ -1325,6 +1325,7 @@ export * from "./finance/buckets.js";
 // Canonical Finance contracts are split by responsibility while this file
 // remains the stable public barrel for existing consumers.
 export * from "./finance/budget.js";
+export * from "./finance/budget-policy.js";
 export * from "./finance/capabilities.js";
 export * from "./finance/common.js";
 export * from "./finance/context.js";

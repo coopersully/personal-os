@@ -176,7 +176,7 @@ describe.sequential("texting service", () => {
       contentKind: "concise",
       conversationReceipt: empty.conversationReceipt ?? "",
     });
-    expect(sent.body).toBe("ilo: The appointment is at 3 PM.\nReply STOP to unsubscribe.");
+    expect(sent.body).toBe("nohmi: The appointment is at 3 PM.\nReply STOP to unsubscribe.");
     expect(twilio.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ to: "+12125550123" }),
     );
@@ -474,7 +474,7 @@ describe.sequential("texting service", () => {
     ).rejects.toThrow("provider unavailable");
     const uncertainMessage = await database.db.query.textMessages.findFirst({
       orderBy: (message, { desc }) => [desc(message.createdAt), desc(message.id)],
-      where: eq(textMessages.body, "ilo: temporary failure"),
+      where: eq(textMessages.body, "nohmi: temporary failure"),
     });
     expect(uncertainMessage?.status).toBe("unknown");
     vi.mocked(twilio.sendMessage).mockRejectedValueOnce({ status: 400 });
@@ -483,7 +483,7 @@ describe.sequential("texting service", () => {
     ).rejects.toMatchObject({ status: 400 });
     expect(
       await database.db.query.textMessages.findFirst({
-        where: eq(textMessages.body, "ilo: definite rejection"),
+        where: eq(textMessages.body, "nohmi: definite rejection"),
       }),
     ).toMatchObject({ status: "failed" });
     vi.mocked(twilio.sendMessage).mockResolvedValueOnce({ sid: "SMaccepted", status: "sent" });
@@ -544,7 +544,7 @@ describe.sequential("texting service", () => {
       connectionId: connection.id,
       direction: "outbound",
       occurredAt: current,
-      occurredAtSource: "ilo",
+      occurredAtSource: "nohmi",
       status: "sent",
       userId,
     });

@@ -10,6 +10,7 @@ import {
   textingConsentEvents,
   textingVerificationChallenges,
   textMessages,
+  users,
 } from "@personal-os/database";
 import {
   normalizeTextingPhoneNumber,
@@ -23,6 +24,7 @@ import {
 import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
+import type { NotificationTransaction } from "./notification-work-resolver.js";
 import { decryptJson, encryptJson } from "./security.js";
 import { issueConversationReceipt, verifyConversationReceipt } from "./texting-security.js";
 import { formatTextLocalTime } from "./texting-time.js";
@@ -230,7 +232,7 @@ export function createTextingService(options: Options) {
           kind: "verified_opt_in",
           occurredAt: now(),
           phoneFingerprint: challenge.phoneFingerprint,
-          source: "ilo",
+          source: "nohmi",
           userId,
         });
         await tx
@@ -242,7 +244,7 @@ export function createTextingService(options: Options) {
       if (isUniqueViolation(error))
         throw new AppError(
           "conflict",
-          "That phone number is already connected to another ilo account.",
+          "That phone number is already connected to another nohmi account.",
         );
       /* v8 ignore next -- unexpected database failures propagate through the shared API error boundary */
       throw error;
@@ -263,7 +265,7 @@ export function createTextingService(options: Options) {
         kind: "disconnected",
         occurredAt: now(),
         phoneFingerprint: row.phoneFingerprint,
-        source: "ilo",
+        source: "nohmi",
         userId,
       });
     });
@@ -422,7 +424,7 @@ export function createTextingService(options: Options) {
       !(await options.db.query.textMessages.findFirst({
         where: and(eq(textMessages.connectionId, row.id), eq(textMessages.direction, "outbound")),
       }));
-    const prefix = isSeries ? `ilo (${input.seriesPart}/${input.seriesTotal}): ` : "ilo: ";
+    const prefix = isSeries ? `nohmi (${input.seriesPart}/${input.seriesTotal}): ` : "nohmi: ";
     const body = `${prefix}${input.body}${optOut ? "\nReply STOP to unsubscribe." : ""}`;
     const estimate = estimateTwilioSegments(body);
     if (estimate.segments > 10)
@@ -509,7 +511,7 @@ export function createTextingService(options: Options) {
           contentKind: input.contentKind,
           direction: "outbound",
           occurredAt: now(),
-          occurredAtSource: "ilo",
+          occurredAtSource: "nohmi",
           predictedSegments: estimate.segments,
           seriesId: input.seriesId,
           seriesPart: input.seriesPart,
@@ -531,6 +533,16 @@ export function createTextingService(options: Options) {
       createdMessage,
       "Could not store the outgoing text message.",
     );
+    return submitMessage(pendingMessage, row, phone, twilio);
+  }
+
+  async function submitMessage(
+    pendingMessage: typeof textMessages.$inferSelect,
+    row: typeof textingConnections.$inferSelect,
+    phone: string,
+    twilio: TwilioConnector,
+  ) {
+    const body = pendingMessage.body;
     let providerMessage: TwilioMessage;
     try {
       providerMessage = await twilio.sendMessage({
@@ -577,7 +589,7 @@ export function createTextingService(options: Options) {
         });
         throw new AppError(
           "forbidden",
-          "Twilio reports this recipient has opted out. They must reply START before ilo can text again.",
+          "Twilio reports this recipient has opted out. They must reply START before nohmi can text again.",
         );
       }
       const status =
@@ -605,6 +617,98 @@ export function createTextingService(options: Options) {
       .where(eq(textMessages.id, pendingMessage.id))
       .returning();
     return requireDatabaseRecord(message, "Could not finalize the outgoing text message.");
+  }
+
+  /** Internal notification handoff. The coordinator commits its fenced attempt and message link
+   * in the same transaction as this queued message, before the single provider submission. */
+  async function sendNotification(
+    userId: string,
+    prepare: (
+      tx: NotificationTransaction,
+      connection: typeof textingConnections.$inferSelect,
+    ) => Promise<{ body: string; queued: (messageId: string) => Promise<void> } | null>,
+  ) {
+    const twilio = requireProvider();
+    const queued = await options.db.transaction(async (tx) => {
+      // T-local serialization precedes the connection. Non-key mode permits consent/message
+      // foreign-key checks; this is not a shared Finance transaction protocol.
+      const [user] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for("no key update");
+      if (!user) throw new AppError("not_found", "Account not found.");
+      const [connection] = await tx
+        .select()
+        .from(textingConnections)
+        .where(eq(textingConnections.userId, userId))
+        .for("update")
+        .limit(1);
+      if (connection?.state !== "active")
+        throw new AppError("forbidden", "Texting consent is not active.");
+      const prepared = await prepare(tx, connection);
+      if (!prepared) return null;
+      const first = !(await tx.query.textMessages.findFirst({
+        where: and(
+          eq(textMessages.connectionId, connection.id),
+          eq(textMessages.direction, "outbound"),
+        ),
+      }));
+      const body = `${prepared.body}${first ? "\nReply STOP to unsubscribe." : ""}`;
+      const estimate = estimateTwilioSegments(body);
+      if (estimate.segments > 3)
+        throw new AppError("invalid_request", "Notification exceeds the short-message limit.");
+      const recent = await tx
+        .select()
+        .from(textMessages)
+        .where(
+          and(
+            eq(textMessages.userId, userId),
+            eq(textMessages.direction, "outbound"),
+            gte(textMessages.createdAt, new Date(now().getTime() - 86400000)),
+          ),
+        );
+      if (
+        recent.filter((message) => message.createdAt >= new Date(now().getTime() - 60000)).length >=
+          5 ||
+        recent.reduce(
+          (total, message) => total + (message.actualSegments ?? message.predictedSegments ?? 1),
+          0,
+        ) +
+          estimate.segments >
+          100
+      )
+        throw new AppError("rate_limited", "Texting quota reached. Try again later.");
+      const [message] = await tx
+        .insert(textMessages)
+        .values({
+          body,
+          connectionId: connection.id,
+          contentKind: "concise",
+          direction: "outbound",
+          occurredAt: now(),
+          occurredAtSource: "nohmi",
+          predictedSegments: estimate.segments,
+          status: "queued",
+          userId,
+        })
+        .returning();
+      const stored = requireDatabaseRecord(message, "Could not store the notification message.");
+      await prepared.queued(stored.id);
+      await tx
+        .update(textingConnections)
+        .set({ conversationRevision: connection.conversationRevision + 1, updatedAt: now() })
+        .where(eq(textingConnections.id, connection.id));
+      return { message: stored, connection };
+    });
+    if (!queued) return null;
+    return submitMessage(
+      queued.message,
+      queued.connection,
+      decryptJson<EncryptedPhone>(queued.connection.encryptedPhoneNumber, options.encryptionKey)
+        .e164,
+      twilio,
+    );
   }
 
   async function inbound(parameters: Record<string, string>) {
@@ -762,6 +866,7 @@ export function createTextingService(options: Options) {
     getConnection: async (userId: string) => publicConnection(await connectionRow(userId)),
     inbound,
     send,
+    sendNotification,
     startVerification,
     updateStatus,
   };

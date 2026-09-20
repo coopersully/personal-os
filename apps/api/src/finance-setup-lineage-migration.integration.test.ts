@@ -9,6 +9,7 @@ it("preserves legacy setup/profile rows without inferred lineage and enforces te
   const prior = await migrationsWithout(folder, "nohmi-setup-lineage-", [
     "0084_finance_setup_profile_lineage",
     "0085_finance_context_capture",
+    "0086_notification_foundation",
   ]);
   const container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
   const database = createDatabaseClient(container.getConnectionUri());

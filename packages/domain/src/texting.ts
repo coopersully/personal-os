@@ -29,7 +29,7 @@ export const textContentKindSchema = z.enum([
   "requested_large_content",
   "safety_critical",
 ]);
-export const textOccurredAtSourceSchema = z.enum(["provider", "ilo"]);
+export const textOccurredAtSourceSchema = z.enum(["provider", "nohmi"]);
 
 export const startTextingVerificationInputSchema = z.object({
   consentAccepted: z.literal(true),
@@ -133,3 +133,5 @@ export type TextingConnection = z.infer<typeof textingConnectionSchema>;
 export type TextingConnectionState = z.infer<typeof textingConnectionStateSchema>;
 export type TextingCountry = z.infer<typeof textingCountrySchema>;
 export type TextingVerificationChallenge = z.infer<typeof textingVerificationChallengeSchema>;
+
+export * from "./notification-policy.js";

@@ -266,10 +266,9 @@ reserved time is a Task schedule, not a new notification or autonomous execution
 
 Finance exposes the same canonical records and mutations as the portal. Read operations
 require `finances:read`; canonical setup, ledger, financial-profile, complete-budget,
-Inbox, and goal mutations require `finances:write`. Budgets can be created, revised, and approved
-through MCP. `approve_finance_budget` accepts explicit person approval as `user_instruction`;
-`agent_self_approval` additionally requires the persisted Finance bypass setting. Only the
-signed-in person can change that setting. Connection handoffs, synchronization, account
+Inbox, and goal mutations require `finances:write`. Budgets can be created and revised through MCP. Activation requires an authenticated person
+and `user_instruction`; an agent cannot gain that authority by supplying the same label, even
+with global review bypass enabled. No agent budget-activation policy is registered. Connection handoffs, synchronization, account
 corrections, and transaction import have scoped tools; disconnection remains a signed-in-person
 portal action, and provider authentication
 and consent may still require the person. Money movement, bill payment, trading, and external
@@ -383,15 +382,24 @@ classification, ownership, freshness, and totals govern financial interpretation
 The Finance playbook uses the canonical `nohmi-finance` identity and owner.
 Start a financial interview with `get_finance_playbook` and `setup_finances` using
 `operation: start`. The API resumes an active session and returns one question. Persist each
-answer with its session ID, question ID, expected session version, and idempotency key. Resume
-on conflicts or interruptions. When setup requests budget approval, read `get_finance_budget`,
-show all resources, allocations, rationale, and assumptions, and approve the matching
-`budgetVersionId`. Setup approval uses the setup session version; direct
-`approve_finance_budget` uses the budget version. The portal follows this same protocol without
-asking the person to copy instructions into an agent.
+answer with its session ID, question ID, expected session version, and idempotency key. Optional planning questions support `operation: skip` with that same revision-bound identity;
+a skip leaves facts unknown. Reliable income, uncertain income, dated one-time resources,
+obligations, goal contributions, and protected priorities persist as typed profile facts.
+Confirmed none is distinct from unknown. Resume on conflicts or interruptions. First plans
+remain `incomplete` while the qualified position producer reports `producer_not_registered`;
+uncertain income, exceptional resources, and liquid reserves do not silently fund them.
+Bookkeeping remains available during setup. When setup requests budget approval, the host reads
+`get_finance_budget` and presents the exact proposal, including all resources, allocations,
+rationale, and assumptions, for person-authenticated approval in the portal. The MCP agent cannot
+approve or activate a budget. The person-authenticated API approval operation
+`approve_finance_budget` uses the budget version; person-authenticated setup approval uses the
+setup session version. Both bind the matching `budgetVersionId` and echo
+`expectedProfileVersionId` from the displayed proposal. A changed profile or superseding proposal
+requires the person to review again. The portal follows this protocol without asking the person
+to copy instructions into an agent.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
-the latest complete plan and `get_finance_budget_status` the active plan. Creation and revision
+the latest plan, including an explicit incomplete draft, and `get_finance_budget_status` the active plan. Creation and revision
 retain resource/allocation identities and relationships, balance to the cent, and create
 versioned proposals. `get_finance_inbox` returns transaction-backed cases and the exact next
 question. `answer_finance_review` submits a typed classification, relationship, profile update,

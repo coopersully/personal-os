@@ -1,6 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import { financeCapabilityManifest } from "@personal-os/domain";
 import { registerFinanceTools } from "./finances.js";
 
@@ -14,6 +14,50 @@ const base = {
 };
 
 describe("Finance MCP workflows", () => {
+  it("forwards exact approval profile evidence and setup skips without hiding agent denial", async () => {
+    const approveFinanceBudget = vi.fn(async () => {
+      throw new ApiClientError({
+        status: 403,
+        code: "forbidden",
+        message: "Budget activation requires an authenticated user decision.",
+      });
+    });
+    const setupFinances = vi.fn(async () => ({ ...base, data: {} }));
+    const server = new McpServer({ name: "finance-approval-parity", version: "1" });
+    registerFinanceTools(server, {
+      approveFinanceBudget,
+      setupFinances,
+    } as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const input = {
+      approvalSource: "user_instruction",
+      budgetVersionId: id,
+      expectedProfileVersionId: id,
+      expectedVersion: 3,
+      idempotencyKey: "exact-decision",
+    };
+    const result = await client.callTool({ name: "approve_finance_budget", arguments: input });
+    expect(approveFinanceBudget).toHaveBeenCalledWith(input);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain("authenticated user decision");
+    const skip = {
+      operation: "skip",
+      sessionId: id,
+      expectedVersion: 2,
+      questionId: "planning:obligations",
+      idempotencyKey: "skip-unknown",
+    };
+    await client.callTool({ name: "setup_finances", arguments: skip });
+    expect(setupFinances).toHaveBeenCalledWith(skip);
+    const tools = await client.listTools();
+    expect(
+      tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
+    ).toContain("agent tokens cannot activate");
+    await client.close();
+    await server.close();
+  });
   it("forwards ledger search and versioned ownership corrections without dropping fields", async () => {
     const api = {
       listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),

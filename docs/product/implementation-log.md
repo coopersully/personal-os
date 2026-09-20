@@ -2,6 +2,22 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-18 — Progressive Finance first-plan source implementation
+
+- Setup reuses canonical profile facts and records optional planning answers as typed,
+  provenance-bearing revisions. Unknown amounts and dates remain unknown; confirmed none and
+  revision-bound skips are explicit. Profile edits, Inbox answers, and current legacy profile
+  edits share the append-only canonical writer.
+- First plans preserve stated obligations, debt minimums, priorities, goal contributions, and
+  buffers. They disclose deficits without inventing cash or funding goals. Uncertain income,
+  one-time resources, and liquid reserves do not silently become recurring plan resources.
+- Migration `0084` adds profile/proposal lineage and skipped-question state without inventing
+  evidence for historical rows. Approval checks the authenticated person and exact current
+  profile/proposal revisions; global bypass does not grant agent activation authority.
+- This is source implementation evidence, not production verification. Generated first plans
+  remain incomplete while qualified position evidence is unavailable. Automatic activation and
+  goal-aware period reviews remain later work; manual bookkeeping remains available.
+
 ## 2026-09-16 — Exact Finance work in unified Reviews
 
 - Unified Reviews now includes pending Finance questions and approvals alongside open/deferred

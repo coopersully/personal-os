@@ -101,12 +101,25 @@ an explicit click. A remounted page discovers interrupted progress through
 current question ID, exact session version, and an idempotency key. Conflicts
 preserve entered text and offer a resume action.
 
-Budget approval loads the complete proposal and shows its resources,
-allocations, assumptions, rationale, and totals before enabling approval. The
-loaded budget must match the session's `budgetVersionId`. Setup approval sends
-that exact ID and the setup session version; the API guards the budget revision
-as part of the same operation. Resuming reconciles a proposal revised or approved
-through Plan or MCP with the saved setup session.
+Setup reuses current profile facts and asks about income reliability, obligations and timing,
+reserves, debt minimums, goals, protected priorities, and a chosen buffer. Structured answers use
+labelled fields. Blank amounts remain unknown; **Confirm none** records an empty list. **Skip for
+now** records progress against the current profile revision without confirming a fact. A concurrent
+profile change requires resume before an old answer or skip can apply.
+
+The first plan uses only stated recurring resources and chosen needs, preserves exact-cent deficits,
+and excludes uncertain income, exceptional resources, and reserves from recurring funding. Debt
+minimums already represented in obligations are counted once. Planned contributions never update
+goal balances. Missing position evidence is reported through the shared unavailable contract;
+the generated first plan remains incomplete and cannot be activated. Manual bookkeeping remains
+available throughout setup.
+
+Budget approval loads the complete proposal and shows its resources, allocations, assumptions,
+rationale, totals, and status. The app submits its exact budget and bound profile revision. The API
+requires an authenticated user decision and checks the current profile and latest proposal under the
+same lock. A caller-supplied `user_instruction` label is not user authentication; agent activation
+is unavailable. Resuming reconciles a proposal revised or approved through Plan with saved setup.
+Legacy unbound proposals with a current profile need a new bound revision before approval.
 
 Saving a profile or approving a budget does not imply maintained finances.
 Initial maintenance starts on request and displays the returned run stage.

@@ -24,6 +24,29 @@ describe("Finance setup answer parsing", () => {
     expect(() => parseSetupMoney("-1")).toThrow("non-negative");
   });
 
+  it.each([
+    "1.001",
+    "1e3",
+    "0x10",
+    "Infinity",
+    "100000000.01",
+    "1,00",
+    "1 00",
+    "$$10",
+  ])("rejects ambiguous or out-of-range money without inventing cents: %s", (answer) => {
+    expect(() => parseSetupMoney(answer)).toThrow();
+  });
+
+  it.each([
+    ["$8,000.25", 8000.25],
+    [" 100.01 ", 100.01],
+    ["0.01", 0.01],
+    ["100000000", 100000000],
+    ["0", 0],
+  ])("preserves explicitly entered cents for %s", (answer, expected) => {
+    expect(parseSetupMoney(answer)).toBe(expected);
+  });
+
   it("maps each deterministic question to exactly one profile fact", () => {
     expect(setupProfileChange("profile:location", "New York")).toEqual({
       jurisdiction: "US-NY",
@@ -32,13 +55,54 @@ describe("Finance setup answer parsing", () => {
     expect(setupProfileChange("profile:monthly_take_home", "5000")).toEqual({
       expectedMonthlyTakeHome: 5000,
     });
-    expect(() => setupProfileChange("profile:monthly_take_home", "0")).toThrow("positive");
+    expect(setupProfileChange("profile:monthly_take_home", "0")).toEqual({
+      expectedMonthlyTakeHome: 0,
+    });
     expect(setupProfileChange("profile:liquid_reserves", "10000")).toEqual({
       liquidReserves: 10000,
     });
     expect(() => setupProfileChange("profile:household_size", "0")).toThrow("positive");
     expect(() => setupProfileChange("profile:household_size", "1.5")).toThrow("whole");
     expect(() => setupProfileChange("profile:household_size", "101")).toThrow("positive");
+  });
+
+  it("validates structured facts and preserves authenticated source and unknown timing", () => {
+    const provenance = {
+      actorId: "person",
+      actorType: "user" as const,
+      confidence: 1,
+      evidence: {},
+      maintenanceRunId: null,
+      observedAt: "2026-09-18T00:00:00.000Z",
+      requestId: "answer",
+      sourceId: null,
+    };
+    expect(
+      setupProfileChange(
+        "planning:recurringIncome",
+        JSON.stringify({ amountCents: 0, nextDate: null, provenance: { actorId: "forged" } }),
+        null,
+        provenance,
+      ),
+    ).toMatchObject({
+      planning: { recurringIncome: { amountCents: 0, nextDate: null, provenance } },
+    });
+    expect(setupProfileChange("planning:obligations", "[]", null, provenance)).toMatchObject({
+      planning: { obligations: [] },
+    });
+    expect(setupProfileChange("profile:debts", "[]")).toEqual({ debts: [] });
+    expect(setupProfileChange("profile:income_stability", " Stable ")).toEqual({
+      incomeStability: "stable",
+    });
+    expect(setupProfileChange("profile:buffer_target", "0")).toMatchObject({
+      preferences: { bufferTarget: 0 },
+    });
+    expect(() => setupProfileChange("planning:recurringIncome", "{oops")).toThrow(
+      "structured setup",
+    );
+    expect(() => setupProfileChange("planning:unknown", "[]")).toThrow("Unknown planning");
+    expect(() => setupProfileChange("unknown", "0")).toThrow("Unknown setup");
+    expect(() => setupProfileChange("planning:obligations", "[null]", null, provenance)).toThrow();
   });
 
   it("reports completed, question, and caller-driven next-action states", () => {

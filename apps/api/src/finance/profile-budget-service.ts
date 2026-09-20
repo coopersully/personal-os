@@ -17,7 +17,6 @@ import type {
   FinanceBudgetVersion,
   FinanceChange,
   FinanceGoal,
-  FinanceProfileVersion,
   FinanceProvenance,
   FinanceToolResult,
   ManageFinanceGoalInput,
@@ -34,16 +33,11 @@ import {
 } from "./context.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
+import { appendFinanceProfile, profileValue } from "./profile-writer.js";
 
-type Options = { db: Database; now: () => Date };
-type FinanceExecutor = Pick<Database, "insert" | "query" | "select" | "update">;
-
-const defaultPreferences = {
-  bufferTarget: null,
-  debtPriority: null,
-  emergencyReserveMonths: null,
-  notes: [],
-} as const;
+type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type Options = { db: Database; now: () => Date; executor?: FinanceTransaction };
+type FinanceExecutor = Pick<Database, "insert" | "query" | "select" | "update" | "execute">;
 
 function toCents(amount: number): number {
   return Math.round((amount + Number.EPSILON) * 100);
@@ -80,39 +74,6 @@ function result<T>(input: {
   };
 }
 
-function provenance(context: FinanceMutationContext, now: Date): FinanceProvenance {
-  return {
-    actorId: context.actorId,
-    actorType: context.actorType,
-    confidence: 1,
-    evidence: {},
-    maintenanceRunId: null,
-    observedAt: now.toISOString(),
-    requestId: context.requestId,
-    sourceId: null,
-  };
-}
-
-function profileValue(row: typeof financeProfileVersions.$inferSelect): FinanceProfileVersion {
-  return {
-    createdAt: row.createdAt.toISOString(),
-    debts: row.debts as FinanceProfileVersion["debts"],
-    dependents: row.dependents,
-    expectedMonthlyTakeHome:
-      row.expectedMonthlyTakeHome === null ? null : fromCents(row.expectedMonthlyTakeHome),
-    householdSize: row.householdSize,
-    id: row.id,
-    incomeStability: row.incomeStability,
-    insurance: row.insurance as FinanceProfileVersion["insurance"],
-    jurisdiction: row.jurisdiction,
-    liquidReserves: row.liquidReserves === null ? null : fromCents(row.liquidReserves),
-    preferences: row.preferences as FinanceProfileVersion["preferences"],
-    provenance: row.provenance as FinanceProfileVersion["provenance"],
-    userId: row.userId,
-    version: row.version,
-  };
-}
-
 function goalValue(row: typeof financeGoals.$inferSelect): FinanceGoal {
   return {
     createdAt: row.createdAt.toISOString(),
@@ -128,7 +89,7 @@ function goalValue(row: typeof financeGoals.$inferSelect): FinanceGoal {
   };
 }
 
-export function createProfileBudgetService({ db, now }: Options) {
+export function createProfileBudgetService({ db, now, executor: transaction }: Options) {
   async function latestProfile(userId: string) {
     return db.query.financeProfileVersions.findFirst({
       orderBy: [desc(financeProfileVersions.version)],
@@ -247,6 +208,7 @@ export function createProfileBudgetService({ db, now }: Options) {
       effectiveFrom: row.effectiveFrom,
       expectedResources: fromCents(row.expectedResources),
       id: row.id,
+      profileVersionId: row.profileVersionId,
       planId: row.planId,
       rationale: row.rationale,
       resources: (row.resources as FinanceBudgetResource[]).map((resource) => ({
@@ -264,10 +226,31 @@ export function createProfileBudgetService({ db, now }: Options) {
     context: FinanceMutationContext,
     existingPlan?: { id: string; latestVersion: number },
   ) {
+    await lockFinanceProfileVersion(executor, context.userId);
+    const currentProfile = await executor.query.financeProfileVersions.findFirst({
+      orderBy: [desc(financeProfileVersions.version)],
+      where: eq(financeProfileVersions.userId, context.userId),
+    });
     await validateAllocations(executor, context.userId, input.allocations);
+    if (
+      [...input.resources, ...input.allocations].some(
+        (item) =>
+          !Number.isFinite(item.amount) ||
+          item.amount < 0 ||
+          Math.abs(item.amount * 100 - Math.round(item.amount * 100)) > 0.000001,
+      )
+    )
+      throw new AppError("invalid_request", "Plan amounts must be non-negative exact cents.");
     const resourceTotal = input.resources.reduce((sum, item) => sum + toCents(item.amount), 0);
     const allocatedTotal = input.allocations.reduce((sum, item) => sum + toCents(item.amount), 0);
-    if (resourceTotal !== allocatedTotal) {
+    if (resourceTotal > 2_147_483_647 || allocatedTotal > 2_147_483_647)
+      throw new AppError("invalid_request", "The monthly plan exceeds the supported amount range.");
+    if (
+      input.status !== "incomplete" &&
+      (resourceTotal !== allocatedTotal ||
+        input.resources.length === 0 ||
+        input.allocations.length === 0)
+    ) {
       throw new AppError(
         "invalid_request",
         "A complete budget must assign every expected resource or show an explicit funding source.",
@@ -299,30 +282,32 @@ export function createProfileBudgetService({ db, now }: Options) {
             ...resource,
             amount: toCents(resource.amount),
           })),
-          status: "proposed",
+          status: input.status ?? "proposed",
+          profileVersionId: currentProfile?.id ?? null,
           userId: context.userId,
           version: (existingPlan?.latestVersion ?? 0) + 1,
         })
         .returning();
       if (!version) throw new AppError("internal_error", "The budget version was not created.");
-      await executor.insert(financeBudgetAllocations).values(
-        input.allocations.map((allocation) => ({
-          accountId: allocation.kind === "debt" ? allocation.accountId : null,
-          allocationKey: allocation.key,
-          amount: toCents(allocation.amount),
-          budgetVersionId: version.id,
-          categoryId: allocation.kind === "spending" ? (allocation.categoryId ?? null) : null,
-          description: allocation.description ?? null,
-          goalId:
-            allocation.kind === "goal" || allocation.kind === "savings"
-              ? (allocation.goalId ?? null)
-              : null,
-          kind: allocation.kind,
-          legacyCategory:
-            allocation.kind === "spending" ? (allocation.legacyCategory ?? null) : null,
-          userId: context.userId,
-        })),
-      );
+      if (input.allocations.length)
+        await executor.insert(financeBudgetAllocations).values(
+          input.allocations.map((allocation) => ({
+            accountId: allocation.kind === "debt" ? allocation.accountId : null,
+            allocationKey: allocation.key,
+            amount: toCents(allocation.amount),
+            budgetVersionId: version.id,
+            categoryId: allocation.kind === "spending" ? (allocation.categoryId ?? null) : null,
+            description: allocation.description ?? null,
+            goalId:
+              allocation.kind === "goal" || allocation.kind === "savings"
+                ? (allocation.goalId ?? null)
+                : null,
+            kind: allocation.kind,
+            legacyCategory:
+              allocation.kind === "spending" ? (allocation.legacyCategory ?? null) : null,
+            userId: context.userId,
+          })),
+        );
       await executor.insert(auditEvents).values(
         auditValues({
           action: existingPlan ? "finance.budget.revised" : "finance.budget.created",
@@ -343,7 +328,9 @@ export function createProfileBudgetService({ db, now }: Options) {
     return [
       `Expected resources: ${formatMoney(budget.expectedResources)}. Total allocated: ${formatMoney(budget.allocatedTotal)}. Balance: ${formatMoney(budget.balanceDelta)}.`,
       ...(budget.assumptions.length > 0
-        ? [`Material assumptions: ${budget.assumptions.join("; ")}`]
+        ? [
+            `Material assumptions: ${budget.assumptions.join("; ").slice(0, 1800)}${budget.assumptions.join("; ").length > 1800 ? "… Read the full assumptions on the plan." : ""}`,
+          ]
         : []),
     ];
   }
@@ -360,6 +347,7 @@ export function createProfileBudgetService({ db, now }: Options) {
     async updateFinancialProfile(
       input: UpdateFinancialProfileInput,
       context: FinanceMutationContext,
+      source?: Pick<FinanceProvenance, "sourceId" | "evidence">,
     ) {
       return executeFinanceIdempotently(
         db,
@@ -367,77 +355,16 @@ export function createProfileBudgetService({ db, now }: Options) {
         {
           idempotencyKey: input.idempotencyKey,
           operation: "update_financial_profile",
-          payload: input,
+          lockIdentities: [`finance-profile:${context.userId}`],
+          payload: source ? { ...input, source } : input,
         },
         async (tx) => {
-          await lockFinanceProfileVersion(tx, context.userId);
-          const before = await tx.query.financeProfileVersions.findFirst({
-            orderBy: [desc(financeProfileVersions.version)],
-            where: eq(financeProfileVersions.userId, context.userId),
-          });
-          const currentVersion = before?.version ?? 0;
-          if (input.expectedVersion !== currentVersion) {
-            throw new AppError(
-              "conflict",
-              `The financial profile is at version ${currentVersion}; reload it before updating.`,
-            );
-          }
-          const observedAt = now();
-          const previous = before
-            ? profileValue(before)
-            : {
-                debts: [],
-                dependents: null,
-                expectedMonthlyTakeHome: null,
-                householdSize: null,
-                incomeStability: "unknown" as const,
-                insurance: [],
-                jurisdiction: null,
-                liquidReserves: null,
-                preferences: { ...defaultPreferences },
-                provenance: {},
-              };
-          const next = { ...previous, ...input.changes };
-          const nextProvenance = { ...previous.provenance };
-          for (const field of Object.keys(input.changes)) {
-            nextProvenance[field] = provenance(context, observedAt);
-          }
-          const [row] = await tx
-            .insert(financeProfileVersions)
-            .values({
-              debts: next.debts as unknown as Record<string, unknown>[],
-              dependents: next.dependents,
-              expectedMonthlyTakeHome:
-                next.expectedMonthlyTakeHome == null ? null : toCents(next.expectedMonthlyTakeHome),
-              householdSize: next.householdSize,
-              incomeStability: next.incomeStability,
-              insurance: next.insurance as unknown as Record<string, unknown>[],
-              jurisdiction: next.jurisdiction,
-              liquidReserves: next.liquidReserves == null ? null : toCents(next.liquidReserves),
-              preferences: next.preferences,
-              provenance: nextProvenance,
-              userId: context.userId,
-              version: currentVersion + 1,
-            })
-            .returning();
-          if (!row) throw new AppError("internal_error", "The financial profile was not updated.");
-          await tx.insert(auditEvents).values(
-            auditValues({
-              action: "finance.profile.updated",
-              after: { changedFields: Object.keys(input.changes), version: row.version },
-              before: before ? { version: before.version } : null,
-              entityId: row.id,
-              entityType: "finance_profile_version",
-              principal: context,
-              requestId: context.requestId,
-            }),
-          );
-          const data = profileValue(row);
+          const data = await appendFinanceProfile(tx, input, context, now(), source);
           return result({
             changes: [
               {
-                affectedEntityId: row.id,
-                description: `Saved profile version ${row.version}.`,
+                affectedEntityId: data.id,
+                description: `Saved profile version ${data.version}.`,
                 reversible: true,
                 type: "profile_updated",
               },
@@ -446,6 +373,7 @@ export function createProfileBudgetService({ db, now }: Options) {
             headline: "I saved that answer to your financial profile.",
           });
         },
+        transaction,
       );
     },
 
@@ -480,6 +408,7 @@ export function createProfileBudgetService({ db, now }: Options) {
         {
           idempotencyKey: input.idempotencyKey,
           operation: "create_finance_budget",
+          lockIdentities: [`finance-profile:${context.userId}`],
           payload: input,
         },
         async (tx) => {
@@ -496,10 +425,14 @@ export function createProfileBudgetService({ db, now }: Options) {
               ],
               data,
               disclosures: budgetDisclosures(data),
-              headline: "I created a balanced budget proposal.",
+              headline:
+                data.status === "incomplete"
+                  ? "I saved an incomplete first plan with unknowns and unfunded needs."
+                  : "I created a balanced budget proposal.",
             }),
           );
         },
+        transaction,
       );
     },
 
@@ -510,6 +443,7 @@ export function createProfileBudgetService({ db, now }: Options) {
         {
           idempotencyKey: input.idempotencyKey,
           operation: "revise_finance_budget",
+          lockIdentities: [`finance-profile:${context.userId}`],
           payload: input,
         },
         async (tx) => {
@@ -546,24 +480,39 @@ export function createProfileBudgetService({ db, now }: Options) {
               ],
               data,
               disclosures: budgetDisclosures(data),
-              headline: "I revised the budget and kept it balanced.",
+              headline:
+                data.status === "incomplete"
+                  ? "I revised the incomplete first plan; it still needs qualified evidence."
+                  : "I revised the budget and kept it balanced.",
             }),
           );
         },
+        transaction,
       );
     },
 
     async approveFinanceBudget(input: ApproveFinanceBudgetInput, context: FinanceMutationContext) {
       requireFinanceMutation(context, { approvalSource: input.approvalSource });
+      if (context.actorType !== "user" || input.approvalSource !== "user_instruction")
+        throw new AppError(
+          "forbidden",
+          "Budget activation requires an authenticated user decision.",
+        );
       return executeFinanceIdempotently(
         db,
         context,
         {
           idempotencyKey: input.idempotencyKey,
           operation: "approve_finance_budget",
+          lockIdentities: [`finance-profile:${context.userId}`],
           payload: input,
         },
         async (tx) => {
+          await lockFinanceProfileVersion(tx, context.userId);
+          const currentProfile = await tx.query.financeProfileVersions.findFirst({
+            orderBy: [desc(financeProfileVersions.version)],
+            where: eq(financeProfileVersions.userId, context.userId),
+          });
           const approvedAt = now();
           const row = await (async () => {
             const version = await tx.query.financeBudgetVersions.findFirst({
@@ -573,6 +522,20 @@ export function createProfileBudgetService({ db, now }: Options) {
               ),
             });
             if (!version) throw new AppError("not_found", "That budget version was not found.");
+            if (
+              version.profileVersionId !== (currentProfile?.id ?? null) ||
+              version.profileVersionId !== (input.expectedProfileVersionId ?? null)
+            )
+              throw new AppError(
+                "conflict",
+                "The proposal's profile revision changed. Review a new proposal before approving.",
+              );
+            const latest = await tx.query.financeBudgetVersions.findFirst({
+              orderBy: [desc(financeBudgetVersions.version)],
+              where: eq(financeBudgetVersions.planId, version.planId),
+            });
+            if (latest?.id !== version.id)
+              throw new AppError("conflict", "Review the latest budget revision before approving.");
             if (version.version !== input.expectedVersion) {
               throw new AppError("conflict", "The budget version changed before approval.");
             }
@@ -610,7 +573,13 @@ export function createProfileBudgetService({ db, now }: Options) {
                   input.approvalSource === "agent_self_approval"
                     ? "finance.budget.agent_self_approved"
                     : "finance.budget.user_instruction_approved",
-                after: { approvalSource: input.approvalSource, status: "active" },
+                after: {
+                  approvalSource: input.approvalSource,
+                  status: "active",
+                  profileVersionId: version.profileVersionId,
+                  budgetVersionId: version.id,
+                  budgetVersion: version.version,
+                },
                 before: { status: version.status },
                 entityId: active.id,
                 entityType: "finance_budget_version",
@@ -637,6 +606,7 @@ export function createProfileBudgetService({ db, now }: Options) {
             }),
           );
         },
+        transaction,
       );
     },
 
@@ -782,6 +752,7 @@ export function createProfileBudgetService({ db, now }: Options) {
             headline: "I updated the financial goal.",
           });
         },
+        transaction,
       );
     },
   };

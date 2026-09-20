@@ -5089,6 +5089,7 @@ describe("ilo web app", () => {
       expect(mocks.approveFinanceBudget).toHaveBeenCalledWith({
         approvalSource: "user_instruction",
         budgetVersionId: thirdId,
+        expectedProfileVersionId: null,
         expectedVersion: 4,
         idempotencyKey: expect.any(String),
       }),

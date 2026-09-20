@@ -87,6 +87,7 @@ import type {
   UpdateFinanceProfileInput,
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
+  UpdateFinancialProfileInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
@@ -130,6 +131,7 @@ import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
+import { appendFinanceProfile } from "./finance/profile-writer.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
   financeCandidateActionFingerprint,
@@ -4330,8 +4332,9 @@ export function createFinanceService({
     async updateProfile(
       input: UpdateFinanceProfileInput,
       context: MutationContext,
-      executor: FinanceWriteExecutor = db,
-    ) {
+      executor: FinanceWriteExecutor & Pick<Database, "execute" | "query"> = db,
+    ): Promise<FinanceProfile> {
+      if (executor === db) return db.transaction((tx) => this.updateProfile(input, context, tx));
       if (input.payAccountId)
         await ownedAccount(context.principal.userId, input.payAccountId, executor);
       const before = await this.getProfile(context.principal.userId, undefined, executor);
@@ -4401,6 +4404,45 @@ export function createFinanceService({
           ...context,
         }),
       );
+      if (input.effectiveDate <= now().toISOString().slice(0, 10)) {
+        const periods =
+          input.payFrequency === "monthly"
+            ? 12
+            : input.payFrequency === "semimonthly"
+              ? 24
+              : input.payFrequency === "biweekly"
+                ? 26
+                : input.payFrequency === "weekly"
+                  ? 52
+                  : null;
+        const changes: UpdateFinancialProfileInput["changes"] = {};
+        if (input.householdSize !== undefined) changes.householdSize = input.householdSize;
+        if (input.dependents !== undefined) changes.dependents = input.dependents;
+        if (input.expectedNetPay === null) changes.expectedMonthlyTakeHome = null;
+        else if (input.expectedNetPay !== undefined && periods !== null)
+          changes.expectedMonthlyTakeHome =
+            Math.round((input.expectedNetPay * 100 * periods) / 12) / 100;
+        if (Object.keys(changes).length > 0) {
+          await appendFinanceProfile(
+            executor,
+            { changes },
+            {
+              actorId: context.principal.actorId,
+              actorType: context.principal.actorType,
+              userId: context.principal.userId,
+              requestId: context.requestId,
+              canMutate: context.principal.scopes.has("finances:write"),
+              bypassEnabled: false,
+              canSelfApprove: false,
+            },
+            now(),
+            {
+              sourceId: saved.id,
+              evidence: { source: "finance_profile", effectiveDate: input.effectiveDate },
+            },
+          );
+        }
+      }
       return value;
     },
     async listIncomeStreams(userId: string) {

@@ -638,6 +638,13 @@
       "when": 1789510000000,
       "tag": "0083_global_execution_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1789740000000,
+      "tag": "0084_finance_setup_profile_lineage",
+      "breakpoints": true
     }
   ]
 }

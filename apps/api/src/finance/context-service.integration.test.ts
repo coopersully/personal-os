@@ -683,4 +683,39 @@ describe.sequential("capture-only Finance contexts", () => {
       );
     }
   });
+  it("reuses the supplied connection for authorization with a one-connection pool", async () => {
+    const single = createDatabaseClient({
+      connectionString: container.getConnectionUri(),
+      max: 1,
+      connectionTimeoutMillis: 1_000,
+    });
+    try {
+      const api = createFinanceContextService({
+        db: single.db,
+        principal: {
+          userId,
+          actorId: userId,
+          actorType: "user",
+          scopes: new Set(["finances:write", "finances:read"]),
+        },
+        requestId: "single-connection",
+      });
+      const captured = await single.db.transaction((tx) =>
+        api.captureContext(
+          {
+            ...content,
+            type: "create",
+            operationId: randomUUID(),
+          },
+          tx,
+        ),
+      );
+      expect(captured).toMatchObject({ revision: "1", status: "active" });
+      expect(await api.getCurrentContext(userId, captured.id)).toEqual(captured);
+      expect(single.pool.totalCount).toBe(1);
+      expect(single.pool.waitingCount).toBe(0);
+    } finally {
+      await single.close();
+    }
+  });
 });

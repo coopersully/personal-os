@@ -129,7 +129,7 @@ export function createFinanceContextService(options: {
     async captureContext(raw: unknown, executor?: FinanceTransaction): Promise<FinanceContext> {
       authorize("finances:write");
       const input = captureFinanceContextInputSchema.parse(raw);
-      const context = await loadFinanceAuthorization({ db, principal, requestId });
+      const context = await loadFinanceAuthorization({ db: executor ?? db, principal, requestId });
       const sourceKind = principal.actorType === "user" ? "app" : "agent";
       return executeFinanceIdempotently(
         db,

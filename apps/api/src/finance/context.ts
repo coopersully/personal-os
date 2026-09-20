@@ -20,7 +20,7 @@ export type FinanceMutationContext = {
 };
 
 export async function loadFinanceAuthorization(input: {
-  db: Database;
+  db: Database | FinanceTransaction;
   principal: Principal;
   requestId: string;
 }): Promise<FinanceMutationContext> {

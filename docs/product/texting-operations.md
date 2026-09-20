@@ -181,8 +181,8 @@ Review bypass never grants scopes, creates a domain rule, supplies missing facts
 confidence into authority. Every direct action and SMS approval retains actor, channel, source,
 policy, proposal version, conversation revision, effect, delivery, and undo or recovery evidence.
 
-The current implementation's bypass storage and UI are Finances-specific. Promoting review bypass
-to a global policy and migrating Finances onto it are target work, not shipped behavior.
+The global execution-policy setting is shared across workspaces. SMS-bound approvals and Finance
+reply routing remain unavailable; notification preferences never grant execution authority.
 
 ## Global defaults and per-workspace controls
 
@@ -279,7 +279,8 @@ delivery: do not automatically resend identical content until provider or recipi
 resolves the uncertainty. Status webhooks may advance delivery state but never regress a terminal
 state.
 
-Only a current uncursored conversation read issues the short-lived receipt required to send. The
+For manual agent sends, only a current uncursored conversation read issues the short-lived receipt
+required to send. The
 receipt binds user, agent, connection, consent epoch, conversation revision, and time zone, and the
 send path revalidates all of them under lock. Every displayed message includes UTC time and an
 explicit local offset.
@@ -293,10 +294,87 @@ and Attention work across the four workspaces with filters and domain-owned acti
 sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
 recovery coverage remains target work. Texting does not yet provide general-inbox intent
 classification, work-node answers, cross-workspace child
-intents, event-driven agent dispatch, `maintain_texting`, maintenance notification intents,
-per-workspace SMS controls, global review bypass, or SMS-bound approvals.
+intents, event-driven agent dispatch, `maintain_texting`, available Finance notification producers, general per-workspace SMS controls, or SMS-bound approvals.
+The T0 foundation below stores notification preferences and delivery lifecycle separately from the
+unavailable producer and routing capabilities.
 
 Local tests prove validation, persistence, signed-webhook handling, and degraded provider behavior
 with mocks. They do not prove production sender registration, carrier reachability, callback
 routing, or STOP/START behavior; production enablement still requires an authorized end-to-end test
 that records identifiers, timestamps, and final states without retaining phone numbers or bodies.
+
+## T0 notification implementation boundary
+
+The T0 notification slice adds owner-scoped notification preferences, durable work intents, and
+separate delivery-attempt history. It does not enable Finance SMS replies. Production notification status reports `producer_not_registered` until the authoritative Finance
+work resolver is registered. Only authenticated status and human preference updates are registered;
+publication and draining have no public route or client method. The internal publication/drain
+methods return unavailable without a producer and create no intents or provider calls.
+No schedule, startup drain, host continuation, inbound claim, or approval binding is added by T0.
+
+Callers publish only bounded `FinanceHumanWorkRef` values. They cannot submit rendered SMS, current
+work status, a disclosure level, a destination, another user's identity, or execution authority.
+A future domain resolver must use the caller's transaction and lock every authoritative work/status
+and disclosure row through the queued-message commit. The real Finance writer/lock protocol is not
+registered or proven by T0; only an injected transactional fixture exercises the coordinator. It validates ownership and all reference fields,
+returns missing or foreign work without disclosing its existence, and treats superseded references
+as stale. Finance display IDs and date-only bank records are not substitutes for canonical work
+identities, revisions, or timestamps. Missing occurrence instants remain null.
+
+An intent keeps its stable owner/domain/work identity while its evidence revision can refresh.
+Immutable attempt membership records the exact work and semantic action revision considered for
+that delivery. Wording or evidence changes cannot erase reminder history. Reminders use elapsed
+24-hour days (seven by default), not calendar-day rollover. `never` suppresses repeats. An uncertain
+attempt suppresses further sends for its work even if a new action revision appears, until provider
+or operator evidence reconciles that delivery.
+
+Eligibility and relative dates use `users.planningTimezone` at send time; the attempt records that
+zone and the user's revision timestamp. Missing or invalid zones fail closed. Quiet hours evaluate
+local wall time at each invocation: both occurrences of a repeated DST hour remain quiet; a skipped
+hour has no invented offset. The next bounded invocation rechecks eligibility against the current
+zone, preferences, expiry and domain state. No nohmi recurring notification schedule is introduced.
+
+T0 messages summarize up to three safe contextual labels, with an overflow count and an ordinary
+authenticated link to `/settings?section=reviews`. This is a general Reviews destination, not an
+exact-item or approval link. Messages do not advertise reply choices or numeric answer references.
+A domain disclosure ceiling and the global privacy ceiling constrain workspace preferences; a user
+preference cannot expand the permitted context. Sensitive or oversized content falls back to a
+short review summary. Notification rows contain references and delivery state, not copies of SMS
+bodies, phone numbers, domain results, or host credentials.
+
+### Durable send and recovery boundary
+
+Texting owns the existing Twilio HTTPS submission and its bounded timeout. Configuration, sender
+registration, consent, webhook authentication and provider credentials retain the transport's
+existing requirements. The notification coordinator creates a leased claim, then revalidates
+current work, consent epoch, timezone and policy before atomically storing the queued SMS and its
+attempt link. All database locks end before the single provider call. A resolution after that commit
+cannot retract an in-flight text; it remains resolved in Finance and does not produce domain effects.
+
+An expired pre-submission lease may be reclaimed with a new fencing token. Once queued for provider
+submission, neither lease expiry nor another drain resends the attempt. A queued message without a
+provider ID becomes uncertain after its bounded submission window. Provider status evidence can
+reconcile it; failed or uncertain delivery remains inspectable, with app review or delivery
+reconciliation as recovery. STOP, disablement and consent changes prevent new submissions while
+retaining history. Status reads are bounded and tenant-scoped; no public endpoint exposes claim
+or deliver primitives.
+
+The additive migration also cuts Texting runtime provenance tokens over to `nohmi`. It changes only
+matching application-origin source fields; historical message bodies, provider provenance, consent
+kinds, event times, identities and epochs are preserved. Applying that value transformation again
+has no additional effect. Rollback disables notification entry points and preserves pending and
+uncertain rows for repair; it does not delete accepted evidence or restore former runtime tokens.
+
+Local adapter and transport tests establish deterministic code behavior only. The Finance producer
+still needs its own real mutation-versus-resolver race proof. Authorized production evidence must
+separately establish sender/carrier reachability, callback routing, consent and uncertain delivery;
+Codex and Claude continuation remains a later independently evidenced release gate. A mock resolver
+or passing test does not make production Finance SMS available.
+
+T0's private coordinator serializes the canonical user with `FOR NO KEY UPDATE` before acquiring a
+Texting connection lock. This preserves preference/timezone serialization while allowing consent
+and message foreign-key checks. Whole-batch resolution precedes notification writes; status
+reconciliation uses a separate bounded transaction and processes only changed delivery states.
+This local order does not establish a shared Finance gate or make any Finance work kind available.
+The configured first-party origin is validated at construction (HTTP or HTTPS, no credentials,
+path, query or fragment); request headers cannot choose the destination.

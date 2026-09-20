@@ -33,6 +33,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
         "0083_global_execution_policy",
         "0084_finance_setup_profile_lineage",
         "0085_finance_context_capture",
+        "0086_notification_foundation",
       ],
     );
 

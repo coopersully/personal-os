@@ -36,3 +36,19 @@ describe("texting API client", () => {
     expect(request).toHaveBeenCalledTimes(6);
   });
 });
+
+it("maps notification preferences, references and recovery without supplying current-work evidence", async () => {
+  const { defaultNotificationPreferences } = await import("@personal-os/domain");
+  const request = vi.fn(async () => ({})) as unknown as Parameters<
+    typeof createTextingApiClient
+  >[0];
+  const api = createTextingApiClient(request, () => "");
+  await api.getNotificationStatus();
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/notifications");
+  const input = { expectedRevision: null, preferences: defaultNotificationPreferences };
+  await api.saveNotificationPreferences("finances", input);
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/notifications/preferences/finances", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+});

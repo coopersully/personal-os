@@ -63,6 +63,7 @@ import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-a
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
+import { createNotificationService } from "./notification-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
@@ -75,6 +76,7 @@ import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
+import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
 import {
   requestMetadata as metadata,
@@ -599,6 +601,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     senderPhoneNumber: textingConfig.senderPhoneNumber,
     ...(twilio ? { twilio } : {}),
+    now,
+  });
+  const notifications = createNotificationService({
+    db: dependencies.db,
+    origin: dependencies.config.appBaseUrl,
+    transport: texting,
     now,
   });
 
@@ -1291,6 +1299,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     texting,
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
+  registerNotificationRoutes({ app, notifications });
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());

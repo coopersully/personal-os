@@ -22,9 +22,13 @@ import {
   mailThreadDispositions,
   mailThreads,
   migrateDatabase,
+  notificationDeliveryAttempts,
+  notificationIntents,
+  notificationPreferences,
   reminders,
   taskLists,
   taskProjects,
+  textMessages,
   users,
 } from "@personal-os/database";
 import type { Task, TaskListQuery } from "@personal-os/domain";
@@ -206,6 +210,161 @@ describe.sequential("ilo API", () => {
   async function payload(response: Response) {
     return response.status === 204 ? null : response.json();
   }
+
+  it("composes authenticated notification status and human preferences without publication authority", async () => {
+    const registration = await request("/v1/auth/register", {
+      auth: "none",
+      body: {
+        displayName: "Notification Composition User",
+        email: "notification-composition@example.com",
+        password: "LocalTestOnly123!",
+        planningTimezone: "America/New_York",
+      },
+    });
+    expect(registration.status).toBe(201);
+    const registered = await payload(registration);
+    const authorization = { authorization: `Session ${registered.sessionToken}` };
+    const sessionRequest = (path: string, options: Omit<RequestOptions, "auth"> = {}) => {
+      const headers = { ...authorization, ...options.headers };
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers: {
+          ...(hasBody ? { "content-type": "application/json" } : {}),
+          ...headers,
+        },
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    };
+    const createAgent = async (name: string, scopes: string[]) => {
+      const response = await sessionRequest("/v1/access-tokens", { body: { name, scopes } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).token.token as string;
+    };
+    const agentRequest = (token: string, path: string, options: RequestOptions = {}) =>
+      app.request(path, {
+        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+      });
+    const fullAgent = await createAgent("Notification composition full", [
+      "finances:read",
+      "texting:read",
+      "texting:write",
+    ]);
+    const textingOnlyAgent = await createAgent("Notification composition Texting only", [
+      "texting:read",
+    ]);
+    const readAgent = await createAgent("Notification composition reader", [
+      "finances:read",
+      "texting:read",
+    ]);
+
+    expect((await request("/v1/texting/notifications", { auth: "none" })).status).toBe(401);
+    expect((await agentRequest(textingOnlyAgent, "/v1/texting/notifications")).status).toBe(403);
+    expect((await agentRequest(readAgent, "/v1/texting/notifications")).status).toBe(200);
+
+    const emptyNotificationRows = async () => ({
+      attempts: await database.db
+        .select({ id: notificationDeliveryAttempts.id })
+        .from(notificationDeliveryAttempts)
+        .where(eq(notificationDeliveryAttempts.userId, registered.user.id)),
+      intents: await database.db
+        .select({ id: notificationIntents.id })
+        .from(notificationIntents)
+        .where(eq(notificationIntents.userId, registered.user.id)),
+      messages: await database.db
+        .select({ id: textMessages.id })
+        .from(textMessages)
+        .where(eq(textMessages.userId, registered.user.id)),
+      preferences: await database.db
+        .select({ revision: notificationPreferences.revision })
+        .from(notificationPreferences)
+        .where(eq(notificationPreferences.userId, registered.user.id)),
+    });
+    await expect(emptyNotificationRows()).resolves.toEqual({
+      attempts: [],
+      intents: [],
+      messages: [],
+      preferences: [],
+    });
+
+    const status = await sessionRequest("/v1/texting/notifications");
+    expect(status.status).toBe(200);
+    expect(await payload(status)).toMatchObject({
+      attempts: [],
+      capability: "unavailable",
+      intents: [],
+      preferences: [],
+      reason: "producer_not_registered",
+    });
+    const unregisteredPublication = await agentRequest(
+      fullAgent,
+      "/v1/texting/notifications/intents",
+      { body: { work: [] } },
+    );
+    expect(unregisteredPublication.status).toBe(404);
+    await expect(emptyNotificationRows()).resolves.toEqual({
+      attempts: [],
+      intents: [],
+      messages: [],
+      preferences: [],
+    });
+
+    const input = {
+      expectedRevision: null,
+      preferences: {
+        detail: "minimal",
+        enabled: true,
+        quietEndMinute: 480,
+        quietMode: "window",
+        quietStartMinute: 1320,
+        reminderDays: 7,
+      },
+    };
+    expect(
+      (
+        await agentRequest(fullAgent, "/v1/texting/notifications/preferences/global", {
+          body: input,
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await agentRequest(readAgent, "/v1/texting/notifications/preferences/global", {
+          body: input,
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(403);
+    const saved = await sessionRequest("/v1/texting/notifications/preferences/global", {
+      body: input,
+      method: "PATCH",
+    });
+    expect(saved.status).toBe(200);
+    expect(await payload(saved)).toMatchObject({ revision: 1, scope: "global" });
+    await expect(emptyNotificationRows()).resolves.toEqual({
+      attempts: [],
+      intents: [],
+      messages: [],
+      preferences: [{ revision: 1 }],
+    });
+
+    expect((await sessionRequest("/v1/texting")).status).toBe(200);
+    expect(
+      (
+        await app.request("/v1/webhooks/twilio/inbound", {
+          body: "MessageSid=SM123",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
+  });
 
   describe("task lists", () => {
     let listAgentToken = "";

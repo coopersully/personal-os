@@ -87,6 +87,7 @@ import type {
   UpdateFinanceProfileInput,
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
+  UpdateFinancialProfileInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
@@ -4414,33 +4415,33 @@ export function createFinanceService({
                 : input.payFrequency === "weekly"
                   ? 52
                   : null;
-        await appendFinanceProfile(
-          executor,
-          {
-            changes: {
-              householdSize: input.householdSize ?? null,
-              dependents: input.dependents ?? null,
-              expectedMonthlyTakeHome:
-                input.expectedNetPay === null || periods === null
-                  ? null
-                  : Math.round((input.expectedNetPay * 100 * periods) / 12) / 100,
+        const changes: UpdateFinancialProfileInput["changes"] = {};
+        if (input.householdSize !== undefined) changes.householdSize = input.householdSize;
+        if (input.dependents !== undefined) changes.dependents = input.dependents;
+        if (input.expectedNetPay === null) changes.expectedMonthlyTakeHome = null;
+        else if (input.expectedNetPay !== undefined && periods !== null)
+          changes.expectedMonthlyTakeHome =
+            Math.round((input.expectedNetPay * 100 * periods) / 12) / 100;
+        if (Object.keys(changes).length > 0) {
+          await appendFinanceProfile(
+            executor,
+            { changes },
+            {
+              actorId: context.principal.actorId,
+              actorType: context.principal.actorType,
+              userId: context.principal.userId,
+              requestId: context.requestId,
+              canMutate: context.principal.scopes.has("finances:write"),
+              bypassEnabled: false,
+              canSelfApprove: false,
             },
-          },
-          {
-            actorId: context.principal.actorId,
-            actorType: context.principal.actorType,
-            userId: context.principal.userId,
-            requestId: context.requestId,
-            canMutate: context.principal.scopes.has("finances:write"),
-            bypassEnabled: false,
-            canSelfApprove: false,
-          },
-          now(),
-          {
-            sourceId: saved.id,
-            evidence: { source: "finance_profile", effectiveDate: input.effectiveDate },
-          },
-        );
+            now(),
+            {
+              sourceId: saved.id,
+              evidence: { source: "finance_profile", effectiveDate: input.effectiveDate },
+            },
+          );
+        }
       }
       return value;
     },

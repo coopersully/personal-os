@@ -388,12 +388,15 @@ obligations, goal contributions, and protected priorities persist as typed profi
 Confirmed none is distinct from unknown. Resume on conflicts or interruptions. First plans
 remain `incomplete` while the qualified position producer reports `producer_not_registered`;
 uncertain income, exceptional resources, and liquid reserves do not silently fund them.
-Bookkeeping remains available during setup. When setup requests budget approval, read `get_finance_budget`,
-show all resources, allocations, rationale, and assumptions, and approve the matching
-`budgetVersionId`. Setup approval uses the setup session version; direct
-`approve_finance_budget` uses the budget version. Both must echo `expectedProfileVersionId`
-from the displayed proposal; a changed profile or superseding proposal requires review again. The portal follows this same protocol without
-asking the person to copy instructions into an agent.
+Bookkeeping remains available during setup. When setup requests budget approval, the host reads
+`get_finance_budget` and presents the exact proposal, including all resources, allocations,
+rationale, and assumptions, for person-authenticated approval in the portal. The MCP agent cannot
+approve or activate a budget. The person-authenticated API approval operation
+`approve_finance_budget` uses the budget version; person-authenticated setup approval uses the
+setup session version. Both bind the matching `budgetVersionId` and echo
+`expectedProfileVersionId` from the displayed proposal. A changed profile or superseding proposal
+requires the person to review again. The portal follows this protocol without asking the person
+to copy instructions into an agent.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
 the latest plan, including an explicit incomplete draft, and `get_finance_budget_status` the active plan. Creation and revision

@@ -8,8 +8,10 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import { updateFinanceProfileInputSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createProfileBudgetService } from "./profile-budget-service.js";
@@ -94,6 +96,141 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     ]);
     await expect(service.getFinancialProfile(profileUser.id)).resolves.toMatchObject({
       data: { version: 1 },
+    });
+  });
+
+  it.each([
+    { payFrequency: "monthly", expectedNetPay: 3_000, expectedMonthlyTakeHome: 3_000 },
+    { payFrequency: "monthly", expectedNetPay: 0, expectedMonthlyTakeHome: 0 },
+    { payFrequency: "irregular", expectedNetPay: 3_000, expectedMonthlyTakeHome: 4_000 },
+    { payFrequency: null, expectedNetPay: 3_000, expectedMonthlyTakeHome: 4_000 },
+  ] as const)("preserves omitted canonical facts on legacy updates with $payFrequency pay of $expectedNetPay", async ({
+    payFrequency,
+    expectedNetPay,
+    expectedMonthlyTakeHome,
+  }) => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy profile preservation",
+        email: `legacy-profile-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing legacy profile owner");
+    const principal: Principal = {
+      actorId: owner.id,
+      actorType: "user",
+      userId: owner.id,
+      scopes: new Set(["finances:write"]),
+    };
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal,
+      requestId: "seed-profile",
+    });
+    const canonical = createProfileBudgetService({ db: database.db, now: () => now });
+    const first = await canonical.updateFinancialProfile(
+      {
+        expectedVersion: 0,
+        idempotencyKey: "seed-legacy-profile",
+        changes: { householdSize: 3, dependents: 2, expectedMonthlyTakeHome: 4_000 },
+      },
+      context,
+    );
+    const legacy = createFinanceService({ db: database.db, now: () => now });
+    await legacy.updateProfile(
+      updateFinanceProfileInputSchema.parse({
+        effectiveDate: "2026-08-01",
+        employer: "Updated employer",
+        expectedNetPay,
+        payFrequency,
+      }),
+      { principal, requestId: "legacy-update" },
+    );
+    const after = await canonical.getFinancialProfile(owner.id);
+    expect
+      .soft(after.data)
+      .toMatchObject({ householdSize: 3, dependents: 2, expectedMonthlyTakeHome });
+    expect.soft(after.data?.provenance.householdSize).toEqual(first.data.provenance.householdSize);
+    expect.soft(after.data?.provenance.dependents).toEqual(first.data.provenance.dependents);
+    if (payFrequency !== "monthly") {
+      expect.soft(after.data).toEqual(first.data);
+    } else {
+      expect(after.data?.version).toBe(first.data.version + 1);
+    }
+  });
+
+  it("retains explicit-null clearing and determined household changes in the legacy profile bridge", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy explicit null",
+        email: `legacy-null-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing legacy profile owner");
+    const principal: Principal = {
+      actorId: owner.id,
+      actorType: "user",
+      userId: owner.id,
+      scopes: new Set(["finances:write"]),
+    };
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal,
+      requestId: "seed-null-profile",
+    });
+    const canonical = createProfileBudgetService({ db: database.db, now: () => now });
+    await canonical.updateFinancialProfile(
+      {
+        expectedVersion: 0,
+        idempotencyKey: "seed-null-profile",
+        changes: {
+          householdSize: 3,
+          dependents: 2,
+          expectedMonthlyTakeHome: 4_000,
+        },
+      },
+      context,
+    );
+    const legacy = createFinanceService({ db: database.db, now: () => now });
+    await legacy.updateProfile(
+      updateFinanceProfileInputSchema.parse({
+        effectiveDate: "2026-08-01",
+        householdSize: null,
+        dependents: null,
+        expectedNetPay: null,
+        payFrequency: "irregular",
+      }),
+      { principal, requestId: "clear-profile" },
+    );
+    await expect(canonical.getFinancialProfile(owner.id)).resolves.toMatchObject({
+      data: {
+        version: 2,
+        householdSize: null,
+        dependents: null,
+        expectedMonthlyTakeHome: null,
+      },
+    });
+    await legacy.updateProfile(
+      updateFinanceProfileInputSchema.parse({
+        effectiveDate: "2026-08-01",
+        householdSize: 2,
+        dependents: 0,
+        expectedNetPay: 3_000,
+        payFrequency: "irregular",
+      }),
+      { principal, requestId: "household-only-profile" },
+    );
+    await expect(canonical.getFinancialProfile(owner.id)).resolves.toMatchObject({
+      data: {
+        version: 3,
+        householdSize: 2,
+        dependents: 0,
+        expectedMonthlyTakeHome: null,
+      },
     });
   });
 

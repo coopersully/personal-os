@@ -161,6 +161,19 @@ const unavailable = z
   .strict()
   .readonly();
 
+type ImmutableEvidence<T> = T extends object
+  ? { readonly [K in keyof T]: ImmutableEvidence<T[K]> }
+  : T;
+
+/** Freeze only Zod's parsed copy, including nested fact sources and account scopes. */
+function immutableEvidence<T>(value: T): ImmutableEvidence<T> {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) immutableEvidence(child);
+    Object.freeze(value);
+  }
+  return value as ImmutableEvidence<T>;
+}
+
 export const financeBudgetPolicyEvaluationInputSchema = z
   .object({
     evaluatedAt: isoDateTimeSchema,
@@ -177,7 +190,7 @@ export const financeBudgetPolicyEvaluationInputSchema = z
         .object({
           state: z.literal("available"),
           userId: idSchema,
-          evidence: financePositionEvidenceSchema,
+          evidence: financePositionEvidenceSchema.transform(immutableEvidence),
         })
         .strict()
         .readonly(),
@@ -257,6 +270,47 @@ export const financeBudgetPolicyEvaluationSchema = z
   })
   .strict()
   .superRefine((result, context) => {
+    if (
+      result.kind === "hypothetical_preview" &&
+      (result.input.position.state !== "available" || result.input.usage.state !== "available")
+    )
+      context.addIssue({
+        code: "custom",
+        message: "A matching hypothetical preview requires position and usage evidence.",
+      });
+    const keys = result.deltas.map((delta) => delta.allocationKey);
+    if (new Set(keys).size !== keys.length)
+      context.addIssue({
+        code: "custom",
+        path: ["deltas"],
+        message: "Allocation identities must be unique.",
+      });
+    if (result.deltas.some((delta) => delta.deltaCents !== delta.afterCents - delta.beforeCents))
+      context.addIssue({
+        code: "custom",
+        path: ["deltas"],
+        message: "Delta must equal after minus before cents.",
+      });
+    const gross = result.deltas.reduce((total, delta) => total + Math.max(0, delta.deltaCents), 0);
+    if (
+      result.grossMovedCents === null ? result.deltas.length > 0 : result.grossMovedCents !== gross
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["grossMovedCents"],
+        message: "Gross moved cents must equal the sum of positive allocation deltas.",
+      });
+    const projected =
+      result.input.usage.state === "available" && result.grossMovedCents !== null
+        ? result.input.usage.consumedCents + result.grossMovedCents
+        : null;
+    if (result.projectedMonthlyUsageCents !== projected)
+      context.addIssue({
+        code: "custom",
+        path: ["projectedMonthlyUsageCents"],
+        message:
+          "Projected usage must equal evidenced consumed cents plus gross moved cents, or remain unknown.",
+      });
     if (
       result.evaluatedAt !== result.input.evaluatedAt ||
       JSON.stringify(result.revisions) !== JSON.stringify(result.input.observed)

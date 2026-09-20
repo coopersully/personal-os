@@ -200,7 +200,7 @@ describe("unregistered policy evaluation boundaries", () => {
         grossMovedCents: 0,
         projectedMonthlyUsageCents: 0,
       }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("rejects invalid dates without throwing outside schema validation", () => {
@@ -210,5 +210,121 @@ describe("unregistered policy evaluation boundaries", () => {
         period: { from: "not-a-date", through: "2026-09-30", timezone: "UTC" },
       }).success,
     ).toBe(false);
+  });
+});
+
+const availableEvaluation = () => {
+  const input = evaluation();
+  const fact = { cents: 1000, currency: "USD", quality: "verified", reasons: [], sources: [ref] };
+  return {
+    ...input,
+    position: {
+      state: "available",
+      userId: id,
+      evidence: {
+        revision: "position-1",
+        asOf: input.evaluatedAt,
+        scope: { accountIds: [id], from: "2026-09-01", through: "2026-09-30" },
+        cash: fact,
+        postedSpend: fact,
+        pendingExposure: fact,
+        committed: fact,
+        protected: fact,
+        spendable: fact,
+        debt: fact,
+        investments: fact,
+        netWorth: fact,
+      },
+    },
+    usage: {
+      state: "available",
+      userId: id,
+      period: terms().period,
+      revision: "usage-1",
+      accounting: "gross_positive_allocation_deltas",
+      scope: "user_month_all_policy_versions",
+      consumedCents: 100,
+    },
+  };
+};
+const preview = () => ({
+  kind: "hypothetical_preview",
+  executionAvailable: false,
+  executionUnavailableReasons: ["authority_not_wired", "position_commit_fence_not_wired"],
+  evaluatedAt: evaluation().evaluatedAt,
+  input: availableEvaluation(),
+  revisions: revisions(),
+  reasons: [],
+  grossMovedCents: 50,
+  projectedMonthlyUsageCents: 150,
+  deltas: [
+    { allocationKey: "food", beforeCents: 100, afterCents: 50, deltaCents: -50 },
+    { allocationKey: "bills", beforeCents: 100, afterCents: 150, deltaCents: 50 },
+  ],
+});
+
+describe("hypothetical preview evidence and accounting", () => {
+  it("requires both position and usage evidence for a matching preview", () => {
+    const input = preview();
+    expect(financeBudgetPolicyEvaluationSchema.safeParse(input).success).toBe(true);
+    for (const field of ["position", "usage"] as const) {
+      expect(
+        financeBudgetPolicyEvaluationSchema.safeParse({
+          ...input,
+          input: {
+            ...input.input,
+            [field]: { state: "unavailable", reason: "missing_evidence" },
+          },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it.each([
+    "duplicate",
+    "wrong_delta",
+    "net_gross",
+    "doubled_gross",
+    "unknown_gross",
+    "wrong_projected",
+  ])("rejects inconsistent output accounting: %s", (fault) => {
+    const input = preview();
+    const firstDelta = input.deltas[0];
+    if (!firstDelta) throw new Error("Missing delta fixture");
+    if (fault === "duplicate") input.deltas.push({ ...firstDelta });
+    if (fault === "wrong_delta") firstDelta.deltaCents = -49;
+    if (fault === "net_gross") input.grossMovedCents = 0;
+    if (fault === "doubled_gross") input.grossMovedCents = 100;
+    if (fault === "wrong_projected") input.projectedMonthlyUsageCents = 151;
+    const value =
+      fault === "unknown_gross"
+        ? { ...input, kind: "denied", reasons: ["missing_evidence"], grossMovedCents: null }
+        : input;
+    expect(financeBudgetPolicyEvaluationSchema.safeParse(value).success).toBe(false);
+  });
+
+  it("deeply freezes parsed position evidence in inputs and outputs without freezing caller data", () => {
+    const source = availableEvaluation();
+    const input = financeBudgetPolicyEvaluationInputSchema.parse(source);
+    const output = financeBudgetPolicyEvaluationSchema.parse(preview());
+    for (const parsed of [input, output.input]) {
+      if (parsed.position.state !== "available") throw new Error("Expected available fixture");
+      const evidence = parsed.position.evidence;
+      expect(Reflect.set(evidence.cash, "cents", 999)).toBe(false);
+      expect(Reflect.set(evidence.scope, "from", "2026-08-01")).toBe(false);
+      expect(Reflect.set(evidence.scope.accountIds, "0", "changed")).toBe(false);
+      const sourceRef = evidence.cash.sources[0];
+      if (!sourceRef) throw new Error("Missing source fixture");
+      expect(Reflect.set(sourceRef, "revision", "changed")).toBe(false);
+      expect(Reflect.set(evidence.cash.reasons, "0", "stale_evidence")).toBe(false);
+      expect(Reflect.set(evidence, "cash", { cents: 0 })).toBe(false);
+      expect(evidence.cash.cents).toBe(1000);
+      expect(evidence.scope.from).toBe("2026-09-01");
+      expect(evidence.scope.accountIds).toEqual([id]);
+      expect(evidence.cash.sources[0]?.revision).toBe("1");
+    }
+    expect(Object.isFrozen(source.position.evidence.cash)).toBe(false);
+    source.position.evidence.cash.cents = 42;
+    if (input.position.state === "available") expect(input.position.evidence.cash.cents).toBe(1000);
   });
 });

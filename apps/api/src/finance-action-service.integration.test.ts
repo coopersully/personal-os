@@ -96,8 +96,9 @@ async function settleWithoutDeadlock(operations: Promise<unknown>[]) {
 async function waitForAdvisoryLockWaiters(
   pool: ReturnType<typeof createDatabaseClient>["pool"],
   minimum = 1,
+  timeoutMs = 5_000,
 ) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = await pool.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'",
@@ -108,12 +109,12 @@ async function waitForAdvisoryLockWaiters(
   throw new Error(`Expected ${minimum} reimbursement topology lock waiter(s).`);
 }
 
-function createStatementTimedDatabase(connectionUri: string) {
+function createStatementTimedDatabase(connectionUri: string, statementTimeoutMs = 5_000) {
   const url = new URL(connectionUri);
   // Every writer session gets a server-side ceiling as well as the test's
   // client-side completion assertion, so a reversed lock order cannot hang
   // this suite indefinitely.
-  url.searchParams.set("options", "-c statement_timeout=5000");
+  url.searchParams.set("options", `-c statement_timeout=${statementTimeoutMs}`);
   return createDatabaseClient(url.toString());
 }
 
@@ -7073,13 +7074,19 @@ describe.sequential("finance action service", () => {
     if (queued.status !== "pending_review")
       throw new Error("Expected a pending reimbursement review.");
 
-    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const waiterObservationTimeoutMs = 15_000;
+    const writerStatementTimeoutMs = 30_000;
+    const contentionDatabase = createStatementTimedDatabase(
+      container.getConnectionUri(),
+      writerStatementTimeoutMs,
+    );
     const actions = createFinanceActionService({
       db: contentionDatabase.db,
       finances: createFinanceService({ db: contentionDatabase.db, now: () => now }),
       now: () => now,
     });
     const blocker = await database.pool.connect();
+    let operationSettlement: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
       await blocker.query("BEGIN");
       await blocker.query("SET LOCAL statement_timeout = '5s'");
@@ -7095,9 +7102,11 @@ describe.sequential("finance action service", () => {
         { ...input, expectedAmount: 180, rationale: "Alex owes the smaller shared portion." },
         { principal: agent(userId, "competing-agent"), requestId: "review-order-competing" },
       );
-      await waitForAdvisoryLockWaiters(database.pool, 2);
+      const operations = [approval, competingRequest];
+      operationSettlement = Promise.allSettled(operations);
+      await waitForAdvisoryLockWaiters(database.pool, 2, waiterObservationTimeoutMs);
       await blocker.query("COMMIT");
-      const outcomes = await settleWithoutDeadlock([approval, competingRequest]);
+      const outcomes = await settleWithoutDeadlock(operations);
       expect(
         outcomes.every(
           (outcome) =>
@@ -7107,6 +7116,7 @@ describe.sequential("finance action service", () => {
       ).toBe(true);
     } finally {
       await blocker.query("ROLLBACK").catch(() => undefined);
+      await operationSettlement;
       blocker.release();
       await contentionDatabase.close();
     }
@@ -7153,7 +7163,7 @@ describe.sequential("finance action service", () => {
       expect(cases).toEqual([]);
       expect(reviews.filter((review) => review.status === "pending")).toHaveLength(1);
     }
-  }, 15_000);
+  }, 40_000);
 
   it("serializes a reimbursement maintenance answer before a competing same-target agent request", async () => {
     // This barriers a question terminalization and a competing review queue

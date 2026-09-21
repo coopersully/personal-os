@@ -17,7 +17,7 @@ vi.mock("../../api.js", () => ({ api, errorMessage: (e: Error) => e.message }));
 const id = "11111111-1111-4111-8111-111111111111";
 const question = {
   id,
-  reviewCaseId: id,
+  reviewCaseId: "22222222-2222-4222-8222-222222222222",
   transactionId: id,
   prompt: "What was this transaction for?",
   disclosure: "minimal",
@@ -103,5 +103,13 @@ it("creates from the transaction action and opens the exact question after a saf
   await screen.findByText(`?contextualQuestion=${id}`);
   expect(api.createFinanceContextualQuestion.mock.calls[0]).toEqual(
     api.createFinanceContextualQuestion.mock.calls[1],
+  );
+});
+
+it("links the contextual financial case to the legacy review destination", async () => {
+  show();
+  expect(await screen.findByRole("link", { name: "View financial review" })).toHaveAttribute(
+    "href",
+    `/finances/review/legacy?item=${question.reviewCaseId}`,
   );
 });

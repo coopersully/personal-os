@@ -163,7 +163,7 @@ function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
         </Link>
         <Link
           className="underline underline-offset-4"
-          to={`/finances/review?item=${encodeURIComponent(question.reviewCaseId)}`}
+          to={`/finances/review/legacy?item=${encodeURIComponent(question.reviewCaseId)}`}
         >
           View financial review
         </Link>

@@ -20,10 +20,13 @@ This log records delivered vertical slices against the master plan. It does not 
   [storage contract](../engineering/finance-budget-policy-management.md) records lock ordering
   and validator scope. Missing position and cumulative usage producers remain
   unavailable, including when a caller supplies plausible evidence or global bypass is enabled.
-- This remains unregistered source groundwork pending Integration review and full verification:
-  no policy HTTP route, MCP capability, or user interface is available. No activation, automatic
-  revision, usage ledger, scheduler, or commit-time position fence is implemented. Every result
-  explicitly keeps execution unavailable.
+- Human-session management/read HTTP routes and typed API-client methods are registered. The
+  combined source head `f4661789e3d37d17fdb707b1019240ea0c81adf6` passed full `pnpm verify`,
+  including 2,469 tests and 28 desktop/mobile E2E checks. PR publication, hosted review and merge
+  remain pending; this is not a production activation claim.
+- Every result keeps `executionAvailable:false`. No automatic application, policy activation,
+  usage ledger, scheduler, commit-time position fence, MCP capability, user interface, host or
+  Texting activation is implemented.
 
 ## 2026-09-18 — Progressive Finance first-plan source implementation
 

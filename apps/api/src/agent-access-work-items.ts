@@ -26,6 +26,7 @@ import {
 import { and, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "./errors.js";
+import { readFinanceContextualWork } from "./finance/contextual-question-projection.js";
 import { readFinanceEffectWork } from "./finance/review-effect-projection.js";
 import type { Principal } from "./types.js";
 
@@ -38,6 +39,7 @@ type SourceReaders = {
   financeActions: (
     input: SourceInput,
   ) => Promise<Array<typeof financeAgentActionReviews.$inferSelect>>;
+  financeContextual: (input: SourceInput) => Promise<AgentAccessWorkItem[]>;
   financeReviews: (input: SourceInput) => Promise<Array<typeof financeReviewCases.$inferSelect>>;
   mailQuestions: (
     input: SourceInput,
@@ -54,6 +56,7 @@ type SourceResult = {
   financeEffects: Awaited<ReturnType<SourceReaders["financeEffects"]>>;
   financeAccounts: Awaited<ReturnType<SourceReaders["financeAccounts"]>>;
   financeActions: Awaited<ReturnType<SourceReaders["financeActions"]>>;
+  financeContextual: Awaited<ReturnType<SourceReaders["financeContextual"]>>;
   financeReviews: Awaited<ReturnType<SourceReaders["financeReviews"]>>;
   mailQuestions: Awaited<ReturnType<SourceReaders["mailQuestions"]>>;
   mailRules: Awaited<ReturnType<SourceReaders["mailRules"]>>;
@@ -94,6 +97,7 @@ const sourceImpact: Record<
   financeEffects: { domains: ["finances"], kinds: ["review"] },
   financeAccounts: { domains: ["finances"], kinds: ["review"] },
   financeActions: { domains: ["finances"], kinds: ["review"] },
+  financeContextual: { domains: ["finances"], kinds: ["review"] },
   financeReviews: { domains: ["finances"], kinds: ["review"] },
   mailQuestions: { domains: ["mail"], kinds: ["review"] },
   mailRules: { domains: ["mail"], kinds: ["review"] },
@@ -171,6 +175,7 @@ export function createAgentAccessWorkItemService({
             lte(financeAgentActionReviews.updatedAt, snapshotAt),
           ),
         ),
+    financeContextual: (input) => readFinanceContextualWork(db, input),
     financeReviews: async ({ snapshotAt, userId }) =>
       db
         .select()
@@ -485,6 +490,7 @@ function projectItems({
 
   if (accessibleDomains.has("finances")) {
     items.push(...(results.financeEffects ?? []));
+    items.push(...(results.financeContextual ?? []));
     for (const review of results.financeReviews ?? []) {
       items.push({
         action: {

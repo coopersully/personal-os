@@ -5549,6 +5549,38 @@ describe.sequential("ilo API", () => {
     });
     expect(financeTransactionResponse.status).toBe(201);
     const financeTransaction = (await payload(financeTransactionResponse)).transaction;
+    const [contextualTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: financeAccount.id,
+        amount: 1825,
+        direction: "expense",
+        merchant: "Corner Market",
+        transactionDate: "2026-07-13",
+        userId: registrationBody.user.id,
+      })
+      .returning();
+    if (!contextualTransaction) throw new Error("Contextual transaction was not created.");
+    const contextualQuestionResponse = await request(
+      `/v1/finances/transactions/${contextualTransaction.id}/contextual-question`,
+      { body: { operationId: crypto.randomUUID() } },
+    );
+    expect(contextualQuestionResponse.status).toBe(200);
+    const contextualQuestion = await payload(contextualQuestionResponse);
+    expect(contextualQuestion).toMatchObject({
+      question: { status: "open", transactionId: contextualTransaction.id },
+      state: "available",
+    });
+    await expect(
+      payload(await request(`/v1/finances/contextual-questions/${contextualQuestion.question.id}`)),
+    ).resolves.toEqual(contextualQuestion);
+    expect(
+      (
+        await request(`/v1/finances/transactions/${contextualTransaction.id}/remove`, {
+          body: { idempotencyKey: `remove-${contextualTransaction.id}` },
+        })
+      ).status,
+    ).toBe(200);
     expect(
       (
         await request(`/v1/finances/transactions/${financeTransaction.id}`, {

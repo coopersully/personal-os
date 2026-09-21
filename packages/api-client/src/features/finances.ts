@@ -10,6 +10,7 @@ import type {
   CreateFinanceBudgetPolicyInput,
   CreateFinanceBudgetRevisionProposalInput,
   CreateFinanceBudgetVersionInput,
+  CreateFinanceContextualQuestionInput,
   CreateFinanceTransactionInput,
   DesignateFinanceBudgetBaselineInput,
   DisconnectFinanceAccountInput,
@@ -21,6 +22,7 @@ import type {
   FinanceActionOutcome,
   FinanceActionReview,
   FinanceAlert,
+  FinanceAnswer,
   FinanceBudget,
   FinanceBudgetBucketList,
   FinanceBudgetPace,
@@ -39,7 +41,9 @@ import type {
   FinanceCategorizationProposal,
   FinanceCategorizationProposalPage,
   FinanceCategory,
+  FinanceContextualQuestionResult,
   FinanceCsvImportInput,
+  FinanceDomainOutcome,
   FinanceExport,
   FinanceForecast,
   FinanceGoal,
@@ -154,6 +158,24 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    createFinanceContextualQuestion(
+      transactionId: string,
+      input: CreateFinanceContextualQuestionInput,
+    ): Promise<FinanceContextualQuestionResult> {
+      return request(
+        `/v1/finances/transactions/${encodeURIComponent(transactionId)}/contextual-question`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    getFinanceContextualQuestion(id: string): Promise<FinanceContextualQuestionResult> {
+      return request(`/v1/finances/contextual-questions/${encodeURIComponent(id)}`);
+    },
+    answerFinanceContextualQuestion(input: FinanceAnswer): Promise<FinanceDomainOutcome> {
+      return request("/v1/finances/contextual-questions/answer", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
     async listFinanceBudgetPolicies(
       query: FinanceBudgetPolicyListInput = { limit: 50 },
     ): Promise<FinanceBudgetPolicyRecord[]> {

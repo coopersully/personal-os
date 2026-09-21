@@ -11,6 +11,7 @@ it("corrects published empty-text admission without weakening validation or rewr
   const folder = resolve(process.cwd(), "packages/database/migrations");
   const prior = await migrationsWithout(folder, "nohmi-policy-text-", [
     "0088_finance_budget_policy_nonempty_text",
+    "0089_finance_contextual_questions",
   ]);
   const plan = {
     userId: randomUUID(),

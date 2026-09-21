@@ -19,6 +19,7 @@ describe.sequential("Finance maintenance lineage migration", () => {
       "0086_notification_foundation",
       "0087_finance_budget_policy_management",
       "0088_finance_budget_policy_nonempty_text",
+      "0089_finance_contextual_questions",
     ]);
     try {
       await migrateDatabase(database.db, beforeLineage);
@@ -114,7 +115,7 @@ describe.sequential("Finance maintenance lineage migration", () => {
       );
 
       async function historicalRows() {
-        const result: Record<string, unknown> = {};
+        const result: Record<string, Array<{ record: Record<string, unknown> }>> = {};
         for (const table of [
           "finance_maintenance_runs",
           "finance_maintenance_judgments",
@@ -136,7 +137,18 @@ describe.sequential("Finance maintenance lineage migration", () => {
       }
       const before = await historicalRows();
       await migrateDatabase(database.db, migrationsFolder);
-      expect(await historicalRows()).toEqual(before);
+      const expected = structuredClone(before);
+      for (const table of ["finance_accounts", "finance_transactions"]) {
+        expected[table] = (before[table] ?? []).map(({ record }) => ({
+          record: { ...record, contextual_revision: 1 },
+        }));
+      }
+      expect(await historicalRows()).toEqual(expected);
+      for (const table of ["finance_accounts", "finance_transactions"]) {
+        const revisions = await database.pool.query(`SELECT contextual_revision FROM ${table}`);
+        expect(revisions.rows.length).toBeGreaterThan(0);
+        expect(revisions.rows.every((row) => row.contextual_revision === "1")).toBe(true);
+      }
       await expect(
         database.pool.query(
           `SELECT canonical_run_id, recovery FROM finance_maintenance_runs WHERE id = $1`,
@@ -235,7 +247,7 @@ describe.sequential("Finance maintenance lineage migration", () => {
       for (const table of Object.keys(before).filter(
         (table) => table !== "finance_maintenance_runs",
       ))
-        expect(afterLink[table]).toEqual(before[table]);
+        expect(afterLink[table]).toEqual(expected[table]);
     } finally {
       await database.close();
       await container.stop();

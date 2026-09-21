@@ -11,11 +11,13 @@ import {
   createFinanceBudgetPolicySchema,
   createFinanceBudgetRevisionProposalSchema,
   createFinanceBudgetVersionInputSchema,
+  createFinanceContextualQuestionInputSchema,
   createFinanceTransactionInputSchema,
   designateFinanceBudgetBaselineSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
   financeAccountQuerySchema,
+  financeAnswerSchema,
   financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetPolicyLifecycleSchema,
@@ -62,6 +64,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
+import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
 import type { createFinanceMaintenanceIntentService } from "../finance/maintenance-intent-service.js";
 import {
   buildFinancePeriodReviewResult,
@@ -88,6 +91,7 @@ type FinanceRouteOptions = {
   db?: Database;
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
+  contextualQuestions?: ReturnType<typeof createFinanceContextualQuestionService>;
   financeBudgetPolicies?: ReturnType<typeof createFinanceBudgetPolicyService>;
   financeMaintenance: FinanceMaintenanceService;
   canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
@@ -104,6 +108,7 @@ export function registerFinanceRoutes({
   actions,
   db,
   financeChallenges,
+  contextualQuestions,
   financeBudgetPolicies,
   canonicalFinanceMaintenance,
   financePeriodReviews,
@@ -174,6 +179,31 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  const questions = () => {
+    if (!contextualQuestions)
+      throw new Error("Finance contextual question service is unavailable.");
+    return contextualQuestions;
+  };
+  app.post("/v1/finances/transactions/:id/contextual-question", requireHuman, async (context) =>
+    context.json(
+      await questions().createQuestion(
+        routeId(context),
+        await parseBody(context, createFinanceContextualQuestionInputSchema),
+        financeMutationContext(context),
+      ),
+    ),
+  );
+  app.get("/v1/finances/contextual-questions/:id", async (context) =>
+    context.json(await questions().getQuestion(routeId(context), financeMutationContext(context))),
+  );
+  app.post("/v1/finances/contextual-questions/answer", async (context) =>
+    context.json(
+      await questions().answerWork(
+        await parseBody(context, financeAnswerSchema),
+        financeMutationContext(context),
+      ),
+    ),
+  );
   app.use("/v1/finances/budget-policies", requireHuman);
   app.use("/v1/finances/budget-policies/*", requireHuman);
   app.get("/v1/finances/budget-policies", async (context) => {

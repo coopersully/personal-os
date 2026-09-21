@@ -1330,6 +1330,7 @@ export * from "./finance/budget-policy-management.js";
 export * from "./finance/capabilities.js";
 export * from "./finance/common.js";
 export * from "./finance/context.js";
+export * from "./finance/contextual-questions.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";

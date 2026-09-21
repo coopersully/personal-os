@@ -66,3 +66,51 @@ describe("Finance budget policy client", () => {
     ]);
   });
 });
+
+describe("contextual question client", () => {
+  it("preserves canonical references and encodes the real creation and answer routes", async () => {
+    const unavailable = {
+      state: "unavailable",
+      reasonCode: "producer_not_registered",
+      retryable: false,
+    };
+    const request = vi.fn(async () => unavailable) as unknown as FinanceRequest;
+    const api = createFinanceApi(request);
+    await expect(
+      api.createFinanceContextualQuestion("transaction/id", {
+        operationId: "11111111-1111-4111-8111-111111111111",
+      }),
+    ).resolves.toEqual(unavailable);
+    await expect(api.getFinanceContextualQuestion("question/id")).resolves.toEqual(unavailable);
+    expect(vi.mocked(request).mock.calls).toEqual([
+      [
+        "/v1/finances/transactions/transaction%2Fid/contextual-question",
+        {
+          method: "POST",
+          body: JSON.stringify({ operationId: "11111111-1111-4111-8111-111111111111" }),
+        },
+      ],
+      ["/v1/finances/contextual-questions/question%2Fid"],
+    ]);
+  });
+  it("sends the exact canonical answer without converting opaque revisions", async () => {
+    const request = vi.fn(async () => ({ state: "accepted" })) as unknown as FinanceRequest;
+    const answer = {
+      operationId: "11111111-1111-4111-8111-111111111111",
+      work: {
+        domain: "finances" as const,
+        kind: "question" as const,
+        id: "22222222-2222-4222-8222-222222222222",
+        revision: "9007199254740993",
+        actionRevision: "1",
+      },
+      text: "Lunch",
+      source: { kind: "app" as const, messageId: null },
+    };
+    await createFinanceApi(request).answerFinanceContextualQuestion(answer);
+    expect(request).toHaveBeenCalledWith("/v1/finances/contextual-questions/answer", {
+      method: "POST",
+      body: JSON.stringify(answer),
+    });
+  });
+});

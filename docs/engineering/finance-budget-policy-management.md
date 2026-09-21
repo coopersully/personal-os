@@ -55,9 +55,9 @@ owner/month slot. Policy/proposal mutations use the supplied transaction for the
 audit, and completed receipt. Failure rolls back those effects; the existing helper may retain an
 explicit failed receipt.
 
-Candidate dependencies form one deduplicated union across resources and allocations. UUID case
-is normalized for lock identity. The order is `finance_accounts`, `finance_categories`,
-`finance_goals`, `finance_income_streams`, then UUID within each table. Every dependency is checked
+Typed allocation dependencies form one deduplicated set. UUID case is normalized for lock identity.
+The order is `finance_accounts`, `finance_categories`, `finance_goals`, then UUID within each table.
+Every dependency is checked
 for ownership under `FOR KEY SHARE`, retained until proposal/save commit. No child-lock trigger
 is installed. Pure preview and history reads use a repeatable-read snapshot without row locks.
 
@@ -71,8 +71,8 @@ admission while P waits on the deleting account. PostgreSQL permits the compatib
 `KEY SHARE` to complete: account deletion commits, owner deletion commits, and P rejects the
 missing dependency without saving a preview. This measured schedule disproved the initially
 suspected three-transaction deadlock; no shared deletion-path repair or child-lock trigger was
-made. The regression remains part of this lock contract. Category, goal, and income
-sources have no application hard-delete path; goal removal updates status. Future deletion
+made. The regression remains part of this lock contract. Category and goal targets have no
+application hard-delete path; goal removal updates status. Future deletion
 paths must review owner admission and retain this regression.
 
 Real-PostgreSQL tests pause proposal/save transactions behind a row or audit-table lock, observe
@@ -81,5 +81,13 @@ order still locks the same sorted union; a deletion that wins causes a clean mut
 
 History reads return the original parsed packet unchanged. Current dependency existence,
 revisions, expiry, and disabled/withdrawn state are assessed separately. Deleted category,
-account, goal, or income-source references mark a saved preview stale. None of these checks
+account, or goal allocation references mark a saved preview stale. None of these checks
 constitutes the future commit-time position fence or grants permission to execute a budget.
+
+Budget resource `sourceId` is optional opaque provenance in the existing public contract; funding
+kind does not identify an account or income-stream namespace. Management preserves these UUIDs
+without dereferencing them, requiring typed ownership, or treating their existence as qualified
+evidence. Position and usage remain explicitly unavailable, so unchanged legacy resources can be
+previewed and saved with a denied result while execution stays unavailable. Clearing or changing
+provenance still changes the candidate and is denied by the evaluator. A future producer must
+establish typed source identity and ownership before granting any execution evidence.

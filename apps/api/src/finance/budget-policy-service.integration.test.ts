@@ -7,6 +7,7 @@ import {
   financeBudgetPolicyEvaluationSchema,
   financeBudgetPolicyPlanSnapshotSchema,
   financeBudgetPolicyTermsSchema,
+  financeBudgetResourceSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -399,7 +400,78 @@ describe.sequential("human budget policy management", () => {
       }),
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
-  it("rejects foreign resources, missing required targets, wrong period and forged evidence", async () => {
+  it.each([
+    "opaque",
+    "income-account",
+    "reserve-stream",
+    "foreign-account",
+  ] as const)("retains %s budget resource provenance as unavailable evidence through management", async (sourceKind) => {
+    const f = await fixture();
+    const sourceId = randomUUID();
+    if (sourceKind === "income-account" || sourceKind === "foreign-account") {
+      const owner = sourceKind === "foreign-account" ? (await fixture()).userId : f.userId;
+      await database.pool.query(
+        "INSERT INTO finance_accounts(id,user_id,provider,institution,name) VALUES($1,$2,'manual','Test','Opaque provenance')",
+        [sourceId, owner],
+      );
+    }
+    if (sourceKind === "reserve-stream") {
+      await database.pool.query(
+        "INSERT INTO finance_income_streams(id,user_id,payer,display_name,cadence,expected_amount_cents,amount_tolerance_cents,confidence_basis_points,source) VALUES($1,$2,'Source','Source','monthly',10000,0,10000,'user')",
+        [sourceId, f.userId],
+      );
+    }
+    const resource = financeBudgetResourceSchema.parse({
+      key: "income",
+      kind: sourceKind === "reserve-stream" ? "reserve_draw" : "income",
+      amount: 10000,
+      sourceId,
+    });
+    await database.pool.query("UPDATE finance_budget_versions SET resources=$2 WHERE id=$1", [
+      f.budgetId,
+      JSON.stringify([resource]),
+    ]);
+    const candidate = {
+      ...f.candidate,
+      resources: [
+        { key: resource.key, kind: resource.kind, sourceId, amountCents: resource.amount },
+      ],
+    };
+    const { policy, expected } = await f.ready();
+    const preview = await service.previewPolicy(f.userId, {
+      policyId: policy.id,
+      expected,
+      candidate,
+    });
+    expect(preview.executionAvailable).toBe(false);
+    expect(preview.reasons).toContain("missing_evidence");
+    expect(preview.reasons).not.toContain("resource_changed");
+    expect(preview.input.position.state).toBe("unavailable");
+    expect(preview.input.candidate.resources).toEqual(candidate.resources);
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate,
+    });
+    const saved = await service.savePreview(f.context, proposal.id, {
+      idempotencyKey: randomUUID(),
+      expected,
+      expectedProposalRevision: 1,
+      expiresAt: "2026-09-21T00:00:00Z",
+    });
+    const history = await service.getPreview(f.userId, proposal.id, saved.id);
+    expect(history.result).toEqual(saved.result);
+    expect(history.assessment.stale).toBe(false);
+    expect(history.result.executionAvailable).toBe(false);
+    const changed = await service.previewPolicy(f.userId, {
+      policyId: policy.id,
+      expected,
+      candidate: { ...candidate, resources: [{ ...candidate.resources[0], sourceId: null }] },
+    });
+    expect(changed.reasons).toContain("resource_changed");
+  });
+  it("rejects missing required targets and wrong period", async () => {
     const f = await fixture();
     const { policy, expected } = await f.ready();
     for (const candidate of [
@@ -407,11 +479,6 @@ describe.sequential("human budget policy management", () => {
       {
         ...f.candidate,
         allocations: [{ key: "loan", kind: "debt", targetId: null, amountCents: 10000 }],
-      },
-      { ...f.candidate, resources: [{ ...f.candidate.resources[0], sourceId: randomUUID() }] },
-      {
-        ...f.candidate,
-        resources: [{ ...f.candidate.resources[0], kind: "reserve_draw", sourceId: randomUUID() }],
       },
     ])
       await expect(
@@ -959,7 +1026,6 @@ describe.sequential("human budget policy management", () => {
     "category",
     "account",
     "goal",
-    "income",
   ] as const)("keeps %s dependency locked through save and marks deletion stale", async (kind) => {
     const f = await fixture();
     const { policy, expected } = await f.ready();
@@ -968,7 +1034,6 @@ describe.sequential("human budget policy management", () => {
       category: "finance_categories",
       account: "finance_accounts",
       goal: "finance_goals",
-      income: "finance_income_streams",
     }[kind];
     if (kind === "category")
       await database.pool.query(
@@ -985,25 +1050,17 @@ describe.sequential("human budget policy management", () => {
         "INSERT INTO finance_goals(id,user_id,name,target_amount_cents) VALUES($1,$2,'Target',10000)",
         [target, f.userId],
       );
-    if (kind === "income")
-      await database.pool.query(
-        "INSERT INTO finance_income_streams(id,user_id,payer,display_name,cadence,expected_amount_cents,amount_tolerance_cents,confidence_basis_points,source) VALUES($1,$2,'Target','Target','monthly',10000,0,10000,'user')",
-        [target, f.userId],
-      );
-    const candidate =
-      kind === "income"
-        ? { ...f.candidate, resources: [{ ...f.candidate.resources[0], sourceId: target }] }
-        : {
-            ...f.candidate,
-            allocations: [
-              {
-                key: "target",
-                kind: kind === "category" ? "spending" : kind === "account" ? "debt" : "goal",
-                targetId: target,
-                amountCents: 10000,
-              },
-            ],
-          };
+    const candidate = {
+      ...f.candidate,
+      allocations: [
+        {
+          key: "target",
+          kind: kind === "category" ? "spending" : kind === "account" ? "debt" : "goal",
+          targetId: target,
+          amountCents: 10000,
+        },
+      ],
+    };
     const proposal = await service.createProposal(f.context, {
       idempotencyKey: randomUUID(),
       policyId: policy.id,

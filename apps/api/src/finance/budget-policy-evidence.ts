@@ -9,7 +9,6 @@ import {
   financeBudgetVersions,
   financeCategories,
   financeGoals,
-  financeIncomeStreams,
   financeProfileVersions,
 } from "@personal-os/database";
 import {
@@ -194,10 +193,9 @@ const dependencyTables = {
   finance_accounts: financeAccounts,
   finance_categories: financeCategories,
   finance_goals: financeGoals,
-  finance_income_streams: financeIncomeStreams,
 };
 
-/** A single union avoids acquiring the same account in resource and allocation order. */
+/** Only allocation targets carry a typed entity contract. Resource source IDs are opaque. */
 function candidateDependencies(candidate: FinanceBudgetPolicyPlanSnapshot) {
   const entries = new Map<string, { table: keyof typeof dependencyTables; id: string }>();
   const add = (table: keyof typeof dependencyTables, id: string | null) => {
@@ -215,8 +213,8 @@ function candidateDependencies(candidate: FinanceBudgetPolicyPlanSnapshot) {
           : "finance_goals",
       item.targetId,
     );
-  for (const item of candidate.resources)
-    add(item.kind === "income" ? "finance_income_streams" : "finance_accounts", item.sourceId);
+  // Budget resource kind describes funding, not the namespace of sourceId. Preserve
+  // that provenance verbatim; the unavailable position producer cannot qualify it.
   return [...entries.values()].sort(
     (a, b) => a.table.localeCompare(b.table) || a.id.localeCompare(b.id),
   );

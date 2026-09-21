@@ -11,10 +11,14 @@ This log records delivered vertical slices against the master plan. It does not 
   cap violations are denied. Previewing does not change baseline, plan or cumulative usage.
 - Migration `0087` and the management service add explicit human-confirmed monthly baselines,
   draft policy versions, inactive revision proposals, immutable saved preview packets, and
-  revision-checked disable/withdraw. Tenant-constrained history, audit, and idempotency receipts
-  use owner admission followed by the shared profile mutex. No historical policy is inferred.
+  revision-checked disable/withdraw. Database triggers reject history/identity rewrites, composite
+  keys bind exact plan and proposal lineage, and strict immutable JSON validators keep stored
+  packets readable. Audit and idempotency receipts use owner admission followed by the shared
+  profile mutex and sorted dependency key-share locks. No historical policy is inferred.
 - Saved packets retain their original evidence; history reads calculate current stale/expired
-  and lifecycle status separately. Missing position and cumulative usage producers remain
+  and lifecycle status separately; deleted candidate dependencies mark the packet stale. The
+  [storage contract](../engineering/finance-budget-policy-management.md) records lock ordering
+  and validator scope. Missing position and cumulative usage producers remain
   unavailable, including when a caller supplies plausible evidence or global bypass is enabled.
 - This remains unregistered source groundwork pending Integration review and full verification:
   no policy HTTP route, MCP capability, or user interface is available. No activation, automatic

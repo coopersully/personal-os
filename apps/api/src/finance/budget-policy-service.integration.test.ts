@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { createDatabaseClient, type DatabaseClient, migrateDatabase } from "@personal-os/database";
+import {
+  financeBudgetPolicyEvaluationInputSchema,
+  financeBudgetPolicyEvaluationSchema,
+  financeBudgetPolicyPlanSnapshotSchema,
+  financeBudgetPolicyTermsSchema,
+} from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createFinanceBudgetPolicyService } from "./budget-policy-service.js";
 import type { FinanceMutationContext } from "./context.js";
@@ -431,7 +437,7 @@ describe.sequential("human budget policy management", () => {
       }),
     ).rejects.toMatchObject({ code: "conflict" });
   });
-  it("preserves readable historical packets when current terms move to a new month", async () => {
+  it("preserves readable historical packets after terms are appended", async () => {
     const f = await fixture();
     const { policy, expected } = await f.ready();
     const proposal = await service.createProposal(f.context, {
@@ -446,11 +452,14 @@ describe.sequential("human budget policy management", () => {
       expectedProposalRevision: 1,
       expiresAt: "2026-09-21T00:00:00Z",
     });
-    // Simulate a later valid month version; historical packets must not depend on the current candidate scope.
-    await database.pool.query(
-      "UPDATE finance_budget_policy_versions SET period_month='2026-10',period_from='2026-10-01',period_through='2026-10-31' WHERE id=$1",
-      [policy.latestVersion.id],
-    );
+    await service.revisePolicy(f.context, policy.id, {
+      idempotencyKey: randomUUID(),
+      terms: { ...f.terms, monthlyCapCents: 3000 },
+      expectedProfile: f.profile,
+      expectedLatestBudget: f.budget,
+      expectedLifecycleRevision: 1,
+      expectedLatestVersion: 1,
+    });
     expect((await service.getPreview(f.userId, proposal.id, saved.id)).result).toEqual(
       saved.result,
     );
@@ -822,5 +831,606 @@ describe.sequential("human budget policy management", () => {
     await expect(
       service.designateBaseline(f.context, { ...f.baselineInput, planId: other.planId }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+  it("does not consume the monthly baseline slot for an archived plan", async () => {
+    const f = await fixture();
+    await database.pool.query("UPDATE finance_budget_plans SET status='archived' WHERE id=$1", [
+      f.planId,
+    ]);
+    await expect(service.designateBaseline(f.context, f.baselineInput)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(
+      (
+        await database.pool.query(
+          "SELECT count(*)::int AS n FROM finance_budget_period_baselines WHERE user_id=$1",
+          [f.userId],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+  });
+  it("returns checked conflicts at each persisted integer revision ceiling", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate: f.candidate,
+    });
+    await database.pool.query(
+      "UPDATE finance_budget_revision_proposals SET lifecycle_revision=2147483647 WHERE id=$1",
+      [proposal.id],
+    );
+    await expect(
+      service.withdrawProposal(f.context, proposal.id, {
+        idempotencyKey: randomUUID(),
+        expectedLifecycleRevision: 2147483647,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.pool.query(
+      "INSERT INTO finance_budget_policy_versions SELECT (jsonb_populate_record(NULL::finance_budget_policy_versions,to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'version',2147483647))).* FROM finance_budget_policy_versions v WHERE id=$1",
+      [policy.latestVersion.id],
+    );
+    await expect(
+      service.revisePolicy(f.context, policy.id, {
+        idempotencyKey: randomUUID(),
+        terms: f.terms,
+        expectedProfile: f.profile,
+        expectedLatestBudget: f.budget,
+        expectedLifecycleRevision: 1,
+        expectedLatestVersion: 2147483647,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.pool.query(
+      "UPDATE finance_budget_policies SET lifecycle_revision=2147483647 WHERE id=$1",
+      [policy.id],
+    );
+    await expect(
+      service.disablePolicy(f.context, policy.id, {
+        idempotencyKey: randomUUID(),
+        expectedLifecycleRevision: 2147483647,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it.each([
+    "category",
+    "account",
+    "goal",
+    "income",
+  ] as const)("keeps %s dependency locked through save and marks deletion stale", async (kind) => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const target = randomUUID();
+    const table = {
+      category: "finance_categories",
+      account: "finance_accounts",
+      goal: "finance_goals",
+      income: "finance_income_streams",
+    }[kind];
+    if (kind === "category")
+      await database.pool.query(
+        "INSERT INTO finance_categories(id,user_id,name,slug,\"group\") VALUES($1,$2,'Target','target','spending')",
+        [target, f.userId],
+      );
+    if (kind === "account")
+      await database.pool.query(
+        "INSERT INTO finance_accounts(id,user_id,provider,institution,name) VALUES($1,$2,'manual','Test','Target')",
+        [target, f.userId],
+      );
+    if (kind === "goal")
+      await database.pool.query(
+        "INSERT INTO finance_goals(id,user_id,name,target_amount_cents) VALUES($1,$2,'Target',10000)",
+        [target, f.userId],
+      );
+    if (kind === "income")
+      await database.pool.query(
+        "INSERT INTO finance_income_streams(id,user_id,payer,display_name,cadence,expected_amount_cents,amount_tolerance_cents,confidence_basis_points,source) VALUES($1,$2,'Target','Target','monthly',10000,0,10000,'user')",
+        [target, f.userId],
+      );
+    const candidate =
+      kind === "income"
+        ? { ...f.candidate, resources: [{ ...f.candidate.resources[0], sourceId: target }] }
+        : {
+            ...f.candidate,
+            allocations: [
+              {
+                key: "target",
+                kind: kind === "category" ? "spending" : kind === "account" ? "debt" : "goal",
+                targetId: target,
+                amountCents: 10000,
+              },
+            ],
+          };
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate,
+    });
+    const gate = await database.pool.connect();
+    const deleting = await database.pool.connect();
+    try {
+      await gate.query("BEGIN");
+      await gate.query("LOCK TABLE audit_events IN SHARE MODE");
+      const saving = service.savePreview(f.context, proposal.id, {
+        idempotencyKey: randomUUID(),
+        expected,
+        expectedProposalRevision: 1,
+        expiresAt: "2026-09-21T00:00:00Z",
+      });
+      await expect
+        .poll(
+          async () =>
+            (
+              await database.pool.query(
+                "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event='relation' AND query LIKE 'insert into \"audit_events\"%'",
+              )
+            ).rows[0].n,
+          { timeout: 2000, interval: 10 },
+        )
+        .toBe(1);
+      await deleting.query("BEGIN");
+      await deleting.query("SET LOCAL lock_timeout='100ms'");
+      await expect(
+        deleting.query(`DELETE FROM ${table} WHERE id=$1`, [target]),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await deleting.query("ROLLBACK");
+      await gate.query("COMMIT");
+      const saved = await saving;
+      await database.pool.query(`DELETE FROM ${table} WHERE id=$1`, [target]);
+      const historical = await service.getPreview(f.userId, proposal.id, saved.id);
+      expect(historical.result).toEqual(saved.result);
+      expect(historical.assessment.stale).toBe(true);
+    } finally {
+      await deleting.query("ROLLBACK");
+      await gate.query("ROLLBACK");
+      deleting.release();
+      gate.release();
+    }
+  });
+  async function cloneRow(table: string, id: string, changes: Record<string, unknown>) {
+    return database.pool.query(
+      `INSERT INTO ${table} SELECT (jsonb_populate_record(NULL::${table},to_jsonb(r)||$2::jsonb)).* FROM ${table} r WHERE id=$1 RETURNING id`,
+      [id, JSON.stringify({ id: randomUUID(), ...changes })],
+    );
+  }
+  it("rejects valid-value rewrites of every immutable row and root identity", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate: f.candidate,
+    });
+    const preview = await service.savePreview(f.context, proposal.id, {
+      idempotencyKey: randomUUID(),
+      expected,
+      expectedProposalRevision: 1,
+      expiresAt: "2026-09-21T00:00:00Z",
+    });
+    for (const [table, id, change] of [
+      ["finance_budget_policy_versions", policy.latestVersion.id, "monthly_cap_cents=3000"],
+      ["finance_budget_policy_previews", preview.id, "expires_at='2026-09-20T20:00:00Z'"],
+      ["finance_budget_period_baselines", null, "timezone='UTC'"],
+      ["finance_budget_policies", policy.id, "created_by_actor_id='rewritten'"],
+      ["finance_budget_policies", policy.id, "created_at=created_at+interval '1 second'"],
+      [
+        "finance_budget_revision_proposals",
+        proposal.id,
+        "candidate_hash='sha256:'||repeat('a',64)",
+      ],
+      ["finance_budget_revision_proposals", proposal.id, "profile_version_id=NULL"],
+    ])
+      await expect(
+        database.pool.query(`UPDATE ${table} SET ${change} WHERE ${id ? "id=$1" : "user_id=$1"}`, [
+          id ?? f.userId,
+        ]),
+      ).rejects.toMatchObject({ code: "23514" });
+    await database.pool.query("DELETE FROM users WHERE id=$1", [f.userId]);
+    expect(
+      (
+        await database.pool.query(
+          "SELECT count(*)::int AS n FROM finance_budget_policy_previews WHERE user_id=$1",
+          [f.userId],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+  });
+  it("rejects same-owner wrong-plan and wrong-proposal lineage", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate: f.candidate,
+    });
+    const preview = await service.savePreview(f.context, proposal.id, {
+      idempotencyKey: randomUUID(),
+      expected,
+      expectedProposalRevision: 1,
+      expiresAt: "2026-09-21T00:00:00Z",
+    });
+    const otherPlan = randomUUID(),
+      otherBudget = randomUUID();
+    await database.pool.query("INSERT INTO finance_budget_plans(id,user_id) VALUES($1,$2)", [
+      otherPlan,
+      f.userId,
+    ]);
+    await database.pool.query(
+      "INSERT INTO finance_budget_versions(id,plan_id,user_id,version,effective_from,expected_resources_cents,allocated_total_cents,balance_delta_cents,rationale) VALUES($1,$2,$3,1,'2026-09',0,0,0,'Other plan')",
+      [otherBudget, otherPlan, f.userId],
+    );
+    await expect(
+      cloneRow("finance_budget_policy_versions", policy.latestVersion.id, {
+        version: 2,
+        baseline_budget_version_id: otherBudget,
+      }),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(
+      cloneRow("finance_budget_policy_versions", policy.latestVersion.id, {
+        version: 2,
+        plan_id: otherPlan,
+      }),
+    ).rejects.toMatchObject({ code: "23503" });
+    for (const field of [
+      "baseline_budget_version_id",
+      "active_budget_version_id",
+      "latest_budget_version_id",
+    ])
+      await expect(
+        cloneRow("finance_budget_revision_proposals", proposal.id, { [field]: otherBudget }),
+      ).rejects.toMatchObject({ code: "23503" });
+    const p2 = await service.createPolicy(f.context, {
+      ...f.policyInput,
+      idempotencyKey: randomUUID(),
+    });
+    const wrongInput = {
+      ...preview.result.input,
+      observed: { ...expected, policy: { id: p2.latestVersion.id, revision: "1" } },
+    };
+    await expect(
+      cloneRow("finance_budget_policy_previews", preview.id, {
+        policy_version_id: p2.latestVersion.id,
+        input_snapshot: wrongInput,
+        result_snapshot: { ...preview.result, input: wrongInput, revisions: wrongInput.observed },
+      }),
+    ).rejects.toMatchObject({ code: "23503" });
+    const otherProposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: p2.id,
+      expected: wrongInput.observed,
+      candidate: f.candidate,
+    });
+    await expect(
+      cloneRow("finance_budget_policy_previews", preview.id, { proposal_id: otherProposal.id }),
+    ).rejects.toMatchObject({ code: "23503" });
+    const baseline = (
+      await database.pool.query("SELECT id FROM finance_budget_period_baselines WHERE user_id=$1", [
+        f.userId,
+      ])
+    ).rows[0].id;
+    await expect(
+      cloneRow("finance_budget_period_baselines", baseline, {
+        budget_version_id: otherBudget,
+        period_month: "2026-10",
+        period_from: "2026-10-01",
+        period_through: "2026-10-31",
+      }),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+  it("admits only strict immutable JSON packets readable by the public contract", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate: f.candidate,
+    });
+    const preview = await service.savePreview(f.context, proposal.id, {
+      idempotencyKey: randomUUID(),
+      expected,
+      expectedProposalRevision: 1,
+      expiresAt: "2026-09-21T00:00:00Z",
+    });
+    for (const directions of [
+      [{}],
+      [{ allocationKey: "spending", direction: "execute" }],
+      [{ allocationKey: "spending", direction: "both", grant: true }],
+      [
+        { allocationKey: "spending", direction: "both" },
+        { allocationKey: "spending", direction: "increase" },
+      ],
+    ])
+      await expect(
+        cloneRow("finance_budget_policy_versions", policy.latestVersion.id, {
+          version: 2,
+          directions,
+        }),
+      ).rejects.toMatchObject({ code: "23514" });
+    for (const protections of [
+      [{}],
+      [{ allocationKey: "buffer", minimumCents: -1 }],
+      [
+        { allocationKey: "buffer", minimumCents: 0 },
+        { allocationKey: "buffer", minimumCents: 1 },
+      ],
+    ])
+      await expect(
+        cloneRow("finance_budget_policy_versions", policy.latestVersion.id, {
+          version: 2,
+          protections,
+        }),
+      ).rejects.toMatchObject({ code: "23514" });
+    for (const candidate of [
+      {},
+      { ...f.candidate, grant: true },
+      { ...f.candidate, resources: [{ ...f.candidate.resources[0], amountCents: 0.5 }] },
+      { ...f.candidate, allocations: [f.candidate.allocations[0], f.candidate.allocations[0]] },
+    ])
+      await expect(
+        cloneRow("finance_budget_revision_proposals", proposal.id, {
+          candidate_snapshot: candidate,
+        }),
+      ).rejects.toMatchObject({ code: "23514" });
+    for (const result of [
+      {},
+      { ...preview.result, grant: true },
+      { ...preview.result, executionAvailable: true },
+      { ...preview.result, reasons: [] },
+      { ...preview.result, grossMovedCents: 999 },
+      {
+        ...preview.result,
+        revisions: { ...preview.result.revisions, policyLifecycleRevision: 99 },
+      },
+    ])
+      await expect(
+        cloneRow("finance_budget_policy_previews", preview.id, { result_snapshot: result }),
+      ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      cloneRow("finance_budget_policy_previews", preview.id, {
+        input_snapshot: { ...preview.result.input, evaluatedAt: "2026-09-19T00:00:00Z" },
+      }),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+  it("agrees with public parsers on canonical packets and representative nested corruption", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const result = await service.previewPolicy(f.userId, {
+      policyId: policy.id,
+      expected,
+      candidate: f.candidate,
+    });
+    const samples = [
+      {
+        kind: "plan",
+        schema: financeBudgetPolicyPlanSnapshotSchema,
+        good: f.candidate,
+        bad: [
+          {},
+          { ...f.candidate, grant: true },
+          { ...f.candidate, resources: [{ ...f.candidate.resources[0], sourceId: "not-a-uuid" }] },
+          {
+            ...f.candidate,
+            allocations: [
+              { ...f.candidate.allocations[0], key: "same" },
+              { ...f.candidate.allocations[1], key: "same" },
+            ],
+          },
+          {
+            ...f.candidate,
+            allocations: [
+              { ...f.candidate.allocations[0], amountCents: 2147483647 },
+              { ...f.candidate.allocations[1], amountCents: 1 },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "terms",
+        schema: financeBudgetPolicyTermsSchema,
+        good: f.terms,
+        bad: [
+          { ...f.terms, grant: true },
+          { ...f.terms, period: { ...f.terms.period, timezone: "Not/A_Zone" } },
+          { ...f.terms, period: { ...f.terms.period, through: "2026-09-29" } },
+          { ...f.terms, protections: [{ allocationKey: "buffer", minimumCents: 0, extra: true }] },
+        ],
+      },
+      {
+        kind: "input",
+        schema: financeBudgetPolicyEvaluationInputSchema,
+        good: result.input,
+        bad: [
+          {
+            ...result.input,
+            position: { state: "unavailable", reason: "missing_evidence", sources: [] },
+          },
+          {
+            ...result.input,
+            observed: { ...result.revisions, policy: { ...result.revisions.policy, extra: true } },
+          },
+          { ...result.input, evaluatedAt: "2026-02-30T00:00:00Z" },
+        ],
+      },
+      {
+        kind: "result",
+        schema: financeBudgetPolicyEvaluationSchema,
+        good: result,
+        bad: [
+          {
+            ...result,
+            deltas: [{ allocationKey: "x", beforeCents: 0, afterCents: 2, deltaCents: 1 }],
+            grossMovedCents: 1,
+          },
+          { ...result, executionUnavailableReasons: ["authority_not_wired"] },
+          { ...result, evaluatedAt: "2026-09-19T00:00:00Z" },
+        ],
+      },
+    ];
+    for (const sample of samples) {
+      expect(sample.schema.safeParse(sample.good).success).toBe(true);
+      expect(
+        (
+          await database.pool.query(
+            "SELECT finance_budget_policy_json_valid($1::jsonb,$2) AS valid",
+            [JSON.stringify(sample.good), sample.kind],
+          )
+        ).rows[0].valid,
+      ).toBe(true);
+      for (const bad of sample.bad) {
+        expect(sample.schema.safeParse(bad).success).toBe(false);
+        expect(
+          (
+            await database.pool.query(
+              "SELECT finance_budget_policy_json_valid($1::jsonb,$2) AS valid",
+              [JSON.stringify(bad), sample.kind],
+            )
+          ).rows[0].valid,
+        ).toBe(false);
+      }
+    }
+  });
+  it("locks the sorted dependency union despite reversed candidate order and rejects a deletion winner", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const first = "10000000-0000-4000-8000-000000000001",
+      last = "f0000000-0000-4000-8000-000000000002";
+    for (const id of [first, last])
+      await database.pool.query(
+        "INSERT INTO finance_categories(id,user_id,name,slug,\"group\") VALUES($1,$2,'Ordered',$1::uuid::text,'spending')",
+        [id, f.userId],
+      );
+    const candidate = {
+      ...f.candidate,
+      allocations: [
+        { key: "last", kind: "spending", targetId: last, amountCents: 5000 },
+        { key: "first", kind: "spending", targetId: first, amountCents: 5000 },
+      ],
+    };
+    const holding = await database.pool.connect();
+    const deleting = await database.pool.connect();
+    try {
+      await holding.query("BEGIN");
+      await holding.query("SELECT id FROM finance_categories WHERE id=$1 FOR UPDATE", [last]);
+      const proposing = service.createProposal(f.context, {
+        idempotencyKey: randomUUID(),
+        policyId: policy.id,
+        expected,
+        candidate,
+      });
+      const outcome = expect(proposing).rejects.toMatchObject({ code: "invalid_request" });
+      await expect
+        .poll(
+          async () =>
+            (
+              await database.pool.query(
+                "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND wait_event='transactionid' AND query LIKE '%finance_categories%'",
+              )
+            ).rows[0].n,
+          { timeout: 2000, interval: 10 },
+        )
+        .toBe(1);
+      await deleting.query("BEGIN");
+      await deleting.query("SET LOCAL lock_timeout='100ms'");
+      await expect(
+        deleting.query("DELETE FROM finance_categories WHERE id=$1", [first]),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await deleting.query("ROLLBACK");
+      await holding.query("DELETE FROM finance_categories WHERE id=$1", [last]);
+      await holding.query("COMMIT");
+      await outcome;
+      expect(
+        (
+          await database.pool.query(
+            "SELECT count(*)::int AS n FROM finance_budget_revision_proposals WHERE user_id=$1",
+            [f.userId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+    } finally {
+      await holding.query("ROLLBACK");
+      await deleting.query("ROLLBACK");
+      holding.release();
+      deleting.release();
+    }
+  });
+  it("rejects an active budget from another plan as a checked conflict", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const plan = randomUUID(),
+      budget = randomUUID();
+    await database.pool.query("INSERT INTO finance_budget_plans(id,user_id) VALUES($1,$2)", [
+      plan,
+      f.userId,
+    ]);
+    await database.pool.query("UPDATE finance_budget_versions SET status='retired' WHERE id=$1", [
+      f.budgetId,
+    ]);
+    await database.pool.query(
+      "INSERT INTO finance_budget_versions(id,plan_id,user_id,version,status,effective_from,expected_resources_cents,allocated_total_cents,balance_delta_cents,rationale) VALUES($1,$2,$3,1,'active','2026-09',0,0,0,'Other plan')",
+      [budget, plan, f.userId],
+    );
+    await expect(
+      service.createProposal(f.context, {
+        idempotencyKey: randomUUID(),
+        policyId: policy.id,
+        expected: { ...expected, activeBudget: { id: budget, revision: "1" } },
+        candidate: f.candidate,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it("keeps validation independent of session settings and accepts known timezone aliases", async () => {
+    const f = await fixture();
+    const client = await database.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL DateStyle='German, DMY'");
+      await client.query("SET LOCAL TimeZone='Pacific/Auckland'");
+      for (const timezone of [
+        "UTC",
+        "America/New_York",
+        "america/new_york",
+        "US/Eastern",
+        "Asia/Kathmandu",
+        "Europe/London",
+      ]) {
+        const terms = { ...f.terms, period: { ...f.terms.period, timezone } };
+        expect(financeBudgetPolicyTermsSchema.safeParse(terms).success).toBe(true);
+        expect(
+          (
+            await client.query(
+              "SELECT finance_budget_policy_json_valid($1::jsonb,'terms') AS valid",
+              [JSON.stringify(terms)],
+            )
+          ).rows[0].valid,
+        ).toBe(true);
+      }
+      for (const allocations of [
+        [
+          { ...f.candidate.allocations[0], key: "foo" },
+          { ...f.candidate.allocations[1], key: "\vfoo" },
+        ],
+        [{ ...f.candidate.allocations[0], key: "😀".repeat(61) }],
+      ]) {
+        const candidate = { ...f.candidate, allocations };
+        expect(financeBudgetPolicyPlanSnapshotSchema.safeParse(candidate).success).toBe(false);
+        expect(
+          (
+            await client.query(
+              "SELECT finance_budget_policy_json_valid($1::jsonb,'plan') AS valid",
+              [JSON.stringify(candidate)],
+            )
+          ).rows[0].valid,
+        ).toBe(false);
+      }
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 });

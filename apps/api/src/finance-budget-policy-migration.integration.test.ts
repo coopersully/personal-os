@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createDatabaseClient, type DatabaseClient, migrateDatabase } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { evaluateFinanceBudgetPolicy } from "./finance/budget-policy-evaluator.js";
 import { migrationsWithout } from "./test-migrations.js";
 
 describe.sequential("budget policy management migration", () => {
@@ -91,8 +92,8 @@ describe.sequential("budget policy management migration", () => {
     const budget = (historical[0] as { id: string }).id;
     const version = (
       await database.pool.query(
-        `INSERT INTO finance_budget_policy_versions(user_id,policy_id,version,baseline_budget_version_id,period_month,period_from,period_through,timezone,expires_at,per_change_cap_cents,monthly_cap_cents,currency,rollover,accounting,usage_scope,directions,protections,created_by_actor_id) VALUES($1,$2,1,$3,'2026-09','2026-09-01','2026-09-30','UTC','2026-10-01',100,200,'USD','none','gross_positive_allocation_deltas','user_month_all_policy_versions','[]','[]',$1::uuid::text) RETURNING id`,
-        [owner, policy, budget],
+        `INSERT INTO finance_budget_policy_versions(user_id,policy_id,plan_id,version,baseline_budget_version_id,period_month,period_from,period_through,timezone,expires_at,per_change_cap_cents,monthly_cap_cents,currency,rollover,accounting,usage_scope,directions,protections,created_by_actor_id) VALUES($1,$2,$4,1,$3,'2026-09','2026-09-01','2026-09-30','UTC','2026-10-01',100,200,'USD','none','gross_positive_allocation_deltas','user_month_all_policy_versions','[]','[]',$1::uuid::text) RETURNING id`,
+        [owner, policy, budget, plan],
       )
     ).rows[0].id;
     for (const [field, value] of [
@@ -105,24 +106,77 @@ describe.sequential("budget policy management migration", () => {
       ["directions", {}],
     ]) {
       await expect(
-        database.pool.query(`UPDATE finance_budget_policy_versions SET ${field}=$1 WHERE id=$2`, [
-          typeof value === "object" ? JSON.stringify(value) : value,
-          version,
-        ]),
+        database.pool.query(
+          "INSERT INTO finance_budget_policy_versions SELECT (jsonb_populate_record(NULL::finance_budget_policy_versions,to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'version',2)||$2::jsonb)).* FROM finance_budget_policy_versions v WHERE id=$1",
+          [version, JSON.stringify({ [String(field)]: value })],
+        ),
       ).rejects.toThrow();
     }
+    const candidate = {
+      userId: owner,
+      planId: plan,
+      revision: { id: randomUUID(), revision: "1" },
+      month: "2026-09",
+      resources: [{ key: "income", kind: "income", sourceId: null, amountCents: 100 }],
+      allocations: [{ key: "buffer", kind: "buffer", targetId: null, amountCents: 100 }],
+    };
+    const tuple = {
+      userId: owner,
+      planId: plan,
+      policy: { id: version, revision: "1" },
+      policyLifecycleRevision: 1,
+      profile: null,
+      baseline: { id: budget, revision: "1" },
+      activeBudget: null,
+      latestBudget: null,
+      positionRevision: null,
+      usageRevision: null,
+    };
+    const result = evaluateFinanceBudgetPolicy({
+      evaluatedAt: "2026-09-20T00:00:00.000Z",
+      terms: {
+        currency: "USD",
+        period: { from: "2026-09-01", through: "2026-09-30", timezone: "UTC" },
+        rollover: "none",
+        accounting: "gross_positive_allocation_deltas",
+        usageScope: "user_month_all_policy_versions",
+        perChangeCapCents: 100,
+        monthlyCapCents: 200,
+        expiresAt: "2026-10-01T00:00:00.000Z",
+        baseline: tuple.baseline,
+        directions: [],
+        protections: [],
+      },
+      policyState: "draft",
+      expected: tuple,
+      observed: tuple,
+      baseline: null,
+      current: null,
+      candidate,
+      position: { state: "unavailable", reason: "producer_not_registered" },
+      usage: { state: "unavailable", reason: "producer_not_registered" },
+    });
     const proposal = (
       await database.pool.query(
-        `INSERT INTO finance_budget_revision_proposals(user_id,policy_id,policy_version_id,plan_id,baseline_budget_version_id,candidate_snapshot,candidate_hash,state,lifecycle_revision,created_by_actor_id) VALUES($1,$2,$3,$4,$5,'{}',$6,'inactive',1,$1::uuid::text) RETURNING id`,
-        [owner, policy, version, plan, budget, `sha256:${"a".repeat(64)}`],
+        `INSERT INTO finance_budget_revision_proposals(user_id,policy_id,policy_version_id,plan_id,baseline_budget_version_id,candidate_snapshot,candidate_hash,state,lifecycle_revision,created_by_actor_id) VALUES($1,$2,$3,$4,$5,$6,$7,'inactive',1,$1::uuid::text) RETURNING id`,
+        [
+          owner,
+          policy,
+          version,
+          plan,
+          budget,
+          JSON.stringify(candidate),
+          `sha256:${"a".repeat(64)}`,
+        ],
       )
     ).rows[0].id;
-    const previewSql = `INSERT INTO finance_budget_policy_previews(user_id,proposal_id,policy_version_id,policy_lifecycle_revision,proposal_lifecycle_revision,input_snapshot,result_snapshot,preview_hash,evaluated_at,expires_at,created_by_actor_id) VALUES($1,$2,$3,1,1,'{}',$4,$5,'2026-09-20','2026-09-21',$1::uuid::text)`;
+    const previewSql = `INSERT INTO finance_budget_policy_previews(user_id,proposal_id,policy_version_id,policy_lifecycle_revision,proposal_lifecycle_revision,input_snapshot,result_snapshot,preview_hash,evaluated_at,expires_at,created_by_actor_id) VALUES($1,$2,$3,1,1,$4,$5,$6,'2026-09-20','2026-09-21',$1::uuid::text)`;
     const args = [
       owner,
       proposal,
       version,
-      JSON.stringify({ kind: "denied", executionAvailable: false }),
+      JSON.stringify(result.input),
+      JSON.stringify(result),
       `sha256:${"b".repeat(64)}`,
     ];
     await database.pool.query(previewSql, args);
@@ -132,8 +186,9 @@ describe.sequential("budget policy management migration", () => {
         owner,
         proposal,
         version,
-        JSON.stringify({ kind: "hypothetical_preview", executionAvailable: true }),
-        args[4],
+        args[3],
+        JSON.stringify({ ...result, executionAvailable: true }),
+        args[5],
       ]),
     ).rejects.toThrow();
     await expect(

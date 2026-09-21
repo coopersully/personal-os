@@ -45,10 +45,13 @@ export async function policyBudget(tx: FinanceTransaction, userId: string, id: s
     where: and(eq(financeBudgetVersions.userId, userId), eq(financeBudgetVersions.id, id)),
   });
 }
-export async function policyPlan(tx: FinanceTransaction, userId: string, id: string) {
-  const row = await tx.query.financeBudgetPlans.findFirst({
-    where: and(eq(financeBudgetPlans.userId, userId), eq(financeBudgetPlans.id, id)),
-  });
+export async function policyPlan(tx: FinanceTransaction, userId: string, id: string, lock = false) {
+  const query = tx
+    .select()
+    .from(financeBudgetPlans)
+    .where(and(eq(financeBudgetPlans.userId, userId), eq(financeBudgetPlans.id, id)))
+    .limit(1);
+  const [row] = await (lock ? query.for("update") : query);
   if (!row) throw new AppError("not_found", "Budget plan not found.");
   return row;
 }
@@ -179,45 +182,73 @@ export async function policyBaseline(
     return null;
   return budget;
 }
+const dependencyTables = {
+  finance_accounts: financeAccounts,
+  finance_categories: financeCategories,
+  finance_goals: financeGoals,
+  finance_income_streams: financeIncomeStreams,
+};
+
+/** A single union avoids acquiring the same account in resource and allocation order. */
+function candidateDependencies(candidate: FinanceBudgetPolicyPlanSnapshot) {
+  const entries = new Map<string, { table: keyof typeof dependencyTables; id: string }>();
+  const add = (table: keyof typeof dependencyTables, id: string | null) => {
+    if (id !== null) {
+      const canonicalId = id.toLowerCase();
+      entries.set(`${table}:${canonicalId}`, { table, id: canonicalId });
+    }
+  };
+  for (const item of candidate.allocations)
+    add(
+      item.kind === "spending"
+        ? "finance_categories"
+        : item.kind === "debt"
+          ? "finance_accounts"
+          : "finance_goals",
+      item.targetId,
+    );
+  for (const item of candidate.resources)
+    add(item.kind === "income" ? "finance_income_streams" : "finance_accounts", item.sourceId);
+  return [...entries.values()].sort(
+    (a, b) => a.table.localeCompare(b.table) || a.id.localeCompare(b.id),
+  );
+}
+
+export async function policyDependenciesAvailable(
+  tx: FinanceTransaction,
+  userId: string,
+  candidate: FinanceBudgetPolicyPlanSnapshot,
+  lock = false,
+) {
+  for (const dependency of candidateDependencies(candidate)) {
+    const table = dependencyTables[dependency.table];
+    const query = tx
+      .select({ id: table.id })
+      .from(table)
+      .where(and(eq(table.id, dependency.id), eq(table.userId, userId)))
+      .limit(1);
+    const [owned] = await (lock ? query.for("key share") : query);
+    if (!owned) return false;
+  }
+  return true;
+}
+
 export async function validatePolicyCandidate(
   tx: FinanceTransaction,
   userId: string,
   planId: string,
   month: string,
   candidate: FinanceBudgetPolicyPlanSnapshot,
+  lock = false,
 ) {
   if (candidate.userId !== userId || candidate.planId !== planId || candidate.month !== month)
     throw new AppError("invalid_request", "Candidate must belong to this owner, plan, and period.");
   for (const item of candidate.allocations) {
     if (item.kind === "buffer" && item.targetId !== null)
       throw new AppError("invalid_request", "Buffer allocations cannot target another entity.");
-    if (item.targetId === null) {
-      if (item.kind === "debt" || item.kind === "goal")
-        throw new AppError("invalid_request", "This allocation requires a target.");
-      continue;
-    }
-    const table =
-      item.kind === "spending"
-        ? financeCategories
-        : item.kind === "debt"
-          ? financeAccounts
-          : financeGoals;
-    const [owned] = await tx
-      .select({ id: table.id })
-      .from(table)
-      .where(and(eq(table.id, item.targetId), eq(table.userId, userId)))
-      .limit(1);
-    if (!owned)
-      throw new AppError("invalid_request", "Candidate allocation target is unavailable.");
+    if (item.targetId === null && (item.kind === "debt" || item.kind === "goal"))
+      throw new AppError("invalid_request", "This allocation requires a target.");
   }
-  for (const item of candidate.resources) {
-    if (item.sourceId === null) continue;
-    const table = item.kind === "income" ? financeIncomeStreams : financeAccounts;
-    const [owned] = await tx
-      .select({ id: table.id })
-      .from(table)
-      .where(and(eq(table.id, item.sourceId), eq(table.userId, userId)))
-      .limit(1);
-    if (!owned) throw new AppError("invalid_request", "Candidate resource source is unavailable.");
-  }
+  if (!(await policyDependenciesAvailable(tx, userId, candidate, lock)))
+    throw new AppError("invalid_request", "Candidate dependency is unavailable.");
 }

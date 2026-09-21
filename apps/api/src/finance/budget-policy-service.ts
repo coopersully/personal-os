@@ -33,6 +33,7 @@ import {
   policyBaseline,
   policyBudget,
   policyCurrent,
+  policyDependenciesAvailable,
   policyHash,
   policyPlan,
   policyRef,
@@ -69,6 +70,11 @@ function requirePerson(context: FinanceMutationContext) {
       "forbidden",
       "Budget policy management requires a person with finances:write.",
     );
+}
+
+function nextPolicyRevision(revision: number): number {
+  conflict(revision >= 2_147_483_647, "This Finance revision reached its supported limit.");
+  return revision + 1;
 }
 
 function persistedRow<T>(row: T | undefined): T {
@@ -193,6 +199,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     tx: FinanceTransaction,
     context: FinanceMutationContext,
     policyId: string,
+    planId: string,
     version: number,
     terms: FinanceBudgetPolicyTerms,
   ) {
@@ -201,6 +208,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
       .values({
         userId: context.userId,
         policyId,
+        planId,
         version,
         baselineBudgetVersionId: terms.baseline.id,
         periodMonth: terms.period.from.slice(0, 7),
@@ -230,10 +238,18 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     version: Version,
     expected: FinanceBudgetPolicyRevisionTuple,
     candidate: FinanceBudgetPolicyPlanSnapshot,
+    lockDependencies = false,
   ) {
     const terms = await policyTerms(tx, version);
     const plan = await policyPlan(tx, userId, policy.planId);
-    await validatePolicyCandidate(tx, userId, policy.planId, version.periodMonth, candidate);
+    await validatePolicyCandidate(
+      tx,
+      userId,
+      policy.planId,
+      version.periodMonth,
+      candidate,
+      lockDependencies,
+    );
     const current = await policyCurrent(tx, userId, policy.planId, version.periodMonth);
     const baseline = await policyBaseline(tx, userId, policy.planId, terms);
     const observed: FinanceBudgetPolicyRevisionTuple = {
@@ -303,6 +319,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
       usageRevision: null,
     };
     const stale =
+      !(await policyDependenciesAvailable(tx, userId, packet.input.candidate)) ||
       !samePolicyValue(packet.revisions, observed) ||
       !samePolicyValue(packet.input.terms, terms) ||
       proposal.lifecycleRevision !== saved.proposalLifecycleRevision ||
@@ -382,7 +399,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
           })
           .returning()
           .then(([row]) => persistedRow(row));
-        const version = await appendVersion(tx, context, row.id, 1, input.terms);
+        const version = await appendVersion(tx, context, row.id, row.planId, 1, input.terms);
         await audit(tx, context, "created", row.id, {
           state: "draft",
           versionId: version.id,
@@ -408,7 +425,14 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
           input.expectedProfile,
           input.expectedLatestBudget,
         );
-        const next = await appendVersion(tx, context, id, version.version + 1, input.terms);
+        const next = await appendVersion(
+          tx,
+          context,
+          id,
+          row.planId,
+          nextPolicyRevision(version.version),
+          input.terms,
+        );
         const updated = await tx
           .update(financeBudgetPolicies)
           .set({ updatedAt: now() })
@@ -433,7 +457,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
           .update(financeBudgetPolicies)
           .set({
             state: "disabled",
-            lifecycleRevision: row.lifecycleRevision + 1,
+            lifecycleRevision: nextPolicyRevision(row.lifecycleRevision),
             disabledAt: now(),
             disabledByActorId: context.actorId,
             updatedAt: now(),
@@ -451,7 +475,11 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     async designateBaseline(context: FinanceMutationContext, value: unknown) {
       const input = designateFinanceBudgetBaselineSchema.parse(value);
       return mutate(context, "baseline", input, async (tx) => {
-        await policyPlan(tx, context.userId, input.planId);
+        const plan = await policyPlan(tx, context.userId, input.planId, true);
+        conflict(
+          plan.status !== "active",
+          "Archived plans cannot consume the monthly baseline slot.",
+        );
         const current = await policyCurrent(
           tx,
           context.userId,
@@ -537,12 +565,14 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
           version,
           input.expected,
           input.candidate,
+          true,
         );
         conflict(
           policy.state !== "draft" ||
             !samePolicyValue(result.revisions, input.expected) ||
             result.input.policyState !== "draft" ||
             !result.input.baseline ||
+            (result.input.current !== null && result.input.current.planId !== policy.planId) ||
             now().getTime() >= version.expiresAt.getTime(),
         );
         const candidate = {
@@ -595,7 +625,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
           .update(financeBudgetRevisionProposals)
           .set({
             state: "withdrawn",
-            lifecycleRevision: proposal.lifecycleRevision + 1,
+            lifecycleRevision: nextPolicyRevision(proposal.lifecycleRevision),
             withdrawnAt: now(),
             withdrawnByActorId: context.actorId,
             updatedAt: now(),
@@ -633,6 +663,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             version,
             input.expected,
             candidate,
+            true,
           );
           assertProposalCurrent(proposal, policy, version, result.revisions);
           const expiry = new Date(input.expiresAt);

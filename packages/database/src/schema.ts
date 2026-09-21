@@ -31,6 +31,10 @@ import type {
   ConnectorSyncStatus,
   ConnectorSyncTriggerReason,
   DomainProfile,
+  FinanceBudgetPolicyEvaluation,
+  FinanceBudgetPolicyEvaluationInput,
+  FinanceBudgetPolicyPlanSnapshot,
+  FinanceBudgetPolicyTerms,
   FinanceHumanWorkRef,
   FinanceProvider,
   GoogleConnectionService,
@@ -3310,7 +3314,11 @@ export const financeBudgetVersions = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("finance_budget_versions_id_user_idx").on(table.id, table.userId),
+    uniqueIndex("finance_budget_versions_id_plan_user_idx").on(
+      table.id,
+      table.planId,
+      table.userId,
+    ),
     uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
     foreignKey({
       columns: [table.profileVersionId, table.userId],
@@ -4065,6 +4073,10 @@ export const financeBudgetPolicies = pgTable(
     disabledByActorId: text("disabled_by_actor_id"),
   },
   (table) => [
+    check(
+      "finance_budget_policies_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(updated_at) AND updated_at>='0001-01-01T00:00:00Z'::timestamptz AND updated_at<'10000-01-01T00:00:00Z'::timestamptz AND (disabled_at IS NULL OR (isfinite(disabled_at) AND disabled_at>='0001-01-01T00:00:00Z'::timestamptz AND disabled_at<'10000-01-01T00:00:00Z'::timestamptz))`,
+    ),
     check("finance_budget_policies_revision_check", sql`lifecycle_revision >= 1`),
     check(
       "finance_budget_policies_state_check",
@@ -4080,6 +4092,11 @@ export const financeBudgetPolicies = pgTable(
       columns: [table.planId, table.userId],
       foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
     }),
+    uniqueIndex("finance_budget_policies_id_plan_user_idx").on(
+      table.id,
+      table.planId,
+      table.userId,
+    ),
     uniqueIndex("finance_budget_policies_id_user_idx").on(table.id, table.userId),
     index("finance_budget_policies_user_updated_idx").on(table.userId, table.updatedAt, table.id),
     index("finance_budget_policies_user_plan_state_idx").on(
@@ -4096,6 +4113,7 @@ export const financeBudgetPolicyVersions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").notNull(),
     policyId: uuid("policy_id").notNull(),
+    planId: uuid("plan_id").notNull(),
     version: integer("version").notNull(),
     baselineBudgetVersionId: uuid("baseline_budget_version_id").notNull(),
     periodMonth: text("period_month").notNull(),
@@ -4109,12 +4127,20 @@ export const financeBudgetPolicyVersions = pgTable(
     rollover: text("rollover").notNull(),
     accounting: text("accounting").notNull(),
     usageScope: text("usage_scope").notNull(),
-    directions: jsonb("directions").notNull(),
-    protections: jsonb("protections").notNull(),
+    directions: jsonb("directions").$type<FinanceBudgetPolicyTerms["directions"]>().notNull(),
+    protections: jsonb("protections").$type<FinanceBudgetPolicyTerms["protections"]>().notNull(),
     createdByActorId: text("created_by_actor_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "finance_budget_policy_versions_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(baseline_budget_version_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(expires_at) AND expires_at>='0001-01-01T00:00:00Z'::timestamptz AND expires_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_policy_versions_contract_check",
+      sql`finance_budget_policy_json_valid(directions,'directions') IS TRUE AND finance_budget_policy_json_valid(protections,'protections') IS TRUE AND finance_budget_policy_json_valid(jsonb_build_object('from',period_from,'through',period_through,'timezone',timezone),'period') IS TRUE`,
+    ),
     check("finance_budget_policy_versions_version_check", sql`version >= 1`),
     check(
       "finance_budget_policy_versions_period_check",
@@ -4147,18 +4173,27 @@ export const financeBudgetPolicyVersions = pgTable(
     }).onDelete("cascade"),
     foreignKey({
       name: "finance_budget_policy_versions_policy_fk",
-      columns: [table.policyId, table.userId],
-      foreignColumns: [financeBudgetPolicies.id, financeBudgetPolicies.userId],
+      columns: [table.policyId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetPolicies.id,
+        financeBudgetPolicies.planId,
+        financeBudgetPolicies.userId,
+      ],
     }),
     foreignKey({
       name: "finance_budget_policy_versions_baseline_fk",
-      columns: [table.baselineBudgetVersionId, table.userId],
-      foreignColumns: [financeBudgetVersions.id, financeBudgetVersions.userId],
+      columns: [table.baselineBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
     }),
     uniqueIndex("finance_budget_policy_versions_id_user_idx").on(table.id, table.userId),
     uniqueIndex("finance_budget_policy_versions_policy_owner_idx").on(
       table.id,
       table.policyId,
+      table.planId,
       table.userId,
     ),
     uniqueIndex("finance_budget_policy_versions_policy_version_idx").on(
@@ -4186,7 +4221,9 @@ export const financeBudgetRevisionProposals = pgTable(
     baselineBudgetVersionId: uuid("baseline_budget_version_id").notNull(),
     activeBudgetVersionId: uuid("active_budget_version_id"),
     latestBudgetVersionId: uuid("latest_budget_version_id"),
-    candidateSnapshot: jsonb("candidate_snapshot").notNull(),
+    candidateSnapshot: jsonb("candidate_snapshot")
+      .$type<FinanceBudgetPolicyPlanSnapshot>()
+      .notNull(),
     candidateHash: text("candidate_hash").notNull(),
     state: text("state").notNull(),
     lifecycleRevision: integer("lifecycle_revision").notNull(),
@@ -4197,6 +4234,14 @@ export const financeBudgetRevisionProposals = pgTable(
     withdrawnByActorId: text("withdrawn_by_actor_id"),
   },
   (table) => [
+    check(
+      "finance_budget_revision_proposals_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_version_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(baseline_budget_version_id),'uuid') IS TRUE AND (profile_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(profile_version_id),'uuid') IS TRUE)) AND (active_budget_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(active_budget_version_id),'uuid') IS TRUE)) AND (latest_budget_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(latest_budget_version_id),'uuid') IS TRUE)) AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(updated_at) AND updated_at>='0001-01-01T00:00:00Z'::timestamptz AND updated_at<'10000-01-01T00:00:00Z'::timestamptz AND (withdrawn_at IS NULL OR (isfinite(withdrawn_at) AND withdrawn_at>='0001-01-01T00:00:00Z'::timestamptz AND withdrawn_at<'10000-01-01T00:00:00Z'::timestamptz))`,
+    ),
+    check(
+      "finance_budget_revision_proposals_contract_check",
+      sql`finance_budget_policy_json_valid(candidate_snapshot,'plan') IS TRUE AND candidate_snapshot->>'userId'=user_id::text AND candidate_snapshot->>'planId'=plan_id::text`,
+    ),
     check("finance_budget_revision_proposals_revision_check", sql`lifecycle_revision >= 1`),
     check(
       "finance_budget_revision_proposals_state_check",
@@ -4217,10 +4262,11 @@ export const financeBudgetRevisionProposals = pgTable(
     }).onDelete("cascade"),
     foreignKey({
       name: "finance_budget_revision_proposals_policy_version_fk",
-      columns: [table.policyVersionId, table.policyId, table.userId],
+      columns: [table.policyVersionId, table.policyId, table.planId, table.userId],
       foreignColumns: [
         financeBudgetPolicyVersions.id,
         financeBudgetPolicyVersions.policyId,
+        financeBudgetPolicyVersions.planId,
         financeBudgetPolicyVersions.userId,
       ],
     }),
@@ -4236,19 +4282,36 @@ export const financeBudgetRevisionProposals = pgTable(
     }),
     foreignKey({
       name: "finance_budget_revision_proposals_baseline_fk",
-      columns: [table.baselineBudgetVersionId, table.userId],
-      foreignColumns: [financeBudgetVersions.id, financeBudgetVersions.userId],
+      columns: [table.baselineBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
     }),
     foreignKey({
       name: "finance_budget_revision_proposals_active_fk",
-      columns: [table.activeBudgetVersionId, table.userId],
-      foreignColumns: [financeBudgetVersions.id, financeBudgetVersions.userId],
+      columns: [table.activeBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
     }),
     foreignKey({
       name: "finance_budget_revision_proposals_latest_fk",
-      columns: [table.latestBudgetVersionId, table.userId],
-      foreignColumns: [financeBudgetVersions.id, financeBudgetVersions.userId],
+      columns: [table.latestBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
     }),
+    uniqueIndex("finance_budget_proposals_version_user_idx").on(
+      table.id,
+      table.policyVersionId,
+      table.userId,
+    ),
     uniqueIndex("finance_budget_revision_proposals_id_user_idx").on(table.id, table.userId),
     index("finance_budget_revision_proposals_user_state_created_idx").on(
       table.userId,
@@ -4273,8 +4336,8 @@ export const financeBudgetPolicyPreviews = pgTable(
     policyVersionId: uuid("policy_version_id").notNull(),
     policyLifecycleRevision: integer("policy_lifecycle_revision").notNull(),
     proposalLifecycleRevision: integer("proposal_lifecycle_revision").notNull(),
-    inputSnapshot: jsonb("input_snapshot").notNull(),
-    resultSnapshot: jsonb("result_snapshot").notNull(),
+    inputSnapshot: jsonb("input_snapshot").$type<FinanceBudgetPolicyEvaluationInput>().notNull(),
+    resultSnapshot: jsonb("result_snapshot").$type<FinanceBudgetPolicyEvaluation>().notNull(),
     previewHash: text("preview_hash").notNull(),
     evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -4282,6 +4345,14 @@ export const financeBudgetPolicyPreviews = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "finance_budget_policy_previews_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(proposal_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_version_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(evaluated_at) AND evaluated_at>='0001-01-01T00:00:00Z'::timestamptz AND evaluated_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(expires_at) AND expires_at>='0001-01-01T00:00:00Z'::timestamptz AND expires_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_policy_previews_contract_check",
+      sql`finance_budget_policy_json_valid(input_snapshot,'input') IS TRUE AND finance_budget_policy_json_valid(result_snapshot,'result') IS TRUE AND result_snapshot->'input'=input_snapshot AND (input_snapshot->>'evaluatedAt')::timestamptz=evaluated_at AND expires_at <= (input_snapshot->'terms'->>'expiresAt')::timestamptz AND input_snapshot->'observed'->>'userId'=user_id::text AND input_snapshot->'observed'->'policy'->>'id'=policy_version_id::text`,
+    ),
     check(
       "finance_budget_policy_previews_revision_check",
       sql`policy_lifecycle_revision >= 1 AND proposal_lifecycle_revision >= 1`,
@@ -4307,8 +4378,12 @@ export const financeBudgetPolicyPreviews = pgTable(
     }).onDelete("cascade"),
     foreignKey({
       name: "finance_budget_policy_previews_proposal_fk",
-      columns: [table.proposalId, table.userId],
-      foreignColumns: [financeBudgetRevisionProposals.id, financeBudgetRevisionProposals.userId],
+      columns: [table.proposalId, table.policyVersionId, table.userId],
+      foreignColumns: [
+        financeBudgetRevisionProposals.id,
+        financeBudgetRevisionProposals.policyVersionId,
+        financeBudgetRevisionProposals.userId,
+      ],
     }),
     foreignKey({
       name: "finance_budget_policy_previews_policy_version_fk",
@@ -4342,6 +4417,14 @@ export const financeBudgetPeriodBaselines = pgTable(
   },
   (table) => [
     check(
+      "finance_budget_period_baselines_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(budget_version_id),'uuid') IS TRUE AND isfinite(confirmed_at) AND confirmed_at>='0001-01-01T00:00:00Z'::timestamptz AND confirmed_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_period_baselines_contract_check",
+      sql`finance_budget_policy_json_valid(jsonb_build_object('from',period_from,'through',period_through,'timezone',timezone),'period') IS TRUE`,
+    ),
+    check(
       "finance_budget_period_baselines_period_check",
       sql`period_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND period_from = period_month || '-01' AND period_through = to_char((period_from::date + interval '1 month - 1 day'), 'YYYY-MM-DD') AND char_length(timezone) BETWEEN 1 AND 100`,
     ),
@@ -4357,8 +4440,12 @@ export const financeBudgetPeriodBaselines = pgTable(
     }),
     foreignKey({
       name: "finance_budget_period_baselines_budget_fk",
-      columns: [table.budgetVersionId, table.userId],
-      foreignColumns: [financeBudgetVersions.id, financeBudgetVersions.userId],
+      columns: [table.budgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
     }),
     uniqueIndex("finance_budget_period_baselines_id_user_idx").on(table.id, table.userId),
     uniqueIndex("finance_budget_period_baselines_user_month_idx").on(

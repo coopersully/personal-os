@@ -4,6 +4,7 @@ import {
   type Database,
   type DatabaseClient,
   executionPolicySettings,
+  financeMutationRecords,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -11,6 +12,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq, sql } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import {
+  executeFinanceAdmittedMutation,
   executeFinanceIdempotently,
   loadFinanceAuthorization,
   requireFinanceMutation,
@@ -111,6 +113,328 @@ describe.sequential("trusted Finance mutation context", () => {
         mutate,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("admits supplied-transaction work once and replays before preparing again", async () => {
+    const principal: Principal = {
+      actorId: userId,
+      actorType: "user",
+      scopes: new Set(["finances:write"]),
+      userId,
+    };
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal,
+      requestId: "admitted-first",
+    });
+    const operation = {
+      idempotencyKey: "admitted-replay",
+      operation: "finance.answer-contextual-question.v1",
+      payload: { answer: "Groceries", questionId: "question-1" },
+      sourceKind: "app" as const,
+    };
+    const prepare = vi.fn(
+      async (executor: Parameters<typeof executeFinanceAdmittedMutation>[0]) => {
+        await expect(
+          executor.query.financeMutationRecords.findFirst({
+            where: eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
+          }),
+        ).resolves.toBeUndefined();
+        return {
+          prepared: { questionId: "question-1" },
+          state: "admitted" as const,
+        };
+      },
+    );
+    const mutate = vi.fn(async () => ({
+      operationId: operation.idempotencyKey,
+      state: "accepted",
+    }));
+
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(tx, context, operation, prepare, mutate),
+      ),
+    ).resolves.toEqual({ operationId: "admitted-replay", state: "accepted" });
+
+    const retryContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal,
+      requestId: "admitted-retry",
+    });
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(tx, retryContext, operation, prepare, mutate),
+      ),
+    ).resolves.toEqual({ operationId: "admitted-replay", state: "accepted" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(mutate).toHaveBeenCalledOnce();
+    await expect(
+      database.db.query.financeMutationRecords.findFirst({
+        where: eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
+      }),
+    ).resolves.toMatchObject({
+      actorId: userId,
+      actorType: "user",
+      operation: operation.operation,
+      status: "completed",
+    });
+  });
+
+  it("fails closed for failed or started admitted-mutation receipts", async () => {
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "admitted-terminal-receipts",
+    });
+    const prepare = async () => ({ prepared: {}, state: "admitted" as const });
+    const mutate = async () => ({ state: "accepted" });
+
+    for (const status of ["failed", "started"] as const) {
+      const idempotencyKey = `admitted-${status}`;
+      const operation = {
+        idempotencyKey,
+        operation: "finance.answer-contextual-question.v1",
+        payload: { answer: "Groceries", questionId: idempotencyKey },
+        sourceKind: "app" as const,
+      };
+      await database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(tx, context, operation, prepare, mutate),
+      );
+      await database.db
+        .update(financeMutationRecords)
+        .set({
+          completedAt: null,
+          leaseExpiresAt: new Date("2020-01-01T00:00:00Z"),
+          response: null,
+          status,
+        })
+        .where(eq(financeMutationRecords.idempotencyKey, idempotencyKey));
+
+      await expect(
+        database.db.transaction((tx) =>
+          executeFinanceAdmittedMutation(tx, context, operation, prepare, mutate),
+        ),
+      ).rejects.toThrow(status === "failed" ? "previously failed" : "already in progress");
+    }
+  });
+
+  it("leaves no receipt when preparation is unavailable or contended", async () => {
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "admitted-without-receipt",
+    });
+    const mutate = vi.fn(async () => ({ state: "accepted" }));
+    const unavailableOperation = {
+      idempotencyKey: "admitted-unavailable",
+      operation: "finance.answer-contextual-question.v1",
+      payload: { questionId: "missing" },
+      sourceKind: "app" as const,
+    };
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(
+          tx,
+          context,
+          unavailableOperation,
+          async () => ({
+            result: {
+              reasonCode: "producer_not_registered",
+              retryable: false,
+              state: "unavailable",
+            },
+            state: "unavailable",
+          }),
+          mutate,
+        ),
+      ),
+    ).resolves.toEqual({
+      reasonCode: "producer_not_registered",
+      retryable: false,
+      state: "unavailable",
+    });
+    expect(mutate).not.toHaveBeenCalled();
+    await expect(
+      database.db.query.financeMutationRecords.findFirst({
+        where: eq(financeMutationRecords.idempotencyKey, unavailableOperation.idempotencyKey),
+      }),
+    ).resolves.toBeUndefined();
+
+    const contendedOperation = {
+      ...unavailableOperation,
+      idempotencyKey: "admitted-contended",
+      payload: { questionId: "locked" },
+    };
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(
+          tx,
+          context,
+          contendedOperation,
+          async () => {
+            throw Object.assign(new Error("The Finance work is busy."), { code: "conflict" });
+          },
+          mutate,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db.query.financeMutationRecords.findFirst({
+        where: eq(financeMutationRecords.idempotencyKey, contendedOperation.idempotencyKey),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("binds admitted receipt equality to the canonical request and actor", async () => {
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "admitted-canonical",
+    });
+    const operation = {
+      idempotencyKey: "admitted-canonical",
+      operation: "finance.answer-contextual-question.v1",
+      payload: { answer: "Groceries", questionId: "question-canonical" },
+      sourceKind: "app" as const,
+    };
+    const prepare = vi.fn(async () => ({ prepared: {}, state: "admitted" as const }));
+    const mutate = vi.fn(async () => ({ state: "accepted" }));
+    await database.db.transaction((tx) =>
+      executeFinanceAdmittedMutation(tx, context, operation, prepare, mutate),
+    );
+
+    const changedActor = { ...context, actorId: "another-user-session" };
+    for (const [candidateContext, candidateOperation] of [
+      [changedActor, operation],
+      [context, { ...operation, payload: { ...operation.payload, answer: "Transit" } }],
+      [context, { ...operation, sourceKind: "agent" as const }],
+    ] as const) {
+      await expect(
+        database.db.transaction((tx) =>
+          executeFinanceAdmittedMutation(tx, candidateContext, candidateOperation, prepare, mutate),
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    await database.db
+      .update(financeMutationRecords)
+      .set({ actorId: "tampered-actor" })
+      .where(eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey));
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(tx, context, operation, prepare, mutate),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(mutate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unscoped or missing owners before admitted preparation", async () => {
+    const prepare = vi.fn(async () => ({ prepared: {}, state: "admitted" as const }));
+    const mutate = vi.fn(async () => ({ state: "accepted" }));
+    const operation = {
+      idempotencyKey: "admitted-owner-check",
+      operation: "finance.answer-contextual-question.v1",
+      payload: { questionId: "question-owner-check" },
+      sourceKind: "app" as const,
+    };
+    const readOnlyContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:read"]),
+        userId,
+      },
+      requestId: "admitted-read-only",
+    });
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(tx, readOnlyContext, operation, prepare, mutate),
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+
+    const missingUserId = "00000000-0000-4000-8000-000000000098";
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(
+          tx,
+          {
+            ...readOnlyContext,
+            actorId: missingUserId,
+            canMutate: true,
+            userId: missingUserId,
+          },
+          { ...operation, idempotencyKey: "admitted-missing-owner" },
+          prepare,
+          mutate,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("rolls back admitted receipts and domain writes on supplied-transaction failure", async () => {
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId,
+      },
+      requestId: "admitted-rollback",
+    });
+    const operation = {
+      idempotencyKey: "admitted-rollback",
+      operation: "finance.answer-contextual-question.v1",
+      payload: { answer: "Groceries", questionId: "question-rollback" },
+      sourceKind: "app" as const,
+    };
+
+    await expect(
+      database.db.transaction((tx) =>
+        executeFinanceAdmittedMutation(
+          tx,
+          context,
+          operation,
+          async () => ({ prepared: {}, state: "admitted" }),
+          async (executor) => {
+            await executor
+              .update(executionPolicySettings)
+              .set({ reviewBypassEnabled: false })
+              .where(eq(executionPolicySettings.userId, userId));
+            throw new Error("admitted mutation failed");
+          },
+        ),
+      ),
+    ).rejects.toThrow("admitted mutation failed");
+    await expect(
+      database.db.query.financeMutationRecords.findFirst({
+        where: eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      database.db.query.executionPolicySettings.findFirst({
+        where: eq(executionPolicySettings.userId, userId),
+      }),
+    ).resolves.toMatchObject({ reviewBypassEnabled: true });
   });
 
   it("admits the owner before receipt work without changing the receipt hash", async () => {

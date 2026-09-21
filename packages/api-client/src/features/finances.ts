@@ -7,8 +7,11 @@ import type {
   CreateFinanceAccountInput,
   CreateFinanceBudgetBucketInput,
   CreateFinanceBudgetInput,
+  CreateFinanceBudgetPolicyInput,
+  CreateFinanceBudgetRevisionProposalInput,
   CreateFinanceBudgetVersionInput,
   CreateFinanceTransactionInput,
+  DesignateFinanceBudgetBaselineInput,
   DisconnectFinanceAccountInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
@@ -22,7 +25,14 @@ import type {
   FinanceBudgetBucketList,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
+  FinanceBudgetPeriodBaselineRecord,
   FinanceBudgetPlan,
+  FinanceBudgetPolicyEvaluation,
+  FinanceBudgetPolicyLifecycleInput,
+  FinanceBudgetPolicyListInput,
+  FinanceBudgetPolicyPreviewRecord,
+  FinanceBudgetPolicyRecord,
+  FinanceBudgetRevisionProposalRecord,
   FinanceBudgetStatus,
   FinanceBudgetVersion,
   FinanceCategorizationApplyResult,
@@ -74,10 +84,13 @@ import type {
   ManageFinanceRecurringItemInput,
   ManageFinanceRuleInput,
   MergeFinanceMerchantsInput,
+  PreviewFinanceBudgetPolicyInput,
   ReconcileFinanceReimbursementInput,
   RemoveFinanceTransactionInput,
   ResolveFinanceAlertInput,
   ReviseFinanceBudgetInput,
+  ReviseFinanceBudgetPolicyInput,
+  SaveFinanceBudgetPolicyPreviewInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
   SplitFinanceTransactionInput,
@@ -141,6 +154,115 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async listFinanceBudgetPolicies(
+      query: FinanceBudgetPolicyListInput = { limit: 50 },
+    ): Promise<FinanceBudgetPolicyRecord[]> {
+      const search = new URLSearchParams({ limit: String(query.limit) });
+      if (query.beforeId) search.set("beforeId", query.beforeId);
+      const response = await request<{ policies: FinanceBudgetPolicyRecord[] }>(
+        `/v1/finances/budget-policies?${search}`,
+      );
+      return response.policies;
+    },
+    async getFinanceBudgetPolicy(id: string): Promise<FinanceBudgetPolicyRecord> {
+      const response = await request<{ policy: FinanceBudgetPolicyRecord }>(
+        `/v1/finances/budget-policies/${encodeURIComponent(id)}`,
+      );
+      return response.policy;
+    },
+    async createFinanceBudgetPolicy(
+      input: CreateFinanceBudgetPolicyInput,
+    ): Promise<FinanceBudgetPolicyRecord> {
+      const response = await request<{ policy: FinanceBudgetPolicyRecord }>(
+        "/v1/finances/budget-policies",
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.policy;
+    },
+    async reviseFinanceBudgetPolicy(
+      id: string,
+      input: ReviseFinanceBudgetPolicyInput,
+    ): Promise<FinanceBudgetPolicyRecord> {
+      const response = await request<{ policy: FinanceBudgetPolicyRecord }>(
+        `/v1/finances/budget-policies/${encodeURIComponent(id)}/revisions`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.policy;
+    },
+    async disableFinanceBudgetPolicy(
+      id: string,
+      input: FinanceBudgetPolicyLifecycleInput,
+    ): Promise<FinanceBudgetPolicyRecord> {
+      const response = await request<{ policy: FinanceBudgetPolicyRecord }>(
+        `/v1/finances/budget-policies/${encodeURIComponent(id)}/disable`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.policy;
+    },
+    async designateFinanceBudgetBaseline(
+      input: DesignateFinanceBudgetBaselineInput,
+    ): Promise<FinanceBudgetPeriodBaselineRecord> {
+      const response = await request<{ baseline: FinanceBudgetPeriodBaselineRecord }>(
+        "/v1/finances/budget-policies/baselines",
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.baseline;
+    },
+    async previewFinanceBudgetPolicy(
+      input: PreviewFinanceBudgetPolicyInput,
+    ): Promise<FinanceBudgetPolicyEvaluation> {
+      const response = await request<{ evaluation: FinanceBudgetPolicyEvaluation }>(
+        "/v1/finances/budget-policies/preview",
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.evaluation;
+    },
+    async createFinanceBudgetRevisionProposal(
+      input: CreateFinanceBudgetRevisionProposalInput,
+    ): Promise<FinanceBudgetRevisionProposalRecord> {
+      const response = await request<{ proposal: FinanceBudgetRevisionProposalRecord }>(
+        "/v1/finances/budget-policies/proposals",
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.proposal;
+    },
+    async getFinanceBudgetRevisionProposal(
+      id: string,
+    ): Promise<FinanceBudgetRevisionProposalRecord> {
+      const response = await request<{ proposal: FinanceBudgetRevisionProposalRecord }>(
+        `/v1/finances/budget-policies/proposals/${encodeURIComponent(id)}`,
+      );
+      return response.proposal;
+    },
+    async withdrawFinanceBudgetRevisionProposal(
+      id: string,
+      input: FinanceBudgetPolicyLifecycleInput,
+    ): Promise<FinanceBudgetRevisionProposalRecord> {
+      const response = await request<{ proposal: FinanceBudgetRevisionProposalRecord }>(
+        `/v1/finances/budget-policies/proposals/${encodeURIComponent(id)}/withdraw`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.proposal;
+    },
+    async saveFinanceBudgetPolicyPreview(
+      proposalId: string,
+      input: SaveFinanceBudgetPolicyPreviewInput,
+    ): Promise<FinanceBudgetPolicyPreviewRecord> {
+      const response = await request<{ preview: FinanceBudgetPolicyPreviewRecord }>(
+        `/v1/finances/budget-policies/proposals/${encodeURIComponent(proposalId)}/previews`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.preview;
+    },
+    async getFinanceBudgetPolicyPreview(
+      proposalId: string,
+      id: string,
+    ): Promise<FinanceBudgetPolicyPreviewRecord> {
+      const response = await request<{ preview: FinanceBudgetPolicyPreviewRecord }>(
+        `/v1/finances/budget-policies/proposals/${encodeURIComponent(proposalId)}/previews/${encodeURIComponent(id)}`,
+      );
+      return response.preview;
+    },
     async reviewFinanceReceipt(
       id: string,
       input: FinanceReceiptReviewInput,

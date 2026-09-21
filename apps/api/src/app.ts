@@ -49,6 +49,7 @@ import { createDesktopActivityService } from "./desktop-activity-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
+import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
@@ -433,6 +434,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
+  const financeBudgetPolicies = createFinanceBudgetPolicyService({ db: dependencies.db, now });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
@@ -1269,6 +1271,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     app,
     db: dependencies.db,
     financeChallenges,
+    financeBudgetPolicies,
     canonicalFinanceMaintenance,
     financeMaintenance,
     financePeriodReviews,

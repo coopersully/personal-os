@@ -1,6 +1,8 @@
+import type { Database } from "@personal-os/database";
 import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
+import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -11,6 +13,122 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("registers human-only budget policy reads and normalizes list pagination", async () => {
+    const app = new Hono<AppEnv>();
+    let actorType: "agent" | "user" = "user";
+    const policy = {
+      executionAvailable: false,
+      executionUnavailableReasons: ["authority_not_wired", "position_commit_fence_not_wired"],
+      id,
+    };
+    const listPolicies = vi.fn(async () => [policy]);
+    const getPolicy = vi.fn(async () => policy);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType,
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "budget-policy-route");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      financeBudgetPolicies: { getPolicy, listPolicies } as unknown as ReturnType<
+        typeof createFinanceBudgetPolicyService
+      >,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const listed = await app.request(`/v1/finances/budget-policies?limit=25&beforeId=${id}`);
+    const fetched = await app.request(`/v1/finances/budget-policies/${id}`);
+
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toEqual({ policies: [policy] });
+    await expect(fetched.json()).resolves.toEqual({ policy });
+    expect(listPolicies).toHaveBeenCalledWith(id, { beforeId: id, limit: 25 });
+    expect(getPolicy).toHaveBeenCalledWith(id, id);
+
+    actorType = "agent";
+    const rejected = await app.request("/v1/finances/budget-policies?limit=25");
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toEqual({
+      error: {
+        code: "forbidden",
+        message: "This operation requires an interactive user session.",
+        requestId: "budget-policy-route",
+      },
+    });
+    expect(listPolicies).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards human budget policy lifecycle mutations with execution unavailable", async () => {
+    const app = new Hono<AppEnv>();
+    const policy = {
+      executionAvailable: false,
+      executionUnavailableReasons: ["authority_not_wired", "position_commit_fence_not_wired"],
+      id,
+    };
+    const disablePolicy = vi.fn(async () => policy);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "budget-policy-disable");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      db: {
+        query: { executionPolicySettings: { findFirst: vi.fn(async () => undefined) } },
+      } as unknown as Database,
+      financeBudgetPolicies: { disablePolicy } as unknown as ReturnType<
+        typeof createFinanceBudgetPolicyService
+      >,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request(`/v1/finances/budget-policies/${id}/disable`, {
+      body: JSON.stringify({ expectedLifecycleRevision: 1, idempotencyKey: "disable-policy" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ policy });
+    expect(disablePolicy).toHaveBeenCalledWith(
+      {
+        actorId: id,
+        actorType: "user",
+        bypassEnabled: false,
+        canMutate: true,
+        canSelfApprove: false,
+        requestId: "budget-policy-disable",
+        userId: id,
+      },
+      id,
+      { expectedLifecycleRevision: 1, idempotencyKey: "disable-policy" },
+    );
+  });
+
   it("does not serialize an absent playbook dependency and disables caching", async () => {
     const app = new Hono<AppEnv>();
     app.use("*", async (context, next) => {

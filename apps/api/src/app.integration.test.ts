@@ -4898,6 +4898,49 @@ describe.sequential("ilo API", () => {
     });
   });
 
+  it("composes human-only budget policy management", async () => {
+    const registration = await request("/v1/auth/register", {
+      auth: "none",
+      body: {
+        displayName: "Budget Policy Composition User",
+        email: `budget-policy-${crypto.randomUUID()}@example.com`,
+        password: "LocalTestOnly123!",
+        planningTimezone: "UTC",
+      },
+    });
+    expect(registration.status).toBe(201);
+    const registered = await payload(registration);
+    const authorization = { authorization: `Session ${registered.sessionToken}` };
+
+    const listed = await app.request("/v1/finances/budget-policies?limit=25", {
+      headers: authorization,
+    });
+
+    expect(listed.status).toBe(200);
+    await expect(payload(listed)).resolves.toEqual({ policies: [] });
+
+    const tokenResponse = await app.request("/v1/access-tokens", {
+      body: JSON.stringify({
+        name: "Budget policy agent",
+        scopes: ["finances:read", "finances:write"],
+      }),
+      headers: { ...authorization, "content-type": "application/json" },
+      method: "POST",
+    });
+    const token = (await payload(tokenResponse)).token.token as string;
+    const rejected = await app.request("/v1/finances/budget-policies?limit=25", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(payload(rejected)).resolves.toMatchObject({
+      error: {
+        code: "forbidden",
+        message: "This operation requires an interactive user session.",
+      },
+    });
+  });
+
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
     const betaApp = createApp({
       config: {

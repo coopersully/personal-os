@@ -127,6 +127,7 @@ describe.sequential("mail service", () => {
       "0085_finance_context_capture",
       "0086_notification_foundation",
       "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -206,6 +207,7 @@ describe.sequential("mail service", () => {
       "0085_finance_context_capture",
       "0086_notification_foundation",
       "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

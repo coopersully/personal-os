@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { createDatabaseClient, type DatabaseClient, migrateDatabase } from "@personal-os/database";
+import * as databaseSchema from "@personal-os/database/schema";
 import {
   financeBudgetPolicyEvaluationInputSchema,
   financeBudgetPolicyEvaluationSchema,
@@ -8,6 +9,7 @@ import {
   financeBudgetPolicyTermsSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { createFinanceBudgetPolicyService } from "./budget-policy-service.js";
 import type { FinanceMutationContext } from "./context.js";
 
@@ -723,6 +725,57 @@ describe.sequential("human budget policy management", () => {
         })
       ).state,
     ).toBe("disabled");
+  });
+  it("lists latest owned policy records with a bounded number of reads", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    await other.ready();
+    const { policy } = await f.ready();
+    const second = await service.createPolicy(f.context, {
+      ...f.policyInput,
+      idempotencyKey: randomUUID(),
+    });
+    const third = await service.createPolicy(f.context, {
+      ...f.policyInput,
+      idempotencyKey: randomUUID(),
+    });
+    const revised = await service.revisePolicy(f.context, policy.id, {
+      expectedProfile: f.profile,
+      expectedLatestBudget: f.budget,
+      idempotencyKey: randomUUID(),
+      expectedLifecycleRevision: 1,
+      expectedLatestVersion: 1,
+      terms: { ...f.terms, perChangeCapCents: 50 },
+    });
+    const queries: string[] = [];
+    const measured = createFinanceBudgetPolicyService({
+      db: drizzle(database.pool, {
+        schema: databaseSchema,
+        logger: {
+          logQuery(query) {
+            queries.push(query);
+          },
+        },
+      }),
+      now: () => clock,
+    });
+    const listed = await measured.listPolicies(f.userId, { limit: 100 });
+    expect(listed).toEqual([revised, second, third].sort((a, b) => b.id.localeCompare(a.id)));
+    expect(queries.filter((query) => /^select\b/i.test(query))).toHaveLength(3);
+    expect(await measured.listPolicies(f.userId, { limit: 1, beforeId: listed[0]?.id })).toEqual([
+      listed[1],
+    ]);
+    queries.length = 0;
+    expect(await measured.listPolicies(randomUUID(), { limit: 100 })).toEqual([]);
+    expect(queries.filter((query) => /^select\b/i.test(query))).toHaveLength(1);
+    await database.pool.query(
+      "INSERT INTO finance_budget_policies(user_id,plan_id,state,lifecycle_revision,created_by_actor_id) VALUES($1,$2,'draft',1,$1::uuid::text)",
+      [f.userId, f.planId],
+    );
+    await expect(measured.listPolicies(f.userId, { limit: 100 })).rejects.toMatchObject({
+      code: "conflict",
+      message: "Budget policy terms are unavailable.",
+    });
   });
   it("bounds lists and conceals foreign proposal and preview identities", async () => {
     const f = await fixture();

@@ -100,7 +100,15 @@ export async function policyTerms(
   tx: FinanceTransaction,
   version: typeof financeBudgetPolicyVersions.$inferSelect,
 ): Promise<FinanceBudgetPolicyTerms> {
-  const baseline = await policyBudget(tx, version.userId, version.baselineBudgetVersionId);
+  return policyTermsFromBaseline(
+    version,
+    await policyBudget(tx, version.userId, version.baselineBudgetVersionId),
+  );
+}
+export function policyTermsFromBaseline(
+  version: typeof financeBudgetPolicyVersions.$inferSelect,
+  baseline: typeof financeBudgetVersions.$inferSelect | undefined,
+): FinanceBudgetPolicyTerms {
   if (!baseline) throw new AppError("conflict", "Baseline version is unavailable.");
   return financeBudgetPolicyTermsSchema.parse({
     currency: version.currency,

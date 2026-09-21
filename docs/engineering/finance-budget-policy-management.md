@@ -24,6 +24,9 @@ an explicit conflict at `2147483647`; they never rely on a PostgreSQL overflow e
 
 ## Stored JSON contract
 
+Migration `0088` corrects empty-string admission in the published `0087` text validator. It
+rejects empty keys and revision strings for subsequent writes without rewriting stored history.
+
 All validator and trigger functions retain SECURITY INVOKER with a fixed pg_catalog search path;
 helper calls explicitly resolve to public. Hostile caller search paths cannot change validation.
 The immutable PostgreSQL validators inspect only supplied values. They validate strict keys,

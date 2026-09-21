@@ -6,6 +6,7 @@ import {
   financeBudgetPolicyPreviews,
   financeBudgetPolicyVersions,
   financeBudgetRevisionProposals,
+  financeBudgetVersions,
 } from "@personal-os/database";
 import {
   createFinanceBudgetPolicySchema,
@@ -25,7 +26,7 @@ import {
   reviseFinanceBudgetPolicySchema,
   saveFinanceBudgetPolicyPreviewSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { evaluateFinanceBudgetPolicy } from "./budget-policy-evaluator.js";
@@ -40,6 +41,7 @@ import {
   policyRoot,
   policySnapshot,
   policyTerms,
+  policyTermsFromBaseline,
   samePolicyValue,
   validatePolicyCandidate,
 } from "./budget-policy-evidence.js";
@@ -128,7 +130,12 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
       }),
     );
   }
-  async function record(tx: FinanceTransaction, row: Policy, version: Version) {
+  async function record(
+    tx: FinanceTransaction,
+    row: Policy,
+    version: Version,
+    terms?: FinanceBudgetPolicyTerms,
+  ) {
     return financeBudgetPolicyRecordSchema.parse({
       ...capability,
       id: row.id,
@@ -140,7 +147,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
       latestVersion: {
         id: version.id,
         version: version.version,
-        terms: await policyTerms(tx, version),
+        terms: terms ?? (await policyTerms(tx, version)),
         createdAt: version.createdAt.toISOString(),
       },
     });
@@ -361,11 +368,44 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
           )
           .orderBy(desc(financeBudgetPolicies.id))
           .limit(input.limit);
+        if (rows.length === 0) return [];
+        const versions = await tx
+          .selectDistinctOn([financeBudgetPolicyVersions.policyId])
+          .from(financeBudgetPolicyVersions)
+          .where(
+            and(
+              eq(financeBudgetPolicyVersions.userId, userId),
+              inArray(
+                financeBudgetPolicyVersions.policyId,
+                rows.map((row) => row.id),
+              ),
+            ),
+          )
+          .orderBy(financeBudgetPolicyVersions.policyId, desc(financeBudgetPolicyVersions.version));
+        const byPolicy = new Map(versions.map((version) => [version.policyId, version]));
+        const current = rows.map((row) => {
+          const version = byPolicy.get(row.id);
+          if (!version) throw new AppError("conflict", "Budget policy terms are unavailable.");
+          return { row, version };
+        });
+        const baselines = await tx.query.financeBudgetVersions.findMany({
+          where: and(
+            eq(financeBudgetVersions.userId, userId),
+            inArray(financeBudgetVersions.id, [
+              ...new Set(versions.map((version) => version.baselineBudgetVersionId)),
+            ]),
+          ),
+        });
+        const byBaseline = new Map(baselines.map((baseline) => [baseline.id, baseline]));
         return Promise.all(
-          rows.map(async (row) => {
-            const found = await policyRoot(tx, userId, row.id);
-            return record(tx, row, found.version);
-          }),
+          current.map(({ row, version }) =>
+            record(
+              tx,
+              row,
+              version,
+              policyTermsFromBaseline(version, byBaseline.get(version.baselineBudgetVersionId)),
+            ),
+          ),
         );
       });
     },

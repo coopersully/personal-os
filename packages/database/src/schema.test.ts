@@ -387,6 +387,7 @@ describe("database schema contracts", () => {
       "0085_finance_context_capture",
       "0086_notification_foundation",
       "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
     ]);
   });
 

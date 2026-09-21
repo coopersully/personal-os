@@ -205,6 +205,94 @@ describe.sequential("budget policy management migration", () => {
       ),
     ).rejects.toThrow();
   });
+  it("enforces exact lifecycle transitions even under a hostile search path", async () => {
+    const client = await database.pool.connect();
+    try {
+      await client.query("CREATE SCHEMA hostile");
+      await client.query(
+        `CREATE FUNCTION hostile.finance_budget_policy_object(jsonb,text[]) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true'`,
+      );
+      await client.query(
+        `CREATE FUNCTION hostile.finance_budget_policy_json_valid(jsonb,text) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true'`,
+      );
+      await client.query(
+        `CREATE FUNCTION hostile.to_jsonb(anyelement) RETURNS jsonb LANGUAGE sql IMMUTABLE AS 'SELECT ''{}''::jsonb'`,
+      );
+      await client.query("SET search_path = hostile, public, pg_catalog");
+      expect(
+        (await client.query("SELECT public.finance_budget_policy_json_valid('{}','ref') AS valid"))
+          .rows[0].valid,
+      ).toBe(false);
+      await expect(
+        client.query(
+          "INSERT INTO public.finance_budget_policy_versions SELECT (jsonb_populate_record(NULL::public.finance_budget_policy_versions,pg_catalog.to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'version',2,'directions','[{}]'::jsonb))).* FROM public.finance_budget_policy_versions v LIMIT 1",
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      const functions = (
+        await client.query(
+          "SELECT proconfig, prosecdef FROM pg_catalog.pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'finance_budget_policy_%'",
+        )
+      ).rows;
+      expect(functions).toHaveLength(7);
+      for (const fn of functions) {
+        expect(fn.proconfig).toContain("search_path=pg_catalog");
+        expect(fn.prosecdef).toBe(false);
+      }
+      for (const [table, terminal, attribution] of [
+        ["finance_budget_policies", "disabled", "disabled"],
+        ["finance_budget_revision_proposals", "withdrawn", "withdrawn"],
+      ]) {
+        const id = (
+          await client.query(`SELECT id FROM public.${table} WHERE user_id=$1 LIMIT 1`, [owner])
+        ).rows[0].id;
+        if (terminal === "disabled") {
+          await client.query(
+            `UPDATE public.${table} SET updated_at=updated_at + interval '1 second' WHERE id=$1`,
+            [id],
+          );
+          await expect(
+            client.query(`UPDATE public.${table} SET lifecycle_revision=2 WHERE id=$1`, [id]),
+          ).rejects.toMatchObject({ code: "23514" });
+        }
+        const transition = `UPDATE public.${table} SET state=$2,lifecycle_revision=$3,${attribution}_at=now(),${attribution}_by_actor_id=$4 WHERE id=$1`;
+        for (const revision of [1, 3, 2147483647]) {
+          await expect(
+            client.query(transition, [id, terminal, revision, owner]),
+          ).rejects.toMatchObject({ code: "23514" });
+        }
+        await client.query(transition, [id, terminal, 2, owner]);
+        for (const change of [
+          `${attribution}_by_actor_id='rewritten'`,
+          `${attribution}_at=now() + interval '1 day'`,
+          "lifecycle_revision=3",
+          "updated_at=updated_at",
+          "created_by_actor_id='rewritten'",
+        ]) {
+          await expect(
+            client.query(`UPDATE public.${table} SET ${change} WHERE id=$1`, [id]),
+          ).rejects.toMatchObject({ code: "23514" });
+        }
+        // INSERT a ceiling fixture: the transition comparison must reject with
+        // the invariant SQLSTATE, never overflow its OLD + 1 expression.
+        const ceiling = (
+          await client.query(
+            `INSERT INTO public.${table} SELECT (jsonb_populate_record(NULL::public.${table},pg_catalog.to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'state',$2::text,'lifecycle_revision',2147483647,'${attribution}_at',NULL,'${attribution}_by_actor_id',NULL))).* FROM public.${table} v WHERE id=$1 RETURNING id`,
+            [id, terminal === "disabled" ? "draft" : "inactive"],
+          )
+        ).rows[0].id;
+        await expect(
+          client.query(transition, [ceiling, terminal, 2147483647, owner]),
+        ).rejects.toMatchObject({ code: "23514" });
+      }
+      await expect(
+        client.query("UPDATE public.finance_budget_policy_versions SET version=version"),
+      ).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await client.query("RESET search_path");
+      await client.query("DROP SCHEMA IF EXISTS hostile CASCADE");
+      client.release();
+    }
+  });
   it("admits owner deletion without preserving policy authority", async () => {
     await database.pool.query("DELETE FROM users WHERE id=$1", [owner]);
     expect(

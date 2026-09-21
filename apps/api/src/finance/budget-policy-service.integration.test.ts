@@ -858,12 +858,14 @@ describe.sequential("human budget policy management", () => {
       expected,
       candidate: f.candidate,
     });
-    await database.pool.query(
-      "UPDATE finance_budget_revision_proposals SET lifecycle_revision=2147483647 WHERE id=$1",
-      [proposal.id],
-    );
+    const ceilingProposal = (
+      await database.pool.query(
+        "INSERT INTO finance_budget_revision_proposals SELECT (jsonb_populate_record(NULL::finance_budget_revision_proposals,to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'lifecycle_revision',2147483647))).* FROM finance_budget_revision_proposals v WHERE id=$1 RETURNING id",
+        [proposal.id],
+      )
+    ).rows[0].id;
     await expect(
-      service.withdrawProposal(f.context, proposal.id, {
+      service.withdrawProposal(f.context, ceilingProposal, {
         idempotencyKey: randomUUID(),
         expectedLifecycleRevision: 2147483647,
       }),
@@ -882,12 +884,18 @@ describe.sequential("human budget policy management", () => {
         expectedLatestVersion: 2147483647,
       }),
     ).rejects.toMatchObject({ code: "conflict" });
+    const ceilingPolicy = (
+      await database.pool.query(
+        "INSERT INTO finance_budget_policies SELECT (jsonb_populate_record(NULL::finance_budget_policies,to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'lifecycle_revision',2147483647))).* FROM finance_budget_policies v WHERE id=$1 RETURNING id",
+        [policy.id],
+      )
+    ).rows[0].id;
     await database.pool.query(
-      "UPDATE finance_budget_policies SET lifecycle_revision=2147483647 WHERE id=$1",
-      [policy.id],
+      "INSERT INTO finance_budget_policy_versions SELECT (jsonb_populate_record(NULL::finance_budget_policy_versions,to_jsonb(v)||jsonb_build_object('id',gen_random_uuid(),'policy_id',$2::uuid))).* FROM finance_budget_policy_versions v WHERE id=$1",
+      [policy.latestVersion.id, ceilingPolicy],
     );
     await expect(
-      service.disablePolicy(f.context, policy.id, {
+      service.disablePolicy(f.context, ceilingPolicy, {
         idempotencyKey: randomUUID(),
         expectedLifecycleRevision: 2147483647,
       }),

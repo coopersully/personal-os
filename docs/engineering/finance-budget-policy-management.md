@@ -6,12 +6,13 @@ management retains `executionAvailable:false`, and position and usage remain una
 
 ## Immutable history and exact lineage
 
-Policy versions, saved previews, and period baselines reject every UPDATE. Policy roots may
-change only state, lifecycle revision, updated time, and disable attribution. Proposal roots may
-change only state, lifecycle revision, updated time, and withdrawal attribution. Null-safe row
-comparisons protect every other column, including future columns. Terminal disabled/withdrawn
-states cannot revert; lifecycle revisions cannot decrease. DELETE is not intercepted, so owner
-privacy cascades still remove the entire history.
+Policy versions, saved previews, and period baselines reject every UPDATE. A draft policy
+revision may change only its updated time. Disabling a draft policy or withdrawing an inactive
+proposal requires exactly one lifecycle revision increment and allows only state, revision,
+updated time, and the corresponding terminal attribution fields to change. The comparison uses
+bigint arithmetic at the integer ceiling. Terminal roots reject every UPDATE, including no-ops.
+Null-safe row comparisons protect every other column, including future columns. DELETE is not
+intercepted, so owner privacy cascades still remove the entire history.
 
 Composite foreign keys bind budget versions to their plan and owner, policy versions to their
 policy/plan/owner, and every proposal budget reference to the same plan. A saved preview's
@@ -21,6 +22,8 @@ an explicit conflict at `2147483647`; they never rely on a PostgreSQL overflow e
 
 ## Stored JSON contract
 
+All validator and trigger functions retain SECURITY INVOKER with a fixed pg_catalog search path;
+helper calls explicitly resolve to public. Hostile caller search paths cannot change validation.
 The immutable PostgreSQL validators inspect only supplied values. They validate strict keys,
 required/null fields, canonical trimmed strings, JavaScript UTF-16 length bounds, UUIDs, complete
 months, cents, unique resource/allocation/direction/protection/delta identities, bounded totals,

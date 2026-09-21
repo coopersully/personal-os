@@ -75,8 +75,8 @@ string is never an answer reference. Migration 0089 owns this storage; 0085 rema
 Creation is human-only. Reads require `finances:read`; answers require `finances:write` and bind
 the authenticated user/agent and accepted app/agent source to the operation receipt. SMS and
 external message IDs remain unavailable. The HTTP route module and API client expose creation,
-read and answer handlers; application composition and unified Reviews registration are separate
-integration work. This source slice does not activate an MCP answer port, Texting, host
+read and answer handlers, with application composition and unified Reviews registration supplied
+by Foundations. This source slice does not activate an MCP answer port, Texting, host
 continuation, or maintenance scheduling.
 
 An answer stores immutable text, exact work/action revisions, resulting work revision, source,

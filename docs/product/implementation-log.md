@@ -7,12 +7,12 @@
   leave financial cases and transaction semantics unchanged.
 - Migration 0089 adds private parent generations, question identity and immutable answer storage.
   Published migrations 0081–0088 are unchanged. Prospective context in 0085 remains separate.
-- Added a revalidated unified Reviews source reader. Application service injection and registration
-  remain integration work; no MCP answer availability, SMS, host continuation, deployment or
-  production activation is claimed by this source slice.
+- Added and registered a revalidated unified Reviews source reader and injected the contextual
+  service into the application route composition. No MCP answer availability, SMS, host
+  continuation, deployment or production activation is claimed by this source slice.
 - Focused local PostgreSQL and UI evidence covers transaction admission, both lock directions,
   SET NULL/ABA, multi-item maintenance, exact replay, caller rollback and retry identity.
-  Full verification and browser acceptance remain pending integration and the shared verification slot.
+  Full verification and browser acceptance remain pending the shared verification slot.
 
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.

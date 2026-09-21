@@ -31,6 +31,10 @@ import type {
   ConnectorSyncStatus,
   ConnectorSyncTriggerReason,
   DomainProfile,
+  FinanceBudgetPolicyEvaluation,
+  FinanceBudgetPolicyEvaluationInput,
+  FinanceBudgetPolicyPlanSnapshot,
+  FinanceBudgetPolicyTerms,
   FinanceHumanWorkRef,
   FinanceProvider,
   GoogleConnectionService,
@@ -3252,6 +3256,7 @@ export const financeBudgetPlans = pgTable(
   },
   (table) => [
     index("finance_budget_plans_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_budget_plans_id_user_idx").on(table.id, table.userId),
     uniqueIndex("finance_budget_plans_user_month_idx").on(table.userId, table.month),
   ],
 );
@@ -3309,6 +3314,11 @@ export const financeBudgetVersions = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_budget_versions_id_plan_user_idx").on(
+      table.id,
+      table.planId,
+      table.userId,
+    ),
     uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
     foreignKey({
       columns: [table.profileVersionId, table.userId],
@@ -4045,5 +4055,402 @@ export const notificationAttemptItems = pgTable(
       columns: [table.userId, table.intentId],
       foreignColumns: [notificationIntents.userId, notificationIntents.id],
     }).onDelete("cascade"),
+  ],
+);
+
+export const financeBudgetPolicies = pgTable(
+  "finance_budget_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    lifecycleRevision: integer("lifecycle_revision").notNull(),
+    state: text("state").notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    disabledByActorId: text("disabled_by_actor_id"),
+  },
+  (table) => [
+    check(
+      "finance_budget_policies_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(updated_at) AND updated_at>='0001-01-01T00:00:00Z'::timestamptz AND updated_at<'10000-01-01T00:00:00Z'::timestamptz AND (disabled_at IS NULL OR (isfinite(disabled_at) AND disabled_at>='0001-01-01T00:00:00Z'::timestamptz AND disabled_at<'10000-01-01T00:00:00Z'::timestamptz))`,
+    ),
+    check("finance_budget_policies_revision_check", sql`lifecycle_revision >= 1`),
+    check(
+      "finance_budget_policies_state_check",
+      sql`(state = 'draft' AND disabled_at IS NULL AND disabled_by_actor_id IS NULL) OR (state = 'disabled' AND disabled_at IS NOT NULL AND disabled_by_actor_id IS NOT NULL)`,
+    ),
+    foreignKey({
+      name: "finance_budget_policies_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_policies_plan_fk",
+      columns: [table.planId, table.userId],
+      foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
+    }),
+    uniqueIndex("finance_budget_policies_id_plan_user_idx").on(
+      table.id,
+      table.planId,
+      table.userId,
+    ),
+    uniqueIndex("finance_budget_policies_id_user_idx").on(table.id, table.userId),
+    index("finance_budget_policies_user_updated_idx").on(table.userId, table.updatedAt, table.id),
+    index("finance_budget_policies_user_plan_state_idx").on(
+      table.userId,
+      table.planId,
+      table.state,
+    ),
+  ],
+);
+
+export const financeBudgetPolicyVersions = pgTable(
+  "finance_budget_policy_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    policyId: uuid("policy_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    version: integer("version").notNull(),
+    baselineBudgetVersionId: uuid("baseline_budget_version_id").notNull(),
+    periodMonth: text("period_month").notNull(),
+    periodFrom: text("period_from").notNull(),
+    periodThrough: text("period_through").notNull(),
+    timezone: text("timezone").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    perChangeCapCents: integer("per_change_cap_cents").notNull(),
+    monthlyCapCents: integer("monthly_cap_cents").notNull(),
+    currency: text("currency").notNull(),
+    rollover: text("rollover").notNull(),
+    accounting: text("accounting").notNull(),
+    usageScope: text("usage_scope").notNull(),
+    directions: jsonb("directions").$type<FinanceBudgetPolicyTerms["directions"]>().notNull(),
+    protections: jsonb("protections").$type<FinanceBudgetPolicyTerms["protections"]>().notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "finance_budget_policy_versions_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(baseline_budget_version_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(expires_at) AND expires_at>='0001-01-01T00:00:00Z'::timestamptz AND expires_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_policy_versions_contract_check",
+      sql`finance_budget_policy_json_valid(directions,'directions') IS TRUE AND finance_budget_policy_json_valid(protections,'protections') IS TRUE AND finance_budget_policy_json_valid(jsonb_build_object('from',period_from,'through',period_through,'timezone',timezone),'period') IS TRUE`,
+    ),
+    check("finance_budget_policy_versions_version_check", sql`version >= 1`),
+    check(
+      "finance_budget_policy_versions_period_check",
+      sql`period_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND period_from = period_month || '-01' AND period_through = to_char((period_from::date + interval '1 month - 1 day'), 'YYYY-MM-DD') AND char_length(timezone) BETWEEN 1 AND 100`,
+    ),
+    check(
+      "finance_budget_policy_versions_caps_check",
+      sql`per_change_cap_cents >= 0 AND monthly_cap_cents >= 0`,
+    ),
+    check(
+      "finance_budget_policy_versions_terms_check",
+      sql`currency = 'USD' AND rollover = 'none' AND accounting = 'gross_positive_allocation_deltas' AND usage_scope = 'user_month_all_policy_versions'`,
+    ),
+    check(
+      "finance_budget_policy_versions_directions_check",
+      sql`jsonb_typeof(directions) = 'array' AND octet_length(directions::text) <= 131072`,
+    ),
+    check(
+      "finance_budget_policy_versions_protections_check",
+      sql`jsonb_typeof(protections) = 'array' AND octet_length(protections::text) <= 131072`,
+    ),
+    check(
+      "finance_budget_policy_versions_entries_check",
+      sql`jsonb_array_length(directions) <= 500 AND jsonb_array_length(protections) <= 500`,
+    ),
+    foreignKey({
+      name: "finance_budget_policy_versions_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_policy_versions_policy_fk",
+      columns: [table.policyId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetPolicies.id,
+        financeBudgetPolicies.planId,
+        financeBudgetPolicies.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_policy_versions_baseline_fk",
+      columns: [table.baselineBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    uniqueIndex("finance_budget_policy_versions_id_user_idx").on(table.id, table.userId),
+    uniqueIndex("finance_budget_policy_versions_policy_owner_idx").on(
+      table.id,
+      table.policyId,
+      table.planId,
+      table.userId,
+    ),
+    uniqueIndex("finance_budget_policy_versions_policy_version_idx").on(
+      table.policyId,
+      table.version,
+    ),
+    index("finance_budget_policy_versions_user_policy_version_idx").on(
+      table.userId,
+      table.policyId,
+      table.version,
+    ),
+    index("finance_budget_policy_versions_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
+
+export const financeBudgetRevisionProposals = pgTable(
+  "finance_budget_revision_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    policyId: uuid("policy_id").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    profileVersionId: uuid("profile_version_id"),
+    baselineBudgetVersionId: uuid("baseline_budget_version_id").notNull(),
+    activeBudgetVersionId: uuid("active_budget_version_id"),
+    latestBudgetVersionId: uuid("latest_budget_version_id"),
+    candidateSnapshot: jsonb("candidate_snapshot")
+      .$type<FinanceBudgetPolicyPlanSnapshot>()
+      .notNull(),
+    candidateHash: text("candidate_hash").notNull(),
+    state: text("state").notNull(),
+    lifecycleRevision: integer("lifecycle_revision").notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    withdrawnByActorId: text("withdrawn_by_actor_id"),
+  },
+  (table) => [
+    check(
+      "finance_budget_revision_proposals_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_version_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(baseline_budget_version_id),'uuid') IS TRUE AND (profile_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(profile_version_id),'uuid') IS TRUE)) AND (active_budget_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(active_budget_version_id),'uuid') IS TRUE)) AND (latest_budget_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(latest_budget_version_id),'uuid') IS TRUE)) AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(updated_at) AND updated_at>='0001-01-01T00:00:00Z'::timestamptz AND updated_at<'10000-01-01T00:00:00Z'::timestamptz AND (withdrawn_at IS NULL OR (isfinite(withdrawn_at) AND withdrawn_at>='0001-01-01T00:00:00Z'::timestamptz AND withdrawn_at<'10000-01-01T00:00:00Z'::timestamptz))`,
+    ),
+    check(
+      "finance_budget_revision_proposals_contract_check",
+      sql`finance_budget_policy_json_valid(candidate_snapshot,'plan') IS TRUE AND candidate_snapshot->>'userId'=user_id::text AND candidate_snapshot->>'planId'=plan_id::text`,
+    ),
+    check("finance_budget_revision_proposals_revision_check", sql`lifecycle_revision >= 1`),
+    check(
+      "finance_budget_revision_proposals_state_check",
+      sql`(state = 'inactive' AND withdrawn_at IS NULL AND withdrawn_by_actor_id IS NULL) OR (state = 'withdrawn' AND withdrawn_at IS NOT NULL AND withdrawn_by_actor_id IS NOT NULL)`,
+    ),
+    check(
+      "finance_budget_revision_proposals_candidate_snapshot_check",
+      sql`jsonb_typeof(candidate_snapshot) = 'object' AND octet_length(candidate_snapshot::text) <= 524288`,
+    ),
+    check(
+      "finance_budget_revision_proposals_hash_check",
+      sql`candidate_hash ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    foreignKey({
+      name: "finance_budget_revision_proposals_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_revision_proposals_policy_version_fk",
+      columns: [table.policyVersionId, table.policyId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetPolicyVersions.id,
+        financeBudgetPolicyVersions.policyId,
+        financeBudgetPolicyVersions.planId,
+        financeBudgetPolicyVersions.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_plan_fk",
+      columns: [table.planId, table.userId],
+      foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_profile_fk",
+      columns: [table.profileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_baseline_fk",
+      columns: [table.baselineBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_active_fk",
+      columns: [table.activeBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_latest_fk",
+      columns: [table.latestBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    uniqueIndex("finance_budget_proposals_version_user_idx").on(
+      table.id,
+      table.policyVersionId,
+      table.userId,
+    ),
+    uniqueIndex("finance_budget_revision_proposals_id_user_idx").on(table.id, table.userId),
+    index("finance_budget_revision_proposals_user_state_created_idx").on(
+      table.userId,
+      table.state,
+      table.createdAt,
+      table.id,
+    ),
+    index("finance_budget_revision_proposals_user_policy_created_idx").on(
+      table.userId,
+      table.policyId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const financeBudgetPolicyPreviews = pgTable(
+  "finance_budget_policy_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    policyLifecycleRevision: integer("policy_lifecycle_revision").notNull(),
+    proposalLifecycleRevision: integer("proposal_lifecycle_revision").notNull(),
+    inputSnapshot: jsonb("input_snapshot").$type<FinanceBudgetPolicyEvaluationInput>().notNull(),
+    resultSnapshot: jsonb("result_snapshot").$type<FinanceBudgetPolicyEvaluation>().notNull(),
+    previewHash: text("preview_hash").notNull(),
+    evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "finance_budget_policy_previews_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(proposal_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_version_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(evaluated_at) AND evaluated_at>='0001-01-01T00:00:00Z'::timestamptz AND evaluated_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(expires_at) AND expires_at>='0001-01-01T00:00:00Z'::timestamptz AND expires_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_policy_previews_contract_check",
+      sql`finance_budget_policy_json_valid(input_snapshot,'input') IS TRUE AND finance_budget_policy_json_valid(result_snapshot,'result') IS TRUE AND result_snapshot->'input'=input_snapshot AND (input_snapshot->>'evaluatedAt')::timestamptz=evaluated_at AND expires_at <= (input_snapshot->'terms'->>'expiresAt')::timestamptz AND input_snapshot->'observed'->>'userId'=user_id::text AND input_snapshot->'observed'->'policy'->>'id'=policy_version_id::text`,
+    ),
+    check(
+      "finance_budget_policy_previews_revision_check",
+      sql`policy_lifecycle_revision >= 1 AND proposal_lifecycle_revision >= 1`,
+    ),
+    check("finance_budget_policy_previews_expiry_check", sql`expires_at > evaluated_at`),
+    check(
+      "finance_budget_policy_previews_input_snapshot_check",
+      sql`jsonb_typeof(input_snapshot) = 'object' AND octet_length(input_snapshot::text) <= 2097152`,
+    ),
+    check(
+      "finance_budget_policy_previews_result_snapshot_check",
+      sql`jsonb_typeof(result_snapshot) = 'object' AND octet_length(result_snapshot::text) <= 4194304`,
+    ),
+    check("finance_budget_policy_previews_hash_check", sql`preview_hash ~ '^sha256:[0-9a-f]{64}$'`),
+    check(
+      "finance_budget_policy_previews_execution_check",
+      sql`COALESCE(result_snapshot->'executionAvailable' = 'false'::jsonb AND result_snapshot->>'kind' IN ('hypothetical_preview','denied'), false)`,
+    ),
+    foreignKey({
+      name: "finance_budget_policy_previews_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_policy_previews_proposal_fk",
+      columns: [table.proposalId, table.policyVersionId, table.userId],
+      foreignColumns: [
+        financeBudgetRevisionProposals.id,
+        financeBudgetRevisionProposals.policyVersionId,
+        financeBudgetRevisionProposals.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_policy_previews_policy_version_fk",
+      columns: [table.policyVersionId, table.userId],
+      foreignColumns: [financeBudgetPolicyVersions.id, financeBudgetPolicyVersions.userId],
+    }),
+    uniqueIndex("finance_budget_policy_previews_id_user_idx").on(table.id, table.userId),
+    index("finance_budget_policy_previews_user_proposal_created_idx").on(
+      table.userId,
+      table.proposalId,
+      table.createdAt,
+      table.id,
+    ),
+    index("finance_budget_policy_previews_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
+
+export const financeBudgetPeriodBaselines = pgTable(
+  "finance_budget_period_baselines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    periodMonth: text("period_month").notNull(),
+    periodFrom: text("period_from").notNull(),
+    periodThrough: text("period_through").notNull(),
+    timezone: text("timezone").notNull(),
+    budgetVersionId: uuid("budget_version_id").notNull(),
+    confirmedByActorId: text("confirmed_by_actor_id").notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "finance_budget_period_baselines_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(budget_version_id),'uuid') IS TRUE AND isfinite(confirmed_at) AND confirmed_at>='0001-01-01T00:00:00Z'::timestamptz AND confirmed_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_period_baselines_contract_check",
+      sql`finance_budget_policy_json_valid(jsonb_build_object('from',period_from,'through',period_through,'timezone',timezone),'period') IS TRUE`,
+    ),
+    check(
+      "finance_budget_period_baselines_period_check",
+      sql`period_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND period_from = period_month || '-01' AND period_through = to_char((period_from::date + interval '1 month - 1 day'), 'YYYY-MM-DD') AND char_length(timezone) BETWEEN 1 AND 100`,
+    ),
+    foreignKey({
+      name: "finance_budget_period_baselines_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_period_baselines_plan_fk",
+      columns: [table.planId, table.userId],
+      foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
+    }),
+    foreignKey({
+      name: "finance_budget_period_baselines_budget_fk",
+      columns: [table.budgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    uniqueIndex("finance_budget_period_baselines_id_user_idx").on(table.id, table.userId),
+    uniqueIndex("finance_budget_period_baselines_user_month_idx").on(
+      table.userId,
+      table.periodMonth,
+    ),
   ],
 );

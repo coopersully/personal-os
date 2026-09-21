@@ -129,6 +129,14 @@ stays immutable; the active plan and forecast can differ. Validate current evide
 revisions under lock. Concurrent small revisions cannot exceed an aggregate cap. Crossing a
 boundary creates a proposal without silently normalizing overspending by changing the baseline.
 
+The person explicitly designates one complete, human-approved baseline for each calendar month.
+Changing a policy, replacing a plan, or changing timezone cannot create a second baseline for that
+month. Policy terms and saved preview evidence remain immutable history; edits append versions,
+and disable/withdraw remain available even when evidence is missing or a preview has expired.
+Draft management and saving a hypothetical preview confer no execution authority. Until a reviewed
+authority path, cumulative usage producer, and commit-time position fence exist, execution stays
+unavailable; missing usage must never be treated as zero allowance consumed.
+
 A rule stays inactive until an exact preview exposes matches, non-matches, consequences, conflicts,
 authority and disable/recovery. A factual answer, setup completion or global bypass never activates
 it. Read-only agents may explain/propose; mutation execution follows the same domain authority

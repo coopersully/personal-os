@@ -2,6 +2,31 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-09-20 — Finance budget-policy management groundwork
+
+- Strict policy contracts require explicit period, timezone, baseline, caps, directions,
+  protections, rollover and gross-usage accounting terms. The pure evaluator compares supplied
+  profile/plan/policy/evidence revisions and returns an exact hypothetical preview or denial.
+- Resource changes, protected releases, missing or unqualified evidence, stale revisions and
+  cap violations are denied. Previewing does not change baseline, plan or cumulative usage.
+- Migration `0087` and the management service add explicit human-confirmed monthly baselines,
+  draft policy versions, inactive revision proposals, immutable saved preview packets, and
+  revision-checked disable/withdraw. Database triggers reject history/identity rewrites, composite
+  keys bind exact plan and proposal lineage, and strict immutable JSON validators keep stored
+  packets readable. Audit and idempotency receipts use owner admission followed by the shared
+  profile mutex and sorted dependency key-share locks. No historical policy is inferred.
+- Saved packets retain their original evidence; history reads calculate current stale/expired
+  and lifecycle status separately; deleted candidate dependencies mark the packet stale. The
+  [storage contract](../engineering/finance-budget-policy-management.md) records lock ordering
+  and validator scope. Missing position and cumulative usage producers remain
+  unavailable, including when a caller supplies plausible evidence or global bypass is enabled.
+- Human-session management/read HTTP routes and typed API-client methods are registered. The
+  source implementation represented here passed full `pnpm verify`, including 2,469 tests and
+  28 desktop/mobile E2E checks. This verification does not establish production activation.
+- Every result keeps `executionAvailable:false`. No automatic application, policy activation,
+  usage ledger, scheduler, commit-time position fence, MCP capability, user interface, host or
+  Texting activation is implemented.
+
 ## 2026-09-18 — Progressive Finance first-plan source implementation
 
 - Setup reuses canonical profile facts and records optional planning answers as typed,

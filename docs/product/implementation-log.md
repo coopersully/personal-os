@@ -21,9 +21,8 @@ This log records delivered vertical slices against the master plan. It does not 
   and validator scope. Missing position and cumulative usage producers remain
   unavailable, including when a caller supplies plausible evidence or global bypass is enabled.
 - Human-session management/read HTTP routes and typed API-client methods are registered. The
-  combined source head `f4661789e3d37d17fdb707b1019240ea0c81adf6` passed full `pnpm verify`,
-  including 2,469 tests and 28 desktop/mobile E2E checks. PR publication, hosted review and merge
-  remain pending; this is not a production activation claim.
+  source implementation represented here passed full `pnpm verify`, including 2,469 tests and
+  28 desktop/mobile E2E checks. This verification does not establish production activation.
 - Every result keeps `executionAvailable:false`. No automatic application, policy activation,
   usage ledger, scheduler, commit-time position fence, MCP capability, user interface, host or
   Texting activation is implemented.

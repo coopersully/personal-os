@@ -1,9 +1,8 @@
 # Finance budget policy management storage
 
 This is the bounded source contract for migration `0087`. Human-session management/read HTTP
-routes and typed API-client methods are registered. The combined source head
-`f4661789e3d37d17fdb707b1019240ea0c81adf6` passed full `pnpm verify`; PR publication, hosted
-review and merge remain pending. This records verified source, not production activation.
+routes and typed API-client methods are registered. The source implementation represented here
+passed full `pnpm verify`. This verification does not establish production activation.
 Management retains `executionAvailable:false`, and position and usage remain unavailable.
 Automatic application, MCP/UI surfaces, host scheduling and Texting activation are not implemented.
 

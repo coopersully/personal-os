@@ -36,8 +36,10 @@ import {
   mailStewardshipQuestions,
   mailThreadDispositions,
   oauthStates,
+  textInboundClaims,
   textingConsentEvents,
   textingVerificationChallenges,
+  textReplyBindings,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "./schema.js";
@@ -49,6 +51,47 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("keeps signed inbound claims and recoverable per-child bindings aligned with 0090", async () => {
+    const claims = getTableConfig(textInboundClaims);
+    const bindings = getTableConfig(textReplyBindings);
+    expect(claims.indexes.map((index) => index.config.name)).toContain(
+      "text_inbound_claims_message_idx",
+    );
+    expect(bindings.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "text_reply_bindings_operation_idx",
+        "text_reply_bindings_outbound_item_idx",
+        "text_reply_bindings_inbound_item_idx",
+        "text_reply_bindings_recovery_idx",
+      ]),
+    );
+    expect(bindings.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "answer_mode",
+        "answer_vocabulary",
+        "inbound_claim_id",
+        "canonical_answer",
+        "operation_id",
+      ]),
+    );
+    const migration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0090_texting_inbound_work_binding.sql"),
+      "utf8",
+    );
+    for (const name of [
+      "text_inbound_claims",
+      "text_reply_bindings",
+      "text_messages_owner_id_connection_idx",
+    ])
+      expect(migration).toContain(name);
+    expect(migration).toContain("DEFERRABLE INITIALLY DEFERRED");
+    expect(migration).toContain("FOREIGN KEY (user_id, inbound_claim_id, connection_id)");
+    expect(migration).toContain("FOREIGN KEY (user_id, outbound_message_id, connection_id)");
+    expect(migration).toContain("answer_mode = 'free_text' AND answer_vocabulary IS NULL");
+    expect(migration).not.toMatch(
+      /REFERENCES (?:text_messages|text_inbound_claims)\([^;]+?ON DELETE CASCADE/iu,
+    );
+  });
   it("stores revisioned global policy and preserves only aligned explicit legacy grants", async () => {
     const policy = getTableConfig(executionPolicySettings);
     expect(policy.columns.map((column) => column.name)).toEqual(
@@ -389,6 +432,7 @@ describe("database schema contracts", () => {
       "0087_finance_budget_policy_management",
       "0088_finance_budget_policy_nonempty_text",
       "0089_finance_contextual_questions",
+      "0090_texting_inbound_work_binding",
     ]);
   });
 

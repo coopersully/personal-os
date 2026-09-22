@@ -4,6 +4,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   migrateDatabase,
+  textInboundClaims,
   textingConnections,
   textingVerificationChallenges,
   textMessages,
@@ -189,6 +190,22 @@ describe.sequential("texting service", () => {
     ).rejects.toMatchObject({ code: "conflict" });
 
     await service.inbound({ Body: "Got it", From: "+12125550123", MessageSid: "SMinbound1" });
+    const signedClaims = await database.db
+      .select()
+      .from(textInboundClaims)
+      .where(eq(textInboundClaims.userId, userId));
+    expect(signedClaims).toHaveLength(1);
+    expect(signedClaims[0]).toMatchObject({
+      connectionId: connection.id,
+      consentEpoch: connection.consentEpoch,
+    });
+    await service.inbound({ Body: "Got it", From: "+12125550123", MessageSid: "SMinbound1" });
+    expect(
+      await database.db
+        .select()
+        .from(textInboundClaims)
+        .where(eq(textInboundClaims.userId, userId)),
+    ).toHaveLength(1);
     const read = await service.conversation(principal, "America/New_York", { limit: 100 });
     expect(read.messages).toHaveLength(2);
     expect(read.messages.every((message) => message.localDateTime.includes("12:30:00 PM"))).toBe(
@@ -265,6 +282,12 @@ describe.sequential("texting service", () => {
       OptOutType: "STOP",
     });
     expect((await service.getConnection(userId)).state).toBe("opted_out");
+    expect(
+      await database.db
+        .select()
+        .from(textInboundClaims)
+        .where(eq(textInboundClaims.userId, userId)),
+    ).toHaveLength(1);
     const stoppedConversation = await service.conversation(principal, "UTC", { limit: 100 });
     expect(stoppedConversation.messages).toHaveLength(messageCountBeforeStop);
     await service.inbound({
@@ -355,6 +378,46 @@ describe.sequential("texting service", () => {
         phoneNumber: "+12125550123",
       }),
     ).rejects.toBeInstanceOf(AppError);
+    const disabledWebhooks = createTextingService({
+      apiBaseUrl: "https://api.example.com",
+      db: database.db,
+      enabled: false,
+      encryptionKey,
+      senderPhoneNumber: "+18885550100",
+      twilio,
+    });
+    const before = (
+      await database.db.select().from(textInboundClaims).where(eq(textInboundClaims.userId, userId))
+    ).length;
+    await disabledWebhooks.inbound({
+      Body: "Ignored while disabled",
+      From: "+12125550123",
+      MessageSid: "SMdisabled-ordinary",
+    });
+    expect(
+      await database.db
+        .select()
+        .from(textInboundClaims)
+        .where(eq(textInboundClaims.userId, userId)),
+    ).toHaveLength(before);
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(
+      new Date(current.getTime() + 100_000),
+    );
+    await disabledWebhooks.inbound({
+      Body: "STOP",
+      From: "+12125550123",
+      MessageSid: "SMdisabled-stop",
+    });
+    expect((await disabledWebhooks.getConnection(userId)).state).toBe("opted_out");
+    vi.mocked(twilio.getMessageOccurredAt).mockResolvedValueOnce(
+      new Date(current.getTime() + 101_000),
+    );
+    await disabledWebhooks.inbound({
+      Body: "START",
+      From: "+12125550123",
+      MessageSid: "SMdisabled-start",
+    });
+    expect((await disabledWebhooks.getConnection(userId)).state).toBe("active");
   }, 15_000);
 
   it("enforces graduated length reviews, series rules, quotas, and provider blocks", async () => {

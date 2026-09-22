@@ -26,6 +26,22 @@ describe.sequential("contextual question storage", () => {
     await database?.close();
     await container?.stop();
   });
+  it("pins all contextual trigger functions to the catalog search path", async () => {
+    const names = [
+      "finance_accounts_contextual_generation",
+      "finance_transactions_contextual_generation",
+      "finance_review_cases_contextual_generation",
+      "finance_contextual_answers_reject_update",
+      "finance_contextual_questions_guard_update",
+    ];
+    const result = await database.pool.query<{ proname: string; proconfig: string[] }>(
+      "SELECT proname, proconfig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname = ANY($1::text[]) ORDER BY proname",
+      [names],
+    );
+    expect(result.rows).toEqual(
+      names.sort().map((proname) => ({ proname, proconfig: ["search_path=pg_catalog"] })),
+    );
+  });
   async function fixture() {
     const userId = randomUUID();
     await database.db.insert(users).values({

@@ -40,7 +40,7 @@ export async function resolveContextualWork(
       disclosure: "minimal",
       context: null,
       occurredAt: null,
-      destination: "/settings?section=reviews",
+      destination: `/finances/review?contextualQuestion=${encodeURIComponent(work.id)}`,
     },
   };
 }

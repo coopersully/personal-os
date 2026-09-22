@@ -1,6 +1,6 @@
 ALTER TABLE finance_accounts ADD COLUMN contextual_revision bigint NOT NULL DEFAULT 1 CONSTRAINT finance_accounts_contextual_revision_check CHECK(contextual_revision > 0);
 --> statement-breakpoint
-CREATE FUNCTION finance_accounts_contextual_generation() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION finance_accounts_contextual_generation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.contextual_revision <> 1 THEN RAISE EXCEPTION 'Contextual generation must start at one' USING ERRCODE='23514'; END IF;
@@ -18,7 +18,7 @@ CREATE TRIGGER finance_accounts_contextual_generation BEFORE INSERT OR UPDATE ON
 --> statement-breakpoint
 ALTER TABLE finance_transactions ADD COLUMN contextual_revision bigint NOT NULL DEFAULT 1 CONSTRAINT finance_transactions_contextual_revision_check CHECK(contextual_revision > 0);
 --> statement-breakpoint
-CREATE FUNCTION finance_transactions_contextual_generation() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION finance_transactions_contextual_generation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.contextual_revision <> 1 THEN RAISE EXCEPTION 'Contextual generation must start at one' USING ERRCODE='23514'; END IF;
@@ -36,7 +36,7 @@ CREATE TRIGGER finance_transactions_contextual_generation BEFORE INSERT OR UPDAT
 --> statement-breakpoint
 ALTER TABLE finance_review_cases ADD COLUMN contextual_revision bigint NOT NULL DEFAULT 1 CONSTRAINT finance_review_cases_contextual_revision_check CHECK(contextual_revision > 0);
 --> statement-breakpoint
-CREATE FUNCTION finance_review_cases_contextual_generation() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION finance_review_cases_contextual_generation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.contextual_revision <> 1 THEN RAISE EXCEPTION 'Contextual generation must start at one' USING ERRCODE='23514'; END IF;
@@ -110,14 +110,14 @@ CREATE TABLE finance_contextual_answers (
 CREATE UNIQUE INDEX finance_contextual_answers_operation_unique ON finance_contextual_answers(user_id,operation_id);
 CREATE UNIQUE INDEX finance_contextual_answers_revision_unique ON finance_contextual_answers(user_id,question_id,answered_work_revision);
 --> statement-breakpoint
-CREATE FUNCTION finance_contextual_answers_reject_update() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION finance_contextual_answers_reject_update() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
   RAISE EXCEPTION 'Contextual answers are immutable' USING ERRCODE='23514';
 END;
 $$;
 CREATE TRIGGER finance_contextual_answers_immutable BEFORE UPDATE ON finance_contextual_answers FOR EACH ROW EXECUTE FUNCTION finance_contextual_answers_reject_update();
 --> statement-breakpoint
-CREATE FUNCTION finance_contextual_questions_guard_update() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION finance_contextual_questions_guard_update() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
   IF ROW(NEW.id,NEW.user_id,NEW.subtype,NEW.review_case_id,NEW.transaction_id,NEW.account_id,NEW.account_revision,NEW.transaction_revision,NEW.review_revision,NEW.dependency_adapter_version,NEW.prompt,NEW.disclosure,NEW.merchant,NEW.transaction_date,NEW.amount_cents,NEW.currency_code,NEW.created_at)
     IS DISTINCT FROM ROW(OLD.id,OLD.user_id,OLD.subtype,OLD.review_case_id,OLD.transaction_id,OLD.account_id,OLD.account_revision,OLD.transaction_revision,OLD.review_revision,OLD.dependency_adapter_version,OLD.prompt,OLD.disclosure,OLD.merchant,OLD.transaction_date,OLD.amount_cents,OLD.currency_code,OLD.created_at) THEN

@@ -139,6 +139,18 @@ describe.sequential("real contextual question producer", () => {
         .where(eq(financeContextualAnswers.operationId, answer.operationId)),
     ).toEqual([]);
   });
+  it("resolves current work to the exact contextual question", async () => {
+    const f = await questionFixture();
+    expect(
+      await database.db.transaction((tx) => f.service.resolveWork(f.userId, f.question.work, tx)),
+    ).toMatchObject({
+      state: "current",
+      value: {
+        work: f.question.work,
+        destination: `/finances/review?contextualQuestion=${encodeURIComponent(f.question.work.id)}`,
+      },
+    });
+  });
   it("rejects unsupported source without a receipt and detects parent ABA at the same timestamp", async () => {
     const input = await fixture();
     const api = createFinanceContextualQuestionService({ db: database.db });

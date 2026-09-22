@@ -147,6 +147,34 @@ describe("notification policy", () => {
 });
 
 describe("notification resolver contract", () => {
+  it("accepts only a contextual destination bound to the exact question", () => {
+    const destination = `/finances/review?contextualQuestion=${encodeURIComponent(work.work.id)}`;
+    const value = { ...work, destination };
+    expect(validateNotificationResolution(work.work, { state: "current", value })).toEqual({
+      state: "current",
+      value,
+    });
+    for (const destination of [
+      "/finances/review?contextualQuestion=22222222-2222-4222-8222-222222222222",
+      "/finances/review?contextualQuestion=not-a-uuid",
+      `${value.destination}&redirect=https://evil.test`,
+      `https://evil.test${value.destination}`,
+    ]) {
+      expect(
+        validateNotificationResolution(work.work, {
+          state: "current",
+          value: { ...value, destination },
+        }),
+      ).toEqual({ state: "unavailable" });
+    }
+    const otherKind = { ...work.work, kind: "repair" as const };
+    expect(
+      validateNotificationResolution(otherKind, {
+        state: "current",
+        value: { ...value, work: otherKind },
+      }),
+    ).toEqual({ state: "unavailable" });
+  });
   it("rejects malformed, foreign, mismatched and inactive work without exposing context", () => {
     expect(validateNotificationResolution(work.work, { state: "current", value: work })).toEqual({
       state: "current",

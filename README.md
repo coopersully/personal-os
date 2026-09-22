@@ -1,5 +1,9 @@
 # nohmi
 
+Agents: start with [AGENTS.md](AGENTS.md) and the
+[product decision guide](docs/engineering/agent-context.md). Development-network assignments use
+the [role and merge contract](docs/engineering/autonomous-development.md).
+
 > **Status:** invite-only hosted beta. nohmi is self-hostable under the
 > [GNU Affero General Public License v3.0](LICENSE); commercial licensing and
 > trademark terms are available in [COMMERCIAL.md](COMMERCIAL.md) and

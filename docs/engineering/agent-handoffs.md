@@ -14,7 +14,7 @@ dispatch or resume; never reinterpret an untyped ID by guessing. A packet has:
 | Field | Required content |
 | --- | --- |
 | `schema_version`, `dispatch_id`, `packet_revision` | Format version `2`, stable identity, monotonically increasing packet revision |
-| `parent`, `role`, `report_to` | Parent outcome, exact role, reporting endpoint with kind (`task` or `subagent`), host, parent task ID, and destination ID |
+| `parent`, `role`, `report_to` | Parent outcome, exact delivery role or `nohmi-independent-reviewer` for a reviewer dispatch, reporting endpoint with kind (`task` or `subagent`), host, parent task ID, and destination ID |
 | `executor` | Kind (`task` or `subagent`), host, parent task ID, ready task ID or agent ID when known; queued client ID kept separately; standalone-worker reason when applicable |
 | `issue`, `eligibility` | Live Nohmi issue identity, queue scope, state and scope observation time |
 | `outcome`, `non_goals`, `acceptance` | Observable behavior and criteria keyed by acceptance ID |
@@ -30,6 +30,10 @@ evidence makes the packet non-dispatchable. A queued task may initially have no 
 cannot receive a follow-up requiring a ready ID until resolved. IDs are typed: a subagent handle is
 scoped to its host/parent and cannot be used with task APIs. A newly reserved executor may have a
 null ID; its reporting endpoint must already be known and reachable before dispatch.
+
+An independent reviewer packet uses `role: nohmi-independent-reviewer`. This auxiliary assignment
+grants only read-only inspection and reporting of findings; it grants no implementation, file-write,
+PR-mutation, or merge authority. The orchestrator retains acceptance and merge ownership.
 
 Link the narrowest relevant context. Do not paste the parent conversation, research archive, or
 every project doc into a child prompt. Include settled constraints and their reasons so the worker

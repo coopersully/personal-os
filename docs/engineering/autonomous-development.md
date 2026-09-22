@@ -16,6 +16,11 @@ runtime work; it is background for maintainers, not required context for every w
 | Orchestrator | One outcome, workstream decomposition, path ownership, dependency order, independent acceptance review, PR gates, final merge | All code, tests, migrations, CI/config fixes, rebases, and conflict resolution to workers |
 | Implementation worker | One bounded workstream, implementation plan, code and docs, tests, self-review, PR creation, review responses and fixes | Merge decisions to its orchestrator |
 
+Independent reviewers are auxiliary read-only subagents, not a fourth delivery role. Their dispatch
+packets use `role: nohmi-independent-reviewer`; they inspect and report findings without
+implementation, file-write, PR-mutation, or merge authority. The orchestrator retains acceptance
+and merge ownership.
+
 The head and orchestrator never implement code or make fixes, including one-line fixes, test edits,
 workflow changes, conflict resolution, or commits to repair a worker branch. They may inspect code,
 run read-only checks, maintain planning records, and update coordination metadata. A correction to

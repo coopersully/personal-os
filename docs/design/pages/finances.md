@@ -54,6 +54,20 @@ failed request, or pending request keeps an explicit recovery state. Proposals
 remain visible before approval; a category-only budget view is not a substitute
 for the complete plan shared with MCP.
 
+## Transaction context questions
+
+For a known manual account, an unresolved, posted, uncategorized expense or income transaction
+may expose **Add context** beside its transaction actions. The server checks full eligibility.
+Creation opens the exact `?contextualQuestion=` destination, which reads the current typed
+question rather than substituting the next Inbox item. A missing or foreign question is unavailable.
+
+Show the source merchant, date and amount, one persistent prompt label and freeform answer field.
+Save the server's exact work/action reference and retain the operation key for retries of the same
+answer. Disable editing while saving. Loading, read failure, unavailable and stale states are explicit;
+stale questions have no answer form. Confirmation says **Context saved. The financial review remains
+open.** Source links connect the transaction and distinct financial case. No saved answer implies a
+category change, bookkeeping result or scheduled maintenance.
+
 ## Canonical Review contract
 
 Overview includes one compact outstanding list from the canonical Inbox, including

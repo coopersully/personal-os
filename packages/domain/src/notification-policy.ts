@@ -37,9 +37,20 @@ export const notificationWorkSchema = z
     disclosure: notificationDetailSchema,
     context: z.string().trim().min(1).max(120).nullable(),
     occurredAt: isoDateTimeSchema.nullable(),
-    destination: z.literal("/settings?section=reviews"),
+    destination: z.union([
+      z.literal("/settings?section=reviews"),
+      z.templateLiteral(["/finances/review?contextualQuestion=", z.uuid()]),
+    ]),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.destination === "/settings?section=reviews" ||
+      (value.work.kind === "question" &&
+        value.destination ===
+          `/finances/review?contextualQuestion=${encodeURIComponent(value.work.id)}`),
+    { message: "Contextual destinations must match the exact question.", path: ["destination"] },
+  );
 export type NotificationWork = z.infer<typeof notificationWorkSchema>;
 export const publishNotificationInputSchema = z
   .object({

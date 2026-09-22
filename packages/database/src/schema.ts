@@ -2312,6 +2312,7 @@ export const executionPolicySettings = pgTable(
 export const financeAccounts = pgTable(
   "finance_accounts",
   {
+    contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2367,6 +2368,8 @@ export const financeAccounts = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_accounts_contextual_owner_unique").on(table.userId, table.id),
+    check("finance_accounts_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     index("finance_accounts_user_idx").on(table.userId),
     index("finance_accounts_provider_item_record_id_idx").on(table.providerItemRecordId),
     index("finance_accounts_sync_claim_idx")
@@ -2578,6 +2581,7 @@ export const financeMerchantAliases = pgTable(
 export const financeTransactions = pgTable(
   "finance_transactions",
   {
+    contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2616,6 +2620,12 @@ export const financeTransactions = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_transactions_contextual_parent_unique").on(
+      table.userId,
+      table.id,
+      table.accountId,
+    ),
+    check("finance_transactions_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     uniqueIndex("finance_transactions_id_user_id_unique").on(table.id, table.userId),
     index("finance_transactions_user_date_idx").on(table.userId, table.transactionDate),
     index("finance_transactions_review_idx").on(table.userId, table.needsReview),
@@ -2912,6 +2922,7 @@ export const financeClassificationDecisions = pgTable(
 export const financeReviewCases = pgTable(
   "finance_review_cases",
   {
+    contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2975,6 +2986,12 @@ export const financeReviewCases = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_review_cases_contextual_parent_unique").on(
+      table.userId,
+      table.id,
+      table.transactionId,
+    ),
+    check("finance_review_cases_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     index("finance_review_cases_user_status_idx").on(table.userId, table.status),
     uniqueIndex("finance_review_cases_active_stable_key_unique")
       .on(table.userId, table.stableKey)
@@ -4451,6 +4468,132 @@ export const financeBudgetPeriodBaselines = pgTable(
     uniqueIndex("finance_budget_period_baselines_user_month_idx").on(
       table.userId,
       table.periodMonth,
+    ),
+  ],
+);
+
+/** One explicit human-created purpose question; answering never settles its financial case. */
+export const financeContextualQuestions = pgTable(
+  "finance_contextual_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subtype: text("subtype").$type<"manual_transaction_purpose_v1">().notNull(),
+    reviewCaseId: uuid("review_case_id").notNull(),
+    transactionId: uuid("transaction_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    workRevision: bigint("work_revision", { mode: "bigint" }).notNull().default(1n),
+    actionRevision: bigint("action_revision", { mode: "bigint" }).notNull().default(1n),
+    accountRevision: bigint("account_revision", { mode: "bigint" }).notNull(),
+    transactionRevision: bigint("transaction_revision", { mode: "bigint" }).notNull(),
+    reviewRevision: bigint("review_revision", { mode: "bigint" }).notNull(),
+    dependencyAdapterVersion: integer("dependency_adapter_version").notNull().default(1),
+    state: text("state").$type<"open" | "answered" | "invalidated">().notNull().default("open"),
+    prompt: text("prompt").notNull(),
+    disclosure: text("disclosure").$type<"minimal">().notNull().default("minimal"),
+    merchant: text("merchant").notNull(),
+    transactionDate: text("transaction_date").notNull(),
+    amount: integer("amount_cents").notNull(),
+    currencyCode: text("currency_code"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_contextual_questions_owner_unique").on(table.userId, table.id),
+    uniqueIndex("finance_contextual_questions_case_unique").on(
+      table.userId,
+      table.reviewCaseId,
+      table.subtype,
+    ),
+    uniqueIndex("finance_contextual_questions_transaction_unique").on(
+      table.userId,
+      table.transactionId,
+      table.subtype,
+    ),
+    foreignKey({
+      name: "finance_contextual_questions_case_fk",
+      columns: [table.userId, table.reviewCaseId, table.transactionId],
+      foreignColumns: [
+        financeReviewCases.userId,
+        financeReviewCases.id,
+        financeReviewCases.transactionId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_contextual_questions_transaction_fk",
+      columns: [table.userId, table.transactionId, table.accountId],
+      foreignColumns: [
+        financeTransactions.userId,
+        financeTransactions.id,
+        financeTransactions.accountId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_contextual_questions_account_fk",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_contextual_questions_subtype_check",
+      sql`${table.subtype} = 'manual_transaction_purpose_v1'`,
+    ),
+    check(
+      "finance_contextual_questions_revisions_check",
+      sql`${table.workRevision} > 0 AND ${table.actionRevision} > 0 AND ${table.accountRevision} > 0 AND ${table.transactionRevision} > 0 AND ${table.reviewRevision} > 0 AND ${table.dependencyAdapterVersion} = 1`,
+    ),
+    check(
+      "finance_contextual_questions_state_check",
+      sql`${table.state} IN ('open','answered','invalidated')`,
+    ),
+    check(
+      "finance_contextual_questions_presentation_check",
+      sql`char_length(${table.prompt}) BETWEEN 1 AND 1000 AND ${table.prompt}=btrim(${table.prompt}) AND ${table.disclosure}='minimal' AND char_length(${table.merchant}) BETWEEN 1 AND 1000 AND ${table.transactionDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND (${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$')`,
+    ),
+  ],
+);
+
+export const financeContextualAnswers = pgTable(
+  "finance_contextual_answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
+    operationId: uuid("operation_id").notNull(),
+    answeredWorkRevision: bigint("answered_work_revision", { mode: "bigint" }).notNull(),
+    answeredActionRevision: bigint("answered_action_revision", { mode: "bigint" }).notNull(),
+    resultingWorkRevision: bigint("resulting_work_revision", { mode: "bigint" }).notNull(),
+    text: text("text").notNull(),
+    sourceKind: text("source_kind").$type<"app" | "agent">().notNull(),
+    sourceMessageId: text("source_message_id"),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    actorId: text("actor_id").notNull(),
+    requestId: text("request_id").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_contextual_answers_operation_unique").on(table.userId, table.operationId),
+    uniqueIndex("finance_contextual_answers_revision_unique").on(
+      table.userId,
+      table.questionId,
+      table.answeredWorkRevision,
+    ),
+    foreignKey({
+      name: "finance_contextual_answers_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [financeContextualQuestions.userId, financeContextualQuestions.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_contextual_answers_revisions_check",
+      sql`${table.answeredWorkRevision} > 0 AND ${table.answeredActionRevision} > 0 AND ${table.resultingWorkRevision}::numeric = ${table.answeredWorkRevision}::numeric + 1`,
+    ),
+    check(
+      "finance_contextual_answers_text_check",
+      sql`char_length(${table.text}) BETWEEN 1 AND 10000 AND ${table.text}=btrim(${table.text})`,
+    ),
+    check(
+      "finance_contextual_answers_provenance_check",
+      sql`((${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent')) AND ${table.sourceMessageId} IS NULL AND char_length(${table.actorId}) BETWEEN 1 AND 240 AND char_length(${table.requestId}) BETWEEN 1 AND 240`,
     ),
   ],
 );

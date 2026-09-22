@@ -190,6 +190,9 @@ investment analysis, auditing, and coaching without claiming professional creden
   meaningful: overspending can threaten obligations, while persistent underspending can indicate
   that a stated goal, need, or quality-of-life priority is not actually being served.
 - Visible data freshness, missing evidence, connector failures, material risks, and review state.
+- Transaction context questions identify exact work and retain immutable answers. Saving context
+  completes the question while leaving the financial decision open. Context questions may coexist
+  with other financial cases; source links keep those separate decisions understandable.
 
 ### Agent interface
 

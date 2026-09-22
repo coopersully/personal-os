@@ -23,6 +23,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { asc, eq } from "drizzle-orm";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { AppError } from "./errors.js";
+import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -877,8 +878,13 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(await finances.listReviewQueue(owner.id, 1, caseId)).toEqual([]);
     expect(await actionService.listQuestions(owner.id, 1, questionId)).toEqual([]);
   });
-  it("keeps Finance cases visible and marks counts unknown when action or repair reads fail", async () => {
-    for (const key of ["financeActions", "financeAccounts", "financeEffects"] as const) {
+  it("keeps Finance cases visible and marks counts unknown when a review source fails", async () => {
+    for (const key of [
+      "financeActions",
+      "financeAccounts",
+      "financeContextual",
+      "financeEffects",
+    ] as const) {
       const service = createAgentAccessWorkItemService({
         db: database.db,
         now: () => snapshot,
@@ -979,5 +985,78 @@ describe.sequential("Agent Access work-item projection", () => {
     );
     expect(page.filteredTotal).toBe(2);
     expect(page.summary.byDomain.finances).toBe(2);
+  });
+
+  it("registers current contextual Finance questions in unified Reviews", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Contextual Reviews",
+        email: "contextual-reviews@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing contextual Reviews owner");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Manual",
+        name: "Wallet",
+        provider: "manual",
+        status: "manual",
+        userId: owner.id,
+      })
+      .returning();
+    if (!account) throw new Error("Missing contextual Reviews account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 1800,
+        direction: "expense",
+        merchant: "Corner Market",
+        transactionDate: "2026-08-11",
+        userId: owner.id,
+      })
+      .returning();
+    if (!transaction) throw new Error("Missing contextual Reviews transaction");
+    const actor = {
+      actorId: owner.id,
+      actorType: "user" as const,
+      scopes: humanScopes,
+      userId: owner.id,
+    };
+    const contextualQuestions = createFinanceContextualQuestionService({
+      db: database.db,
+      now: () => new Date("2026-08-11T17:00:00.000Z"),
+    });
+    const created = await contextualQuestions.createQuestion(
+      transaction.id,
+      { operationId: crypto.randomUUID() },
+      { principal: actor, requestId: "contextual-reviews" },
+    );
+    if (created.state !== "available") throw new Error("Contextual question was unavailable");
+
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "contextual-reviews-signing-key",
+      db: database.db,
+      now: () => snapshot,
+    });
+    const page = await service.list(
+      actor,
+      { domain: "finances", kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(page.items).toContainEqual(
+      expect.objectContaining({
+        action: {
+          label: "Answer question",
+          to: `/finances/review?contextualQuestion=${created.question.id}`,
+        },
+        id: `finance-contextual:${created.question.id}`,
+        kind: "review",
+        priority: "person_review",
+      }),
+    );
   });
 });

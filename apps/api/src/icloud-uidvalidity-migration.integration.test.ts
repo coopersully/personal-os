@@ -80,6 +80,7 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0086_notification_foundation",
         "0087_finance_budget_policy_management",
         "0088_finance_budget_policy_nonempty_text",
+        "0089_finance_contextual_questions",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);

@@ -95,6 +95,7 @@ import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import { AddTransactionContext } from "./contextual-question.js";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
 
@@ -596,6 +597,13 @@ export function FinancesPage() {
               ) : null}
               {section === "transactions" ? (
                 <FinanceTransactionsTable
+                  manualAccountIds={
+                    overview.data?.accounts
+                      .filter(
+                        (account) => account.provider === "manual" && account.status === "manual",
+                      )
+                      .map((account) => account.id) ?? []
+                  }
                   hasPreviousPage={transactionCursorHistory.length > 0}
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
@@ -2340,6 +2348,7 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 }
 
 function FinanceTransactionsTable({
+  manualAccountIds,
   hasPreviousPage,
   isCategorizing,
   isLoading,
@@ -2352,6 +2361,7 @@ function FinanceTransactionsTable({
   sort,
   transactions,
 }: {
+  manualAccountIds: string[];
   hasPreviousPage: boolean;
   isCategorizing: boolean;
   isLoading: boolean;
@@ -2536,6 +2546,7 @@ function FinanceTransactionsTable({
                       colSpan={row.getVisibleCells().length}
                     >
                       <TransactionDetails
+                        canAddContext={manualAccountIds.includes(row.original.accountId)}
                         isCategorizing={isCategorizing}
                         onBreakdown={onBreakdown}
                         onCategorize={onCategorize}
@@ -2619,11 +2630,13 @@ function transactionTableColumnClass(columnId: string) {
 }
 
 export function TransactionDetails({
+  canAddContext = false,
   isCategorizing,
   onBreakdown,
   onCategorize,
   transaction,
 }: {
+  canAddContext?: boolean;
   isCategorizing: boolean;
   onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
@@ -2646,6 +2659,14 @@ export function TransactionDetails({
         <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
           Split purchase
         </ShadcnButton>
+        {canAddContext &&
+        transaction.needsReview &&
+        !transaction.pending &&
+        !transaction.categoryId &&
+        !transaction.category &&
+        (transaction.direction === "expense" || transaction.direction === "income") ? (
+          <AddTransactionContext key={transaction.id} transactionId={transaction.id} />
+        ) : null}
         {transaction.needsReview ? (
           <ShadcnButton
             disabled={isCategorizing}

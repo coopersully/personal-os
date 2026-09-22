@@ -22,6 +22,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FinanceContextualQuestionPage } from "./contextual-question.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
 import { savedClarification } from "./review-note.js";
@@ -104,6 +105,15 @@ function TransactionEvidence({ id }: { id: string }) {
 }
 
 export function FinanceReviewPage() {
+  const [search] = useSearchParams();
+  const contextualQuestion = search.get("contextualQuestion");
+  return contextualQuestion ? (
+    <FinanceContextualQuestionPage key={contextualQuestion} id={contextualQuestion} />
+  ) : (
+    <FinanceInboxReviewPage />
+  );
+}
+function FinanceInboxReviewPage() {
   const queryClient = useQueryClient();
   const inbox = useQuery({
     queryKey: inboxKey,

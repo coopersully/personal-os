@@ -67,6 +67,17 @@ type IdempotentOperation = {
 };
 export type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
+export type FinanceAdmittedMutationOperation = {
+  idempotencyKey: string;
+  operation: string;
+  payload: unknown;
+  sourceKind: "agent" | "app";
+};
+
+export type FinanceMutationAdmission<TPrepared, TResult extends Record<string, unknown>> =
+  | { prepared: TPrepared; state: "admitted" }
+  | { result: TResult; state: "unavailable" };
+
 async function admitFinanceUser(tx: FinanceTransaction, userId: string): Promise<boolean> {
   const [owner] = await tx
     .select({ id: users.id })
@@ -95,6 +106,23 @@ function requestHash(operation: IdempotentOperation): string {
     .digest("hex")}`;
 }
 
+function admittedRequestHash(
+  context: FinanceMutationContext,
+  operation: FinanceAdmittedMutationOperation,
+): string {
+  return `sha256:${createHash("sha256")
+    .update(
+      stableJson({
+        actorId: context.actorId,
+        actorType: context.actorType,
+        operation: operation.operation,
+        payload: operation.payload,
+        sourceKind: operation.sourceKind,
+      }),
+    )
+    .digest("hex")}`;
+}
+
 function assertMatchingMutation(
   record: typeof financeMutationRecords.$inferSelect,
   operation: IdempotentOperation,
@@ -106,6 +134,88 @@ function assertMatchingMutation(
       "That idempotency key was already used for different Finance work.",
     );
   }
+}
+
+/**
+ * Runs a newly admitted Finance mutation inside a transaction owned by its caller.
+ * Preparation happens before the receipt is inserted so unsupported or contended
+ * work can leave no durable idempotency claim.
+ */
+export async function executeFinanceAdmittedMutation<
+  TPrepared,
+  TResult extends Record<string, unknown>,
+>(
+  executor: FinanceTransaction,
+  context: FinanceMutationContext,
+  operation: FinanceAdmittedMutationOperation,
+  prepare: (tx: FinanceTransaction) => Promise<FinanceMutationAdmission<TPrepared, TResult>>,
+  mutate: (tx: FinanceTransaction, prepared: TPrepared) => Promise<TResult>,
+): Promise<TResult> {
+  requireFinanceMutation(context);
+  if (!(await admitFinanceUser(executor, context.userId))) {
+    throw new AppError("not_found", "Account not found.");
+  }
+  const hash = admittedRequestHash(context, operation);
+  const lockIdentity = `finance-mutation:${context.userId}:${operation.idempotencyKey}`;
+  const whereKey = and(
+    eq(financeMutationRecords.userId, context.userId),
+    eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
+  );
+  await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
+  const existing = await executor.query.financeMutationRecords.findFirst({ where: whereKey });
+  if (existing) {
+    if (
+      existing.operation !== operation.operation ||
+      existing.requestHash !== hash ||
+      existing.actorType !== context.actorType ||
+      existing.actorId !== context.actorId
+    ) {
+      throw new AppError(
+        "invalid_request",
+        "That idempotency key was already used for different Finance work.",
+      );
+    }
+    if (existing.status === "completed" && existing.response) {
+      return existing.response as TResult;
+    }
+    if (existing.status === "failed") {
+      throw new AppError(
+        "conflict",
+        "That Finance mutation previously failed; use a new idempotency key to retry.",
+      );
+    }
+    throw new AppError("conflict", "That Finance mutation is already in progress.");
+  }
+
+  const admission = await prepare(executor);
+  if (admission.state === "unavailable") return admission.result;
+  const [record] = await executor
+    .insert(financeMutationRecords)
+    .values({
+      actorId: context.actorId,
+      actorType: context.actorType,
+      idempotencyKey: operation.idempotencyKey,
+      operation: operation.operation,
+      requestHash: hash,
+      status: "started",
+      userId: context.userId,
+    })
+    .returning({ id: financeMutationRecords.id });
+  /* v8 ignore start -- PostgreSQL INSERT ... RETURNING yields the inserted row or throws. */
+  if (!record) throw new AppError("internal_error", "Finance mutation state was not created.");
+  /* v8 ignore stop */
+  const response = await mutate(executor, admission.prepared);
+  await executor
+    .update(financeMutationRecords)
+    .set({
+      completedAt: new Date(),
+      leaseExpiresAt: null,
+      response,
+      status: "completed",
+      updatedAt: new Date(),
+    })
+    .where(eq(financeMutationRecords.id, record.id));
+  return response;
 }
 
 export async function executeFinanceIdempotently<T extends Record<string, unknown>>(

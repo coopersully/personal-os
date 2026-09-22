@@ -23,7 +23,11 @@ describe.sequential("budget policy management migration", () => {
       folder,
       "nohmi-budget-policy-",
       existsSync(resolve(folder, "0087_finance_budget_policy_management.sql"))
-        ? ["0087_finance_budget_policy_management", "0088_finance_budget_policy_nonempty_text"]
+        ? [
+            "0087_finance_budget_policy_management",
+            "0088_finance_budget_policy_nonempty_text",
+            "0089_finance_contextual_questions",
+          ]
         : [],
     );
     try {

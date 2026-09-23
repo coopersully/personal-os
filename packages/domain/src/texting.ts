@@ -73,13 +73,18 @@ export function parseTextReply(
     const answer = exact[0];
     if (answer) {
       if (answer.length > 10_000) return { state: "unavailable", reason: "unsupported" };
-      const selector = /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(canonical);
-      const selectedAnswer =
-        selector && Number(selector[1]) === only.itemNumber
-          ? only.answerVocabulary?.find(
-              (word) => word.toLowerCase() === selector[2]?.trim().toLowerCase(),
-            )
-          : undefined;
+      const first = canonical.charCodeAt(0);
+      const separator = canonical[1];
+      const selectedText =
+        first >= 48 &&
+        first <= 57 &&
+        first - 48 === only.itemNumber &&
+        (separator === ":" || (separator !== undefined && /\s/u.test(separator)))
+          ? canonical.slice(2).trim()
+          : null;
+      const selectedAnswer = selectedText
+        ? only.answerVocabulary?.find((word) => word.toLowerCase() === selectedText.toLowerCase())
+        : undefined;
       if (selectedAnswer && selectedAnswer !== answer)
         return { state: "unavailable", reason: "ambiguous" };
       return { state: "matched", choices: [{ bindingId: only.id, answer }] };

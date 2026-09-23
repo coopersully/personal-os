@@ -225,4 +225,19 @@ describe("texting contracts", () => {
       reason: "unsupported",
     });
   }, 2_000);
+
+  it("handles long whitespace after a numeric prefix without backtracking", () => {
+    const answer = `0 ${"\t".repeat(9_000)}x`;
+    expect(
+      parseTextReply(answer, [
+        { id: "a", itemNumber: 1, answerMode: "choices", answerVocabulary: [answer] },
+      ]),
+    ).toEqual({ state: "matched", choices: [{ bindingId: "a", answer }] });
+    const selected = `1 ${"\t".repeat(9_000)}x`;
+    expect(
+      parseTextReply(selected, [
+        { id: "a", itemNumber: 1, answerMode: "choices", answerVocabulary: [selected, "x"] },
+      ]),
+    ).toEqual({ state: "unavailable", reason: "ambiguous" });
+  }, 2_000);
 });

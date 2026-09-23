@@ -589,6 +589,72 @@ describe.sequential("signed SMS child admission", () => {
     });
   });
 
+  it("clarifies an ambiguous multi-item reply without attaching either child", async () => {
+    const f = await fixture("yes");
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const bindings = await database.db.transaction((tx) =>
+      createTextReplyBindings(
+        tx,
+        f.userId,
+        f.connection,
+        f.outbound.id,
+        [1, 2].map((itemNumber) => ({
+          outboundMessageId: f.outbound.id,
+          itemNumber,
+          answerMode: "choices" as const,
+          answerVocabulary: ["yes", "no"],
+          operationId: randomUUID(),
+          expiresAt,
+          work: {
+            domain: "finances" as const,
+            kind: "question" as const,
+            id: randomUUID(),
+            revision: "1",
+            actionRevision: "1",
+          },
+        })),
+      ),
+    );
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    for (const binding of bindings) {
+      const [row] = await database.db
+        .select()
+        .from(textReplyBindings)
+        .where(eq(textReplyBindings.id, binding.id));
+      expect(row?.state).toBe("open");
+      expect(row?.inboundClaimId).toBeNull();
+    }
+  });
+
+  it("requires a signed claim and an open outbound work item before parsing", async () => {
+    const f = await fixture("Purpose");
+    const [unclaimed] = await database.db
+      .insert(textMessages)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        body: "Purpose",
+        direction: "inbound",
+        status: "delivered",
+        occurredAt: new Date(),
+        occurredAtSource: "provider",
+        providerMessageSid: randomUUID(),
+      })
+      .returning();
+    if (!unclaimed) throw new Error("Missing inbound fixture");
+    expect(await bindInboundReply(database.db, f.userId, unclaimed.id)).toEqual({
+      state: "unavailable",
+      reason: "missing",
+    });
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+  });
+
   it("binds two distinct canonical answers to one signed inbound and consumes each once", async () => {
     const f = await fixture();
     const operations = [randomUUID(), randomUUID()];

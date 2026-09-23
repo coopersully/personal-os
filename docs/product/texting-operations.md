@@ -380,6 +380,29 @@ transaction. Finance's eventual accepted provenance retains only local UUIDs wit
 no Texting foreign key, so disconnect or later Texting cleanup cannot erase an accepted Finance
 answer; the intentionally submitted Finance answer text remains a Finance record.
 
+## T2 exact Finance reply recovery and status foundation
+
+The composed recovery service can inspect one signed inbound claim and its numbered Finance
+children by the exact owner and inbound-message UUID. The read-only
+`GET /v1/texting/finance-replies/:inboundMessageId/status` and
+`get_texting_finance_reply_status` MCP tool require both `texting:read` and `finances:read`;
+missing and other-owner claims have the same not-found response. Status inspects the exact Finance
+receipt but does not execute Finance, bind a reply, or transition a Texting child. Its finite
+per-child `accepted`, `waiting`, `uncertain`, `blocked`, and `unavailable` states distinguish
+verified success from unresolved siblings. Public reasons are redacted: a terminal non-accepted
+answer with an unrecognized private reason is `answer_not_applied`, while an unknown nonterminal
+reason remains `processing_uncertain`. The response omits answer text, operation and binding UUIDs,
+provider IDs, phone data, and raw Finance outcomes; its only destination is the ordinary
+`/settings?section=reviews` page.
+
+An internal, owner-scoped `runPage` reconciles bounded unfinished claims and exact Finance receipts
+before any same-key retry or Texting projection. It preserves accepted siblings independently,
+does not re-execute incomplete Finance receipts, and can invoke the unattached-open-binding expiry
+sweep. Composition does not schedule or call that pass: there is no public recovery POST, agent
+write trigger or trigger audit, host continuation, provider activation, or general Texting inbox.
+This foundation adds no 0093 recovery marker and does not settle the clarification/resend design
+for permanently missing provider creation time. It is not the complete Finance SMS conversation.
+
 ## T0 notification implementation boundary
 
 The T0 notification slice adds owner-scoped notification preferences, durable work intents, and

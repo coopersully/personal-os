@@ -116,5 +116,15 @@ describe("texting contracts", () => {
       reason: "ambiguous",
     });
     expect(parseTextReply("3 yes", choices)).toEqual({ state: "unavailable", reason: "ambiguous" });
+    const remaining = choices[1];
+    if (!remaining) throw new Error("Missing second choice fixture");
+    expect(parseTextReply("2: yes", [remaining])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "yes" }],
+    });
+    expect(parseTextReply("1: yes", [remaining])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
   });
 });

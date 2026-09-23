@@ -88,6 +88,8 @@ describe("database schema contracts", () => {
     expect(migration).toContain("FOREIGN KEY (user_id, inbound_claim_id, connection_id)");
     expect(migration).toContain("FOREIGN KEY (user_id, outbound_message_id, connection_id)");
     expect(migration).toContain("answer_mode = 'free_text' AND answer_vocabulary IS NULL");
+    expect(migration).toContain("state IN ('open','expired','pending','waiting','uncertain'");
+    expect(migration).toContain("NEW.state = 'expired' AND CURRENT_TIMESTAMP >= OLD.expires_at");
     expect(migration).not.toMatch(
       /REFERENCES (?:text_messages|text_inbound_claims)\([^;]+?ON DELETE CASCADE/iu,
     );

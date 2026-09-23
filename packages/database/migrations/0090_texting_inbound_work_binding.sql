@@ -40,11 +40,11 @@ CREATE TABLE text_reply_bindings (
   CONSTRAINT text_reply_bindings_outbound_fk FOREIGN KEY (user_id, outbound_message_id, connection_id) REFERENCES text_messages(user_id, id, connection_id) DEFERRABLE INITIALLY DEFERRED,
   CONSTRAINT text_reply_bindings_claim_fk FOREIGN KEY (user_id, inbound_claim_id, connection_id) REFERENCES text_inbound_claims(user_id, id, connection_id) DEFERRABLE INITIALLY DEFERRED,
   CONSTRAINT text_reply_bindings_work_check CHECK (work_kind IN ('question','approval','repair') AND length(work_revision) BETWEEN 1 AND 200 AND length(action_revision) BETWEEN 1 AND 200),
-  CONSTRAINT text_reply_bindings_state_check CHECK (state IN ('open','pending','waiting','uncertain','accepted','blocked','unavailable')),
+  CONSTRAINT text_reply_bindings_state_check CHECK (state IN ('open','expired','pending','waiting','uncertain','accepted','blocked','unavailable')),
   CONSTRAINT text_reply_bindings_mode_check CHECK ((answer_mode = 'choices' AND answer_vocabulary IS NOT NULL) OR (answer_mode = 'free_text' AND answer_vocabulary IS NULL)),
   CONSTRAINT text_reply_bindings_attachment_check CHECK (
-    (state = 'open' AND inbound_claim_id IS NULL AND canonical_answer IS NULL AND result_revision IS NULL AND reason_code IS NULL)
-    OR (state <> 'open' AND inbound_claim_id IS NOT NULL AND canonical_answer IS NOT NULL)
+    (state IN ('open','expired') AND inbound_claim_id IS NULL AND canonical_answer IS NULL AND result_revision IS NULL AND reason_code IS NULL)
+    OR (state NOT IN ('open','expired') AND inbound_claim_id IS NOT NULL AND canonical_answer IS NOT NULL)
   ),
   CONSTRAINT text_reply_bindings_vocabulary_check CHECK (
     CASE WHEN answer_vocabulary IS NULL THEN answer_mode = 'free_text'
@@ -87,9 +87,12 @@ BEGIN
          OLD.answer_mode, OLD.answer_vocabulary, OLD.expires_at, OLD.operation_id, OLD.created_at) THEN
     RAISE EXCEPTION 'Reply binding evidence is immutable' USING ERRCODE='23514';
   END IF;
-  IF OLD.state IN ('accepted','blocked','unavailable')
-     OR (OLD.state = 'open' AND (NEW.state <> 'pending' OR NEW.inbound_claim_id IS NULL OR NEW.canonical_answer IS NULL))
-     OR (OLD.state <> 'open' AND (NEW.inbound_claim_id IS DISTINCT FROM OLD.inbound_claim_id
+  IF OLD.state IN ('expired','accepted','blocked','unavailable')
+     OR (OLD.state = 'open' AND NOT (
+           (NEW.state = 'pending' AND NEW.inbound_claim_id IS NOT NULL AND NEW.canonical_answer IS NOT NULL)
+           OR (NEW.state = 'expired' AND CURRENT_TIMESTAMP >= OLD.expires_at
+               AND NEW.inbound_claim_id IS NULL AND NEW.canonical_answer IS NULL)))
+     OR (OLD.state NOT IN ('open','expired') AND (NEW.inbound_claim_id IS DISTINCT FROM OLD.inbound_claim_id
          OR NEW.canonical_answer IS DISTINCT FROM OLD.canonical_answer))
      OR (OLD.state = 'pending' AND NEW.state NOT IN ('waiting','uncertain','accepted','blocked','unavailable'))
      OR (OLD.state IN ('waiting','uncertain') AND NEW.state NOT IN ('pending','waiting','uncertain','accepted','blocked','unavailable')) THEN

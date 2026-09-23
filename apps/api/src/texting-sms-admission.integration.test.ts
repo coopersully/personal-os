@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  type Database,
   type DatabaseClient,
   migrateDatabase,
   textInboundClaims,
@@ -15,12 +16,21 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq, sql } from "drizzle-orm";
 import { encryptJson } from "./security.js";
 import {
-  bindInboundReply,
+  bindInboundReply as bindInboundReplyWithPolicy,
   createTextReplyBindings,
+  expireOpenReplyBindings,
   transitionReplyChild,
 } from "./texting-reply-binding.js";
 import { createTextingService } from "./texting-service.js";
-import { admitSmsAnswer, type TextingTransaction } from "./texting-sms-admission.js";
+import {
+  createSmsAdmission,
+  isTextingSmsRetryableError,
+  type TextingTransaction,
+} from "./texting-sms-admission.js";
+
+const admitSmsAnswer = createSmsAdmission({ enabled: () => true });
+const bindInboundReply = (db: Database, userId: string, inboundMessageId: string) =>
+  bindInboundReplyWithPolicy(db, userId, inboundMessageId, () => true);
 
 describe.sequential("signed SMS child admission", () => {
   let container: StartedPostgreSqlContainer;
@@ -67,6 +77,7 @@ describe.sequential("signed SMS child admission", () => {
         body: "1) Purpose? 2) Purpose?",
         direction: "outbound",
         status: "queued",
+        providerMessageSid: randomUUID(),
         occurredAt: new Date(),
         occurredAtSource: "nohmi",
       })
@@ -117,6 +128,466 @@ describe.sequential("signed SMS child admission", () => {
       },
     });
   }
+
+  async function singleBinding(f: Awaited<ReturnType<typeof fixture>>) {
+    const operationId = randomUUID();
+    const work = {
+      domain: "finances" as const,
+      kind: "question" as const,
+      id: randomUUID(),
+      revision: "1",
+      actionRevision: "1",
+    };
+    const [binding] = await database.db.transaction(async (tx) =>
+      createTextReplyBindings(tx, f.userId, f.connection, f.outbound.id, [
+        {
+          outboundMessageId: f.outbound.id,
+          itemNumber: 1,
+          answerMode: "free_text",
+          answerVocabulary: null,
+          operationId,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          work,
+        },
+      ]),
+    );
+    if (!binding) throw new Error("Missing binding");
+    return { binding, operationId, work };
+  }
+
+  it.each([
+    "failed",
+    "undelivered",
+  ] as const)("does not attach or admit a reply to a terminal %s outbound", async (status) => {
+    const f = await fixture("Purpose");
+    const { binding, operationId, work } = await singleBinding(f);
+    await database.db
+      .update(textMessages)
+      .set({ status })
+      .where(eq(textMessages.id, f.outbound.id));
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "delivery_failed",
+    });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, binding.id))
+      )[0]?.state,
+    ).toBe("open");
+    await database.db.transaction(async (tx) => {
+      expect(
+        (
+          await admitSmsAnswer(tx, {
+            userId: f.userId,
+            operationId,
+            work,
+            text: "Purpose",
+            inboundMessageId: f.inbound.id,
+            replyBindingId: binding.id,
+          })
+        ).state,
+      ).toBe("unavailable");
+    });
+  });
+
+  it("rejects a pending answer after a terminal delivery callback without consuming it", async () => {
+    const f = await fixture("Purpose");
+    const { binding, operationId, work } = await singleBinding(f);
+    expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+    await service().updateStatus({
+      MessageSid: f.outbound.providerMessageSid ?? "",
+      MessageStatus: "failed",
+    });
+    expect(
+      (await database.db.select().from(textMessages).where(eq(textMessages.id, f.outbound.id)))[0]
+        ?.status,
+    ).toBe("failed");
+    await database.db.transaction(async (tx) => {
+      expect(
+        (
+          await admitSmsAnswer(tx, {
+            userId: f.userId,
+            operationId,
+            work,
+            text: "Purpose",
+            inboundMessageId: f.inbound.id,
+            replyBindingId: binding.id,
+          })
+        ).state,
+      ).toBe("unavailable");
+    });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, binding.id))
+      )[0]?.state,
+    ).toBe("pending");
+  });
+
+  it("lets a terminal callback win the outbound lock before admission with no partial consume", async () => {
+    const f = await fixture("Purpose");
+    const { binding, operationId, work } = await singleBinding(f);
+    expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+    let releaseWriter: (() => void) | undefined;
+    let writerHeld: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      writerHeld = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseWriter = resolve;
+    });
+    const callback = database.db.transaction(async (tx) => {
+      await tx
+        .update(textMessages)
+        .set({ status: "failed" })
+        .where(eq(textMessages.id, f.outbound.id));
+      writerHeld?.();
+      await released;
+    });
+    await held;
+    try {
+      await expect(
+        database.db.transaction((tx) =>
+          admitSmsAnswer(tx, {
+            userId: f.userId,
+            operationId,
+            work,
+            text: "Purpose",
+            inboundMessageId: f.inbound.id,
+            replyBindingId: binding.id,
+          }),
+        ),
+      ).rejects.toMatchObject({ cause: { code: "55P03" } });
+    } finally {
+      releaseWriter?.();
+      await callback;
+    }
+    await database.db.transaction(async (tx) => {
+      expect(
+        (
+          await admitSmsAnswer(tx, {
+            userId: f.userId,
+            operationId,
+            work,
+            text: "Purpose",
+            inboundMessageId: f.inbound.id,
+            replyBindingId: binding.id,
+          })
+        ).state,
+      ).toBe("unavailable");
+    });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, binding.id))
+      )[0]?.state,
+    ).toBe("pending");
+  });
+
+  it("keeps unconfirmed delivery and reversible disablement retryable without attaching", async () => {
+    const f = await fixture("Purpose");
+    const { binding, operationId, work } = await singleBinding(f);
+    await database.db
+      .update(textMessages)
+      .set({ providerMessageSid: null })
+      .where(eq(textMessages.id, f.outbound.id));
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "waiting",
+      reason: "delivery_unconfirmed",
+    });
+    await database.db
+      .update(textMessages)
+      .set({ providerMessageSid: randomUUID() })
+      .where(eq(textMessages.id, f.outbound.id));
+    let enabled = false;
+    expect(
+      await bindInboundReplyWithPolicy(database.db, f.userId, f.inbound.id, () => enabled),
+    ).toEqual({
+      state: "waiting",
+      reason: "texting_disabled",
+    });
+    await expect(
+      database.db.transaction((tx) =>
+        createSmsAdmission({ enabled: () => enabled })(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        }),
+      ),
+    ).rejects.toMatchObject({ kind: "texting_sms_uncertain", reasonCode: "texting_disabled" });
+    await expect(
+      bindInboundReplyWithPolicy(database.db, f.userId, f.inbound.id, () => {
+        throw new Error("Policy source unavailable");
+      }),
+    ).rejects.toMatchObject({ kind: "texting_sms_uncertain", reasonCode: "policy_check_failed" });
+    await expect(
+      database.db.transaction((tx) =>
+        createSmsAdmission({
+          enabled: () => {
+            throw new Error("Policy source unavailable");
+          },
+        })(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        }),
+      ),
+    ).rejects.toMatchObject({ kind: "texting_sms_uncertain", reasonCode: "policy_check_failed" });
+    enabled = true;
+    expect(
+      await bindInboundReplyWithPolicy(database.db, f.userId, f.inbound.id, () => enabled),
+    ).toMatchObject({
+      state: "pending",
+    });
+    await database.db
+      .update(textMessages)
+      .set({ status: "unknown" })
+      .where(eq(textMessages.id, f.outbound.id));
+    try {
+      await database.db.transaction((tx) =>
+        createSmsAdmission({ enabled: () => true })(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        }),
+      );
+      throw new Error("Expected retryable delivery error");
+    } catch (error) {
+      expect(isTextingSmsRetryableError(error)).toBe(true);
+      if (isTextingSmsRetryableError(error)) expect(error.reasonCode).toBe("delivery_unconfirmed");
+    }
+  });
+
+  it("rolls back consume when Texting is disabled after admission", async () => {
+    const f = await fixture("Purpose");
+    const { binding, operationId, work } = await singleBinding(f);
+    expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+    let enabled = true;
+    await expect(
+      database.db.transaction(async (tx) => {
+        const admission = await createSmsAdmission({ enabled: () => enabled })(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        });
+        if (admission.state !== "verified") throw new Error("Not verified");
+        enabled = false;
+        await admission.consume({
+          operationId,
+          state: "accepted",
+          work: [],
+          resultRevision: "2",
+          reasonCode: null,
+        });
+      }),
+    ).rejects.toMatchObject({ kind: "texting_sms_uncertain", reasonCode: "texting_disabled" });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, binding.id))
+      )[0]?.state,
+    ).toBe("pending");
+    let checks = 0;
+    await expect(
+      database.db.transaction(async (tx) => {
+        const admission = await createSmsAdmission({
+          enabled: () => {
+            checks += 1;
+            if (checks === 3) throw new Error("Policy source unavailable");
+            return true;
+          },
+        })(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        });
+        if (admission.state !== "verified") throw new Error("Not verified");
+        await admission.consume({
+          operationId,
+          state: "accepted",
+          work: [],
+          resultRevision: "2",
+          reasonCode: null,
+        });
+      }),
+    ).rejects.toMatchObject({ kind: "texting_sms_uncertain", reasonCode: "policy_check_failed" });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, binding.id))
+      )[0]?.state,
+    ).toBe("pending");
+  });
+
+  it("sweeps only expired open bindings and permits their owner-live cleanup", async () => {
+    const f = await fixture("Purpose");
+    const { binding: pending } = await singleBinding(f);
+    expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+    const [expired] = await database.db
+      .insert(textReplyBindings)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        outboundMessageId: f.outbound.id,
+        consentEpoch: f.connection.consentEpoch,
+        itemNumber: 2,
+        workKind: "question",
+        workId: randomUUID(),
+        workRevision: "1",
+        actionRevision: "1",
+        answerMode: "free_text",
+        answerVocabulary: null,
+        expiresAt: new Date(Date.now() - 60_000),
+        operationId: randomUUID(),
+      })
+      .returning();
+    if (!expired) throw new Error("Missing expired binding");
+    const [fresh] = await database.db
+      .insert(textReplyBindings)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        outboundMessageId: f.outbound.id,
+        consentEpoch: f.connection.consentEpoch,
+        itemNumber: 3,
+        workKind: "question",
+        workId: randomUUID(),
+        workRevision: "1",
+        actionRevision: "1",
+        answerMode: "free_text",
+        answerVocabulary: null,
+        expiresAt: new Date(Date.now() + 60_000),
+        operationId: randomUUID(),
+      })
+      .returning();
+    if (!fresh) throw new Error("Missing fresh binding");
+    await expect(
+      database.db
+        .update(textReplyBindings)
+        .set({ state: "expired" })
+        .where(eq(textReplyBindings.id, fresh.id)),
+    ).rejects.toThrow();
+    await expect(
+      database.db.delete(textReplyBindings).where(eq(textReplyBindings.id, expired.id)),
+    ).rejects.toThrow();
+    expect(await expireOpenReplyBindings(database.db, f.userId)).toBe(1);
+    expect(await expireOpenReplyBindings(database.db, f.userId)).toBe(0);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, pending.id))
+      )[0]?.state,
+    ).toBe("pending");
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, expired.id))
+      )[0]?.state,
+    ).toBe("expired");
+    expect(
+      (
+        await database.db.select().from(textReplyBindings).where(eq(textReplyBindings.id, fresh.id))
+      )[0]?.state,
+    ).toBe("open");
+    await database.db.delete(textReplyBindings).where(eq(textReplyBindings.id, expired.id));
+  });
+
+  it("keeps numbered choice syntax after a mixed-mode sibling is answered", async () => {
+    const f = await fixture("1: Dinner");
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    await database.db.transaction((tx) =>
+      createTextReplyBindings(tx, f.userId, f.connection, f.outbound.id, [
+        {
+          outboundMessageId: f.outbound.id,
+          itemNumber: 1,
+          answerMode: "free_text",
+          answerVocabulary: null,
+          operationId: randomUUID(),
+          expiresAt,
+          work: {
+            domain: "finances",
+            kind: "question",
+            id: randomUUID(),
+            revision: "1",
+            actionRevision: "1",
+          },
+        },
+        {
+          outboundMessageId: f.outbound.id,
+          itemNumber: 2,
+          answerMode: "choices",
+          answerVocabulary: ["yes", "no"],
+          operationId: randomUUID(),
+          expiresAt,
+          work: {
+            domain: "finances",
+            kind: "question",
+            id: randomUUID(),
+            revision: "1",
+            actionRevision: "1",
+          },
+        },
+      ]),
+    );
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toMatchObject({
+      state: "pending",
+      children: [{ answer: "Dinner" }],
+    });
+    const [second] = await database.db
+      .insert(textMessages)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        body: "2: yes",
+        direction: "inbound",
+        status: "delivered",
+        occurredAt: new Date(),
+        occurredAtSource: "provider",
+        providerMessageSid: randomUUID(),
+      })
+      .returning();
+    if (!second) throw new Error("Missing second inbound");
+    await database.db.insert(textInboundClaims).values({
+      userId: f.userId,
+      connectionId: f.connection.id,
+      messageId: second.id,
+      consentEpoch: f.connection.consentEpoch,
+    });
+    expect(await bindInboundReply(database.db, f.userId, second.id)).toMatchObject({
+      state: "pending",
+      children: [{ answer: "yes" }],
+    });
+  });
 
   it("binds two distinct canonical answers to one signed inbound and consumes each once", async () => {
     const f = await fixture();
@@ -482,32 +953,37 @@ describe.sequential("signed SMS child admission", () => {
     });
     const admitting = database.db.transaction(async (tx) => {
       await tx.select({ id: users.id }).from(users).where(eq(users.id, f.userId)).for("key share");
-      expect(
-        (
-          await admitSmsAnswer(tx, {
-            userId: f.userId,
-            operationId,
-            work,
-            text: "Purpose",
-            inboundMessageId: f.inbound.id,
-            replyBindingId: binding.id,
-          })
-        ).state,
-      ).toBe("verified");
+      const admission = await admitSmsAnswer(tx, {
+        userId: f.userId,
+        operationId,
+        work,
+        text: "Purpose",
+        inboundMessageId: f.inbound.id,
+        replyBindingId: binding.id,
+      });
+      expect(admission.state).toBe("verified");
+      if (admission.state !== "verified") throw new Error("Not verified");
       admissionHeld?.();
       await released;
+      await admission.consume({
+        operationId,
+        state: "accepted",
+        work: [],
+        resultRevision: "2",
+        reasonCode: null,
+      });
     });
     await held;
-    const callbackSid = randomUUID();
-    await database.db
-      .update(textMessages)
-      .set({ providerMessageSid: callbackSid })
-      .where(eq(textMessages.id, f.outbound.id));
-    await service().updateStatus({ MessageSid: callbackSid, MessageStatus: "sent" });
+    const statusWriter = service().updateStatus({
+      MessageSid: f.outbound.providerMessageSid ?? "",
+      MessageStatus: "failed",
+    });
     expect(
-      (await database.db.select().from(textMessages).where(eq(textMessages.id, f.outbound.id)))[0]
-        ?.status,
-    ).toBe("sent");
+      await Promise.race([
+        statusWriter.then(() => "finished"),
+        new Promise((resolve) => setTimeout(() => resolve("waiting"), 30)),
+      ]),
+    ).toBe("waiting");
     const disconnect = service().disconnect(f.userId);
     expect(
       await Promise.race([
@@ -517,7 +993,20 @@ describe.sequential("signed SMS child admission", () => {
     ).toBe("waiting");
     releaseAdmission?.();
     await admitting;
+    await statusWriter;
     await disconnect;
+    expect(
+      (
+        await database.db
+          .select()
+          .from(textReplyBindings)
+          .where(eq(textReplyBindings.id, binding.id))
+      )[0]?.state,
+    ).toBe("accepted");
+    expect(
+      (await database.db.select().from(textMessages).where(eq(textMessages.id, f.outbound.id)))[0]
+        ?.status,
+    ).toBe("failed");
     await database.db.transaction(async (tx) => {
       expect(
         (

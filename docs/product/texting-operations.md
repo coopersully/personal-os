@@ -322,11 +322,13 @@ ordinary line breaks, case, punctuation, and internal whitespace stay in the ans
 duplicate, unknown, or delimiter-looking selectors require clarification. Each child stores only
 its canonical submitted answer, not the transport envelope or routing syntax. The same inbound
 claim may bind several distinct children; each has its own operation UUID and outcome.
+Numbered `N: answer` syntax remains valid when earlier siblings have already been answered,
+including when the remaining item uses bounded choices.
 
 Binding a reply commits each child as pending before any Finance call. An internal Finance port
 receives a server-composed same-transaction admission callback. After Finance's owner and operation
-locks, Texting takes connection SHARE NOWAIT, inbound message SHARE NOWAIT, and exact binding UPDATE
-NOWAIT. It verifies the signed claim, owner, recipient, active consent epoch, direction, exact work
+locks, Texting takes connection SHARE NOWAIT, inbound message SHARE NOWAIT, outbound message SHARE
+NOWAIT, and exact binding UPDATE NOWAIT. It verifies the signed claim, owner, recipient, active consent epoch, direction, exact work
 and action revisions, canonical answer, operation UUID, expiry, and pending state. The one-shot
 consume callback may run only within Finance's first accepted mutation before its receipt completes;
 it changes exactly that child to accepted or rolls back both sides. Completed exact Finance receipt
@@ -334,6 +336,21 @@ replay skips admission and consume. Blocked or unavailable child outcomes are pr
 an idempotent Texting-only transaction. Temporary failures remain waiting or uncertain for recovery;
 they are not a terminal invalid-source finding. This slice does not register Finance dispatch or
 promise a provider acknowledgment as proof that bookkeeping finished.
+
+The exact outbound message is locked SHARE NOWAIT before its binding. A definitively failed or
+undelivered outbound cannot acquire a new reply or admit an unconsumed answer. A queued message
+without a provider SID, or one with unknown delivery, remains retryable rather than producing a
+terminal Finance receipt; queued messages with a SID and accepted, sending, sent, or delivered
+messages may proceed. An already accepted Finance receipt remains authoritative if a later callback
+reports delivery failure. A temporary Texting disablement also leaves signed claims and pending
+children recoverable: bind waits, and admission throws a typed retryable error without a terminal
+Finance receipt. Disabling between verification and consume rolls back the shared Finance/Texting
+transaction. T2 must durably retry waiting claims when policy or delivery evidence changes.
+
+An idempotent sweep can change only an expired, unattached open binding to terminal `expired` under
+its row lock. Attached pending, waiting, and uncertain children are never swept without first
+checking the exact Finance receipt. T1 adds no host schedule for the sweep, so bounded retention is
+not claimed until T2 wires invocation and reconciliation.
 
 Texting history cleanup must retain any inbound claim or outbound binding while its child is open,
 pending, waiting, or uncertain. Database foreign keys reject deletion of their source message or

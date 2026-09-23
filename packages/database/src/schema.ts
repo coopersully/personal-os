@@ -3791,7 +3791,14 @@ export const textReplyBindings = pgTable(
     canonicalAnswer: text("canonical_answer"),
     state: text("state")
       .$type<
-        "open" | "pending" | "waiting" | "uncertain" | "accepted" | "blocked" | "unavailable"
+        | "open"
+        | "expired"
+        | "pending"
+        | "waiting"
+        | "uncertain"
+        | "accepted"
+        | "blocked"
+        | "unavailable"
       >()
       .notNull()
       .default("open"),
@@ -3838,7 +3845,7 @@ export const textReplyBindings = pgTable(
     ),
     check(
       "text_reply_bindings_state_check",
-      sql`${table.state} IN ('open','pending','waiting','uncertain','accepted','blocked','unavailable')`,
+      sql`${table.state} IN ('open','expired','pending','waiting','uncertain','accepted','blocked','unavailable')`,
     ),
     check(
       "text_reply_bindings_mode_check",
@@ -3850,7 +3857,7 @@ export const textReplyBindings = pgTable(
     ),
     check(
       "text_reply_bindings_attachment_check",
-      sql`(${table.state} = 'open' AND ${table.inboundClaimId} IS NULL AND ${table.canonicalAnswer} IS NULL AND ${table.resultRevision} IS NULL AND ${table.reasonCode} IS NULL) OR (${table.state} <> 'open' AND ${table.inboundClaimId} IS NOT NULL AND ${table.canonicalAnswer} IS NOT NULL)`,
+      sql`(${table.state} IN ('open','expired') AND ${table.inboundClaimId} IS NULL AND ${table.canonicalAnswer} IS NULL AND ${table.resultRevision} IS NULL AND ${table.reasonCode} IS NULL) OR (${table.state} NOT IN ('open','expired') AND ${table.inboundClaimId} IS NOT NULL AND ${table.canonicalAnswer} IS NOT NULL)`,
     ),
   ],
 );

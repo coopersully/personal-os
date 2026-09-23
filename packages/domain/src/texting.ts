@@ -69,7 +69,7 @@ export function parseTextReply(
   if (
     bindings.length === 1 &&
     only &&
-    !(only.answerMode === "free_text" ? /^\d\s*:/u : /^\d\s+/u).test(canonical)
+    !(only.answerMode === "free_text" ? /^\d\s*:/u : /^\d(?::|\s+)/u).test(canonical)
   ) {
     const binding = bindings[0];
     if (!binding) return { state: "unavailable", reason: "unsupported" };
@@ -90,7 +90,9 @@ export function parseTextReply(
   const choices: TextReplyChoice[] = [];
   const used = new Set<number>();
   for (const part of parts) {
-    const match = hasFreeText ? /^(\d)\s*:[ \t]*(.+)$/su.exec(part) : /^(\d)\s+(.+)$/su.exec(part);
+    const match = hasFreeText
+      ? /^(\d)\s*:[ \t]*(.+)$/su.exec(part)
+      : /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(part);
     if (!match) return { state: "unavailable", reason: "ambiguous" };
     const itemNumber = Number(match[1]);
     const binding = bindings.find((row) => row.itemNumber === itemNumber);

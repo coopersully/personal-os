@@ -12,9 +12,13 @@ import {
   type TextReplyParseResult,
   textReplyBindingInputSchema,
 } from "@personal-os/domain";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
-import type { TextingTransaction } from "./texting-sms-admission.js";
+import {
+  readTextingEnabled,
+  replyDeliveryState,
+  type TextingTransaction,
+} from "./texting-sms-admission.js";
 
 function retry(): AppError {
   return new AppError("conflict", "Texting reply changed or is busy. Retry the same operation.", {
@@ -86,7 +90,8 @@ export async function createTextReplyBindings(
 }
 
 export type BindInboundResult =
-  | { state: "unavailable"; reason: "ambiguous" | "unsupported" | "missing" }
+  | { state: "unavailable"; reason: "ambiguous" | "unsupported" | "missing" | "delivery_failed" }
+  | { state: "waiting"; reason: "delivery_unconfirmed" | "texting_disabled" }
   | {
       state: "pending";
       children: Array<{ bindingId: string; operationId: string; answer: string }>;
@@ -97,9 +102,11 @@ export async function bindInboundReply(
   db: Database,
   userId: string,
   inboundMessageId: string,
+  enabled: () => boolean,
   now: Date = new Date(),
 ): Promise<BindInboundResult> {
   return db.transaction(async (tx) => {
+    if (!readTextingEnabled(enabled)) return { state: "waiting", reason: "texting_disabled" };
     const [owner] = await tx
       .select({ id: users.id })
       .from(users)
@@ -168,6 +175,19 @@ export async function bindInboundReply(
     if (!candidates.length) return { state: "unavailable", reason: "unsupported" };
     if (new Set(candidates.map((row) => row.outboundMessageId)).size !== 1 || candidates.length > 3)
       return { state: "unavailable", reason: "ambiguous" };
+    const candidate = candidates[0];
+    if (!candidate) return { state: "unavailable", reason: "unsupported" };
+    const [outbound] = await tx
+      .select()
+      .from(textMessages)
+      .where(and(eq(textMessages.userId, userId), eq(textMessages.id, candidate.outboundMessageId)))
+      .for("share", { noWait: true })
+      .limit(1);
+    if (outbound?.direction !== "outbound" || outbound.connectionId !== connection.id)
+      return { state: "unavailable", reason: "missing" };
+    const delivery = replyDeliveryState(outbound);
+    if (delivery === "terminal") return { state: "unavailable", reason: "delivery_failed" };
+    if (delivery === "waiting") return { state: "waiting", reason: "delivery_unconfirmed" };
     const parsed: TextReplyParseResult = parseTextReply(
       message.body,
       candidates.map((row) => ({
@@ -196,6 +216,7 @@ export async function bindInboundReply(
       )
     )
       throw retry();
+    if (!readTextingEnabled(enabled)) return { state: "waiting", reason: "texting_disabled" };
     const children = [];
     for (const row of locked) {
       const choice = parsed.choices.find((item) => item.bindingId === row.id);
@@ -295,5 +316,55 @@ export async function transitionReplyChild(
       )
       .returning({ id: textReplyBindings.id });
     return Boolean(changed);
+  });
+}
+
+/** Idempotently terminalize only expired, unanswered bindings; T2 must schedule the sweep. */
+export async function expireOpenReplyBindings(
+  db: Database,
+  userId: string,
+  now: Date = new Date(),
+): Promise<number> {
+  return db.transaction(async (tx) => {
+    const [owner] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("key share", { noWait: true })
+      .limit(1);
+    if (!owner) return 0;
+    const [connection] = await tx
+      .select({ id: textingConnections.id })
+      .from(textingConnections)
+      .where(eq(textingConnections.userId, userId))
+      .for("share", { noWait: true })
+      .limit(1);
+    if (!connection) return 0;
+    const expired = await tx
+      .select({ id: textReplyBindings.id })
+      .from(textReplyBindings)
+      .where(
+        and(
+          eq(textReplyBindings.userId, userId),
+          eq(textReplyBindings.connectionId, connection.id),
+          eq(textReplyBindings.state, "open"),
+          sql`${textReplyBindings.expiresAt} <= CURRENT_TIMESTAMP`,
+        ),
+      )
+      .orderBy(asc(textReplyBindings.expiresAt), asc(textReplyBindings.id))
+      .limit(100)
+      .for("update", { noWait: true });
+    if (!expired.length) return 0;
+    const changed = await tx
+      .update(textReplyBindings)
+      .set({ state: "expired", updatedAt: now })
+      .where(
+        inArray(
+          textReplyBindings.id,
+          expired.map((row) => row.id),
+        ),
+      )
+      .returning({ id: textReplyBindings.id });
+    return changed.length;
   });
 }

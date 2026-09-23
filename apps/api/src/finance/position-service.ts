@@ -217,45 +217,14 @@ export function createFinancePositionService(input: { db: Database; now: () => D
           ),
           userId,
         };
-        const includedAccountIds = new Set(
-          accounts
-            .filter((account) => scope.accountIds.includes(account.id) && account.includeInPlanning)
-            .map((account) => account.id),
-        );
-        const revisionTransactions = activityInput.transactions.filter((transaction) =>
-          includedAccountIds.has(transaction.accountId),
-        );
-        const revisionTransactionIds = new Set(
-          revisionTransactions.map((transaction) => transaction.id),
-        );
-        const revisionAllocations = activityInput.allocations.filter((allocation) =>
-          revisionTransactionIds.has(allocation.transactionId),
-        );
-        const revisionAllocationIds = new Set(
-          revisionAllocations.map((allocation) => allocation.id),
-        );
-        const revisionReimbursements = activityInput.reimbursements.filter((reimbursement) =>
-          revisionAllocationIds.has(reimbursement.allocationId),
-        );
-        const revisionReimbursementIds = new Set(
-          revisionReimbursements.map((reimbursement) => reimbursement.id),
-        );
-        const revisionRelationships = relationships.filter((relationship) =>
-          relationship.transactionIds.some((id) => revisionTransactionIds.has(id)),
-        );
-        const revisionMatches = activityInput.matches.filter(
-          (match) =>
-            revisionReimbursementIds.has(match.reimbursementId) &&
-            revisionTransactionIds.has(match.creditTransactionId),
-        );
         // Sort all row sets before hashing so database ordering cannot create a new revision.
         const activityRevision = positionRevision({
           scope,
-          transactions: revisionTransactions.toSorted((a, b) => a.id.localeCompare(b.id)),
-          allocations: revisionAllocations.toSorted((a, b) => a.id.localeCompare(b.id)),
-          relationships: revisionRelationships.toSorted((a, b) => a.id.localeCompare(b.id)),
-          reimbursements: revisionReimbursements.toSorted((a, b) => a.id.localeCompare(b.id)),
-          matches: revisionMatches.toSorted(
+          transactions: activityInput.transactions.toSorted((a, b) => a.id.localeCompare(b.id)),
+          allocations: activityInput.allocations.toSorted((a, b) => a.id.localeCompare(b.id)),
+          relationships: relationships.toSorted((a, b) => a.id.localeCompare(b.id)),
+          reimbursements: activityInput.reimbursements.toSorted((a, b) => a.id.localeCompare(b.id)),
+          matches: activityInput.matches.toSorted(
             (a, b) =>
               a.reimbursementId.localeCompare(b.reimbursementId) ||
               a.creditTransactionId.localeCompare(b.creditTransactionId),

@@ -115,3 +115,72 @@ rollback and single-connection execution, real writer/SET NULL lock directions, 
 maintenance and exact replay. UI tests cover canonical references, failed-save identity and stale
 states. These establish local source behavior only; full verification, composition and production
 activation require their own evidence.
+
+
+## Internal Finance SMS port (not activated)
+
+The internal SMS port resolves exact Finance work in the caller-owned transaction and supplies a
+minimal Finance-owned prompt. This does not register a Texting producer or enable SMS answers;
+public app/agent handlers still reject SMS sources. Migration 0092 adds Finance SMS provenance;
+the internal port accepts only through injected Texting admission and consumes the exact reply
+binding inside the Finance answer transaction. This source change does not register a producer,
+route, dispatcher, or MCP tool. F-owned composition and T2 recovery remain separate integration work.
+
+The accepted retention contract stores the local inbound-message UUID and exact reply-binding UUID
+as immutable owner-scoped Finance answer provenance, without a Texting foreign key. It copies no
+raw transport envelope, phone number, or provider SID. Intentionally submitted canonical Finance
+answer text is stored as the answer, distinct from copying the SMS envelope. Owner deletion
+cascades Finance answers; disconnect and Texting history cleanup preserve accepted Finance history
+and receipt recovery. The Finance historical uniqueness fence is owner plus reply binding;
+inbound-message identity is not globally unique because one reply can answer multiple bound items.
+Migration 0092 preserves existing app/agent rows and enforces the historical binding fence.
+
+Texting supplies a server-composed verifier for the complete owner/command/consent/authenticated
+claim/binding tuple. Its accepted-only consume capability runs once inside the first Finance
+mutation after answer/audit persistence and before receipt completion, in the same transaction.
+Completed exact receipt replay skips current Texting evidence and consumption. Rejection cannot
+consume a binding; transient verification failure propagates as retryable or uncertain instead of
+becoming terminal unavailable. Texting owns durable independent child dispatch and separate
+idempotent projection of committed non-accepted results; one failed child never rewrites a successful
+sibling. Local PostgreSQL tests cover accepted/blocked replay, atomic rollback, independent child outcomes,
+and competing writers; this evidence does not establish provider reachability or production activation.
+
+
+The Texting admission factory requires an explicit `enabled: () => boolean` policy dependency;
+there is no permissive default. Check that policy before and after Texting locks and again at
+accepted consumption. Explicit disablement at any phase throws a typed retryable failure and
+permits no Finance mutation or binding consumption. A policy-check exception also fails closed
+with a typed retryable failure. Disablement alone creates no terminal Finance receipt or Texting
+unavailable projection; preserve the pending child for bounded recovery after re-enabling. At
+consumption, any failure rolls back the complete Finance/Texting transaction. Keep bounded reason
+metadata distinct: `texting_disabled`, `delivery_unconfirmed`, and `policy_check_failed`. Completed exact Finance
+receipt replay bypasses current Texting policy and source checks and remains read-only.
+
+Before terminalizing an attached child on expiry, Texting recovery must inspect its exact Finance
+receipt/operation to reconcile any committed outcome. T1 expiration may sweep only open, unattached
+bindings; it must not blindly sweep pending, waiting, or uncertain children. Durable bounded retry
+and attached-child recovery remain T2 integration requirements, not T1 availability claims.
+
+For new answers, after Finance owner KEY SHARE and operation admission, Texting locks connection,
+inbound message, outbound message (all SHARE NOWAIT), then binding UPDATE NOWAIT, before Finance
+account/transaction/case/question locks. The outbound lock fences delivery-status changes through
+commit. Failed or undelivered outbound messages deny admission. Queued messages without provider
+identity and unknown delivery status remain recoverable waiting/uncertain; admission propagates a
+typed failure rather than storing a terminal unavailable Finance outcome. Queued messages with
+provider identity and accepted/sending/sent/delivered statuses remain subject to all other policy,
+claim, binding and revision checks. Texting owns explicit expiration of unattached open bindings.
+Provider chronology uses immutable outbound Twilio `dateCreated` and requires inbound Twilio
+`dateCreated` to be strictly later; equal times are unavailable. Missing submission evidence remains
+`delivery_unconfirmed` and cannot be backfilled. Recovery must inspect the exact Finance receipt,
+then surface bounded clarification/resend rather than retrying indefinitely.
+
+`inspectSmsReceipt(userId, command)` owns a Finance transaction; callers hold no Texting locks.
+It reuses answer authorization, owner KEY SHARE, operation advisory lock, and exact actor/source/
+canonical-command hash checks, performing no writes or current Texting reads. Command operation,
+work, inbound-message and binding UUIDs normalize to lowercase before admission, hashing and storage;
+case variants replay the same operation and cannot consume twice. Results distinguish
+absent, completed accepted/blocked, and incomplete started/failed. Malformed completed evidence is
+an internal/indeterminate error; database errors never become absent. Both started and failed
+receipts reject same-key answer execution without mutation; no reclaim path exists in this slice.
+An absent snapshot grants no new-operation or resend authority. Texting projects its result afterward
+in a separate transaction with its own durable fencing.

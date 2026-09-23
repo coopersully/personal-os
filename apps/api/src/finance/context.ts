@@ -71,7 +71,7 @@ export type FinanceAdmittedMutationOperation = {
   idempotencyKey: string;
   operation: string;
   payload: unknown;
-  sourceKind: "agent" | "app";
+  sourceKind: "agent" | "app" | "sms";
 };
 
 export type FinanceMutationAdmission<TPrepared, TResult extends Record<string, unknown>> =
@@ -136,21 +136,12 @@ function assertMatchingMutation(
   }
 }
 
-/**
- * Runs a newly admitted Finance mutation inside a transaction owned by its caller.
- * Preparation happens before the receipt is inserted so unsupported or contended
- * work can leave no durable idempotency claim.
- */
-export async function executeFinanceAdmittedMutation<
-  TPrepared,
-  TResult extends Record<string, unknown>,
->(
+/** Read-only exact receipt lookup, sharing mutation authorization, locks and hash semantics. */
+export async function readFinanceAdmittedReceipt(
   executor: FinanceTransaction,
   context: FinanceMutationContext,
   operation: FinanceAdmittedMutationOperation,
-  prepare: (tx: FinanceTransaction) => Promise<FinanceMutationAdmission<TPrepared, TResult>>,
-  mutate: (tx: FinanceTransaction, prepared: TPrepared) => Promise<TResult>,
-): Promise<TResult> {
+) {
   requireFinanceMutation(context);
   if (!(await admitFinanceUser(executor, context.userId))) {
     throw new AppError("not_found", "Account not found.");
@@ -175,6 +166,27 @@ export async function executeFinanceAdmittedMutation<
         "That idempotency key was already used for different Finance work.",
       );
     }
+  }
+  return existing;
+}
+
+/**
+ * Runs a newly admitted Finance mutation inside a transaction owned by its caller.
+ * Preparation happens before the receipt is inserted so unsupported or contended
+ * work can leave no durable idempotency claim.
+ */
+export async function executeFinanceAdmittedMutation<
+  TPrepared,
+  TResult extends Record<string, unknown>,
+>(
+  executor: FinanceTransaction,
+  context: FinanceMutationContext,
+  operation: FinanceAdmittedMutationOperation,
+  prepare: (tx: FinanceTransaction) => Promise<FinanceMutationAdmission<TPrepared, TResult>>,
+  mutate: (tx: FinanceTransaction, prepared: TPrepared) => Promise<TResult>,
+): Promise<TResult> {
+  const existing = await readFinanceAdmittedReceipt(executor, context, operation);
+  if (existing) {
     if (existing.status === "completed" && existing.response) {
       return existing.response as TResult;
     }
@@ -196,7 +208,7 @@ export async function executeFinanceAdmittedMutation<
       actorType: context.actorType,
       idempotencyKey: operation.idempotencyKey,
       operation: operation.operation,
-      requestHash: hash,
+      requestHash: admittedRequestHash(context, operation),
       status: "started",
       userId: context.userId,
     })

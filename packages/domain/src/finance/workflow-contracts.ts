@@ -81,6 +81,18 @@ export const financeAnswerSchema = z
   .strict();
 export type FinanceAnswer = z.infer<typeof financeAnswerSchema>;
 
+/** Internal command only: local provenance identities do not themselves confer authority. */
+export const financeSmsAnswerCommandSchema = z
+  .object({
+    operationId: idSchema.toLowerCase(),
+    work: financeHumanWorkRefSchema.extend({ id: idSchema.toLowerCase() }),
+    text: financeAnswerSchema.shape.text,
+    inboundMessageId: idSchema.toLowerCase(),
+    replyBindingId: idSchema.toLowerCase(),
+  })
+  .strict();
+export type FinanceSmsAnswerCommand = z.infer<typeof financeSmsAnswerCommandSchema>;
+
 export const financeContextSchema = z
   .object({
     id: idSchema,

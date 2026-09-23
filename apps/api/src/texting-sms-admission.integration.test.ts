@@ -46,9 +46,16 @@ describe.sequential("signed SMS child admission", () => {
     await container?.stop();
   });
 
-  async function fixture(body = "1: Dinner with Sam\n---\n2: Taxi for client") {
+  async function fixture(
+    body = "1: Dinner with Sam\n---\n2: Taxi for client",
+    replyTiming: "after" | "before" | "delayed" = "after",
+  ) {
     const userId = randomUUID();
     const phone = `+1${userId.replaceAll("-", "").slice(0, 10)}`;
+    // These rows are inserted before test bindings; model the provider and webhook's
+    // logical times separately from insertion order.
+    const occurredAt = new Date(Date.now() + (replyTiming === "after" ? 30_000 : -30_000));
+    const claimCreatedAt = new Date(Date.now() + (replyTiming === "before" ? -30_000 : 30_000));
     await database.db.insert(users).values({
       id: userId,
       email: `${userId}@example.com`,
@@ -90,7 +97,7 @@ describe.sequential("signed SMS child admission", () => {
         body,
         direction: "inbound",
         status: "delivered",
-        occurredAt: new Date(),
+        occurredAt,
         occurredAtSource: "provider",
         providerMessageSid: randomUUID(),
       })
@@ -103,6 +110,7 @@ describe.sequential("signed SMS child admission", () => {
         connectionId: connection.id,
         messageId: inbound.id,
         consentEpoch: connection.consentEpoch,
+        createdAt: claimCreatedAt,
       })
       .returning();
     if (!claim) throw new Error("No claim");
@@ -154,6 +162,150 @@ describe.sequential("signed SMS child admission", () => {
     if (!binding) throw new Error("Missing binding");
     return { binding, operationId, work };
   }
+
+  it.each([
+    "before",
+    "delayed",
+  ] as const)("does not attach a %s reply to work created after its provider occurrence", async (replyTiming) => {
+    const f = await fixture("Purpose", replyTiming);
+    const { binding } = await singleBinding(f);
+    expect(f.inbound.occurredAt.getTime()).toBeLessThan(binding.createdAt.getTime());
+    if (replyTiming === "delayed")
+      expect(f.claim.createdAt.getTime()).toBeGreaterThan(binding.createdAt.getTime());
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+    const [unchanged] = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, binding.id));
+    expect(unchanged?.state).toBe("open");
+    expect(unchanged?.inboundClaimId).toBeNull();
+  });
+
+  it("rejects equal provider and binding times while accepting a clearly later reply", async () => {
+    const f = await fixture("Purpose");
+    const { binding } = await singleBinding(f);
+    const [sameTime] = await database.db
+      .insert(textMessages)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        body: "Purpose",
+        direction: "inbound",
+        status: "delivered",
+        occurredAt: binding.createdAt,
+        occurredAtSource: "provider",
+        providerMessageSid: randomUUID(),
+      })
+      .returning();
+    if (!sameTime) throw new Error("Missing same-time inbound");
+    await database.db.insert(textInboundClaims).values({
+      userId: f.userId,
+      connectionId: f.connection.id,
+      messageId: sameTime.id,
+      consentEpoch: f.connection.consentEpoch,
+      createdAt: new Date(binding.createdAt.getTime() + 1_000),
+    });
+    expect(await bindInboundReply(database.db, f.userId, sameTime.id)).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+    expect(f.inbound.occurredAt.getTime()).toBeGreaterThan(binding.createdAt.getTime());
+    expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+  });
+
+  it("does not attach an older reply to a newer sibling of an answerable item", async () => {
+    const f = await fixture("2: yes");
+    const { binding: earlier } = await singleBinding(f);
+    const [later] = await database.db
+      .insert(textReplyBindings)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        outboundMessageId: f.outbound.id,
+        consentEpoch: f.connection.consentEpoch,
+        itemNumber: 2,
+        workKind: "question",
+        workId: randomUUID(),
+        workRevision: "1",
+        actionRevision: "1",
+        answerMode: "choices",
+        answerVocabulary: ["yes", "no"],
+        expiresAt: new Date(Date.now() + 60_000),
+        operationId: randomUUID(),
+        createdAt: new Date(f.inbound.occurredAt.getTime() + 1_000),
+      })
+      .returning();
+    if (!later) throw new Error("Missing newer sibling");
+    expect(earlier.createdAt.getTime()).toBeLessThan(f.inbound.occurredAt.getTime());
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    const siblings = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.outboundMessageId, f.outbound.id));
+    expect(siblings).toHaveLength(2);
+    expect(siblings.every((row) => row.state === "open" && row.inboundClaimId === null)).toBe(true);
+  });
+
+  it.each([
+    "before",
+    "delayed",
+  ] as const)("does not admit a causally invalid %s pending attachment", async (replyTiming) => {
+    const f = await fixture("Purpose", replyTiming);
+    const operationId = randomUUID();
+    const work = {
+      domain: "finances" as const,
+      kind: "question" as const,
+      id: randomUUID(),
+      revision: "1",
+      actionRevision: "1",
+    };
+    const [binding] = await database.db
+      .insert(textReplyBindings)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        outboundMessageId: f.outbound.id,
+        consentEpoch: f.connection.consentEpoch,
+        itemNumber: 1,
+        workKind: work.kind,
+        workId: work.id,
+        workRevision: work.revision,
+        actionRevision: work.actionRevision,
+        answerMode: "free_text",
+        answerVocabulary: null,
+        expiresAt: new Date(Date.now() + 60_000),
+        operationId,
+        inboundClaimId: f.claim.id,
+        canonicalAnswer: "Purpose",
+        state: "pending",
+      })
+      .returning();
+    if (!binding) throw new Error("Missing seeded pending binding");
+    await database.db.transaction(async (tx) => {
+      expect(
+        await admitSmsAnswer(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        }),
+      ).toEqual({ state: "unavailable" });
+    });
+    const [unchanged] = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, binding.id));
+    expect(unchanged?.state).toBe("pending");
+    expect(unchanged?.resultRevision).toBeNull();
+  });
 
   it.each([
     "failed",

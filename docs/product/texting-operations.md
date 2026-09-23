@@ -324,11 +324,17 @@ its canonical submitted answer, not the transport envelope or routing syntax. Th
 claim may bind several distinct children; each has its own operation UUID and outcome.
 Numbered `N: answer` syntax remains valid when earlier siblings have already been answered,
 including when the remaining item uses bounded choices.
+An unattached reply may answer only a binding older than both the signed claim receipt and the
+provider's inbound occurrence time. An old or delayed webhook cannot be retargeted to a newer
+question; equal or uncertain timestamps fail closed and require clarification or a fresh reply.
+Twilio's [message `dateCreated`](https://www.twilio.com/docs/messaging/api/message-resource) is
+second-granularity, so a genuine same-second answer may need resending.
+T2 must surface that unsupported ordering honestly rather than silently accepting a different item.
 
 Binding a reply commits each child as pending before any Finance call. An internal Finance port
 receives a server-composed same-transaction admission callback. After Finance's owner and operation
 locks, Texting takes connection SHARE NOWAIT, inbound message SHARE NOWAIT, outbound message SHARE
-NOWAIT, and exact binding UPDATE NOWAIT. It verifies the signed claim, owner, recipient, active consent epoch, direction, exact work
+NOWAIT, and exact binding UPDATE NOWAIT. It verifies the signed claim, owner, recipient, active consent epoch, direction, causal reply order, exact work
 and action revisions, canonical answer, operation UUID, expiry, and pending state. The one-shot
 consume callback may run only within Finance's first accepted mutation before its receipt completes;
 it changes exactly that child to accepted or rolls back both sides. Completed exact Finance receipt

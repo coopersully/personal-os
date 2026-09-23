@@ -57,6 +57,14 @@ describe("texting contracts", () => {
       state: "matched",
       choices: [{ bindingId: "a", answer: "Dinner with Sam; reimbursable,\n50%" }],
     });
+    expect(parseTextReply("1:15 lunch", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:15 lunch" }],
+    });
+    expect(parseTextReply("1:1 with Sam", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:1 with Sam" }],
+    });
     expect(
       parseTextReply("1: Dinner, team\n---\n2: Taxi; client", [
         free,
@@ -91,6 +99,9 @@ describe("texting contracts", () => {
       state: "unavailable",
       reason: "ambiguous",
     });
+    expect(
+      parseTextReply("1:15 lunch\n---\n2: Taxi", [free, { ...free, id: "b", itemNumber: 2 }]),
+    ).toEqual({ state: "unavailable", reason: "ambiguous" });
     expect(parseTextReply("  ", [free])).toEqual({ state: "unavailable", reason: "unsupported" });
     expect(parseTextReply("x".repeat(10_001), [free])).toEqual({
       state: "unavailable",

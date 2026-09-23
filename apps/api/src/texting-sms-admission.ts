@@ -175,6 +175,8 @@ async function admitSmsAnswer(
     binding.consentEpoch !== connection.consentEpoch ||
     binding.state !== "pending" ||
     binding.expiresAt <= current ||
+    binding.createdAt >= claim.createdAt ||
+    binding.createdAt >= inbound.occurredAt ||
     binding.operationId !== expected.operationId ||
     binding.canonicalAnswer !== expected.text ||
     binding.workId !== work.id ||

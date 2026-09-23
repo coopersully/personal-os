@@ -12,7 +12,7 @@ import {
   type TextReplyParseResult,
   textReplyBindingInputSchema,
 } from "@personal-os/domain";
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import {
   readTextingEnabled,
@@ -168,6 +168,8 @@ export async function bindInboundReply(
           eq(textReplyBindings.consentEpoch, connection.consentEpoch),
           eq(textReplyBindings.state, "open"),
           gt(textReplyBindings.expiresAt, now),
+          lt(textReplyBindings.createdAt, claim.createdAt),
+          lt(textReplyBindings.createdAt, message.occurredAt),
         ),
       )
       .orderBy(asc(textReplyBindings.itemNumber))
@@ -212,7 +214,9 @@ export async function bindInboundReply(
           row.state !== "open" ||
           row.connectionId !== connection.id ||
           row.consentEpoch !== connection.consentEpoch ||
-          row.expiresAt <= now,
+          row.expiresAt <= now ||
+          row.createdAt >= claim.createdAt ||
+          row.createdAt >= message.occurredAt,
       )
     )
       throw retry();

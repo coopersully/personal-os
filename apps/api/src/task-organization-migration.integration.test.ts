@@ -363,6 +363,26 @@ describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
         finalReconciliationMigration,
         ...migrationsAfterTaskOrganization,
       ],
+      [
+        "0055_finance_sync_health",
+        "0056_workspace_maintenance_runs",
+        "0057_finance_currency_evidence",
+        "0058_finance_provider_items",
+        "0059_finance_automation_settings",
+        "0060_finance_agent_action_reviews",
+        "0061_finance_transaction_allocations",
+        "0062_finance_reimbursements",
+        "0063_finance_maintenance_candidates",
+        "0064_finance_ledger_challenges",
+        "0065_finance_period_reviews",
+        "0066_finance_plan_versions",
+        "0067_finance_ledger_protocol",
+        "0068_finance_mutation_leases",
+        "0069_finance_legacy_budget_backfill",
+        "0070_calendar_stewardship_foundations",
+        "0071_calendar_event_links",
+        "0072_finance_parallel_migration_reconciliation",
+      ],
     );
     temporaryMigrationFolders.push(financeHistory);
     await migrateDatabase(database.db, financeHistory);
@@ -443,6 +463,12 @@ describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
         "0072_finance_parallel_migration_reconciliation",
         finalReconciliationMigration,
         ...migrationsAfterTaskOrganization,
+      ],
+      [
+        "0056_workspace_maintenance_runs",
+        "0057_finance_currency_evidence",
+        "0058_finance_provider_items",
+        reconciliationMigration,
       ],
     );
     temporaryMigrationFolders.push(taskHistory);

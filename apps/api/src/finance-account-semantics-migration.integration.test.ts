@@ -38,6 +38,7 @@ describe.sequential("Finance account-semantics migration recovery", () => {
         "0088_finance_budget_policy_nonempty_text",
         "0089_finance_contextual_questions",
       ],
+      ["0072_texting", "0073_texting_review_hardening"],
     );
 
     try {

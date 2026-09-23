@@ -16,6 +16,20 @@ it("keeps exact Finance SMS reply status finite and free of private evidence", (
     reviewHref: "/settings?section=reviews",
   };
   expect(financeTextReplyStatusSchema.parse(safe)).toEqual(safe);
+  expect(
+    financeTextReplyStatusSchema.parse({
+      ...safe,
+      children: [
+        { itemNumber: 1, state: "blocked", reasonCode: "answer_not_applied", terminal: true },
+      ],
+    }).children[0]?.reasonCode,
+  ).toBe("answer_not_applied");
+  expect(() =>
+    financeTextReplyStatusSchema.parse({
+      ...safe,
+      children: [{ itemNumber: 1, state: "blocked", reasonCode: "stale_revision", terminal: true }],
+    }),
+  ).toThrow();
   for (const secret of [
     "canonicalAnswer",
     "operationId",

@@ -44,6 +44,7 @@ export const financeTextReplyStatusReasonSchema = z.enum([
   "finance_pending",
   "receipt_unavailable",
   "receipt_mismatch",
+  "answer_not_applied",
   "processing_uncertain",
 ]);
 export const financeTextReplyStatusChildSchema = z

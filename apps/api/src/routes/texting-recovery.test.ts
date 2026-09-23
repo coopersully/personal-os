@@ -149,4 +149,30 @@ describe("exact Finance SMS reply status route", () => {
     expect((await app.request("/v1/texting/finance-replies/not-a-uuid/status")).status).toBe(400);
     expect(inspectClaim).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["stale_revision", true, "answer_not_applied"],
+    ["private-terminal-detail", true, "answer_not_applied"],
+    [null, true, "answer_not_applied"],
+    ["delivery_failed", true, "delivery_failed"],
+    ["dispatch_uncertain", false, "processing_uncertain"],
+  ] as const)("projects a %s blocked child with terminal=%s to %s without leaking private evidence", async (reason, terminal, publicCode) => {
+    const { app, internal } = fixture();
+    const child = internal.children[1];
+    if (!child) throw new Error("Missing blocked child fixture");
+    child.state = terminal ? "blocked" : "uncertain";
+    child.reason = reason;
+    child.terminal = terminal;
+    const response = await app.request(path);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.children[1]).toEqual({
+      itemNumber: 2,
+      state: terminal ? "blocked" : "uncertain",
+      reasonCode: publicCode,
+      terminal,
+    });
+    for (const secret of ["stale_revision", "private-terminal-detail", "dispatch_uncertain"])
+      expect(JSON.stringify(body)).not.toContain(secret);
+  });
 });

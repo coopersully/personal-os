@@ -15,10 +15,10 @@ import { requireFeatureAccess, requireScope } from "./support.js";
 type PublicReason = FinanceTextReplyStatus["reasonCode"];
 
 /** Internal evidence and arbitrary Finance reason text never cross this boundary. */
-function publicReason(reason: string | null): PublicReason {
+function publicReason(reason: string | null, terminalNonAccepted = false): PublicReason {
   switch (reason) {
     case null:
-      return null;
+      return terminalNonAccepted ? "answer_not_applied" : null;
     case "ambiguous":
       return "ambiguous_reply";
     case "unsupported":
@@ -39,7 +39,7 @@ function publicReason(reason: string | null): PublicReason {
     case "accepted_binding_mismatch":
       return "receipt_mismatch";
     default:
-      return "processing_uncertain";
+      return terminalNonAccepted ? "answer_not_applied" : "processing_uncertain";
   }
 }
 
@@ -51,7 +51,7 @@ function publicStatus(claim: TextingRecoveryClaim): FinanceTextReplyStatus {
     children: claim.children.map((child) => ({
       itemNumber: child.itemNumber,
       state: child.state,
-      reasonCode: child.state === "accepted" ? null : publicReason(child.reason),
+      reasonCode: child.state === "accepted" ? null : publicReason(child.reason, child.terminal),
       terminal: child.terminal,
     })),
     reviewHref: "/settings?section=reviews",

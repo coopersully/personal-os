@@ -181,6 +181,40 @@ describe("texting contracts", () => {
     });
   });
 
+  it("preserves exact single-choice vocabulary when it resembles a selector", () => {
+    const choice = {
+      id: "a",
+      itemNumber: 1,
+      answerMode: "choices" as const,
+      answerVocabulary: ["1:1"],
+    };
+    expect(parseTextReply("1:1", [choice])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:1" }],
+    });
+    expect(
+      parseTextReply("2 pm", [{ ...choice, itemNumber: 2, answerVocabulary: ["2 pm"] }]),
+    ).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "2 pm" }],
+    });
+    expect(parseTextReply("1 day", [{ ...choice, answerVocabulary: ["1 day"] }])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1 day" }],
+    });
+    expect(parseTextReply("1:1", [{ ...choice, answerVocabulary: ["1:1", "1"] }])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(
+      parseTextReply("2 pm", [{ ...choice, itemNumber: 2, answerVocabulary: ["2 pm", "pm"] }]),
+    ).toEqual({ state: "unavailable", reason: "ambiguous" });
+    expect(parseTextReply("1 day", [{ ...choice, answerVocabulary: ["1 day", "day"] }])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+  });
+
   it("rejects an overlong choice reply without stalling on separator-free whitespace", () => {
     const choices = [
       { id: "a", itemNumber: 1, answerMode: "choices" as const, answerVocabulary: ["yes"] },

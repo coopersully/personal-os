@@ -951,6 +951,66 @@ describe.sequential("signed SMS child admission", () => {
     });
   });
 
+  it("attaches an exact selector-looking choice only when it has one interpretation", async () => {
+    const exact = await fixture("1:1");
+    const [binding] = await database.db.transaction((tx) =>
+      createTextReplyBindings(tx, exact.userId, exact.connection, exact.outbound.id, [
+        {
+          outboundMessageId: exact.outbound.id,
+          itemNumber: 1,
+          answerMode: "choices",
+          answerVocabulary: ["1:1"],
+          operationId: randomUUID(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          work: {
+            domain: "finances",
+            kind: "question",
+            id: randomUUID(),
+            revision: "1",
+            actionRevision: "1",
+          },
+        },
+      ]),
+    );
+    if (!binding) throw new Error("Missing exact choice binding");
+    expect(await bindInboundReply(database.db, exact.userId, exact.inbound.id)).toMatchObject({
+      state: "pending",
+      children: [{ bindingId: binding.id, answer: "1:1" }],
+    });
+
+    const collision = await fixture("1:1");
+    const [ambiguous] = await database.db.transaction((tx) =>
+      createTextReplyBindings(tx, collision.userId, collision.connection, collision.outbound.id, [
+        {
+          outboundMessageId: collision.outbound.id,
+          itemNumber: 1,
+          answerMode: "choices",
+          answerVocabulary: ["1:1", "1"],
+          operationId: randomUUID(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          work: {
+            domain: "finances",
+            kind: "question",
+            id: randomUUID(),
+            revision: "1",
+            actionRevision: "1",
+          },
+        },
+      ]),
+    );
+    if (!ambiguous) throw new Error("Missing ambiguous choice binding");
+    expect(await bindInboundReply(database.db, collision.userId, collision.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    const [unchanged] = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, ambiguous.id));
+    expect(unchanged?.state).toBe("open");
+    expect(unchanged?.canonicalAnswer).toBeNull();
+  });
+
   it("clarifies an ambiguous multi-item reply without attaching either child", async () => {
     const f = await fixture("yes");
     const expiresAt = new Date(Date.now() + 60_000).toISOString();

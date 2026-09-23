@@ -66,6 +66,25 @@ export function parseTextReply(
     return { state: "unavailable", reason: "unsupported" };
   const canonical = body.trim();
   const only = bindings[0];
+  if (bindings.length === 1 && only?.answerMode === "choices") {
+    const exact =
+      only.answerVocabulary?.filter((word) => word.toLowerCase() === canonical.toLowerCase()) ?? [];
+    if (exact.length > 1) return { state: "unavailable", reason: "ambiguous" };
+    const answer = exact[0];
+    if (answer) {
+      if (answer.length > 10_000) return { state: "unavailable", reason: "unsupported" };
+      const selector = /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(canonical);
+      const selectedAnswer =
+        selector && Number(selector[1]) === only.itemNumber
+          ? only.answerVocabulary?.find(
+              (word) => word.toLowerCase() === selector[2]?.trim().toLowerCase(),
+            )
+          : undefined;
+      if (selectedAnswer && selectedAnswer !== answer)
+        return { state: "unavailable", reason: "ambiguous" };
+      return { state: "matched", choices: [{ bindingId: only.id, answer }] };
+    }
+  }
   if (
     bindings.length === 1 &&
     only &&

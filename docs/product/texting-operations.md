@@ -325,7 +325,9 @@ claim may bind several distinct children; each has its own operation UUID and ou
 Numbered `N: answer` syntax remains valid when earlier siblings have already been answered,
 including when the remaining item uses bounded choices; numeric choice vocabulary also permits
 `2:1`. A single free-text answer beginning `1:15` stays literal, while ambiguous multi-item
-numeric prefixes require clarification.
+numeric prefixes require clarification. For one choice item, an exact vocabulary term such as
+`2 pm` is preserved before reading it as a numbered selector; if both interpretations are valid
+and different, Texting asks for clarification instead of changing the answer.
 An unattached reply may answer only a binding whose database creation preceded the signed claim's
 database receipt and whose exact outbound Twilio `dateCreated` preceded the inbound Twilio
 `dateCreated`. The latter provider timestamp is persisted once with the successful outbound SID;

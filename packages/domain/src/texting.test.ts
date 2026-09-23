@@ -1,6 +1,7 @@
 import { createAccessTokenInputSchema } from "./auth.js";
 import {
   normalizeTextingPhoneNumber,
+  parseTextReply,
   sendTextMessageInputSchema,
   textConversationQuerySchema,
 } from "./texting.js";
@@ -44,4 +45,199 @@ describe("texting contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("parses exact free-text answers without changing internal whitespace or punctuation", () => {
+    const free = {
+      id: "a",
+      itemNumber: 1,
+      answerMode: "free_text" as const,
+      answerVocabulary: null,
+    };
+    expect(parseTextReply("  Dinner with Sam; reimbursable,\n50%  ", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "Dinner with Sam; reimbursable,\n50%" }],
+    });
+    expect(parseTextReply("1:15 lunch", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:15 lunch" }],
+    });
+    expect(parseTextReply("1:1 with Sam", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:1 with Sam" }],
+    });
+    expect(
+      parseTextReply("1: Dinner, team\n---\n2: Taxi; client", [
+        free,
+        { ...free, id: "b", itemNumber: 2 },
+      ]),
+    ).toEqual({
+      state: "matched",
+      choices: [
+        { bindingId: "a", answer: "Dinner, team" },
+        { bindingId: "b", answer: "Taxi; client" },
+      ],
+    });
+    expect(
+      parseTextReply("1: Dinner\n---\n1: Taxi", [free, { ...free, id: "b", itemNumber: 2 }]),
+    ).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(parseTextReply("Dinner", [free, { ...free, id: "b", itemNumber: 2 }])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(
+      parseTextReply("1: Dinner\n---\nother text", [free, { ...free, id: "b", itemNumber: 2 }]),
+    ).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(
+      parseTextReply("1: Dinner; 2: Taxi", [free, { ...free, id: "b", itemNumber: 2 }]),
+    ).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(
+      parseTextReply("1:15 lunch\n---\n2: Taxi", [free, { ...free, id: "b", itemNumber: 2 }]),
+    ).toEqual({ state: "unavailable", reason: "ambiguous" });
+    expect(parseTextReply("  ", [free])).toEqual({ state: "unavailable", reason: "unsupported" });
+    expect(parseTextReply("x".repeat(10_001), [free])).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+  });
+
+  it("requires explicit distinct numbers and vocabulary for multiple choices", () => {
+    const choices = [
+      { id: "a", itemNumber: 1, answerMode: "choices" as const, answerVocabulary: ["yes", "no"] },
+      { id: "b", itemNumber: 2, answerMode: "choices" as const, answerVocabulary: ["yes", "no"] },
+    ];
+    expect(parseTextReply("1 yes, 2 no", choices)).toEqual({
+      state: "matched",
+      choices: [
+        { bindingId: "a", answer: "yes" },
+        { bindingId: "b", answer: "no" },
+      ],
+    });
+    expect(parseTextReply(" 1: yes  ;  2 no ", choices)).toEqual({
+      state: "matched",
+      choices: [
+        { bindingId: "a", answer: "yes" },
+        { bindingId: "b", answer: "no" },
+      ],
+    });
+    expect(parseTextReply("yes", choices)).toEqual({ state: "unavailable", reason: "ambiguous" });
+    expect(parseTextReply("1 yes, 1 no", choices)).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(parseTextReply("3 yes", choices)).toEqual({ state: "unavailable", reason: "ambiguous" });
+    const remaining = choices[1];
+    if (!remaining) throw new Error("Missing second choice fixture");
+    expect(parseTextReply("2: yes", [remaining])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "yes" }],
+    });
+    expect(parseTextReply("1: yes", [remaining])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+  });
+
+  it("accepts numeric choice answers without treating single free-text times as selectors", () => {
+    const free = {
+      id: "a",
+      itemNumber: 1,
+      answerMode: "free_text" as const,
+      answerVocabulary: null,
+    };
+    const numeric = {
+      id: "b",
+      itemNumber: 2,
+      answerMode: "choices" as const,
+      answerVocabulary: ["1", "2"],
+    };
+    expect(parseTextReply("1:1", [{ ...numeric, itemNumber: 1 }])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "1" }],
+    });
+    expect(parseTextReply("2:1", [free, numeric])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "1" }],
+    });
+    expect(parseTextReply("2:1", [numeric])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "1" }],
+    });
+    expect(parseTextReply("1:15 lunch", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:15 lunch" }],
+    });
+    expect(parseTextReply("1:15 lunch", [free, numeric])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+  });
+
+  it("preserves exact single-choice vocabulary when it resembles a selector", () => {
+    const choice = {
+      id: "a",
+      itemNumber: 1,
+      answerMode: "choices" as const,
+      answerVocabulary: ["1:1"],
+    };
+    expect(parseTextReply("1:1", [choice])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:1" }],
+    });
+    expect(
+      parseTextReply("2 pm", [{ ...choice, itemNumber: 2, answerVocabulary: ["2 pm"] }]),
+    ).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "2 pm" }],
+    });
+    expect(parseTextReply("1 day", [{ ...choice, answerVocabulary: ["1 day"] }])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1 day" }],
+    });
+    expect(parseTextReply("1:1", [{ ...choice, answerVocabulary: ["1:1", "1"] }])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+    expect(
+      parseTextReply("2 pm", [{ ...choice, itemNumber: 2, answerVocabulary: ["2 pm", "pm"] }]),
+    ).toEqual({ state: "unavailable", reason: "ambiguous" });
+    expect(parseTextReply("1 day", [{ ...choice, answerVocabulary: ["1 day", "day"] }])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+  });
+
+  it("rejects an overlong choice reply without stalling on separator-free whitespace", () => {
+    const choices = [
+      { id: "a", itemNumber: 1, answerMode: "choices" as const, answerVocabulary: ["yes"] },
+      { id: "b", itemNumber: 2, answerMode: "choices" as const, answerVocabulary: ["no"] },
+    ];
+    expect(parseTextReply(`1 yes${" ".repeat(50_000)}x`, choices)).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+  }, 2_000);
+
+  it("handles long whitespace after a numeric prefix without backtracking", () => {
+    const answer = `0 ${"\t".repeat(9_000)}x`;
+    expect(
+      parseTextReply(answer, [
+        { id: "a", itemNumber: 1, answerMode: "choices", answerVocabulary: [answer] },
+      ]),
+    ).toEqual({ state: "matched", choices: [{ bindingId: "a", answer }] });
+    const selected = `1 ${"\t".repeat(9_000)}x`;
+    expect(
+      parseTextReply(selected, [
+        { id: "a", itemNumber: 1, answerMode: "choices", answerVocabulary: [selected, "x"] },
+      ]),
+    ).toEqual({ state: "unavailable", reason: "ambiguous" });
+  }, 2_000);
 });

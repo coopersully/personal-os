@@ -70,6 +70,7 @@ describe.sequential("notification migration integrity", () => {
     const expectedMessages = originalMessages.map((r) => ({
       ...r,
       occurred_at_source: r.occurred_at_source === "ilo" ? "nohmi" : r.occurred_at_source,
+      provider_submitted_at: null,
     }));
     const expectedConsent = originalConsent.map((r) => ({
       ...r,

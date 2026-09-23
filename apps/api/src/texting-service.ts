@@ -6,6 +6,7 @@ import {
 } from "@personal-os/connectors";
 import {
   type Database,
+  textInboundClaims,
   textingConnections,
   textingConsentEvents,
   textingVerificationChallenges,
@@ -611,6 +612,11 @@ export function createTextingService(options: Options) {
       .update(textMessages)
       .set({
         providerMessageSid: providerMessage.sid,
+        providerSubmittedAt:
+          providerMessage.dateCreated instanceof Date &&
+          Number.isFinite(providerMessage.dateCreated.getTime())
+            ? providerMessage.dateCreated
+            : null,
         status: providerMessage.status === "queued" ? "queued" : "accepted",
         updatedAt: now(),
       })
@@ -812,6 +818,16 @@ export function createTextingService(options: Options) {
         .onConflictDoNothing()
         .returning({ id: textMessages.id });
       if (!inserted) return;
+      // This method is registered only behind the signature-validating inbound route.
+      // Consent keywords never reach this branch. Disabled Texting keeps transport history
+      // while preventing new reply work from becoming agent-readable.
+      if (options.enabled && row.state === "active")
+        await tx.insert(textInboundClaims).values({
+          connectionId: row.id,
+          consentEpoch: row.consentEpoch,
+          messageId: inserted.id,
+          userId: row.userId,
+        });
       await tx
         .update(textingConnections)
         .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })

@@ -303,6 +303,83 @@ with mocks. They do not prove production sender registration, carrier reachabili
 routing, or STOP/START behavior; production enablement still requires an authorized end-to-end test
 that records identifiers, timestamps, and final states without retaining phone numbers or bodies.
 
+## T1 inbound and answer-admission boundary
+
+The T1 storage slice adds an owner-scoped claim to each ordinary inbound message committed through
+the signed Twilio route while Texting is active. The claim captures the connected recipient and
+current consent epoch in the same transaction as the message. STOP and START remain consent-only;
+disabled Texting continues to synchronize those keywords but creates no new answer claims. A raw
+message row or provider identifier is not an authentication claim. Provider duplicates retain one
+message and one claim. A reconnect, newer STOP or START, or provider block advances the connection's
+consent epoch; admission requires both claim and outbound binding to match the currently active epoch.
+
+An internal outbound binding names one exact queued message and one numbered Finance question,
+including its work/action revisions, answer mode, expiry, and stable child operation UUID. It is
+created only in that outbound message's transaction. Choices use a bounded vocabulary. A single
+unambiguous free-text question accepts the person's trimmed answer; multiple free-text answers use
+`1: answer` followed by a line containing only `---` and then `2: answer`. Commas, semicolons,
+ordinary line breaks, case, punctuation, and internal whitespace stay in the answer. Missing,
+duplicate, unknown, or delimiter-looking selectors require clarification. Each child stores only
+its canonical submitted answer, not the transport envelope or routing syntax. The same inbound
+claim may bind several distinct children; each has its own operation UUID and outcome.
+Numbered `N: answer` syntax remains valid when earlier siblings have already been answered,
+including when the remaining item uses bounded choices; numeric choice vocabulary also permits
+`2:1`. A single free-text answer beginning `1:15` stays literal, while ambiguous multi-item
+numeric prefixes require clarification. For one choice item, an exact vocabulary term such as
+`2 pm` is preserved before reading it as a numbered selector; if both interpretations are valid
+and different, Texting asks for clarification instead of changing the answer.
+An unattached reply may answer only a binding whose database creation preceded the signed claim's
+database receipt and whose exact outbound Twilio `dateCreated` preceded the inbound Twilio
+`dateCreated`. The latter provider timestamp is persisted once with the successful outbound SID;
+an unacknowledged or historical outbound with no trustworthy provider time stays unconfirmed,
+without a fabricated backfill. These two comparisons stay within their respective clocks. An old
+or delayed webhook cannot be retargeted to a newer question; equal or uncertain provider times
+fail closed and require clarification or a fresh reply. Twilio's
+[message `dateCreated`](https://www.twilio.com/docs/messaging/api/message-resource) is
+second-granularity, so a genuine same-second answer may need resending.
+T2 must surface that unsupported ordering honestly rather than silently accepting a different item.
+
+Binding a reply commits each child as pending before any Finance call. An internal Finance port
+receives a server-composed same-transaction admission callback. After Finance's owner and operation
+locks, Texting takes connection SHARE NOWAIT, inbound message SHARE NOWAIT, outbound message SHARE
+NOWAIT, and exact binding UPDATE NOWAIT. It verifies the signed claim, owner, recipient, active consent epoch, direction, causal reply order, exact work
+and action revisions, canonical answer, operation UUID, expiry, and pending state. The one-shot
+consume callback may run only within Finance's first accepted mutation before its receipt completes;
+it changes exactly that child to accepted or rolls back both sides. Completed exact Finance receipt
+replay skips admission and consume. Blocked or unavailable child outcomes are projected later through
+an idempotent Texting-only transaction. Temporary failures remain waiting or uncertain for recovery;
+they are not a terminal invalid-source finding. This slice does not register Finance dispatch or
+promise a provider acknowledgment as proof that bookkeeping finished.
+
+The exact outbound message is locked SHARE NOWAIT before its binding. A definitively failed or
+undelivered outbound cannot acquire a new reply or admit an unconsumed answer. A queued message
+without a provider SID or provider `dateCreated`, or one with unknown delivery, remains retryable
+rather than producing a terminal Finance receipt; queued messages with a SID and accepted, sending,
+sent, or delivered messages may proceed only with immutable provider handoff time earlier than the
+inbound provider occurrence. An already accepted Finance receipt remains authoritative if a later callback
+reports delivery failure. A temporary Texting disablement also leaves signed claims and pending
+children recoverable: bind waits, and admission throws a typed retryable error without a terminal
+Finance receipt. Disabling between verification and consume rolls back the shared Finance/Texting
+transaction. T2 must durably retry waiting claims when policy or delivery evidence changes.
+If a provider response omitted `dateCreated`, later status callbacks cannot manufacture the
+missing creation-time evidence; T2 needs a bounded clarification/resend path after exact Finance
+receipt reconciliation rather than silently retrying that binding forever.
+
+An idempotent sweep can change only an expired, unattached open binding to terminal `expired` under
+its row lock. Attached pending, waiting, and uncertain children are never swept without first
+checking the exact Finance receipt. T1 adds no host schedule for the sweep, so bounded retention is
+not claimed until T2 wires invocation and reconciliation.
+
+Texting history cleanup must retain any inbound claim or outbound binding while its child is open,
+pending, waiting, or uncertain. Database foreign keys reject deletion of their source message or
+connection while the claim or binding exists; guards reject deletion of unfinished bindings and
+owner-live claims. Terminal bindings may be purged after the applicable retention decision, but
+signed inbound claims and their source messages remain until account deletion. A full-history purge
+cannot discard unfinished child outcomes. Account deletion cascades all owner records in one
+transaction. Finance's eventual accepted provenance retains only local UUIDs with
+no Texting foreign key, so disconnect or later Texting cleanup cannot erase an accepted Finance
+answer; the intentionally submitted Finance answer text remains a Finance record.
+
 ## T0 notification implementation boundary
 
 The T0 notification slice adds owner-scoped notification preferences, durable work intents, and

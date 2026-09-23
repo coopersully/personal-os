@@ -3715,15 +3715,155 @@ export const textMessages = pgTable(
     seriesTotal: integer("series_total"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     occurredAtSource: text("occurred_at_source").$type<TextOccurredAtSource>().notNull(),
+    providerSubmittedAt: timestamp("provider_submitted_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
+    check(
+      "text_messages_provider_submitted_check",
+      sql`${table.providerSubmittedAt} IS NULL OR (${table.direction} = 'outbound' AND ${table.providerMessageSid} IS NOT NULL)`,
+    ),
     uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
     uniqueIndex("text_messages_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("text_messages_owner_id_connection_idx").on(
+      table.userId,
+      table.id,
+      table.connectionId,
+    ),
     index("text_messages_conversation_idx").on(table.connectionId, table.occurredAt, table.id),
     index("text_messages_user_outbound_idx").on(table.userId, table.direction, table.createdAt),
+  ],
+);
+
+/** Created only by the validated inbound webhook, never from a public message or SID assertion. */
+export const textInboundClaims = pgTable(
+  "text_inbound_claims",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    consentEpoch: integer("consent_epoch").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("text_inbound_claims_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("text_inbound_claims_owner_id_connection_idx").on(
+      table.userId,
+      table.id,
+      table.connectionId,
+    ),
+    uniqueIndex("text_inbound_claims_message_idx").on(table.messageId),
+    foreignKey({
+      name: "text_inbound_claims_connection_fk",
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }).onDelete("no action"),
+    foreignKey({
+      name: "text_inbound_claims_message_fk",
+      columns: [table.userId, table.messageId, table.connectionId],
+      foreignColumns: [textMessages.userId, textMessages.id, textMessages.connectionId],
+    }).onDelete("no action"),
+    check("text_inbound_claims_epoch_check", sql`${table.consentEpoch} > 0`),
+  ],
+);
+
+/** One immutable outbound work item with one stable, independently recoverable child operation. */
+export const textReplyBindings = pgTable(
+  "text_reply_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    outboundMessageId: uuid("outbound_message_id").notNull(),
+    consentEpoch: integer("consent_epoch").notNull(),
+    itemNumber: integer("item_number").notNull(),
+    workKind: text("work_kind").$type<"question" | "approval" | "repair">().notNull(),
+    workId: uuid("work_id").notNull(),
+    workRevision: text("work_revision").notNull(),
+    actionRevision: text("action_revision").notNull(),
+    answerMode: text("answer_mode").$type<"choices" | "free_text">().notNull(),
+    answerVocabulary: jsonb("answer_vocabulary").$type<string[]>(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    operationId: uuid("operation_id").notNull(),
+    inboundClaimId: uuid("inbound_claim_id"),
+    canonicalAnswer: text("canonical_answer"),
+    state: text("state")
+      .$type<
+        | "open"
+        | "expired"
+        | "pending"
+        | "waiting"
+        | "uncertain"
+        | "accepted"
+        | "blocked"
+        | "unavailable"
+      >()
+      .notNull()
+      .default("open"),
+    resultRevision: text("result_revision"),
+    reasonCode: text("reason_code"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("text_reply_bindings_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("text_reply_bindings_operation_idx").on(table.userId, table.operationId),
+    uniqueIndex("text_reply_bindings_outbound_item_idx").on(
+      table.userId,
+      table.outboundMessageId,
+      table.itemNumber,
+    ),
+    uniqueIndex("text_reply_bindings_inbound_item_idx")
+      .on(table.inboundClaimId, table.itemNumber)
+      .where(sql`${table.inboundClaimId} IS NOT NULL`),
+    index("text_reply_bindings_recovery_idx").on(table.state, table.updatedAt),
+    foreignKey({
+      name: "text_reply_bindings_connection_fk",
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }).onDelete("no action"),
+    foreignKey({
+      name: "text_reply_bindings_outbound_fk",
+      columns: [table.userId, table.outboundMessageId, table.connectionId],
+      foreignColumns: [textMessages.userId, textMessages.id, textMessages.connectionId],
+    }).onDelete("no action"),
+    foreignKey({
+      name: "text_reply_bindings_claim_fk",
+      columns: [table.userId, table.inboundClaimId, table.connectionId],
+      foreignColumns: [
+        textInboundClaims.userId,
+        textInboundClaims.id,
+        textInboundClaims.connectionId,
+      ],
+    }).onDelete("no action"),
+    check("text_reply_bindings_epoch_check", sql`${table.consentEpoch} > 0`),
+    check("text_reply_bindings_item_check", sql`${table.itemNumber} BETWEEN 1 AND 3`),
+    check(
+      "text_reply_bindings_work_check",
+      sql`${table.workKind} IN ('question','approval','repair') AND length(${table.workRevision}) BETWEEN 1 AND 200 AND length(${table.actionRevision}) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "text_reply_bindings_state_check",
+      sql`${table.state} IN ('open','expired','pending','waiting','uncertain','accepted','blocked','unavailable')`,
+    ),
+    check(
+      "text_reply_bindings_mode_check",
+      sql`(${table.answerMode} = 'choices' AND ${table.answerVocabulary} IS NOT NULL) OR (${table.answerMode} = 'free_text' AND ${table.answerVocabulary} IS NULL)`,
+    ),
+    check(
+      "text_reply_bindings_vocabulary_check",
+      sql`CASE WHEN ${table.answerVocabulary} IS NULL THEN ${table.answerMode} = 'free_text' WHEN jsonb_typeof(${table.answerVocabulary}) = 'array' THEN jsonb_array_length(${table.answerVocabulary}) BETWEEN 1 AND 8 ELSE false END`,
+    ),
+    check(
+      "text_reply_bindings_attachment_check",
+      sql`(${table.state} IN ('open','expired') AND ${table.inboundClaimId} IS NULL AND ${table.canonicalAnswer} IS NULL AND ${table.resultRevision} IS NULL AND ${table.reasonCode} IS NULL) OR (${table.state} NOT IN ('open','expired') AND ${table.inboundClaimId} IS NOT NULL AND ${table.canonicalAnswer} IS NOT NULL)`,
+    ),
   ],
 );
 

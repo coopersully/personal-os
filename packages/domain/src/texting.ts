@@ -1,6 +1,7 @@
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { financeHumanWorkRefSchema } from "./finance/workflow-contracts.js";
 
 export const textingConsentVersion = "2026-08-28-v1" as const;
 export const textingCountrySchema = z.enum(["US", "CA"]);
@@ -30,6 +31,117 @@ export const textContentKindSchema = z.enum([
   "safety_critical",
 ]);
 export const textOccurredAtSourceSchema = z.enum(["provider", "nohmi"]);
+
+/** Internal, bounded evidence for one question printed in an outbound SMS. */
+export const textReplyBindingInputSchema = z
+  .object({
+    outboundMessageId: idSchema,
+    itemNumber: z.int().min(1).max(3),
+    work: financeHumanWorkRefSchema,
+    answerMode: z.enum(["choices", "free_text"]),
+    answerVocabulary: z.array(z.string().trim().min(1).max(80)).min(1).max(8).nullable(),
+    expiresAt: isoDateTimeSchema,
+    operationId: idSchema,
+  })
+  .strict()
+  .refine((value) => (value.answerMode === "choices") === (value.answerVocabulary !== null));
+export type TextReplyBindingInput = z.infer<typeof textReplyBindingInputSchema>;
+
+export type TextReplyChoice = { bindingId: string; answer: string };
+export type TextReplyParseResult =
+  | { state: "matched"; choices: TextReplyChoice[] }
+  | { state: "unavailable"; reason: "ambiguous" | "unsupported" };
+
+/** A numbered reply is required whenever more than one child is answerable. */
+export function parseTextReply(
+  body: string,
+  bindings: ReadonlyArray<{
+    id: string;
+    itemNumber: number;
+    answerMode: "choices" | "free_text";
+    answerVocabulary: readonly string[] | null;
+  }>,
+): TextReplyParseResult {
+  if (bindings.length === 0 || bindings.length > 3)
+    return { state: "unavailable", reason: "unsupported" };
+  const canonical = body.trim();
+  const only = bindings[0];
+  if (bindings.length === 1 && only?.answerMode === "choices") {
+    const exact =
+      only.answerVocabulary?.filter((word) => word.toLowerCase() === canonical.toLowerCase()) ?? [];
+    if (exact.length > 1) return { state: "unavailable", reason: "ambiguous" };
+    const answer = exact[0];
+    if (answer) {
+      if (answer.length > 10_000) return { state: "unavailable", reason: "unsupported" };
+      const first = canonical.charCodeAt(0);
+      const separator = canonical[1];
+      const selectedText =
+        first >= 48 &&
+        first <= 57 &&
+        first - 48 === only.itemNumber &&
+        (separator === ":" || (separator !== undefined && /\s/u.test(separator)))
+          ? canonical.slice(2).trim()
+          : null;
+      const selectedAnswer = selectedText
+        ? only.answerVocabulary?.find((word) => word.toLowerCase() === selectedText.toLowerCase())
+        : undefined;
+      if (selectedAnswer && selectedAnswer !== answer)
+        return { state: "unavailable", reason: "ambiguous" };
+      return { state: "matched", choices: [{ bindingId: only.id, answer }] };
+    }
+  }
+  if (
+    bindings.length === 1 &&
+    only &&
+    !(only.answerMode === "free_text" ? /^\d\s*:(?!\d)/u : /^\d(?::|\s+)/u).test(canonical)
+  ) {
+    const binding = bindings[0];
+    if (!binding) return { state: "unavailable", reason: "unsupported" };
+    const answer =
+      binding.answerMode === "free_text"
+        ? canonical
+        : binding.answerVocabulary?.find((word) => word.toLowerCase() === canonical.toLowerCase());
+    return answer && answer.length <= 10_000
+      ? { state: "matched", choices: [{ bindingId: binding.id, answer }] }
+      : { state: "unavailable", reason: "unsupported" };
+  }
+  const hasFreeText = bindings.some((row) => row.answerMode === "free_text");
+  // Free-text clauses use a whole-line separator. A delimiter-looking line without a
+  // valid following selector is rejected; commas, semicolons, and other newlines stay in text.
+  // Split choices on punctuation alone; trim each clause after splitting to keep long
+  // separator-free whitespace runs linear to scan.
+  const parts = canonical.split(hasFreeText ? /\r?\n---\r?\n/u : /[,;]/u);
+  if (parts.length === 0 || parts.length > bindings.length)
+    return { state: "unavailable", reason: "ambiguous" };
+  const choices: TextReplyChoice[] = [];
+  const used = new Set<number>();
+  for (const part of parts) {
+    const match = hasFreeText
+      ? /^(\d)\s*:[ \t]*(.+)$/su.exec(part)
+      : /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(part.trim());
+    if (!match) return { state: "unavailable", reason: "ambiguous" };
+    const itemNumber = Number(match[1]);
+    const binding = bindings.find((row) => row.itemNumber === itemNumber);
+    if (!binding || used.has(itemNumber)) return { state: "unavailable", reason: "ambiguous" };
+    if (hasFreeText && binding.answerMode === "free_text" && /^\d\s*:\d/u.test(part))
+      return { state: "unavailable", reason: "ambiguous" };
+    const rawAnswer = match[2]?.trim() ?? "";
+    if (
+      hasFreeText &&
+      (/(?:^|\r?\n)---(?:\r?\n|$)/u.test(rawAnswer) ||
+        /(?:[,;]|\r?\n)\s*[1-3]\s*:/u.test(rawAnswer))
+    )
+      return { state: "unavailable", reason: "ambiguous" };
+    const answer =
+      binding.answerMode === "free_text"
+        ? rawAnswer
+        : binding.answerVocabulary?.find((word) => word.toLowerCase() === rawAnswer.toLowerCase());
+    if (!answer || answer.length > 10_000) return { state: "unavailable", reason: "unsupported" };
+    used.add(itemNumber);
+    choices.push({ bindingId: binding.id, answer });
+  }
+  return { state: "matched", choices };
+}
 
 export const startTextingVerificationInputSchema = z.object({
   consentAccepted: z.literal(true),

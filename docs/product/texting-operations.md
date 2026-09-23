@@ -395,8 +395,9 @@ reason remains `processing_uncertain`. The response omits answer text, operation
 provider IDs, phone data, and raw Finance outcomes; its only destination is the ordinary
 `/settings?section=reviews` page.
 
-An internal, owner-scoped `runPage` reconciles bounded unfinished claims and exact Finance receipts
-before any same-key retry or Texting projection. It preserves accepted siblings independently,
+An internal, owner-scoped `runPage` reconciles bounded unfinished claims. For attached children,
+it inspects the exact Finance receipt before same-key execution or result projection; unattached
+claims may first be bound. It preserves accepted siblings independently,
 does not re-execute incomplete Finance receipts, and can invoke the unattached-open-binding expiry
 sweep. Composition does not schedule or call that pass: there is no public recovery POST, agent
 write trigger or trigger audit, host continuation, provider activation, or general Texting inbox.

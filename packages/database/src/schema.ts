@@ -3721,6 +3721,10 @@ export const textMessages = pgTable(
     ...timestamps,
   },
   (table) => [
+    check(
+      "text_messages_provider_submitted_check",
+      sql`${table.providerSubmittedAt} IS NULL OR (${table.direction} = 'outbound' AND ${table.providerMessageSid} IS NOT NULL)`,
+    ),
     uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
     uniqueIndex("text_messages_owner_id_idx").on(table.userId, table.id),
     uniqueIndex("text_messages_owner_id_connection_idx").on(

@@ -77,6 +77,15 @@ describe("database schema contracts", () => {
       ]),
     );
     expect(messages.columns.map((column) => column.name)).toContain("provider_submitted_at");
+    const providerSubmittedCheck = messages.checks.find(
+      (constraint) => constraint.name === "text_messages_provider_submitted_check",
+    );
+    expect(providerSubmittedCheck).toBeDefined();
+    if (!providerSubmittedCheck) throw new Error("Provider submission schema check is missing.");
+    const providerSubmittedSql = new PgDialect().sqlToQuery(providerSubmittedCheck.value).sql;
+    expect(providerSubmittedSql).toContain('"provider_submitted_at" IS NULL');
+    expect(providerSubmittedSql).toContain("\"direction\" = 'outbound'");
+    expect(providerSubmittedSql).toContain('"provider_message_sid" IS NOT NULL');
     const migration = await readFile(
       resolve(process.cwd(), "packages/database/migrations/0090_texting_inbound_work_binding.sql"),
       "utf8",

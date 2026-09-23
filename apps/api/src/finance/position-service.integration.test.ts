@@ -132,6 +132,61 @@ describe.sequential("Finance position persistence boundary", () => {
       service.readPosition(userId, { ...dates, from: "2026-09-19" }),
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
+  it("keeps scoped revisions stable when an unrequested account changes", async () => {
+    const owner = required(
+      (
+        await database.db
+          .insert(users)
+          .values({
+            displayName: "Scoped revision",
+            email: "scoped-position@example.com",
+            passwordHash: "unused",
+          })
+          .returning()
+      )[0],
+    );
+    const accounts = await database.db
+      .insert(financeAccounts)
+      .values([
+        {
+          userId: owner.id,
+          provider: "manual",
+          institution: "Synthetic",
+          name: "Selected cash",
+          balance: 10_000,
+          currencyCode: "USD",
+          ownershipType: "individual",
+          ownershipShareBps: 10_000,
+        },
+        {
+          userId: owner.id,
+          provider: "manual",
+          institution: "Synthetic",
+          name: "Unrequested cash",
+          balance: 20_000,
+          currencyCode: "USD",
+          ownershipType: "individual",
+          ownershipShareBps: 10_000,
+        },
+      ])
+      .returning();
+    const selectedAccount = required(accounts[0]);
+    const unrequestedAccount = required(accounts[1]);
+    const scope = { ...dates, accountIds: [selectedAccount.id] };
+    const before = await service.readPosition(owner.id, scope);
+
+    await database.db.insert(financeTransactions).values({
+      userId: owner.id,
+      accountId: unrequestedAccount.id,
+      amount: 2_500,
+      direction: "expense",
+      merchant: "Outside scope",
+      transactionDate: "2026-09-14",
+    });
+
+    const after = await service.readPosition(owner.id, scope);
+    expect(after.revision).toBe(before.revision);
+  });
   it("honors only current validated tenant relationships and invalidates corrections", async () => {
     const [event] = await database.db
       .insert(financeEconomicEvents)

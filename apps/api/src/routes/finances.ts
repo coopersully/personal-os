@@ -199,6 +199,7 @@ export function registerFinanceRoutes({
       ...context.req.query(),
       ...(accountIds === undefined ? {} : { accountIds: accountIds.split(",").filter(Boolean) }),
     });
+    context.header("Cache-Control", "no-store");
     return context.json({
       position: await position().readPosition(context.get("principal").userId, scope),
     });

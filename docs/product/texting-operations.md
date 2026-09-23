@@ -323,11 +323,17 @@ duplicate, unknown, or delimiter-looking selectors require clarification. Each c
 its canonical submitted answer, not the transport envelope or routing syntax. The same inbound
 claim may bind several distinct children; each has its own operation UUID and outcome.
 Numbered `N: answer` syntax remains valid when earlier siblings have already been answered,
-including when the remaining item uses bounded choices.
-An unattached reply may answer only a binding older than both the signed claim receipt and the
-provider's inbound occurrence time. An old or delayed webhook cannot be retargeted to a newer
-question; equal or uncertain timestamps fail closed and require clarification or a fresh reply.
-Twilio's [message `dateCreated`](https://www.twilio.com/docs/messaging/api/message-resource) is
+including when the remaining item uses bounded choices; numeric choice vocabulary also permits
+`2:1`. A single free-text answer beginning `1:15` stays literal, while ambiguous multi-item
+numeric prefixes require clarification.
+An unattached reply may answer only a binding whose database creation preceded the signed claim's
+database receipt and whose exact outbound Twilio `dateCreated` preceded the inbound Twilio
+`dateCreated`. The latter provider timestamp is persisted once with the successful outbound SID;
+an unacknowledged or historical outbound with no trustworthy provider time stays unconfirmed,
+without a fabricated backfill. These two comparisons stay within their respective clocks. An old
+or delayed webhook cannot be retargeted to a newer question; equal or uncertain provider times
+fail closed and require clarification or a fresh reply. Twilio's
+[message `dateCreated`](https://www.twilio.com/docs/messaging/api/message-resource) is
 second-granularity, so a genuine same-second answer may need resending.
 T2 must surface that unsupported ordering honestly rather than silently accepting a different item.
 
@@ -345,13 +351,17 @@ promise a provider acknowledgment as proof that bookkeeping finished.
 
 The exact outbound message is locked SHARE NOWAIT before its binding. A definitively failed or
 undelivered outbound cannot acquire a new reply or admit an unconsumed answer. A queued message
-without a provider SID, or one with unknown delivery, remains retryable rather than producing a
-terminal Finance receipt; queued messages with a SID and accepted, sending, sent, or delivered
-messages may proceed. An already accepted Finance receipt remains authoritative if a later callback
+without a provider SID or provider `dateCreated`, or one with unknown delivery, remains retryable
+rather than producing a terminal Finance receipt; queued messages with a SID and accepted, sending,
+sent, or delivered messages may proceed only with immutable provider handoff time earlier than the
+inbound provider occurrence. An already accepted Finance receipt remains authoritative if a later callback
 reports delivery failure. A temporary Texting disablement also leaves signed claims and pending
 children recoverable: bind waits, and admission throws a typed retryable error without a terminal
 Finance receipt. Disabling between verification and consume rolls back the shared Finance/Texting
 transaction. T2 must durably retry waiting claims when policy or delivery evidence changes.
+If a provider response omitted `dateCreated`, later status callbacks cannot manufacture the
+missing creation-time evidence; T2 needs a bounded clarification/resend path after exact Finance
+receipt reconciliation rather than silently retrying that binding forever.
 
 An idempotent sweep can change only an expired, unattached open binding to terminal `expired` under
 its row lock. Attached pending, waiting, and uncertain children are never swept without first

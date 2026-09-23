@@ -3715,6 +3715,7 @@ export const textMessages = pgTable(
     seriesTotal: integer("series_total"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     occurredAtSource: text("occurred_at_source").$type<TextOccurredAtSource>().notNull(),
+    providerSubmittedAt: timestamp("provider_submitted_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     ...timestamps,

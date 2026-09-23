@@ -39,6 +39,7 @@ import {
   textInboundClaims,
   textingConsentEvents,
   textingVerificationChallenges,
+  textMessages,
   textReplyBindings,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
@@ -53,6 +54,7 @@ function requiredTable(name: string): PgTable {
 describe("database schema contracts", () => {
   it("keeps signed inbound claims and recoverable per-child bindings aligned with 0090", async () => {
     const claims = getTableConfig(textInboundClaims);
+    const messages = getTableConfig(textMessages);
     const bindings = getTableConfig(textReplyBindings);
     expect(claims.indexes.map((index) => index.config.name)).toContain(
       "text_inbound_claims_message_idx",
@@ -74,6 +76,7 @@ describe("database schema contracts", () => {
         "operation_id",
       ]),
     );
+    expect(messages.columns.map((column) => column.name)).toContain("provider_submitted_at");
     const migration = await readFile(
       resolve(process.cwd(), "packages/database/migrations/0090_texting_inbound_work_binding.sql"),
       "utf8",
@@ -93,6 +96,16 @@ describe("database schema contracts", () => {
     expect(migration).not.toMatch(
       /REFERENCES (?:text_messages|text_inbound_claims)\([^;]+?ON DELETE CASCADE/iu,
     );
+    const providerEvidenceMigration = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0091_texting_provider_submission_evidence.sql",
+      ),
+      "utf8",
+    );
+    expect(providerEvidenceMigration).toContain("ADD COLUMN provider_submitted_at timestamptz");
+    expect(providerEvidenceMigration).toContain("text_messages_provider_submitted_check");
+    expect(providerEvidenceMigration).toContain("text_messages_provider_submitted_immutable");
   });
   it("stores revisioned global policy and preserves only aligned explicit legacy grants", async () => {
     const policy = getTableConfig(executionPolicySettings);
@@ -435,6 +448,7 @@ describe("database schema contracts", () => {
       "0088_finance_budget_policy_nonempty_text",
       "0089_finance_contextual_questions",
       "0090_texting_inbound_work_binding",
+      "0091_texting_provider_submission_evidence",
     ]);
   });
 

@@ -49,13 +49,28 @@ describe.sequential("signed SMS child admission", () => {
   async function fixture(
     body = "1: Dinner with Sam\n---\n2: Taxi for client",
     replyTiming: "after" | "before" | "delayed" = "after",
+    handoffTiming: "before" | "after" | "equal" | "missing" | "skew" | "unsubmitted" = "before",
   ) {
     const userId = randomUUID();
     const phone = `+1${userId.replaceAll("-", "").slice(0, 10)}`;
     // These rows are inserted before test bindings; model the provider and webhook's
     // logical times separately from insertion order.
-    const occurredAt = new Date(Date.now() + (replyTiming === "after" ? 30_000 : -30_000));
-    const claimCreatedAt = new Date(Date.now() + (replyTiming === "before" ? -30_000 : 30_000));
+    const anchor = Date.now();
+    const occurredAt = new Date(anchor + (replyTiming === "after" ? 30_000 : -30_000));
+    const claimCreatedAt = new Date(anchor + (replyTiming === "before" ? -30_000 : 30_000));
+    const providerSubmittedAt =
+      handoffTiming === "missing" || handoffTiming === "unsubmitted"
+        ? null
+        : handoffTiming === "equal"
+          ? occurredAt
+          : new Date(
+              anchor +
+                (handoffTiming === "after"
+                  ? 31_000
+                  : handoffTiming === "skew" || replyTiming === "after"
+                    ? -60_000
+                    : 1_000),
+            );
     await database.db.insert(users).values({
       id: userId,
       email: `${userId}@example.com`,
@@ -84,7 +99,8 @@ describe.sequential("signed SMS child admission", () => {
         body: "1) Purpose? 2) Purpose?",
         direction: "outbound",
         status: "queued",
-        providerMessageSid: randomUUID(),
+        providerMessageSid: handoffTiming === "unsubmitted" ? null : randomUUID(),
+        providerSubmittedAt,
         occurredAt: new Date(),
         occurredAtSource: "nohmi",
       })
@@ -169,7 +185,9 @@ describe.sequential("signed SMS child admission", () => {
   ] as const)("does not attach a %s reply to work created after its provider occurrence", async (replyTiming) => {
     const f = await fixture("Purpose", replyTiming);
     const { binding } = await singleBinding(f);
-    expect(f.inbound.occurredAt.getTime()).toBeLessThan(binding.createdAt.getTime());
+    expect(f.outbound.providerSubmittedAt?.getTime()).toBeGreaterThan(
+      f.inbound.occurredAt.getTime(),
+    );
     if (replyTiming === "delayed")
       expect(f.claim.createdAt.getTime()).toBeGreaterThan(binding.createdAt.getTime());
     expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
@@ -184,9 +202,10 @@ describe.sequential("signed SMS child admission", () => {
     expect(unchanged?.inboundClaimId).toBeNull();
   });
 
-  it("rejects equal provider and binding times while accepting a clearly later reply", async () => {
+  it("rejects equal provider handoff and inbound times while accepting a clearly later reply", async () => {
     const f = await fixture("Purpose");
     const { binding } = await singleBinding(f);
+    if (!f.outbound.providerSubmittedAt) throw new Error("Missing provider handoff");
     const [sameTime] = await database.db
       .insert(textMessages)
       .values({
@@ -195,7 +214,7 @@ describe.sequential("signed SMS child admission", () => {
         body: "Purpose",
         direction: "inbound",
         status: "delivered",
-        occurredAt: binding.createdAt,
+        occurredAt: f.outbound.providerSubmittedAt,
         occurredAtSource: "provider",
         providerMessageSid: randomUUID(),
       })
@@ -212,8 +231,191 @@ describe.sequential("signed SMS child admission", () => {
       state: "unavailable",
       reason: "unsupported",
     });
-    expect(f.inbound.occurredAt.getTime()).toBeGreaterThan(binding.createdAt.getTime());
+    expect(f.inbound.occurredAt.getTime()).toBeGreaterThan(
+      f.outbound.providerSubmittedAt.getTime(),
+    );
     expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+  });
+
+  it.each([
+    "after",
+    "equal",
+  ] as const)("does not attach a reply that predates or equals provider handoff (%s)", async (handoffTiming) => {
+    const f = await fixture("Purpose", "after", handoffTiming);
+    const { binding } = await singleBinding(f);
+    expect(binding.createdAt.getTime()).toBeLessThan(f.inbound.occurredAt.getTime());
+    expect(f.claim.createdAt.getTime()).toBeGreaterThan(binding.createdAt.getTime());
+    expect(f.outbound.providerSubmittedAt?.getTime()).toBeGreaterThanOrEqual(
+      f.inbound.occurredAt.getTime(),
+    );
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+    const [unchanged] = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, binding.id));
+    expect(unchanged?.state).toBe("open");
+    expect(unchanged?.inboundClaimId).toBeNull();
+  });
+
+  it("waits without an authoritative provider handoff timestamp", async () => {
+    const f = await fixture("Purpose", "after", "missing");
+    const { binding, operationId, work } = await singleBinding(f);
+    await database.db
+      .update(textMessages)
+      .set({ status: "sent", sentAt: new Date() })
+      .where(eq(textMessages.id, f.outbound.id));
+    expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
+      state: "waiting",
+      reason: "delivery_unconfirmed",
+    });
+    await database.db
+      .update(textReplyBindings)
+      .set({ state: "pending", inboundClaimId: f.claim.id, canonicalAnswer: "Purpose" })
+      .where(eq(textReplyBindings.id, binding.id));
+    await expect(
+      database.db.transaction((tx) =>
+        admitSmsAnswer(tx, {
+          userId: f.userId,
+          operationId,
+          work,
+          text: "Purpose",
+          inboundMessageId: f.inbound.id,
+          replyBindingId: binding.id,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      kind: "texting_sms_uncertain",
+      reasonCode: "delivery_unconfirmed",
+    });
+    const [unchanged] = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, binding.id));
+    expect(unchanged?.state).toBe("pending");
+  });
+
+  it("accepts provider ordering despite independent database and provider clock skew", async () => {
+    const f = await fixture("Purpose", "delayed", "skew");
+    const { binding } = await singleBinding(f);
+    expect(f.outbound.providerSubmittedAt?.getTime()).toBeLessThan(f.inbound.occurredAt.getTime());
+    expect(f.inbound.occurredAt.getTime()).toBeLessThan(binding.createdAt.getTime());
+    expect(binding.createdAt.getTime()).toBeLessThan(f.claim.createdAt.getTime());
+    expect((await bindInboundReply(database.db, f.userId, f.inbound.id)).state).toBe("pending");
+  });
+
+  it("preserves provider time and SID through callbacks without backfilling legacy evidence", async () => {
+    const f = await fixture("Purpose");
+    const original = f.outbound.providerSubmittedAt;
+    if (!original) throw new Error("Missing provider timestamp fixture");
+    await database.db
+      .update(textMessages)
+      .set({ status: "sent", sentAt: new Date() })
+      .where(eq(textMessages.id, f.outbound.id));
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerSubmittedAt: new Date(original.getTime() + 1_000) })
+        .where(eq(textMessages.id, f.outbound.id)),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerMessageSid: randomUUID() })
+        .where(eq(textMessages.id, f.outbound.id)),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerMessageSid: null })
+        .where(eq(textMessages.id, f.outbound.id)),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerSubmittedAt: original })
+        .where(eq(textMessages.id, f.inbound.id)),
+    ).rejects.toThrow();
+    const [unchanged] = await database.db
+      .select()
+      .from(textMessages)
+      .where(eq(textMessages.id, f.outbound.id));
+    expect(unchanged).toMatchObject({
+      providerMessageSid: f.outbound.providerMessageSid,
+      providerSubmittedAt: original,
+      status: "sent",
+    });
+
+    const legacy = await fixture("Purpose", "after", "missing");
+    expect(legacy.outbound.providerSubmittedAt).toBeNull();
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerSubmittedAt: new Date(Date.now() - 60_000) })
+        .where(eq(textMessages.id, legacy.outbound.id)),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerMessageSid: null })
+        .where(eq(textMessages.id, legacy.outbound.id)),
+    ).rejects.toThrow();
+    await database.db
+      .update(textMessages)
+      .set({ status: "unknown", providerMessageSid: null })
+      .where(eq(textMessages.id, legacy.outbound.id));
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({
+          status: "queued",
+          providerMessageSid: randomUUID(),
+          providerSubmittedAt: new Date(),
+        })
+        .where(eq(textMessages.id, legacy.outbound.id)),
+    ).rejects.toThrow();
+
+    const [queued] = await database.db
+      .insert(textMessages)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        body: "New question",
+        direction: "outbound",
+        status: "queued",
+        occurredAt: new Date(),
+        occurredAtSource: "nohmi",
+      })
+      .returning();
+    if (!queued) throw new Error("Missing queued outbound");
+    const [setOnce] = await database.db
+      .update(textMessages)
+      .set({ providerMessageSid: randomUUID(), providerSubmittedAt: new Date(Date.now() - 60_000) })
+      .where(eq(textMessages.id, queued.id))
+      .returning();
+    expect(setOnce?.providerSubmittedAt).toBeInstanceOf(Date);
+
+    const [uncertain] = await database.db
+      .insert(textMessages)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        body: "Uncertain question",
+        direction: "outbound",
+        status: "unknown",
+        occurredAt: new Date(),
+        occurredAtSource: "nohmi",
+      })
+      .returning();
+    if (!uncertain) throw new Error("Missing uncertain outbound");
+    await expect(
+      database.db
+        .update(textMessages)
+        .set({ providerMessageSid: randomUUID(), providerSubmittedAt: new Date() })
+        .where(eq(textMessages.id, uncertain.id)),
+    ).rejects.toThrow();
   });
 
   it("does not attach an older reply to a newer sibling of an answerable item", async () => {
@@ -255,8 +457,13 @@ describe.sequential("signed SMS child admission", () => {
   it.each([
     "before",
     "delayed",
+    "provider_after",
   ] as const)("does not admit a causally invalid %s pending attachment", async (replyTiming) => {
-    const f = await fixture("Purpose", replyTiming);
+    const f = await fixture(
+      "Purpose",
+      replyTiming === "provider_after" ? "after" : replyTiming,
+      replyTiming === "provider_after" ? "after" : "before",
+    );
     const operationId = randomUUID();
     const work = {
       domain: "finances" as const,
@@ -444,19 +651,15 @@ describe.sequential("signed SMS child admission", () => {
   });
 
   it("keeps unconfirmed delivery and reversible disablement retryable without attaching", async () => {
-    const f = await fixture("Purpose");
+    const f = await fixture("Purpose", "after", "unsubmitted");
     const { binding, operationId, work } = await singleBinding(f);
-    await database.db
-      .update(textMessages)
-      .set({ providerMessageSid: null })
-      .where(eq(textMessages.id, f.outbound.id));
     expect(await bindInboundReply(database.db, f.userId, f.inbound.id)).toEqual({
       state: "waiting",
       reason: "delivery_unconfirmed",
     });
     await database.db
       .update(textMessages)
-      .set({ providerMessageSid: randomUUID() })
+      .set({ providerMessageSid: randomUUID(), providerSubmittedAt: new Date(Date.now() - 60_000) })
       .where(eq(textMessages.id, f.outbound.id));
     let enabled = false;
     expect(
@@ -674,7 +877,14 @@ describe.sequential("signed SMS child admission", () => {
     await database.db.delete(textReplyBindings).where(eq(textReplyBindings.id, expired.id));
   });
 
-  it("keeps numbered choice syntax after a mixed-mode sibling is answered", async () => {
+  it.each([
+    { body: "2: yes", vocabulary: ["yes", "no"], answer: "yes" },
+    { body: "2:1", vocabulary: ["1", "2"], answer: "1" },
+  ])("keeps numbered choice syntax after a mixed-mode sibling is answered ($body)", async ({
+    body,
+    vocabulary,
+    answer,
+  }) => {
     const f = await fixture("1: Dinner");
     const expiresAt = new Date(Date.now() + 60_000).toISOString();
     await database.db.transaction((tx) =>
@@ -698,7 +908,7 @@ describe.sequential("signed SMS child admission", () => {
           outboundMessageId: f.outbound.id,
           itemNumber: 2,
           answerMode: "choices",
-          answerVocabulary: ["yes", "no"],
+          answerVocabulary: vocabulary,
           operationId: randomUUID(),
           expiresAt,
           work: {
@@ -720,7 +930,7 @@ describe.sequential("signed SMS child admission", () => {
       .values({
         userId: f.userId,
         connectionId: f.connection.id,
-        body: "2: yes",
+        body,
         direction: "inbound",
         status: "delivered",
         occurredAt: new Date(),
@@ -737,7 +947,7 @@ describe.sequential("signed SMS child admission", () => {
     });
     expect(await bindInboundReply(database.db, f.userId, second.id)).toMatchObject({
       state: "pending",
-      children: [{ answer: "yes" }],
+      children: [{ answer }],
     });
   });
 

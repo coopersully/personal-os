@@ -146,6 +146,41 @@ describe("texting contracts", () => {
     });
   });
 
+  it("accepts numeric choice answers without treating single free-text times as selectors", () => {
+    const free = {
+      id: "a",
+      itemNumber: 1,
+      answerMode: "free_text" as const,
+      answerVocabulary: null,
+    };
+    const numeric = {
+      id: "b",
+      itemNumber: 2,
+      answerMode: "choices" as const,
+      answerVocabulary: ["1", "2"],
+    };
+    expect(parseTextReply("1:1", [{ ...numeric, itemNumber: 1 }])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "1" }],
+    });
+    expect(parseTextReply("2:1", [free, numeric])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "1" }],
+    });
+    expect(parseTextReply("2:1", [numeric])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "b", answer: "1" }],
+    });
+    expect(parseTextReply("1:15 lunch", [free])).toEqual({
+      state: "matched",
+      choices: [{ bindingId: "a", answer: "1:15 lunch" }],
+    });
+    expect(parseTextReply("1:15 lunch", [free, numeric])).toEqual({
+      state: "unavailable",
+      reason: "ambiguous",
+    });
+  });
+
   it("rejects an overlong choice reply without stalling on separator-free whitespace", () => {
     const choices = [
       { id: "a", itemNumber: 1, answerMode: "choices" as const, answerVocabulary: ["yes"] },

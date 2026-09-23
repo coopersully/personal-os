@@ -33,7 +33,11 @@ describe.sequential("texting service", () => {
       code === "123456" ? "approved" : code === "000000" ? "failed" : "pending",
     ),
     getMessageOccurredAt: vi.fn(async () => current),
-    sendMessage: vi.fn(async () => ({ sid: `SM${crypto.randomUUID()}`, status: "queued" })),
+    sendMessage: vi.fn(async () => ({
+      sid: `SM${crypto.randomUUID()}`,
+      status: "queued",
+      dateCreated: current,
+    })),
     startVerification: vi.fn(async () => ({ sid: `VE${crypto.randomUUID()}`, status: "pending" })),
     validateWebhook: vi.fn(() => true),
   };
@@ -178,6 +182,10 @@ describe.sequential("texting service", () => {
       conversationReceipt: empty.conversationReceipt ?? "",
     });
     expect(sent.body).toBe("nohmi: The appointment is at 3 PM.\nReply STOP to unsubscribe.");
+    expect(
+      (await database.db.select().from(textMessages).where(eq(textMessages.id, sent.id)))[0]
+        ?.providerSubmittedAt,
+    ).toEqual(current);
     expect(twilio.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ to: "+12125550123" }),
     );
@@ -549,8 +557,24 @@ describe.sequential("texting service", () => {
         where: eq(textMessages.body, "nohmi: definite rejection"),
       }),
     ).toMatchObject({ status: "failed" });
+    vi.mocked(twilio.sendMessage).mockResolvedValueOnce({
+      sid: "SMinvalidDate",
+      status: "queued",
+      dateCreated: new Date(Number.NaN),
+    });
+    await sendWithFreshRead({ body: "invalid provider date", contentKind: "concise" });
+    expect(
+      await database.db.query.textMessages.findFirst({
+        where: eq(textMessages.providerMessageSid, "SMinvalidDate"),
+      }),
+    ).toMatchObject({ providerSubmittedAt: null });
     vi.mocked(twilio.sendMessage).mockResolvedValueOnce({ sid: "SMaccepted", status: "sent" });
     await sendWithFreshRead({ body: "accepted status", contentKind: "concise" });
+    expect(
+      await database.db.query.textMessages.findFirst({
+        where: eq(textMessages.providerMessageSid, "SMaccepted"),
+      }),
+    ).toMatchObject({ providerSubmittedAt: null });
     await expect(service.inbound({ MessageSid: "SMmissing" })).rejects.toMatchObject({
       code: "invalid_request",
     });

@@ -176,7 +176,6 @@ async function admitSmsAnswer(
     binding.state !== "pending" ||
     binding.expiresAt <= current ||
     binding.createdAt >= claim.createdAt ||
-    binding.createdAt >= inbound.occurredAt ||
     binding.operationId !== expected.operationId ||
     binding.canonicalAnswer !== expected.text ||
     binding.workId !== work.id ||
@@ -188,6 +187,8 @@ async function admitSmsAnswer(
   const delivery = replyDeliveryState(outbound);
   if (delivery === "terminal") return { state: "unavailable" };
   if (delivery === "waiting") throw new TextingSmsRetryableError("delivery_unconfirmed");
+  if (!outbound.providerSubmittedAt) throw new TextingSmsRetryableError("delivery_unconfirmed");
+  if (outbound.providerSubmittedAt >= inbound.occurredAt) return { state: "unavailable" };
   requireEnabled(enabled);
   let invoked = false;
   return {

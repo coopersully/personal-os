@@ -69,7 +69,7 @@ export function parseTextReply(
   if (
     bindings.length === 1 &&
     only &&
-    !(only.answerMode === "free_text" ? /^\d\s*:(?!\d)/u : /^\d(?::(?!\d)|\s+)/u).test(canonical)
+    !(only.answerMode === "free_text" ? /^\d\s*:(?!\d)/u : /^\d(?::|\s+)/u).test(canonical)
   ) {
     const binding = bindings[0];
     if (!binding) return { state: "unavailable", reason: "unsupported" };
@@ -93,12 +93,14 @@ export function parseTextReply(
   const used = new Set<number>();
   for (const part of parts) {
     const match = hasFreeText
-      ? /^(\d)\s*:(?!\d)[ \t]*(.+)$/su.exec(part)
-      : /^(\d)(?::(?!\d)[ \t]*|\s+)(.+)$/su.exec(part.trim());
+      ? /^(\d)\s*:[ \t]*(.+)$/su.exec(part)
+      : /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(part.trim());
     if (!match) return { state: "unavailable", reason: "ambiguous" };
     const itemNumber = Number(match[1]);
     const binding = bindings.find((row) => row.itemNumber === itemNumber);
     if (!binding || used.has(itemNumber)) return { state: "unavailable", reason: "ambiguous" };
+    if (hasFreeText && binding.answerMode === "free_text" && /^\d\s*:\d/u.test(part))
+      return { state: "unavailable", reason: "ambiguous" };
     const rawAnswer = match[2]?.trim() ?? "";
     if (
       hasFreeText &&

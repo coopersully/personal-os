@@ -169,7 +169,6 @@ export async function bindInboundReply(
           eq(textReplyBindings.state, "open"),
           gt(textReplyBindings.expiresAt, now),
           lt(textReplyBindings.createdAt, claim.createdAt),
-          lt(textReplyBindings.createdAt, message.occurredAt),
         ),
       )
       .orderBy(asc(textReplyBindings.itemNumber))
@@ -190,6 +189,9 @@ export async function bindInboundReply(
     const delivery = replyDeliveryState(outbound);
     if (delivery === "terminal") return { state: "unavailable", reason: "delivery_failed" };
     if (delivery === "waiting") return { state: "waiting", reason: "delivery_unconfirmed" };
+    if (!outbound.providerSubmittedAt) return { state: "waiting", reason: "delivery_unconfirmed" };
+    if (outbound.providerSubmittedAt >= message.occurredAt)
+      return { state: "unavailable", reason: "unsupported" };
     const parsed: TextReplyParseResult = parseTextReply(
       message.body,
       candidates.map((row) => ({
@@ -209,14 +211,15 @@ export async function bindInboundReply(
       .for("update", { noWait: true });
     if (
       locked.length !== ids.length ||
+      !outbound.providerSubmittedAt ||
+      outbound.providerSubmittedAt >= message.occurredAt ||
       locked.some(
         (row) =>
           row.state !== "open" ||
           row.connectionId !== connection.id ||
           row.consentEpoch !== connection.consentEpoch ||
           row.expiresAt <= now ||
-          row.createdAt >= claim.createdAt ||
-          row.createdAt >= message.occurredAt,
+          row.createdAt >= claim.createdAt,
       )
     )
       throw retry();

@@ -612,6 +612,11 @@ export function createTextingService(options: Options) {
       .update(textMessages)
       .set({
         providerMessageSid: providerMessage.sid,
+        providerSubmittedAt:
+          providerMessage.dateCreated instanceof Date &&
+          Number.isFinite(providerMessage.dateCreated.getTime())
+            ? providerMessage.dateCreated
+            : null,
         status: providerMessage.status === "queued" ? "queued" : "accepted",
         updatedAt: now(),
       })

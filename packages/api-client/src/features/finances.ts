@@ -60,6 +60,8 @@ import type {
   FinanceOverview,
   FinancePeriodReview,
   FinancePlaybookResponse,
+  FinancePositionEvidence,
+  FinancePositionReadScope,
   FinanceProfile,
   FinanceProfileVersion,
   FinanceQuestion,
@@ -158,6 +160,14 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
+      const search = new URLSearchParams({ from: scope.from, through: scope.through });
+      if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));
+      const response = await request<{ position: FinancePositionEvidence }>(
+        `/v1/finances/position?${search}`,
+      );
+      return response.position;
+    },
     createFinanceContextualQuestion(
       transactionId: string,
       input: CreateFinanceContextualQuestionInput,

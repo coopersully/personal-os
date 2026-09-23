@@ -11,6 +11,7 @@ import {
 } from "@personal-os/database";
 import {
   type FinancePositionEvidence,
+  type FinancePositionReadScope,
   financePositionEvidenceSchema,
   financeProvenanceSchema,
 } from "@personal-os/domain";
@@ -18,10 +19,6 @@ import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
 import type { RecognitionInput } from "./recognition.js";
-
-export type FinancePositionReadScope = Omit<FinancePositionEvidence["scope"], "accountIds"> & {
-  accountIds?: string[];
-};
 
 /** Read-only producer. Authenticated composition supplies userId, never a request payload. */
 export function createFinancePositionService(input: { db: Database; now: () => Date }) {

@@ -1,5 +1,32 @@
 import { createFinanceApi, type FinanceRequest } from "./finances.js";
 
+describe("Finance position client", () => {
+  it("maps bounded scopes without adding tenant identity", async () => {
+    const position = { revision: "position-1" };
+    const request = vi.fn(async () => ({ position })) as unknown as FinanceRequest;
+    const api = createFinanceApi(request);
+
+    await expect(
+      api.getFinancePosition({
+        accountIds: [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222",
+        ],
+        from: "2026-09-01",
+        through: "2026-09-30",
+      }),
+    ).resolves.toEqual(position);
+    await api.getFinancePosition({ accountIds: [], from: "2026-09-01", through: "2026-09-30" });
+
+    expect(vi.mocked(request).mock.calls).toEqual([
+      [
+        "/v1/finances/position?from=2026-09-01&through=2026-09-30&accountIds=11111111-1111-4111-8111-111111111111%2C22222222-2222-4222-8222-222222222222",
+      ],
+      ["/v1/finances/position?from=2026-09-01&through=2026-09-30&accountIds="],
+    ]);
+  });
+});
+
 describe("Finance budget policy client", () => {
   it("maps every human management operation onto the budget policy route family", async () => {
     const record = {

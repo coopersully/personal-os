@@ -59,6 +59,19 @@ export const financePositionEvidenceSchema = z
   .strict();
 export type FinancePositionEvidence = z.infer<typeof financePositionEvidenceSchema>;
 
+export const financePositionReadScopeSchema = z
+  .object({
+    accountIds: z.array(idSchema).max(100).optional(),
+    from: z.iso.date(),
+    through: z.iso.date(),
+  })
+  .strict()
+  .refine(({ from, through }) => from <= through, {
+    message: "Position scope dates are reversed.",
+    path: ["through"],
+  });
+export type FinancePositionReadScope = z.infer<typeof financePositionReadScopeSchema>;
+
 export const financeHumanWorkRefSchema = financeRevisionRefSchema.extend({
   domain: z.literal("finances"),
   kind: z.enum(["question", "approval", "repair"]),
@@ -197,20 +210,27 @@ export type FinanceWorkflowPortRegistration = z.infer<typeof financeWorkflowPort
 
 export const financeWorkflowPortManifest = financeWorkflowPortNames.map((port) =>
   financeWorkflowPortRegistrationSchema.parse(
-    port === "resumeFinance"
+    port === "readPosition"
       ? {
           port,
           state: "available",
           producer: "finances",
-          route: { method: "POST", path: "/v1/finances/maintenance" },
+          route: { method: "GET", path: "/v1/finances/position" },
         }
-      : {
-          port,
-          state: "unavailable",
-          reasonCode: "producer_not_registered",
-          producer: null,
-          route: null,
-        },
+      : port === "resumeFinance"
+        ? {
+            port,
+            state: "available",
+            producer: "finances",
+            route: { method: "POST", path: "/v1/finances/maintenance" },
+          }
+        : {
+            port,
+            state: "unavailable",
+            reasonCode: "producer_not_registered",
+            producer: null,
+            route: null,
+          },
   ),
 );
 

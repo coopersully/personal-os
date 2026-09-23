@@ -56,6 +56,7 @@ import {
   contextualTransaction,
 } from "./finance/contextual-question-store.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
@@ -575,6 +576,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
     actions: financeActions,
     db: dependencies.db,
@@ -1317,6 +1319,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financeMaintenance,
     financePeriodReviews,
     financePlaybook,
+    financePosition,
     financeStatus,
     finances,
     mutationContext,

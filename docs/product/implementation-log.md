@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-09-23 — Canonical Finance position read registration
+
+- Registered the canonical `PositionEvidence` producer at the authenticated read-only
+  `/v1/finances/position` route and exposed the same bounded scope through the typed API client.
+  The server derives the owner from the authenticated principal; callers supply only an ordered
+  date window and an optional list of at most 100 account IDs.
+- The Finance workflow manifest now advertises `readPosition` alongside the existing maintenance
+  resume port. Invalid dates, foreign or unknown accounts, excess account scope and missing
+  `finances:read` access fail closed.
+- This registration does not change maintenance or status arithmetic, enable budget execution,
+  publish notifications, activate host continuation, or add provider effects. Those integrations
+  remain later Finance MVP slices.
+
 ## 2026-09-21 — Contextual Finance question source implementation
 
 - Added the manual transaction-purpose producer, immutable typed answers, exact-reference resolver,

@@ -266,6 +266,19 @@ describe.sequential("ilo API", () => {
     expect((await request("/v1/texting/notifications", { auth: "none" })).status).toBe(401);
     expect((await agentRequest(textingOnlyAgent, "/v1/texting/notifications")).status).toBe(403);
     expect((await agentRequest(readAgent, "/v1/texting/notifications")).status).toBe(200);
+    const missingInboundMessageId = crypto.randomUUID();
+    const recoveryStatusPath = `/v1/texting/finance-replies/${missingInboundMessageId}/status`;
+    expect((await request(recoveryStatusPath, { auth: "none" })).status).toBe(401);
+    expect((await agentRequest(textingOnlyAgent, recoveryStatusPath)).status).toBe(403);
+    expect((await agentRequest(readAgent, recoveryStatusPath)).status).toBe(404);
+    expect(
+      (
+        await sessionRequest(recoveryStatusPath, {
+          body: {},
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
 
     const emptyNotificationRows = async () => ({
       attempts: await database.db

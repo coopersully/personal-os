@@ -51,7 +51,12 @@ import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
+import {
+  type ContextualPrincipal,
+  contextualTransaction,
+} from "./finance/contextual-question-store.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
@@ -92,11 +97,14 @@ import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
+import { registerTextingRecoveryRoutes } from "./routes/texting-recovery.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import { createTaskWorkspaceService } from "./task-workspace-service.js";
+import { createTextingRecoveryService } from "./texting-recovery-service.js";
 import { createTextingService } from "./texting-service.js";
+import { createSmsAdmission } from "./texting-sms-admission.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -440,6 +448,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     now,
   });
+  const financeSms = createFinanceSmsPort({
+    admitSmsAnswer: createSmsAdmission({ enabled: () => textingConfig.enabled }),
+    db: dependencies.db,
+    now,
+  });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
@@ -608,6 +621,28 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     senderPhoneNumber: textingConfig.senderPhoneNumber,
     ...(twilio ? { twilio } : {}),
+    now,
+  });
+  const textingRecovery = createTextingRecoveryService({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    finance: {
+      inspectSmsReceipt: financeSms.inspectSmsReceipt,
+      executeAnswer: (userId, command) => {
+        const context: ContextualPrincipal = {
+          principal: {
+            actorId: userId,
+            actorType: "user",
+            scopes: new Set(["finances:write"]),
+            userId,
+          },
+          requestId: command.operationId,
+        };
+        return contextualTransaction(dependencies.db, undefined, (tx) =>
+          financeSms.answerSmsWork(command, context, tx),
+        );
+      },
+    },
     now,
   });
   const notifications = createNotificationService({
@@ -1308,6 +1343,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     texting,
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
+  registerTextingRecoveryRoutes({ app, recovery: textingRecovery });
   registerNotificationRoutes({ app, notifications });
 
   app.get("/v1/audit", async (context) => {

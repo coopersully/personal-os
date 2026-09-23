@@ -102,4 +102,51 @@ describe("exact Finance SMS reply status route", () => {
     expect(runPage).not.toHaveBeenCalled();
     expect((await app.request(path, { method: "POST" })).status).toBe(404);
   });
+
+  it.each([
+    ["ambiguous", "ambiguous_reply"],
+    ["unsupported", "unsupported_reply"],
+    ["delivery_unconfirmed", "delivery_unconfirmed"],
+    ["texting_disabled", "texting_disabled"],
+    ["consent_revoked", "consent_revoked"],
+    ["delivery_failed", "delivery_failed"],
+    ["source_unavailable", "source_unavailable"],
+    ["finance_receipt_started", "finance_pending"],
+    ["finance_receipt_failed", "finance_pending"],
+    ["receipt_inspection_failed", "receipt_unavailable"],
+    ["terminal_receipt_missing", "receipt_mismatch"],
+    ["terminal_receipt_mismatch", "receipt_mismatch"],
+    ["accepted_binding_mismatch", "receipt_mismatch"],
+    ["private-finance-receipt-detail", "processing_uncertain"],
+  ])("maps private reason %s to finite public reason %s", async (internalReason, publicCode) => {
+    const { app, internal } = fixture();
+    internal.reason = internalReason;
+    const child = internal.children[1];
+    if (!child) throw new Error("Missing uncertain child");
+    child.reason = internalReason;
+    const response = await app.request(path);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.reasonCode).toBe(publicCode);
+    expect(body.children[1].reasonCode).toBe(publicCode);
+    expect(JSON.stringify(body)).not.toContain("private-finance-receipt-detail");
+    expect(JSON.stringify(body)).not.toContain("operationId");
+  });
+
+  it("redacts an accepted child's stale private reason and rejects malformed claim IDs", async () => {
+    const { app, internal, inspectClaim } = fixture();
+    const child = internal.children[0];
+    if (!child) throw new Error("Missing accepted child");
+    child.reason = "private-accepted-receipt-detail";
+    const response = await app.request(path);
+    expect(response.status).toBe(200);
+    expect((await response.json()).children[0]).toEqual({
+      itemNumber: 1,
+      state: "accepted",
+      reasonCode: null,
+      terminal: true,
+    });
+    expect((await app.request("/v1/texting/finance-replies/not-a-uuid/status")).status).toBe(400);
+    expect(inspectClaim).toHaveBeenCalledTimes(1);
+  });
 });

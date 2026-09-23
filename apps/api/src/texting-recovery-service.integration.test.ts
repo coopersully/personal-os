@@ -233,6 +233,109 @@ describe.sequential("Texting signed-claim recovery", () => {
     expect(inspections).toBe(0);
   });
 
+  it("reports an owner-scoped signed claim without a binding as awaiting attachment", async () => {
+    const f = await fixture();
+    const [unattached] = await database.db
+      .insert(textMessages)
+      .values({
+        userId: f.userId,
+        connectionId: f.connection.id,
+        body: "1: Dinner with Sam",
+        direction: "inbound",
+        status: "delivered",
+        providerMessageSid: randomUUID(),
+        occurredAt: new Date(),
+        occurredAtSource: "provider",
+      })
+      .returning();
+    if (!unattached) throw new Error("Missing unattached inbound message");
+    await database.db.insert(textInboundClaims).values({
+      userId: f.userId,
+      connectionId: f.connection.id,
+      messageId: unattached.id,
+      consentEpoch: f.connection.consentEpoch,
+    });
+    let inspections = 0;
+    const service = createTextingRecoveryService({
+      db: database.db,
+      enabled: () => true,
+      finance: {
+        inspectSmsReceipt: async () => {
+          inspections += 1;
+          return { state: "absent" };
+        },
+        executeAnswer: async () => {
+          throw new Error("unattached status must not execute");
+        },
+      },
+    });
+    expect(await service.inspectClaim(f.userId, unattached.id)).toEqual({
+      inboundMessageId: unattached.id,
+      state: "waiting",
+      reason: "unattached_claim",
+      children: [],
+    });
+    expect(inspections).toBe(0);
+    expect(await service.inspectClaim(randomUUID(), unattached.id)).toBeNull();
+  });
+
+  it.each([
+    ["absent", "finance_receipt_absent"],
+    ["started", "finance_receipt_started"],
+    ["failed", "finance_receipt_failed"],
+    ["completed", "receipt_projection_pending"],
+    ["inspection_error", "receipt_inspection_failed"],
+  ] as const)("inspects a pending child with %s Finance evidence without executing or projecting", async (receiptCase, reason) => {
+    const f = await fixture();
+    let executions = 0;
+    const accepted: FinanceDomainOutcome & { state: "accepted" } = {
+      operationId: f.operationId,
+      state: "accepted",
+      work: [f.command.work],
+      resultRevision: "result-1",
+      reasonCode: null,
+    };
+    const service = createTextingRecoveryService({
+      db: database.db,
+      enabled: () => true,
+      finance: {
+        inspectSmsReceipt: async () => {
+          if (receiptCase === "inspection_error") throw new Error("Receipt store unavailable");
+          if (receiptCase === "completed") return { state: "completed", outcome: accepted };
+          if (receiptCase === "started" || receiptCase === "failed")
+            return { state: "incomplete", status: receiptCase };
+          return { state: "absent" };
+        },
+        executeAnswer: async () => {
+          executions += 1;
+          throw new Error("read-only status must not execute");
+        },
+      },
+    });
+    const status = await service.inspectClaim(f.userId, f.inbound.id);
+    expect(status).toEqual({
+      inboundMessageId: f.inbound.id,
+      state: "attached",
+      reason: null,
+      children: [
+        {
+          itemNumber: 1,
+          bindingId: f.binding.id,
+          operationId: f.operationId,
+          state: "uncertain",
+          reason,
+          terminal: false,
+        },
+      ],
+    });
+    expect(executions).toBe(0);
+    const [stored] = await database.db
+      .select({ state: textReplyBindings.state })
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, f.binding.id));
+    expect(stored?.state).toBe("pending");
+  });
+
   it.each([
     "started",
     "failed",
@@ -401,6 +504,9 @@ describe.sequential("Texting signed-claim recovery", () => {
     "absent",
     "blocked",
     "revision_mismatch",
+    "started",
+    "failed",
+    "inspection_error",
   ] as const)("inspects a lone terminal child without replaying Finance when the receipt is %s", async (receiptCase) => {
     const f = await fixture();
     const accepted: FinanceDomainOutcome & { state: "accepted" } = {
@@ -424,7 +530,10 @@ describe.sequential("Texting signed-claim recovery", () => {
       enabled: () => true,
       finance: {
         inspectSmsReceipt: async () => {
+          if (receiptCase === "inspection_error") throw new Error("Receipt store unavailable");
           if (receiptCase === "absent") return { state: "absent" };
+          if (receiptCase === "started" || receiptCase === "failed")
+            return { state: "incomplete", status: receiptCase };
           return {
             state: "completed",
             outcome:
@@ -447,7 +556,14 @@ describe.sequential("Texting signed-claim recovery", () => {
         bindingId: f.binding.id,
         operationId: f.operationId,
         state: "uncertain",
-        reason: receiptCase === "absent" ? "terminal_receipt_missing" : "terminal_receipt_mismatch",
+        reason:
+          receiptCase === "absent"
+            ? "terminal_receipt_missing"
+            : receiptCase === "started" || receiptCase === "failed"
+              ? `finance_receipt_${receiptCase}`
+              : receiptCase === "inspection_error"
+                ? "receipt_inspection_failed"
+                : "terminal_receipt_mismatch",
         terminal: false,
       },
     ]);
@@ -542,6 +658,50 @@ describe.sequential("Texting signed-claim recovery", () => {
       .where(eq(textReplyBindings.id, f.binding.id));
     expect(stored?.state).toBe(bindingState);
     expect(stored?.reasonCode).toBe(reasonCode);
+    // A later owner status read must agree with the exact completed receipt,
+    // including unavailable versus blocked and the persisted reason.
+    expect((await service.inspectClaim(f.userId, f.inbound.id))?.children).toEqual([
+      {
+        itemNumber: 1,
+        bindingId: f.binding.id,
+        operationId: f.operationId,
+        state: bindingState,
+        reason: reasonCode,
+        terminal: true,
+      },
+    ]);
+  });
+
+  it("uses a finite fallback reason when a completed failed receipt has none", async () => {
+    const f = await fixture();
+    const outcome: FinanceDomainOutcome = {
+      operationId: f.operationId,
+      state: "failed",
+      work: [f.command.work],
+      resultRevision: null,
+      reasonCode: null,
+    };
+    const service = createTextingRecoveryService({
+      db: database.db,
+      enabled: () => true,
+      finance: {
+        inspectSmsReceipt: async () => ({ state: "completed", outcome }),
+        executeAnswer: async () => {
+          throw new Error("completed receipt must not re-execute");
+        },
+      },
+    });
+    const result = await service.runPage(f.userId, { limit: 1 });
+    expect(result.claims[0]?.children[0]).toMatchObject({
+      state: "blocked",
+      reason: "finance_failed",
+      terminal: true,
+    });
+    expect((await service.inspectClaim(f.userId, f.inbound.id))?.children[0]).toMatchObject({
+      state: "blocked",
+      reason: "finance_failed",
+      terminal: true,
+    });
   });
 
   it("holds a disabled child and later resumes with the same operation key", async () => {

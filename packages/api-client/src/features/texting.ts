@@ -1,5 +1,6 @@
 import type {
   CheckTextingVerificationInput,
+  FinanceTextReplyStatus,
   NotificationPreferences,
   NotificationStatus,
   SendTextMessageInput,
@@ -15,6 +16,9 @@ type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export function createTextingApiClient(request: Request, toQuery: (query: object) => string) {
   return {
+    async getFinanceTextReplyStatus(inboundMessageId: string): Promise<FinanceTextReplyStatus> {
+      return request(`/v1/texting/finance-replies/${encodeURIComponent(inboundMessageId)}/status`);
+    },
     async getNotificationStatus(): Promise<NotificationStatus> {
       return request("/v1/texting/notifications");
     },

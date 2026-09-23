@@ -360,6 +360,10 @@ export const iloToolCatalog = {
   sync_x_bookmarks: write("bookmarks", ["bookmarks:read"], { openWorld: true }),
 
   read_text_conversation: read("texting", ["texting:read"]),
+  get_texting_finance_reply_status: {
+    ...read("texting", ["texting:read", "finances:read"]),
+    scopeMatch: "all",
+  },
   send_text_message: write("texting", ["texting:write"], {
     openWorld: true,
     policy: "approved_rule",

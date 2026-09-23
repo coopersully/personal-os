@@ -4704,14 +4704,19 @@ export const financeContextualAnswers = pgTable(
     answeredActionRevision: bigint("answered_action_revision", { mode: "bigint" }).notNull(),
     resultingWorkRevision: bigint("resulting_work_revision", { mode: "bigint" }).notNull(),
     text: text("text").notNull(),
-    sourceKind: text("source_kind").$type<"app" | "agent">().notNull(),
+    sourceKind: text("source_kind").$type<"app" | "agent" | "sms">().notNull(),
     sourceMessageId: text("source_message_id"),
+    sourceReplyBindingId: uuid("source_reply_binding_id"),
     actorType: text("actor_type").$type<"user" | "agent">().notNull(),
     actorId: text("actor_id").notNull(),
     requestId: text("request_id").notNull(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
   },
   (table) => [
+    uniqueIndex("finance_contextual_answers_sms_binding_unique").on(
+      table.userId,
+      table.sourceReplyBindingId,
+    ),
     uniqueIndex("finance_contextual_answers_operation_unique").on(table.userId, table.operationId),
     uniqueIndex("finance_contextual_answers_revision_unique").on(
       table.userId,
@@ -4733,7 +4738,7 @@ export const financeContextualAnswers = pgTable(
     ),
     check(
       "finance_contextual_answers_provenance_check",
-      sql`((${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent')) AND ${table.sourceMessageId} IS NULL AND char_length(${table.actorId}) BETWEEN 1 AND 240 AND char_length(${table.requestId}) BETWEEN 1 AND 240`,
+      sql`((((${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent')) AND ${table.sourceMessageId} IS NULL AND ${table.sourceReplyBindingId} IS NULL) OR (${table.sourceKind}='sms' AND ${table.actorType}='user' AND ${table.actorId}=${table.userId}::text AND ${table.sourceMessageId} IS NOT NULL AND ${table.sourceMessageId} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND ${table.sourceReplyBindingId} IS NOT NULL)) AND char_length(${table.actorId}) BETWEEN 1 AND 240 AND char_length(${table.requestId}) BETWEEN 1 AND 240`,
     ),
   ],
 );

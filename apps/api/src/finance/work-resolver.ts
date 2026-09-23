@@ -44,3 +44,19 @@ export async function resolveContextualWork(
     },
   };
 }
+
+export type FinanceSmsQuestionResolution =
+  | Exclude<NotificationResolution, { state: "current" }>
+  | (Extract<NotificationResolution, { state: "current" }> & { prompt: string });
+
+/** Internal SMS prompt; exact currentness and parent locks remain Finance-owned. */
+export async function resolveSmsQuestion(
+  userId: string,
+  work: FinanceHumanWorkRef,
+  tx: FinanceTransaction,
+): Promise<FinanceSmsQuestionResolution> {
+  const resolved = await resolveContextualWork(userId, work, tx);
+  return resolved.state === "current"
+    ? { ...resolved, prompt: "What was this transaction for?" }
+    : resolved;
+}

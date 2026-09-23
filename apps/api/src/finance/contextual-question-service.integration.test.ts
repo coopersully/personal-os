@@ -14,6 +14,7 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import type { FinanceHumanWorkRef } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -25,6 +26,7 @@ import { type FinanceTransaction, loadFinanceAuthorization } from "./context.js"
 import { readFinanceContextualWork } from "./contextual-question-projection.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createInboxService } from "./inbox-service.js";
+import { resolveSmsQuestion } from "./work-resolver.js";
 
 describe.sequential("real contextual question producer", () => {
   let container: StartedPostgreSqlContainer;
@@ -303,6 +305,32 @@ describe.sequential("real contextual question producer", () => {
       await blocker.query("ROLLBACK");
       blocker.release();
     }
+  });
+  it("resolves SMS questions with minimal disclosure and preserves exact lifecycle states", async () => {
+    const f = await questionFixture();
+    const resolveSms = (work: FinanceHumanWorkRef = f.question.work, userId = f.userId) =>
+      database.db.transaction((tx) => resolveSmsQuestion(userId, work, tx));
+    expect(await resolveSms()).toEqual({
+      state: "current",
+      prompt: "What was this transaction for?",
+      value: {
+        work: f.question.work,
+        active: true,
+        expiresAt: null,
+        disclosure: "minimal",
+        context: null,
+        occurredAt: null,
+        destination: `/finances/review?contextualQuestion=${f.question.id}`,
+      },
+    });
+    expect(await resolveSms({ ...f.question.work, revision: "2" })).toEqual({ state: "stale" });
+    const foreign = await fixture();
+    expect(await resolveSms(f.question.work, foreign.userId)).toEqual({ state: "unavailable" });
+    expect(await resolveSms({ ...f.question.work, kind: "approval" })).toEqual({
+      state: "unavailable",
+    });
+    await f.service.answerWork(f.answer, f.context);
+    expect(await resolveSms()).toEqual({ state: "resolved" });
   });
   it("retains parent locks through caller commit and fences a real transaction edit", async () => {
     const f = await questionFixture();

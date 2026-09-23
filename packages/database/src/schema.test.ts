@@ -18,6 +18,7 @@ import {
   financeBudgetBuckets,
   financeBudgets,
   financeBudgetTaxonomies,
+  financeContextualAnswers,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
@@ -52,6 +53,31 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("fences Finance SMS provenance by owner and binding without a Texting retention dependency", () => {
+    const answers = getTableConfig(financeContextualAnswers);
+    const bindingIndex = answers.indexes.find(
+      (index) => index.config.name === "finance_contextual_answers_sms_binding_unique",
+    );
+    expect(bindingIndex).toMatchObject({ config: { unique: true } });
+    expect(
+      bindingIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "source_reply_binding_id"]);
+    expect(
+      answers.columns.find((column) => column.name === "source_reply_binding_id")?.getSQLType(),
+    ).toBe("uuid");
+    expect(answers.foreignKeys.map((key) => getTableName(key.reference().foreignTable))).toEqual([
+      "finance_contextual_questions",
+    ]);
+    const provenance = answers.checks.find(
+      (check) => check.name === "finance_contextual_answers_provenance_check",
+    );
+    if (!provenance) throw new Error("Missing provenance constraint");
+    const sql = new PgDialect().sqlToQuery(provenance.value).sql;
+    expect(sql).toContain('"source_reply_binding_id" IS NULL');
+    expect(sql).toContain('"source_reply_binding_id" IS NOT NULL');
+    expect(sql).toContain('"source_message_id" IS NOT NULL');
+    expect(sql).toContain('"actor_id"="finance_contextual_answers"."user_id"::text');
+  });
   it("keeps signed inbound claims and recoverable per-child bindings aligned with 0090", async () => {
     const claims = getTableConfig(textInboundClaims);
     const messages = getTableConfig(textMessages);
@@ -458,6 +484,7 @@ describe("database schema contracts", () => {
       "0089_finance_contextual_questions",
       "0090_texting_inbound_work_binding",
       "0091_texting_provider_submission_evidence",
+      "0092_finance_sms_answer_provenance",
     ]);
   });
 

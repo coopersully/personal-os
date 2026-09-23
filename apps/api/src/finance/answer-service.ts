@@ -4,7 +4,9 @@ import {
   financeContextualQuestions,
 } from "@personal-os/database";
 import {
+  type FinanceAnswer,
   type FinanceDomainOutcome,
+  type FinanceSmsAnswerCommand,
   financeAnswerSchema,
   financeDomainOutcomeSchema,
 } from "@personal-os/domain";
@@ -28,7 +30,12 @@ import {
   maxContextualRevision,
 } from "./contextual-question-store.js";
 
-type Prepared = { kind: "stale" } | { kind: "current"; locked: LockedContextualQuestion };
+import type { AdmitSmsAnswer } from "./sms-answer-port.js";
+
+type Consume = (accepted: FinanceDomainOutcome & { state: "accepted" }) => Promise<void>;
+type Prepared =
+  | { kind: "stale" }
+  | { kind: "current"; locked: LockedContextualQuestion; consume: Consume | undefined };
 function outcome(
   operationId: string,
   state: "unavailable" | "blocked" | "accepted",
@@ -63,6 +70,40 @@ export async function answerContextualWork(
     input.source.messageId !== null
   )
     return outcome(input.operationId, "unavailable");
+  return answerCore(options, input, context, executor);
+}
+
+/** Internal entry; only the server-composed SMS port supplies admission. */
+export async function answerSmsContextualWork(
+  options: ContextualOptions,
+  command: FinanceSmsAnswerCommand,
+  context: ContextualPrincipal,
+  executor: FinanceTransaction,
+  admit: AdmitSmsAnswer,
+): Promise<FinanceDomainOutcome> {
+  return answerCore(
+    options,
+    {
+      operationId: command.operationId,
+      work: command.work,
+      text: command.text,
+      source: { kind: "sms", messageId: command.inboundMessageId },
+    },
+    context,
+    executor,
+    { command, admit },
+  );
+}
+
+async function answerCore(
+  options: ContextualOptions,
+  input: FinanceAnswer,
+  context: ContextualPrincipal,
+  executor?: FinanceTransaction,
+  sms?: { command: FinanceSmsAnswerCommand; admit: AdmitSmsAnswer },
+): Promise<FinanceDomainOutcome> {
+  const sourceKind = input.source.kind;
+  if (input.work.kind !== "question") return outcome(input.operationId, "unavailable");
   return contextualTransaction(options.db, executor, async (tx) => {
     const authority = await loadFinanceAuthorization({ db: tx, ...context });
     return executeFinanceAdmittedMutation<Prepared, FinanceDomainOutcome>(
@@ -71,10 +112,20 @@ export async function answerContextualWork(
       {
         idempotencyKey: input.operationId,
         operation: "answer_contextual_question_v1",
-        payload: input,
+        payload: sms?.command ?? input,
         sourceKind,
       },
       async (preparedTx) => {
+        let consume: Consume | undefined;
+        if (sms) {
+          const admitted = await sms.admit(preparedTx, {
+            ...sms.command,
+            userId: context.principal.userId,
+          });
+          if (admitted.state !== "verified")
+            return { state: "unavailable", result: outcome(input.operationId, "unavailable") };
+          consume = admitted.consume;
+        }
         // Stored subtype is checked only here, after an exact completed receipt can replay.
         const locked = await lockContextualQuestion(
           preparedTx,
@@ -94,7 +145,7 @@ export async function answerContextualWork(
           return { state: "admitted", prepared: { kind: "stale" } };
         if (question.workRevision === maxContextualRevision)
           throw new AppError("conflict", "Question revision limit reached.");
-        return { state: "admitted", prepared: { kind: "current", locked } };
+        return { state: "admitted", prepared: { kind: "current", locked, consume } };
       },
       async (writeTx, prepared) => {
         if (prepared.kind === "stale") return outcome(input.operationId, "blocked");
@@ -126,8 +177,9 @@ export async function answerContextualWork(
             resultingWorkRevision: revision,
             text: input.text,
             sourceKind,
-            sourceMessageId: null,
-            actorType: sourceKind === "app" ? "user" : "agent",
+            sourceMessageId: sms?.command.inboundMessageId ?? null,
+            sourceReplyBindingId: sms?.command.replyBindingId ?? null,
+            actorType: context.principal.actorType as "user" | "agent",
             actorId: context.principal.actorId,
             requestId: context.requestId,
             recordedAt,
@@ -152,7 +204,12 @@ export async function answerContextualWork(
             },
           }),
         );
-        return outcome(input.operationId, "accepted", revision.toString());
+        const accepted = {
+          ...outcome(input.operationId, "accepted", revision.toString()),
+          state: "accepted" as const,
+        };
+        await prepared.consume?.(accepted);
+        return accepted;
       },
     );
   });

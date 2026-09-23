@@ -84,7 +84,9 @@ export function parseTextReply(
   const hasFreeText = bindings.some((row) => row.answerMode === "free_text");
   // Free-text clauses use a whole-line separator. A delimiter-looking line without a
   // valid following selector is rejected; commas, semicolons, and other newlines stay in text.
-  const parts = canonical.split(hasFreeText ? /\r?\n---\r?\n/u : /\s*[,;]\s*/u);
+  // Split choices on punctuation alone; trim each clause after splitting to keep long
+  // separator-free whitespace runs linear to scan.
+  const parts = canonical.split(hasFreeText ? /\r?\n---\r?\n/u : /[,;]/u);
   if (parts.length === 0 || parts.length > bindings.length)
     return { state: "unavailable", reason: "ambiguous" };
   const choices: TextReplyChoice[] = [];
@@ -92,7 +94,7 @@ export function parseTextReply(
   for (const part of parts) {
     const match = hasFreeText
       ? /^(\d)\s*:[ \t]*(.+)$/su.exec(part)
-      : /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(part);
+      : /^(\d)(?::[ \t]*|\s+)(.+)$/su.exec(part.trim());
     if (!match) return { state: "unavailable", reason: "ambiguous" };
     const itemNumber = Number(match[1]);
     const binding = bindings.find((row) => row.itemNumber === itemNumber);

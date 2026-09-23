@@ -110,6 +110,13 @@ describe("texting contracts", () => {
         { bindingId: "b", answer: "no" },
       ],
     });
+    expect(parseTextReply(" 1: yes  ;  2 no ", choices)).toEqual({
+      state: "matched",
+      choices: [
+        { bindingId: "a", answer: "yes" },
+        { bindingId: "b", answer: "no" },
+      ],
+    });
     expect(parseTextReply("yes", choices)).toEqual({ state: "unavailable", reason: "ambiguous" });
     expect(parseTextReply("1 yes, 1 no", choices)).toEqual({
       state: "unavailable",
@@ -127,4 +134,15 @@ describe("texting contracts", () => {
       reason: "ambiguous",
     });
   });
+
+  it("rejects an overlong choice reply without stalling on separator-free whitespace", () => {
+    const choices = [
+      { id: "a", itemNumber: 1, answerMode: "choices" as const, answerVocabulary: ["yes"] },
+      { id: "b", itemNumber: 2, answerMode: "choices" as const, answerVocabulary: ["no"] },
+    ];
+    expect(parseTextReply(`1 yes${" ".repeat(50_000)}x`, choices)).toEqual({
+      state: "unavailable",
+      reason: "unsupported",
+    });
+  }, 2_000);
 });

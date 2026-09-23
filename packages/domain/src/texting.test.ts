@@ -1,10 +1,71 @@
 import { createAccessTokenInputSchema } from "./auth.js";
 import {
+  financeTextReplyStatusSchema,
   normalizeTextingPhoneNumber,
   parseTextReply,
   sendTextMessageInputSchema,
   textConversationQuerySchema,
 } from "./texting.js";
+
+it("keeps exact Finance SMS reply status finite and free of private evidence", () => {
+  const safe = {
+    inboundMessageId: "11111111-1111-4111-8111-111111111111",
+    state: "attached",
+    reasonCode: null,
+    children: [{ itemNumber: 1, state: "accepted", reasonCode: null, terminal: true }],
+    reviewHref: "/settings?section=reviews",
+  };
+  expect(financeTextReplyStatusSchema.parse(safe)).toEqual(safe);
+  expect(
+    financeTextReplyStatusSchema.parse({
+      ...safe,
+      children: [
+        { itemNumber: 1, state: "blocked", reasonCode: "answer_not_applied", terminal: true },
+      ],
+    }).children[0]?.reasonCode,
+  ).toBe("answer_not_applied");
+  expect(() =>
+    financeTextReplyStatusSchema.parse({
+      ...safe,
+      children: [{ itemNumber: 1, state: "blocked", reasonCode: "stale_revision", terminal: true }],
+    }),
+  ).toThrow();
+  for (const secret of [
+    "canonicalAnswer",
+    "operationId",
+    "bindingId",
+    "providerMessageSid",
+    "phoneNumber",
+    "sourceHash",
+    "rawOutcome",
+  ]) {
+    expect(() => financeTextReplyStatusSchema.parse({ ...safe, [secret]: "private" })).toThrow();
+    expect(() =>
+      financeTextReplyStatusSchema.parse({
+        ...safe,
+        children: [{ ...safe.children[0], [secret]: "private" }],
+      }),
+    ).toThrow();
+  }
+  expect(() =>
+    financeTextReplyStatusSchema.parse({ ...safe, children: Array(4).fill(safe.children[0]) }),
+  ).toThrow();
+  expect(() =>
+    financeTextReplyStatusSchema.parse({
+      ...safe,
+      children: [{ ...safe.children[0], itemNumber: 4 }],
+    }),
+  ).toThrow();
+  expect(() =>
+    financeTextReplyStatusSchema.parse({
+      ...safe,
+      children: [{ ...safe.children[0], terminal: false }],
+    }),
+  ).toThrow();
+  expect(() =>
+    financeTextReplyStatusSchema.parse({ ...safe, reviewHref: "/finances/review?id=private" }),
+  ).toThrow();
+});
 
 describe("texting contracts", () => {
   it("normalizes US and Canadian NANP numbers", () => {

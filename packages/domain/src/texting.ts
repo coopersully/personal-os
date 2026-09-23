@@ -32,6 +32,42 @@ export const textContentKindSchema = z.enum([
 ]);
 export const textOccurredAtSourceSchema = z.enum(["provider", "nohmi"]);
 
+/** Redacted, exact-owner status for a signed Finance reply; no answer or receipt evidence. */
+export const financeTextReplyStatusReasonSchema = z.enum([
+  "ambiguous_reply",
+  "unsupported_reply",
+  "delivery_unconfirmed",
+  "texting_disabled",
+  "consent_revoked",
+  "delivery_failed",
+  "source_unavailable",
+  "finance_pending",
+  "receipt_unavailable",
+  "receipt_mismatch",
+  "answer_not_applied",
+  "processing_uncertain",
+]);
+export const financeTextReplyStatusChildSchema = z
+  .object({
+    itemNumber: z.int().min(1).max(3),
+    state: z.enum(["accepted", "waiting", "uncertain", "blocked", "unavailable"]),
+    reasonCode: financeTextReplyStatusReasonSchema.nullable(),
+    terminal: z.boolean(),
+  })
+  .strict()
+  .refine((child) => child.state !== "accepted" || (child.terminal && child.reasonCode === null))
+  .refine((child) => !["waiting", "uncertain"].includes(child.state) || !child.terminal);
+export const financeTextReplyStatusSchema = z
+  .object({
+    inboundMessageId: idSchema,
+    state: z.enum(["attached", "waiting", "unavailable", "uncertain"]),
+    reasonCode: financeTextReplyStatusReasonSchema.nullable(),
+    children: z.array(financeTextReplyStatusChildSchema).max(3),
+    reviewHref: z.literal("/settings?section=reviews"),
+  })
+  .strict();
+export type FinanceTextReplyStatus = z.infer<typeof financeTextReplyStatusSchema>;
+
 /** Internal, bounded evidence for one question printed in an outbound SMS. */
 export const textReplyBindingInputSchema = z
   .object({

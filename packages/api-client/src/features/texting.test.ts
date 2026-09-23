@@ -52,3 +52,21 @@ it("maps notification preferences, references and recovery without supplying cur
     body: JSON.stringify(input),
   });
 });
+
+it("reads one exact Finance reply status without a mutation or query-bearing destination", async () => {
+  const inboundMessageId = "11111111-1111-4111-8111-111111111111";
+  const status = {
+    inboundMessageId,
+    state: "waiting",
+    reasonCode: "processing_uncertain",
+    children: [],
+    reviewHref: "/settings?section=reviews",
+  };
+  const request = vi.fn(async () => status) as unknown as Parameters<
+    typeof createTextingApiClient
+  >[0];
+  const api = createTextingApiClient(request, () => "");
+  await expect(api.getFinanceTextReplyStatus(inboundMessageId)).resolves.toEqual(status);
+  expect(request).toHaveBeenCalledWith(`/v1/texting/finance-replies/${inboundMessageId}/status`);
+  expect(request).toHaveBeenCalledTimes(1);
+});

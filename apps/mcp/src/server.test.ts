@@ -941,6 +941,66 @@ describe("ilo MCP server", () => {
     }
   });
 
+  it("discovers exact Finance SMS reply status only with both read scopes and calls the GET client", async () => {
+    const status = {
+      inboundMessageId: id,
+      state: "attached" as const,
+      reasonCode: null,
+      children: [{ itemNumber: 1, state: "accepted" as const, reasonCode: null, terminal: true }],
+      reviewHref: "/settings?section=reviews" as const,
+    };
+    const api = {
+      ...mockApi(),
+      getFinanceTextReplyStatus: vi.fn(async () => status),
+    };
+    for (const scopes of [
+      [],
+      ["texting:read"],
+      ["finances:read"],
+      ["texting:read", "finances:read"],
+    ] as const) {
+      const server = createPersonalOsMcpServer({
+        api: api as unknown as PersonalOsApiClient,
+        readOnly: true,
+        scopes: new Set<AccessScope>(scopes),
+        timeZone: "UTC",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      try {
+        await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+        const matching = (await client.listTools()).tools.find(
+          (tool) => tool.name === "get_texting_finance_reply_status",
+        );
+        if (scopes.length < 2) {
+          expect(matching).toBeUndefined();
+          continue;
+        }
+        expect(matching).toMatchObject({
+          annotations: {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+          _meta: { "ilo/domain": "texting", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+        });
+        const result = await client.callTool({
+          name: "get_texting_finance_reply_status",
+          arguments: { inboundMessageId: id },
+        });
+        expect(result.structuredContent).toMatchObject({
+          result: status,
+          _ilo: { domain: "texting", policy: "read_only", readOnly: true, stage: "inspect" },
+        });
+        expect(api.getFinanceTextReplyStatus).toHaveBeenCalledExactlyOnceWith(id);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    }
+  });
+
   it("preserves every Finance budget-plan disposition through the MCP tool", async () => {
     const api = mockApi();
     const outcomes = [

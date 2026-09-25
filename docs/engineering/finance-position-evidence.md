@@ -36,11 +36,11 @@ posting dates; service-period attribution requires separate confirmed allocation
 Account source references hash their balance, ownership, currency, inclusion, update revision,
 provider Item update revision, sync cutoff, and public freshness reasons. The tenant snapshot's
 activity reference hashes the selected account references, ordered transaction projections,
-allocations, relationships, reimbursements, matches, and scope. No credentials, provider messages, rationale, or merchant text
-are included in the source references. The position revision hashes the ordered scope and validated
-facts; changing only the observation time does not change that revision. Persisted reviews must
-retain their original evidence identity; rereading the current producer does not reproduce
-historical bank or correction state.
+allocations, relationships, reimbursements, matches, and scope. No credentials, provider messages,
+rationale, or merchant text are included in the source references. The position revision hashes the
+ordered scope and validated facts; changing only the observation time does not change that revision.
+Persisted reviews must retain their original evidence identity; rereading the current producer does
+not reproduce historical bank or correction state.
 
 Account balance facts retain up to 100 individual account references. Spendable uses one aggregate
 tenant-snapshot reference whose revision hashes all four validated dependencies, including every

@@ -13,7 +13,8 @@
   remain readable without the new checkpoint. A retry preserves the blocked run and starts a fresh
   read, direct replays validate the durable checkpoint before challenge or verification, and
   historical placeholder records fail closed. Period review dates come from that checkpoint rather
-  than the publication date.
+  than the publication date, and publication fails closed if current status has advanced to another
+  month.
 - This slice does not apply budgets, publish notifications, request host continuation, add a
   migration, activate production behavior, or change legacy status arithmetic.
 

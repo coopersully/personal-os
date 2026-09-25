@@ -200,6 +200,11 @@ describe.sequential("Finance period review service", () => {
         },
       },
     });
+    observed.details.budget.month = "2026-09";
+    await expect(service.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    observed.details.budget.month = "2026-08";
     const concurrent = Promise.all([
       service.createForRun(owner.id, run.id, positionCheckpoint),
       service.createForRun(owner.id, run.id, positionCheckpoint),

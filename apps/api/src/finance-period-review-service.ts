@@ -148,6 +148,15 @@ export function createFinancePeriodReviewService({ db, finances, status }: Optio
               "conflict",
               "Finance verification is not current enough to publish.",
             );
+          const period = periodFor(run.scope, canonicalPosition);
+          if (
+            run.scope.type === "all_outstanding" &&
+            observed.details.budget.month !== period.start.slice(0, 7)
+          )
+            throw new AppError(
+              "invalid_request",
+              "Canonical Finance position evidence no longer matches the current review period.",
+            );
           const [candidate] = await tx
             .select()
             .from(financeMaintenanceCandidates)
@@ -348,7 +357,6 @@ export function createFinancePeriodReviewService({ db, finances, status }: Optio
             ...findings.map((finding) => finding.id),
           ];
           const reviewStatus = questions > 0 ? "completed_with_questions" : "completed";
-          const period = periodFor(run.scope, canonicalPosition);
           const [created] = await tx
             .insert(financePeriodReviews)
             .values({

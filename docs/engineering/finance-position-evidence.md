@@ -22,7 +22,9 @@ position evidence. A requested retry supersedes that blocked run with a fresh ru
 blocked evidence record while allowing the canonical reader to observe recovered facts. Direct
 replays still validate the durable checkpoint before challenge or verification work, and historical
 placeholder projection records fail closed as missing canonical evidence. Immutable period reviews
-derive their period from the validated checkpoint scope rather than the publication date.
+derive their period from the validated checkpoint scope rather than the publication date. An
+all-outstanding review also fails closed when current Finance status has advanced to a different
+month, preventing an older period label from carrying newer status figures.
 
 ## Scope and evidence identity
 

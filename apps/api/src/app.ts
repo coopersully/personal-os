@@ -586,7 +586,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const financePeriodReviews = createFinancePeriodReviewService({
     db: dependencies.db,
     finances,
-    now,
     status: financeStatus,
   });
   const financeMaintenance = createFinanceMaintenanceService({
@@ -596,6 +595,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
     periodReviews: financePeriodReviews,
+    position: financePosition,
     status: financeStatus,
   });
   const canonicalFinanceMaintenance = createFinanceMaintenanceIntentService({

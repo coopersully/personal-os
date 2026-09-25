@@ -9,7 +9,11 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import { type FinanceStatus, financeLedgerChallengeChecks } from "@personal-os/domain";
+import {
+  type FinancePositionEvidenceCheckpoint,
+  type FinanceStatus,
+  financeLedgerChallengeChecks,
+} from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
@@ -40,6 +44,22 @@ const snapshot = vi.fn<ReturnType<typeof createFinanceService>["maintenanceCandi
   }),
 );
 const finances = { maintenanceCandidateSnapshot: snapshot };
+const verifiedPositionFact = { quality: "verified" as const, reasons: [] };
+const positionCheckpoint: FinancePositionEvidenceCheckpoint = {
+  revision: `sha256:${"e".repeat(64)}`,
+  scope: { accountIds: [], from: "2026-08-01", through: "2026-08-31" },
+  facts: {
+    cash: verifiedPositionFact,
+    postedSpend: verifiedPositionFact,
+    pendingExposure: verifiedPositionFact,
+    committed: verifiedPositionFact,
+    protected: verifiedPositionFact,
+    spendable: verifiedPositionFact,
+    debt: verifiedPositionFact,
+    investments: verifiedPositionFact,
+    netWorth: verifiedPositionFact,
+  },
+};
 
 describe.sequential("Finance period review service", () => {
   let container: StartedPostgreSqlContainer;
@@ -67,7 +87,7 @@ describe.sequential("Finance period review service", () => {
         displayName: "Period review owner",
         email: `period-review-${crypto.randomUUID()}@example.com`,
         passwordHash: "unused",
-        planningTimezone: "America/Los_Angeles",
+        planningTimezone: "UTC",
       })
       .returning();
     if (!owner) throw new Error("Period review owner was not created.");
@@ -137,6 +157,7 @@ describe.sequential("Finance period review service", () => {
       asOf: now.toISOString(),
       details: {
         activeGoals: [],
+        budget: { month: "2026-08" },
         cashFlow: { net: 500, projectedLowestBalance: 1_250 },
         closeReadiness: {
           missingProvenance: 0,
@@ -171,7 +192,6 @@ describe.sequential("Finance period review service", () => {
     const service = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => new Date("2026-09-01T00:30:00.000Z"),
       status: {
         getFinanceStatus: async (_userId, _scope, executor) => {
           snapshotExecutor = executor;
@@ -180,20 +200,29 @@ describe.sequential("Finance period review service", () => {
         },
       },
     });
+    observed.details.budget.month = "2026-09";
+    await expect(service.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    observed.details.budget.month = "2026-08";
     const concurrent = Promise.all([
-      service.createForRun(owner.id, run.id),
-      service.createForRun(owner.id, run.id),
+      service.createForRun(owner.id, run.id, positionCheckpoint),
+      service.createForRun(owner.id, run.id, positionCheckpoint),
     ]);
     const [first, concurrentReplay] = await concurrent;
     expect(snapshotExecutor).toBeDefined();
     expect(statusReads).toBeGreaterThan(0);
     expect(concurrentReplay).toEqual(first);
-    const replay = await service.createForRun(owner.id, run.id);
+    const replay = await service.createForRun(owner.id, run.id, positionCheckpoint);
     expect(replay).toEqual(first);
     expect(first).toMatchObject({
       challenge: { checked: financeLedgerChallengeChecks, findings: 0 },
       period: { end: "2026-08-31", start: "2026-08-01" },
-      position: { closing: 3_000, opening: 2_500 },
+      position: {
+        closing: 3_000,
+        evidence: positionCheckpoint,
+        opening: 2_500,
+      },
       spending: { budgetVariance: -50, gross: 310, personal: 90, savings: 1_910 },
       status: "completed",
       work: { questions: 0, rulesAndActions: 1 },
@@ -256,14 +285,15 @@ describe.sequential("Finance period review service", () => {
     const service = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: { getFinanceStatus: async () => observed },
     });
     await expect(service.getLatest(owner.id)).resolves.toBeNull();
     await expect(service.getOwned(owner.id, crypto.randomUUID())).rejects.toMatchObject({
       code: "not_found",
     });
-    await expect(service.createForRun(owner.id, crypto.randomUUID())).rejects.toMatchObject({
+    await expect(
+      service.createForRun(owner.id, crypto.randomUUID(), positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "not_found",
     });
 
@@ -278,7 +308,7 @@ describe.sequential("Finance period review service", () => {
       })
       .returning();
     if (!run) throw new Error("Incomplete period run was not created.");
-    await expect(service.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(service.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toMatchObject({
       code: "conflict",
     });
 
@@ -307,14 +337,13 @@ describe.sequential("Finance period review service", () => {
       })
       .returning();
     if (!candidate) throw new Error("Incomplete period candidate was not created.");
-    await expect(service.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(service.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toMatchObject({
       code: "conflict",
     });
 
     const staleService = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: {
         getFinanceStatus: async () => ({
           ...observed,
@@ -332,14 +361,15 @@ describe.sequential("Finance period review service", () => {
         }),
       },
     });
-    await expect(staleService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      staleService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
 
     const wrongRulebookService = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: {
         getFinanceStatus: async () => ({
           ...observed,
@@ -347,7 +377,9 @@ describe.sequential("Finance period review service", () => {
         }),
       },
     });
-    await expect(wrongRulebookService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      wrongRulebookService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     const [challenge] = await database.db
@@ -369,10 +401,45 @@ describe.sequential("Finance period review service", () => {
     const currentService = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: { getFinanceStatus: async () => observed },
     });
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: { end: "2026-08-31", start: "2026-08-02", type: "window" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(currentService.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toThrow(
+      "Canonical Finance position evidence does not match the maintenance period.",
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: { end: "2026-08-31", start: "2026-08-01", type: "window" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(currentService.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toThrow(
+      "A resolved ledger challenge is required.",
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: { type: "all_outstanding" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(
+      currentService.createForRun(owner.id, run.id, {
+        ...positionCheckpoint,
+        scope: { ...positionCheckpoint.scope, from: "2026-08-02" },
+      }),
+    ).rejects.toThrow("Canonical Finance position evidence does not identify one complete month.");
+    await expect(
+      currentService.createForRun(owner.id, run.id, {
+        ...positionCheckpoint,
+        scope: { ...positionCheckpoint.scope, through: "2026-08-30" },
+      }),
+    ).rejects.toThrow("Canonical Finance position evidence does not identify one complete month.");
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: run.scope })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     await database.db
@@ -383,7 +450,9 @@ describe.sequential("Finance period review service", () => {
       .update(financeMaintenanceCandidates)
       .set({ state: "challenged" })
       .where(eq(financeMaintenanceCandidates.id, candidate.id));
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     const [question] = await database.db
@@ -410,7 +479,9 @@ describe.sequential("Finance period review service", () => {
       })
       .returning();
     if (!prepared) throw new Error("Missing prepared action.");
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     await database.db
@@ -419,7 +490,9 @@ describe.sequential("Finance period review service", () => {
         coverage: { checked: financeLedgerChallengeChecks, reviewedItemIds: [question.id] },
       })
       .where(eq(financeLedgerChallenges.id, challenge.id));
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     await database.db
@@ -432,7 +505,9 @@ describe.sequential("Finance period review service", () => {
         state: "submitted",
       })
       .where(eq(financeLedgerChallenges.id, challenge.id));
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     await database.db
@@ -443,14 +518,18 @@ describe.sequential("Finance period review service", () => {
       .update(financeMaintenanceCandidates)
       .set({ state: "ready_for_challenge" })
       .where(eq(financeMaintenanceCandidates.id, candidate.id));
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     await database.db
       .update(financeMaintenanceCandidates)
       .set({ state: "challenged" })
       .where(eq(financeMaintenanceCandidates.id, candidate.id));
-    await expect(currentService.createForRun(crypto.randomUUID(), run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(crypto.randomUUID(), run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "not_found",
     });
     snapshot.mockResolvedValueOnce({
@@ -459,7 +538,9 @@ describe.sequential("Finance period review service", () => {
       revision: `sha256:${"9".repeat(64)}`,
       sourceRevision: `sha256:${"8".repeat(64)}`,
     });
-    await expect(currentService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
     expect(snapshot).toHaveBeenLastCalledWith(
@@ -484,7 +565,11 @@ describe.sequential("Finance period review service", () => {
       revision: candidate.revision,
       sourceRevision: `sha256:${"2".repeat(64)}`,
     });
-    const completedWithQuestions = await currentService.createForRun(owner.id, run.id);
+    const completedWithQuestions = await currentService.createForRun(
+      owner.id,
+      run.id,
+      positionCheckpoint,
+    );
     expect(completedWithQuestions).toMatchObject({
       challenge: { checked: financeLedgerChallengeChecks, findings: 0, observations: 0 },
       period: { end: "2026-08-31", start: "2026-08-01" },
@@ -521,9 +606,9 @@ describe.sequential("Finance period review service", () => {
       .update(financeMaintenanceCandidates)
       .set({ revision: `sha256:${"5".repeat(64)}` })
       .where(eq(financeMaintenanceCandidates.id, candidate.id));
-    await expect(currentService.createForRun(owner.id, run.id)).resolves.toEqual(
-      completedWithQuestions,
-    );
+    await expect(
+      currentService.createForRun(owner.id, run.id, positionCheckpoint),
+    ).resolves.toEqual(completedWithQuestions);
     const [unchangedRun] = await database.db
       .select()
       .from(workspaceMaintenanceRuns)

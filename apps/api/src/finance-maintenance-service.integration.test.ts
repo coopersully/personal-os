@@ -2017,9 +2017,14 @@ describe.sequential("Finance maintenance service", () => {
     const ownerId = await createUser("Unavailable canonical position");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
     const deps = requiredServices();
-    deps.position.readPosition.mockImplementation(async (_userId, scope) =>
-      positionEvidence({ ...scope, accountIds: scope.accountIds ?? [] }, ["committed"]),
-    );
+    let positionReads = 0;
+    deps.position.readPosition.mockImplementation(async (_userId, scope) => {
+      positionReads += 1;
+      return positionEvidence(
+        { ...scope, accountIds: scope.accountIds ?? [] },
+        positionReads === 1 ? ["committed"] : [],
+      );
+    });
     const service = createFinanceMaintenanceService({
       ...deps,
       finances: operations(),
@@ -2049,18 +2054,18 @@ describe.sequential("Finance maintenance service", () => {
     });
     expect(deps.challenge.prepare).not.toHaveBeenCalled();
 
-    await expect(service.startOrResume(ownerId, run.scope)).resolves.toMatchObject({
-      id: run.id,
-      status: "queued",
+    const recovered = await service.startOrResume(ownerId, run.scope);
+    expect(recovered).toMatchObject({ status: "queued" });
+    expect(recovered.id).not.toBe(run.id);
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      settledResult: expect.objectContaining({ recovery: "superseded_by_manual_retry" }),
+      status: "failed_terminal",
     });
-    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
-      status: "blocked",
-      settledResult: {
-        code: "finance_position_evidence_unavailable",
-      },
+    await expect(service.dispatchRun(recovered.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
     });
-    expect(deps.position.readPosition).toHaveBeenCalledTimes(1);
-    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+    expect(deps.position.readPosition).toHaveBeenCalledTimes(2);
+    expect(deps.challenge.prepare).toHaveBeenCalledTimes(1);
   });
 
   it("blocks historical placeholder projection records before challenge or verification", async () => {
@@ -2122,8 +2127,7 @@ describe.sequential("Finance maintenance service", () => {
     expect(deps.position.readPosition).not.toHaveBeenCalled();
     expect(deps.challenge.prepare).not.toHaveBeenCalled();
 
-    await service.startOrResume(ownerId, scope);
-    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+    await expect(service.startOrResume(ownerId, scope)).resolves.toMatchObject({
       status: "blocked",
       settledResult: { code: "finance_position_scope_unsupported" },
     });

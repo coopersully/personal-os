@@ -586,7 +586,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const financePeriodReviews = createFinancePeriodReviewService({
     db: dependencies.db,
     finances,
-    now,
     status: financeStatus,
   });
   const financeMaintenance = createFinanceMaintenanceService({

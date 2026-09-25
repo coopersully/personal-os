@@ -1079,6 +1079,19 @@ export function createFinanceMaintenanceService({
         observed.state !== "blocked" &&
         observed.freshness.blockers.length === 0
       ) {
+        const settledCode = (run.settledResult as { code?: unknown } | null)?.code;
+        if (settledCode === "finance_position_evidence_unavailable") {
+          return maintenance.restartBlocked({
+            expectedRulebookVersion: run.rulebookVersion,
+            runId: run.id,
+          });
+        }
+        if (
+          settledCode === "finance_position_evidence_missing" ||
+          settledCode === "finance_position_scope_unsupported"
+        ) {
+          return run;
+        }
         return maintenance.requeue({
           expectedRulebookVersion: run.rulebookVersion,
           expectedStatus: "blocked",

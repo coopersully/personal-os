@@ -87,7 +87,7 @@ describe.sequential("Finance period review service", () => {
         displayName: "Period review owner",
         email: `period-review-${crypto.randomUUID()}@example.com`,
         passwordHash: "unused",
-        planningTimezone: "America/Los_Angeles",
+        planningTimezone: "UTC",
       })
       .returning();
     if (!owner) throw new Error("Period review owner was not created.");
@@ -157,6 +157,7 @@ describe.sequential("Finance period review service", () => {
       asOf: now.toISOString(),
       details: {
         activeGoals: [],
+        budget: { month: "2026-08" },
         cashFlow: { net: 500, projectedLowestBalance: 1_250 },
         closeReadiness: {
           missingProvenance: 0,
@@ -191,7 +192,6 @@ describe.sequential("Finance period review service", () => {
     const service = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => new Date("2026-09-01T00:30:00.000Z"),
       status: {
         getFinanceStatus: async (_userId, _scope, executor) => {
           snapshotExecutor = executor;
@@ -280,7 +280,6 @@ describe.sequential("Finance period review service", () => {
     const service = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: { getFinanceStatus: async () => observed },
     });
     await expect(service.getLatest(owner.id)).resolves.toBeNull();
@@ -340,7 +339,6 @@ describe.sequential("Finance period review service", () => {
     const staleService = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: {
         getFinanceStatus: async () => ({
           ...observed,
@@ -367,7 +365,6 @@ describe.sequential("Finance period review service", () => {
     const wrongRulebookService = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: {
         getFinanceStatus: async () => ({
           ...observed,
@@ -399,7 +396,6 @@ describe.sequential("Finance period review service", () => {
     const currentService = createFinancePeriodReviewService({
       db: database.db,
       finances,
-      now: () => now,
       status: { getFinanceStatus: async () => observed },
     });
     await expect(

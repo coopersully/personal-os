@@ -18,9 +18,11 @@ amounts, observation time, source references, provider detail or merchant text. 
 that durable checkpoint, and a newly published immutable period review embeds the same identity.
 Older stored reviews remain readable without the field. Maintenance settles blocked when any
 required position fact is unavailable, so it cannot claim the period is maintained from partial
-position evidence. Requeued and replayed runs revalidate the durable checkpoint before any
-challenge or verification work. Historical placeholder projection records fail closed as missing
-canonical evidence.
+position evidence. A requested retry supersedes that blocked run with a fresh run, preserving the
+blocked evidence record while allowing the canonical reader to observe recovered facts. Direct
+replays still validate the durable checkpoint before challenge or verification work, and historical
+placeholder projection records fail closed as missing canonical evidence. Immutable period reviews
+derive their period from the validated checkpoint scope rather than the publication date.
 
 ## Scope and evidence identity
 

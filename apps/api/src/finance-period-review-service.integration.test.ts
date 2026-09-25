@@ -403,6 +403,40 @@ describe.sequential("Finance period review service", () => {
       finances,
       status: { getFinanceStatus: async () => observed },
     });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: { end: "2026-08-31", start: "2026-08-02", type: "window" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(currentService.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toThrow(
+      "Canonical Finance position evidence does not match the maintenance period.",
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: { end: "2026-08-31", start: "2026-08-01", type: "window" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(currentService.createForRun(owner.id, run.id, positionCheckpoint)).rejects.toThrow(
+      "A resolved ledger challenge is required.",
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: { type: "all_outstanding" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await expect(
+      currentService.createForRun(owner.id, run.id, {
+        ...positionCheckpoint,
+        scope: { ...positionCheckpoint.scope, from: "2026-08-02" },
+      }),
+    ).rejects.toThrow("Canonical Finance position evidence does not identify one complete month.");
+    await expect(
+      currentService.createForRun(owner.id, run.id, {
+        ...positionCheckpoint,
+        scope: { ...positionCheckpoint.scope, through: "2026-08-30" },
+      }),
+    ).rejects.toThrow("Canonical Finance position evidence does not identify one complete month.");
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ scope: run.scope })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
     await expect(
       currentService.createForRun(owner.id, run.id, positionCheckpoint),
     ).rejects.toMatchObject({

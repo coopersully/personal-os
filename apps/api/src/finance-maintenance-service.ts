@@ -437,6 +437,31 @@ function positionCheckpointFromRecords(
   return parsed.data;
 }
 
+function positionReplayBlock(
+  records: Awaited<ReturnType<WorkspaceMaintenanceService["listStepRecords"]>>,
+): { code: string; position?: unknown } | null {
+  const projectionRecord = records.find(
+    (record) => record.step === "budget_and_health_projection" && record.status === "completed",
+  );
+  if (!projectionRecord) return null;
+  const projection = projectionRecord.result as { position?: unknown } | null;
+  const parsed = financePositionEvidenceCheckpointSchema.safeParse(projection?.position);
+  if (parsed.success) {
+    return financePositionFactNames.some(
+      (name) => parsed.data.facts[name].quality === "unavailable",
+    )
+      ? { code: "finance_position_evidence_unavailable", position: parsed.data }
+      : null;
+  }
+  const unavailable = projection?.position as
+    | { quality?: unknown; reason?: unknown; scope?: unknown }
+    | undefined;
+  if (unavailable?.quality === "unavailable" && unavailable.reason === "unsupported_scope") {
+    return { code: "finance_position_scope_unsupported", position: unavailable };
+  }
+  return { code: "finance_position_evidence_missing" };
+}
+
 export function createFinanceMaintenanceService({
   actions,
   challenge,
@@ -558,11 +583,19 @@ export function createFinanceMaintenanceService({
         );
       }
       await assertCurrentRulebook(run);
-      if (checkpoint?.phase === "challenge" && prepared) return releaseAtChallenge(prepared);
-
       const completed = new Set(
         records.filter((record) => record.status === "completed").map((record) => record.step),
       );
+      const replayBlock = positionReplayBlock(records);
+      if (replayBlock) {
+        return maintenance.settle({
+          claimId,
+          result: replayBlock,
+          runId,
+          status: "blocked",
+        });
+      }
+      if (checkpoint?.phase === "challenge" && prepared) return releaseAtChallenge(prepared);
       if (
         checkpoint?.phase === "health_refresh" ||
         completed.has("commit_or_queue_review") ||

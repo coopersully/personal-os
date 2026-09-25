@@ -2048,6 +2048,50 @@ describe.sequential("Finance maintenance service", () => {
       through: "2026-08-12",
     });
     expect(deps.challenge.prepare).not.toHaveBeenCalled();
+
+    await expect(service.startOrResume(ownerId, run.scope)).resolves.toMatchObject({
+      id: run.id,
+      status: "queued",
+    });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "blocked",
+      settledResult: {
+        code: "finance_position_evidence_unavailable",
+      },
+    });
+    expect(deps.position.readPosition).toHaveBeenCalledTimes(1);
+    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+  });
+
+  it("blocks historical placeholder projection records before challenge or verification", async () => {
+    const ownerId = await createUser("Historical position placeholder");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations(),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await database.db.insert(workspaceMaintenanceSteps).values({
+      attemptClaimId: crypto.randomUUID(),
+      idempotencyKey: "legacy:budget_and_health_projection",
+      runId: run.id,
+      safeResult: { prepared: true, refreshed: false },
+      status: "completed",
+      stepName: "budget_and_health_projection",
+    });
+
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "blocked",
+      settledResult: { code: "finance_position_evidence_missing" },
+    });
+    expect(deps.position.readPosition).not.toHaveBeenCalled();
+    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+    expect(deps.actions.settleFinanceMaintenanceCandidate).not.toHaveBeenCalled();
+    expect(deps.periodReviews.createForRun).not.toHaveBeenCalled();
   });
 
   it("blocks unsupported target position scopes without widening the read", async () => {
@@ -2074,6 +2118,14 @@ describe.sequential("Finance maintenance service", () => {
         code: "finance_position_scope_unsupported",
         position: { quality: "unavailable", reason: "unsupported_scope", scope },
       },
+    });
+    expect(deps.position.readPosition).not.toHaveBeenCalled();
+    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+
+    await service.startOrResume(ownerId, scope);
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "blocked",
+      settledResult: { code: "finance_position_scope_unsupported" },
     });
     expect(deps.position.readPosition).not.toHaveBeenCalled();
     expect(deps.challenge.prepare).not.toHaveBeenCalled();

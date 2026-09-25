@@ -10,7 +10,8 @@
   checkpoint; amounts, source references and provider details stay out of maintenance metadata.
 - Any unavailable required position fact leaves the maintenance run explicitly blocked, so no
   maintained-period claim is produced from incomplete position evidence. Existing period reviews
-  remain readable without the new checkpoint.
+  remain readable without the new checkpoint. Requeued runs validate the durable checkpoint before
+  challenge or verification, and historical placeholder records fail closed.
 - This slice does not apply budgets, publish notifications, request host continuation, add a
   migration, activate production behavior, or change legacy status arithmetic.
 

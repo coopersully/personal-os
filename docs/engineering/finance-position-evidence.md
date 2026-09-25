@@ -18,7 +18,9 @@ amounts, observation time, source references, provider detail or merchant text. 
 that durable checkpoint, and a newly published immutable period review embeds the same identity.
 Older stored reviews remain readable without the field. Maintenance settles blocked when any
 required position fact is unavailable, so it cannot claim the period is maintained from partial
-position evidence.
+position evidence. Requeued and replayed runs revalidate the durable checkpoint before any
+challenge or verification work. Historical placeholder projection records fail closed as missing
+canonical evidence.
 
 ## Scope and evidence identity
 

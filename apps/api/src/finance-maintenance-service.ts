@@ -425,6 +425,25 @@ function checkpointForPosition(
   });
 }
 
+function positionFactsUnavailable(position: FinancePositionEvidenceCheckpoint): boolean {
+  return financePositionFactNames.some((name) => position.facts[name].quality === "unavailable");
+}
+
+function samePositionIdentity(
+  expected: FinancePositionEvidenceCheckpoint,
+  observed: FinancePositionEvidenceCheckpoint,
+): boolean {
+  return (
+    observed.revision === expected.revision &&
+    observed.scope.from === expected.scope.from &&
+    observed.scope.through === expected.scope.through &&
+    observed.scope.accountIds.length === expected.scope.accountIds.length &&
+    observed.scope.accountIds.every(
+      (accountId, index) => accountId === expected.scope.accountIds[index],
+    )
+  );
+}
+
 function positionCheckpointFromRecords(
   records: Awaited<ReturnType<WorkspaceMaintenanceService["listStepRecords"]>>,
 ): FinancePositionEvidenceCheckpoint {
@@ -663,6 +682,31 @@ export function createFinanceMaintenanceService({
         }
         if (!completed.has("verify")) {
           const positionCheckpoint = positionCheckpointFromRecords(records);
+          const currentPosition = checkpointForPosition(
+            await position.readPosition(run.userId, positionCheckpoint.scope),
+          );
+          if (positionFactsUnavailable(currentPosition)) {
+            return maintenance.settle({
+              claimId,
+              result: {
+                code: "finance_position_evidence_unavailable",
+                position: currentPosition,
+              },
+              runId,
+              status: "blocked",
+            });
+          }
+          if (!samePositionIdentity(positionCheckpoint, currentPosition)) {
+            return maintenance.settle({
+              claimId,
+              result: {
+                code: "finance_position_evidence_changed",
+                position: currentPosition,
+              },
+              runId,
+              status: "blocked",
+            });
+          }
           await maintenance.completeStep({
             claimId,
             idempotencyKey: `finances:${run.rulebookVersion}:verify`,
@@ -904,11 +948,7 @@ export function createFinanceMaintenanceService({
             runId,
             step,
           });
-          if (
-            financePositionFactNames.some(
-              (name) => positionCheckpoint.facts[name].quality === "unavailable",
-            )
-          ) {
+          if (positionFactsUnavailable(positionCheckpoint)) {
             return maintenance.settle({
               claimId,
               result: {
@@ -1080,16 +1120,17 @@ export function createFinanceMaintenanceService({
         observed.freshness.blockers.length === 0
       ) {
         const settledCode = (run.settledResult as { code?: unknown } | null)?.code;
-        if (settledCode === "finance_position_evidence_unavailable") {
+        if (
+          settledCode === "finance_position_evidence_unavailable" ||
+          settledCode === "finance_position_evidence_missing" ||
+          settledCode === "finance_position_evidence_changed"
+        ) {
           return maintenance.restartBlocked({
             expectedRulebookVersion: run.rulebookVersion,
             runId: run.id,
           });
         }
-        if (
-          settledCode === "finance_position_evidence_missing" ||
-          settledCode === "finance_position_scope_unsupported"
-        ) {
+        if (settledCode === "finance_position_scope_unsupported") {
           return run;
         }
         return maintenance.requeue({

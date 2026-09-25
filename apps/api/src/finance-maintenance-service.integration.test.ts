@@ -2097,6 +2097,101 @@ describe.sequential("Finance maintenance service", () => {
     expect(deps.challenge.prepare).not.toHaveBeenCalled();
     expect(deps.actions.settleFinanceMaintenanceCandidate).not.toHaveBeenCalled();
     expect(deps.periodReviews.createForRun).not.toHaveBeenCalled();
+
+    const recovered = await service.startOrResume(ownerId, run.scope);
+    expect(recovered).toMatchObject({ status: "queued" });
+    expect(recovered.id).not.toBe(run.id);
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      settledResult: expect.objectContaining({ recovery: "superseded_by_manual_retry" }),
+      status: "failed_terminal",
+    });
+    await expect(service.dispatchRun(recovered.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    expect(deps.position.readPosition).toHaveBeenCalledTimes(1);
+    expect(deps.challenge.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      changedPart: "revision changes",
+      code: "finance_position_evidence_changed",
+      revision: "d",
+      through: "2026-08-31",
+      unavailable: [],
+    },
+    {
+      changedPart: "scope changes",
+      code: "finance_position_evidence_changed",
+      revision: "e",
+      through: "2026-08-30",
+      unavailable: [],
+    },
+    {
+      changedPart: "facts become unavailable",
+      code: "finance_position_evidence_unavailable",
+      revision: "e",
+      through: "2026-08-31",
+      unavailable: ["committed" as const],
+    },
+  ])("blocks verification when canonical position $changedPart after challenge", async ({
+    code,
+    revision,
+    through,
+    unavailable,
+  }) => {
+    const ownerId = await createUser("Changed canonical position identity");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    deps.challenge.resolve.mockResolvedValue({
+      candidateId: crypto.randomUUID(),
+      candidateRevision: `sha256:${"b".repeat(64)}`,
+      questions: 1,
+    });
+    let positionReads = 0;
+    deps.position.readPosition.mockImplementation(async (_userId, scope) => {
+      positionReads += 1;
+      const evidence = positionEvidence(
+        { ...scope, accountIds: scope.accountIds ?? [] },
+        positionReads === 1 ? [] : unavailable,
+      );
+      return {
+        ...evidence,
+        revision: `sha256:${(positionReads === 1 ? "e" : revision).repeat(64)}`,
+        scope: positionReads === 1 ? evidence.scope : { ...evidence.scope, through },
+      };
+    });
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations({
+        projectMaintenanceCandidateQuestionsForUser: async () => ({ created: 1, total: 1 }),
+      }),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    await resumeAfterChallenge(workspace, run.id);
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      checkpoint: { phase: "health_refresh" },
+      status: "queued",
+    });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      settledResult: {
+        code,
+        position: {
+          revision: `sha256:${revision.repeat(64)}`,
+          scope: { through },
+        },
+      },
+      status: "blocked",
+    });
+    expect(deps.position.readPosition).toHaveBeenCalledTimes(2);
+    expect(deps.periodReviews.createForRun).not.toHaveBeenCalled();
   });
 
   it("blocks unsupported target position scopes without widening the read", async () => {
@@ -2290,6 +2385,7 @@ describe.sequential("Finance maintenance service", () => {
       run.id,
       projectedPosition,
     );
+    expect(deps.position.readPosition).toHaveBeenCalledTimes(2);
     await expect(service.dispatchRun(run.id)).resolves.toBeNull();
     expect(deps.periodReviews.createForRun).toHaveBeenCalledTimes(1);
   });

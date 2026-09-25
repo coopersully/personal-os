@@ -6,15 +6,16 @@
   window or current status month. Target scopes fail closed as unsupported instead of widening to a
   tenant-wide read.
 - The projection step durably stores only the position revision, exact scope, and per-fact quality
-  and public reason codes. Verification and newly published immutable period reviews carry the same
-  checkpoint; amounts, source references and provider details stay out of maintenance metadata.
+  and public reason codes. Verification rereads the same exact scope and requires the same revision
+  before it and newly published immutable period reviews carry the checkpoint; amounts, source
+  references and provider details stay out of maintenance metadata.
 - Any unavailable required position fact leaves the maintenance run explicitly blocked, so no
   maintained-period claim is produced from incomplete position evidence. Existing period reviews
   remain readable without the new checkpoint. A retry preserves the blocked run and starts a fresh
   read, direct replays validate the durable checkpoint before challenge or verification, and
-  historical placeholder records fail closed. Period review dates come from that checkpoint rather
-  than the publication date, and publication fails closed if current status has advanced to another
-  month.
+  historical placeholder records fail closed and can recover only through a preserved fresh-run
+  retry. Period review dates come from that checkpoint rather than the publication date, and
+  publication fails closed if current status has advanced to another month.
 - This slice does not apply budgets, publish notifications, request host continuation, add a
   migration, activate production behavior, or change legacy status arithmetic.
 

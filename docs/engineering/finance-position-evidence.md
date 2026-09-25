@@ -14,15 +14,18 @@ calling the producer.
 
 The maintenance projection step persists a safe checkpoint containing only the producer revision,
 exact account/date scope, and each fact's quality and public reason codes. It does not persist
-amounts, observation time, source references, provider detail or merchant text. Verification reuses
-that durable checkpoint, and a newly published immutable period review embeds the same identity.
+amounts, observation time, source references, provider detail or merchant text. Before verification,
+maintenance rereads the checkpoint's exact scope and requires the same canonical revision and scope;
+changed or newly unavailable evidence blocks the run. Verification then carries the durable
+checkpoint, and a newly published immutable period review embeds that same identity.
 Older stored reviews remain readable without the field. Maintenance settles blocked when any
 required position fact is unavailable, so it cannot claim the period is maintained from partial
 position evidence. A requested retry supersedes that blocked run with a fresh run, preserving the
 blocked evidence record while allowing the canonical reader to observe recovered facts. Direct
-replays still validate the durable checkpoint before challenge or verification work, and historical
-placeholder projection records fail closed as missing canonical evidence. Immutable period reviews
-derive their period from the validated checkpoint scope rather than the publication date. An
+replays still validate the durable checkpoint before challenge or verification work. Historical
+placeholder projection records fail closed as missing canonical evidence, then a requested retry
+preserves that run and starts a fresh canonical read. Immutable period reviews derive their period
+from the validated checkpoint scope rather than the publication date. An
 all-outstanding review also fails closed when current Finance status has advanced to a different
 month, preventing an older period label from carrying newer status figures.
 

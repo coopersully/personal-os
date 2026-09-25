@@ -2,9 +2,23 @@
 
 The lane-owned API producer in `apps/api/src/finance/position-service.ts` reads one tenant-owned,
 repeatable-read, read-only database snapshot and validates its result with F0b's
-`financePositionEvidenceSchema`. The module is an internal producer until the Integration owner
-registers and verifies the authenticated `readPosition` port. Existing legacy Cashflow, Wealth,
-and budget responses have not been switched to this producer.
+`financePositionEvidenceSchema`. The authenticated `/v1/finances/position` route, typed client and
+Finance workflow manifest register the bounded `readPosition` port. Existing legacy Cashflow,
+Wealth, and budget responses have not been switched to this producer.
+
+Finance maintenance is the first internal workflow consumer. A window run reads that exact date
+window. An all-outstanding run reads the exact calendar month named by the run's current Finance
+status. Target scopes remain unsupported because a transaction, account or other target cannot be
+silently widened into a tenant-wide financial position. Unsupported targets settle blocked without
+calling the producer.
+
+The maintenance projection step persists a safe checkpoint containing only the producer revision,
+exact account/date scope, and each fact's quality and public reason codes. It does not persist
+amounts, observation time, source references, provider detail or merchant text. Verification reuses
+that durable checkpoint, and a newly published immutable period review embeds the same identity.
+Older stored reviews remain readable without the field. Maintenance settles blocked when any
+required position fact is unavailable, so it cannot claim the period is maintained from partial
+position evidence.
 
 ## Scope and evidence identity
 
@@ -25,8 +39,8 @@ activity reference hashes the selected account references, ordered transaction p
 allocations, relationships, reimbursements, matches, and scope. No credentials, provider messages, rationale, or merchant text
 are included in the source references. The position revision hashes the ordered scope and validated
 facts; changing only the observation time does not change that revision. Persisted reviews must
-retain their original evidence packet; rereading the current producer does not reproduce historical
-bank or correction state.
+retain their original evidence identity; rereading the current producer does not reproduce
+historical bank or correction state.
 
 Account balance facts retain up to 100 individual account references. Spendable uses one aggregate
 tenant-snapshot reference whose revision hashes all four validated dependencies, including every

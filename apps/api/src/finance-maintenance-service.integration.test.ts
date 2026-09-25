@@ -26,6 +26,8 @@ import {
 import type {
   FinanceCategorizationProposal,
   FinanceMaintenanceCandidateItemDraft,
+  FinancePositionEvidence,
+  FinancePositionReadScope,
   FinanceStatus,
   MaintenanceScope,
 } from "@personal-os/domain";
@@ -43,6 +45,74 @@ import { createWorkspaceMaintenanceService } from "./workspace-maintenance-servi
 
 const now = new Date("2026-08-15T12:00:00.000Z");
 const categoryId = "22222222-2222-4222-8222-222222222222";
+
+const positionFact = (
+  quality: "verified" | "qualified" | "unavailable" = "verified",
+): FinancePositionEvidence["cash"] => ({
+  cents: quality === "unavailable" ? null : 10_000,
+  currency: "USD",
+  quality,
+  reasons: quality === "unavailable" ? ["missing_commitments"] : [],
+  sources: [{ id: crypto.randomUUID(), revision: `sha256:${"f".repeat(64)}` }],
+});
+
+function positionEvidence(
+  scope: FinancePositionEvidence["scope"] = {
+    accountIds: [],
+    from: "2026-08-01",
+    through: "2026-08-31",
+  },
+  unavailable: (keyof Pick<
+    FinancePositionEvidence,
+    | "cash"
+    | "postedSpend"
+    | "pendingExposure"
+    | "committed"
+    | "protected"
+    | "spendable"
+    | "debt"
+    | "investments"
+    | "netWorth"
+  >)[] = [],
+): FinancePositionEvidence {
+  const fact = (name: (typeof unavailable)[number]) =>
+    positionFact(unavailable.includes(name) ? "unavailable" : "verified");
+  return {
+    revision: `sha256:${"e".repeat(64)}`,
+    asOf: now.toISOString(),
+    scope,
+    cash: fact("cash"),
+    postedSpend: fact("postedSpend"),
+    pendingExposure: fact("pendingExposure"),
+    committed: fact("committed"),
+    protected: fact("protected"),
+    spendable: fact("spendable"),
+    debt: fact("debt"),
+    investments: fact("investments"),
+    netWorth: fact("netWorth"),
+  };
+}
+
+function safePositionCheckpoint() {
+  const position = positionEvidence();
+  return {
+    revision: position.revision,
+    scope: position.scope,
+    facts: Object.fromEntries(
+      [
+        "cash",
+        "postedSpend",
+        "pendingExposure",
+        "committed",
+        "protected",
+        "spendable",
+        "debt",
+        "investments",
+        "netWorth",
+      ].map((name) => [name, { quality: "verified", reasons: [] }]),
+    ),
+  };
+}
 
 function proposal(
   id: string,
@@ -261,6 +331,7 @@ describe.sequential("Finance maintenance service", () => {
     return {
       asOf: now.toISOString(),
       details: {
+        budget: { approved: true, month: "2026-08", total: 1_000 },
         health: { confidence: options.blocked ? "insufficient" : "reliable" },
         questions: [],
         review: { total: options.questions ?? 0 },
@@ -289,6 +360,11 @@ describe.sequential("Finance maintenance service", () => {
       },
       periodReviews: {
         createForRun: vi.fn(async () => ({ id: crypto.randomUUID(), status: "completed" })),
+      },
+      position: {
+        readPosition: vi.fn(async (_userId: string, scope: FinancePositionReadScope) =>
+          positionEvidence({ ...scope, accountIds: scope.accountIds ?? [] }),
+        ),
       },
     };
   }
@@ -1885,6 +1961,124 @@ describe.sequential("Finance maintenance service", () => {
     );
   }
 
+  async function recordCanonicalPosition(runId: string) {
+    await database.db.insert(workspaceMaintenanceSteps).values({
+      attemptClaimId: crypto.randomUUID(),
+      idempotencyKey: "test:canonical-position",
+      runId,
+      safeResult: { position: safePositionCheckpoint() },
+      status: "completed",
+      stepName: "budget_and_health_projection",
+    });
+  }
+
+  it("reads an exact run-scoped canonical position and persists only safe evidence metadata", async () => {
+    const ownerId = await createUser("Canonical position checkpoint");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations(),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    expect(deps.position.readPosition).toHaveBeenCalledWith(ownerId, {
+      from: "2026-08-01",
+      through: "2026-08-31",
+    });
+    const projection = (await workspace.listStepRecords(run.id)).find(
+      (record) => record.step === "budget_and_health_projection",
+    );
+    expect(projection).toMatchObject({
+      result: {
+        position: {
+          facts: {
+            cash: { quality: "verified", reasons: [] },
+            committed: { quality: "verified", reasons: [] },
+          },
+          revision: `sha256:${"e".repeat(64)}`,
+          scope: { accountIds: [], from: "2026-08-01", through: "2026-08-31" },
+        },
+      },
+      status: "completed",
+    });
+    expect(JSON.stringify(projection?.result)).not.toContain("cents");
+    expect(JSON.stringify(projection?.result)).not.toContain("sources");
+    expect(JSON.stringify(projection?.result)).not.toContain("asOf");
+  });
+
+  it("preserves an exact window and blocks unavailable required position facts", async () => {
+    const ownerId = await createUser("Unavailable canonical position");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    deps.position.readPosition.mockImplementation(async (_userId, scope) =>
+      positionEvidence({ ...scope, accountIds: scope.accountIds ?? [] }, ["committed"]),
+    );
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations(),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+
+    const run = await service.startOrResume(ownerId, {
+      type: "window",
+      start: "2026-08-10",
+      end: "2026-08-12",
+    });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "blocked",
+      settledResult: {
+        code: "finance_position_evidence_unavailable",
+        position: {
+          facts: { committed: { quality: "unavailable", reasons: ["missing_commitments"] } },
+          scope: { accountIds: [], from: "2026-08-10", through: "2026-08-12" },
+        },
+      },
+    });
+    expect(deps.position.readPosition).toHaveBeenCalledWith(ownerId, {
+      from: "2026-08-10",
+      through: "2026-08-12",
+    });
+    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+  });
+
+  it("blocks unsupported target position scopes without widening the read", async () => {
+    const ownerId = await createUser("Unsupported canonical position scope");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    const scope = {
+      type: "target" as const,
+      entityType: "finance_transaction",
+      id: crypto.randomUUID(),
+    };
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations(),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+
+    const run = await service.startOrResume(ownerId, scope);
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "blocked",
+      settledResult: {
+        code: "finance_position_scope_unsupported",
+        position: { quality: "unavailable", reason: "unsupported_scope", scope },
+      },
+    });
+    expect(deps.position.readPosition).not.toHaveBeenCalled();
+    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+  });
+
   it("requires every canonical capability and never falls back to direct ledger writes", async () => {
     for (const missing of [
       "beginMaintenanceCandidatePreparation",
@@ -1898,6 +2092,7 @@ describe.sequential("Finance maintenance service", () => {
       "actions",
       "challenge",
       "periodReviews",
+      "position",
     ] as const) {
       const ownerId = await createUser(`Missing ${missing}`);
       const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
@@ -1920,7 +2115,12 @@ describe.sequential("Finance maintenance service", () => {
         now: () => now,
         status: { getFinanceStatus: async () => status() },
       };
-      if (missing === "actions" || missing === "challenge" || missing === "periodReviews")
+      if (
+        missing === "actions" ||
+        missing === "challenge" ||
+        missing === "periodReviews" ||
+        missing === "position"
+      )
         Reflect.deleteProperty(input, missing);
       else Reflect.deleteProperty(input.finances, missing);
       const service = createFinanceMaintenanceService(input);
@@ -2005,7 +2205,8 @@ describe.sequential("Finance maintenance service", () => {
     });
     expect(order).toEqual(["health", "period_review"]);
     expect(deps.actions.settleFinanceMaintenanceCandidate).not.toHaveBeenCalled();
-    expect(await workspace.listStepRecords(run.id)).toEqual(
+    const completedSteps = await workspace.listStepRecords(run.id);
+    expect(completedSteps).toEqual(
       expect.arrayContaining(
         [
           "challenge_resolve",
@@ -2015,6 +2216,23 @@ describe.sequential("Finance maintenance service", () => {
           "period_review",
         ].map((step) => expect.objectContaining({ step, status: "completed" })),
       ),
+    );
+    const projectedPosition = (
+      completedSteps.find((record) => record.step === "budget_and_health_projection")?.result as
+        | { position?: unknown }
+        | undefined
+    )?.position;
+    expect(
+      (
+        completedSteps.find((record) => record.step === "verify")?.result as
+          | { position?: unknown }
+          | undefined
+      )?.position,
+    ).toEqual(projectedPosition);
+    expect(deps.periodReviews.createForRun).toHaveBeenCalledWith(
+      ownerId,
+      run.id,
+      projectedPosition,
     );
     await expect(service.dispatchRun(run.id)).resolves.toBeNull();
     expect(deps.periodReviews.createForRun).toHaveBeenCalledTimes(1);
@@ -2275,7 +2493,11 @@ describe.sequential("Finance maintenance service", () => {
       status: "completed",
       settledResult: { verification: { freshness: "current", duplicateActions: 0 } },
     });
-    expect(deps.periodReviews.createForRun).toHaveBeenCalledWith(ownerId, run.id);
+    expect(deps.periodReviews.createForRun).toHaveBeenCalledWith(
+      ownerId,
+      run.id,
+      expect.objectContaining({ revision: `sha256:${"e".repeat(64)}` }),
+    );
     await expect(service.getRun(crypto.randomUUID(), run.id)).rejects.toMatchObject({
       code: "not_found",
     });
@@ -2349,6 +2571,7 @@ describe.sequential("Finance maintenance service", () => {
         },
       });
       const run = await first.startOrResume(ownerId, { type: "all_outstanding" });
+      await recordCanonicalPosition(run.id);
       await database.db
         .update(workspaceMaintenanceRuns)
         .set({ checkpoint: { phase: "health_refresh" } })
@@ -2403,6 +2626,7 @@ describe.sequential("Finance maintenance service", () => {
       status: { getFinanceStatus: async () => status() },
     });
     const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await recordCanonicalPosition(run.id);
     await database.db
       .update(workspaceMaintenanceRuns)
       .set({ checkpoint: { phase: "health_refresh" } })
@@ -2419,11 +2643,8 @@ describe.sequential("Finance maintenance service", () => {
     );
   });
 
-  it("forwards window and target scopes through candidate discovery, exact reconciliation and health", async () => {
-    for (const scope of [
-      { type: "window", start: "2026-08-01", end: "2026-08-07" },
-      { type: "target", entityType: "finance_transaction", id: crypto.randomUUID() },
-    ] as const) {
+  it("forwards a window scope through candidate discovery, exact reconciliation and health", async () => {
+    for (const scope of [{ type: "window", start: "2026-08-01", end: "2026-08-07" }] as const) {
       const ownerId = await createUser(`Canonical ${scope.type} scope`);
       const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
       const observed: MaintenanceScope[] = [];

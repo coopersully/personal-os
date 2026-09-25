@@ -14,10 +14,12 @@ import {
 } from "@personal-os/database";
 import {
   type FinancePeriodReview,
+  type FinancePositionEvidenceCheckpoint,
   type FinanceStatus,
   financeCandidateLedgerProjectionSchema,
   financeLedgerChallengeChecks,
   financePeriodReviewSchema,
+  financePositionEvidenceCheckpointSchema,
   type LocalDate,
   localDateAt,
   type MaintenanceScope,
@@ -93,7 +95,12 @@ function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriod
 /** Immutable review of committed work or a fully challenged turn awaiting user answers. */
 export function createFinancePeriodReviewService({ db, finances, now, status }: Options) {
   return {
-    async createForRun(userId: string, runId: string): Promise<FinancePeriodReview> {
+    async createForRun(
+      userId: string,
+      runId: string,
+      positionEvidence: FinancePositionEvidenceCheckpoint,
+    ): Promise<FinancePeriodReview> {
+      const canonicalPosition = financePositionEvidenceCheckpointSchema.parse(positionEvidence);
       return retrySerializationFailure(
         db,
         async (tx) => {
@@ -273,6 +280,7 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             position: {
               cashLowPoint: observed.details.cashFlow.projectedLowestBalance,
               closing,
+              evidence: canonicalPosition,
               opening,
             },
             recommendations: [

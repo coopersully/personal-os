@@ -1,5 +1,19 @@
 # nohmi — Implementation Log
 
+## 2026-09-25 — Canonical Finance position maintenance checkpoint
+
+- Finance maintenance now consumes the registered canonical position reader for the run's exact
+  window or current status month. Target scopes fail closed as unsupported instead of widening to a
+  tenant-wide read.
+- The projection step durably stores only the position revision, exact scope, and per-fact quality
+  and public reason codes. Verification and newly published immutable period reviews carry the same
+  checkpoint; amounts, source references and provider details stay out of maintenance metadata.
+- Any unavailable required position fact leaves the maintenance run explicitly blocked, so no
+  maintained-period claim is produced from incomplete position evidence. Existing period reviews
+  remain readable without the new checkpoint.
+- This slice does not apply budgets, publish notifications, request host continuation, add a
+  migration, activate production behavior, or change legacy status arithmetic.
+
 ## 2026-09-23 — Canonical Finance position read registration
 
 - Registered the canonical `PositionEvidence` producer at the authenticated read-only

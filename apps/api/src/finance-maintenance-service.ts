@@ -1,11 +1,16 @@
-import type {
-  ApplyFinanceCategorizationsInput,
-  FinanceCategorizationApplyResult,
-  FinanceCategorizationProposalPage,
-  FinanceMaintenanceCandidateItemDraft,
-  FinanceMaintenanceRun,
-  FinanceStatus,
-  MaintenanceScope,
+import {
+  type ApplyFinanceCategorizationsInput,
+  type FinanceCategorizationApplyResult,
+  type FinanceCategorizationProposalPage,
+  type FinanceMaintenanceCandidateItemDraft,
+  type FinanceMaintenanceRun,
+  type FinancePositionEvidence,
+  type FinancePositionEvidenceCheckpoint,
+  type FinancePositionReadScope,
+  type FinanceStatus,
+  financePositionEvidenceCheckpointSchema,
+  financePositionFactNames,
+  type MaintenanceScope,
 } from "@personal-os/domain";
 import { AppError } from "./errors.js";
 import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
@@ -211,7 +216,17 @@ type Options = {
   maintenance: WorkspaceMaintenanceService;
   now: () => Date;
   periodReviews: {
-    createForRun: (userId: string, runId: string) => Promise<{ id: string; status: string }>;
+    createForRun: (
+      userId: string,
+      runId: string,
+      position: FinancePositionEvidenceCheckpoint,
+    ) => Promise<{ id: string; status: string }>;
+  };
+  position: {
+    readPosition: (
+      userId: string,
+      scope: FinancePositionReadScope,
+    ) => Promise<FinancePositionEvidence>;
   };
   status: FinanceStatusReader;
 };
@@ -374,6 +389,54 @@ function safeErrorMessage(error: unknown): string {
   return "Finance maintenance could not finish this step.";
 }
 
+function finalDayOfMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const monthNumber = Number(month.slice(5, 7));
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+}
+
+function positionScopeFor(
+  scope: MaintenanceScope,
+  observed: FinanceStatus,
+): FinancePositionReadScope | null {
+  if (scope.type === "target") return null;
+  if (scope.type === "window") {
+    return { from: scope.start, through: scope.end };
+  }
+  const month = observed.details.budget.month;
+  return {
+    from: `${month}-01`,
+    through: finalDayOfMonth(month),
+  };
+}
+
+function checkpointForPosition(
+  position: FinancePositionEvidence,
+): FinancePositionEvidenceCheckpoint {
+  return financePositionEvidenceCheckpointSchema.parse({
+    revision: position.revision,
+    scope: position.scope,
+    facts: Object.fromEntries(
+      financePositionFactNames.map((name) => [
+        name,
+        { quality: position[name].quality, reasons: position[name].reasons },
+      ]),
+    ),
+  });
+}
+
+function positionCheckpointFromRecords(
+  records: Awaited<ReturnType<WorkspaceMaintenanceService["listStepRecords"]>>,
+): FinancePositionEvidenceCheckpoint {
+  const projection = records.find(
+    (record) => record.step === "budget_and_health_projection" && record.status === "completed",
+  )?.result as { position?: unknown } | undefined;
+  const parsed = financePositionEvidenceCheckpointSchema.safeParse(projection?.position);
+  if (!parsed.success)
+    throw new AppError("conflict", "Canonical Finance position evidence is missing.");
+  return parsed.data;
+}
+
 export function createFinanceMaintenanceService({
   actions,
   challenge,
@@ -381,6 +444,7 @@ export function createFinanceMaintenanceService({
   maintenance,
   now,
   periodReviews,
+  position,
   status,
 }: Options) {
   async function currentStatus(userId: string, scope: MaintenanceScope) {
@@ -485,6 +549,7 @@ export function createFinanceMaintenanceService({
         challenge?.resolve,
         actions?.settleFinanceMaintenanceCandidate,
         periodReviews?.createForRun,
+        position?.readPosition,
       ];
       if (requiredCapabilities.some((capability) => typeof capability !== "function")) {
         throw new AppError(
@@ -564,10 +629,11 @@ export function createFinanceMaintenanceService({
           throw new AppError("conflict", "Finance source freshness must recover before verify.");
         }
         if (!completed.has("verify")) {
+          const positionCheckpoint = positionCheckpointFromRecords(records);
           await maintenance.completeStep({
             claimId,
             idempotencyKey: `finances:${run.rulebookVersion}:verify`,
-            result: { state: observed.state },
+            result: { position: positionCheckpoint, state: observed.state },
             runId,
             step: "verify",
           });
@@ -575,7 +641,12 @@ export function createFinanceMaintenanceService({
         }
         if (!completed.has("period_review")) {
           currentStep = "period_review";
-          const periodReview = await periodReviews.createForRun(run.userId, runId);
+          const positionCheckpoint = positionCheckpointFromRecords(records);
+          const periodReview = await periodReviews.createForRun(
+            run.userId,
+            runId,
+            positionCheckpoint,
+          );
           await maintenance.completeStep({
             claimId,
             idempotencyKey: `finances:${run.rulebookVersion}:period_review`,
@@ -769,13 +840,52 @@ export function createFinanceMaintenanceService({
           continue;
         }
         if (step === "budget_and_health_projection") {
+          const observed = await assertCurrentRulebook(run);
+          const readScope = positionScopeFor(run.scope, observed);
+          if (!readScope) {
+            const unavailable = {
+              quality: "unavailable" as const,
+              reason: "unsupported_scope" as const,
+              scope: run.scope,
+            };
+            await maintenance.completeStep({
+              claimId,
+              idempotencyKey,
+              result: { position: unavailable },
+              runId,
+              step,
+            });
+            return maintenance.settle({
+              claimId,
+              result: { code: "finance_position_scope_unsupported", position: unavailable },
+              runId,
+              status: "blocked",
+            });
+          }
+          const evidence = await position.readPosition(run.userId, readScope);
+          const positionCheckpoint = checkpointForPosition(evidence);
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: { prepared: true, refreshed: false },
+            result: { position: positionCheckpoint },
             runId,
             step,
           });
+          if (
+            financePositionFactNames.some(
+              (name) => positionCheckpoint.facts[name].quality === "unavailable",
+            )
+          ) {
+            return maintenance.settle({
+              claimId,
+              result: {
+                code: "finance_position_evidence_unavailable",
+                position: positionCheckpoint,
+              },
+              runId,
+              status: "blocked",
+            });
+          }
           continue;
         }
         if (step === "challenge_prepare") {

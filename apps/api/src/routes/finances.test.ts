@@ -3,6 +3,7 @@ import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
+import type { createFinancePositionService } from "../finance/position-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -13,6 +14,65 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("reads canonical position evidence for the authenticated tenant and validates scope", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read"]);
+    const position = { revision: "position-1" };
+    const readPosition = vi.fn(async () => position);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes,
+        userId: id,
+      });
+      context.set("requestId", "position-route");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financePosition: { readPosition } as unknown as ReturnType<
+        typeof createFinancePositionService
+      >,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request(
+      `/v1/finances/position?from=2026-09-01&through=2026-09-30&accountIds=${id}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ position });
+    expect(readPosition).toHaveBeenCalledWith(id, {
+      accountIds: [id],
+      from: "2026-09-01",
+      through: "2026-09-30",
+    });
+
+    const foreignTenant = await app.request(
+      `/v1/finances/position?from=2026-09-01&through=2026-09-30&userId=22222222-2222-4222-8222-222222222222`,
+    );
+    const reversed = await app.request("/v1/finances/position?from=2026-10-01&through=2026-09-30");
+    expect(foreignTenant.status).toBe(400);
+    expect(reversed.status).toBe(400);
+    expect(readPosition).toHaveBeenCalledTimes(1);
+
+    scopes = new Set<AccessScope>(["finances:write"]);
+    const missingReadScope = await app.request(
+      "/v1/finances/position?from=2026-09-01&through=2026-09-30",
+    );
+    expect(missingReadScope.status).toBe(403);
+    expect(readPosition).toHaveBeenCalledTimes(1);
+  });
+
   it("registers human-only budget policy reads and normalizes list pagination", async () => {
     const app = new Hono<AppEnv>();
     let actorType: "agent" | "user" = "user";

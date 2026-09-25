@@ -27,6 +27,7 @@ import {
   financeMaintenanceHistoryQuerySchema,
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
+  financePositionReadScopeSchema,
   financeReceiptReviewInputSchema,
   financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
@@ -66,6 +67,7 @@ import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-
 import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
 import type { createFinanceMaintenanceIntentService } from "../finance/maintenance-intent-service.js";
+import type { createFinancePositionService } from "../finance/position-service.js";
 import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
@@ -97,6 +99,7 @@ type FinanceRouteOptions = {
   canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
   financePeriodReviews?: FinancePeriodReviewService;
   financePlaybook?: ReturnType<typeof createFinancePlaybookService>;
+  financePosition?: ReturnType<typeof createFinancePositionService>;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -113,6 +116,7 @@ export function registerFinanceRoutes({
   canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
+  financePosition,
   financeStatus,
   finances,
   mutationContext,
@@ -167,10 +171,11 @@ export function registerFinanceRoutes({
       return;
     }
     if (
-      context.req.method === "POST" &&
-      ["/v1/finances/categorizations/propose", "/v1/finances/scenarios/compare"].includes(
-        context.req.path,
-      )
+      (context.req.method === "GET" && context.req.path === "/v1/finances/position") ||
+      (context.req.method === "POST" &&
+        ["/v1/finances/categorizations/propose", "/v1/finances/scenarios/compare"].includes(
+          context.req.path,
+        ))
     ) {
       await requireFinanceRead(context, next);
       return;
@@ -184,6 +189,21 @@ export function registerFinanceRoutes({
       throw new Error("Finance contextual question service is unavailable.");
     return contextualQuestions;
   };
+  const position = () => {
+    if (!financePosition) throw new Error("Finance position service is unavailable.");
+    return financePosition;
+  };
+  app.get("/v1/finances/position", async (context) => {
+    const accountIds = context.req.query("accountIds");
+    const scope = financePositionReadScopeSchema.parse({
+      ...context.req.query(),
+      ...(accountIds === undefined ? {} : { accountIds: accountIds.split(",").filter(Boolean) }),
+    });
+    context.header("Cache-Control", "no-store");
+    return context.json({
+      position: await position().readPosition(context.get("principal").userId, scope),
+    });
+  });
   app.post("/v1/finances/transactions/:id/contextual-question", requireHuman, async (context) =>
     context.json(
       await questions().createQuestion(

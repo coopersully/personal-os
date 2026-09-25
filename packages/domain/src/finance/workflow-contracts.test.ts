@@ -3,17 +3,24 @@ import {
   financeDomainOutcomeSchema,
   financeMoneyFactReasonCodeSchema,
   financeMoneyFactSchema,
+  financePositionReadScopeSchema,
   financeRevisionRefSchema,
   financeWorkflowPortManifest,
   financeWorkflowPortResultSchema,
 } from "./workflow-contracts.js";
 
 describe("Finance workflow contracts", () => {
-  it("advertises only the implemented resume port", () => {
+  it("advertises only the implemented position and resume ports", () => {
     expect(financeWorkflowPortManifest).toHaveLength(7);
     expect(
       financeWorkflowPortManifest.filter((registration) => registration.state === "available"),
     ).toEqual([
+      {
+        port: "readPosition",
+        state: "available",
+        producer: "finances",
+        route: { method: "GET", path: "/v1/finances/position" },
+      },
       {
         port: "resumeFinance",
         state: "available",
@@ -26,6 +33,33 @@ describe("Finance workflow contracts", () => {
         .filter((registration) => registration.state === "unavailable")
         .every((registration) => registration.reasonCode === "producer_not_registered"),
     ).toBe(true);
+  });
+
+  it("validates bounded position read scopes without accepting tenant authority", () => {
+    const scope = { from: "2026-09-01", through: "2026-09-30" };
+    expect(financePositionReadScopeSchema.parse(scope)).toEqual(scope);
+    expect(financePositionReadScopeSchema.parse({ ...scope, accountIds: [] })).toEqual({
+      ...scope,
+      accountIds: [],
+    });
+    expect(financePositionReadScopeSchema.safeParse({ ...scope, from: "2026-10-01" }).success).toBe(
+      false,
+    );
+    expect(
+      financePositionReadScopeSchema.safeParse({
+        ...scope,
+        userId: "00000000-0000-4000-8000-000000000001",
+      }).success,
+    ).toBe(false);
+    expect(
+      financePositionReadScopeSchema.safeParse({
+        ...scope,
+        accountIds: Array.from(
+          { length: 101 },
+          (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        ),
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects tenant authority smuggled across a producer boundary", () => {

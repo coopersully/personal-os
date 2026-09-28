@@ -305,6 +305,7 @@ describe.sequential("Finance status service", () => {
     if (!allocation) throw new Error("Reimbursement scan allocation was not created.");
     await database.db.insert(financeReimbursements).values({
       allocationId: allocation.id,
+      dueDate: "2026-08-20",
       expectedAmount: 10_000,
       receivedAmount: 0,
       rationale: "A shared dinner is expected to be repaid.",

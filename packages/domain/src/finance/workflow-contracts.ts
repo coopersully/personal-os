@@ -59,6 +59,46 @@ export const financePositionEvidenceSchema = z
   .strict();
 export type FinancePositionEvidence = z.infer<typeof financePositionEvidenceSchema>;
 
+export const financePositionFactNames = [
+  "cash",
+  "postedSpend",
+  "pendingExposure",
+  "committed",
+  "protected",
+  "spendable",
+  "debt",
+  "investments",
+  "netWorth",
+] as const;
+
+const financePositionFactCheckpointSchema = financeMoneyFactSchema
+  .pick({ quality: true, reasons: true })
+  .strict();
+
+/** Safe durable identity for the exact canonical position evidence consumed by a workflow. */
+export const financePositionEvidenceCheckpointSchema = z
+  .object({
+    revision: revisionSchema,
+    scope: financePositionEvidenceSchema.shape.scope,
+    facts: z
+      .object({
+        cash: financePositionFactCheckpointSchema,
+        postedSpend: financePositionFactCheckpointSchema,
+        pendingExposure: financePositionFactCheckpointSchema,
+        committed: financePositionFactCheckpointSchema,
+        protected: financePositionFactCheckpointSchema,
+        spendable: financePositionFactCheckpointSchema,
+        debt: financePositionFactCheckpointSchema,
+        investments: financePositionFactCheckpointSchema,
+        netWorth: financePositionFactCheckpointSchema,
+      })
+      .strict(),
+  })
+  .strict();
+export type FinancePositionEvidenceCheckpoint = z.infer<
+  typeof financePositionEvidenceCheckpointSchema
+>;
+
 export const financePositionReadScopeSchema = z
   .object({
     accountIds: z.array(idSchema).max(100).optional(),

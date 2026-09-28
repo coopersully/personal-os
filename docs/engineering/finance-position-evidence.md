@@ -2,9 +2,32 @@
 
 The lane-owned API producer in `apps/api/src/finance/position-service.ts` reads one tenant-owned,
 repeatable-read, read-only database snapshot and validates its result with F0b's
-`financePositionEvidenceSchema`. The module is an internal producer until the Integration owner
-registers and verifies the authenticated `readPosition` port. Existing legacy Cashflow, Wealth,
-and budget responses have not been switched to this producer.
+`financePositionEvidenceSchema`. The authenticated `/v1/finances/position` route, typed client and
+Finance workflow manifest register the bounded `readPosition` port. Existing legacy Cashflow,
+Wealth, and budget responses have not been switched to this producer.
+
+Finance maintenance is the first internal workflow consumer. A window run reads that exact date
+window. An all-outstanding run reads the exact calendar month named by the run's current Finance
+status. Target scopes remain unsupported because a transaction, account or other target cannot be
+silently widened into a tenant-wide financial position. Unsupported targets settle blocked without
+calling the producer.
+
+The maintenance projection step persists a safe checkpoint containing only the producer revision,
+exact account/date scope, and each fact's quality and public reason codes. It does not persist
+amounts, observation time, source references, provider detail or merchant text. Before verification,
+maintenance rereads the checkpoint's exact scope and requires the same canonical revision and scope;
+changed or newly unavailable evidence blocks the run. Verification then carries the durable
+checkpoint, and a newly published immutable period review embeds that same identity.
+Older stored reviews remain readable without the field. Maintenance settles blocked when any
+required position fact is unavailable, so it cannot claim the period is maintained from partial
+position evidence. A requested retry supersedes that blocked run with a fresh run, preserving the
+blocked evidence record while allowing the canonical reader to observe recovered facts. Direct
+replays still validate the durable checkpoint before challenge or verification work. Historical
+placeholder projection records fail closed as missing canonical evidence, then a requested retry
+preserves that run and starts a fresh canonical read. Immutable period reviews derive their period
+from the validated checkpoint scope rather than the publication date. An
+all-outstanding review also fails closed when current Finance status has advanced to a different
+month, preventing an older period label from carrying newer status figures.
 
 ## Scope and evidence identity
 
@@ -22,11 +45,11 @@ posting dates; service-period attribution requires separate confirmed allocation
 Account source references hash their balance, ownership, currency, inclusion, update revision,
 provider Item update revision, sync cutoff, and public freshness reasons. The tenant snapshot's
 activity reference hashes the selected account references, ordered transaction projections,
-allocations, relationships, reimbursements, matches, and scope. No credentials, provider messages, rationale, or merchant text
-are included in the source references. The position revision hashes the ordered scope and validated
-facts; changing only the observation time does not change that revision. Persisted reviews must
-retain their original evidence packet; rereading the current producer does not reproduce historical
-bank or correction state.
+allocations, relationships, reimbursements, matches, and scope. No credentials, provider messages,
+rationale, or merchant text are included in the source references. The position revision hashes the
+ordered scope and validated facts; changing only the observation time does not change that revision.
+Persisted reviews must retain their original evidence identity; rereading the current producer does
+not reproduce historical bank or correction state.
 
 Account balance facts retain up to 100 individual account references. Spendable uses one aggregate
 tenant-snapshot reference whose revision hashes all four validated dependencies, including every

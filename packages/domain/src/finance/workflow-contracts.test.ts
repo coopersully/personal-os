@@ -3,6 +3,7 @@ import {
   financeDomainOutcomeSchema,
   financeMoneyFactReasonCodeSchema,
   financeMoneyFactSchema,
+  financePositionEvidenceCheckpointSchema,
   financePositionReadScopeSchema,
   financeRevisionRefSchema,
   financeWorkflowPortManifest,
@@ -58,6 +59,38 @@ describe("Finance workflow contracts", () => {
           { length: 101 },
           (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
         ),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("limits durable position checkpoints to evidence identity and public quality metadata", () => {
+    const fact = { quality: "verified", reasons: [] };
+    const checkpoint = {
+      revision: "position-revision",
+      scope: { accountIds: [], from: "2026-09-01", through: "2026-09-30" },
+      facts: {
+        cash: fact,
+        postedSpend: fact,
+        pendingExposure: fact,
+        committed: fact,
+        protected: fact,
+        spendable: fact,
+        debt: fact,
+        investments: fact,
+        netWorth: fact,
+      },
+    };
+    expect(financePositionEvidenceCheckpointSchema.parse(checkpoint)).toEqual(checkpoint);
+    expect(
+      financePositionEvidenceCheckpointSchema.safeParse({
+        ...checkpoint,
+        facts: { ...checkpoint.facts, cash: { ...fact, cents: 100 } },
+      }).success,
+    ).toBe(false);
+    expect(
+      financePositionEvidenceCheckpointSchema.safeParse({
+        ...checkpoint,
+        facts: { ...checkpoint.facts, cash: { ...fact, sources: [] } },
       }).success,
     ).toBe(false);
   });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
   createFinanceBudgetInputSchema,
@@ -612,6 +613,7 @@ export const financePeriodReviewSchema = z
       .object({
         cashLowPoint: financePeriodReviewMoneySchema,
         closing: financePeriodReviewMoneySchema,
+        evidence: financePositionEvidenceCheckpointSchema.optional(),
         opening: financePeriodReviewMoneySchema,
       })
       .strict(),

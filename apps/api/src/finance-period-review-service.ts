@@ -9,17 +9,16 @@ import {
   financeReimbursements,
   financeTransactionAllocations,
   financeTransactions,
-  users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   type FinancePeriodReview,
+  type FinancePositionEvidenceCheckpoint,
   type FinanceStatus,
   financeCandidateLedgerProjectionSchema,
   financeLedgerChallengeChecks,
   financePeriodReviewSchema,
-  type LocalDate,
-  localDateAt,
+  financePositionEvidenceCheckpointSchema,
   type MaintenanceScope,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
@@ -36,7 +35,6 @@ type StatusReader = {
 type Options = {
   db: Database;
   finances: Pick<ReturnType<typeof createFinanceService>, "maintenanceCandidateSnapshot">;
-  now: () => Date;
   status: StatusReader;
 };
 
@@ -64,16 +62,34 @@ async function retrySerializationFailure<Result>(
   throw new Error("Unreachable serialization retry state.");
 }
 
-function periodFor(scope: MaintenanceScope, localDate: LocalDate) {
-  if (scope.type === "window") return { end: scope.end, start: scope.start };
-  const month = `${localDate.year.toString().padStart(4, "0")}-${localDate.month
-    .toString()
-    .padStart(2, "0")}`;
+function finalDayOfMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const monthNumber = Number(month.slice(5, 7));
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+}
+
+function periodFor(scope: MaintenanceScope, positionEvidence: FinancePositionEvidenceCheckpoint) {
+  const period = {
+    end: positionEvidence.scope.through,
+    start: positionEvidence.scope.from,
+  };
+  if (scope.type === "window") {
+    if (period.start !== scope.start || period.end !== scope.end)
+      throw new AppError(
+        "conflict",
+        "Canonical Finance position evidence does not match the maintenance period.",
+      );
+    return period;
+  }
+  if (scope.type === "target") return period;
+  const month = period.start.slice(0, 7);
   const start = `${month}-01`;
-  const endDate = new Date(`${start}T00:00:00.000Z`);
-  endDate.setUTCMonth(endDate.getUTCMonth() + 1);
-  endDate.setUTCDate(0);
-  return { end: endDate.toISOString().slice(0, 10), start };
+  if (period.start !== start || period.end !== finalDayOfMonth(month))
+    throw new AppError(
+      "conflict",
+      "Canonical Finance position evidence does not identify one complete month.",
+    );
+  return period;
 }
 
 function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriodReview {
@@ -91,9 +107,14 @@ function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriod
 }
 
 /** Immutable review of committed work or a fully challenged turn awaiting user answers. */
-export function createFinancePeriodReviewService({ db, finances, now, status }: Options) {
+export function createFinancePeriodReviewService({ db, finances, status }: Options) {
   return {
-    async createForRun(userId: string, runId: string): Promise<FinancePeriodReview> {
+    async createForRun(
+      userId: string,
+      runId: string,
+      positionEvidence: FinancePositionEvidenceCheckpoint,
+    ): Promise<FinancePeriodReview> {
+      const canonicalPosition = financePositionEvidenceCheckpointSchema.parse(positionEvidence);
       return retrySerializationFailure(
         db,
         async (tx) => {
@@ -117,12 +138,6 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             )
             .limit(1);
           if (existing) return serialize(existing);
-          const [owner] = await tx
-            .select({ planningTimezone: users.planningTimezone })
-            .from(users)
-            .where(eq(users.id, userId))
-            .limit(1);
-          if (!owner) throw new AppError("not_found", "The Finance owner was not found.");
           const observed = await status.getFinanceStatus(userId, run.scope, tx);
           if (
             observed.freshness.state !== "current" ||
@@ -132,6 +147,15 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             throw new AppError(
               "conflict",
               "Finance verification is not current enough to publish.",
+            );
+          const period = periodFor(run.scope, canonicalPosition);
+          if (
+            run.scope.type === "all_outstanding" &&
+            observed.details.budget.month !== period.start.slice(0, 7)
+          )
+            throw new AppError(
+              "invalid_request",
+              "Canonical Finance position evidence no longer matches the current review period.",
             );
           const [candidate] = await tx
             .select()
@@ -273,6 +297,7 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             position: {
               cashLowPoint: observed.details.cashFlow.projectedLowestBalance,
               closing,
+              evidence: canonicalPosition,
               opening,
             },
             recommendations: [
@@ -332,7 +357,6 @@ export function createFinancePeriodReviewService({ db, finances, now, status }: 
             ...findings.map((finding) => finding.id),
           ];
           const reviewStatus = questions > 0 ? "completed_with_questions" : "completed";
-          const period = periodFor(run.scope, localDateAt(now(), owner.planningTimezone));
           const [created] = await tx
             .insert(financePeriodReviews)
             .values({

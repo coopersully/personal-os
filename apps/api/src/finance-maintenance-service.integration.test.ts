@@ -2090,11 +2090,11 @@ describe.sequential("Finance maintenance service", () => {
     expect(deps.challenge.prepare).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks and replays unavailable canonical budget evaluation without entering challenge", async () => {
+  it("restarts canonical budget evaluation after an unavailable dependency recovers", async () => {
     const ownerId = await createUser("Unavailable canonical budget evaluation");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
     const deps = requiredServices();
-    deps.budget.evaluateMaintenance.mockImplementation(async (_userId, position) => ({
+    deps.budget.evaluateMaintenance.mockImplementationOnce(async (_userId, position) => ({
       positionRevision: position.revision,
       state: "unavailable",
       reasonCode: "dependency_unavailable",
@@ -2112,15 +2112,18 @@ describe.sequential("Finance maintenance service", () => {
       status: "blocked",
       settledResult: { code: "finance_budget_evaluation_unavailable" },
     });
-    await expect(
-      service.startOrResume(ownerId, { type: "all_outstanding" }),
-    ).resolves.toMatchObject({ status: "queued" });
-    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
-      status: "blocked",
-      settledResult: { code: "finance_budget_evaluation_unavailable" },
+    const recovered = await service.startOrResume(ownerId, run.scope);
+    expect(recovered).toMatchObject({ status: "queued" });
+    expect(recovered.id).not.toBe(run.id);
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      settledResult: expect.objectContaining({ recovery: "superseded_by_manual_retry" }),
+      status: "failed_terminal",
     });
-    expect(deps.budget.evaluateMaintenance).toHaveBeenCalledTimes(1);
-    expect(deps.challenge.prepare).not.toHaveBeenCalled();
+    await expect(service.dispatchRun(recovered.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    expect(deps.budget.evaluateMaintenance).toHaveBeenCalledTimes(2);
+    expect(deps.challenge.prepare).toHaveBeenCalledTimes(1);
   });
 
   it("blocks historical placeholder projection records before challenge or verification", async () => {

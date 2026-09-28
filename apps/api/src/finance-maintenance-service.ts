@@ -1212,7 +1212,11 @@ export function createFinanceMaintenanceService({
         if (
           settledCode === "finance_position_evidence_unavailable" ||
           settledCode === "finance_position_evidence_missing" ||
-          settledCode === "finance_position_evidence_changed"
+          settledCode === "finance_position_evidence_changed" ||
+          settledCode === "finance_budget_evaluation_unavailable" ||
+          settledCode === "finance_budget_evaluation_missing" ||
+          settledCode === "finance_budget_evaluation_changed" ||
+          settledCode === "finance_canonical_evidence_changed"
         ) {
           return maintenance.restartBlocked({
             expectedRulebookVersion: run.rulebookVersion,

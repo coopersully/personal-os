@@ -590,6 +590,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const financeMaintenance = createFinanceMaintenanceService({
     actions: financeActions,
+    budget: financeBudgetPolicies,
     challenge: financeChallenges,
     finances,
     maintenance,

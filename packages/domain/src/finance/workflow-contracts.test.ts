@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  financeBudgetEvaluationCheckpointSchema,
   financeDomainOutcomeSchema,
   financeMoneyFactReasonCodeSchema,
   financeMoneyFactSchema,
@@ -93,6 +94,54 @@ describe("Finance workflow contracts", () => {
         facts: { ...checkpoint.facts, cash: { ...fact, sources: [] } },
       }).success,
     ).toBe(false);
+  });
+
+  it("limits durable budget checkpoints to identity and decision metadata", () => {
+    const checkpoint = {
+      positionRevision: "position-revision",
+      state: "evaluated" as const,
+      reasonCode: null,
+      evaluations: [
+        {
+          proposal: { id: "00000000-0000-4000-8000-000000000001", revision: "1" },
+          policy: { id: "00000000-0000-4000-8000-000000000002", revision: "2" },
+          plan: { id: "00000000-0000-4000-8000-000000000003", revision: "3" },
+          outcome: "denied" as const,
+          reasons: ["usage_unavailable" as const],
+          executionAvailable: false as const,
+          executionUnavailableReasons: [
+            "authority_not_wired" as const,
+            "position_commit_fence_not_wired" as const,
+          ],
+        },
+      ],
+    };
+    expect(financeBudgetEvaluationCheckpointSchema.parse(checkpoint)).toEqual(checkpoint);
+    expect(
+      financeBudgetEvaluationCheckpointSchema.safeParse({
+        ...checkpoint,
+        evaluations: [{ ...checkpoint.evaluations[0], grossMovedCents: 500 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      financeBudgetEvaluationCheckpointSchema.safeParse({
+        ...checkpoint,
+        evaluations: [{ ...checkpoint.evaluations[0], sourceText: "private" }],
+      }).success,
+    ).toBe(false);
+    for (const invalid of [
+      { ...checkpoint, evaluations: [] },
+      { ...checkpoint, state: "not_applicable", evaluations: checkpoint.evaluations },
+      { ...checkpoint, state: "unavailable", evaluations: [], reasonCode: null },
+      {
+        ...checkpoint,
+        state: "not_applicable",
+        evaluations: [],
+        reasonCode: "dependency_unavailable",
+      },
+    ]) {
+      expect(financeBudgetEvaluationCheckpointSchema.safeParse(invalid).success).toBe(false);
+    }
   });
 
   it("rejects tenant authority smuggled across a producer boundary", () => {

@@ -75,30 +75,24 @@ The normalized tool vocabulary is intentionally low entropy: provider-specific i
 capabilities remain available as evidence, but an agent should learn one Mail, Tasks, Calendar,
 Finances, and User Knowledge contract rather than a separate workflow for every provider.
 
-Maintenance is not batch CRUD and the MCP host does not provide the sequence. The workspace API
-owns its expert playbook, knowledge contract, rulebook, orchestration, durable run state, question/learning loop,
-advisory model, review artifact, idempotency, and completion decision. MCP only validates the
-intent, calls the authenticated typed API, and returns the durable state. A host instruction such
-as `maintain finances` should therefore work consistently without embedding Finance procedure in a
-Claude, Codex, or other client automation.
+nohmi is the account's persistent brain, storage and tools, never a built-in agent. The API
+supplies domain knowledge, playbooks, deterministic preparation, calculations, authority checks,
+durable work and verified effects. External agents retrieve that material, reason, triage, converse
+and select permitted operations. MCP is a thin authenticated adapter, not a second reasoning or
+policy engine. A maintenance intent can return work awaiting agent judgment rather than completing
+all reasoning inside one call.
 
-The person may schedule the same maintenance intent through any number of ChatGPT or Codex scheduled
-tasks, Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
-operating-system scheduler, or another MCP-capable host. Multiple hosts and overlapping schedules
-are permitted; nohmi must not choose one exclusive owner merely to simplify orchestration. Those
-systems are the sole authority for creating, editing, activating, pausing, and delivering the
-recurring schedule. nohmi may record an expected cadence and observed check-in health, but those
-records never invoke the tool; nohmi owns durable execution, context, policy, questions, recovery,
-and completion truth only after a host calls it.
+Knowledge belongs to the account. Authorized agents and fresh sessions can retrieve permitted
+contributions and work from other agents or previous runs, with original sources and revision
+history. Current connection scopes still govern access; provenance does not grant authority.
 
-Each call accepts an optional immutable nohmi-owned local schedule identity in addition to its
-invoking connection, host-declared automation identity when available, requested scope, and
-idempotency identity. The local schedule identity is required when a declared external schedule
-invokes maintenance and is validated against the authenticated connection; manual and otherwise
-unscheduled calls leave it absent. Run, health, revocation, idempotency, and coalescing records
-propagate that identity so the domain's durable-run contract can coalesce or resume compatible
-concurrent calls, keep incompatible scopes separate, and distinguish schedules without replaying
-completed external effects.
+External callers control their runtime, cadence and schedules. The target requires no particular
+host, local/cloud runtime, schedule registration, automatic wake-up or agent response-time guarantee.
+Polling for pending work is supported; optional authenticated events announce work availability.
+No event receipt establishes that an agent ran. Concurrent callers use work claims, revisions and
+idempotency rather than a mandatory host/schedule registry. Optional caller/run labels are
+observational metadata. This reconciles target requirements on 2026-09-28; runtime availability
+continues to come from actual discovery and registered operations.
 
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
@@ -114,12 +108,13 @@ Texting is a shared general inbox, not a fifth workspace. Its target high-level 
 
 - `get_texting_status` for connection, consent, conversation backlog, active child intents,
   awaiting replies, delivery uncertainty, and valid recovery actions; and
-- `maintain_texting` for claiming unprocessed inbound messages, routing free-form and
-  cross-workspace requests, resuming child work, resolving bound answers or reviews, composing a
-  concise reply, and reconciling uncertain delivery.
+- `maintain_texting` for deterministic reconciliation and exposing unprocessed messages, exact
+  bindings, interrupted child work and valid recovery actions to external agents. Additional
+  granular discovery/claim/result capabilities follow the shared work contract.
 
-The API-owned Texting coordinator dispatches only to domain-owned operations available under the
-caller's scopes and global/per-workspace settings. It does not place multi-domain logic in MCP.
+External agents interpret free-form messages, choose domain tools, clarify ambiguity and compose
+substantive replies. The API validates structured routing and bounded answer/approval bindings
+under current scopes and channel/domain policy. Neither the API nor MCP runs an internal agent.
 Workspace maintenance publishes typed notification intents; Texting renders and sends them without
 letting a workspace call Twilio or read the shared conversation.
 

@@ -1,11 +1,15 @@
 # Finance MVP specification
 
-- Status: Approved by Cooper on 2026-09-14 ("It looks good, proceed."). Approval authorizes the planned rollout; it does not establish shipped capability.
+- Status: Original MVP approved 2026-09-14; toolkit/agent boundaries and Finance scope reconciled with Cooper on 2026-09-28. Neither approval nor this document establishes shipped capability.
 - Baseline inspected: `origin/main` at `3d3306608c4b6f729d0c93e4e887dae2ba930d2d`, 2026-09-13.
 - Planning owner: the Finance orchestration task; implementation belongs to separate workstream tasks.
 - Tracker: [COO-45](https://linear.app/coopersully/issue/COO-45/plan-and-coordinate-the-complete-finance-mvp).
-- Delivery: [implementation plan](../superpowers/plans/2026-09-13-finance-mvp.md) and
-  [execution prompts](../superpowers/plans/finance-mvp-handoffs.md).
+- Delivery: the [earlier implementation plan](../superpowers/plans/2026-09-13-finance-mvp.md) and
+  [handoffs](../superpowers/plans/finance-mvp-handoffs.md) are historical sequencing, not current
+  dispatch authority. The [full Finance design](../superpowers/specs/2026-09-28-finance-toolkit-design.md),
+  [Texting design](../superpowers/specs/2026-09-28-texting-toolkit-design.md), and
+  [shared toolkit design](../superpowers/specs/2026-09-28-shared-agent-toolkit-design.md) await written
+  review before replacement implementation plans are prepared.
 
 ## 1. Product outcome
 
@@ -33,8 +37,10 @@ proposal; the current review changes are one prerequisite, not the organizing ce
   inside explicit user-defined boundaries. No production policy is activated by this specification.
 - App and agent operate on the same records. Users can resolve items themselves and provide
   free-form context before or after an event. Corrections survive later maintenance.
-- Both Codex and Claude are required at launch. Each needs a separately evidenced unattended
-  maintenance and two-way Finance SMS journey after the original agent session ends.
+- nohmi is the account's persistent brain, storage and tools, never a built-in agent. External
+  agents reason and manage knowledge; authorized agents on the same account can retrieve permitted
+  contributions from other agents and previous runs. No vendor, host runtime, schedule registration,
+  agent wake-up or response time is a release requirement.
 - External hosts own recurring schedules. nohmi owns durable domain state, accepted-work recovery,
   source synchronization, questions, policy and results. Multiple hosts may overlap safely.
 - Venmo-specific access must work automatically after connection. No upload or manually maintained
@@ -51,19 +57,28 @@ worth. Existing manual accounts and supported generic imports remain usable. The
 without an agent, a completed budget, a paid connector or SMS; unavailable automation is explicit.
 
 Preserve existing supported features rather than remove them to match this boundary. Do not add
-new budget modes, FX consolidation, household sharing, investment execution, tax optimization,
-full portfolio analytics, semantic memory infrastructure or a general multi-workspace SMS agent
-as prerequisites. Account ownership that cannot be established must qualify or exclude affected
+all later budget views, FX consolidation, investment execution, tax optimization, full portfolio
+analytics or semantic indexes as prerequisites of the first usable journey. Full delivery includes
+category carryover, shared structured knowledge and general cross-workspace Texting tools; it never
+includes a built-in SMS agent. Shared household and multi-person financial plans are permanently
+out of scope; additional currencies are a possible future extension. Account ownership that cannot be established must qualify or exclude affected
 aggregates. A joint account is not authority to disclose another person's records.
 
 MVP budget automation is bounded reallocation of existing planned resources. New borrowing, reserve
 withdrawals, increased assumed income, or reduced protected priorities require a new explicit
-proposal. Monthly rollovers and different budget modes remain later product work.
+proposal. Full delivery includes per-category carryover of neither surplus nor deficit, surplus
+only, or both. Automatic reallocations use explicitly selected categories and must satisfy dollar
+and percentage limits, a cumulative monthly dollar limit and protected category minimums. They
+change planned allocations, not bank balances. Planned goal contributions stay separate from actual
+funding or an explicit reservation of existing cash. Carryover and additional views can follow the
+first usable question/answer journey; they are required by the full Finance design.
 
-## 3. Current state and the completion gap
+## 3. Historical baseline and the completion gap
 
-Implementation evidence comes from code, migrations, tests, the implementation log and deployed
-observations. The inspected source baseline is not a claim that every path works in production.
+The table below records the September 13 planning baseline, not current delivery status. Use the
+implementation log, current code and new design's source inventory for subsequent progress.
+Implementation evidence comes from code, migrations, tests and deployed observations; source
+presence is not proof that every path works in production.
 
 | Area | Existing foundation | MVP completion work |
 | --- | --- | --- |
@@ -74,13 +89,12 @@ observations. The inspected source baseline is not a claim that every path works
 | Questions/context | Canonical cases plus other question/review paths; the separately reviewed COO-46 source slice adds contextual notes and dashboard actions (not yet merged) | Complete unified lifecycle, prospective notes, matching, user correction and narrow reusable knowledge |
 | Maintenance | Protocol start/judgment/audit/resume plus older candidate/challenge/settle surfaces | Converge orchestration without losing challenge, authority, fencing or review guarantees; verify honest terminal states |
 | Texting | Verified phone, consent, guarded read/send MCP tools, inbound persistence and delivery tracking | Shared notifications, durable inbound processing, work-bound free-form answers, revision-bound approvals and recovery |
-| Host operation | External scheduling target and generic agent interfaces | Demonstrate Codex and Claude separately, unattended permissions, continuation, overlapping runs and host availability |
+| External caller access | Generic agent interfaces and older host-specific planning | Discover and resume durable work from any fresh authorized session; overlapping calls, polling and optional work events |
 | Review/advice | Period review and planning/report surfaces | One evidence-qualified review tying actuals and forecasts to goals, useful recommendations and unresolved work |
 
-The existing `cooper/finance-review-context` feature slice must be reviewed and landed independently
-before dependent tasks assume its notes behavior exists on main. Its previous verification evidence
-predates the latest merge; it needs fresh required checks. Do not copy this whole branch into new
-implementation tasks.
+The baseline originally required separate review of `cooper/finance-review-context`. This is
+historical dependency context, not an assertion that it is still unmerged. Inspect current main
+and the implementation log before dispatch; do not copy old branches or repeat delivered work.
 
 ## 4. User journeys and acceptance requirements
 
@@ -165,33 +179,30 @@ records. MVP uses bounded structured retrieval and explicit provenance; it does 
 embeddings or unrestricted conversation history. Conflicting facts are disputed rather than last
 writer wins. Knowledge can inform recommendations but cannot grant action authority.
 
-### F6 — Text with Codex and Claude during daily maintenance
+### F6 — Finance SMS through the toolkit
 
-The [Finance SMS journey](texting-operations.md#finance-mvp-requirement) is a release requirement
-for both hosts. Finance emits a typed intent; shared policy applies consent, disclosure, quiet hours,
-reminders and deduplication. Texting composes at most three clear items with stable internal message
-and proposal bindings. Multi-item messages link to authenticated unified Reviews.
+The [Finance SMS journey](texting-operations.md#finance-mvp-requirement) proves nohmi's own
+capabilities: an exact question or proposal can be sent, a signed reply persists, a fresh authorized
+caller retrieves it and applies an allowed resolution, and the same result appears in the app.
+The toolkit supports polling and optional work events without host or schedule registration.
+External agents interpret free-form text, ask clarifications and compose substantive responses.
+nohmi validates structured bindings, records source evidence and performs deterministic operations.
 
-Inbound SMS is durably recorded and claimed. Replies bind to current work; unnumbered answers are
-accepted only for one unambiguous active item. Free-form context can start a Finance expectation or
-clarify existing work. Receipt acknowledgment reports acceptance, never invented completion.
-Uncertain intent asks one question. Unsupported general-domain requests receive an honest response.
+Shared policy applies consent, disclosure, quiet hours, reminders and deduplication. Actionable
+messages contain at most three items; multi-item messages link to authenticated unified Reviews.
+Adaptive coaching preferences and past questions are exposed to agents so they can become quieter
+as uncertainty shrinks. An optional daily check-in is a preference, not a nohmi-owned agent schedule.
 
-A reply after the original agent session ends must reach authorized continuation without a user
-copying text into the host. Event-driven continuation is preferred; a host-owned bounded follow-up
-schedule is acceptable if measured latency and required host availability are disclosed. The API
-keeps pending work and safe recovery when the host is offline, revoked or rate limited. No host
-adapter may create new recurring schedules inside nohmi or bypass the external host's controls.
+Inbound records and processing status survive the original session. A provider acknowledgment does
+not claim bookkeeping completed. Work can wait for an external caller indefinitely without an
+invented response-time promise. A caller's absence, revocation or failure leaves honest recoverable
+state. No named model host, automatic continuation attempt, or host-specific latency gates release.
 
-Approved acceptance budget: inbound acknowledgment within 60 seconds and a continuation attempt
-within 5 minutes while the configured host is available. These are measured release targets, not a
-carrier delivery guarantee. A missed target exposes pending/overdue status and an app recovery path.
-Record p50/p95 latency and host usage/cost during trials; idle checks must avoid repeated reasoning
-or identical notifications. Dispatch retries cannot duplicate a completed action or trigger storm.
-
-SMS can answer factual questions and approve only an exact unexpired reversible proposal under
-channel/domain policy. New budget authority, credentials and stronger approvals use authenticated
-app review. A stale or ambiguous yes cannot approve anything.
+SMS can record factual answers and approve an exact unexpired reversible proposal under current
+channel/domain policy. Free-form agent interpretation cannot manufacture user approval. New budget
+authority, rules, credentials and stronger approvals use authenticated app review. A stale or
+ambiguous yes cannot approve anything. Accepted work and safely replayable unfinished work remain
+distinct during recovery and manual-resolution races.
 
 ### F7 — Review and improve finances
 
@@ -211,10 +222,12 @@ immutable snapshot with a superseding review when necessary.
 - `packages/domain`: validated shared contracts and money/lifecycle invariants.
 - `packages/database`: tenant-owned records, revisions, durable claims, audit and migrations.
 - Finance API modules: ledger meaning, setup, plans, policy, reconciliation, work and reviews.
-- Shared Texting: consent, delivery, conversation claims, routing and response composition.
+- Shared Texting: consent, delivery, conversation claims, explicit bindings and structured routing;
+  external agents interpret messages and compose substantive responses.
 - Shared notification policy: eligibility once per work identity, then channel suppression.
 - User Knowledge: typed reusable facts and purpose-bound retrieval; Finance owns operational notes.
-- External host adapters: connection-bound delivery/continuation only; no copied finance playbooks.
+- External caller access: bounded work retrieval, claims, account knowledge and optional events;
+  no mandatory host-specific adapter, schedule registry or internal agent.
 - Typed API client, web and MCP: the same domain operations; no competing calculations or authority.
 
 See the [contract and ownership plan](../superpowers/plans/2026-09-13-finance-mvp.md). There is one
@@ -234,30 +247,30 @@ nested references and knowledge retrieval.
 
 | Gate | Observable evidence |
 | --- | --- |
-| Fresh user | Connect or use manual account, understand coverage, create/approve plan, configure authority and both host integrations |
+| Fresh user | Connect or use manual account, understand coverage, create/approve plan and configure authority without an agent or host registration |
 | Normal month | Receive income, pay bills, spend, contribute to savings/investments and review mutually consistent totals |
 | Ambiguity | Shared expense plus partial reimbursement, prospective note, unmatched remainder, correction and later maintenance |
 | Authority | Read-only rejection, inactive rule, stale approval, cumulative cap race, revoked credential and protected category |
 | Recovery | Provider replay/removal, pending replacement, duplicate invocation/SMS, process interruption, stale source, offline host and uncertain send |
 | Channel parity | App, API, MCP and SMS resolve one case; a manual correction wins without later reversal |
-| Both hosts | Separate real Codex and Claude runs, terminated original session, later SMS reply, resumed domain result and overlapping invocation |
-| Release | Fresh `pnpm verify`, reviewed migration transitions, production-equivalent connector/SMS/host evidence and operator recovery |
+| Fresh caller | End the original client session, receive a later real SMS reply, retrieve and resolve it using a fresh authorized client; prove overlapping callers and cross-agent knowledge reuse |
+| Release | Fresh `pnpm verify`, reviewed migration transitions, production-equivalent connector/SMS evidence and operator recovery |
 
 Use synthetic multi-tenant fixtures in the repository. Production smoke evidence records only
 sanitized identifiers, timestamps, configuration capabilities and terminal states. Obtain explicit
 authorization for actual SMS/provider connection tests; this plan is not consent to send messages.
 No host, connector or SMS capability is marked shipped from mocks alone.
 
-## 7. Decisions and gates still open
+## 7. Supersession and remaining evidence
 
-Cooper approved the specification and rollout on 2026-09-14, including monthly/USD scope, bounded
-reallocation policy shape, context expiry controls and the SMS latency target. Implementation agents
-cannot change these boundaries silently. Host feasibility and production evidence remain release
-gates; approval alone does not satisfy them.
+Cooper's September 28 decisions supersede the earlier named-host requirements, mandatory schedule
+identity, agent continuation latency target, and implications of built-in reasoning. They also
+settle per-category carryover, combined reallocation limits, protected minimums, actual goal
+funding, same-account cross-agent knowledge and permanent exclusion of shared financial plans.
+The coordinated written designs require review before new implementation plans are approved.
 
-Host feasibility must choose and identify the actual supported Codex and Claude surfaces and their
-continuation mechanisms. An SDK runner is not proof that a desktop app automation works; a Claude
-Code routine is not proof of Cowork support. If either required host cannot pass, report a release
-blocker and options to the user rather than dropping it from scope.
-
-Venmo coverage is a separate go/no-go experiment. It must not delay the required Finance journey.
+Release still requires verified domain invariants, migration/recovery safety, truthful capabilities,
+real authorized connector/SMS evidence and app/API/MCP parity. Removing external-host certification
+never weakens evidence for nohmi's own external boundaries. Vendor walkthroughs are optional,
+explicitly scoped interoperability examples. Venmo coverage remains a separate feasibility gate and
+must not delay the required generic Finance journey.

@@ -20,6 +20,14 @@ The product doctrine is defined in
 
 ## Decision
 
+Reconciled 2026-09-28: stewardship is a toolkit contract, not an internal agent. nohmi supplies the
+account's persistent brain, storage, knowledge, domain tools and entropy-reducing automation.
+External agents reason, interpret ambiguity, manage knowledge, choose next actions, and author
+advice. Agents on the same account can resume prior work and retrieve each other's permitted
+contributions. The domain owns financial semantics and policy, not model inference. A coordinator
+executes deterministic steps and returns work awaiting an agent; it must not add a model loop to
+satisfy a high-level intent. No specific host, schedule registration, or agent latency gates release.
+
 Implement each workspace steward as these layered, domain-owned contracts:
 
 1. **Ledger:** canonical material, provider projections, provenance, annotations, questions, rules,
@@ -101,20 +109,12 @@ Retain granular tools for surgical inspection, previews, and exact authorized ac
 the high-level operation a synchronous loop of client-authored calls. Consequential authority stays
 at each underlying operation, and a maintenance request cannot widen the caller's scopes or policy.
 
-External platforms are the sole scheduling authority for recurring maintenance. nohmi may persist
-the declared host and expected cadence plus last-observed and overdue/unknown check-in state, but
-that metadata cannot enqueue a run or modify the external schedule. Internal queues, leases,
-retries, delayed authorized effects, and recovery timers may continue an accepted invocation; they
-must not originate a new recurring maintenance turn.
-
-Scheduling authority is scoped to each schedule rather than one exclusive owner per workspace.
-Multiple hosts and overlapping schedules may invoke the same intent. Every declaration receives an
-immutable nohmi-owned local schedule identity, and a declared schedule must pass it through the
-typed maintenance API/MCP input. The API validates it against the authenticated connection and
-propagates it through run, health, revocation, idempotency, and coalescing records; host-declared
-automation identity remains optional evidence, while manual and otherwise unscheduled invocations
-carry no schedule identity. Compatible runs coalesce or resume, and incompatible scopes remain
-separate without duplicating completed external effects.
+External callers own their execution and recurring schedules. nohmi requires no registered host
+or schedule identity. Optional labels/cadence are observations, never authority or promises of
+agent availability. Polling is supported; optional work events do not guarantee agent execution.
+Multiple callers can overlap using current permissions, expiring work claims, revision checks and
+idempotency. Internal deterministic rules, synchronization and recovery remain domain-owned and
+must not instantiate an internal reasoning loop or create external-agent schedules.
 
 Workspace stewards may publish typed notification intents that reference their run, work nodes,
 safe summary, sensitivity, and first-party destination. The shared Texting coordinator owns channel
@@ -130,8 +130,8 @@ setting, verifies the committed result, and publishes the period review.
 
 ## Reliability and observation
 
-A maintenance run records its owner, invoking actor and connection, optional validated local
-schedule identity, requested scope, purpose, evidence cutoff, playbook/rulebook and User Knowledge
+A maintenance run records its owner, invoking actor and connection, optional caller-provided run
+labels, requested scope, purpose, evidence cutoff, playbook/rulebook and User Knowledge
 revisions, steps, claims, effects, policy decisions, approvals, idempotency and recovery state, work
 nodes, failures, review artifact, and terminal status. External effects follow the connector
 reliability contract. Process loss resumes from durable state; concurrent requests coalesce or
@@ -148,8 +148,8 @@ explicit registration seams.
 
 ## Consequences
 
-- A simple client instruction can produce consistent behavior across MCP hosts because nohmi owns the
-  workflow.
+- Agents share domain calculations, authority and durable state across hosts while supplying their
+  own reasoning and using nohmi-owned workflow guidance.
 - User answers and approved rules persist independently of a conversation or model vendor.
 - Reviews explain partial completion and advice instead of reducing a run to success/failure.
 - Cross-workspace coordination preserves verified child successes and reports sibling failures,

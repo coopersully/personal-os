@@ -16,22 +16,23 @@ Texting as a fifth workspace would incorrectly give it ownership of domain recor
 
 ## Decision
 
-Texting is a shared channel with a domain-owned coordinator, not a core workspace. It owns:
+Reconciled 2026-09-28: Texting is a shared toolkit channel with deterministic coordination,
+not an internal conversational agent. nohmi owns transport, consent, conversation storage, durable
+claims, explicit message/work bindings, structured routing, child receipts and delivery policy.
+External agents classify free-form messages, select domain tools, request clarification and compose
+substantive replies using the account's shared knowledge and prior work. No built-in agent exists
+or may be added to complete this workflow.
 
-- consent, connection, conversation, delivery, and uncertain-send reconciliation;
-- durable inbound claims and event-driven processing;
-- classification into existing-work-node answers, reviews, or new intents;
-- routing and linked child-intent coordination across workspaces;
-- application of SMS-specific delivery controls after shared notification-policy evaluation; and
-- concise response composition over domain-owned results.
+Each workspace owns records, calculations, evidence, policy and terminal truth. Texting cannot
+reimplement those operations or grant authority. Agent-submitted structured child requests retain
+source provenance and are validated independently. Ambiguous meaning remains pending for an agent;
+deterministic reply parsing cannot infer new authority from arbitrary text.
 
-Each workspace owns the operation, evidence, policy decision, work nodes, and terminal truth for
-its child intent. Texting cannot call providers on a workspace's behalf, embed workspace playbooks,
-reinterpret a domain result, or grant action authority.
-
-`maintain_texting` is the recovery and catch-up intent for unprocessed messages, interrupted child
-work, unresolved delivery, and missing replies. Inbound webhook arrival should durably enqueue the
-same coordinator promptly; the maintenance intent and event-driven path share one source of truth.
+`maintain_texting` exposes catch-up work and performs deterministic reconciliation. Inbound webhook
+arrival commits durable message/work availability. Authorized agents can poll or consume optional
+events; neither requires a named host, registered schedule, cloud runtime or agent latency promise.
+Event delivery is not proof that an external agent woke or handled a message. Existing source
+registration and provider proof remain separate from this target architecture.
 
 Workspace stewards publish typed notification intents rather than rendered SMS. The shared
 notification service evaluates eligibility, quiet hours, reminders, deduplication, aggregation, and
@@ -83,7 +84,7 @@ conversation message, child run, source evidence, policy, approval, effect, and 
   reports partial work as complete. A failed, blocked, or uncertain sibling remains explicit and
   may resume only under its own safe retry contract; Texting does not compensate a verified success
   merely to simulate an atomic multi-domain operation.
-- Ambiguous routing asks one clarification and leaves unrelated work available.
+- Ambiguous routing remains work for an external agent to clarify; unrelated work stays available.
 - An uncertain outbound provider result reconciles before identical content can be sent again.
 - A queued message that crosses the person's local date boundary is rendered again before provider
   submission so relative dates remain accurate.

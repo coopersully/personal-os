@@ -4,8 +4,9 @@
 
 nohmi helps each person maintain commitments, communication, time, priorities, and money through
 four complete workspaces: Mail, Tasks, Calendar, and Finances. People and authorized agents act on
-the same domain-owned material. A workspace steward supplies expertise, maintains its ledger,
-asks questions that need human judgment, and produces an evidence-backed review.
+the same domain-owned material. nohmi is the account's persistent brain, storage, workflows, and
+tools; it will never contain a built-in agent. Deterministic automation reduces entropy for external
+agents, which reason, triage, converse, and manage shared knowledge across agents and previous runs.
 
 Read the root `AGENTS.md`, then use this map. Read the relevant sections, not the entire archive.
 
@@ -15,6 +16,7 @@ Read the root `AGENTS.md`, then use this map. Read the relevant sections, not th
 | Workspace purpose and interfaces | [Workspaces](../product/workspaces.md) |
 | What stewardship means and who owns execution | [Workspace stewardship](../product/workspace-stewardship.md) |
 | Shared personal context, learning, and consent | [User Knowledge](../product/user-knowledge.md) |
+| Full Finance/Texting toolkit design under written review | [Shared toolkit](../superpowers/specs/2026-09-28-shared-agent-toolkit-design.md), [Finance](../superpowers/specs/2026-09-28-finance-toolkit-design.md), [Texting](../superpowers/specs/2026-09-28-texting-toolkit-design.md) |
 | Actual delivered capabilities | [Implementation log](../product/implementation-log.md), current code, migrations, tests, and live evidence |
 | Packages, domain seams, and shared integration work | [System shape](../architecture/0001-system-shape.md), [feature ownership](feature-ownership.md) |
 | UI and interaction decisions | [Design foundations](../design/foundations.md), [system](../design/system.md), [governance](../design/governance.md) |
@@ -37,7 +39,7 @@ evidence in the nearest current document; keep temporary execution status in Lin
 
 | Situation | Decision rule |
 | --- | --- |
-| A client needs domain expertise | Put workflow and judgment in the API/domain; keep MCP an intent adapter. |
+| A client needs domain expertise | Expose domain knowledge, evidence, workflows and tools. Keep calculations and policy in the API, reasoning in the external agent, and MCP thin. |
 | Several surfaces show one record | Preserve native domain records and typed source links; do not create competing copies. |
 | A provider fails or data is old | Show capability, freshness, failure, and recovery; never manufacture success. |
 | New background work | Persist accepted work and recovery state. External hosts own recurring maintenance schedules. |

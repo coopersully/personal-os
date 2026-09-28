@@ -18,7 +18,14 @@ same person.
 
 ## Decision
 
-Adopt a hybrid model:
+Reconciled 2026-09-28: nohmi is the account's persistent brain, storage, and tools, never a
+built-in agent. External agents manage the knowledge and reason over it. Authenticated agents on
+the same account can retrieve permitted contributions from other agents and previous runs; an
+originating connection records provenance, not exclusive ownership. Retrieval always uses current
+permissions. Agent-to-agent reuse retains the original sources and does not become independent
+reinforcement merely because a second agent repeats it. Concurrent revisions conflict explicitly.
+
+Adopt a combined domain and shared-knowledge storage model:
 
 1. Workspace domains continue to own canonical operational records, expert playbooks, decisions,
    and action policy.

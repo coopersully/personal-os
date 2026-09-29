@@ -18,6 +18,7 @@ import {
   type RitualDefinition,
   type RitualDefinitionInput,
   type RitualOccurrence,
+  type RitualResponse,
   type RitualResponseInput,
   type RitualState,
   requiresSnoozeConfirmation,
@@ -32,6 +33,13 @@ import type { Principal } from "./types.js";
 
 type Context = { principal: Principal; requestId: string };
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+function compactResponses(occurrence: RitualOccurrence): RitualOccurrence {
+  occurrence.responses = [
+    ...new Map(occurrence.responses.map((response) => [response.stepId, response])).values(),
+  ];
+  return occurrence;
+}
+
 export function createRitualService({ db, now }: { db: Database; now: () => Date }) {
   async function locked<T>(context: Context, run: (tx: Tx) => Promise<T>): Promise<T> {
     return db.transaction(async (tx) => {
@@ -77,6 +85,9 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         )
     ).map((r) => r.data);
     for (const occurrence of occurrences) {
+      const responseCount = occurrence.responses.length;
+      compactResponses(occurrence);
+      if (occurrence.responses.length !== responseCount) await persist(tx, occurrence, userId);
       if (occurrence.status !== "pending") continue;
       const def = defs.find((d) => d.id === occurrence.ritualId);
       if (!def?.enabled) {
@@ -398,6 +409,9 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           observedAt: input.observedAt,
           recordedAt: now().toISOString(),
         };
+        occurrence.responses = occurrence.responses.filter(
+          (previous) => previous.stepId !== stepId,
+        );
         occurrence.responses.push(response);
         occurrence.revision++;
         await tx.insert(ritualResponses).values({
@@ -596,7 +610,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           .orderBy(desc(ritualOccurrences.dueAt), desc(ritualOccurrences.id))
           .limit(query.limit + 1);
         return {
-          items: rows.slice(0, query.limit).map((r) => r.data),
+          items: rows.slice(0, query.limit).map((r) => compactResponses(r.data)),
           nextCursor:
             rows.length > query.limit
               ? `${rows[query.limit - 1]!.dueAt.toISOString()}|${rows[query.limit - 1]!.id}`
@@ -607,6 +621,21 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     async export(context: Context) {
       return locked(context, async (tx) => {
         await reconcile(tx, context.principal.userId);
+        const ledger = await tx
+          .select()
+          .from(ritualResponses)
+          .where(eq(ritualResponses.userId, context.principal.userId))
+          .orderBy(
+            sql`${ritualResponses.data}->>'recordedAt'`,
+            sql`${ritualResponses.data}->>'observedAt'`,
+            ritualResponses.id,
+          );
+        const responses = new Map<string, RitualResponse[]>();
+        for (const row of ledger) {
+          const entries = responses.get(row.occurrenceId) ?? [];
+          entries.push(row.data);
+          responses.set(row.occurrenceId, entries);
+        }
         return {
           definitions: await definitions(tx, context.principal.userId),
           occurrences: (
@@ -614,7 +643,20 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
               .select()
               .from(ritualOccurrences)
               .where(eq(ritualOccurrences.userId, context.principal.userId))
-          ).map((r) => r.data),
+          ).map(({ data }) => {
+            const entries = responses.get(data.id) ?? [];
+            // Keep snapshots from older local data readable, and put each latest
+            // response last even if multiple corrections share a millisecond.
+            const latest = new Map(data.responses.map((response) => [response.stepId, response]));
+            const latestIds = new Set([...latest.values()].map((response) => response.id));
+            return {
+              ...data,
+              responses: [
+                ...entries.filter((response) => !latestIds.has(response.id)),
+                ...latest.values(),
+              ],
+            };
+          }),
         };
       });
     },

@@ -643,7 +643,7 @@ describe.sequential("ritual account lifecycle", () => {
     );
     const replay = await service.saveResponse(current.id, "receipt", answer, context());
     expect(replay.current).toEqual(corrected.current);
-    expect(replay.current?.responses).toHaveLength(2);
+    expect(replay.current?.responses).toHaveLength(1);
     expect(replay.current?.responses.at(-1)?.value).toBe(false);
   });
   it("ages accepted delayed snoozes from observation rather than replay time", async () => {
@@ -753,4 +753,59 @@ describe.sequential("ritual account lifecycle", () => {
       ),
     ).toHaveLength(time !== "23:00" ? 0 : 1);
   });
+  it("keeps repeated long autosaves bounded while exporting every correction", async () => {
+    for (const definition of await service.list(context()))
+      await service.deleteData(definition.kind, context());
+    clock = new Date("2026-11-12T17:00:00Z");
+    await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        title: "Morning",
+        time: "06:00",
+        timeZone: "America/New_York",
+        enabled: true,
+        steps: [{ id: "journal", label: "Journal", kind: "short_text" }],
+      },
+      context(),
+    );
+    let state = await service.current(context());
+    const values: string[] = [];
+    for (let index = 0; index < 160; index++) {
+      const value = `${index}:`.padEnd(5000, "x");
+      values.push(value);
+      state = await service.saveResponse(
+        state.current!.id,
+        "journal",
+        { ...mutation(state.current!.revision), value, submitted: true },
+        context(),
+      );
+      expect(state.current?.responses).toHaveLength(1);
+    }
+    expect(JSON.stringify(state).length).toBeLessThan(50000);
+    expect(state.current?.responses[0]?.value).toBe(values.at(-1));
+    const history = await service.history(context(), { limit: 10 });
+    expect(history.items[0]?.responses).toHaveLength(1);
+    const exported = await service.export(context());
+    const answers = exported.occurrences.find((entry) => entry.id === state.current?.id)!.responses;
+    expect(answers).toHaveLength(160);
+    expect(new Set(answers.map((response) => response.value))).toEqual(new Set(values));
+    expect(answers.at(-1)?.value).toBe(values.at(-1));
+    // A cache created before compaction is normalized on the next account read.
+    await database.db
+      .update(ritualOccurrences)
+      .set({ data: { ...state.current!, responses: answers } })
+      .where(eq(ritualOccurrences.id, state.current!.id));
+    expect((await service.current(context())).current?.responses).toHaveLength(1);
+    const [stored] = await database.db
+      .select()
+      .from(ritualOccurrences)
+      .where(eq(ritualOccurrences.id, state.current!.id));
+    expect(stored?.data.responses).toHaveLength(1);
+    expect(
+      (await service.export(context())).occurrences.find((entry) => entry.id === state.current?.id)
+        ?.responses,
+    ).toHaveLength(160);
+  }, 20000);
 });

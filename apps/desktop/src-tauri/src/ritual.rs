@@ -35,11 +35,49 @@ async fn identity(app: &tauri::AppHandle) -> Result<(String, String, u64), Strin
     let account = account_id.clone().ok_or("Sign in to use rituals.")?;
     Ok((server, account, state.generation.load(Ordering::SeqCst)))
 }
+fn compact_occurrence_responses(occurrence: &mut Value) {
+    if let Some(responses) = occurrence
+        .get_mut("responses")
+        .and_then(Value::as_array_mut)
+    {
+        let mut seen = std::collections::HashSet::new();
+        responses.reverse();
+        responses.retain(|response| {
+            response["stepId"]
+                .as_str()
+                .is_some_and(|id| seen.insert(id.to_owned()))
+        });
+        responses.reverse();
+    }
+}
+fn compact_cached_responses(data: &mut Value) {
+    if let Some(current) = data
+        .get_mut("state")
+        .and_then(|state| state.get_mut("current"))
+    {
+        compact_occurrence_responses(current);
+    }
+    if let Some(upcoming) = data
+        .get_mut("state")
+        .and_then(|state| state.get_mut("upcoming"))
+        .and_then(Value::as_array_mut)
+    {
+        for occurrence in upcoming {
+            compact_occurrence_responses(occurrence);
+        }
+    }
+    if let Some(history) = data.get_mut("localHistory").and_then(Value::as_array_mut) {
+        for occurrence in history {
+            compact_occurrence_responses(occurrence);
+        }
+    }
+}
 async fn read(app: &tauri::AppHandle, key: &str) -> Result<Value, String> {
-    Ok(
-        crate::native::call(app, json!({"op":"ritual_store_read","identity":key})).await?["value"]
-            .clone(),
-    )
+    let mut data = crate::native::call(app, json!({"op":"ritual_store_read","identity":key}))
+        .await?["value"]
+        .clone();
+    compact_cached_responses(&mut data);
+    Ok(data)
 }
 async fn write(app: &tauri::AppHandle, key: &str, value: &Value) -> Result<(), String> {
     crate::native::call(
@@ -602,6 +640,7 @@ fn apply_offline(
         let responses = current["responses"]
             .as_array_mut()
             .ok_or("Invalid ritual responses")?;
+        responses.retain(|response| response["stepId"] != step_id);
         responses.push(json!({"id":body["requestId"],"requestId":body["requestId"],"stepId":step_id,"value":body["value"],"submitted":body["submitted"],"observedAt":body["observedAt"],"recordedAt":now}));
         return Ok(state.clone());
     }
@@ -1168,6 +1207,35 @@ mod completion_tests {
 
     fn complete(data: &mut Value) -> Value {
         apply_offline(data, "/actions", "POST", &json!({"kind":"complete"})).unwrap()
+    }
+
+    #[test]
+    fn repeated_long_answers_keep_cache_bounded_and_legacy_cache_compacts() {
+        let mut empty = json!({"state":{"current":null}});
+        compact_cached_responses(&mut empty);
+        assert!(empty["state"]["current"].is_null());
+        let mut data = pending(json!([{"id":"journal","kind":"short_text"}]));
+        let mut corrections = Vec::new();
+        for index in 0..160 {
+            let value = format!("{index}:{}", "x".repeat(4995));
+            answer(&mut data, "journal", json!(value), true);
+            assert_eq!(
+                data["state"]["current"]["responses"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            corrections.push(data["state"]["current"]["responses"][0].clone());
+        }
+        assert!(data.to_string().len() < 10000);
+        let latest = corrections.last().unwrap().clone();
+        data["state"]["current"]["responses"] = json!(corrections);
+        data["queue"] = json!([{"body":{"value":"Queued correction"}}]);
+        compact_cached_responses(&mut data);
+        assert_eq!(data["state"]["current"]["responses"], json!([latest]));
+        assert_eq!(data["queue"][0]["body"]["value"], "Queued correction");
+        assert_eq!(complete(&mut data)["outcome"], "applied");
     }
 
     #[test]

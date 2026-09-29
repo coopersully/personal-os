@@ -147,8 +147,16 @@ pub async fn action(app: tauri::AppHandle, value: Value) {
             }
         }
         "hide" => hide(&app),
+        "ritual_refresh" => {
+            app.state::<crate::ritual::RitualRuntime>()
+                .refresh
+                .notify_one();
+        }
         "refresh" => {
             app.state::<DesktopState>().refresh.notify_one();
+            app.state::<crate::ritual::RitualRuntime>()
+                .refresh
+                .notify_one();
         }
         _ => {}
     }
@@ -172,10 +180,11 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         tray::TrayIconBuilder,
     };
     let open = MenuItem::with_id(app, "open", "Open nohmi", true, None::<&str>)?;
+    let ritual = MenuItem::with_id(app, "ritual", "Open current ritual", true, None::<&str>)?;
     let quick = MenuItem::with_id(app, "quick", "Quick access", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit nohmi", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quick, &settings, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &ritual, &quick, &settings, &quit])?;
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
         .tooltip("nohmi")
@@ -192,6 +201,18 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                             json!({"action":"open","path":"/settings?section=desktop"}),
                         )
                         .await;
+                    });
+                }
+                "ritual" => {
+                    tauri::async_runtime::spawn(async move {
+                        if crate::ritual::ritual_open(app.clone()).await.is_err() {
+                            show(&app);
+                            forward(
+                                &app,
+                                json!({"action":"open","path":"/settings?section=rituals"}),
+                            )
+                            .await;
+                        }
                     });
                 }
                 "quick" => {

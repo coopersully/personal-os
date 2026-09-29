@@ -19,6 +19,7 @@ export * from "./maintenance.js";
 export * from "./pinterest.js";
 export * from "./reflection.js";
 export * from "./reminder.js";
+export * from "./ritual.js";
 export * from "./task.js";
 export * from "./task-organization.js";
 export * from "./task-workspace.js";

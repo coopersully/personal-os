@@ -3,6 +3,7 @@ mod desktop;
 mod lifecycle;
 mod native;
 mod preferences;
+mod ritual;
 mod transport;
 mod wallpaper;
 mod wallpaper_schedule;
@@ -17,10 +18,23 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             app.manage(desktop::DesktopState::load(app.handle()).map_err(std::io::Error::other)?);
+            app.manage(ritual::RitualRuntime::default());
+            #[cfg(target_os = "macos")]
+            {
+                let ritual_app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    ritual::run(ritual_app).await;
+                });
+            }
             lifecycle::setup(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "ritual" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                }
+            }
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -30,6 +44,13 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            ritual::ritual_state,
+            ritual::ritual_ready,
+            ritual::ritual_preferences,
+            ritual::ritual_open,
+            ritual::ritual_preview,
+            ritual::ritual_mutate,
+            ritual::ritual_local,
             desktop::desktop_settings,
             desktop::desktop_take_action,
             desktop::desktop_save_settings,

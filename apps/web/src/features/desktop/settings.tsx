@@ -29,6 +29,7 @@ import {
   ItemTitle,
 } from "../../components/ui/item.js";
 import { Switch } from "../../components/ui/switch.js";
+import { RitualLocal } from "../tracking/ritual-local.js";
 import {
   type DesktopSettings,
   getDesktopSettings,
@@ -164,6 +165,7 @@ export function DesktopSettingsPanel({
               ? "Notifications"
               : "Desktop"}
       </h2>
+      {connectionOnly ? <RitualLocal recoveryOnly /> : null}
       {query.data?.native.error ? (
         <Alert variant="destructive">
           <AlertTitle>macOS needs attention</AlertTitle>

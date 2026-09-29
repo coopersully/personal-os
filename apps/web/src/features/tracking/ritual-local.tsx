@@ -4,7 +4,7 @@ import { useState } from "react";
 import { errorMessage } from "../../api.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
-export function RitualLocal() {
+export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean } = {}) {
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState("");
   const local = useQuery({
@@ -48,19 +48,28 @@ export function RitualLocal() {
     presentation: "Unable to show the ritual on this Mac",
   };
   const retryAt = health ? new Date(health.nextRetryAt) : null;
+  const hasPending = Boolean(local.data?.queue?.length || local.data?.localHistory?.length);
+  if (recoveryOnly && !hasPending) return null;
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground">
-        Automatic rituals on this Mac:{" "}
-        {local.isError
-          ? "unavailable"
-          : local.isPending
-            ? "loading"
-            : local.data?.enabled
-              ? "on"
-              : "off"}
-      </p>
-      {local.isError ? (
+      {recoveryOnly ? (
+        <p>
+          Unsynced ritual changes remain on this Mac from your previous session. Sign back into the
+          same account to sync them, or export and discard them before switching accounts.
+        </p>
+      ) : (
+        <p className="text-muted-foreground">
+          Automatic rituals on this Mac:{" "}
+          {local.isError
+            ? "unavailable"
+            : local.isPending
+              ? "loading"
+              : local.data?.enabled
+                ? "on"
+                : "off"}
+        </p>
+      )}
+      {!recoveryOnly && local.isError ? (
         <Alert variant="warning">
           <AlertTitle>Ritual status unavailable</AlertTitle>
           <AlertDescription>Unable to read this Mac’s ritual status</AlertDescription>
@@ -73,7 +82,7 @@ export function RitualLocal() {
             Retry
           </Button>
         </Alert>
-      ) : health ? (
+      ) : !recoveryOnly && health ? (
         <Alert variant="warning">
           <AlertTitle>
             {stageMessages[health.stage] ?? "Ritual delivery needs attention"}
@@ -99,12 +108,14 @@ export function RitualLocal() {
               Discard pending changes
             </Button>
           </div>
-          <details>
-            <summary>Inspect pending changes</summary>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">
-              {JSON.stringify(local.data, null, 2)}
-            </pre>
-          </details>
+          {!recoveryOnly ? (
+            <details>
+              <summary>Inspect pending changes</summary>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">
+                {JSON.stringify(local.data, null, 2)}
+              </pre>
+            </details>
+          ) : null}
         </>
       ) : null}
       {confirm ? (

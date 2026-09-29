@@ -35,6 +35,86 @@ async fn identity(app: &tauri::AppHandle) -> Result<(String, String, u64), Strin
     let account = account_id.clone().ok_or("Sign in to use rituals.")?;
     Ok((server, account, state.generation.load(Ordering::SeqCst)))
 }
+pub async fn recovery_account(
+    app: &tauri::AppHandle,
+    server: &str,
+) -> Result<Option<String>, String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(None);
+    }
+    let value = crate::native::call(
+        app,
+        json!({"op":"ritual_store_read","identity":format!("recovery|{server}")}),
+    )
+    .await?;
+    Ok(value["value"]["accountId"]
+        .as_str()
+        .filter(|account| !account.is_empty())
+        .map(str::to_owned))
+}
+pub async fn retain_recovery_account(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    crate::native::call(app, json!({"op":"ritual_store_write","identity":format!("recovery|{server}"),"value":{"accountId":account}})).await?;
+    Ok(())
+}
+fn has_recovery_evidence(data: &Value) -> bool {
+    !queue(data).is_empty()
+        || data["conflicts"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+}
+pub async fn prepare_account_activation(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+) -> Result<(), String> {
+    if let Some(previous) = recovery_account(app, server).await? {
+        if previous != account {
+            let data = read(app, &identity_key(server, &previous)).await?;
+            if has_recovery_evidence(&data) {
+                return Err("Previous account ritual changes are waiting for recovery. Export or discard them in the desktop connection settings before signing into another account.".into());
+            }
+            crate::native::call(
+                app,
+                json!({"op":"ritual_store_delete","identity":identity_key(server, &previous)}),
+            )
+            .await?;
+            crate::native::call(
+                app,
+                json!({"op":"ritual_store_delete","identity":format!("recovery|{server}")}),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+async fn local_identity(
+    app: &tauri::AppHandle,
+) -> Result<Option<(String, String, u64, bool)>, String> {
+    match identity(app).await {
+        Ok((server, account, generation)) => Ok(Some((server, account, generation, false))),
+        Err(error) if error == "Sign in to use rituals." => {
+            let state = app.state::<DesktopState>();
+            let server = state.settings.lock().await.server_url.clone();
+            Ok(recovery_account(app, &server).await?.map(|account| {
+                (
+                    server,
+                    account,
+                    state.generation.load(Ordering::SeqCst),
+                    true,
+                )
+            }))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn compact_occurrence_responses(occurrence: &mut Value) {
     if let Some(responses) = occurrence
         .get_mut("responses")
@@ -233,7 +313,113 @@ async fn api(
     .await?;
     let value =
         serde_json::from_str(&response.body).map_err(|_| "Invalid ritual server response")?;
+    validate_api_result(method, response.status, &value)?;
     Ok((response.status, value))
+}
+fn valid_definition(value: &Value) -> bool {
+    value["id"].as_str().is_some_and(|id| !id.is_empty())
+        && matches!(value["kind"].as_str(), Some("morning" | "night"))
+        && value["revision"]
+            .as_u64()
+            .is_some_and(|revision| revision > 0)
+        && value["enabled"].is_boolean()
+        && value["title"].is_string()
+        && value["time"].is_string()
+        && value["timeZone"].is_string()
+        && value["enabledAt"]
+            .as_str()
+            .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok())
+        && value["steps"].as_array().is_some_and(|steps| {
+            !steps.is_empty()
+                && steps.len() <= 20
+                && steps.iter().all(|step| {
+                    step["id"].is_string()
+                        && step["label"].is_string()
+                        && matches!(
+                            step["kind"].as_str(),
+                            Some(
+                                "checkbox"
+                                    | "short_text"
+                                    | "time"
+                                    | "date"
+                                    | "number"
+                                    | "multiple_choice"
+                            )
+                        )
+                })
+        })
+}
+fn valid_occurrence(value: &Value) -> bool {
+    value["id"].is_string()
+        && value["ritualId"].is_string()
+        && valid_definition(&value["definition"])
+        && value["revision"]
+            .as_u64()
+            .is_some_and(|revision| revision > 0)
+        && matches!(
+            value["status"].as_str(),
+            Some("pending" | "completed" | "skipped" | "missed" | "cancelled_configuration")
+        )
+        && ["dueAt", "expiresAt"].iter().all(|field| {
+            value[*field]
+                .as_str()
+                .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok())
+        })
+        && value["responses"].as_array().is_some_and(|items| {
+            items.iter().all(|response| {
+                response["id"].is_string()
+                    && response["stepId"].is_string()
+                    && response["submitted"].is_boolean()
+                    && (response["value"].is_string() || response["value"].is_boolean())
+            })
+        })
+        && value["actions"].as_array().is_some_and(|items| {
+            items
+                .iter()
+                .all(|action| action["id"].is_string() && action["kind"].is_string())
+        })
+}
+fn valid_state(value: &Value) -> bool {
+    value["definitions"].as_array().is_some_and(|definitions| {
+        definitions.len() <= 2 && definitions.iter().all(valid_definition)
+    }) && value
+        .get("current")
+        .is_some_and(|current| current.is_null() || valid_occurrence(current))
+        && value.get("upcoming").is_none_or(|upcoming| {
+            upcoming
+                .as_array()
+                .is_some_and(|items| items.iter().all(valid_occurrence))
+        })
+        && value["serverNow"]
+            .as_str()
+            .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok())
+        && value["snoozeCount"].is_u64()
+        && matches!(
+            value["syncStatus"].as_str(),
+            Some("saved" | "queued" | "conflict")
+        )
+}
+fn validate_api_result(method: &str, status: u16, value: &Value) -> Result<(), String> {
+    if !(200..300).contains(&status) {
+        return Ok(());
+    }
+    let valid = if method == "POST" {
+        valid_state(&value["state"])
+            && match value["outcome"].as_str() {
+                Some("applied" | "conflict") => true,
+                Some("confirmation_required") => {
+                    value["count"].is_u64() && value["challengeId"].is_string()
+                }
+                _ => false,
+            }
+    } else {
+        valid_state(value)
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err("Invalid ritual server response".into())
+    }
 }
 fn queue(data: &Value) -> Vec<Value> {
     data["queue"].as_array().cloned().unwrap_or_default()
@@ -835,6 +1021,73 @@ pub async fn run(app: tauri::AppHandle) {
 mod tests {
     use super::*;
     #[test]
+    fn protocol_validation_accepts_real_states_and_rejects_partial_successes() {
+        let definition = json!({"id":"morning","kind":"morning","title":"Morning","enabled":true,"revision":1,"time":"06:00","timeZone":"UTC","enabledAt":"2026-09-29T00:00:00Z","steps":[{"id":"one","label":"One","kind":"checkbox"}]});
+        let occurrence = json!({"id":"today","ritualId":"morning","definition":definition,"revision":1,"status":"pending","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-30T06:00:00Z","responses":[],"actions":[]});
+        let state = json!({"definitions":[definition],"current":occurrence,"upcoming":[],"serverNow":"2026-09-29T12:00:00Z","snoozeCount":0,"syncStatus":"saved"});
+        assert!(validate_api_result("GET", 200, &state).is_ok());
+        assert!(validate_api_result("PUT", 200, &state).is_ok());
+        let empty = json!({"definitions":[],"current":null,"serverNow":"2026-09-29T12:00:00Z","snoozeCount":0,"syncStatus":"saved"});
+        assert!(validate_api_result("GET", 200, &empty).is_ok());
+        for outcome in ["applied", "conflict"] {
+            assert!(
+                validate_api_result("POST", 200, &json!({"outcome":outcome,"state":state})).is_ok()
+            );
+        }
+        assert!(validate_api_result("POST", 200, &json!({"outcome":"confirmation_required","count":0,"challengeId":"challenge","state":state})).is_ok());
+        for malformed in [
+            json!({}),
+            json!(null),
+            json!({"definitions":[]}),
+            json!({"outcome":"applied"}),
+        ] {
+            assert!(validate_api_result("GET", 200, &malformed).is_err());
+            assert!(validate_api_result("POST", 200, &malformed).is_err());
+        }
+        for field in [
+            "definitions",
+            "current",
+            "serverNow",
+            "snoozeCount",
+            "syncStatus",
+        ] {
+            let mut malformed = state.clone();
+            malformed.as_object_mut().unwrap().remove(field);
+            assert!(
+                validate_api_result("GET", 200, &malformed).is_err(),
+                "missing {field}"
+            );
+        }
+        let mut malformed = state.clone();
+        malformed["current"]["responses"] = json!([{"value":"private"}]);
+        assert!(validate_api_result("PUT", 200, &malformed).is_err());
+        assert!(validate_api_result(
+            "POST",
+            200,
+            &json!({"outcome":"confirmation_required","state":state})
+        )
+        .is_err());
+        assert!(
+            validate_api_result("GET", 503, &json!({"error":{"message":"unavailable"}})).is_ok()
+        );
+    }
+
+    #[test]
+    fn recovery_gate_keeps_both_queued_and_conflicted_evidence_until_discard() {
+        let mut recovered = json!({"queue":[{"body":{"value":"unsynced answer"}}],"conflicts":[]});
+        assert!(has_recovery_evidence(&recovered));
+        recovered["queue"] = json!([]);
+        recovered["conflicts"] = json!([{"body":{"value":"rejected correction"}}]);
+        assert!(has_recovery_evidence(&recovered));
+        recovered["conflicts"] = json!([]);
+        assert!(!has_recovery_evidence(&recovered));
+        assert_eq!(
+            identity_key("https://server.test", "previous-account"),
+            "https://server.test|previous-account"
+        );
+    }
+
+    #[test]
     fn delivery_health_is_redacted_retryable_and_clears_on_recovery_or_account_change() {
         let at = chrono::DateTime::parse_from_rfc3339("2026-09-29T12:00:00Z")
             .unwrap()
@@ -903,7 +1156,9 @@ mod tests {
 pub async fn ritual_local(app: tauri::AppHandle, discard: bool) -> Result<Value, String> {
     let runtime = app.state::<RitualRuntime>();
     let _lock = runtime.lock.lock().await;
-    let (server, account, generation) = identity(&app).await?;
+    let (server, account, generation, recovery) = local_identity(&app)
+        .await?
+        .ok_or("Sign in to use rituals.")?;
     let key = identity_key(&server, &account);
     let mut data = read(&app, &key).await?;
     if discard {
@@ -912,7 +1167,9 @@ pub async fn ritual_local(app: tauri::AppHandle, discard: bool) -> Result<Value,
         data["conflicts"] = json!([]);
         data["state"] = Value::Null;
         write(&app, &key, &data).await?;
-        let _ = sync(&app, &server, &account, generation, &mut data).await;
+        if !recovery {
+            let _ = sync(&app, &server, &account, generation, &mut data).await;
+        }
     }
     let mut evidence = queue(&data);
     evidence.extend(data["conflicts"].as_array().cloned().unwrap_or_default());
@@ -923,13 +1180,16 @@ pub async fn ritual_local(app: tauri::AppHandle, discard: bool) -> Result<Value,
             .load(Ordering::SeqCst),
     );
     Ok(
-        json!({"queue":evidence,"enabled":data["enabled"],"localHistory":data["localHistory"],"deliveryHealth":health}),
+        json!({"queue":evidence,"enabled":data["enabled"],"localHistory":data["localHistory"],"deliveryHealth":health,"recovery":recovery}),
     )
 }
 pub async fn require_synced(app: &tauri::AppHandle) -> Result<(), String> {
-    if let Ok((server, account, _)) = identity(app).await {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    if let Some((server, account, _, _)) = local_identity(app).await? {
         let data = read(app, &identity_key(&server, &account)).await?;
-        if !queue(&data).is_empty() || data["conflicts"].as_array().is_some_and(|v| !v.is_empty()) {
+        if has_recovery_evidence(&data) {
             return Err("Ritual changes are waiting to sync. Open Settings → Rituals to export or discard them before signing out or switching servers.".into());
         }
     }

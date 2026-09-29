@@ -434,3 +434,21 @@ describe("desktop preferences", () => {
     expect(saved.notifications.quietEnd).toBeNull();
   });
 });
+
+it("exposes pending ritual recovery in signed-out connection settings", async () => {
+  mocks.invoke.mockImplementation(async (command: string) => {
+    if (command === "desktop_settings") return status;
+    if (command === "ritual_local")
+      return {
+        recovery: true,
+        queue: [{ value: "Private answer" }],
+        localHistory: [],
+        enabled: false,
+      };
+    return { ok: true };
+  });
+  mount({ connectionOnly: true });
+  expect(await screen.findByRole("button", { name: "Export pending changes" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Discard pending changes" })).toBeInTheDocument();
+  expect(screen.queryByText(/Private answer/)).not.toBeInTheDocument();
+});

@@ -259,6 +259,9 @@ fn server_switch_cleanup(
     if let Some(account) = old_account {
         operations.push(serde_json::json!({"op":"ritual_store_delete","identity":format!("{old_origin}|{account}")}));
     }
+    operations.push(
+        serde_json::json!({"op":"ritual_store_delete","identity":format!("recovery|{old_origin}")}),
+    );
     operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":old_origin}));
     // Switching always starts signed out, including a previously used destination.
     operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":new_origin}));
@@ -283,7 +286,10 @@ pub async fn desktop_save_settings(
     let mut current = state.settings.lock().await;
     let switched = current.server_url != settings.server_url;
     let old_origin = current.server_url.clone();
-    let old_account = state.account_id.lock().await.clone();
+    let old_account = match state.account_id.lock().await.clone() {
+        Some(account) => Some(account),
+        None => crate::ritual::recovery_account(&app, &old_origin).await?,
+    };
     let temporary = state.settings_path.with_extension("tmp");
     std::fs::write(
         &temporary,
@@ -322,6 +328,13 @@ pub async fn desktop_save_settings(
         for operation in
             server_switch_cleanup(&old_origin, old_account.as_deref(), &settings.server_url)
         {
+            if !cfg!(target_os = "macos")
+                && operation["op"]
+                    .as_str()
+                    .is_some_and(|op| op.starts_with("ritual_"))
+            {
+                continue;
+            }
             if let Err(error) = crate::native::call(&app, operation).await {
                 // Never publish a destination whose old private state could not
                 // be purged. Completed deletions stay deleted; restoring the old
@@ -445,15 +458,16 @@ mod tests {
             vec![
                 serde_json::json!({"op":"clear"}),
                 serde_json::json!({"op":"ritual_store_delete","identity":"https://old.test|account"}),
+                serde_json::json!({"op":"ritual_store_delete","identity":"recovery|https://old.test"}),
                 serde_json::json!({"op":"keychain_delete","serverUrl":"https://old.test"}),
                 serde_json::json!({"op":"keychain_delete","serverUrl":"https://new.test"}),
             ]
         );
         let signed_out = server_switch_cleanup("https://old.test", None, "https://new.test");
-        assert_eq!(signed_out.len(), 3);
+        assert_eq!(signed_out.len(), 4);
         assert!(signed_out
             .iter()
-            .all(|operation| operation["op"] != "ritual_store_delete"));
+            .all(|operation| operation["identity"] != "https://old.test|account"));
     }
 
     #[test]

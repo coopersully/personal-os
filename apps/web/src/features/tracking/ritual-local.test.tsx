@@ -61,3 +61,44 @@ it("does not present stale enabled state as current when refresh fails", async (
   await client.invalidateQueries({ queryKey: ["ritual-local"] });
   expect(await screen.findByText("Automatic rituals on this Mac: unavailable")).toBeInTheDocument();
 });
+
+it("keeps the signed-out recovery surface empty when no private changes remain", async () => {
+  invoke.mockResolvedValue({ enabled: true, queue: [], localHistory: [] });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <RitualLocal recoveryOnly />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("ritual_local", { discard: false }));
+  expect(view.container).toBeEmptyDOMElement();
+});
+
+it("offers signed-out recovery without rendering private answers or delivery status", async () => {
+  invoke.mockResolvedValue({
+    enabled: true,
+    recovery: true,
+    queue: [{ value: "Private journal text" }],
+    localHistory: [],
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <RitualLocal recoveryOnly />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByRole("button", { name: "Export pending changes" })).toBeInTheDocument();
+  expect(screen.queryByText(/Private journal text/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Automatic rituals on this Mac/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Inspect pending changes")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Discard pending changes" }));
+  expect(invoke).not.toHaveBeenCalledWith("ritual_local", { discard: true });
+  invoke.mockResolvedValue({ enabled: false, queue: [], localHistory: [] });
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Export pending changes" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(invoke).toHaveBeenCalledWith("ritual_local", { discard: true });
+});

@@ -77,10 +77,21 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
         crate::native::call(app, json!({"op":"keychain_get","serverUrl":origin})).await?;
     let token = credential["value"].as_str().map(str::to_owned);
     if pathname == "/v1/auth/logout" && request.method == "POST" {
-        if let Some(account) = state.account_id.lock().await.clone() {
+        if cfg!(target_os = "macos") {
+            let previous_account = match state.account_id.lock().await.clone() {
+                Some(account) => Some(account),
+                None => crate::ritual::recovery_account(app, &origin).await?,
+            };
+            if let Some(account) = previous_account {
+                crate::native::call(
+                    app,
+                    json!({"op":"ritual_store_delete","identity":format!("{origin}|{account}")}),
+                )
+                .await?;
+            }
             crate::native::call(
                 app,
-                json!({"op":"ritual_store_delete","identity":format!("{origin}|{account}")}),
+                json!({"op":"ritual_store_delete","identity":format!("recovery|{origin}")}),
             )
             .await?;
         }
@@ -131,6 +142,9 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
     }
     let mut response = result?;
     if response.status == 401 && token.is_some() {
+        if let Some(account) = state.account_id.lock().await.clone() {
+            crate::ritual::retain_recovery_account(app, &origin, &account).await?;
+        }
         crate::native::call(app, json!({"op":"keychain_delete","serverUrl":origin})).await?;
         crate::native::call(app, json!({"op":"clear"})).await?;
         crate::ritual::hide(app).await;
@@ -155,6 +169,7 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
                 .as_str()
                 .filter(|s| !s.is_empty())
                 .ok_or("No desktop session was returned.")?;
+            crate::ritual::prepare_account_activation(app, &origin, &account).await?;
             crate::native::call(
                 app,
                 json!({"op":"keychain_set","serverUrl":origin,"value":token}),
@@ -199,6 +214,7 @@ async fn activate_account(
     settings: &mut crate::desktop::DesktopSettings,
     account: &str,
 ) -> Result<(), String> {
+    crate::ritual::prepare_account_activation(app, &settings.server_url, account).await?;
     let next = crate::preferences::load(&state.settings_path, settings, account);
     let temporary = state.settings_path.with_extension("tmp");
     std::fs::write(
@@ -218,11 +234,13 @@ async fn activate_account(
         crate::ritual::hide(app).await;
     }
     crate::native::call(app, json!({"op":"configure","settings":next})).await?;
-    crate::native::call(
-        app,
-        json!({"op":"ritual_bind_account","serverUrl":next.server_url,"accountId":account}),
-    )
-    .await?;
+    if cfg!(target_os = "macos") {
+        crate::native::call(
+            app,
+            json!({"op":"ritual_bind_account","serverUrl":next.server_url,"accountId":account}),
+        )
+        .await?;
+    }
     *settings = next;
     *state.account_id.lock().await = Some(account.to_string());
     let _ = app.emit("desktop-settings-changed", json!({"serverChanged":false}));

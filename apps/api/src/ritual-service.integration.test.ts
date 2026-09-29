@@ -697,4 +697,60 @@ describe.sequential("ritual account lifecycle", () => {
       ).outcome,
     ).toBe("applied");
   });
+  it.each([
+    "11:00",
+    "12:00",
+    "23:00",
+  ])("rescheduling evening to %s only affects future boundaries", async (time) => {
+    for (const definition of await service.list(context()))
+      await service.deleteData(definition.kind, context());
+    clock = new Date("2026-11-10T17:00:00Z"); // noon New York
+    for (const kind of ["morning", "night"] as const) {
+      await service.saveDefinition(
+        kind,
+        {
+          ...mutation(0),
+          kind,
+          title: kind,
+          time: kind === "morning" ? "06:00" : "21:00",
+          timeZone: "America/New_York",
+          enabled: true,
+          steps: [{ id: "one", label: "Original step", kind: "checkbox" }],
+        },
+        context(),
+      );
+    }
+    let state = await service.current(context());
+    const original = state.current!;
+    const evening = state.definitions.find((definition) => definition.kind === "night")!;
+    await service.saveDefinition(
+      "night",
+      {
+        ...evening,
+        ...mutation(evening.revision),
+        time,
+        steps: [{ id: "changed", label: "Changed future step", kind: "checkbox" }],
+      },
+      context(),
+    );
+    state = await service.current(context());
+    expect(state.current?.id).toBe(original.id);
+    expect(state.current?.status).toBe("pending");
+    expect(state.current?.definition).toEqual(original.definition);
+    const next = time !== "23:00" ? "2026-11-11T11:00:00.000Z" : "2026-11-11T04:00:00.000Z";
+    expect(state.current?.expiresAt).toBe(next);
+    expect(state.upcoming?.every((window) => window.dueAt > clock.toISOString())).toBe(true);
+    clock = new Date("2026-11-11T03:00:00Z"); // past the original evening boundary
+    expect((await service.current(context())).current?.id).toBe(original.id);
+    clock = new Date(next);
+    const after = (await service.current(context())).current!;
+    expect(after.id).not.toBe(original.id);
+    expect(after.definition.kind).toBe(time !== "23:00" ? "morning" : "night");
+    const history = await service.history(context(), { limit: 100 });
+    expect(
+      history.items.filter(
+        (entry) => entry.definition.kind === "night" && entry.scheduledLocalDate === "2026-11-10",
+      ),
+    ).toHaveLength(time !== "23:00" ? 0 : 1);
+  });
 });

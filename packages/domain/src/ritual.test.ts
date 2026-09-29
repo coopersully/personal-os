@@ -156,3 +156,14 @@ it("rejects long malformed numbers without overlapping digit matches", () => {
     ritualAnswerIsValid({ id: "number", label: "Number", kind: "number" }, `${"0".repeat(5000)}x`),
   ).toBe(false);
 });
+
+it("a revised schedule cutoff excludes retroactive boundaries", () => {
+  const morning = definition("morning");
+  const evening = { ...definition("night", "11:00"), enabledAt: "2026-09-29T16:00:00Z" };
+  expect(currentRitualWindow([morning, evening], "2026-09-29T16:00:00Z")?.ritualId).toBe("morning");
+  const upcoming = upcomingRitualWindows([morning, evening], "2026-09-29T16:00:00Z");
+  expect(upcoming[0]?.dueAt).toBe("2026-09-30T10:00:00.000Z");
+  expect(upcoming.find((window) => window.ritualId === "night")?.dueAt).toBe(
+    "2026-09-30T15:00:00.000Z",
+  );
+});

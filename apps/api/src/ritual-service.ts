@@ -300,7 +300,17 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           throw new AppError("invalid_request", "Use the same time zone for both rituals.");
         const { requestId, deviceId: _device, expectedRevision: _revision, ...settings } = input;
         let enabledAt = before?.enabledAt ?? new Date(now().getTime() - 36 * 3600000).toISOString();
+        const scheduleChanged =
+          before !== undefined &&
+          (before.time !== input.time ||
+            before.timeZone !== input.timeZone ||
+            before.enabled !== input.enabled);
+        // Reconcile the old schedule first so changing a time cannot rewrite the
+        // occurrence already open, even when no client loaded it yet today.
+        const open = before ? (await reconcile(tx, context.principal.userId)).state.current : null;
         if (before && !before.enabled && input.enabled) enabledAt = now().toISOString();
+        if (before && (before.time !== input.time || before.timeZone !== input.timeZone))
+          enabledAt = new Date(now().getTime() + 1).toISOString();
         const definition: RitualDefinition = {
           ...settings,
           id: before?.id ?? randomUUID(),
@@ -330,6 +340,19 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           revision: definition.revision,
           data: definition,
         });
+        if (scheduleChanged && open?.status === "pending") {
+          const updated = [...defs.filter((d) => d.id !== definition.id), definition];
+          const next = upcomingRitualWindows(updated, now().toISOString()).find(
+            (window) =>
+              window.ritualId !== open.ritualId ||
+              window.scheduledLocalDate !== open.scheduledLocalDate,
+          );
+          if (next && next.dueAt !== open.expiresAt) {
+            open.expiresAt = next.dueAt;
+            open.revision++;
+            await persist(tx, open, context.principal.userId);
+          }
+        }
         await reconcile(tx, context.principal.userId);
         await remember(
           tx,

@@ -44,7 +44,7 @@ const queryClient = new QueryClient({
   queryCache: new QueryCache({ onError: notifyError }),
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: queryWindowFocusPolicy(desktop),
+      refetchOnWindowFocus: queryWindowFocusPolicy(desktop, window.location.hash),
       retry: false,
       staleTime: 15_000,
     },

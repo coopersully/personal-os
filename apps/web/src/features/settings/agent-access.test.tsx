@@ -744,13 +744,20 @@ describe("agent access settings", () => {
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("radio", { name: /Full nohmi/ }));
     await browser.click(screen.getByText(/Fine-tune permissions/));
+    expect(screen.getByLabelText("Read private ritual responses")).toBeChecked();
+    expect(screen.queryByLabelText("Manage rituals and responses")).not.toBeInTheDocument();
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
     await waitFor(() =>
       expect(mocks.createAccessToken).toHaveBeenCalledWith(
         expect.objectContaining({
-          scopes: expect.arrayContaining(["finances:read", "finances:write", "mail:write"]),
+          scopes: expect.arrayContaining([
+            "finances:read",
+            "finances:write",
+            "mail:write",
+            "tracking:read",
+          ]),
         }),
       ),
     );

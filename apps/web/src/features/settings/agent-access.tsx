@@ -126,7 +126,7 @@ const scopeLabels: Record<AccessScope, string> = {
 
 const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
 const selectableScopes = (Object.keys(scopeLabels) as AccessScope[]).filter(
-  (scope) => scope !== "automations:write",
+  (scope) => scope !== "automations:write" && scope !== "tracking:write",
 );
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
@@ -162,6 +162,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "reminders:write",
       "tasks:read",
       "tasks:write",
+      "tracking:read",
       "mail:read",
       "mail:write",
       "finances:read",

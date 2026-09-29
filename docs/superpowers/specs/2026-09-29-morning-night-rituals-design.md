@@ -128,7 +128,7 @@ API under /v1/rituals:
 - GET /history with bounded cursor pagination and ritual/date filters.
 - GET /export and DELETE /:kind/data for user data portability/deletion; deletion removes the definition and its response/action history.
 
-Every mutation includes requestId, expectedRevision where applicable, and deviceId; derive account identity from authentication, never a caller's owner field. State conflicts return a typed conflict with current state. Snooze decisions return applied, confirmation_required (count and challenge bound to occurrence/revision), or conflict. Enforce body/field limits.
+Every mutation includes requestId, expectedRevision where applicable, and deviceId; derive account identity from authentication, never a caller's owner field. Action conflicts return a typed result with current state. Stale definition or response writes return HTTP 409; clients refresh authoritative state and preserve unsaved edits or native recovery evidence. Snooze decisions return applied, confirmation_required (count and challenge bound to occurrence/revision), or conflict. Enforce body/field limits.
 
 Direct human sessions use existing account authorization. Add tracking:read and tracking:write scopes to the existing token policy layer, default denied to old tokens; write permission does not imply read permission. This slice does not add agent orchestration or MCP tools. Export and deletion remain direct-human operations.
 

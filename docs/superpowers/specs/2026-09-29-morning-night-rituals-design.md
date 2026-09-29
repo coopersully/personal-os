@@ -1,13 +1,13 @@
-# Morning and Night Rituals — Product and Technical Specification
+# Morning and Evening Rituals — Product and Technical Specification
 
 Date: 2026-09-29
 Status: Product behavior agreed in chat; implementation specification ready for execution review. No feature code or deployment is included in this documentation change.
 
 ## 1. Outcome and scope
 
-Give Cooper a calm, ordered morning and night checklist that appears over the macOS desktop, saves responses to the signed-in Nohmi account, and remains available when the computer wakes after the configured time.
+Give Cooper a calm, ordered morning and evening checklist that appears over the macOS desktop, saves responses to the signed-in Nohmi account, and remains available when the computer wakes after the configured time.
 
-The first release provides two editable rituals, checkbox and short-text steps, daily scheduling, a native desktop backdrop, completion history, and recorded snooze/skip behavior. It does not require an agent, the full Tracking workspace, analytics, task recurrence, or a new journal product.
+The first release provides two editable rituals, checkbox, short-entry, time, date, number, and multiple-choice steps, daily scheduling, a native desktop backdrop, completion history, and recorded snooze/skip behavior. It does not require an agent, the full Tracking workspace, analytics, task recurrence, or a new journal product.
 
 Confirmed behavior:
 - Morning defaults to 06:00; night defaults to 21:00. Both times and enablement are configurable in the app.
@@ -35,12 +35,12 @@ Execution must refresh main and reconcile the desktop foundation before coding. 
 
 ## 3. Setup and configuration
 
-After desktop sign-in, onboarding offers Morning and Night rituals without enabling them silently. Existing users find the same controls under Settings → Rituals, plus a menu action to reopen the current ritual. Account configuration is shared; automatic presentation is enabled per installation so a second Mac does not start interrupting unexpectedly.
+After desktop sign-in, onboarding offers Morning and Evening rituals without enabling them silently. Existing users find the same controls under Settings → Rituals, plus a menu action to reopen the current ritual. Account configuration is shared; automatic presentation is enabled per installation so a second Mac does not start interrupting unexpectedly.
 
 Each ritual has:
 - Stable ID and kind: morning or night, unique per account.
 - Enabled flag, title, local wall-clock due time, account IANA time zone, and revision.
-- Ordered steps with stable IDs, label, kind (checkbox or short_text), and optional text placeholder.
+- Ordered steps with stable IDs, label, kind (checkbox, short_text, time, date, number, or multiple_choice), and optional text placeholder.
 - At least one and at most 20 steps; label 1–240 trimmed characters; text answer at most 5,000 characters.
 - Reorder, add, edit, and remove controls. All configured steps must be answered to complete; Skip is the escape for an unfulfilled ritual.
 
@@ -62,15 +62,15 @@ A pure schedule calculation returns the latest eligible occurrence and its expir
 
 Native reconciliation runs on launch, wake, unlock, significant clock/time-zone changes, relevant account refresh, and while resident at due/snooze deadlines with a bounded periodic fallback. The API independently enforces expiry on every state read/write; native scheduling is a delivery mechanism, not domain authority.
 
-Do not wake the Mac or show private text on the lock screen. At 08:30 unlock, show the 06:00 morning ritual if it is still eligible. At 22:00 launch, show the 21:00 night ritual and settle a materialized unfinished morning as missed. After explicit Quit, no foreground overlay is promised until the app launches again. Close-to-background and open-at-login use the existing desktop controls.
+Do not wake the Mac or show private text on the lock screen. At 08:30 unlock, show the 06:00 morning ritual if it is still eligible. At 22:00 launch, show the 21:00 evening ritual and settle a materialized unfinished morning as missed. After explicit Quit, no foreground overlay is promised until the app launches again. Close-to-background and open-at-login use the existing desktop controls.
 
 ## 5. Responses and completion
 
-Checkbox answers record completed; unchecked is unanswered, not a negative observation. Short-text steps need a nonempty trimmed answer. Persist drafts independently; a text step becomes answered only when the user explicitly submits it. Debounced draft saving must not auto-complete a ritual as the user types.
+Checkbox answers record completed; unchecked is unanswered, not a negative observation. Short-text steps need a nonempty trimmed answer. Persist text automatically after a brief 250 ms pause; nonempty trimmed text counts as answered. No per-field Save buttons. Saving an answer never completes or dismisses a ritual.
 
 Each accepted response carries occurrence/step identity, observation time, recorded time, revision, and request ID. Repeated writes or retries do not duplicate the answer. Corrections append superseding records; unchecking before terminal completion retracts the prior completion without deleting its audit trail. Terminal occurrences are read-only in this release.
 
-The API atomically marks completed only when every step in the immutable snapshot has an accepted response. The overlay closes after that result, or after durable native offline capture with a clearly visible queued-sync status in history. Completion of a stale occurrence cannot complete the next day's ritual.
+An explicit Complete Morning Ritual or Complete Evening Ritual action atomically marks completed only when every step in the immutable snapshot has an accepted response. The button remains disabled while answers are incomplete or saving, and includes the centered X of Y complete count. The overlay closes after that result, or after durable native offline capture with a clearly visible queued-sync status in history. Completion of a stale occurrence cannot complete the next day's ritual.
 
 Short entries remain private Tracking text answers in v1. They are readable in ritual history and are not silently duplicated into the separate Journal domain. Future journal linking must preserve a single authoritative source.
 
@@ -87,7 +87,7 @@ The rolling window is exactly 72 hours, [pressedAt - 72 hours, pressedAt), for t
 
 The first and second snoozes in that window apply immediately, recording pressed and confirmed. From the third onward, show:
 “You’ve snoozed your morning ritual {count} times in the last 3 days. Snooze another 10 minutes?”
-Use “night ritual” for night. Buttons: “Snooze 10 minutes” and “Go back.” Confirmation cancellation records snooze_cancelled and leaves the overlay present.
+Use “evening ritual” for night. Buttons: “Snooze 10 minutes” and “Go back.” Confirmation cancellation records snooze_cancelled and leaves the overlay present.
 
 A confirmed snooze sets snoozedUntil to confirmedAt + 10 minutes. Clamp presentation to the occurrence's expiry: at the next boundary, the new ritual takes precedence. A cancelled or expired confirmation cannot defer a later occurrence. Count queries use server time online. A concurrent count change returns the updated count and requires renewed confirmation if the displayed count is stale.
 
@@ -155,7 +155,7 @@ Acceptance scenarios:
 6. Snooze preserves answers; Skip records an explicit skip; the next boundary marks unfinished work missed and presents only the new ritual.
 7. Night spans midnight correctly; DST, clock changes, one disabled ritual, and changed schedules do not duplicate occurrences.
 8. Offline answers/actions survive restart; stale history prompts honestly; reconnect does not duplicate or cross account boundaries.
-9. Partial text is a draft; submitting the final answer completes; network failures never falsely claim cloud save.
+9. Text autosaves; only the explicit Complete action completes an answered ritual; network failures never falsely claim cloud save.
 10. Keyboard, VoiceOver, reduced motion/transparency, multiple displays, fullscreen/Spaces, and lock/unlock are exercised on the installed app.
 11. Unauthenticated/cross-account/token-under-scoped calls fail; export/deletion and sensitive-log checks pass.
 12. Hosted migration/API capability is verified before installing a compatible desktop build. Older clients keep working; unsupported servers show a clear unavailable state.
@@ -183,3 +183,15 @@ The companion implementation plan and Linear parent/sub-issues own execution sta
 - Task 6: [COO-68 — Verify and install the complete ritual experience](https://linear.app/coopersully/issue/COO-68/verify-and-install-the-complete-ritual-experience).
 
 All implementation issues start in Todo with High priority. Blocking relations follow the plan order; desktop settings and native work additionally depend on COO-51 — Harden macOS desktop connection and window reliability. Linear owns execution status; repository documents retain the design and build contract.
+
+### Ritual presentation refinement
+
+The small centered nohmi logo sits above the rounded card. The card has no visible icon or title. Form fields are start-aligned; progress, save status, snooze confirmation, and other supporting content are centered. Snooze and Skip are text buttons below the card. The checklist scrolls within the available screen height while its completion footer remains visible. The entrance fades and lifts over 600 ms, respecting reduced-motion preferences.
+
+### Settings and response types refinement
+
+Use Morning and Evening in product copy; retain the stored `night` identifier for compatibility. Settings use the Reviews single-select segmented control, a responsive card grid, autosaving schedule and checklist editors, device controls, and history. Each ritual has an interactive preview isolated from account answers and action history. Steps support checkbox, short entry, time (HH:mm), date (YYYY-MM-DD), finite number, and single-answer multiple choice (2–12 distinct options). Non-checkbox responses retain their string representation for export and offline compatibility; submitted values are validated against the immutable step definition. All six types participate in explicit completion gating online and offline.
+
+### Settings organization and replay refinement
+
+Morning, Evening, and History and data share the top segmented navigation. Checklist steps use secondary shadcn Items with pointer drag handles and arrow-key reordering. This Mac combines device enable/pause controls and one Show ritual action for the selected ritual. Show ritual opens the native full-screen presentation, even after completion, with matching answers from today when available. Replay edits remain in memory and never create occurrences, responses, or escape events. Close preview and Escape dismiss the replay. Browser previews fill the viewport.

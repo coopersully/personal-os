@@ -485,6 +485,7 @@ describe("database schema contracts", () => {
       "0090_texting_inbound_work_binding",
       "0091_texting_provider_submission_evidence",
       "0092_finance_sms_answer_provenance",
+      "0093_ritual_tracking",
     ]);
   });
 

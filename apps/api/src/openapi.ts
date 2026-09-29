@@ -4,6 +4,9 @@ import {
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  ritualActionInputSchema,
+  ritualDefinitionInputSchema,
+  ritualResponseInputSchema,
   taskWorkspacePageSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -47,6 +50,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
   return {
     components: {
       schemas: {
+        RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
+        RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
+        RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
         TaskWorkspacePage: z.toJSONSchema(taskWorkspacePageSchema, { io: "input" }),
         FinanceMaintenanceHistoryPage: {
           properties: {
@@ -1023,6 +1029,83 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/assistant/attention/{domain}/{id}": {
         patch: { security, responses: { 200: { description: "Attention item updated" } } },
+      },
+      "/v1/rituals": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Ritual definitions" } },
+        },
+      },
+      "/v1/rituals/current": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Current reconciled ritual" } },
+        },
+      },
+      "/v1/rituals/history": {
+        get: {
+          security,
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
+            queryParameter("dateFrom", { type: "string", format: "date" }),
+            queryParameter("dateTo", { type: "string", format: "date" }),
+          ],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Paginated ritual history" } },
+        },
+      },
+      "/v1/rituals/export": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Private ritual export; interactive user only" } },
+        },
+      },
+      "/v1/rituals/{kind}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualDefinitionInput"),
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Revision-bound ritual configuration" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/responses/{stepId}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualResponseInput"),
+          parameters: [
+            { in: "path", name: "id", required: true, schema: { type: "string" } },
+            { in: "path", name: "stepId", required: true, schema: { type: "string" } },
+          ],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Save draft or submitted ritual response" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/actions": {
+        post: {
+          security,
+          requestBody: jsonRequest("RitualActionInput"),
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Record snooze/skip press, confirm or cancel" } },
+        },
+      },
+      "/v1/rituals/{kind}/data": {
+        delete: {
+          security,
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: {
+            204: { description: "Delete ritual and its history; interactive user only" },
+          },
+        },
       },
       "/v1/audit": { get: { security, responses: { 200: { description: "Activity history" } } } },
     },

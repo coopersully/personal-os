@@ -140,13 +140,35 @@ pub fn api_path(path: &str) -> Result<(), String> {
     let pathname = path.split('?').next().unwrap_or("");
     if !pathname.starts_with("/v1/")
         || path.contains(['\\', '#', '\r', '\n'])
-        || pathname.contains('%')
+        || (pathname.contains('%') && !encoded_ritual_response_path(pathname))
         || pathname.split('/').any(|p| p == ".." || p == ".")
     {
         return Err("Invalid API request path.".into());
     }
     Ok(())
 }
+fn encoded_ritual_response_path(path: &str) -> bool {
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 7
+        || parts[1..4] != ["v1", "rituals", "occurrences"]
+        || parts[5] != "responses"
+        || parts[4].is_empty()
+        || !parts[4]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return false;
+    }
+    crate::ritual::decode_segment(parts[6]).is_ok_and(|step| {
+        !step.is_empty()
+            && step != "."
+            && step != ".."
+            && !step
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\' | '%'))
+    })
+}
+
 pub struct DesktopState {
     pub settings: Mutex<DesktopSettings>,
     pub settings_path: PathBuf,
@@ -234,6 +256,14 @@ pub async fn desktop_save_settings(
     mut settings: DesktopSettings,
 ) -> Result<serde_json::Value, String> {
     settings.validate()?;
+    // Match mutation lock order: ritual fence, then settings/account state.
+    let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
+    let _ritual_guard = ritual_runtime.lock.lock().await;
+    let switching =
+        app.state::<DesktopState>().settings.lock().await.server_url != settings.server_url;
+    if switching {
+        crate::ritual::require_synced(&app).await?;
+    }
     let state = app.state::<DesktopState>();
     let mut current = state.settings.lock().await;
     let switched = current.server_url != settings.server_url;
@@ -269,6 +299,7 @@ pub async fn desktop_save_settings(
     if switched {
         state.invalidate();
         crate::native::call(&app, serde_json::json!({"op":"clear"})).await?;
+        crate::ritual::hide(&app).await;
         *state.account_id.lock().await = None;
         *state.pending_action.lock().await = None;
         *state.deferred_action.lock().await = None;
@@ -320,7 +351,7 @@ pub async fn desktop_save_settings(
         serde_json::json!({"serverChanged":switched}),
     )
     .map_err(|e| e.to_string())?;
-    desktop_settings(app).await
+    desktop_settings(app.clone()).await
 }
 #[tauri::command]
 pub async fn desktop_native_action(
@@ -387,6 +418,24 @@ mod tests {
         }
         assert!(api_path("/v1/tasks?completed=false").is_ok());
     }
+    #[test]
+    fn ritual_response_paths_allow_safe_encoded_ids_only() {
+        for id in ["wake%20time", "%E2%98%80", "plus%2Bsign"] {
+            assert!(api_path(&format!("/v1/rituals/occurrences/123-ab/responses/{id}")).is_ok());
+        }
+        for id in [
+            "%2e%2e", "%2e", "%2F", "%5C", "%00", "%0A", "%25", "%FF", "%",
+        ] {
+            assert!(
+                api_path(&format!("/v1/rituals/occurrences/123-ab/responses/{id}")).is_err(),
+                "accepted {id}"
+            );
+        }
+        assert!(api_path("/v1/tasks/%E2%98%80").is_err());
+        assert!(api_path("/v1/rituals/occurrences/%2e%2e/responses/okay").is_err());
+        assert!(api_path("/v1/rituals/occurrences/123/responses/x%20y/extra").is_err());
+    }
+
     #[test]
     fn preferences_reject_invalid_color_and_partial_quiet_hours() {
         let mut value = DesktopSettings::default();

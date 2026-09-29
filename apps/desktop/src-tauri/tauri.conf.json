@@ -10,6 +10,7 @@
     "frontendDist": "../../web/dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "security": {
       "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https:; font-src 'self' data:; img-src 'self' asset: data: https://lh3.googleusercontent.com https://i.pinimg.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
     },
@@ -34,7 +35,7 @@
   "bundle": {
     "active": true,
     "category": "Productivity",
-    "copyright": "Copyright © 2026 nohmi contributors",
+    "copyright": "Copyright \u00a9 2026 nohmi contributors",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -47,7 +48,8 @@
     "targets": "all",
     "macOS": {
       "minimumSystemVersion": "14.0"
-    }
+    },
+    "resources": ["sounds/*.wav"]
   },
   "plugins": {
     "deep-link": {

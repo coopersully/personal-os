@@ -84,6 +84,7 @@ final class NativeCompanion {
     return result
   }
   func clear(preservingColdResponses: Bool = false) {
+    RitualBackdrop.shared.hide()
     snapshot = nil
     pet.model.update(nil)
     notifications.clear(preservingColdResponses: preservingColdResponses)
@@ -100,6 +101,27 @@ final class NativeCompanion {
       return value
     }
     switch op {
+    case "ritual_bind_account":
+      let server = try string("serverUrl")
+      guard let token = try SessionKeychain.get(server) else { throw NativeError.message("Sign in to use rituals.") }
+      try RitualStore.write("session|\(server)", ritualSessionBinding(account: string("accountId"), token: token))
+      return ["ok": true]
+    case "ritual_restore_account":
+      let server = try string("serverUrl")
+      let account = try ritualBoundAccount(RitualStore.read("session|\(server)"), token: SessionKeychain.get(server))
+      return ["ok": true, "accountId": account as Any? ?? NSNull()]
+    case "ritual_store_delete": try RitualStore.delete(string("identity")); return ["ok":true]
+    case "ritual_store_read": return ["ok":true,"value":try RitualStore.read(string("identity"))]
+    case "ritual_store_write":
+      guard let value=object["value"] as? [String:Any] else {throw NativeError.message("Missing ritual storage")}
+      try RitualStore.write(string("identity"),value);return ["ok":true]
+    case "ritual_style_checklist":
+      RitualBackdrop.shared.styleChecklist(windowAddress: (object["windowAddress"] as? NSNumber)?.uint64Value, prepare: object["prepare"] as? Bool == true, animate: object["animate"] as? Bool == true, kind: object["kind"] as? String ?? "morning"); return ["ok":true]
+    case "ritual_fade_out":
+      return ["ok":true,"durationMs":RitualBackdrop.shared.fadeOut()]
+    case "ritual_backdrop":
+      if object["visible"] as? Bool == true {return ["ok":true,"visible":RitualBackdrop.shared.present(kind: object["kind"] as? String ?? "morning")]}
+      RitualBackdrop.shared.hide();return ["ok":true,"visible":false]
     case "wallpaper_prepare": return try WallpaperController.prepare(object)
     case "wallpaper_apply": return try WallpaperController.apply(object)
     case "configure":
@@ -191,6 +213,7 @@ final class NativeCompanion {
       return ["ok": true]
     case "keychain_delete":
       try SessionKeychain.delete(string("serverUrl"))
+      try RitualStore.delete("session|\(string("serverUrl"))")
       return ["ok": true]
     default: throw NativeError.message("Unknown native operation")
     }

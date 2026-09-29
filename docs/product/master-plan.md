@@ -1,8 +1,8 @@
 # nohmi — Complete Implementation Plan
 
-## Morning and night rituals delivery slice — 2026-09-29
+## Morning and evening rituals delivery slice — 2026-09-29
 
-The agreed first ritual slice combines daily start/shutdown, Tracking check-ins, and the macOS desktop overlay. Its specification and implementation plan are documented; implementation is not yet delivered. Repeated observations belong to the newer Tasks/Tracking design described in the specification, rather than recurring Task records.
+The agreed first ritual slice combines daily start/shutdown, Tracking check-ins, and the macOS desktop overlay. The source implementation includes autosaving configuration, six response types, explicit completion, account history, native presentation, and encrypted offline recovery. Hosted rollout and installed acceptance remain separate delivery gates. Repeated observations belong to the newer Tasks/Tracking design described in the specification, rather than recurring Task records.
 
 - [Ritual specification](../superpowers/specs/2026-09-29-morning-night-rituals-design.md)
 - [Ritual implementation plan](../superpowers/plans/2026-09-29-morning-night-rituals.md)

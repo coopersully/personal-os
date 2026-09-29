@@ -50,6 +50,17 @@ const stylesheetForDecorativeChecks = stylesheet
     /(\.setup-navigation__fade\s*\{\s*)background: linear-gradient\(to bottom, transparent, var\(--canvas\) 62%\);/g,
     "$1",
   );
+// Ritual previews mirror the explicitly approved native sunrise/moonlight backdrop.
+// Keep this exception restricted to those two selectors and their exact colors.
+const stylesheetForRitualChecks = stylesheetForDecorativeChecks
+  .replace(
+    /(\.ritual-browser-preview\s*\{\s*)background: radial-gradient\(ellipse at 50% 100%, rgb\(255 210 64 \/ 65%\), transparent 65%\), rgb\(38 79 133\);/g,
+    "$1",
+  )
+  .replace(
+    /(\.ritual-browser-preview\[data-ritual-kind="night"\]\s*\{\s*)background: radial-gradient\(ellipse at 50% 0%, rgb\(240 248 255 \/ 65%\), transparent 65%\), rgb\(9 18 48\);/g,
+    "$1",
+  );
 const stylesheetPatterns = [
   { name: "gradient", pattern: /(?:linear|radial|conic)-gradient\(/g },
   { name: "decorative shadow", pattern: /(?:box|text)-shadow\s*:/g },
@@ -116,8 +127,8 @@ for (const path of await sourceFiles(root)) {
 }
 
 for (const { name, pattern } of stylesheetPatterns) {
-  for (const match of stylesheetForDecorativeChecks.matchAll(pattern)) {
-    const line = stylesheetForDecorativeChecks.slice(0, match.index).split("\n").length;
+  for (const match of stylesheetForRitualChecks.matchAll(pattern)) {
+    const line = stylesheetForRitualChecks.slice(0, match.index).split("\n").length;
     violations.push(`apps/web/src/styles.css:${line} ${name}: ${match[0]}`);
   }
 }

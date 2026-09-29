@@ -112,6 +112,8 @@ const scopeLabels: Record<AccessScope, string> = {
     "Maintain Finances: sync providers, reconcile and categorize under approved rules, create durable runs; questions and approvals stay pending",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
+  "tracking:read": "Read private ritual responses",
+  "tracking:write": "Manage rituals and responses",
   "mail:read": "Read mail",
   "mail:write": "Manage mail",
   "reminders:read": "Read reminders",

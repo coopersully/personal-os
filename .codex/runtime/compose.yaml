@@ -23,6 +23,11 @@ x-app-common: &app-common
           - .codex/run/
           - '**/coverage/'
           - '**/dist/'
+          - '**/target/'
+          - apps/desktop/src-tauri/target/
+          - '**/.build/'
+          - apps/desktop/macos/.build/
+          - .superpowers/
           - '**/node_modules/'
           - '**/playwright-report/'
           - '**/test-results/'

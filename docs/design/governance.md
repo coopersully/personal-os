@@ -205,3 +205,10 @@ Docs/skill updates:
 Do not create a permanent repository document for every observation. The
 template is a reasoning and review tool; only durable rules graduate into the
 design book.
+
+## Ritual presentation exception
+
+Morning and evening ritual presentations use explicitly approved sky colors and sunrise/moonlight
+radial gradients to isolate the checklist from the desktop. Browser previews mirror those two
+backdrops; the theme check permits only their exact selectors and colors. Standard cards remain
+flat and shadow-free. This is a ritual presentation treatment, not a shared component default.

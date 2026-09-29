@@ -1,0 +1,38 @@
+import XCTest
+@testable import IloNative
+final class RitualTests: XCTestCase {
+ func testPresentationRequiresPendingUnlockedAndDue() {
+  let now = Date(timeIntervalSince1970: 1000)
+  let current:[String:Any] = ["status":"pending", "dueAt":"1970-01-01T00:15:00Z", "expiresAt":"1970-01-01T00:30:00Z"]
+  XCTAssertTrue(ritualShouldPresent(current, now:now, locked:false))
+  XCTAssertFalse(ritualShouldPresent(current, now:now, locked:true))
+  var snoozed=current; snoozed["snoozedUntil"]="1970-01-01T00:20:00Z"
+  XCTAssertFalse(ritualShouldPresent(snoozed,now:now,locked:false))
+  var done=current;done["status"]="completed"
+  XCTAssertFalse(ritualShouldPresent(done,now:now,locked:false))
+ }
+}
+extension RitualTests {
+ func testOfflineIdentityRequiresTheSameRetainedSession() {
+  let binding=ritualSessionBinding(account:"account-a",token:"session-a")
+  XCTAssertEqual(ritualBoundAccount(binding,token:"session-a"),"account-a")
+  XCTAssertNil(ritualBoundAccount(binding,token:"session-b"))
+  XCTAssertNil(ritualBoundAccount(binding,token:nil))
+ }
+}
+
+extension RitualTests {
+ func testBackdropConsumesPointerInputAndStaysBelowChecklist() {
+  let check = {
+   _ = NSApplication.shared
+   let panel = makeRitualBackdrop(frame: NSRect(x: 0, y: 0, width: 800, height: 600), kind: "morning", reduceMotion: true, reduceTransparency: false)
+   XCTAssertFalse(panel.ignoresMouseEvents)
+   XCTAssertLessThan(panel.level.rawValue, ritualChecklistLevel.rawValue)
+   let blocker = panel.contentView?.hitTest(NSPoint(x: 20, y: 20))
+   XCTAssertTrue(blocker is NSVisualEffectView)
+   XCTAssertTrue(blocker?.acceptsFirstMouse(for: nil) == true)
+   XCTAssertFalse(panel.canBecomeKey)
+  }
+  if Thread.isMainThread { check() } else { DispatchQueue.main.sync(execute: check) }
+ }
+}

@@ -198,3 +198,40 @@ Default implementation order is 1 → 2 → 3 → 4 → 5 → 6. Tasks 3–6 als
 - Task 6: [COO-68 — Verify and install the complete ritual experience](https://linear.app/coopersully/issue/COO-68/verify-and-install-the-complete-ritual-experience).
 
 All implementation issues start in Todo with High priority. Blocking relations follow the plan order; desktop settings and native work additionally depend on COO-51 — Harden macOS desktop connection and window reliability. Linear owns execution status; repository documents retain the design and build contract.
+
+## Implementation evidence — September 29, 2026
+
+The later instruction to fully implement authorized execution of this plan. Tasks 1–5 now have
+source implementations in the Tracking domain/API, account settings, and native desktop process.
+The domain schedule is shared in `packages/domain/src/ritual.ts`; transactions and actions remain
+in one `ritual-service.ts` rather than split files, keeping account locking and reconciliation in
+one place. Migration `0093_ritual_tracking.sql` adds the six account-owned storage tables.
+
+Verification completed so far:
+
+- Domain schedule/DST, PostgreSQL lifecycle, authorization, typed client, shared checklist,
+  settings and privacy regression checks pass. Native suites pass 30 Rust and 32 Swift tests;
+  four provisioning tests and WidgetKit compilation also pass.
+- Desktop/mobile browser ritual acceptance passes for opt-in defaults, ordered step persistence,
+  account history access and deletion. API integration covers completion, drafts, missed versus
+  skipped history, replay, account isolation, rescheduling, snooze count/cancellation, and deletion
+  of cached private responses.
+- A separate `nohmi Ritual QA` app connected only to local fixtures exercised the actual native
+  backdrop/checklist, checkbox progress, text submission, completion dismissal, third-snooze
+  confirmation with count 2, cancellation, and reopening a snoozed ritual.
+- Offline acceptance stopped the local API, saved a checkbox and journal draft, quit and relaunched
+  the app, and verified automatic recovery of both. Submitting the journal completed the ritual
+  offline. After reconnecting, account history showed the night occurrence completed.
+- Both the separate QA bundle and the normal `app.personal-os.desktop` debug bundle build.
+  The normal bundle remains in the worktree; `/Applications/nohmi.app` has not been replaced.
+
+Independent review findings were resolved: conflicting offline writes no longer block subsequent
+sync, same-day schedule edits preserve the open occurrence, deletion clears private replay copies,
+account changes destroy the private webview, and offline counts age per ritual. Additional native
+acceptance fixed manual reopening during confirmation and credential-bound offline restart.
+
+`pnpm verify` is still the final shared gate. One full run encountered unrelated finance timeouts;
+those two files passed a focused 26-test rerun. The full check is rerunning with the repository's
+existing CI timeout configuration. Do not interpret source/native acceptance as deployed status.
+Hosted rollout, replacement of the installed app, and physical multi-display/Spaces/lock-screen/
+VoiceOver acceptance remain open under COO-68 — Verify and install the complete ritual experience.

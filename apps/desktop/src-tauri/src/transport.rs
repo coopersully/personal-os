@@ -51,6 +51,15 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
     {
         return Err("Request is too large.".into());
     }
+    let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
+    // Only logout takes this fence; ritual requests already hold it upstream.
+    let _ritual_guard = if pathname == "/v1/auth/logout" && request.method == "POST" {
+        let guard = ritual_runtime.lock.lock().await;
+        crate::ritual::require_synced(app).await?;
+        Some(guard)
+    } else {
+        None
+    };
     let state = app.state::<DesktopState>();
     let settings = state.settings.lock().await;
     if request.server_url != settings.server_url {
@@ -68,8 +77,16 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
         crate::native::call(app, json!({"op":"keychain_get","serverUrl":origin})).await?;
     let token = credential["value"].as_str().map(str::to_owned);
     if pathname == "/v1/auth/logout" && request.method == "POST" {
+        if let Some(account) = state.account_id.lock().await.clone() {
+            crate::native::call(
+                app,
+                json!({"op":"ritual_store_delete","identity":format!("{origin}|{account}")}),
+            )
+            .await?;
+        }
         crate::native::call(app, json!({"op":"keychain_delete","serverUrl":origin})).await?;
         crate::native::call(app, json!({"op":"clear"})).await?;
+        crate::ritual::hide(app).await;
         *state.account_id.lock().await = None;
         *state.pending_action.lock().await = None;
         *state.deferred_action.lock().await = None;
@@ -116,6 +133,7 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
     if response.status == 401 && token.is_some() {
         crate::native::call(app, json!({"op":"keychain_delete","serverUrl":origin})).await?;
         crate::native::call(app, json!({"op":"clear"})).await?;
+        crate::ritual::hide(app).await;
         *state.account_id.lock().await = None;
         *state.pending_action.lock().await = None;
         *state.deferred_action.lock().await = None;
@@ -192,8 +210,14 @@ async fn activate_account(
         .is_some_and(|previous| previous != account)
     {
         crate::native::call(app, json!({"op":"clear"})).await?;
+        crate::ritual::hide(app).await;
     }
     crate::native::call(app, json!({"op":"configure","settings":next})).await?;
+    crate::native::call(
+        app,
+        json!({"op":"ritual_bind_account","serverUrl":next.server_url,"accountId":account}),
+    )
+    .await?;
     *settings = next;
     *state.account_id.lock().await = Some(account.to_string());
     let _ = app.emit("desktop-settings-changed", json!({"serverChanged":false}));

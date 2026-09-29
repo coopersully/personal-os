@@ -37,6 +37,7 @@ import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
 import { createMailStewardshipApiClient } from "./features/mail-stewardship.js";
 import { createReminderApiClient } from "./features/reminders.js";
+import { createRitualsApiClient } from "./features/rituals.js";
 import { createTaskWorkspaceApiClient } from "./features/task-workspace.js";
 import { createTaskApiClient } from "./features/tasks.js";
 import { createTextingApiClient } from "./features/texting.js";
@@ -202,6 +203,7 @@ export function createApiClient(options: ClientOptions) {
     ...createFinanceApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
+    ...createRitualsApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createMailStewardshipApiClient(request),
     ...createReminderApiClient(request, toQuery),

@@ -78,6 +78,7 @@ import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
+import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
@@ -86,6 +87,7 @@ import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
+import { registerRitualRoutes } from "./routes/rituals.js";
 import {
   requestMetadata as metadata,
   parseBody,
@@ -1029,6 +1031,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/mail/*", authenticate);
   app.use("/v1/goals/*", authenticate);
   app.use("/v1/goals", authenticate);
+  app.use("/v1/rituals", authenticate);
+  app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
   app.use("/v1/motives", authenticate);
   app.use("/v1/finances/*", authenticate);
@@ -1307,6 +1311,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
+  registerRitualRoutes({
+    app,
+    rituals: createRitualService({ db: dependencies.db, now }),
+    mutationContext,
+  });
 
   registerFinanceRoutes({
     actions: financeActions,
@@ -1548,6 +1557,8 @@ const oauthScopeLabels: Record<string, string> = {
     "Maintain Finances: create a durable Finance maintenance run that can use provider synchronization and rule-approved categorization and reconciliation; questions and approvals stay pending rather than guessed.",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
+  "tracking:read": "Read private ritual responses",
+  "tracking:write": "Manage rituals and responses",
   "mail:read": "Read connected mail",
   "mail:write": "Manage mail and approved Mail rules",
   "reminders:read": "Read reminders",

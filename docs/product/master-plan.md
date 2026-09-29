@@ -1,5 +1,15 @@
 # ilo — Complete Implementation Plan
 
+## Morning and night rituals delivery slice — 2026-09-29
+
+The agreed first ritual slice combines daily start/shutdown, Tracking check-ins, and the macOS desktop overlay. Its specification and implementation plan are documented; implementation is not yet delivered. Repeated observations belong to the newer Tasks/Tracking design described in the specification, rather than recurring Task records.
+
+- [Ritual specification](../superpowers/specs/2026-09-29-morning-night-rituals-design.md)
+- [Ritual implementation plan](../superpowers/plans/2026-09-29-morning-night-rituals.md)
+- [COO-62 — Deliver morning and night desktop rituals](https://linear.app/coopersully/issue/COO-62/deliver-morning-and-night-desktop-rituals)
+
+The linked plan records the desktop foundation dependency, six implementation units, and the hosted API plus installed-app acceptance required for completion. Linear owns current execution status.
+
 - Status: Proposed execution plan
 - Date: 2026-07-18
 - Companion: [Master Product & Experience Design](./master-design.md)

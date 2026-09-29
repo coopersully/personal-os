@@ -184,6 +184,11 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
         }
         if request.method != "GET" {
             state.refresh.notify_one();
+            if pathname == "/v1/rituals" || pathname.starts_with("/v1/rituals/") {
+                app.state::<crate::ritual::RitualRuntime>()
+                    .refresh
+                    .notify_one();
+            }
         }
     }
     Ok(response)

@@ -392,6 +392,26 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
             revision: changed.revision,
             data: changed,
           });
+          const previous = defs.find((d) => d.id === changed.id)!;
+          await tx.insert(auditEvents).values(
+            auditValues({
+              ...context,
+              action: "ritual.definition_zone_changed",
+              entityType: "ritual",
+              entityId: changed.id,
+              before: {
+                revision: previous.revision,
+                timeZone: previous.timeZone,
+                enabledAt: previous.enabledAt,
+              },
+              after: {
+                revision: changed.revision,
+                timeZone: changed.timeZone,
+                enabledAt: changed.enabledAt,
+                requestId,
+              },
+            }),
+          );
         }
         if ((scheduleChanged || zoneChanges.length) && open?.status === "pending") {
           const updated = [
@@ -406,9 +426,20 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
               window.scheduledLocalDate !== open.scheduledLocalDate,
           );
           if (next && next.dueAt !== open.expiresAt) {
+            const beforeExpiry = { revision: open.revision, expiresAt: open.expiresAt };
             open.expiresAt = next.dueAt;
             open.revision++;
             await persist(tx, open, context.principal.userId);
+            await tx.insert(auditEvents).values(
+              auditValues({
+                ...context,
+                action: "ritual.occurrence_expiry_changed",
+                entityType: "ritual_occurrence",
+                entityId: open.id,
+                before: beforeExpiry,
+                after: { revision: open.revision, expiresAt: open.expiresAt, requestId },
+              }),
+            );
           }
         }
         await reconcile(tx, context.principal.userId);

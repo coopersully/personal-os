@@ -984,6 +984,39 @@ describe.sequential("ritual account lifecycle", () => {
     expect(preserved.timeZone).toBe("America/New_York");
     expect(preserved.definition.timeZone).toBe("America/New_York");
     expect(preserved.expiresAt).toBe("2026-11-05T21:00:00.000Z");
+    const audit = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.userId, userId));
+    const cascade = audit.filter((entry) => entry.after?.requestId === input.requestId);
+    expect(cascade).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ritual.definition_zone_changed",
+          entityId: evening.id,
+          before: {
+            revision: evening.revision,
+            timeZone: evening.timeZone,
+            enabledAt: evening.enabledAt,
+          },
+          after: expect.objectContaining({
+            revision: evening.revision + 1,
+            timeZone: "Europe/London",
+          }),
+        }),
+        expect.objectContaining({
+          action: "ritual.occurrence_expiry_changed",
+          entityId: open.id,
+          before: { revision: open.revision, expiresAt: open.expiresAt },
+          after: expect.objectContaining({
+            revision: preserved.revision,
+            expiresAt: preserved.expiresAt,
+          }),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(cascade)).not.toContain('"steps"');
+    expect(JSON.stringify(cascade)).not.toContain('"responses"');
     await service.saveDefinition("morning", input, context());
     expect(await service.list(context())).toEqual(updated);
     await expect(

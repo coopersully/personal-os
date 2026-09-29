@@ -162,8 +162,8 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         (a) =>
           a.kind === "snooze_confirmed" &&
           a.outcome === "applied" &&
-          Date.parse(a.recordedAt) >= start &&
-          Date.parse(a.recordedAt) <= end,
+          Math.min(Date.parse(a.observedAt), Date.parse(a.recordedAt)) >= start &&
+          Math.min(Date.parse(a.observedAt), Date.parse(a.recordedAt)) <= end,
       ).length;
   }
   async function previous<T>(

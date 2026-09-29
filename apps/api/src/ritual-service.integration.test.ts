@@ -613,4 +613,88 @@ describe.sequential("ritual account lifecycle", () => {
       expect(receipt).not.toHaveProperty("responses");
     }
   });
+  it("replays definition receipts from immutable versions and answer receipts with fresh state", async () => {
+    const definition = (await service.list(context()))[0]!;
+    const input = {
+      ...definition,
+      ...mutation(definition.revision),
+      title: "Original receipt title",
+      steps: [{ id: "receipt", label: "Receipt", kind: "checkbox" as const }],
+    };
+    const saved = await service.saveDefinition(definition.kind, input, context());
+    await service.saveDefinition(
+      definition.kind,
+      { ...saved, ...mutation(saved.revision), title: "Latest title" },
+      context(),
+    );
+    expect(await service.saveDefinition(definition.kind, input, context())).toEqual(saved);
+    expect((await service.list(context())).find((d) => d.id === definition.id)?.title).toBe(
+      "Latest title",
+    );
+    clock = new Date(clock.getTime() + 86400000);
+    const current = (await service.current(context())).current!;
+    const answer = { ...mutation(current.revision), value: true, submitted: true };
+    const answered = await service.saveResponse(current.id, "receipt", answer, context());
+    const corrected = await service.saveResponse(
+      current.id,
+      "receipt",
+      { ...mutation(answered.current!.revision), value: false, submitted: false },
+      context(),
+    );
+    const replay = await service.saveResponse(current.id, "receipt", answer, context());
+    expect(replay.current).toEqual(corrected.current);
+    expect(replay.current?.responses).toHaveLength(2);
+    expect(replay.current?.responses.at(-1)?.value).toBe(false);
+  });
+  it("ages accepted delayed snoozes from observation rather than replay time", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Delayed",
+        email: "delayed-ritual@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    const ownerContext = {
+      ...context(),
+      principal: { ...context().principal, userId: owner!.id, actorId: owner!.id },
+    };
+    clock = new Date("2026-11-01T12:00:00Z");
+    await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        enabled: true,
+        title: "Morning",
+        time: "06:00",
+        timeZone: "UTC",
+        steps: [{ id: "one", label: "One", kind: "checkbox" }],
+      },
+      ownerContext,
+    );
+    let state = await service.current(ownerContext);
+    for (const observedAt of ["2026-11-01T08:00:00Z", "2026-11-01T08:20:00Z"]) {
+      const result = await service.act(
+        state.current!.id,
+        { ...mutation(state.current!.revision), observedAt, kind: "snooze" },
+        ownerContext,
+      );
+      expect(result.outcome).toBe("applied");
+      state = result.state;
+      clock = new Date(clock.getTime() + 60000);
+    }
+    clock = new Date("2026-11-04T09:00:00Z");
+    state = await service.current(ownerContext);
+    expect(state.snoozeCount).toBe(0);
+    expect(
+      (
+        await service.act(
+          state.current!.id,
+          { ...mutation(state.current!.revision), kind: "snooze" },
+          ownerContext,
+        )
+      ).outcome,
+    ).toBe("applied");
+  });
 });

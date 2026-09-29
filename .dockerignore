@@ -17,3 +17,4 @@ infra/terraform.tfvars
 
 **/.build
 .superpowers
+.context

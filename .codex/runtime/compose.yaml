@@ -13,31 +13,31 @@ x-app-common: &app-common
     app.ilo.runtime.root: ${ILO_RUNTIME_ROOT:?}
   develop: &app-develop
     watch:
+      # Native build trees are outside every sync root, including directory events.
       - action: sync
-        path: ../..
-        target: /workspace
-        ignore:
-          - .env
-          - .env.codex.local
-          - .git/
-          - .codex/run/
-          - '**/coverage/'
-          - '**/dist/'
-          - '**/target/'
-          - apps/desktop/src-tauri/target/
-          - apps/desktop/src-tauri/target/**
-          - '**/.build/'
-          - apps/desktop/macos/.build/
-          - apps/desktop/macos/.build/**
-          - .superpowers/
-          - .superpowers/**
-          - .context/**
-          - '**/node_modules/'
-          - '**/playwright-report/'
-          - '**/test-results/'
-          - package.json
-          - pnpm-lock.yaml
-          - pnpm-workspace.yaml
+        path: ../../apps/api
+        target: /workspace/apps/api
+        ignore: &source-ignore
+          - '**/node_modules'
+          - '**/dist'
+          - '**/coverage'
+          - '**/playwright-report'
+          - '**/test-results'
+      - action: sync
+        path: ../../apps/web
+        target: /workspace/apps/web
+        ignore: *source-ignore
+      - action: sync
+        path: ../../apps/mcp
+        target: /workspace/apps/mcp
+        ignore: *source-ignore
+      - action: sync
+        path: ../../packages
+        target: /workspace/packages
+        ignore: *source-ignore
+      - action: sync
+        path: ../../tsconfig.base.json
+        target: /workspace/tsconfig.base.json
       - action: rebuild
         path: ../../package.json
       - action: rebuild

@@ -808,4 +808,49 @@ describe.sequential("ritual account lifecycle", () => {
         ?.responses,
     ).toHaveLength(160);
   }, 20000);
+  it.each([
+    "disable",
+    "delete",
+  ])("does not resurrect yesterday's evening after %s of today's morning", async (operation) => {
+    for (const definition of await service.list(context()))
+      await service.deleteData(definition.kind, context());
+    clock = new Date("2026-11-14T17:00:00Z");
+    for (const kind of ["morning", "night"] as const) {
+      await service.saveDefinition(
+        kind,
+        {
+          ...mutation(0),
+          kind,
+          title: kind,
+          enabled: true,
+          time: kind === "morning" ? "06:00" : "21:00",
+          timeZone: "America/New_York",
+          steps: [{ id: "one", label: "One", kind: "checkbox" }],
+        },
+        context(),
+      );
+    }
+    const morning = (await service.list(context())).find(
+      (definition) => definition.kind === "morning",
+    )!;
+    expect((await service.current(context())).current?.definition.kind).toBe("morning");
+    if (operation === "disable") {
+      await service.saveDefinition(
+        "morning",
+        { ...morning, ...mutation(morning.revision), enabled: false },
+        context(),
+      );
+    } else await service.deleteData("morning", context());
+    expect((await service.current(context())).current).toBeNull();
+    expect(
+      (await service.history(context(), { limit: 100 })).items.some(
+        (entry) => entry.definition.kind === "night",
+      ),
+    ).toBe(false);
+    clock = new Date("2026-11-15T02:00:00Z");
+    const evening = (await service.current(context())).current!;
+    expect(evening.definition.kind).toBe("night");
+    expect(evening.scheduledLocalDate).toBe("2026-11-14");
+    expect(evening.status).toBe("pending");
+  });
 });

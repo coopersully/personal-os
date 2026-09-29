@@ -69,7 +69,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
   ): Promise<{ state: RitualState; occurrences: RitualOccurrence[] }> {
     const defs = await definitions(tx, userId);
     const instant = now().toISOString();
-    const window = currentRitualWindow(defs, instant);
+    let window = currentRitualWindow(defs, instant);
     const occurrences = (
       await tx
         .select()
@@ -84,6 +84,13 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           ),
         )
     ).map((r) => r.data);
+    // Configuration changes may remove the latest boundary from the schedule.
+    // Never reopen an earlier boundary after cancelling or settling a newer one.
+    if (
+      window &&
+      occurrences.some((occurrence) => Date.parse(occurrence.dueAt) > Date.parse(window!.dueAt))
+    )
+      window = null;
     for (const occurrence of occurrences) {
       const responseCount = occurrence.responses.length;
       compactResponses(occurrence);
@@ -665,6 +672,37 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         const defs = await definitions(tx, context.principal.userId);
         const def = defs.find((d) => d.id === kind || d.kind === kind);
         if (!def) throw new AppError("not_found", "Ritual was not found.");
+        const { occurrences } = await reconcile(tx, context.principal.userId);
+        const latest = occurrences.toSorted((a, b) => Date.parse(b.dueAt) - Date.parse(a.dueAt))[0];
+        if (latest?.ritualId === def.id) {
+          // Deletion removes its history too. Retain only a schedule cutoff on
+          // remaining definitions so an older boundary cannot be resurrected.
+          for (const remaining of defs.filter(
+            (entry) =>
+              entry.id !== def.id && Date.parse(entry.enabledAt) < Date.parse(latest.dueAt),
+          )) {
+            const next = {
+              ...remaining,
+              revision: remaining.revision + 1,
+              enabledAt: latest.dueAt,
+            };
+            await tx
+              .update(ritualDefinitions)
+              .set({ data: next })
+              .where(
+                and(
+                  eq(ritualDefinitions.userId, context.principal.userId),
+                  eq(ritualDefinitions.id, next.id),
+                ),
+              );
+            await tx.insert(ritualDefinitionRevisions).values({
+              userId: context.principal.userId,
+              ritualId: next.id,
+              revision: next.revision,
+              data: next,
+            });
+          }
+        }
         await tx
           .delete(ritualDefinitions)
           .where(

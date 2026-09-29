@@ -12,6 +12,8 @@ import {
 } from "@personal-os/database";
 import {
   currentRitualWindow,
+  localDateAt,
+  localDateTimeToUtc,
   type RitualAction,
   type RitualActionInput,
   type RitualActionResult,
@@ -317,7 +319,9 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         )
           throw new AppError("invalid_request", "Use the same time zone for both rituals.");
         const { requestId, deviceId: _device, expectedRevision: _revision, ...settings } = input;
-        let enabledAt = before?.enabledAt ?? new Date(now().getTime() - 36 * 3600000).toISOString();
+        let enabledAt =
+          before?.enabledAt ??
+          localDateTimeToUtc(localDateAt(now(), input.timeZone), 0, input.timeZone).toISOString();
         const scheduleChanged =
           before !== undefined &&
           (before.time !== input.time ||

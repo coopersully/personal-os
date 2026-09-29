@@ -60,3 +60,24 @@ extension RitualTests {
   if Thread.isMainThread { check() } else { DispatchQueue.main.sync(execute: check) }
  }
 }
+
+extension RitualTests {
+ func testRapidSessionHideCannotLeaveABackdropWithoutAChecklist() {
+  let check = {
+   _ = NSApplication.shared
+   let backdrop = RitualBackdrop.shared
+   let card = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 500), styleMask: [.borderless], backing: .buffered, defer: false)
+   let address = UInt64(UInt(bitPattern: Unmanaged.passUnretained(card).toOpaque()))
+   _ = backdrop.styleChecklist(windowAddress: address, prepare: true)
+   // Lock removes the native reference before Rust sees the notification. A
+   // rapid unlock must refuse the stale ready presentation and remove blockers.
+   backdrop.hide()
+   XCTAssertFalse(backdrop.present(kind: "morning"))
+   XCTAssertTrue(backdrop.windows.isEmpty)
+   XCTAssertFalse(card.isVisible)
+   XCTAssertFalse(backdrop.present(kind: "night"))
+   XCTAssertTrue(backdrop.windows.isEmpty)
+  }
+  if Thread.isMainThread { check() } else { DispatchQueue.main.sync(execute: check) }
+ }
+}

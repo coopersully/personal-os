@@ -853,4 +853,39 @@ describe.sequential("ritual account lifecycle", () => {
     expect(evening.scheduledLocalDate).toBe("2026-11-14");
     expect(evening.status).toBe("pending");
   });
+  it.each([
+    { kind: "morning" as const, instant: "2026-11-10T10:00:00Z", time: "06:00", due: false },
+    { kind: "night" as const, instant: "2026-11-10T17:00:00Z", time: "21:00", due: false },
+    { kind: "morning" as const, instant: "2026-11-10T17:00:00Z", time: "06:00", due: true },
+  ])("initial $kind enablement at $instant never backfills yesterday", async ({
+    kind,
+    instant,
+    time,
+    due,
+  }) => {
+    for (const definition of await service.list(context()))
+      await service.deleteData(definition.kind, context());
+    clock = new Date(instant);
+    await service.saveDefinition(
+      kind,
+      {
+        ...mutation(0),
+        kind,
+        title: kind,
+        enabled: true,
+        time,
+        timeZone: "America/New_York",
+        steps: [{ id: "one", label: "One", kind: "checkbox" }],
+      },
+      context(),
+    );
+    const state = await service.current(context());
+    if (due) expect(state.current?.scheduledLocalDate).toBe("2026-11-10");
+    else expect(state.current).toBeNull();
+    expect(
+      (await service.history(context(), { limit: 100 })).items.every(
+        (occurrence) => occurrence.scheduledLocalDate >= "2026-11-10",
+      ),
+    ).toBe(true);
+  });
 });

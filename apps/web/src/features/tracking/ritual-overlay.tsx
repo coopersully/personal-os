@@ -113,6 +113,9 @@ export function RitualChecklist({
     unavailable?: boolean | undefined;
   } | null>(null);
   const [texts, setTexts] = useState<Record<string, string>>({});
+  const failedDrafts = useRef<
+    Record<string, { value: string | boolean; occurrenceId: string; revision: number }>
+  >({});
   const stateRef = useRef(state);
   stateRef.current = state;
   useEffect(() => {
@@ -135,8 +138,11 @@ export function RitualChecklist({
   async function respond(stepId: string, value: string | boolean, submitted: boolean) {
     setBusy(true);
     setError("");
+    const attempt = input();
+    const occurrenceId = stateRef.current.current!.id;
     try {
-      const next = await saveResponse(stepId, { ...input(), value, submitted });
+      const next = await saveResponse(stepId, { ...attempt, value, submitted });
+      delete failedDrafts.current[stepId];
       setState(next);
       const accepted = next.current && latestRitualResponses(next.current)[stepId];
       if (accepted?.value === value && accepted.submitted === submitted) {
@@ -148,6 +154,7 @@ export function RitualChecklist({
         });
       }
     } catch (e) {
+      failedDrafts.current[stepId] = { value, occurrenceId, revision: attempt.expectedRevision };
       setError(errorMessage(e));
     } finally {
       setBusy(false);
@@ -193,7 +200,17 @@ export function RitualChecklist({
     const current = occurrence;
     if (busy || !current || current.status !== "pending") return;
     const answers = latestRitualResponses(current);
-    const draft = Object.entries(texts).find(([id, value]) => value !== answers[id]?.value);
+    const draft = Object.entries(texts).find(([id, value]) => {
+      const failed = failedDrafts.current[id];
+      return (
+        value !== answers[id]?.value &&
+        !(
+          failed?.value === value &&
+          failed.occurrenceId === current.id &&
+          failed.revision === current.revision
+        )
+      );
+    });
     if (!draft) return;
     const timer = setTimeout(
       () =>

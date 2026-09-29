@@ -221,3 +221,28 @@ it("keeps newer typing while an older answer finishes saving", async () => {
   );
   expect(screen.getByLabelText("Journal")).toHaveValue("Second");
 });
+
+it("does not retry a failed draft at the same revision, but resumes after a newer authoritative state", async () => {
+  const response = vi.fn().mockRejectedValue(new Error("Revision conflict"));
+  const view = render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "Unsaved answer" } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Revision conflict");
+  view.rerender(
+    <RitualChecklist state={structuredClone(state)} saveResponse={response} act={vi.fn()} />,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  expect(response).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText("Journal")).toHaveValue("Unsaved answer");
+  const refreshed = { ...state, current: { ...state.current!, revision: 2 } } as RitualState;
+  response.mockImplementation(async (stepId, input) => ({
+    ...refreshed,
+    current: { ...refreshed.current!, revision: 3, responses: [{ ...input, stepId }] },
+  }));
+  view.rerender(<RitualChecklist state={refreshed} saveResponse={response} act={vi.fn()} />);
+  await waitFor(() => expect(response).toHaveBeenCalledTimes(2));
+  expect(response).toHaveBeenLastCalledWith(
+    "journal",
+    expect.objectContaining({ value: "Unsaved answer", expectedRevision: 2 }),
+  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Snooze" })).toBeEnabled());
+});

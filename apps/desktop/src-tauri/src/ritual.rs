@@ -191,15 +191,18 @@ async fn animate_completion(app: &tauri::AppHandle) {
         tokio::time::sleep(std::time::Duration::from_millis(duration)).await;
     }
 }
+async fn reset_presentation(runtime: &RitualRuntime) {
+    *runtime.ready.lock().await = None;
+    *runtime.presentation.lock().await = None;
+    *runtime.preview.lock().await = None;
+    *runtime.shown.lock().await = None;
+}
 pub async fn hide(app: &tauri::AppHandle) {
-    *app.state::<RitualRuntime>().ready.lock().await = None;
-    *app.state::<RitualRuntime>().presentation.lock().await = None;
-    *app.state::<RitualRuntime>().preview.lock().await = None;
+    reset_presentation(&app.state::<RitualRuntime>()).await;
     if let Some(window) = app.get_webview_window("ritual") {
         let _ = window.destroy();
     }
     let _ = crate::native::call(app, json!({"op":"ritual_backdrop","visible":false})).await;
-    *app.state::<RitualRuntime>().shown.lock().await = None;
 }
 async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<(), String> {
     let mut preview = app.state::<RitualRuntime>().preview.lock().await.clone();
@@ -229,7 +232,7 @@ async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<()
         let native = crate::native::call(app, json!({"op":"ritual_backdrop","visible":true,"kind":state["current"]["definition"]["kind"]})).await?;
         if native["visible"] != true {
             hide(app).await;
-            return Ok(());
+            return Err("Ritual presentation unavailable; retrying with a new checklist".into());
         }
     }
     let id = state["current"]["id"]
@@ -566,11 +569,15 @@ pub async fn ritual_ready(
     #[cfg(not(target_os = "macos"))]
     let address = 0usize;
     window.set_focus().map_err(|e| e.to_string())?;
-    crate::native::call(
+    let styled = crate::native::call(
         &app,
         json!({"op":"ritual_style_checklist","windowAddress":address,"animate":true,"kind":kind}),
     )
     .await?;
+    if styled["prepared"] != true {
+        hide(&app).await;
+        return Err("Ritual checklist unavailable; retrying presentation".into());
+    }
     *runtime.ready.lock().await = Some(occurrence_id);
     Ok(())
 }
@@ -1020,6 +1027,21 @@ pub async fn run(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn failed_native_presentation_resets_stale_ready_window_for_recreation() {
+        let runtime = RitualRuntime::default();
+        *runtime.ready.lock().await = Some("today".into());
+        *runtime.shown.lock().await = Some("today".into());
+        *runtime.presentation.lock().await = Some(json!({"current":{"id":"today"}}));
+        reset_presentation(&runtime).await;
+        assert!(runtime.ready.lock().await.is_none());
+        assert!(runtime.shown.lock().await.is_none());
+        assert!(runtime.presentation.lock().await.is_none());
+        // The next scheduling pass can create and prepare the same occurrence.
+        *runtime.shown.lock().await = Some("today".into());
+        assert!(runtime.ready.lock().await.is_none());
+    }
+
     #[test]
     fn protocol_validation_accepts_real_states_and_rejects_partial_successes() {
         let definition = json!({"id":"morning","kind":"morning","title":"Morning","enabled":true,"revision":1,"time":"06:00","timeZone":"UTC","enabledAt":"2026-09-29T00:00:00Z","steps":[{"id":"one","label":"One","kind":"checkbox"}]});

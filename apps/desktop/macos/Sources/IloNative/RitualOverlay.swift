@@ -111,7 +111,7 @@ func makeRitualBackdrop(frame: NSRect, kind: String, reduceMotion: Bool, reduceT
 
 final class RitualBackdrop {
  static let shared = RitualBackdrop()
- private var windows: [NSWindow] = []
+ private(set) var windows: [NSWindow] = []
  private var appearance = ""
  private weak var checklist: NSWindow?
  private var introSound: NSSound?
@@ -134,7 +134,7 @@ final class RitualBackdrop {
   for name in [NSWindow.didBecomeKeyNotification, NSApplication.didBecomeActiveNotification] {
    observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
     guard let self, !self.windows.isEmpty else { return }
-    self.styleChecklist()
+    if !self.styleChecklist() { self.hide(); NativeCompanion.emit(["action": "ritual_refresh"]) }
    })
   }
  }
@@ -200,12 +200,12 @@ final class RitualBackdrop {
   return Int(duration * 1000)
  }
  func present(kind: String) -> Bool {
-  guard !locked, ritualSessionIsUnlocked(CGSessionCopyCurrentDictionary() as? [String: Any]) else { hide(); return false }
+  guard !locked, ritualSessionIsUnlocked(CGSessionCopyCurrentDictionary() as? [String: Any]), styleChecklist() else { hide(); return false }
   let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
   let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
   let next = "\(kind)|\(NSScreen.screens.map { String(describing: $0.frame) })|\(reduceMotion)|\(reduceTransparency)"
   if next == appearance && !windows.isEmpty {
-   styleChecklist()
+   guard styleChecklist() else { hide(); return false }
    return true
   }
   let currentChecklist = checklist
@@ -224,7 +224,7 @@ final class RitualBackdrop {
     }
    }
   }
-  styleChecklist()
+  guard styleChecklist() else { hide(); return false }
   return true
  }
 }

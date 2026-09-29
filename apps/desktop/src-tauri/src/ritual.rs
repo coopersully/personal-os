@@ -180,6 +180,13 @@ fn should_show(state: &Value, now: &str) -> bool {
         && current["expiresAt"].as_str().is_some_and(|v| v > now)
         && !current["snoozedUntil"].as_str().is_some_and(|v| v > now)
 }
+fn can_open_current(state: &Value, now: &str) -> bool {
+    let mut state = state.clone();
+    if let Some(current) = state.get_mut("current").and_then(Value::as_object_mut) {
+        current.insert("snoozedUntil".into(), Value::Null);
+    }
+    should_show(&state, now)
+}
 async fn animate_completion(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("ritual") {
         let _ = window.eval("document.documentElement.classList.add('ritual-exiting')");
@@ -619,7 +626,14 @@ pub async fn ritual_open(app: tauri::AppHandle) -> Result<(), String> {
     let _lock = runtime.lock.lock().await;
     let (server, account, generation) = identity(&app).await?;
     let mut data = read(&app, &identity_key(&server, &account)).await?;
-    let _ = sync(&app, &server, &account, generation, &mut data).await;
+    let synced = sync(&app, &server, &account, generation, &mut data).await;
+    if !can_open_current(&data["state"], &current_time()) {
+        synced?;
+        return Err(
+            "No current ritual is available. Open Ritual settings to configure or preview one."
+                .into(),
+        );
+    }
     present(&app, &data, true).await
 }
 #[tauri::command]
@@ -1449,6 +1463,17 @@ fn record_local_snooze(data: &mut Value, body: &Value) {
 #[cfg(test)]
 mod manual_reopen_tests {
     use super::*;
+    #[test]
+    fn opening_without_an_eligible_cache_falls_back_but_snoozed_cache_can_reopen() {
+        let now = "2026-09-29T12:00:00Z";
+        assert!(!can_open_current(&Value::Null, now));
+        assert!(!can_open_current(&json!({"current":null}), now));
+        let mut state = json!({"current":{"status":"pending","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-29T21:00:00Z","snoozedUntil":"2026-09-29T12:10:00Z"}});
+        assert!(can_open_current(&state, now));
+        assert!(!can_open_current(&state, "2026-09-29T22:00:00Z"));
+        state["current"]["status"] = json!("completed");
+        assert!(!can_open_current(&state, now));
+    }
     #[test]
     fn reopened_snooze_stays_visible_for_confirmation_drafts_and_cancellation() {
         assert!(!dismisses_action(

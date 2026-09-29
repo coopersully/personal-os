@@ -6,10 +6,12 @@ import { BrowserRouter } from "react-router-dom";
 import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
+import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
 import { notifyError } from "./lib/error-notification.js";
 import "./styles.css";
 
-document.documentElement.classList.toggle("desktop", "__TAURI_INTERNALS__" in window);
+const desktop = "__TAURI_INTERNALS__" in window;
+document.documentElement.classList.toggle("desktop", desktop);
 const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 document.documentElement.classList.toggle("dark", systemTheme === "dark");
 document.documentElement.style.colorScheme = systemTheme;
@@ -40,7 +42,11 @@ const queryClient = new QueryClient({
   }),
   queryCache: new QueryCache({ onError: notifyError }),
   defaultOptions: {
-    queries: { refetchOnWindowFocus: true, retry: false, staleTime: 15_000 },
+    queries: {
+      refetchOnWindowFocus: queryWindowFocusPolicy(desktop),
+      retry: false,
+      staleTime: 15_000,
+    },
   },
 });
 

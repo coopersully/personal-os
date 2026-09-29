@@ -128,6 +128,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   };
 
   await page.goto("/");
+  const initialViewportWidth = await page.evaluate(() => window.innerWidth);
   await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();
   await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Invite code").fill("E2E12345");

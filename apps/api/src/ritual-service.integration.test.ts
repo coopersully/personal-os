@@ -406,19 +406,6 @@ describe.sequential("ritual account lifecycle", () => {
         context(),
       ),
     ).rejects.toThrow(/different times/);
-    await expect(
-      service.saveDefinition(
-        "night",
-        {
-          ...input,
-          requestId: crypto.randomUUID(),
-          kind: "night",
-          time: "21:00",
-          timeZone: "Europe/London",
-        },
-        context(),
-      ),
-    ).rejects.toThrow(/same time zone/);
     const current = (await service.current(context())).current!;
     for (const [stepId, value, submitted] of [
       ["absent", true, true],
@@ -887,5 +874,126 @@ describe.sequential("ritual account lifecycle", () => {
         (occurrence) => occurrence.scheduledLocalDate >= "2026-11-10",
       ),
     ).toBe(true);
+  });
+  async function freshMorningForSnooze() {
+    for (const definition of await service.list(context()))
+      await service.deleteData(definition.kind, context());
+    clock = new Date("2026-11-10T17:00:00Z");
+    await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        title: "Morning",
+        enabled: true,
+        time: "06:00",
+        timeZone: "America/New_York",
+        steps: [{ id: "one", label: "One", kind: "checkbox" }],
+      },
+      context(),
+    );
+    return service.current(context());
+  }
+  it("counts backdated snoozes no earlier than their occurrence boundary", async () => {
+    let state = await freshMorningForSnooze();
+    for (let index = 0; index < 2; index++) {
+      const result = await service.act(
+        state.current!.id,
+        {
+          ...mutation(state.current!.revision),
+          kind: "snooze",
+          observedAt: "2000-01-01T00:00:00Z",
+        },
+        context(),
+      );
+      expect(result.outcome).toBe("applied");
+      state = result.state;
+    }
+    expect(state.snoozeCount).toBe(2);
+    expect(
+      (
+        await service.act(
+          state.current!.id,
+          {
+            ...mutation(state.current!.revision),
+            kind: "snooze",
+          },
+          context(),
+        )
+      ).outcome,
+    ).toBe("confirmation_required");
+  });
+  it.each([
+    "confirm_snooze",
+    "cancel_snooze",
+  ] as const)("rejects %s without a server challenge", async (kind) => {
+    let state = await freshMorningForSnooze();
+    state = (
+      await service.act(
+        state.current!.id,
+        {
+          ...mutation(0),
+          kind: "snooze",
+        },
+        context(),
+      )
+    ).state;
+    const result = await service.act(
+      state.current!.id,
+      {
+        ...mutation(state.current!.revision),
+        kind,
+        historyUnavailable: true,
+      },
+      context(),
+    );
+    expect(result.outcome).toBe("conflict");
+    expect(result.state.current!.actions.some((action) => action.outcome === "applied")).toBe(
+      false,
+    );
+  });
+  it("changes both enabled ritual zones atomically while preserving the open occurrence", async () => {
+    for (const d of await service.list(context())) await service.deleteData(d.kind, context());
+    clock = new Date("2026-11-05T12:00:00Z");
+    for (const kind of ["morning", "night"] as const) {
+      await service.saveDefinition(
+        kind,
+        {
+          ...mutation(0),
+          kind,
+          title: kind,
+          enabled: true,
+          time: kind === "morning" ? "06:00" : "21:00",
+          timeZone: "America/New_York",
+          steps: [{ id: "check", label: "Check", kind: "checkbox" }],
+        },
+        context(),
+      );
+    }
+    const open = (await service.current(context())).current!;
+    const definitions = await service.list(context());
+    const morning = definitions.find((d) => d.kind === "morning")!;
+    const evening = definitions.find((d) => d.kind === "night")!;
+    const input = { ...morning, ...mutation(morning.revision), timeZone: "Europe/London" };
+    await service.saveDefinition("morning", input, context());
+    const updated = await service.list(context());
+    expect(updated.map((d) => d.timeZone)).toEqual(["Europe/London", "Europe/London"]);
+    expect(updated.find((d) => d.kind === "night")?.revision).toBe(evening.revision + 1);
+    const preserved = (await service.current(context())).current!;
+    expect(preserved.id).toBe(open.id);
+    expect(preserved.timeZone).toBe("America/New_York");
+    expect(preserved.definition.timeZone).toBe("America/New_York");
+    expect(preserved.expiresAt).toBe("2026-11-05T21:00:00.000Z");
+    await service.saveDefinition("morning", input, context());
+    expect(await service.list(context())).toEqual(updated);
+    await expect(
+      service.saveDefinition(
+        "night",
+        { ...evening, ...mutation(evening.revision), title: "Stale edit" },
+        context(),
+      ),
+    ).rejects.toThrow(/changed/);
+    clock = new Date("2026-11-05T21:00:00Z");
+    expect((await service.current(context())).current?.timeZone).toBe("Europe/London");
   });
 });

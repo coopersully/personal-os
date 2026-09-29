@@ -102,3 +102,24 @@ it("offers signed-out recovery without rendering private answers or delivery sta
   );
   expect(invoke).toHaveBeenCalledWith("ritual_local", { discard: true });
 });
+
+it("shows quarantined-storage recovery while signed out even with an empty queue", async () => {
+  invoke.mockResolvedValue({ enabled: false, storageWarning: true, queue: [], localHistory: [] });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <RitualLocal recoveryOnly />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent("encrypted original was preserved");
+  expect(screen.queryByRole("button", { name: "Export pending changes" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Discard pending changes" }));
+  expect(screen.getByText(/Permanently discard the unreadable recovery copy/)).toBeInTheDocument();
+  expect(invoke).not.toHaveBeenCalledWith("ritual_local", { discard: true });
+  invoke.mockResolvedValue({ enabled: false, storageWarning: false, queue: [], localHistory: [] });
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Saved ritual data needs recovery")).not.toBeInTheDocument(),
+  );
+  expect(invoke).toHaveBeenCalledWith("ritual_local", { discard: true });
+});

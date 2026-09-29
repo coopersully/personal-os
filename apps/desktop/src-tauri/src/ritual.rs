@@ -64,7 +64,8 @@ pub async fn retain_recovery_account(
     Ok(())
 }
 fn has_recovery_evidence(data: &Value) -> bool {
-    !queue(data).is_empty()
+    data["storageWarning"] == true
+        || !queue(data).is_empty()
         || data["conflicts"]
             .as_array()
             .is_some_and(|items| !items.is_empty())
@@ -431,6 +432,9 @@ fn validate_api_result(method: &str, status: u16, value: &Value) -> Result<(), S
         Err("Invalid ritual server response".into())
     }
 }
+fn retryable_ritual_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500..=599)
+}
 fn queue(data: &Value) -> Vec<Value> {
     data["queue"].as_array().cloned().unwrap_or_default()
 }
@@ -495,7 +499,7 @@ async fn sync(
         {
             return Err("Account changed".into());
         }
-        if status >= 500 {
+        if retryable_ritual_status(status) {
             return Err("The ritual server is temporarily unavailable.".into());
         }
         if !(200..300).contains(&status) || result["outcome"] == "conflict" {
@@ -731,7 +735,7 @@ pub async fn ritual_mutate(
             {
                 return Err("Account changed".into());
             }
-            if status < 500 {
+            if !retryable_ritual_status(status) {
                 data["queue"] = json!([]);
                 if (200..300).contains(&status) {
                     if let Some(next) = automatic_snooze_confirmation(&item, &result) {
@@ -1057,6 +1061,16 @@ mod tests {
     }
 
     #[test]
+    fn temporary_http_failures_keep_mutations_retryable() {
+        for status in [408, 429, 500, 502, 503, 599] {
+            assert!(retryable_ritual_status(status));
+        }
+        for status in [200, 400, 401, 403, 404, 409, 422] {
+            assert!(!retryable_ritual_status(status));
+        }
+    }
+
+    #[test]
     fn protocol_validation_accepts_real_states_and_rejects_partial_successes() {
         let definition = json!({"id":"morning","kind":"morning","title":"Morning","enabled":true,"revision":1,"time":"06:00","timeZone":"UTC","enabledAt":"2026-09-29T00:00:00Z","steps":[{"id":"one","label":"One","kind":"checkbox"}]});
         let occurrence = json!({"id":"today","ritualId":"morning","definition":definition,"revision":1,"status":"pending","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-30T06:00:00Z","responses":[],"actions":[]});
@@ -1109,13 +1123,16 @@ mod tests {
     }
 
     #[test]
-    fn recovery_gate_keeps_both_queued_and_conflicted_evidence_until_discard() {
+    fn recovery_gate_keeps_queued_conflicted_and_quarantined_evidence_until_discard() {
         let mut recovered = json!({"queue":[{"body":{"value":"unsynced answer"}}],"conflicts":[]});
         assert!(has_recovery_evidence(&recovered));
         recovered["queue"] = json!([]);
         recovered["conflicts"] = json!([{"body":{"value":"rejected correction"}}]);
         assert!(has_recovery_evidence(&recovered));
         recovered["conflicts"] = json!([]);
+        recovered["storageWarning"] = json!(true);
+        assert!(has_recovery_evidence(&recovered));
+        recovered["storageWarning"] = json!(false);
         assert!(!has_recovery_evidence(&recovered));
         assert_eq!(
             identity_key("https://server.test", "previous-account"),
@@ -1198,6 +1215,11 @@ pub async fn ritual_local(app: tauri::AppHandle, discard: bool) -> Result<Value,
     let key = identity_key(&server, &account);
     let mut data = read(&app, &key).await?;
     if discard {
+        crate::native::call(&app, json!({"op":"ritual_store_delete","identity":key})).await?;
+        if let Some(object) = data.as_object_mut() {
+            object.remove("storageWarning");
+        }
+
         data["queue"] = json!([]);
         data["localHistory"] = json!([]);
         data["conflicts"] = json!([]);
@@ -1216,7 +1238,7 @@ pub async fn ritual_local(app: tauri::AppHandle, discard: bool) -> Result<Value,
             .load(Ordering::SeqCst),
     );
     Ok(
-        json!({"queue":evidence,"enabled":data["enabled"],"localHistory":data["localHistory"],"deliveryHealth":health,"recovery":recovery}),
+        json!({"queue":evidence,"enabled":data["enabled"],"localHistory":data["localHistory"],"deliveryHealth":health,"recovery":recovery,"storageWarning":data["storageWarning"] == true}),
     )
 }
 pub async fn require_synced(app: &tauri::AppHandle) -> Result<(), String> {

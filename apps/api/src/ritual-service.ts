@@ -177,13 +177,21 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       start = end - 72 * 3600000;
     return occurrences
       .filter((o) => o.ritualId === ritualId)
-      .flatMap((o) => o.actions)
+      .flatMap((o) =>
+        o.actions.map((action) => ({
+          action,
+          at: Math.min(
+            Math.max(Date.parse(action.observedAt), Date.parse(o.dueAt)),
+            Date.parse(action.recordedAt),
+          ),
+        })),
+      )
       .filter(
-        (a) =>
-          a.kind === "snooze_confirmed" &&
-          a.outcome === "applied" &&
-          Math.min(Date.parse(a.observedAt), Date.parse(a.recordedAt)) >= start &&
-          Math.min(Date.parse(a.observedAt), Date.parse(a.recordedAt)) <= end,
+        ({ action, at }) =>
+          action.kind === "snooze_confirmed" &&
+          action.outcome === "applied" &&
+          at >= start &&
+          at <= end,
       ).length;
   }
   async function previous<T>(
@@ -312,12 +320,14 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           defs.some((d) => d.kind !== kind && d.enabled && input.enabled && d.time === input.time)
         )
           throw new AppError("invalid_request", "Morning and evening need different times.");
-        if (
-          defs.some(
-            (d) => d.kind !== kind && d.enabled && input.enabled && d.timeZone !== input.timeZone,
-          )
-        )
-          throw new AppError("invalid_request", "Use the same time zone for both rituals.");
+        const zoneChanges = defs
+          .filter((d) => d.kind !== kind && d.timeZone !== input.timeZone)
+          .map((d) => ({
+            ...d,
+            timeZone: input.timeZone,
+            revision: d.revision + 1,
+            enabledAt: new Date(now().getTime() + 1).toISOString(),
+          }));
         const { requestId, deviceId: _device, expectedRevision: _revision, ...settings } = input;
         let enabledAt =
           before?.enabledAt ??
@@ -329,7 +339,9 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
             before.enabled !== input.enabled);
         // Reconcile the old schedule first so changing a time cannot rewrite the
         // occurrence already open, even when no client loaded it yet today.
-        const open = before ? (await reconcile(tx, context.principal.userId)).state.current : null;
+        const open = defs.length
+          ? (await reconcile(tx, context.principal.userId)).state.current
+          : null;
         if (before && !before.enabled && input.enabled) enabledAt = now().toISOString();
         if (before && (before.time !== input.time || before.timeZone !== input.timeZone))
           enabledAt = new Date(now().getTime() + 1).toISOString();
@@ -362,8 +374,32 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           revision: definition.revision,
           data: definition,
         });
-        if (scheduleChanged && open?.status === "pending") {
-          const updated = [...defs.filter((d) => d.id !== definition.id), definition];
+        // A ritual time zone is shared. Update the other definition in the same
+        // owner-locked transaction while retaining every existing occurrence.
+        for (const changed of zoneChanges) {
+          await tx
+            .update(ritualDefinitions)
+            .set({ data: changed })
+            .where(
+              and(
+                eq(ritualDefinitions.id, changed.id),
+                eq(ritualDefinitions.userId, context.principal.userId),
+              ),
+            );
+          await tx.insert(ritualDefinitionRevisions).values({
+            userId: context.principal.userId,
+            ritualId: changed.id,
+            revision: changed.revision,
+            data: changed,
+          });
+        }
+        if ((scheduleChanged || zoneChanges.length) && open?.status === "pending") {
+          const updated = [
+            ...defs
+              .filter((d) => d.id !== definition.id)
+              .map((d) => zoneChanges.find((changed) => changed.id === d.id) ?? d),
+            definition,
+          ];
           const next = upcomingRitualWindows(updated, now().toISOString()).find(
             (window) =>
               window.ritualId !== open.ritualId ||
@@ -524,7 +560,10 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
               ),
             ).toISOString();
             result = { outcome: "applied", state };
-          } else if (input.kind === "confirm_snooze" || input.kind === "cancel_snooze") {
+          } else if (
+            (input.kind === "confirm_snooze" || input.kind === "cancel_snooze") &&
+            input.challengeId
+          ) {
             const press = occurrence.actions.find(
               (a) =>
                 a.kind === "snooze_pressed" &&

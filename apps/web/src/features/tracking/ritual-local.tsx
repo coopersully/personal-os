@@ -11,6 +11,7 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
     queryKey: ["ritual-local"],
     queryFn: () =>
       invoke<{
+        storageWarning?: boolean;
         queue: unknown[];
         enabled: boolean;
         localHistory: unknown[];
@@ -21,6 +22,7 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
     refetchInterval: 10000,
   });
   async function discard() {
+    setError("");
     try {
       await invoke("ritual_local", { discard: true });
       setConfirm(false);
@@ -49,15 +51,25 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
   };
   const retryAt = health ? new Date(health.nextRetryAt) : null;
   const hasPending = Boolean(local.data?.queue?.length || local.data?.localHistory?.length);
-  if (recoveryOnly && !hasPending) return null;
+  const storageWarning = local.data?.storageWarning === true;
+  if (recoveryOnly && !hasPending && !storageWarning) return null;
   return (
     <div className="flex flex-col gap-2">
-      {recoveryOnly ? (
+      {storageWarning ? (
+        <Alert variant="warning">
+          <AlertTitle>Saved ritual data needs recovery</AlertTitle>
+          <AlertDescription>
+            This Mac could not read its saved ritual data. The encrypted original was preserved
+            separately. Discarding local data permanently removes that recovery copy.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {recoveryOnly && hasPending ? (
         <p>
           Unsynced ritual changes remain on this Mac from your previous session. Sign back into the
           same account to sync them, or export and discard them before switching accounts.
         </p>
-      ) : (
+      ) : !recoveryOnly ? (
         <p className="text-muted-foreground">
           Automatic rituals on this Mac:{" "}
           {local.isError
@@ -68,7 +80,7 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
                 ? "on"
                 : "off"}
         </p>
-      )}
+      ) : null}
       {!recoveryOnly && local.isError ? (
         <Alert variant="warning">
           <AlertTitle>Ritual status unavailable</AlertTitle>
@@ -95,20 +107,22 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
           </AlertDescription>
         </Alert>
       ) : null}
-      {local.data?.queue?.length || local.data?.localHistory?.length ? (
+      {hasPending || storageWarning ? (
         <>
           <p role="status">
             {local.data?.queue?.length ?? 0} ritual changes are waiting to sync or need review.
           </p>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={exportPending}>
-              Export pending changes
-            </Button>
+            {hasPending ? (
+              <Button variant="outline" onClick={exportPending}>
+                Export pending changes
+              </Button>
+            ) : null}
             <Button variant="ghost" onClick={() => setConfirm(true)}>
               Discard pending changes
             </Button>
           </div>
-          {!recoveryOnly ? (
+          {!recoveryOnly && hasPending ? (
             <details>
               <summary>Inspect pending changes</summary>
               <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">
@@ -121,7 +135,9 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
       {confirm ? (
         <div role="alert">
           <p>
-            Discard the unsynced changes on this Mac? Export them first if you want to keep a copy.
+            {storageWarning
+              ? "Permanently discard the unreadable recovery copy and any unsynced changes on this Mac?"
+              : "Discard the unsynced changes on this Mac? Export them first if you want to keep a copy."}
           </p>
           <Button variant="destructive" onClick={() => void discard()}>
             Discard changes

@@ -189,6 +189,7 @@ function RitualForm({
           cache.setQueryData<{ rituals: RitualDefinition[] }>(["rituals"], (old) => ({
             rituals: [...(old?.rituals ?? []).filter((item) => item.kind !== kind), result],
           }));
+          void cache.invalidateQueries({ queryKey: ["rituals"] });
         })
         .catch(async (e: unknown) => {
           setError(errorMessage(e));
@@ -299,6 +300,9 @@ function RitualForm({
                   value={draft.timeZone}
                   onChange={(e) => patch({ timeZone: e.target.value })}
                 />
+                <FieldDescription>
+                  Applies to both rituals from the next scheduled time
+                </FieldDescription>
               </Field>
             </FieldGroup>
           </CardContent>

@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import IloNative
 final class RitualTests: XCTestCase {
@@ -79,5 +80,63 @@ extension RitualTests {
    XCTAssertTrue(backdrop.windows.isEmpty)
   }
   if Thread.isMainThread { check() } else { DispatchQueue.main.sync(execute: check) }
+ }
+}
+
+extension RitualTests {
+ func testUnreadableRitualCiphertextIsQuarantinedWithoutCreatingAKey() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("identity.sealed")
+  let other = directory.appendingPathComponent("other.unreadable-" + UUID().uuidString + ".sealed")
+  try Data("other encrypted bytes".utf8).write(to: other)
+  let bytes = Data("original encrypted bytes".utf8)
+  try bytes.write(to: url)
+  var lookups = 0
+  let result = try RitualStore.readFile(url, identity: "identity", lookupKey: { lookups += 1; return nil })
+  XCTAssertEqual(lookups, 1)
+  XCTAssertEqual(result["storageWarning"] as? Bool, true)
+  XCTAssertEqual((result["queue"] as? [Any])?.count, 0)
+  XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+  let quarantines = try RitualStore.quarantinedFiles(url)
+  XCTAssertEqual(quarantines.count, 1)
+  XCTAssertEqual(try Data(contentsOf: quarantines[0]), bytes)
+  XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: quarantines[0].path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+  let subsequent = try RitualStore.readFile(url, identity: "identity", lookupKey: { XCTFail("Absent cache must not create/read keys"); return nil })
+  XCTAssertEqual(subsequent["storageWarning"] as? Bool, true)
+  try RitualStore.deleteFiles(url)
+  XCTAssertTrue(try RitualStore.quarantinedFiles(url).isEmpty)
+  XCTAssertTrue(FileManager.default.fileExists(atPath: other.path))
+  let cleared = try RitualStore.readFile(url, identity: "identity", lookupKey: { nil })
+  XCTAssertNil(cleared["storageWarning"])
+ }
+ func testCorruptCiphertextIsQuarantinedButLockedKeychainIsNot() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("identity.sealed")
+  let bytes = Data("corrupt ciphertext".utf8)
+  try bytes.write(to: url)
+  XCTAssertThrowsError(try RitualStore.readFile(url, identity: "identity", lookupKey: { throw NativeError.message("Keychain access denied") }))
+  XCTAssertEqual(try Data(contentsOf: url), bytes)
+  XCTAssertTrue(try RitualStore.quarantinedFiles(url).isEmpty)
+  let recovered = try RitualStore.readFile(url, identity: "identity", lookupKey: { SymmetricKey(size: .bits256) })
+  XCTAssertEqual(recovered["storageWarning"] as? Bool, true)
+  XCTAssertEqual(try RitualStore.quarantinedFiles(url).count, 1)
+ }
+ func testValidEncryptedRitualCacheRemainsReadable() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let url = directory.appendingPathComponent("identity.sealed")
+  let key = SymmetricKey(size: .bits256)
+  let plain = try JSONSerialization.data(withJSONObject: ["queue": [["answer": "private"]]])
+  let sealed = try AES.GCM.seal(plain, using: key, authenticating: Data("identity".utf8))
+  try XCTUnwrap(sealed.combined).write(to: url)
+  let restored = try RitualStore.readFile(url, identity: "identity", lookupKey: { key })
+  XCTAssertNil(restored["storageWarning"])
+  XCTAssertEqual((restored["queue"] as? [[String: String]])?.first?["answer"], "private")
+  XCTAssertTrue(try RitualStore.quarantinedFiles(url).isEmpty)
  }
 }

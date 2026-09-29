@@ -30,11 +30,20 @@ export function createRitualsApiClient(
       }),
     listRitualHistory: (
       cursor?: string,
-      filters: { kind?: string; dateFrom?: string; dateTo?: string } = {},
-    ) =>
-      request<{ items: RitualOccurrence[]; nextCursor: string | null }>(
-        `/v1/rituals/history${Object.keys(filters).length || cursor ? `?${new URLSearchParams({ ...filters, ...(cursor ? { cursor } : {}) }).toString()}` : ""}`,
-      ),
+      filters: {
+        kind?: string | undefined;
+        dateFrom?: string | undefined;
+        dateTo?: string | undefined;
+      } = {},
+    ) => {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries({ ...filters, cursor })) {
+        if (value !== undefined && value !== "") query.set(key, value);
+      }
+      return request<{ items: RitualOccurrence[]; nextCursor: string | null }>(
+        `/v1/rituals/history${query.size ? `?${query}` : ""}`,
+      );
+    },
     exportRitualData: () =>
       request<{ definitions: RitualDefinition[]; occurrences: RitualOccurrence[] }>(
         "/v1/rituals/export",

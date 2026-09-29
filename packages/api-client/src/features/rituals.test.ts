@@ -57,3 +57,12 @@ it("sends explicit completion and encoded responses through the transport", asyn
   await api.listRitualHistory(undefined, { kind: "night", dateFrom: "2026-09-29" });
   expect(request).toHaveBeenLastCalledWith("/v1/rituals/history?kind=night&dateFrom=2026-09-29");
 });
+
+it("omits absent and empty history filters", async () => {
+  const request = vi.fn().mockResolvedValue({});
+  const api = createRitualsApiClient(request);
+  await api.listRitualHistory(undefined, { kind: undefined, dateFrom: "", dateTo: undefined });
+  expect(request).toHaveBeenLastCalledWith("/v1/rituals/history");
+  await api.listRitualHistory("next", { kind: undefined, dateFrom: "2026-09-29" });
+  expect(request).toHaveBeenLastCalledWith("/v1/rituals/history?dateFrom=2026-09-29&cursor=next");
+});

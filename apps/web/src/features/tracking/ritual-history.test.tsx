@@ -25,6 +25,7 @@ const occurrence = {
   status: "completed",
   scheduledLocalDate: "2026-09-29",
   dueAt: "2026-09-29T10:00:00Z",
+  timeZone: "America/New_York",
   definition: {
     title: "Good morning",
     steps: [
@@ -83,6 +84,12 @@ it("filters, paginates and exports complete response and escape history", async 
   );
   mount(<RitualHistory />);
   expect(await screen.findByText(/Morning ritual · 2026-09-29 · completed/)).toBeInTheDocument();
+  expect(screen.getByText(/^Due /)).toHaveTextContent(
+    new Date(occurrence.dueAt).toLocaleString(undefined, {
+      timeZone: occurrence.timeZone,
+      timeZoneName: "short",
+    }),
+  );
   expect(screen.getByText(/Teeth: Done/)).toBeInTheDocument();
   expect(screen.getByText(/Teeth: Unchecked/)).toBeInTheDocument();
   expect(screen.getByText(/Private draft/)).toHaveTextContent("(draft)");
@@ -116,10 +123,14 @@ it("requires explicit deletion and keeps failure visible for retry", async () =>
   mocks.history.mockResolvedValue({ items: [], nextCursor: null });
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   expect(await screen.findByText("Your ritual history will appear here.")).toBeInTheDocument();
+  expect(screen.queryByText("Deletion unavailable")).not.toBeInTheDocument();
   expect(mocks.remove).toHaveBeenLastCalledWith("night");
   mocks.export.mockRejectedValueOnce(new Error("Export unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
   expect(await screen.findByText("Export unavailable")).toBeInTheDocument();
+  mocks.export.mockResolvedValue({ occurrences: [] });
+  fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
+  await waitFor(() => expect(screen.queryByText("Export unavailable")).not.toBeInTheDocument());
 });
 it("reports unavailable account history", async () => {
   mocks.history.mockRejectedValue(new Error("History unavailable"));

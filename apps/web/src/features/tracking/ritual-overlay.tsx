@@ -30,25 +30,38 @@ import { RitualPreviewChecklist } from "./ritual-preview.js";
 export function RitualOverlay() {
   const [state, setState] = useState<RitualState | null>(null);
   const [readyId, setReadyId] = useState<string | null>(null);
+  const [readinessError, setReadinessError] = useState("");
   const occurrenceId = state?.current?.id;
   useEffect(() => {
-    if (!occurrenceId) return;
+    setReadinessError("");
+    if (!occurrenceId || readyId === occurrenceId) return;
     let cancelled = false;
-    void (async () => {
-      await document.fonts.ready;
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      if (cancelled) return;
-      await ritualContentReady(occurrenceId);
-      if (!cancelled) setReadyId(occurrenceId);
-    })().catch((e) => {
-      if (!cancelled) setError(errorMessage(e));
-    });
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    async function prepare() {
+      try {
+        await document.fonts.ready;
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        if (cancelled) return;
+        await ritualContentReady(occurrenceId!);
+        if (!cancelled) {
+          setReadinessError("");
+          setReadyId(occurrenceId!);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setReadinessError(errorMessage(e));
+          retry = setTimeout(() => void prepare(), 1000);
+        }
+      }
+    }
+    void prepare();
     return () => {
       cancelled = true;
+      clearTimeout(retry);
     };
-  }, [occurrenceId]);
+  }, [occurrenceId, readyId]);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -74,23 +87,35 @@ export function RitualOverlay() {
     };
   }, []);
   return (
-    <main
-      className="ritual-surface"
-      data-ritual-kind={state?.current?.definition.kind}
-      data-ready={Boolean(occurrenceId && readyId === occurrenceId)}
-    >
-      {state?.preview ? (
-        <RitualPreviewChecklist initialState={state} onClose={() => void showRitualPreview(null)} />
-      ) : state ? (
-        <RitualChecklist
-          key={state.current?.id ?? "empty"}
-          state={state}
-          saveResponse={(stepId, input) => submitRitualResponse(state.current!.id, stepId, input)}
-          act={(input) => submitRitualAction(state.current!.id, input)}
-        />
+    <>
+      {readinessError || error ? (
+        <p
+          role="alert"
+          className="fixed inset-x-4 top-4 z-50 rounded-lg bg-background p-3 text-center"
+        >
+          {readinessError || error}
+        </p>
       ) : null}
-      {error ? <p role="alert">{error}</p> : null}
-    </main>
+      <main
+        className="ritual-surface"
+        data-ritual-kind={state?.current?.definition.kind}
+        data-ready={Boolean(occurrenceId && readyId === occurrenceId)}
+      >
+        {state?.preview ? (
+          <RitualPreviewChecklist
+            initialState={state}
+            onClose={() => void showRitualPreview(null)}
+          />
+        ) : state ? (
+          <RitualChecklist
+            key={state.current?.id ?? "empty"}
+            state={state}
+            saveResponse={(stepId, input) => submitRitualResponse(state.current!.id, stepId, input)}
+            act={(input) => submitRitualAction(state.current!.id, input)}
+          />
+        ) : null}
+      </main>
+    </>
   );
 }
 export function RitualChecklist({

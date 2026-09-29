@@ -24,6 +24,7 @@ export function RitualHistory() {
     getNextPageParam: (p) => p.nextCursor ?? undefined,
   });
   async function exportData() {
+    setError("");
     try {
       const data = await api.exportRitualData();
       const url = URL.createObjectURL(
@@ -40,6 +41,7 @@ export function RitualHistory() {
   }
   async function remove() {
     if (!deleting) return;
+    setError("");
     try {
       await api.deleteRitualData(deleting);
       setDeleting(null);
@@ -94,18 +96,31 @@ export function RitualHistory() {
               {o.scheduledLocalDate} · {o.status.replaceAll("_", " ")}
             </summary>
             <div className="flex flex-col gap-2 py-3">
-              <p>Due {new Date(o.dueAt).toLocaleString()}</p>
+              <p>
+                Due{" "}
+                {new Date(o.dueAt).toLocaleString(undefined, {
+                  timeZone: o.timeZone,
+                  timeZoneName: "short",
+                })}
+              </p>
               {o.responses.map((r) => (
                 <p key={r.id}>
                   {o.definition.steps.find((s) => s.id === r.stepId)?.label}:{" "}
                   {typeof r.value === "boolean" ? (r.value ? "Done" : "Unchecked") : r.value}{" "}
-                  {r.submitted ? "" : "(draft)"} · {new Date(r.recordedAt).toLocaleString()}
+                  {r.submitted ? "" : "(draft)"} ·{" "}
+                  {new Date(r.recordedAt).toLocaleString(undefined, {
+                    timeZone: o.timeZone,
+                    timeZoneName: "short",
+                  })}
                 </p>
               ))}
               {o.actions.map((a) => (
                 <p key={a.id}>
                   {a.kind.replaceAll("_", " ")} · {a.outcome} ·{" "}
-                  {new Date(a.recordedAt).toLocaleString()}
+                  {new Date(a.recordedAt).toLocaleString(undefined, {
+                    timeZone: o.timeZone,
+                    timeZoneName: "short",
+                  })}
                 </p>
               ))}
             </div>

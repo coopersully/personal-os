@@ -1,7 +1,7 @@
 # Morning and Evening Rituals — Product and Technical Specification
 
 Date: 2026-09-29
-Status: Product behavior agreed in chat; implementation specification ready for execution review. No feature code or deployment is included in this documentation change.
+Status: Product behavior agreed in chat and implemented in this change. Hosted rollout and installed-device acceptance remain tracked separately.
 
 ## 1. Outcome and scope
 
@@ -46,7 +46,7 @@ Each ritual has:
 
 Starter examples are offered for review: medication checkbox, teeth checkbox, journal short text. Do not assume a medication schedule or silently add medication to both rituals. Night starts from the user's chosen steps.
 
-Use the existing account planning time zone when present, otherwise propose the device zone at setup and save it explicitly. Show the zone beside the time fields. Travel does not silently reinterpret account history. Reject identical morning/night times when both are enabled.
+Use the existing account planning time zone when present, otherwise propose the device zone at setup and save it explicitly. Show the zone beside the time fields. Editing either ritual's zone updates both definitions atomically for future boundaries; existing occurrences retain their saved zone. History formats timestamps in that occurrence zone, so travel does not silently reinterpret it. Reject identical morning/night times when both are enabled.
 
 Configuration changes create a new revision. A pending occurrence keeps its step snapshot. Schedule edits apply to future occurrences; disabling a ritual immediately suppresses presentation and settles its current occurrence as cancelled_configuration, preserving responses. Re-enabling starts at the next scheduled boundary. Initial enablement can create the current eligible occurrence if its due time has passed; do not backfill earlier days.
 
@@ -121,12 +121,12 @@ PostgreSQL tables:
 Use owner-bound foreign keys, optimistic concurrency, idempotency, and append-only redacted audit evidence. Do not store responses in Task rows or generic audit payloads.
 
 API under /v1/rituals:
-- GET / and PUT /:id for definitions (PUT carries expected revision).
+- GET / and PUT /:kind for definitions (PUT carries expected revision).
 - GET /current for reconciliation and current state.
 - PUT /occurrences/:id/responses/:stepId for drafts/submitted values and corrections.
 - POST /occurrences/:id/actions for escape press/confirmation/cancel/skip.
 - GET /history with bounded cursor pagination and ritual/date filters.
-- GET /export and DELETE /:id/data for user data portability/deletion; deletion disables the ritual and removes its response/action history.
+- GET /export and DELETE /:kind/data for user data portability/deletion; deletion removes the definition and its response/action history.
 
 Every mutation includes requestId, expectedRevision where applicable, and deviceId; derive account identity from authentication, never a caller's owner field. State conflicts return a typed conflict with current state. Snooze decisions return applied, confirmation_required (count and challenge bound to occurrence/revision), or conflict. Enforce body/field limits.
 

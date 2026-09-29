@@ -2,7 +2,8 @@
 
 import type { RitualState } from "@personal-os/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { RitualChecklist } from "./ritual-overlay.js";
+import * as ritualBridge from "../desktop/ritual-bridge.js";
+import { RitualChecklist, RitualOverlay } from "./ritual-overlay.js";
 
 const state = {
   current: {
@@ -245,4 +246,41 @@ it("does not retry a failed draft at the same revision, but resumes after a newe
     expect.objectContaining({ value: "Unsaved answer", expectedRevision: 2 }),
   );
   await waitFor(() => expect(screen.getByRole("button", { name: "Snooze" })).toBeEnabled());
+});
+
+it("retries readiness while preserving its visible error across successful state polling", async () => {
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { ready: Promise.resolve() },
+  });
+  const read = vi.spyOn(ritualBridge, "readRitualState").mockResolvedValue(state);
+  let finish: () => void = () => {};
+  const ready = vi
+    .spyOn(ritualBridge, "ritualContentReady")
+    .mockRejectedValueOnce(new Error("Unable to present ritual"))
+    .mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    callback(0);
+    return 1;
+  });
+  const view = render(<RitualOverlay />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Unable to present ritual");
+  expect(screen.getByRole("alert").closest("main")).toBeNull();
+  await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 });
+  await waitFor(() => expect(ready).toHaveBeenCalledTimes(2), { timeout: 2000 });
+  expect(screen.getByRole("alert")).toHaveTextContent("Unable to present ritual");
+  finish();
+  await waitFor(() => expect(screen.getByRole("main")).toHaveAttribute("data-ready", "true"));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  expect(ready).toHaveBeenCalledTimes(2);
+  view.unmount();
+  read.mockRestore();
+  ready.mockRestore();
+  frame.mockRestore();
 });

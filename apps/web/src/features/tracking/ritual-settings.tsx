@@ -77,7 +77,7 @@ export function RitualSettings({ timeZone }: { timeZone: string }) {
           <RitualForm
             kind={kind}
             definition={query.data.rituals.find((d) => d.kind === kind)}
-            timeZone={timeZone}
+            timeZone={query.data.rituals[0]?.timeZone ?? timeZone}
           />
         </div>
       ))}
@@ -159,6 +159,14 @@ function RitualForm({
       revision.current = definition.revision;
       saved.current = JSON.stringify(remote);
       setDraft(rebased);
+    }
+    if (!busy && !definition) {
+      const base = JSON.parse(saved.current) as typeof draft;
+      if (base.timeZone !== timeZone) {
+        const local = draftRef.current;
+        saved.current = JSON.stringify({ ...base, timeZone });
+        if (local.timeZone === base.timeZone) setDraft({ ...local, timeZone });
+      }
     }
     previousDefinitionId.current = definition?.id;
   }, [definition, kind, timeZone, busy]);

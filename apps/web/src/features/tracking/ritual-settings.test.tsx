@@ -258,3 +258,39 @@ it("adopts external changes to clean settings without saving them back", async (
   await new Promise((resolve) => setTimeout(resolve, 600));
   expect(mocks.save).not.toHaveBeenCalled();
 });
+
+it("inherits the existing shared zone when creating the second ritual", async () => {
+  const morning = {
+    id: "morning",
+    kind: "morning",
+    title: "Morning",
+    revision: 1,
+    enabled: true,
+    time: "06:00",
+    timeZone: "Europe/London",
+    steps: [{ id: "check", label: "Check", kind: "checkbox" }],
+  };
+  mocks.list.mockResolvedValue({ rituals: [morning] });
+  mocks.save
+    .mockReset()
+    .mockImplementation(async (input) => ({ ...input, id: input.kind, revision: 1 }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <RitualSettings timeZone="America/New_York" />
+    </QueryClientProvider>,
+  );
+  await screen.findByDisplayValue("06:00");
+  expect(screen.getAllByLabelText("Time zone")[1]).toHaveValue("Europe/London");
+  const updated = { ...morning, revision: 2, timeZone: "Asia/Tokyo" };
+  mocks.list.mockResolvedValue({ rituals: [updated] });
+  await client.invalidateQueries({ queryKey: ["rituals"] });
+  await waitFor(() => expect(screen.getAllByLabelText("Time zone")[1]).toHaveValue("Asia/Tokyo"));
+  fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Enable evening ritual" }));
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "night", enabled: true, timeZone: "Asia/Tokyo" }),
+    ),
+  );
+});

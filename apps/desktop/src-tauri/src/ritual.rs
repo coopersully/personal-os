@@ -157,11 +157,17 @@ async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<()
         let window_address = window.ns_window().map_err(|e| e.to_string())? as usize;
         #[cfg(not(target_os = "macos"))]
         let window_address = 0usize;
-        crate::native::call(
+        let prepared = crate::native::call(
             app,
             json!({"op":"ritual_style_checklist","windowAddress":window_address,"prepare":true}),
         )
         .await?;
+        if prepared["prepared"] != true {
+            window.destroy().map_err(|e| e.to_string())?;
+            return Err(
+                "Ritual presentation is unavailable while the session is locked or unknown".into(),
+            );
+        }
         window.show().map_err(|e| e.to_string())?;
         *shown = Some(id.into());
     }

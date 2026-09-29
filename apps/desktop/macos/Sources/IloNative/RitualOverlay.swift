@@ -13,6 +13,19 @@ func ritualShouldPresent(_ current:[String:Any],now:Date,locked:Bool)->Bool {
  if let snooze=ritualDate(current["snoozedUntil"]),now<snooze {return false}
  return true
 }
+// macOS omits CGSSessionScreenIsLocked in a normal unlocked console session.
+// Require the positive public session flags; nil/partial dictionaries and malformed
+// lock values are unavailable, never permission to display private content.
+func ritualSessionIsUnlocked(_ session: [String: Any]?) -> Bool {
+ guard let session,
+       session[kCGSessionOnConsoleKey as String] as? Bool == true,
+       session[kCGSessionLoginDoneKey as String] as? Bool == true else { return false }
+ if let value = session["CGSSessionScreenIsLocked"] {
+  guard let locked = value as? Bool else { return false }
+  return !locked
+ }
+ return true
+}
 // These views intentionally consume pointer events while leaving system shortcuts available.
 private final class RitualBlockingView: NSVisualEffectView {
  override func hitTest(_ point: NSPoint) -> NSView? { bounds.contains(point) ? self : nil }
@@ -125,7 +138,8 @@ final class RitualBackdrop {
    })
   }
  }
- func hide() {
+ func hide(hideChecklist: Bool = true) {
+  if hideChecklist { checklist?.orderOut(nil) }
   introSound?.stop()
   introSound = nil
   checklist = nil
@@ -135,7 +149,8 @@ final class RitualBackdrop {
   }
   windows = []; appearance = ""
  }
- func styleChecklist(windowAddress: UInt64? = nil, prepare: Bool = false, animate: Bool = false, kind: String = "morning") {
+ @discardableResult
+ func styleChecklist(windowAddress: UInt64? = nil, prepare: Bool = false, animate: Bool = false, kind: String = "morning") -> Bool {
   if let windowAddress {
    // Destroyed Tauri windows can linger in NSApp.windows with the same title.
    // Bind the exact current window, never an older snoozed presentation.
@@ -143,7 +158,10 @@ final class RitualBackdrop {
     UInt64(UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque())) == windowAddress
    }
   }
-  guard let window = checklist else { return }
+  guard !locked, ritualSessionIsUnlocked(CGSessionCopyCurrentDictionary() as? [String: Any]), let window = checklist else {
+   checklist?.orderOut(nil)
+   return false
+  }
   // A child window stays above its backdrop through activation and reordering.
   if let backdrop = windows.first(where: { $0.frame.intersects(window.frame) }), window.parent !== backdrop {
    window.parent?.removeChildWindow(window)
@@ -170,6 +188,7 @@ final class RitualBackdrop {
    // A second native fade/movement would compound that easing and clip the sequence.
    window.alphaValue = 1
   }
+  return true
  }
  func fadeOut() -> Int {
   let duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.0 : 0.65
@@ -181,8 +200,7 @@ final class RitualBackdrop {
   return Int(duration * 1000)
  }
  func present(kind: String) -> Bool {
-  if let session = CGSessionCopyCurrentDictionary() as? [String: Any], session["CGSSessionScreenIsLocked"] as? Bool == true { locked = true }
-  guard !locked else { hide(); return false }
+  guard !locked, ritualSessionIsUnlocked(CGSessionCopyCurrentDictionary() as? [String: Any]) else { hide(); return false }
   let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
   let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
   let next = "\(kind)|\(NSScreen.screens.map { String(describing: $0.frame) })|\(reduceMotion)|\(reduceTransparency)"
@@ -191,7 +209,7 @@ final class RitualBackdrop {
    return true
   }
   let currentChecklist = checklist
-  hide(); appearance = next
+  hide(hideChecklist: false); appearance = next
   checklist = currentChecklist
   for screen in NSScreen.screens {
    let window = makeRitualBackdrop(frame: screen.frame, kind: kind, reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)

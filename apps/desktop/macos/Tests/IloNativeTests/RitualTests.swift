@@ -36,3 +36,27 @@ extension RitualTests {
   if Thread.isMainThread { check() } else { DispatchQueue.main.sync(execute: check) }
  }
 }
+
+extension RitualTests {
+ func testPrivatePresentationRequiresAUsableUnlockedConsoleSession() {
+  XCTAssertFalse(ritualSessionIsUnlocked(nil))
+  XCTAssertFalse(ritualSessionIsUnlocked([:]))
+  var session: [String: Any] = [kCGSessionOnConsoleKey as String: true, kCGSessionLoginDoneKey as String: true]
+  XCTAssertTrue(ritualSessionIsUnlocked(session))
+  session["CGSSessionScreenIsLocked"] = true
+  XCTAssertFalse(ritualSessionIsUnlocked(session))
+  session["CGSSessionScreenIsLocked"] = "unavailable"
+  XCTAssertFalse(ritualSessionIsUnlocked(session))
+  session["CGSSessionScreenIsLocked"] = false
+  XCTAssertTrue(ritualSessionIsUnlocked(session))
+  session[kCGSessionOnConsoleKey as String] = false
+  XCTAssertFalse(ritualSessionIsUnlocked(session))
+ }
+ func testPreparationRejectsAnUnknownChecklistWindow() {
+  let check = {
+   _ = NSApplication.shared
+   XCTAssertFalse(RitualBackdrop.shared.styleChecklist(windowAddress: UInt64.max, prepare: true))
+  }
+  if Thread.isMainThread { check() } else { DispatchQueue.main.sync(execute: check) }
+ }
+}

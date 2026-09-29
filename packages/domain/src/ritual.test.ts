@@ -150,3 +150,9 @@ it("step identifiers support Unicode and spaces without unsafe path characters",
     expect(ritualStepSchema.safeParse({ id, label: "Step", kind: "checkbox" }).success).toBe(false);
   }
 });
+
+it("rejects long malformed numbers without overlapping digit matches", () => {
+  expect(
+    ritualAnswerIsValid({ id: "number", label: "Number", kind: "number" }, `${"0".repeat(5000)}x`),
+  ).toBe(false);
+});

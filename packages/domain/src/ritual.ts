@@ -233,7 +233,8 @@ export function ritualAnswerIsValid(step: RitualStep, value: string | boolean): 
     );
   if (step.kind === "number")
     return (
-      /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value) && Number.isFinite(Number(value))
+      /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value) &&
+      Number.isFinite(Number(value))
     );
   if (step.kind === "multiple_choice") return step.options?.includes(value) ?? false;
   return true;

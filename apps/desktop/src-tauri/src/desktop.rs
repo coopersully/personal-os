@@ -250,6 +250,21 @@ pub async fn desktop_settings(app: tauri::AppHandle) -> Result<serde_json::Value
         serde_json::json!({"settings":settings,"native":native,"hostedServer":HOSTED_SERVER,"wallpaperError":wallpaper_error}),
     )
 }
+fn server_switch_cleanup(
+    old_origin: &str,
+    old_account: Option<&str>,
+    new_origin: &str,
+) -> Vec<serde_json::Value> {
+    let mut operations = vec![serde_json::json!({"op":"clear"})];
+    if let Some(account) = old_account {
+        operations.push(serde_json::json!({"op":"ritual_store_delete","identity":format!("{old_origin}|{account}")}));
+    }
+    operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":old_origin}));
+    // Switching always starts signed out, including a previously used destination.
+    operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":new_origin}));
+    operations
+}
+
 #[tauri::command]
 pub async fn desktop_save_settings(
     app: tauri::AppHandle,
@@ -267,6 +282,8 @@ pub async fn desktop_save_settings(
     let state = app.state::<DesktopState>();
     let mut current = state.settings.lock().await;
     let switched = current.server_url != settings.server_url;
+    let old_origin = current.server_url.clone();
+    let old_account = state.account_id.lock().await.clone();
     let temporary = state.settings_path.with_extension("tmp");
     std::fs::write(
         &temporary,
@@ -298,30 +315,31 @@ pub async fn desktop_save_settings(
     }
     if switched {
         state.invalidate();
-        crate::native::call(&app, serde_json::json!({"op":"clear"})).await?;
         crate::ritual::hide(&app).await;
         *state.account_id.lock().await = None;
         *state.pending_action.lock().await = None;
         *state.deferred_action.lock().await = None;
-        if let Err(error) = crate::native::call(
-            &app,
-            serde_json::json!({"op":"keychain_delete","serverUrl":settings.server_url}),
-        )
-        .await
+        for operation in
+            server_switch_cleanup(&old_origin, old_account.as_deref(), &settings.server_url)
         {
-            // Restore the committed origin if its previous session could not be cleared.
-            std::fs::write(
-                &temporary,
-                serde_json::to_vec_pretty(&*current).map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            std::fs::rename(&temporary, &state.settings_path).map_err(|e| e.to_string())?;
-            let _ = crate::native::call(
-                &app,
-                serde_json::json!({"op":"configure","settings":*current}),
-            )
-            .await;
-            return Err(error);
+            if let Err(error) = crate::native::call(&app, operation).await {
+                // Never publish a destination whose old private state could not
+                // be purged. Completed deletions stay deleted; restoring the old
+                // origin can require signing in again, but never restores secrets.
+                std::fs::write(
+                    &temporary,
+                    serde_json::to_vec_pretty(&*current).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                std::fs::rename(&temporary, &state.settings_path).map_err(|e| e.to_string())?;
+                let _ = crate::native::call(
+                    &app,
+                    serde_json::json!({"op":"configure","settings":*current}),
+                )
+                .await;
+                let _ = app.emit("desktop-session-invalidated", ());
+                return Err(format!("Could not clear the previous desktop session. The previous server remains selected; sign in again if needed. {error}"));
+            }
         }
     }
     if !switched {
@@ -418,6 +436,26 @@ mod tests {
         }
         assert!(api_path("/v1/tasks?completed=false").is_ok());
     }
+    #[test]
+    fn server_switch_purges_old_private_state_before_destination_credential() {
+        let operations =
+            server_switch_cleanup("https://old.test", Some("account"), "https://new.test");
+        assert_eq!(
+            operations,
+            vec![
+                serde_json::json!({"op":"clear"}),
+                serde_json::json!({"op":"ritual_store_delete","identity":"https://old.test|account"}),
+                serde_json::json!({"op":"keychain_delete","serverUrl":"https://old.test"}),
+                serde_json::json!({"op":"keychain_delete","serverUrl":"https://new.test"}),
+            ]
+        );
+        let signed_out = server_switch_cleanup("https://old.test", None, "https://new.test");
+        assert_eq!(signed_out.len(), 3);
+        assert!(signed_out
+            .iter()
+            .all(|operation| operation["op"] != "ritual_store_delete"));
+    }
+
     #[test]
     fn ritual_response_paths_allow_safe_encoded_ids_only() {
         for id in ["wake%20time", "%E2%98%80", "plus%2Bsign"] {

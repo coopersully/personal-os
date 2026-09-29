@@ -116,7 +116,7 @@ final class NativeCompanion {
       guard let value=object["value"] as? [String:Any] else {throw NativeError.message("Missing ritual storage")}
       try RitualStore.write(string("identity"),value);return ["ok":true]
     case "ritual_style_checklist":
-      RitualBackdrop.shared.styleChecklist(windowAddress: (object["windowAddress"] as? NSNumber)?.uint64Value, prepare: object["prepare"] as? Bool == true, animate: object["animate"] as? Bool == true, kind: object["kind"] as? String ?? "morning"); return ["ok":true]
+      let prepared = RitualBackdrop.shared.styleChecklist(windowAddress: (object["windowAddress"] as? NSNumber)?.uint64Value, prepare: object["prepare"] as? Bool == true, animate: object["animate"] as? Bool == true, kind: object["kind"] as? String ?? "morning"); return ["ok":true,"prepared":prepared]
     case "ritual_fade_out":
       return ["ok":true,"durationMs":RitualBackdrop.shared.fadeOut()]
     case "ritual_backdrop":

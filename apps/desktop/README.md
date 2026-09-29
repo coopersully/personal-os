@@ -4,7 +4,7 @@ The desktop app bundles the React interface with a resident Tauri/Rust process a
 
 ## Connection and daily use
 
-Release builds start with `https://api.ilo.coopersully.me`. Settings → Desktop supports a custom HTTPS API origin; HTTP is permitted only for loopback development. The same server controls are available before sign-in and when the selected API is unavailable. Test connection checks the actual nohmi authentication response.
+Release builds start with the hosted API at `https://nohmi-api.coopersully.me`. Settings → Desktop presents hosted nohmi as the recommended default and keeps custom HTTPS API origins under Advanced server settings; HTTP is permitted only for loopback development. Existing installations using the retired hosted origin migrate to the current origin. The same controls are available before sign-in and when the selected API is unavailable. Test connection checks the actual nohmi authentication response.
 
 Requests use the selected origin through native HTTP. Session credentials stay in Keychain; redirects never forward them. Switching servers requires a fresh sign-in and clears the previous account's ambient data. Pet, widget and notification preferences are saved per installation, server and account. Login registration is an installation preference.
 
@@ -70,3 +70,17 @@ Distribution requires final installed acceptance: notifications/permission setti
 Local packaged-app checks exercised native sign-in/sign-out, Keychain session restoration across Quit, Today tasks/reminders, Command-comma, settings rendering, server switching, pet enable/disable, close-to-background, pet quick access, task completion, quick capture and explicit Quit. Session transitions reset mounted query observers without reloading the packaged webview. Native notification permission was requested and macOS returned `UNErrorDomain` code 1 for this local build; real delivery has not been accepted. No valid Apple signing identity was available, so signed widget installation and login-item registration remain external acceptance requirements. Hosted readiness and the app's production API request returned HTTP 503, preventing production sign-in verification. Live provider OAuth, Pinterest application across physical displays/Spaces, and signed installed acceptance remain to be exercised. No production deployment or release publication was performed.
 
 Framework references: [Apple UserNotifications](https://developer.apple.com/documentation/usernotifications), [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice), [WidgetKit](https://developer.apple.com/documentation/widgetkit), [Tauri macOS bundles](https://v2.tauri.app/distribute/macos-application-bundle/).
+
+## Morning and evening rituals
+
+Settings → Rituals offers optional morning (06:00) and evening (21:00) checklists in an explicit account time zone. The Morning and Evening tabs autosave schedules and draggable steps supporting checkboxes, short entries, times, dates, numbers, and multiple choice. The **This Mac** card controls local delivery and opens a full-screen preview, including saved answers for today when available. Preview edits do not change account history. The menu bar can open the current due ritual. The Mac must be running nohmi; waking or relaunching catches up to the current due ritual without stacking missed days.
+
+A native backdrop obscures other content while the centered checklist stays readable. Snooze lasts ten minutes, with an explicit count and confirmation starting at the third snooze in 72 hours; Skip affects only this occurrence. Valid entries save automatically. The Complete button becomes available only when every step has a valid response; completion is explicit. The History and data tab includes responses and escape events, with export and deletion controls.
+
+Live and history snapshots retain the latest answer for each step so repeated autosaves do not grow the desktop cache. The account keeps the correction ledger, and data exports include those earlier responses.
+
+If a session expires with pending edits, the signed-out connection screen retains export and discard controls. Recovery identity does not restore authentication. Malformed server responses cannot acknowledge queued edits or be interpreted as account-data deletion.
+
+Offline responses enter a Keychain-backed encrypted outbox before dismissal. Up to seven days of server-resolved scheduling are cached. Unavailable history always requests snooze confirmation. Delivery failures show a redacted stage and retry time in Settings. Conflicting late writes remain visible under local recovery in settings and can be exported or explicitly discarded; they cannot reopen a terminal ritual. Sign-out requires pending changes to sync or be discarded. Account deletion removes the matching local evidence on authenticated reconciliation.
+
+The implementation requires the matching ritual API/migration. Unsupported servers display an unavailable message. Installed-app, multi-display, Spaces and VoiceOver acceptance remains a separate release gate; compilation alone does not establish those results.

@@ -1,5 +1,40 @@
 # nohmi — Implementation Log
 
+## 2026-09-29 — Morning and evening rituals
+
+- Added account-owned ritual definitions, immutable daily snapshots, checkbox, short-entry, time, date, number, and multiple-choice
+  responses, and an append-only escape history. Settings default to 06:00 and 21:00 in the
+  selected time zone; an unfinished ritual remains available until the next enabled boundary.
+- Added autosaving schedules and draggable steps in Morning and Evening settings tabs, with
+  history filters, export, and deletion in a separate History and data tab. Full-screen previews
+  replay today’s saved answers without changing account data. Valid entries save immediately;
+  explicit completion requires every configured response.
+- Added a resident macOS checklist with native blurred backdrops on connected displays,
+  sky colors, sunrise/moonlight gradients, and bundled intro sounds. The shadow-free card
+  resolves before the wordmark and supporting text fade in together; completion dismisses it
+  upward while the backdrop fades. Delivery
+  catches up after sleep and app restart without waking the Mac. Snooze lasts ten minutes; two
+  prior confirmed snoozes for the same ritual within 72 hours trigger an explicit count-based
+  confirmation. Every press, confirmation, cancellation, and skip is retained.
+- Native offline responses use authenticated encryption with a Keychain-held key and are scoped
+  to server and account. Restart recovery requires the same retained session credential. Late
+  conflicts remain available for export/discard while later valid writes continue syncing.
+  A seven-day server-resolved schedule avoids guessing future time-zone rules while offline.
+- Tracking writes require a human session; legacy agent tokens gain no new scopes. Account
+  invalidation destroys the private checklist window. Deletion removes ritual data and tombstones
+  cached replay bodies that could otherwise retain deleted answers.
+- Implementation and acceptance evidence are tracked in
+  [the ritual plan](../superpowers/plans/2026-09-29-morning-night-rituals.md) and
+  [COO-62 — Deliver morning and night desktop rituals](https://linear.app/coopersully/issue/COO-62/deliver-morning-and-night-desktop-rituals).
+  Source completion does not imply hosted rollout or replacement of the installed desktop app.
+- Retry records retain compact operation receipts rather than copied private response histories.
+  Replays preserve the original outcome while returning current account state; deletion removes
+  legacy private snapshots without invalidating the other ritual’s compact receipts. Redacted
+  audits distinguish settings, answers, and each terminal/escape operation.
+- Settings exposes redacted native delivery failures and retry timing. Unknown/unavailable
+  session state prevents presentation; switching servers clears the prior encrypted ritual store
+  and credentials after pending changes are settled.
+
 ## 2026-09-25 — Canonical Finance position maintenance checkpoint
 
 - Finance maintenance now consumes the registered canonical position reader for the run's exact

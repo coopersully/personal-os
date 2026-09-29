@@ -4742,3 +4742,115 @@ export const financeContextualAnswers = pgTable(
     ),
   ],
 );
+
+/** Account-owned ritual definitions; immutable snapshots live with occurrences. */
+export const ritualDefinitions = pgTable(
+  "ritual_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualDefinition>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_definition_owner_kind").on(t.userId, t.kind),
+    uniqueIndex("ritual_definition_owner_id").on(t.userId, t.id),
+    check("ritual_kind", sql`${t.kind} in ('morning','night')`),
+  ],
+);
+export const ritualOccurrences = pgTable(
+  "ritual_occurrences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ritualId: uuid("ritual_id").notNull(),
+    localDate: text("local_date").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualOccurrence>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_occurrence_date").on(t.userId, t.ritualId, t.localDate),
+    uniqueIndex("ritual_occurrence_owner_id").on(t.userId, t.id),
+    foreignKey({
+      columns: [t.userId, t.ritualId],
+      foreignColumns: [ritualDefinitions.userId, ritualDefinitions.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualDefinitionRevisions = pgTable(
+  "ritual_definition_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    ritualId: uuid("ritual_id").notNull(),
+    revision: integer("revision").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualDefinition>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_definition_revision").on(t.ritualId, t.revision),
+    check("ritual_revision_positive", sql`${t.revision} > 0`),
+    foreignKey({
+      columns: [t.userId, t.ritualId],
+      foreignColumns: [ritualDefinitions.userId, ritualDefinitions.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualResponses = pgTable(
+  "ritual_responses",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    occurrenceId: uuid("occurrence_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualResponse>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_response_request").on(t.userId, t.requestId),
+    foreignKey({
+      columns: [t.userId, t.occurrenceId],
+      foreignColumns: [ritualOccurrences.userId, ritualOccurrences.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualActions = pgTable(
+  "ritual_actions",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    occurrenceId: uuid("occurrence_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    kind: text("kind").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualAction>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_action_request_kind").on(t.userId, t.requestId, t.kind),
+    foreignKey({
+      columns: [t.userId, t.occurrenceId],
+      foreignColumns: [ritualOccurrences.userId, ritualOccurrences.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualRequests = pgTable(
+  "ritual_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestId: uuid("request_id").notNull(),
+    ritualId: uuid("ritual_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    result: jsonb("result").$type<unknown>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_request_owner").on(t.userId, t.requestId),
+    foreignKey({
+      columns: [t.userId, t.ritualId],
+      foreignColumns: [ritualDefinitions.userId, ritualDefinitions.id],
+    }).onDelete("cascade"),
+  ],
+);

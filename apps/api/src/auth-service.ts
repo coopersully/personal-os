@@ -43,6 +43,8 @@ const allScopes = new Set<AccessScope>([
   "mail:write",
   "goals:read",
   "goals:write",
+  "tracking:read",
+  "tracking:write",
   "finances:read",
   "finances:write",
   "finances:maintain",

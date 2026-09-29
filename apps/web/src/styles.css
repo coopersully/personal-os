@@ -23,6 +23,8 @@
   --border-subtle: #dededb;
   --border-strong: #a1a19c;
   --content-primary: #18181b;
+  --ritual-morning-content: #18181b;
+  --ritual-evening-content: #ffffff;
   --content-secondary: #5f5f67;
   --content-tertiary: #85858d;
   --inverse-surface: #151514;
@@ -641,26 +643,52 @@ p {
   width: auto;
 }
 .desktop,
-.desktop body {
-  background: transparent;
+.desktop body,
+.desktop #root {
+  height: 100%;
+  min-height: 0;
 }
 .desktop body {
-  padding: 10px;
+  background: var(--app-shell-background);
+  overflow: hidden;
+  padding: 0;
 }
 .desktop .app-shell {
   background: var(--app-shell-background);
-  border-radius: calc(var(--radius) * 1.4);
-  min-height: calc(100vh - 20px);
-  /* Fixed navigation/popovers must escape the shell's rounded rectangle in WKWebView. */
-  overflow: visible;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 .desktop .sidebar {
   background: var(--sidebar);
-  height: calc(100vh - 20px);
-  top: 10px;
+  height: 100%;
+  top: 0;
 }
 .desktop .workspace-app-bar {
-  top: 10px;
+  top: 0;
+}
+.desktop .workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.desktop .content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  width: 100%;
+}
+.desktop .sidebar__content {
+  scrollbar-width: none;
+}
+.desktop .sidebar__content::-webkit-scrollbar {
+  display: none;
+}
+.desktop .workspace-stage,
+.desktop .workspace-route {
+  min-height: 100%;
 }
 /* Resident WKWebView can pause entrance animations when the window loses focus.
    Desktop navigation must remain visible without an animation completing. */
@@ -7283,4 +7311,105 @@ p {
   .workspace-setup-card {
     transition: none;
   }
+}
+
+html.ritual-window, html.ritual-window body, html.ritual-window #root {
+  background: transparent;
+  height: 100%;
+  overflow: hidden;
+}
+.ritual-surface {
+  --ritual-chrome: var(--ritual-morning-content);
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 64px;
+  background: transparent;
+  color: var(--card-foreground);
+  text-align: center;
+}
+.ritual-presentation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  --ritual-card-delay: 1100ms;
+  --ritual-card-duration: 2000ms;
+  --ritual-chrome-delay: calc(var(--ritual-card-delay) + var(--ritual-card-duration));
+}
+.ritual-logo {
+  flex-shrink: 0;
+  animation: ritual-chrome-enter 1600ms ease-in-out var(--ritual-chrome-delay) backwards;
+}
+.ritual-logo .brand-symbol { width: 40px; height: 40px; }
+.ritual-support {
+  animation: ritual-chrome-enter 1600ms ease-in-out var(--ritual-chrome-delay) backwards;
+}
+.ritual-support-text { font-size: 0.75rem; font-weight: 400; }
+.ritual-card {
+  width: 100%;
+  min-height: 0;
+  --card-spacing: 1.75rem;
+  animation: ritual-element-enter var(--ritual-card-duration) cubic-bezier(0.22, 1, 0.36, 1) var(--ritual-card-delay) backwards;
+}
+.ritual-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
+@keyframes ritual-element-enter {
+  from { opacity: 0; filter: blur(8px); transform: translateY(12px); }
+  to { opacity: 1; filter: none; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ritual-logo, .ritual-card, .ritual-support { animation: none; }
+}
+@media (max-width: 440px) {
+  .ritual-card { --card-spacing: 1.25rem; }
+}
+
+.ritual-browser-preview {
+  background: radial-gradient(ellipse at 50% 100%, rgb(255 210 64 / 65%), transparent 65%), rgb(38 79 133);
+  align-content: center;
+}
+.ritual-browser-preview[data-ritual-kind="night"] {
+  background: radial-gradient(ellipse at 50% 0%, rgb(240 248 255 / 65%), transparent 65%), rgb(9 18 48);
+}
+
+.ritual-surface[data-ready="false"] { visibility: hidden; }
+.ritual-surface[data-ready="false"] .ritual-logo,
+.ritual-surface[data-ready="false"] .ritual-card,
+.ritual-surface[data-ready="false"] .ritual-support { animation: none; }
+
+.ritual-surface[data-ritual-kind="night"],
+.ritual-browser-preview[data-ritual-kind="night"] { --ritual-chrome: var(--ritual-evening-content); }
+.ritual-logo .brand-symbol,
+.ritual-support-text {
+  color: var(--ritual-chrome, var(--ritual-morning-content));
+  fill: currentColor;
+  opacity: 0.25;
+}
+@media (max-width: 440px) {
+  .ritual-surface { padding: 40px; }
+}
+
+@keyframes ritual-chrome-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ritual-exiting .ritual-presentation { pointer-events: none; }
+.ritual-exiting .ritual-card {
+  animation: ritual-card-exit 650ms cubic-bezier(0.55, 0, 1, 0.45) both;
+}
+.ritual-exiting .ritual-logo, .ritual-exiting .ritual-support {
+  animation: none;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+@keyframes ritual-card-exit {
+  from { opacity: 1; filter: none; transform: translateY(0) scale(1); }
+  to { opacity: 0; filter: blur(8px); transform: translateY(-100dvh) scale(0.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ritual-exiting .ritual-card { animation: none; opacity: 0; }
+  .ritual-exiting .ritual-logo, .ritual-exiting .ritual-support { transition: none; }
 }

@@ -6,7 +6,8 @@ use std::{
 use tauri::{Emitter, Manager};
 use tokio::sync::{watch, Mutex, Notify};
 
-pub const HOSTED_SERVER: &str = "https://api.ilo.coopersully.me";
+pub const HOSTED_SERVER: &str = "https://nohmi-api.coopersully.me";
+const LEGACY_HOSTED_SERVER: &str = "https://api.ilo.coopersully.me";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
@@ -113,6 +114,13 @@ impl DesktopSettings {
         Ok(())
     }
 }
+fn migrate_legacy_hosted_server(settings: &mut DesktopSettings) -> bool {
+    if settings.server_url != LEGACY_HOSTED_SERVER {
+        return false;
+    }
+    settings.server_url = HOSTED_SERVER.into();
+    true
+}
 pub fn canonical_server(input: &str) -> Result<String, String> {
     let url = url::Url::parse(input.trim()).map_err(|_| "Enter a valid API server URL.")?;
     let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -132,13 +140,35 @@ pub fn api_path(path: &str) -> Result<(), String> {
     let pathname = path.split('?').next().unwrap_or("");
     if !pathname.starts_with("/v1/")
         || path.contains(['\\', '#', '\r', '\n'])
-        || pathname.contains('%')
+        || (pathname.contains('%') && !encoded_ritual_response_path(pathname))
         || pathname.split('/').any(|p| p == ".." || p == ".")
     {
         return Err("Invalid API request path.".into());
     }
     Ok(())
 }
+fn encoded_ritual_response_path(path: &str) -> bool {
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 7
+        || parts[1..4] != ["v1", "rituals", "occurrences"]
+        || parts[5] != "responses"
+        || parts[4].is_empty()
+        || !parts[4]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return false;
+    }
+    crate::ritual::decode_segment(parts[6]).is_ok_and(|step| {
+        !step.is_empty()
+            && step != "."
+            && step != ".."
+            && !step
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\' | '%'))
+    })
+}
+
 pub struct DesktopState {
     pub settings: Mutex<DesktopSettings>,
     pub settings_path: PathBuf,
@@ -157,7 +187,8 @@ impl DesktopState {
         let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let settings_path = dir.join("desktop.json");
-        let mut settings = if settings_path.exists() {
+        let settings_exist = settings_path.exists();
+        let mut settings = if settings_exist {
             serde_json::from_slice::<DesktopSettings>(
                 &std::fs::read(&settings_path).map_err(|e| e.to_string())?,
             )
@@ -165,12 +196,22 @@ impl DesktopState {
         } else {
             DesktopSettings::default()
         };
-        if cfg!(debug_assertions) && !settings_path.exists() {
+        if cfg!(debug_assertions) && !settings_exist {
             settings.server_url = option_env!("VITE_API_BASE_URL")
                 .unwrap_or("http://localhost:8787")
                 .into();
         }
+        let migrated = migrate_legacy_hosted_server(&mut settings);
         settings.validate()?;
+        if migrated {
+            let temporary = settings_path.with_extension("tmp");
+            std::fs::write(
+                &temporary,
+                serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            std::fs::rename(temporary, &settings_path).map_err(|e| e.to_string())?;
+        }
         Ok(Self {
             settings: Mutex::new(settings),
             settings_path,
@@ -209,15 +250,46 @@ pub async fn desktop_settings(app: tauri::AppHandle) -> Result<serde_json::Value
         serde_json::json!({"settings":settings,"native":native,"hostedServer":HOSTED_SERVER,"wallpaperError":wallpaper_error}),
     )
 }
+fn server_switch_cleanup(
+    old_origin: &str,
+    old_account: Option<&str>,
+    new_origin: &str,
+) -> Vec<serde_json::Value> {
+    let mut operations = vec![serde_json::json!({"op":"clear"})];
+    if let Some(account) = old_account {
+        operations.push(serde_json::json!({"op":"ritual_store_delete","identity":format!("{old_origin}|{account}")}));
+    }
+    operations.push(
+        serde_json::json!({"op":"ritual_store_delete","identity":format!("recovery|{old_origin}")}),
+    );
+    operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":old_origin}));
+    // Switching always starts signed out, including a previously used destination.
+    operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":new_origin}));
+    operations
+}
+
 #[tauri::command]
 pub async fn desktop_save_settings(
     app: tauri::AppHandle,
     mut settings: DesktopSettings,
 ) -> Result<serde_json::Value, String> {
     settings.validate()?;
+    // Match mutation lock order: ritual fence, then settings/account state.
+    let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
+    let _ritual_guard = ritual_runtime.lock.lock().await;
+    let switching =
+        app.state::<DesktopState>().settings.lock().await.server_url != settings.server_url;
+    if switching {
+        crate::ritual::require_synced(&app).await?;
+    }
     let state = app.state::<DesktopState>();
     let mut current = state.settings.lock().await;
     let switched = current.server_url != settings.server_url;
+    let old_origin = current.server_url.clone();
+    let old_account = match state.account_id.lock().await.clone() {
+        Some(account) => Some(account),
+        None => crate::ritual::recovery_account(&app, &old_origin).await?,
+    };
     let temporary = state.settings_path.with_extension("tmp");
     std::fs::write(
         &temporary,
@@ -249,29 +321,38 @@ pub async fn desktop_save_settings(
     }
     if switched {
         state.invalidate();
-        crate::native::call(&app, serde_json::json!({"op":"clear"})).await?;
+        crate::ritual::hide(&app).await;
         *state.account_id.lock().await = None;
         *state.pending_action.lock().await = None;
         *state.deferred_action.lock().await = None;
-        if let Err(error) = crate::native::call(
-            &app,
-            serde_json::json!({"op":"keychain_delete","serverUrl":settings.server_url}),
-        )
-        .await
+        for operation in
+            server_switch_cleanup(&old_origin, old_account.as_deref(), &settings.server_url)
         {
-            // Restore the committed origin if its previous session could not be cleared.
-            std::fs::write(
-                &temporary,
-                serde_json::to_vec_pretty(&*current).map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            std::fs::rename(&temporary, &state.settings_path).map_err(|e| e.to_string())?;
-            let _ = crate::native::call(
-                &app,
-                serde_json::json!({"op":"configure","settings":*current}),
-            )
-            .await;
-            return Err(error);
+            if !cfg!(target_os = "macos")
+                && operation["op"]
+                    .as_str()
+                    .is_some_and(|op| op.starts_with("ritual_"))
+            {
+                continue;
+            }
+            if let Err(error) = crate::native::call(&app, operation).await {
+                // Never publish a destination whose old private state could not
+                // be purged. Completed deletions stay deleted; restoring the old
+                // origin can require signing in again, but never restores secrets.
+                std::fs::write(
+                    &temporary,
+                    serde_json::to_vec_pretty(&*current).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                std::fs::rename(&temporary, &state.settings_path).map_err(|e| e.to_string())?;
+                let _ = crate::native::call(
+                    &app,
+                    serde_json::json!({"op":"configure","settings":*current}),
+                )
+                .await;
+                let _ = app.emit("desktop-session-invalidated", ());
+                return Err(format!("Could not clear the previous desktop session. The previous server remains selected; sign in again if needed. {error}"));
+            }
         }
     }
     if !switched {
@@ -301,7 +382,7 @@ pub async fn desktop_save_settings(
         serde_json::json!({"serverChanged":switched}),
     )
     .map_err(|e| e.to_string())?;
-    desktop_settings(app).await
+    desktop_settings(app.clone()).await
 }
 #[tauri::command]
 pub async fn desktop_native_action(
@@ -326,6 +407,14 @@ mod tests {
     use super::*;
     #[test]
     fn server_origins_are_canonical_and_transport_safe() {
+        assert_eq!(
+            DesktopSettings::default().server_url,
+            "https://nohmi-api.coopersully.me"
+        );
+        let mut legacy = DesktopSettings::default();
+        legacy.server_url = "https://api.ilo.coopersully.me".into();
+        assert!(migrate_legacy_hosted_server(&mut legacy));
+        assert_eq!(legacy.server_url, "https://nohmi-api.coopersully.me");
         assert_eq!(
             canonical_server("https://EXAMPLE.com:443/").unwrap(),
             "https://example.com"
@@ -360,6 +449,45 @@ mod tests {
         }
         assert!(api_path("/v1/tasks?completed=false").is_ok());
     }
+    #[test]
+    fn server_switch_purges_old_private_state_before_destination_credential() {
+        let operations =
+            server_switch_cleanup("https://old.test", Some("account"), "https://new.test");
+        assert_eq!(
+            operations,
+            vec![
+                serde_json::json!({"op":"clear"}),
+                serde_json::json!({"op":"ritual_store_delete","identity":"https://old.test|account"}),
+                serde_json::json!({"op":"ritual_store_delete","identity":"recovery|https://old.test"}),
+                serde_json::json!({"op":"keychain_delete","serverUrl":"https://old.test"}),
+                serde_json::json!({"op":"keychain_delete","serverUrl":"https://new.test"}),
+            ]
+        );
+        let signed_out = server_switch_cleanup("https://old.test", None, "https://new.test");
+        assert_eq!(signed_out.len(), 4);
+        assert!(signed_out
+            .iter()
+            .all(|operation| operation["identity"] != "https://old.test|account"));
+    }
+
+    #[test]
+    fn ritual_response_paths_allow_safe_encoded_ids_only() {
+        for id in ["wake%20time", "%E2%98%80", "plus%2Bsign"] {
+            assert!(api_path(&format!("/v1/rituals/occurrences/123-ab/responses/{id}")).is_ok());
+        }
+        for id in [
+            "%2e%2e", "%2e", "%2F", "%5C", "%00", "%0A", "%25", "%FF", "%",
+        ] {
+            assert!(
+                api_path(&format!("/v1/rituals/occurrences/123-ab/responses/{id}")).is_err(),
+                "accepted {id}"
+            );
+        }
+        assert!(api_path("/v1/tasks/%E2%98%80").is_err());
+        assert!(api_path("/v1/rituals/occurrences/%2e%2e/responses/okay").is_err());
+        assert!(api_path("/v1/rituals/occurrences/123/responses/x%20y/extra").is_err());
+    }
+
     #[test]
     fn preferences_reject_invalid_color_and_partial_quiet_hours() {
         let mut value = DesktopSettings::default();

@@ -134,6 +134,18 @@ describe.sequential("ritual account lifecycle", () => {
     ).rejects.toThrow();
     const logs = await database.db.select().from(auditEvents).where(eq(auditEvents.userId, userId));
     expect(JSON.stringify(logs)).not.toContain("Private answer");
+    expect(logs.map((log) => log.action)).toEqual(
+      expect.arrayContaining([
+        "ritual.definition_saved",
+        "ritual.response_saved",
+        "ritual.snooze",
+        "ritual.complete",
+      ]),
+    );
+    expect(logs.find((log) => log.action === "ritual.complete")?.after).toMatchObject({
+      occurrenceId: id,
+      outcome: "applied",
+    });
     const history = await service.history(context(), { limit: 50 });
     expect(history.items[0]?.actions.map((a) => a.kind)).toEqual([
       "snooze_pressed",
@@ -263,7 +275,7 @@ describe.sequential("ritual account lifecycle", () => {
     expect(after.status).toBe("pending");
     expect(after.definition).toEqual(current.definition);
   });
-  it("deletion removes private copies in other ritual idempotency results", async () => {
+  it("deletion removes legacy private snapshots while preserving compact retries for the other ritual", async () => {
     const morning = (await service.list(context()))[0]!;
     await service.saveDefinition(
       "morning",
@@ -287,15 +299,25 @@ describe.sequential("ritual account lifecycle", () => {
     const state = await service.current(context());
     const input = { ...mutation(state.current!.revision), kind: "snooze" as const };
     await service.act(state.current!.id, input, context());
+    await database.db.insert(ritualRequests).values({
+      userId,
+      ritualId: state.current!.ritualId,
+      requestId: crypto.randomUUID(),
+      fingerprint: "legacy",
+      result: state,
+    });
     await service.deleteData("morning", context());
     const saved = await database.db
       .select()
       .from(ritualRequests)
       .where(eq(ritualRequests.userId, userId));
     expect(JSON.stringify(saved)).not.toContain("Private morning detail");
-    await expect(service.act(state.current!.id, input, context())).rejects.toMatchObject({
-      code: "conflict",
-    });
+    const replay = await service.act(state.current!.id, input, context());
+    expect(replay.outcome).toBe("applied");
+    expect(replay.state.definitions.some((d) => d.kind === "morning")).toBe(false);
+    expect(replay.state.current?.actions.filter((a) => a.kind === "snooze_pressed")).toHaveLength(
+      1,
+    );
   });
   it("serializes competing completion and skip without reopening terminal history", async () => {
     for (const definition of await service.list(context())) {
@@ -334,8 +356,12 @@ describe.sequential("ritual account lifecycle", () => {
     expect(outcomes.map((result) => result.outcome).sort()).toEqual(["applied", "conflict"]);
     expect(final.actions.filter((a) => a.kind === "skip_pressed")).toHaveLength(1);
     expect(final.responses).toHaveLength(1);
-    expect(await service.act(current.id, completion, context())).toEqual(outcomes[0]);
-    expect(await service.act(current.id, skip, context())).toEqual(outcomes[1]);
+    const completionReplay = await service.act(current.id, completion, context());
+    const skipReplay = await service.act(current.id, skip, context());
+    expect(completionReplay.outcome).toBe(outcomes[0]!.outcome);
+    expect(skipReplay.outcome).toBe(outcomes[1]!.outcome);
+    expect(completionReplay.state.current).toEqual(final);
+    expect(skipReplay.state.current).toEqual(final);
     await expect(
       service.saveResponse(
         current.id,
@@ -572,5 +598,19 @@ describe.sequential("ritual account lifecycle", () => {
     } while (cursor);
     expect(actual).toEqual(expected);
     expect(actual).toContain(id);
+  });
+  it("stores bounded retry receipts without duplicating private answers", async () => {
+    const rows = await database.db
+      .select()
+      .from(ritualRequests)
+      .where(eq(ritualRequests.userId, userId));
+    const receipts = rows.map((r) => r.result).filter((r) => r !== null);
+    expect(receipts.length).toBeGreaterThan(0);
+    for (const receipt of receipts) {
+      expect(receipt).toMatchObject({ receiptVersion: 1 });
+      expect(JSON.stringify(receipt).length).toBeLessThan(400);
+      expect(receipt).not.toHaveProperty("state");
+      expect(receipt).not.toHaveProperty("responses");
+    }
   });
 });

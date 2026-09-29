@@ -189,7 +189,30 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         "conflict",
         "This saved reply was removed after ritual data deletion. Refresh before continuing.",
       );
-    return row.result as T;
+    const receipt = row.result as {
+      receiptVersion?: number;
+      kind?: "definition" | "state" | "action";
+      revision?: number;
+      result?: Omit<RitualActionResult, "state">;
+    };
+    // Older locally created records remain readable until deletion tombstones them.
+    if (receipt.receiptVersion !== 1) return row.result as T;
+    if (receipt.kind === "definition") {
+      const [version] = await tx
+        .select()
+        .from(ritualDefinitionRevisions)
+        .where(
+          and(
+            eq(ritualDefinitionRevisions.userId, context.principal.userId),
+            eq(ritualDefinitionRevisions.ritualId, row.ritualId),
+            eq(ritualDefinitionRevisions.revision, receipt.revision!),
+          ),
+        );
+      if (!version) throw new AppError("conflict", "This ritual version is no longer available.");
+      return version.data as T;
+    }
+    const { state } = await reconcile(tx, context.principal.userId);
+    return (receipt.kind === "state" ? state : { ...receipt.result, state }) as T;
   }
   function hash(input: unknown) {
     return createHash("sha256").update(JSON.stringify(input)).digest("hex");
@@ -200,23 +223,38 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     ritualId: string,
     requestId: string,
     input: unknown,
-    result: unknown,
+    result: RitualDefinition | RitualState | RitualActionResult,
+    operation: string,
+    occurrenceId?: string,
   ) {
+    let receipt: unknown;
+    if ("outcome" in result) {
+      const { state: _state, ...outcome } = result;
+      receipt = { receiptVersion: 1, kind: "action", result: outcome };
+    } else if ("current" in result) {
+      receipt = { receiptVersion: 1, kind: "state" };
+    } else {
+      receipt = { receiptVersion: 1, kind: "definition", revision: result.revision };
+    }
     await tx.insert(ritualRequests).values({
       userId: context.principal.userId,
       ritualId,
       requestId,
       fingerprint: hash(input),
-      result,
+      result: receipt,
     });
     await tx.insert(auditEvents).values(
       auditValues({
         ...context,
-        action: "ritual.updated",
+        action: `ritual.${operation}`,
         entityType: "ritual",
         entityId: ritualId,
         before: null,
-        after: { requestId },
+        after: {
+          requestId,
+          ...(occurrenceId ? { occurrenceId } : {}),
+          ...("outcome" in result ? { outcome: result.outcome } : {}),
+        },
       }),
     );
   }
@@ -293,7 +331,15 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           data: definition,
         });
         await reconcile(tx, context.principal.userId);
-        await remember(tx, context, definition.id, requestId, input, definition);
+        await remember(
+          tx,
+          context,
+          definition.id,
+          requestId,
+          input,
+          definition,
+          "definition_saved",
+        );
         return definition;
       });
     },
@@ -339,7 +385,16 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           data: response,
         });
         await persist(tx, occurrence, context.principal.userId);
-        await remember(tx, context, occurrence.ritualId, input.requestId, payload, state);
+        await remember(
+          tx,
+          context,
+          occurrence.ritualId,
+          input.requestId,
+          payload,
+          state,
+          "response_saved",
+          id,
+        );
         return state;
       });
     },
@@ -465,7 +520,16 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           occurrence.ritualId,
           new Date(now().getTime() + 1).toISOString(),
         );
-        await remember(tx, context, occurrence.ritualId, input.requestId, payload, result);
+        await remember(
+          tx,
+          context,
+          occurrence.ritualId,
+          input.requestId,
+          payload,
+          result,
+          input.kind,
+          id,
+        );
         return result;
       });
     },
@@ -544,12 +608,17 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
               eq(ritualDefinitions.userId, context.principal.userId),
             ),
           );
-        // Other rituals' replay snapshots can contain this ritual's answers. Keep
-        // request identities as tombstones so retries cannot duplicate mutations.
+        // Only legacy snapshots can contain another ritual’s private answers. Compact
+        // receipts retain the other ritual’s retry identity without copying private state.
         await tx
           .update(ritualRequests)
           .set({ result: sql`'null'::jsonb` })
-          .where(eq(ritualRequests.userId, context.principal.userId));
+          .where(
+            and(
+              eq(ritualRequests.userId, context.principal.userId),
+              sql`coalesce(${ritualRequests.result}->>'receiptVersion', '') <> '1'`,
+            ),
+          );
         await tx.insert(auditEvents).values(
           auditValues({
             ...context,

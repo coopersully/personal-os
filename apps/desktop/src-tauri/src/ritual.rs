@@ -10,6 +10,7 @@ use tokio::sync::{Mutex, Notify};
 pub struct RitualRuntime {
     pub lock: Mutex<()>,
     pub refresh: Notify,
+    health: Mutex<(u64, Value)>,
     shown: Mutex<Option<String>>,
     manual: Mutex<Option<String>>,
     preview: Mutex<Option<Value>>,
@@ -676,6 +677,26 @@ fn apply_offline(
         _ => Err("Invalid ritual action".into()),
     }
 }
+fn delivery_health(stage: Option<&str>, at: chrono::DateTime<chrono::Utc>) -> Value {
+    match stage {
+        Some(stage @ ("identity" | "store_read" | "sync" | "store_write" | "presentation")) => {
+            json!({
+                "stage":stage,
+                "failedAt":at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                "nextRetryAt":(at + chrono::Duration::seconds(5)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            })
+        }
+        _ => Value::Null,
+    }
+}
+fn health_for_generation(health: &(u64, Value), generation: u64) -> Value {
+    if health.0 == generation {
+        health.1.clone()
+    } else {
+        Value::Null
+    }
+}
+
 async fn wait_for_refresh(refresh: &Notify) -> bool {
     tokio::select! {
         _ = refresh.notified() => true,
@@ -690,41 +711,83 @@ pub async fn run(app: tauri::AppHandle) {
         {
             let runtime = app.state::<RitualRuntime>();
             let _lock = runtime.lock.lock().await;
-            if let Ok((server, account, generation)) = identity(&app).await {
-                let key = identity_key(&server, &account);
-                if let Ok(mut data) = read(&app, &key).await {
-                    if force_sync
-                        || last_sync.elapsed() >= std::time::Duration::from_secs(30)
-                        || !queue(&data).is_empty()
-                    {
-                        // Keep lock/unlock refreshes bounded even when transport stalls.
-                        // The durable outbox safely replays any interrupted request.
-                        let _ = tokio::time::timeout(
-                            std::time::Duration::from_secs(10),
-                            sync(&app, &server, &account, generation, &mut data),
-                        )
-                        .await;
-                        last_sync = std::time::Instant::now();
-                    }
-                    let before = data.clone();
-                    advance_offline(&mut data, &current_time());
-                    if data != before {
-                        let _ = write(&app, &key, &data).await;
-                    }
-                    if app
-                        .state::<DesktopState>()
-                        .generation
-                        .load(Ordering::SeqCst)
-                        == generation
-                    {
-                        let _ = present(&app, &data, false).await;
-                    } else {
-                        hide(&app).await;
+            let generation = app
+                .state::<DesktopState>()
+                .generation
+                .load(Ordering::SeqCst);
+            let unhealthy =
+                !health_for_generation(&*runtime.health.lock().await, generation).is_null();
+            let mut failure = None;
+            match identity(&app).await {
+                Ok((server, account, identity_generation)) => {
+                    let key = identity_key(&server, &account);
+                    match read(&app, &key).await {
+                        Ok(mut data) => {
+                            if force_sync
+                                || unhealthy
+                                || last_sync.elapsed() >= std::time::Duration::from_secs(30)
+                                || !queue(&data).is_empty()
+                            {
+                                // Bound stale transport before falling back to cached delivery.
+                                if !matches!(
+                                    tokio::time::timeout(
+                                        std::time::Duration::from_secs(10),
+                                        sync(
+                                            &app,
+                                            &server,
+                                            &account,
+                                            identity_generation,
+                                            &mut data
+                                        )
+                                    )
+                                    .await,
+                                    Ok(Ok(()))
+                                ) {
+                                    failure = Some("sync");
+                                }
+                                last_sync = std::time::Instant::now();
+                            }
+                            let before = data.clone();
+                            advance_offline(&mut data, &current_time());
+                            if data != before && write(&app, &key, &data).await.is_err() {
+                                failure = Some("store_write");
+                            }
+                            if app
+                                .state::<DesktopState>()
+                                .generation
+                                .load(Ordering::SeqCst)
+                                == identity_generation
+                            {
+                                if present(&app, &data, false).await.is_err() {
+                                    failure = Some("presentation");
+                                }
+                            } else {
+                                hide(&app).await;
+                            }
+                        }
+                        Err(_) => {
+                            failure = Some("store_read");
+                            hide(&app).await;
+                        }
                     }
                 }
-            } else {
-                hide(&app).await;
+                Err(_) => {
+                    failure = Some("identity");
+                    hide(&app).await;
+                }
             }
+            let active_generation = app
+                .state::<DesktopState>()
+                .generation
+                .load(Ordering::SeqCst);
+            *runtime.health.lock().await = (
+                active_generation,
+                if generation == active_generation {
+                    delivery_health(failure, chrono::Utc::now())
+                } else {
+                    Value::Null
+                },
+            );
         }
         force_sync = wait_for_refresh(&app.state::<RitualRuntime>().refresh).await;
     }
@@ -732,6 +795,30 @@ pub async fn run(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn delivery_health_is_redacted_retryable_and_clears_on_recovery_or_account_change() {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-09-29T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for stage in [
+            "identity",
+            "store_read",
+            "sync",
+            "store_write",
+            "presentation",
+        ] {
+            let health = delivery_health(Some(stage), at);
+            assert_eq!(
+                health,
+                json!({"stage":stage,"failedAt":"2026-09-29T12:00:00.000Z","nextRetryAt":"2026-09-29T12:00:05.000Z"})
+            );
+            assert_eq!(health_for_generation(&(2, health.clone()), 2), health);
+            assert!(health_for_generation(&(2, health), 3).is_null());
+        }
+        assert!(delivery_health(None, at).is_null());
+        assert!(delivery_health(Some("private response or raw provider error"), at).is_null());
+    }
+
     #[tokio::test]
     async fn native_refresh_wakes_only_ritual_loop_and_coalesces_bursts() {
         let runtime = RitualRuntime::default();
@@ -790,7 +877,15 @@ pub async fn ritual_local(app: tauri::AppHandle, discard: bool) -> Result<Value,
     }
     let mut evidence = queue(&data);
     evidence.extend(data["conflicts"].as_array().cloned().unwrap_or_default());
-    Ok(json!({"queue":evidence,"enabled":data["enabled"],"localHistory":data["localHistory"]}))
+    let health = health_for_generation(
+        &*runtime.health.lock().await,
+        app.state::<DesktopState>()
+            .generation
+            .load(Ordering::SeqCst),
+    );
+    Ok(
+        json!({"queue":evidence,"enabled":data["enabled"],"localHistory":data["localHistory"],"deliveryHealth":health}),
+    )
 }
 pub async fn require_synced(app: &tauri::AppHandle) -> Result<(), String> {
     if let Ok((server, account, _)) = identity(app).await {

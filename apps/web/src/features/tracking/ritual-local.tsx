@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { errorMessage } from "../../api.js";
+import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 export function RitualLocal() {
   const [confirm, setConfirm] = useState(false);
@@ -9,7 +10,12 @@ export function RitualLocal() {
   const local = useQuery({
     queryKey: ["ritual-local"],
     queryFn: () =>
-      invoke<{ queue: unknown[]; enabled: boolean; localHistory: unknown[] }>("ritual_local", {
+      invoke<{
+        queue: unknown[];
+        enabled: boolean;
+        localHistory: unknown[];
+        deliveryHealth?: { stage: string; failedAt: string; nextRetryAt: string } | null;
+      }>("ritual_local", {
         discard: false,
       }),
     refetchInterval: 10000,
@@ -33,11 +39,53 @@ export function RitualLocal() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  const health = local.isError ? null : local.data?.deliveryHealth;
+  const stageMessages: Record<string, string> = {
+    identity: "Unable to confirm the account for this Mac",
+    store_read: "Unable to read saved ritual changes on this Mac",
+    sync: "Unable to sync rituals with your account",
+    store_write: "Unable to save ritual changes on this Mac",
+    presentation: "Unable to show the ritual on this Mac",
+  };
+  const retryAt = health ? new Date(health.nextRetryAt) : null;
   return (
     <div className="flex flex-col gap-2">
       <p className="text-muted-foreground">
-        Automatic rituals on this Mac: {local.data?.enabled ? "on" : "off"}
+        Automatic rituals on this Mac:{" "}
+        {local.isError
+          ? "unavailable"
+          : local.isPending
+            ? "loading"
+            : local.data?.enabled
+              ? "on"
+              : "off"}
       </p>
+      {local.isError ? (
+        <Alert variant="warning">
+          <AlertTitle>Ritual status unavailable</AlertTitle>
+          <AlertDescription>Unable to read this Mac’s ritual status</AlertDescription>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={local.isFetching}
+            onClick={() => void local.refetch()}
+          >
+            Retry
+          </Button>
+        </Alert>
+      ) : health ? (
+        <Alert variant="warning">
+          <AlertTitle>
+            {stageMessages[health.stage] ?? "Ritual delivery needs attention"}
+          </AlertTitle>
+          <AlertDescription>
+            Retrying automatically
+            {retryAt && Number.isFinite(retryAt.getTime())
+              ? ` at ${retryAt.toLocaleTimeString()}`
+              : " shortly"}
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {local.data?.queue?.length || local.data?.localHistory?.length ? (
         <>
           <p role="status">

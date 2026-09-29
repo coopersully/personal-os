@@ -27,6 +27,13 @@
   [the ritual plan](../superpowers/plans/2026-09-29-morning-night-rituals.md) and
   [COO-62 — Deliver morning and night desktop rituals](https://linear.app/coopersully/issue/COO-62/deliver-morning-and-night-desktop-rituals).
   Source completion does not imply hosted rollout or replacement of the installed desktop app.
+- Retry records retain compact operation receipts rather than copied private response histories.
+  Replays preserve the original outcome while returning current account state; deletion removes
+  legacy private snapshots without invalidating the other ritual’s compact receipts. Redacted
+  audits distinguish settings, answers, and each terminal/escape operation.
+- Settings exposes redacted native delivery failures and retry timing. Unknown/unavailable
+  session state prevents presentation; switching servers clears the prior encrypted ritual store
+  and credentials after pending changes are settled.
 
 ## 2026-09-25 — Canonical Finance position maintenance checkpoint
 

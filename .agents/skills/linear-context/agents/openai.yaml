@@ -1,0 +1,6 @@
+interface:
+  display_name: "Nohmi Linear Context"
+  short_description: "Use Nohmi's Linear workspace conventions"
+  default_prompt: "Use $linear-context before reading or updating Nohmi work items."
+policy:
+  allow_implicit_invocation: true

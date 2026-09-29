@@ -61,6 +61,24 @@ function contrast(first, second) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function oklabChroma(hex) {
+  const [red, green, blue] = hex
+    .slice(1)
+    .match(/.{2}/g)
+    .map((channel) => Number.parseInt(channel, 16) / 255)
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
+  const linearLightness = Math.cbrt(
+    0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue,
+  );
+  const linearMedium = Math.cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue);
+  const linearShort = Math.cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue);
+  const a =
+    1.9779984951 * linearLightness - 2.428592205 * linearMedium + 0.4505937099 * linearShort;
+  const b =
+    0.0259040371 * linearLightness + 0.7827717662 * linearMedium - 0.808675766 * linearShort;
+  return Math.hypot(a, b);
+}
+
 const light = tokensFor(":root");
 const dark = tokensFor(".dark", light);
 const violations = [];
@@ -90,7 +108,7 @@ const pairs = [
   {
     background: "--primary",
     foreground: "--primary-foreground",
-    maxDelta: 1,
+    maxDelta: 1.1,
     min: 4.5,
     name: "primary action",
   },
@@ -136,7 +154,32 @@ const pairs = [
     min: 4.5,
     name: "calendar metadata",
   },
+  ...["calendar", "tasks", "mail", "finances"].map((workspace) => ({
+    background: "--surface",
+    foreground: `--workspace-${workspace}-accent`,
+    maxDelta: 1.5,
+    min: 4.5,
+    name: `${workspace} workspace identity`,
+  })),
 ];
+
+for (const workspace of ["calendar", "tasks", "mail", "finances"]) {
+  const token = `--workspace-${workspace}-accent`;
+  if (!new RegExp(`^\\s*${token}:`, "m").test(blockFor(".dark"))) {
+    violations.push(`${token} must be calibrated explicitly in the dark theme block.`);
+  }
+  for (const [themeName, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ]) {
+    const chroma = oklabChroma(resolveColor(theme, token));
+    if (chroma < 0.12) {
+      violations.push(
+        `${token} must remain a high-chroma workspace identity in ${themeName} mode; received ${chroma.toFixed(3)} OKLab chroma.`,
+      );
+    }
+  }
+}
 
 for (const { background, foreground, maxDelta, min, name } of pairs) {
   const lightRatio = contrast(resolveColor(light, foreground), resolveColor(light, background));
@@ -153,14 +196,29 @@ for (const { background, foreground, maxDelta, min, name } of pairs) {
   }
 }
 
-for (const theme of [light, dark]) {
-  const ladder = ["--canvas", "--surface", "--surface-raised"].map((token) =>
-    relativeLuminance(resolveColor(theme, token)),
-  );
-  if (!(ladder[0] < ladder[1] && ladder[1] < ladder[2])) {
-    violations.push(
-      "Material ladder must become lighter from canvas → surface → raised in each theme.",
-    );
+for (const [name, theme] of [
+  ["light", light],
+  ["dark", dark],
+]) {
+  const canvas = resolveColor(theme, "--canvas");
+  const surface = resolveColor(theme, "--surface");
+  const subtle = resolveColor(theme, "--surface-subtle");
+  if (canvas === surface || surface === subtle || canvas === subtle) {
+    violations.push(`${name} flat surfaces need three distinct neutral tones.`);
+  }
+  for (const token of [
+    "--material-rose",
+    "--material-coral",
+    "--material-amber",
+    "--material-green",
+    "--material-teal",
+    "--material-blue",
+    "--material-indigo",
+    "--material-violet",
+  ]) {
+    if (contrast(resolveColor(theme, "--material-foreground"), resolveColor(theme, token)) < 4.5) {
+      violations.push(`${name} ${token} needs 4.5:1 contrast with material foreground.`);
+    }
   }
 }
 

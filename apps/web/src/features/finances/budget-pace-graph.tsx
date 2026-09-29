@@ -1,6 +1,8 @@
 import type { FinanceBudgetPace, FinanceBudgetPacePeriod } from "@personal-os/domain";
 import { formatDateOnly } from "@personal-os/domain";
+import { Link } from "react-router-dom";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
+import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   Card as ShadcnCard,
   CardAction as ShadcnCardAction,
@@ -9,6 +11,13 @@ import {
   CardHeader as ShadcnCardHeader,
   CardTitle as ShadcnCardTitle,
 } from "@/components/ui/card";
+import {
+  Empty as ShadcnEmpty,
+  EmptyContent as ShadcnEmptyContent,
+  EmptyDescription as ShadcnEmptyDescription,
+  EmptyHeader as ShadcnEmptyHeader,
+  EmptyTitle as ShadcnEmptyTitle,
+} from "@/components/ui/empty";
 import {
   ToggleGroup as ShadcnToggleGroup,
   ToggleGroupItem as ShadcnToggleGroupItem,
@@ -38,7 +47,7 @@ function cellClassName(
   period: FinanceBudgetPacePeriod,
 ) {
   return cn(
-    "block shrink-0 rounded-md outline-none ring-ring/50 transition-transform focus-visible:ring-3",
+    "block shrink-0 rounded-md border border-transparent outline-none transition-colors focus-visible:border-foreground/60",
     period === "week" ? "size-10 sm:size-12" : period === "month" ? "size-5" : "size-3",
     status === "ahead" ? "bg-success/60" : status === "behind" ? "bg-destructive/55" : "bg-muted",
   );
@@ -117,6 +126,24 @@ export function BudgetPaceGraph({
   const latest = data?.cells.find((cell) => cell.date === data.asOf);
   const hasBudget = data?.cells.some((cell) => cell.planned > 0) ?? false;
   const isYear = period === "year";
+
+  if (data && !hasBudget) {
+    return (
+      <ShadcnEmpty className="min-h-48 border">
+        <ShadcnEmptyHeader>
+          <ShadcnEmptyTitle>No budget yet</ShadcnEmptyTitle>
+          <ShadcnEmptyDescription>
+            Set monthly category limits to see whether your spending is on pace.
+          </ShadcnEmptyDescription>
+        </ShadcnEmptyHeader>
+        <ShadcnEmptyContent>
+          <ShadcnButton asChild size="sm">
+            <Link to="/finances/budgets">Set a budget</Link>
+          </ShadcnButton>
+        </ShadcnEmptyContent>
+      </ShadcnEmpty>
+    );
+  }
 
   return (
     <ShadcnCard>

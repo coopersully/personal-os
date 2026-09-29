@@ -42,6 +42,16 @@ function mockX(): XConnector {
           text: `${folderId}: See this event`,
           url: "https://x.com/ada/status/post-1",
         },
+        {
+          authorId: "author-2",
+          authorName: "Grace Hopper",
+          authorUsername: "grace",
+          postedAt: null,
+          raw: { id: "post-2" },
+          remotePostId: "post-2",
+          text: `${folderId}: Read this later`,
+          url: "https://x.com/grace/status/post-2",
+        },
       ],
     })),
   };
@@ -85,12 +95,18 @@ describe.sequential("X Bookmarks service", () => {
   it("authorizes once, persists folders, syncs the chosen folder, and exposes attributed bookmarks", async () => {
     const url = await service.startAuthorization(userId);
     const state = String(new URL(url).searchParams.get("state"));
-    expect(await service.completeAuthorization(state, "code")).toMatchObject({
+    const connected = await service.completeAuthorization(state, "code");
+    expect(connected).toMatchObject({
       username: "example_user",
       selectedFolderId: null,
     });
-    await expect(service.completeAuthorization(state, "code")).rejects.toThrow(
-      "invalid or expired",
+    expect(x.listBookmarkFolders).not.toHaveBeenCalled();
+    await expect(service.completeAuthorization(state, "code")).resolves.toEqual(connected);
+    expect(x.exchangeCode).toHaveBeenCalledTimes(1);
+    expect(x.exchangeCode).toHaveBeenCalledWith(
+      "code",
+      expect.stringMatching(/^pkce_/),
+      "https://api.ilo.invalid/v1/x-bookmarks/callback",
     );
     expect(await service.folders(userId)).toEqual(
       expect.arrayContaining([
@@ -98,9 +114,16 @@ describe.sequential("X Bookmarks service", () => {
       ]),
     );
     await expect(service.selectFolder(userId, "missing")).rejects.toThrow("not found");
-    await expect(service.selectFolder(userId, "folder-calendar")).resolves.toEqual({ changed: 1 });
+    await expect(service.selectFolder(userId, "folder-calendar")).resolves.toEqual({ changed: 2 });
     await expect(service.sync(userId)).resolves.toEqual({ changed: 0 });
     await expect(service.list(userId, 10)).resolves.toMatchObject([
+      {
+        authorUsername: "grace",
+        postUrl: "https://x.com/grace/status/post-2",
+        postedAt: null,
+        source: { provider: "x", remoteId: "post-2", sourceType: "bookmark" },
+        text: "folder-calendar: Read this later",
+      },
       {
         authorUsername: "ada",
         postUrl: "https://x.com/ada/status/post-1",
@@ -121,16 +144,101 @@ describe.sequential("X Bookmarks service", () => {
     await service.completeAuthorization(state, "code");
     await expect(service.sync(userId)).rejects.toThrow("Choose an X bookmark folder first");
     vi.mocked(x.listBookmarkFolders).mockRejectedValueOnce(
-      new ConnectorError("X is unavailable", 503),
+      new ConnectorError({
+        category: "temporary",
+        code: "x_temporary_failure",
+        disposition: "retry",
+        message: "X is unavailable",
+        status: 503,
+      }),
     );
     await expect(service.folders(userId)).rejects.toThrow("X is unavailable");
+    await expect(service.getAccount(userId)).resolves.toMatchObject({
+      syncError: "X is temporarily unavailable. nohmi will retry automatically.",
+      syncStatus: "error",
+    });
+    vi.mocked(x.listBookmarkFolders).mockRejectedValueOnce("opaque provider failure");
+    await expect(service.folders(userId)).rejects.toMatchObject({ code: "internal_error" });
+    await expect(service.getAccount(userId)).resolves.toMatchObject({
+      syncError: "X is temporarily unavailable. nohmi will retry automatically.",
+      syncStatus: "error",
+    });
     await service.selectFolder(userId, "folder-calendar");
     vi.mocked(x.listFolderBookmarks).mockRejectedValueOnce(
-      new ConnectorError("X needs reauthorization", 401),
+      new ConnectorError({
+        category: "authorization",
+        code: "x_authorization_failed",
+        disposition: "reconnect",
+        message: "X needs reauthorization",
+        status: 401,
+      }),
     );
     await expect(service.sync(userId)).rejects.toThrow("X needs reauthorization");
     await service.disconnect(userId);
     await expect(service.list(userId, 10)).rejects.toThrow("Connect X Bookmarks first");
     await expect(service.disconnect(userId)).rejects.toThrow("Connect X Bookmarks first");
+  });
+
+  it("closes invalid, cancelled, incomplete, and provider-failed authorization callbacks", async () => {
+    await expect(
+      service.handleAuthorizationCallback({
+        code: "code",
+        requestId: "invalid-state",
+        state: "invalid",
+      }),
+    ).resolves.toMatchObject({ attemptId: null, status: "failed" });
+
+    const callback = async (values: { code?: string; error?: string; requestId: string }) => {
+      const url = await service.startAuthorization(userId);
+      return service.handleAuthorizationCallback({
+        ...values,
+        state: String(new URL(url).searchParams.get("state")),
+      });
+    };
+    const cancelledUrl = await service.startAuthorization(userId);
+    const cancelledInput = {
+      error: "access_denied",
+      requestId: "cancelled",
+      state: String(new URL(cancelledUrl).searchParams.get("state")),
+    };
+    await expect(service.handleAuthorizationCallback(cancelledInput)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    await expect(service.handleAuthorizationCallback(cancelledInput)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+
+    const failedUrl = await service.startAuthorization(userId);
+    const failedInput = {
+      error: "server_error",
+      requestId: "provider-error",
+      state: String(new URL(failedUrl).searchParams.get("state")),
+    };
+    await expect(service.handleAuthorizationCallback(failedInput)).resolves.toMatchObject({
+      status: "failed",
+    });
+    await expect(service.handleAuthorizationCallback(failedInput)).resolves.toMatchObject({
+      status: "failed",
+    });
+    await expect(callback({ requestId: "missing-code" })).resolves.toMatchObject({
+      status: "failed",
+    });
+
+    vi.mocked(x.exchangeCode).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "temporary",
+        code: "x_temporary_failure",
+        disposition: "retry",
+        message: "X is unavailable",
+        status: 503,
+      }),
+    );
+    await expect(callback({ code: "code", requestId: "temporary" })).resolves.toMatchObject({
+      status: "failed",
+    });
+    vi.mocked(x.exchangeCode).mockRejectedValueOnce(new Error("invalid grant"));
+    await expect(callback({ code: "code", requestId: "invalid-grant" })).resolves.toMatchObject({
+      status: "failed",
+    });
   });
 });

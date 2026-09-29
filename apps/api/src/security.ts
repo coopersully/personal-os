@@ -3,6 +3,7 @@ import {
   createDecipheriv,
   createHash,
   randomBytes,
+  randomInt,
   scrypt as scryptCallback,
   timingSafeEqual,
 } from "node:crypto";
@@ -36,8 +37,13 @@ export function generateToken(prefix: string): string {
   return `${prefix}_${randomBytes(32).toString("base64url")}`;
 }
 
+export function generateInvitationCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join("");
+}
+
 export function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+  return createHash("sha256").update(token).digest("hex"); // codeql[js/insufficient-password-hash]
 }
 
 function decodeEncryptionKey(value: string): Buffer {

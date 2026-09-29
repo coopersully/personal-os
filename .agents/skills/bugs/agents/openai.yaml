@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nohmi Bugs"
+  short_description: "Review open Nohmi Linear bugs"
+  default_prompt: "Use $bugs to show open Nohmi bugs sorted by priority."

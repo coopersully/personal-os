@@ -1,8 +1,8 @@
-import { Settings } from "lucide-react";
+import { SettingsIcon } from "@/components/icons";
 
 /** Settings-owned navigation metadata. The shell decides placement. */
 export const settingsNavigationItem = {
-  icon: Settings,
+  icon: SettingsIcon,
   label: "Settings",
   path: "/settings",
 };

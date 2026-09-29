@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship It"
+  short_description: "Take one Nohmi pull request through verified merge."
+  default_prompt: "Use $ship-it to take the current Nohmi pull request through every gate and merge it autonomously."

@@ -40,10 +40,15 @@ export default defineConfig({
     },
     environment: "node",
     globals: true,
-    include: ["apps/*/src/**/*.test.{ts,tsx}", "packages/*/src/**/*.test.{ts,tsx}"],
-    // GitHub's hosted Linux runner has two cores. More workers makes the large DOM suite
-    // contend with API integration tests and causes otherwise-fast UI tests to time out.
-    maxWorkers: process.env.CI ? 2 : 4,
+    include: [
+      ".codex/scripts/**/*.test.ts",
+      "apps/*/src/**/*.test.{ts,tsx}",
+      "packages/*/src/**/*.test.{ts,tsx}",
+    ],
+    // Keep the large DOM suite from contending with API integration-test containers.
+    // Four local workers made otherwise-fast setup flows exceed their timeout under
+    // full `pnpm verify` load; matching CI keeps the repository-wide gate deterministic.
+    maxWorkers: 2,
     // A few end-to-end interaction tests intentionally cover several user actions. Their
     // deterministic work completes locally, but shared two-core runners need headroom;
     // keep the normal five-second fast-failure limit outside CI.

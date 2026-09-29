@@ -1,6 +1,6 @@
-# ilo design system
+# nohmi design system
 
-ilo is a calm, opinionated workspace for a person and their agents. The
+nohmi is a calm, unopinionated workspace for a person and their agents. The
 system exists to make the product feel intentional at every scale, while making
 its UI predictable to build and review.
 

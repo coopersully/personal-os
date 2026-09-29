@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 
 export type ErrorCode =
   | "conflict"
+  | "feature_unavailable"
   | "forbidden"
   | "internal_error"
   | "invalid_request"
@@ -14,6 +15,7 @@ export type ErrorCode =
 
 const statuses = {
   conflict: 409,
+  feature_unavailable: 410,
   forbidden: 403,
   internal_error: 500,
   invalid_request: 400,
@@ -26,7 +28,7 @@ const statuses = {
 export class AppError extends Error {
   public readonly code: ErrorCode;
   public readonly details?: unknown;
-  public readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503;
+  public readonly status: 400 | 401 | 403 | 404 | 409 | 410 | 429 | 500 | 503;
 
   public constructor(code: ErrorCode, message: string, details?: unknown) {
     super(message);
@@ -37,11 +39,16 @@ export class AppError extends Error {
   }
 }
 
-export function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown, constraint?: string): boolean {
   let current = error;
   const seen = new Set<unknown>();
   while (typeof current === "object" && current !== null && !seen.has(current)) {
-    if ("code" in current && current.code === "23505") return true;
+    if (
+      "code" in current &&
+      current.code === "23505" &&
+      (constraint === undefined || ("constraint" in current && current.constraint === constraint))
+    )
+      return true;
     seen.add(current);
     current = "cause" in current ? current.cause : null;
   }

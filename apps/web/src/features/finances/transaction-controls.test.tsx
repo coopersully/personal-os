@@ -129,7 +129,7 @@ it("loads the exact source record and never presents a failed envelope as transa
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByRole("alert")).toHaveTextContent("Source is no longer available");
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   expect(screen.queryByRole("region", { name: "Source transaction" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByText("Market")).toBeVisible();
@@ -138,4 +138,44 @@ it("loads the exact source record and never presents a failed envelope as transa
     expect(onBreakdown).toHaveBeenCalledWith(expect.objectContaining({ id: "source" })),
   );
   expect(api.getFinanceTransaction).toHaveBeenLastCalledWith("source");
+});
+
+it("retains a pending source and its original merchant through a failed background refresh", async () => {
+  const record = {
+    id: "cached-source",
+    merchant: "Market",
+    rawMerchant: "MARKET 123 POS",
+    amount: 24,
+    date: "2026-09-03",
+    category: "Groceries",
+    direction: "expense",
+    pending: true,
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const envelope = { outcome: "completed", data: record };
+  client.setQueryData(["finance-transaction", "cached-source"], envelope);
+  api.getFinanceTransaction
+    .mockRejectedValueOnce(new Error("private upstream failure"))
+    .mockResolvedValue(envelope);
+  const onCategorize = vi.fn();
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <FinanceLinkedTransaction
+          id="cached-source"
+          onBreakdown={vi.fn()}
+          onCategorize={onCategorize}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  expect(screen.getByText("Pending")).toBeVisible();
+  expect(screen.getByText(/MARKET 123 POS/)).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Categorize" }));
+  expect(onCategorize).toHaveBeenCalledWith(record);
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
+  );
 });

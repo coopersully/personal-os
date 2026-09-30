@@ -1,6 +1,6 @@
 import type { Reminder, Task, TaskWorkspaceItem } from "@personal-os/domain";
 import { EmptyState } from "@personal-os/ui";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -23,10 +23,12 @@ import {
   WorkspaceSecondaryAppBarContent,
 } from "@/components/workspace-secondary-app-bar";
 import { WorkspaceSkeleton } from "@/components/workspace-skeleton";
-import { api, errorMessage } from "../../api";
+import { api } from "../../api";
 import { InlineError } from "../../components/async-state";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { formatMaterialDateTime } from "../../lib/date-format";
 import { invalidateMaterial } from "../../lib/material-queries";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { TasksPage as LegacyTasksPage, listAllTaskLists, listAllTaskProjects } from "./page";
 import { TaskContainerActions } from "./task-navigation";
 import {
@@ -134,7 +136,8 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
   const [confirmation, setConfirmation] = useState<TaskWorkspaceItem[] | null>(null);
   const [preview, setPreview] = useState<TaskWorkspaceItem | null>(null);
   const [result, setResult] = useState<Awaited<ReturnType<typeof runWorkspaceBatch>> | null>(null);
-  const batch = useMutation({
+  const batch = useFeedbackMutation({
+    feedback: { action: "update these tasks", safeToRetry: false, form: false },
     mutationFn: ({
       items: selected,
       action,
@@ -142,7 +145,6 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
       items: TaskWorkspaceItem[];
       action: WorkspaceAction;
     }) => runWorkspaceBatch(selected, action),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: async (outcome) => {
       setResult(outcome);
       setSelection((old) => ({
@@ -289,6 +291,7 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
   };
   return (
     <>
+      <MutationFeedback feedback={batch.feedback} />
       <WorkspaceSecondaryAppBar aria-label="Tasks page controls">
         <WorkspaceSecondaryAppBarContent className="flex-wrap gap-2">
           <h1 className="font-heading text-sm font-medium">{scopeName}</h1>
@@ -353,7 +356,10 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
         {(!canReadItems && lists.isError) ||
         (itemsQuery.isError && !itemsQuery.isFetchNextPageError) ? (
           <div className="flex flex-col items-start gap-2">
-            <InlineError error={canReadItems ? itemsQuery.error : lists.error} />
+            <InlineError
+              error={canReadItems ? itemsQuery.error : lists.error}
+              stale={canReadItems ? itemsQuery.data !== undefined : lists.data !== undefined}
+            />
             <Button
               size="sm"
               variant="outline"
@@ -367,7 +373,12 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
           </div>
         ) : null}
         {requestedTask.isError || requestedReminder.isError ? (
-          <InlineError error={requestedTask.error ?? requestedReminder.error} />
+          <InlineError
+            error={requestedTask.error ?? requestedReminder.error}
+            retry={() =>
+              requestedTask.isError ? requestedTask.refetch() : requestedReminder.refetch()
+            }
+          />
         ) : null}
         {requestedTask.data && !requestedItem && (lists.isError || projects.isError) ? (
           <div className="flex flex-col items-start gap-2">

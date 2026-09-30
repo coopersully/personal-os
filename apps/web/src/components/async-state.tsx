@@ -1,17 +1,68 @@
-import { errorMessage } from "../api.js";
-import { useErrorNotification } from "../lib/error-notification.js";
+import { ApiClientError } from "@personal-os/api-client";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert.js";
+import { Button } from "./ui/button.js";
 import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
 
 export function PageLoading({ workspace = "generic" }: { workspace?: WorkspaceSkeletonKind }) {
   return <WorkspaceSkeleton kind={workspace} />;
 }
 
-export function InlineError({ error }: { error: unknown }) {
-  useErrorNotification(error);
+export function InlineError({
+  error,
+  title = "Couldn’t load this material.",
+  retry,
+  stale = false,
+}: {
+  error: unknown;
+  title?: string;
+  retry?: () => unknown;
+  stale?: boolean;
+}) {
+  const description =
+    error instanceof ApiClientError && error.status === 401
+      ? "Your session has expired. Sign in again to continue."
+      : error instanceof ApiClientError && error.status === 403
+        ? "You don’t have access to this material. Check the account’s permissions."
+        : stale
+          ? "Showing the last available update. Try refreshing before relying on this information."
+          : "Try again. If the problem continues, check your connection.";
   return (
-    <div className="inline-error" role="alert">
-      <strong>Couldn’t load this material.</strong>
-      <span>{errorMessage(error)}</span>
-    </div>
+    <Alert variant={stale ? "warning" : "destructive"} role="status">
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
+      {retry ? (
+        <AlertAction>
+          <Button
+            onClick={() => {
+              void retry();
+            }}
+            variant="outline"
+            size="sm"
+          >
+            Try again
+          </Button>
+        </AlertAction>
+      ) : null}
+    </Alert>
+  );
+}
+
+export function QueryFeedback({
+  query,
+  title,
+  staleOnly = false,
+}: {
+  query: { isError: boolean; error: unknown; data?: unknown; refetch?: () => unknown };
+  title: string;
+  staleOnly?: boolean;
+}) {
+  if (!query.isError || (staleOnly && query.data === undefined)) return null;
+  return (
+    <InlineError
+      error={query.error}
+      title={title}
+      stale={query.data !== undefined}
+      {...(query.refetch ? { retry: query.refetch } : {})}
+    />
   );
 }

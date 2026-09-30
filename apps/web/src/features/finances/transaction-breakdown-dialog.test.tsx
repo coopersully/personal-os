@@ -122,5 +122,7 @@ it("saves a single-category future rule and keeps a failed save recoverable", as
     }),
   );
   rejectSave?.(new Error("Breakdown save failed"));
-  expect(await screen.findByText("Breakdown save failed")).toBeVisible();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this transaction breakdown/),
+  ).toBeVisible();
 });

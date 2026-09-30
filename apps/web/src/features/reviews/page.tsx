@@ -37,7 +37,8 @@ import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/p
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { WorkspaceIcon, workspaceIdentities } from "@/components/workspace-identity";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
 
 const pageSize = 10;
 const skeletonRows = ["first", "second", "third"] as const;
@@ -200,19 +201,7 @@ export function ReviewsPage() {
       </section>
 
       {query.isPending ? <QueueSkeleton /> : null}
-      {query.isError ? (
-        <Alert variant="destructive">
-          <AlertTriangleIcon />
-          <AlertTitle>Reviews could not load</AlertTitle>
-          <AlertDescription>{errorMessage(query.error)}</AlertDescription>
-          <AlertAction>
-            <Button onClick={retry} size="sm" variant="outline">
-              <RefreshIcon data-icon="inline-start" />
-              Try again
-            </Button>
-          </AlertAction>
-        </Alert>
-      ) : null}
+      <QueryFeedback query={{ ...query, refetch: retry }} title="Couldn’t load your reviews." />
       {query.data && query.data.unavailableDomains.length > 0 ? (
         <Alert variant="warning">
           <AlertTriangleIcon />

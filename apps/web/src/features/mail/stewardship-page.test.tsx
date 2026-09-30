@@ -282,7 +282,7 @@ describe("Mail workspace stewardship", () => {
   it("keeps status and maintenance failures visible", async () => {
     mocks.getMailStatus.mockRejectedValueOnce(new Error("Status unavailable"));
     const first = renderPage("/mail/review");
-    expect(await screen.findByText("Status unavailable")).toBeVisible();
+    expect(await screen.findByText("Couldn’t load mail stewardship.")).toBeVisible();
     first.unmount();
 
     mocks.getMailStatus.mockResolvedValue({
@@ -294,7 +294,9 @@ describe("Mail workspace stewardship", () => {
     const user = userEvent.setup();
     renderPage("/mail/review");
     await user.click(await screen.findByRole("button", { name: "Maintain Mail" }));
-    expect(await screen.findByText("Maintenance unavailable")).toBeVisible();
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could maintain the mail workspace/),
+    ).toBeVisible();
     expect(screen.getByRole("heading", { name: "Clean" })).toBeVisible();
   });
 });

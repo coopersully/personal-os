@@ -11,7 +11,7 @@ import {
   localDateTimeToUtc,
   parseLocalDate,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, useIsPresent, usePresenceData } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -68,8 +68,11 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 type FloatingMode = "closed" | "create" | "date" | "search";
 type FloatingSurfaceState = FloatingMode | "details";
@@ -363,10 +366,17 @@ function CalendarSearchCard({
             </Button>
           </InputGroupAddon>
         </InputGroup>
+        <QueryFeedback query={events} title="Couldn’t search the full calendar." />
         {query.trim() ? (
           <ul aria-label="Calendar search results" className="calendar-search-results">
             {results.length === 0 ? (
-              <li>{events.isPending ? "Searching…" : "No matching events or dates."}</li>
+              <li>
+                {events.isPending
+                  ? "Searching…"
+                  : events.isError
+                    ? "Search is incomplete. Try again above."
+                    : "No matching events or dates."}
+              </li>
             ) : (
               results.map((result) => (
                 <li key={result.key}>
@@ -883,12 +893,10 @@ function InlineEventComposer({
   useEffect(() => {
     repairEndAfterStart(startDate, startTime);
   }, [repairEndAfterStart, startDate, startTime]);
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "create the event", form: true },
     mutationFn: (input: Parameters<typeof api.createEvent>[0]) => api.createEvent(input),
-    onError: (error) =>
-      toast.error("Event couldn’t be created", { description: errorMessage(error) }),
     onSuccess: async (created) => {
-      await invalidateMaterial(queryClient);
       if (created.conferenceStatus === "pending") {
         toast.info("Event created", {
           description: "The meeting link is still being prepared.",
@@ -899,6 +907,7 @@ function InlineEventComposer({
         });
       }
       close();
+      await invalidateMaterial(queryClient);
     },
   });
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -941,7 +950,15 @@ function InlineEventComposer({
         <CloseButton close={close} />
       </CardHeader>
       <CardContent>
-        <form onSubmit={submit}>
+        <FeedbackForm
+          feedback={mutation.feedback}
+          onSubmit={submit}
+          validate={(form) => ({
+            ...(!String(new FormData(form).get("title") ?? "").trim()
+              ? { title: "Enter an event title." }
+              : {}),
+          })}
+        >
           <FieldGroup className="gap-3">
             <Field>
               <FieldLabel className="sr-only" htmlFor="floating-event-title">
@@ -1189,12 +1206,15 @@ function InlineEventComposer({
                 rows={2}
               />
             </Field>
+            {writable.length === 0 ? (
+              <p role="status">Connect a writable calendar before creating an event.</p>
+            ) : null}
             <Button disabled={mutation.isPending || writable.length === 0} type="submit">
               <PlusIcon data-icon="inline-start" />
               {mutation.isPending ? "Creating…" : "Create event"}
             </Button>
           </FieldGroup>
-        </form>
+        </FeedbackForm>
       </CardContent>
     </Card>
   );

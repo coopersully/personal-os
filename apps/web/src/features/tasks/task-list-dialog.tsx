@@ -4,7 +4,7 @@ import {
   type TaskListIcon,
   taskListArchiveConflictSchema,
 } from "@personal-os/domain";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -23,9 +23,11 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { taskListIconOptions } from "./task-list-icons";
 
 export function TaskListDialog({
@@ -53,15 +55,16 @@ export function TaskListDialog({
     ]);
     close();
   };
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this list", safeToRetry: false, form: true },
     mutationFn: (input: { description: string | null; icon: TaskListIcon; name: string }) =>
       list
         ? api.updateTaskList(list.id, { ...input, expectedRevision: list.revision })
         : api.createTaskList({ ...input, color: null }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => finish(list ? "List updated." : "List created."),
   });
-  const archive = useMutation({
+  const archive = useFeedbackMutation({
+    feedback: { action: "archive this list", safeToRetry: false, form: false },
     mutationFn: async (
       resolution?: "archive_contents_together" | "cancel" | "move_active_contents",
     ) => {
@@ -75,7 +78,6 @@ export function TaskListDialog({
     onError: (error) => {
       const parsed = taskListConflict(error);
       if (parsed) setConflict(parsed);
-      else toast.error(errorMessage(error));
     },
     onSuccess: (_result, resolution) => {
       if (resolution === "cancel") {
@@ -113,6 +115,7 @@ export function TaskListDialog({
               : "Lists are stable areas for related Tasks and Projects. System View names are reserved."}
           </DialogDescription>
         </DialogHeader>
+        <MutationFeedback feedback={taskListConflict(archive.error) ? null : archive.feedback} />
         {conflict ? (
           <ListArchiveConflict
             conflict={conflict}
@@ -138,7 +141,7 @@ export function TaskListDialog({
           </DialogFooter>
         ) : (
           <>
-            <form onSubmit={submit}>
+            <FeedbackForm feedback={save.feedback} onSubmit={submit}>
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="task-list-name">Name</FieldLabel>
@@ -184,7 +187,7 @@ export function TaskListDialog({
                   </RadioGroup>
                 </FieldSet>
               </FieldGroup>
-              {save.isError ? <InlineError error={save.error} /> : null}
+
               <DialogFooter className="mt-5">
                 <Button onClick={close} type="button" variant="outline">
                   Cancel
@@ -193,7 +196,7 @@ export function TaskListDialog({
                   {save.isPending ? "Saving…" : list ? "Save changes" : "Create List"}
                 </Button>
               </DialogFooter>
-            </form>
+            </FeedbackForm>
             {list ? (
               <Button
                 disabled={archive.isPending}

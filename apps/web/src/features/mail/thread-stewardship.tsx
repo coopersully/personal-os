@@ -5,11 +5,10 @@ import type {
   MailResponseBrief,
   MailStewardshipFeedbackKind,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangleIcon, ShieldCheckIcon } from "@/components/icons";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ShieldCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,8 +18,12 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
-import { useErrorNotification } from "../../lib/error-notification.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import type { MutationFeedbackState } from "../../lib/feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 const dispositions: MailDispositionKind[] = [
   "active",
@@ -57,7 +60,8 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       queryClient.invalidateQueries({ queryKey: ["mail-stewardship-status"] }),
     ]);
   };
-  const disposition = useMutation({
+  const disposition = useFeedbackMutation({
+    feedback: { action: "save the disposition", form: true },
     mutationFn: ({ rationale, value }: { rationale: string; value: MailDispositionKind }) =>
       api.setMailDisposition(threadId, {
         disposition: value,
@@ -67,7 +71,8 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
     onError: refresh,
     onSuccess: refresh,
   });
-  const createObligation = useMutation({
+  const createObligation = useFeedbackMutation({
+    feedback: { action: "create the obligation", form: true },
     mutationFn: ({ kind, rationale }: { kind: MailObligationKind; rationale: string }) =>
       api.createMailObligation(threadId, {
         dueAt: null,
@@ -82,7 +87,8 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
     onError: refresh,
     onSuccess: refresh,
   });
-  const updateObligation = useMutation({
+  const updateObligation = useFeedbackMutation({
+    feedback: { action: "update the obligation", form: true },
     mutationFn: ({
       id,
       state,
@@ -95,7 +101,8 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
     onError: refresh,
     onSuccess: refresh,
   });
-  const answer = useMutation({
+  const answer = useFeedbackMutation({
+    feedback: { action: "save the answer", form: true },
     mutationFn: ({
       answer: value,
       generalize,
@@ -110,7 +117,8 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
     onError: refresh,
     onSuccess: refresh,
   });
-  const feedback = useMutation({
+  const feedback = useFeedbackMutation({
+    feedback: { action: "record the feedback", form: true },
     mutationFn: ({
       comment,
       kind,
@@ -125,7 +133,8 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
     onError: refresh,
     onSuccess: refresh,
   });
-  const brief = useMutation({
+  const brief = useFeedbackMutation({
+    feedback: { action: "prepare the response brief", form: true, safeToRetry: true },
     mutationFn: (purpose: string) =>
       api.previewMailResponseBrief(threadId, {
         expectedThreadUpdatedAt: stewardship.data?.threadUpdatedAt as string,
@@ -137,26 +146,10 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
       }),
     onError: refresh,
   });
-  useErrorNotification(stewardship.error);
-  useErrorNotification(
-    disposition.error ??
-      createObligation.error ??
-      updateObligation.error ??
-      answer.error ??
-      feedback.error ??
-      brief.error,
-  );
-
   if (stewardship.isPending)
     return <Skeleton aria-label="Loading thread stewardship" className="m-6 h-48" />;
-  if (stewardship.isError)
-    return (
-      <Alert className="m-6" variant="destructive">
-        <AlertTriangleIcon aria-hidden="true" />
-        <AlertTitle>Thread stewardship is unavailable</AlertTitle>
-        <AlertDescription>{errorMessage(stewardship.error)}</AlertDescription>
-      </Alert>
-    );
+  if (stewardship.isError && !stewardship.data)
+    return <QueryFeedback query={stewardship} title="Couldn’t load thread stewardship." />;
   return (
     <div className="mail-thread-stewardship">
       <header>
@@ -164,26 +157,17 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
         <h3>Thread ledger</h3>
         <p>Private guidance and exact, version-checked controls. Agents never send email.</p>
       </header>
-      {disposition.isError ||
-      createObligation.isError ||
-      updateObligation.isError ||
-      answer.isError ||
-      feedback.isError ||
-      brief.isError ? (
-        <Alert variant="warning">
-          <AlertTriangleIcon aria-hidden="true" />
-          <AlertTitle>Evidence changed or the operation could not apply</AlertTitle>
-          <AlertDescription>
-            The latest thread evidence has been requested. Review it before retrying.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      <QueryFeedback query={stewardship} title="Couldn’t refresh thread stewardship." staleOnly />
+      <MutationFeedback feedback={updateObligation.feedback} />
+      <MutationFeedback feedback={answer.feedback} />
       <DispositionControl
+        mutationFeedback={disposition.feedback}
         current={stewardship.data.disposition?.disposition ?? null}
         pending={disposition.isPending}
         save={(value, rationale) => disposition.mutate({ rationale, value })}
       />
       <ObligationControl
+        mutationFeedback={createObligation.feedback}
         create={(kind, rationale) => createObligation.mutate({ kind, rationale })}
         obligations={stewardship.data.obligations}
         pending={createObligation.isPending || updateObligation.isPending}
@@ -197,6 +181,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
         questions={stewardship.data.questions}
       />
       <ResponseBriefControl
+        mutationFeedback={brief.feedback}
         brief={brief.data ?? null}
         pending={brief.isPending}
         preview={(purpose) => brief.mutate(purpose)}
@@ -215,6 +200,7 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
         </CardContent>
       </Card>
       <FeedbackControl
+        mutationFeedback={feedback.feedback}
         currentDispositionId={stewardship.data.disposition?.id ?? null}
         pending={feedback.isPending}
         submit={(targetId, kind, comment) =>
@@ -226,10 +212,12 @@ export function ThreadStewardship({ threadId }: { threadId: string }) {
 }
 
 function DispositionControl({
+  mutationFeedback,
   current,
   pending,
   save,
 }: {
+  mutationFeedback: MutationFeedbackState | null;
   current: MailDispositionKind | null;
   pending: boolean;
   save: (value: MailDispositionKind, rationale: string) => void;
@@ -243,7 +231,8 @@ function DispositionControl({
         <CardDescription>How this conversation belongs in the durable workspace.</CardDescription>
       </CardHeader>
       <CardContent>
-        <form
+        <FeedbackForm
+          feedback={mutationFeedback}
           className="mail-stewardship-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -279,18 +268,20 @@ function DispositionControl({
           <Button disabled={pending} size="sm" type="submit">
             Save disposition
           </Button>
-        </form>
+        </FeedbackForm>
       </CardContent>
     </Card>
   );
 }
 
 function ObligationControl({
+  mutationFeedback,
   create,
   obligations,
   pending,
   setState,
 }: {
+  mutationFeedback: MutationFeedbackState | null;
   create: (kind: MailObligationKind, rationale: string) => void;
   obligations: Awaited<ReturnType<typeof api.getMailThreadStewardship>>["obligations"];
   pending: boolean;
@@ -337,7 +328,8 @@ function ObligationControl({
             </div>
           ))
         )}
-        <form
+        <FeedbackForm
+          feedback={mutationFeedback}
           className="mail-stewardship-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -365,15 +357,16 @@ function ObligationControl({
               <Input
                 id="mail-obligation-rationale"
                 name="rationale"
+                required
                 onChange={(event) => setRationale(event.currentTarget.value)}
                 value={rationale}
               />
             </Field>
           </FieldGroup>
-          <Button disabled={pending || !rationale.trim()} size="sm" type="submit">
+          <Button disabled={pending} size="sm" type="submit">
             Record obligation
           </Button>
-        </form>
+        </FeedbackForm>
       </CardContent>
     </Card>
   );
@@ -438,10 +431,12 @@ function QuestionControl({
 }
 
 function ResponseBriefControl({
+  mutationFeedback,
   brief,
   pending,
   preview,
 }: {
+  mutationFeedback: MutationFeedbackState | null;
   brief: MailResponseBrief | null;
   pending: boolean;
   preview: (purpose: string) => void;
@@ -457,7 +452,8 @@ function ResponseBriefControl({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <form
+        <FeedbackForm
+          feedback={mutationFeedback}
           className="mail-stewardship-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -469,15 +465,16 @@ function ResponseBriefControl({
             <Input
               id="mail-response-purpose"
               name="purpose"
+              required
               onChange={(event) => setPurpose(event.currentTarget.value)}
               placeholder="What must a response accomplish?"
               value={purpose}
             />
           </Field>
-          <Button disabled={pending || !purpose.trim()} size="sm" type="submit">
+          <Button disabled={pending} size="sm" type="submit">
             Preview private brief
           </Button>
-        </form>
+        </FeedbackForm>
         {brief ? (
           <section aria-label="Private response brief" className="rounded-lg bg-muted p-3">
             <Badge variant="outline">Not transmittable</Badge>
@@ -494,10 +491,12 @@ function ResponseBriefControl({
 }
 
 function FeedbackControl({
+  mutationFeedback,
   currentDispositionId,
   pending,
   submit,
 }: {
+  mutationFeedback: MutationFeedbackState | null;
   currentDispositionId: string | null;
   pending: boolean;
   submit: (targetId: string, kind: MailStewardshipFeedbackKind, comment: string) => void;
@@ -514,7 +513,8 @@ function FeedbackControl({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form
+        <FeedbackForm
+          feedback={mutationFeedback}
           className="mail-stewardship-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -544,16 +544,17 @@ function FeedbackControl({
               <Textarea
                 id="mail-feedback-comment"
                 name="comment"
+                required
                 onChange={(event) => setComment(event.currentTarget.value)}
                 value={comment}
               />
             </Field>
           </FieldGroup>
-          <Button disabled={pending || !comment.trim()} size="sm" type="submit">
+          <Button disabled={pending} size="sm" type="submit">
             <ShieldCheckIcon aria-hidden="true" data-icon="inline-start" />
             Record feedback
           </Button>
-        </form>
+        </FeedbackForm>
       </CardContent>
     </Card>
   );

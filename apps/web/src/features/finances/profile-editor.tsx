@@ -1,8 +1,11 @@
-import { type FinanceProfileVersion, updateFinancialProfileInputSchema } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type FinanceProfileVersion,
+  financialProfileChangesSchema,
+  type UpdateFinancialProfileInput,
+} from "@personal-os/domain";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -27,7 +30,9 @@ import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -273,6 +278,19 @@ export function FinanceProfileEditor() {
   );
 }
 
+const profileFieldNames = {
+  "changes.jurisdiction": "jurisdiction",
+  "changes.incomeStability": "incomeStability",
+  "changes.householdSize": "householdSize",
+  "changes.dependents": "dependents",
+  "changes.expectedMonthlyTakeHome": "expectedMonthlyTakeHome",
+  "changes.liquidReserves": "liquidReserves",
+  "changes.preferences.emergencyReserveMonths": "reserveMonths",
+  "changes.preferences.bufferTarget": "buffer",
+  "changes.preferences.debtPriority": "debtPriority",
+  "changes.preferences.notes": "notes",
+};
+
 function ProfileDialog({
   profile,
   onClose,
@@ -284,19 +302,19 @@ function ProfileDialog({
   const [form, setForm] = useState(() => profileForm(profile));
   const lastAttempt = useRef<{ payload: string; key: string } | null>(null);
   const changes = changedProfileFields(form, profile);
-  const save = useMutation({
-    mutationFn: async () => {
-      const payload = JSON.stringify(changes);
+  const save = useFeedbackMutation({
+    feedback: { action: "save your financial profile", safeToRetry: false, form: true },
+    mutationFn: async (validatedChanges: UpdateFinancialProfileInput["changes"]) => {
+      const payload = JSON.stringify(validatedChanges);
       if (lastAttempt.current?.payload !== payload)
         lastAttempt.current = { payload, key: crypto.randomUUID() };
-      const parsed = updateFinancialProfileInputSchema.safeParse({
-        changes,
-        expectedVersion: profile?.version ?? 0,
-        idempotencyKey: lastAttempt.current.key,
-      });
-      if (!parsed.success)
-        throw new Error(parsed.error.issues[0]?.message ?? "Check the financial profile fields.");
-      return requireFinanceMutationResult(await api.updateFinancialProfile(parsed.data));
+      return requireFinanceMutationResult(
+        await api.updateFinancialProfile({
+          changes: validatedChanges,
+          expectedVersion: profile?.version ?? 0,
+          idempotencyKey: lastAttempt.current.key,
+        }),
+      );
     },
     onError: (error) => {
       if (isConfirmedFinanceMutationFailure(error)) lastAttempt.current = null;
@@ -327,11 +345,33 @@ function ProfileDialog({
               : "Start with the facts you know."}
           </DialogDescription>
         </DialogHeader>
-        <form
+        <FeedbackForm
+          fieldNames={profileFieldNames}
+          validate={() => {
+            if (!Object.keys(changes).length) return {};
+            const parsed = financialProfileChangesSchema.safeParse(changes);
+            const errors: Record<string, string> = {};
+            if (!parsed.success) {
+              for (const issue of parsed.error.issues) {
+                const path = `changes.${issue.path.join(".")}`;
+                const field = Object.entries(profileFieldNames).find(
+                  ([key]) => path === key || path.startsWith(`${key}.`),
+                )?.[1];
+                if (field)
+                  errors[field] =
+                    field === "notes"
+                      ? "Enter no more than 100 notes, with up to 1,000 characters each."
+                      : "Check this value and enter a valid value.";
+              }
+            }
+            return errors;
+          }}
+          feedback={save.feedback}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
-            if (Object.keys(changes).length) save.mutate();
+            const parsed = financialProfileChangesSchema.safeParse(changes);
+            if (parsed.success) save.mutate(parsed.data);
           }}
         >
           <FieldSet disabled={save.isPending}>
@@ -340,6 +380,7 @@ function ProfileDialog({
               <Field>
                 <FieldLabel htmlFor="profile-jurisdiction">Jurisdiction</FieldLabel>
                 <Input
+                  name="jurisdiction"
                   id="profile-jurisdiction"
                   maxLength={120}
                   value={form.jurisdiction}
@@ -350,6 +391,7 @@ function ProfileDialog({
               <Field>
                 <FieldLabel htmlFor="profile-income-stability">Income stability</FieldLabel>
                 <NativeSelect
+                  name="incomeStability"
                   id="profile-income-stability"
                   value={form.incomeStability}
                   onChange={(event) =>
@@ -370,6 +412,7 @@ function ProfileDialog({
                 <Field key={field.key}>
                   <FieldLabel htmlFor={`profile-${field.key}`}>{field.label}</FieldLabel>
                   <Input
+                    name={field.key}
                     id={`profile-${field.key}`}
                     type="number"
                     min={field.min}
@@ -388,6 +431,7 @@ function ProfileDialog({
               <Field>
                 <FieldLabel htmlFor="profile-reserve-months">Reserve target (months)</FieldLabel>
                 <Input
+                  name="reserveMonths"
                   id="profile-reserve-months"
                   type="number"
                   min="0"
@@ -402,6 +446,7 @@ function ProfileDialog({
               <Field>
                 <FieldLabel htmlFor="profile-buffer">Buffer target (USD)</FieldLabel>
                 <Input
+                  name="buffer"
                   id="profile-buffer"
                   type="number"
                   min="0"
@@ -414,6 +459,7 @@ function ProfileDialog({
               <Field>
                 <FieldLabel htmlFor="profile-debt-priority">Debt priority</FieldLabel>
                 <NativeSelect
+                  name="debtPriority"
                   id="profile-debt-priority"
                   value={form.debtPriority}
                   onChange={(event) =>
@@ -434,6 +480,7 @@ function ProfileDialog({
               <Field className="sm:col-span-2">
                 <FieldLabel htmlFor="profile-notes">Planning notes</FieldLabel>
                 <Textarea
+                  name="notes"
                   id="profile-notes"
                   rows={3}
                   value={form.notes}
@@ -443,14 +490,7 @@ function ProfileDialog({
               </Field>
             </FieldGroup>
           </FieldSet>
-          {save.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Financial profile was not saved</AlertTitle>
-              <AlertDescription>
-                {errorMessage(save.error)} Close and reopen the editor to load the latest version.
-              </AlertDescription>
-            </Alert>
-          ) : null}
+
           <DialogFooter>
             <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
               Cancel
@@ -459,7 +499,7 @@ function ProfileDialog({
               {save.isPending ? "Saving financial profile…" : "Save financial profile"}
             </Button>
           </DialogFooter>
-        </form>
+        </FeedbackForm>
       </DialogContent>
     </Dialog>
   );

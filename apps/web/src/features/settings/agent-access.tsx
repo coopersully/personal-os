@@ -4,7 +4,7 @@ import type {
   MailRulePreview,
   MailSetupAccount,
 } from "@personal-os/domain";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -21,7 +21,10 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { ReadinessPanel } from "../../components/readiness-panel.js";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
@@ -76,6 +79,7 @@ import {
 import { Textarea } from "../../components/ui/textarea.js";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group.js";
 import { WorkspaceIcon } from "../../components/workspace-identity.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   type ConnectedHostAuthority,
   type DomainCapability,
@@ -296,9 +300,9 @@ function AgentAccessSettings({
   });
   const tokens = useQuery({ queryFn: api.listAccessTokens, queryKey: ["tokens"] });
   const oauthClients = useQuery({ queryFn: api.listOAuthClients, queryKey: ["oauth-clients"] });
-  const revokeOAuthClient = useMutation({
+  const revokeOAuthClient = useFeedbackMutation({
+    feedback: { action: "revoke this agent connection", safeToRetry: true, form: false },
     mutationFn: api.revokeOAuthClient,
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
       toast.success("Agent connection revoked.");
       setOauthClientToRevoke(null);
@@ -394,11 +398,17 @@ function AgentAccessSettings({
             </CardAction>
           </CardHeader>
           <CardContent className="settings-section__body agent-access__body">
+            <MutationFeedback feedback={revokeOAuthClient.feedback} />
             {blockingError ? (
               <Alert variant="destructive">
                 <XIcon />
                 <AlertTitle>Workspace access could not be loaded</AlertTitle>
-                <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
+                <AlertDescription>
+                  Couldn’t load the connection guide. Try again to check available access.
+                </AlertDescription>
+                <Button variant="outline" onClick={() => void guide.refetch()}>
+                  Retry connection guide
+                </Button>
               </Alert>
             ) : null}
 
@@ -496,7 +506,12 @@ function AgentAccessSettings({
                 <Alert variant="destructive">
                   <XIcon />
                   <AlertTitle>Agent connection details could not be loaded</AlertTitle>
-                  <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
+                  <AlertDescription>
+                    Couldn’t load the connection guide. Try again to check available access.
+                  </AlertDescription>
+                  <Button variant="outline" onClick={() => void guide.refetch()}>
+                    Retry connection guide
+                  </Button>
                 </Alert>
               ) : null}
 
@@ -696,7 +711,8 @@ function MailRuleReviewDialog({
     queryFn: () => api.previewSavedMailRule(reviewRuleId as string),
     queryKey: ["mail-rule-preview", reviewRuleId],
   });
-  const activate = useMutation({
+  const activate = useFeedbackMutation({
+    feedback: { action: "activate this mail rule", safeToRetry: false, form: false },
     mutationFn: ({ id, preview }: { id: string; preview: MailRulePreview }) =>
       api.activateMailRule(id, {
         expectedCandidateIds: preview.candidates.map((candidate) => candidate.id),
@@ -704,7 +720,6 @@ function MailRuleReviewDialog({
         expectedPreviewedAt: preview.previewedAt,
         expectedVersion: preview.ruleVersion as number,
       }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: async () => {
       toast.success("Mail rule activated.");
       onClose();
@@ -730,6 +745,7 @@ function MailRuleReviewDialog({
       open={reviewRuleId !== null}
     >
       <DialogContent className="agent-access__rule-dialog">
+        <MutationFeedback feedback={activate.feedback} />
         <DialogHeader>
           <DialogTitle>
             {reviewedRule ? `Review ${reviewedRule.name}` : "Review Mail rule"}
@@ -759,13 +775,7 @@ function MailRuleReviewDialog({
           </Alert>
         ) : null}
 
-        {preview.isError ? (
-          <Alert variant="destructive">
-            <XIcon />
-            <AlertTitle>Rule preview could not be loaded</AlertTitle>
-            <AlertDescription>{errorMessage(preview.error)}</AlertDescription>
-          </Alert>
-        ) : null}
+        <QueryFeedback query={preview} title="Couldn’t load the rule preview." />
 
         {reviewed ? (
           <div className="agent-access__rule-preview">
@@ -937,7 +947,7 @@ function WorkspaceSettingsStatus({
         ? "Setup in progress"
         : "Action required";
   const description = error
-    ? errorMessage(error)
+    ? `Couldn’t load ${label} setup. Refresh this section to check its latest state.`
     : loading
       ? `nohmi is checking ${label} configuration.`
       : agentOwned
@@ -1194,9 +1204,9 @@ function TokenAccess({
   >(null);
   const [tokenName, setTokenName] = useState("Local agent");
   const [scopes, setScopes] = useState<AccessScope[]>(defaultTokenScopes);
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create an agent token", safeToRetry: false, form: true },
     mutationFn: () => api.createAccessToken({ name: tokenName.trim(), scopes }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: (token) => {
       setSecret(token.token);
       toast.success("Local agent token created.");
@@ -1206,9 +1216,9 @@ function TokenAccess({
       ]);
     },
   });
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "revoke this agent token", safeToRetry: false, form: false },
     mutationFn: api.deleteAccessToken,
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
       toast.success("Agent token revoked.");
       setTokenToRevoke(null);
@@ -1240,6 +1250,7 @@ function TokenAccess({
         </CardAction>
       </CardHeader>
       <CardContent>
+        <MutationFeedback feedback={remove.feedback} />
         <Collapsible onOpenChange={setOpen} open={open}>
           <CollapsibleTrigger asChild>
             <Button className="settings-disclosure__trigger" type="button" variant="outline">
@@ -1249,86 +1260,99 @@ function TokenAccess({
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="agent-access__token-content">
-            <FieldGroup>
-              <Field orientation="responsive">
-                <FieldContent>
-                  <FieldLabel htmlFor="token-name">Token name</FieldLabel>
-                  <FieldDescription>Name the host or device that will use it.</FieldDescription>
-                </FieldContent>
-                <Input
-                  autoComplete="off"
-                  id="token-name"
-                  name="token-name"
-                  onChange={(event) => setTokenName(event.target.value)}
-                  value={tokenName}
-                />
-              </Field>
-              <FieldSet>
-                <FieldLegend variant="label">Permission preset</FieldLegend>
-                <ToggleGroup
-                  aria-label="Permission preset"
-                  className="agent-access__presets"
-                  onValueChange={(presetName) => {
-                    const preset = tokenPresets.find((item) => item.name === presetName);
-                    if (preset) setScopes(preset.scopes);
-                  }}
-                  type="single"
-                  value={selectedPreset}
-                  variant="outline"
-                >
-                  {tokenPresets.map((preset) => (
-                    <ToggleGroupItem
-                      aria-label={`${preset.name}: ${preset.description}`}
-                      key={preset.name}
-                      value={preset.name}
+            <FeedbackForm
+              feedback={create.feedback}
+              fieldNames={{ name: "token-name" }}
+              onSubmit={(event) => {
+                event.preventDefault();
+                create.mutate();
+              }}
+            >
+              <FieldGroup>
+                <Field orientation="responsive">
+                  <FieldContent>
+                    <FieldLabel htmlFor="token-name">Token name</FieldLabel>
+                    <FieldDescription>Name the host or device that will use it.</FieldDescription>
+                  </FieldContent>
+                  <Input
+                    autoComplete="off"
+                    id="token-name"
+                    name="token-name"
+                    required
+                    onChange={(event) => setTokenName(event.target.value)}
+                    value={tokenName}
+                  />
+                </Field>
+                <FieldSet>
+                  <FieldLegend variant="label">Permission preset</FieldLegend>
+                  <ToggleGroup
+                    aria-label="Permission preset"
+                    className="agent-access__presets"
+                    onValueChange={(presetName) => {
+                      const preset = tokenPresets.find((item) => item.name === presetName);
+                      if (preset) setScopes(preset.scopes);
+                    }}
+                    type="single"
+                    value={selectedPreset}
+                    variant="outline"
+                  >
+                    {tokenPresets.map((preset) => (
+                      <ToggleGroupItem
+                        aria-label={`${preset.name}: ${preset.description}`}
+                        key={preset.name}
+                        value={preset.name}
+                      >
+                        {preset.name}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </FieldSet>
+                <Collapsible onOpenChange={setPermissionsOpen} open={permissionsOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      className="settings-disclosure__trigger"
+                      type="button"
+                      variant="outline"
                     >
-                      {preset.name}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </FieldSet>
-              <Collapsible onOpenChange={setPermissionsOpen} open={permissionsOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button className="settings-disclosure__trigger" type="button" variant="outline">
-                    Fine-tune permissions · {scopes.length} selected
-                    <ChevronDownIcon data-icon="inline-end" />
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="settings-disclosure__content">
-                  <FieldSet>
-                    <FieldLegend className="sr-only" variant="label">
-                      Fine-tune permissions
-                    </FieldLegend>
-                    <FieldGroup className="token-permissions">
-                      {selectableScopes.map((scope) => (
-                        <Field key={scope} orientation="horizontal">
-                          <Checkbox
-                            checked={scopes.includes(scope)}
-                            id={`scope-${scope}`}
-                            onCheckedChange={(checked) =>
-                              setScopes((current) =>
-                                checked
-                                  ? [...new Set([...current, scope])]
-                                  : current.filter((selectedScope) => selectedScope !== scope),
-                              )
-                            }
-                          />
-                          <FieldLabel htmlFor={`scope-${scope}`}>{scopeLabels[scope]}</FieldLabel>
-                        </Field>
-                      ))}
-                    </FieldGroup>
-                  </FieldSet>
-                </CollapsibleContent>
-              </Collapsible>
-              <Button
-                disabled={create.isPending || scopes.length === 0 || tokenName.trim().length === 0}
-                onClick={() => create.mutate()}
-                type="button"
-              >
-                <KeyIcon data-icon="inline-start" />
-                Create local token
-              </Button>
-            </FieldGroup>
+                      Fine-tune permissions · {scopes.length} selected
+                      <ChevronDownIcon data-icon="inline-end" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="settings-disclosure__content">
+                    <FieldSet>
+                      <FieldLegend className="sr-only" variant="label">
+                        Fine-tune permissions
+                      </FieldLegend>
+                      <FieldGroup className="token-permissions">
+                        {selectableScopes.map((scope) => (
+                          <Field key={scope} orientation="horizontal">
+                            <Checkbox
+                              checked={scopes.includes(scope)}
+                              id={`scope-${scope}`}
+                              onCheckedChange={(checked) =>
+                                setScopes((current) =>
+                                  checked
+                                    ? [...new Set([...current, scope])]
+                                    : current.filter((selectedScope) => selectedScope !== scope),
+                                )
+                              }
+                            />
+                            <FieldLabel htmlFor={`scope-${scope}`}>{scopeLabels[scope]}</FieldLabel>
+                          </Field>
+                        ))}
+                      </FieldGroup>
+                    </FieldSet>
+                  </CollapsibleContent>
+                </Collapsible>
+                <Button disabled={create.isPending || scopes.length === 0} type="submit">
+                  <KeyIcon data-icon="inline-start" />
+                  Create local token
+                </Button>
+              </FieldGroup>
+            </FeedbackForm>
+            {scopes.length === 0 ? (
+              <p>Select at least one permission before creating a token.</p>
+            ) : null}
             {secret ? (
               <Alert role="status">
                 <KeyIcon />
@@ -1580,6 +1604,8 @@ async function copyToClipboard(value: string, label: string): Promise<void> {
     await navigator.clipboard.writeText(value);
     toast.success(`${label} copied.`);
   } catch {
-    toast.error(`Could not copy ${label.toLowerCase()}.`);
+    toast.error(`Couldn’t copy ${label.toLowerCase()}. Try copying again.`, {
+      duration: Number.POSITIVE_INFINITY,
+    });
   }
 }

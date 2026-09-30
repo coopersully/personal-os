@@ -313,7 +313,9 @@ describe("Finance settings", () => {
 
     await browser.click(await screen.findByRole("button", { name: "Activate guidance" }));
 
-    expect(await screen.findByText("Guidance activation failed")).toBeVisible();
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could activate financial planning/),
+    ).toBeVisible();
     expect(screen.getByText("Keep financial review trustworthy.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Activate guidance" })).toBeEnabled();
   });
@@ -327,7 +329,9 @@ describe("Finance settings", () => {
     await browser.type(employer, "Unsaved employer");
     await browser.click(screen.getByRole("button", { name: "Save profile" }));
 
-    expect(await screen.findByText("Profile save failed")).toBeVisible();
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could save your financial profile/),
+    ).toBeVisible();
     expect(employer).toHaveValue("Unsaved employer");
     expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
   });

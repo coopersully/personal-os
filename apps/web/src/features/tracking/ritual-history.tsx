@@ -1,13 +1,15 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { useConfirmAction } from "../../components/confirm-action.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 export function RitualHistory() {
   const cache = useQueryClient();
-  const [error, setError] = useState("");
-  const [deleting, setDeleting] = useState<"morning" | "night" | null>(null);
   const [kind, setKind] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -23,34 +25,42 @@ export function RitualHistory() {
     queryFn: ({ pageParam }) => api.listRitualHistory(pageParam, filters),
     getNextPageParam: (p) => p.nextCursor ?? undefined,
   });
-  async function exportData() {
-    setError("");
-    try {
+  const exportData = useFeedbackMutation({
+    feedback: { action: "export ritual history", safeToRetry: true, form: true },
+    mutationFn: async () => {
       const data = await api.exportRitualData();
       const url = URL.createObjectURL(
         new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
       );
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "nohmi-rituals.json";
-      a.click();
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "nohmi-rituals.json";
+      link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  }
-  async function remove() {
-    if (!deleting) return;
-    setError("");
-    try {
-      await api.deleteRitualData(deleting);
-      setDeleting(null);
+    },
+  });
+  const remove = useFeedbackMutation({
+    feedback: {
+      action: "delete ritual history",
+      form: true,
+      safeToRetry: true,
+      success: "Ritual history deleted.",
+    },
+    mutationFn: (kind: "morning" | "night") => api.deleteRitualData(kind),
+    onSuccess: async () => {
       await cache.invalidateQueries({ queryKey: ["rituals"] });
-      await history.refetch();
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  }
+      await cache.invalidateQueries({ queryKey: ["ritual-history"] });
+    },
+  });
+  const { confirm, confirmation } = useConfirmAction();
+  const deleteHistory = (kind: "morning" | "night") =>
+    confirm({
+      title: `Delete ${kind === "night" ? "evening" : "morning"} ritual data?`,
+      description:
+        "This permanently deletes the ritual, its answers, and its history. This cannot be undone.",
+      actionLabel: "Delete permanently",
+      onConfirm: () => remove.mutate(kind),
+    });
   return (
     <section className="flex flex-col gap-4" aria-label="Ritual history">
       <div className="flex flex-wrap gap-3">
@@ -86,7 +96,7 @@ export function RitualHistory() {
         </label>
       </div>
       {history.isPending ? <p>Loading history…</p> : null}
-      {history.isError ? <p role="alert">{errorMessage(history.error)}</p> : null}
+      <QueryFeedback query={history} title="Couldn’t load ritual history." />
       {history.data?.pages
         .flatMap((p) => p.items)
         .map((o) => (
@@ -135,31 +145,19 @@ export function RitualHistory() {
         </Button>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={() => void exportData()}>
+        <Button variant="outline" onClick={() => exportData.mutate()}>
           Export rituals
         </Button>
-        <Button variant="ghost" onClick={() => setDeleting("morning")}>
+        <Button variant="ghost" onClick={() => deleteHistory("morning")}>
           Delete morning data
         </Button>
-        <Button variant="ghost" onClick={() => setDeleting("night")}>
+        <Button variant="ghost" onClick={() => deleteHistory("night")}>
           Delete evening data
         </Button>
       </div>
-      {deleting ? (
-        <div role="alert">
-          <p>
-            Delete the {deleting === "night" ? "evening" : "morning"} ritual and all its answers and
-            history? This cannot be undone.
-          </p>
-          <Button variant="destructive" onClick={() => void remove()}>
-            Delete permanently
-          </Button>
-          <Button variant="ghost" onClick={() => setDeleting(null)}>
-            Cancel
-          </Button>
-        </div>
-      ) : null}
-      {error ? <p role="alert">{error}</p> : null}
+      <MutationFeedback feedback={exportData.feedback} />
+      <MutationFeedback feedback={remove.feedback} />
+      {confirmation}
     </section>
   );
 }

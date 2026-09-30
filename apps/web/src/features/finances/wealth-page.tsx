@@ -1,5 +1,5 @@
 import type { FinanceGoal, ManageFinanceGoalInput } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -29,7 +29,9 @@ import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
 } from "@/components/workspace-secondary-app-bar";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -65,7 +67,8 @@ export function FinanceWealthPage() {
     operation: "complete" | "remove";
   } | null>(null);
   const lastAction = useRef<{ payload: string; key: string } | null>(null);
-  const changeGoal = useMutation({
+  const changeGoal = useFeedbackMutation({
+    feedback: { action: "update this goal", safeToRetry: false, form: false },
     mutationFn: async ({ goal, operation }: { goal: FinanceGoal; operation: GoalOperation }) => {
       const changes = { goalId: goal.id, expectedVersion: goal.version, operation };
       const payload = JSON.stringify(changes);
@@ -105,7 +108,7 @@ export function FinanceWealthPage() {
         {changeGoal.isError && !confirm ? (
           <Alert variant="destructive">
             <AlertTitle>Goal was not changed</AlertTitle>
-            <AlertDescription>{errorMessage(changeGoal.error)}</AlertDescription>
+            <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
           </Alert>
         ) : null}
         {visibleGoals?.length ? (
@@ -252,7 +255,7 @@ export function FinanceWealthPage() {
             {changeGoal.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>Goal was not changed</AlertTitle>
-                <AlertDescription>{errorMessage(changeGoal.error)}</AlertDescription>
+                <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
               </Alert>
             ) : null}
             <DialogFooter>
@@ -289,7 +292,8 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
   const [deadline, setDeadline] = useState(goal?.deadline ?? "");
   const [priority, setPriority] = useState<FinanceGoal["priority"]>(goal?.priority ?? "medium");
   const lastAttempt = useRef<{ payload: string; key: string } | null>(null);
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this goal", safeToRetry: false, form: true },
     mutationFn: async () => {
       const changes = {
         deadline: deadline || null,
@@ -341,7 +345,15 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               : "Set a target and priority for your financial plan."}
           </DialogDescription>
         </DialogHeader>
-        <form
+        <FeedbackForm
+          feedback={save.feedback}
+          fieldNames={{
+            targetAmount: "target",
+            "changes.targetAmount": "target",
+            "changes.name": "name",
+            "changes.deadline": "deadline",
+            "changes.priority": "priority",
+          }}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
@@ -353,6 +365,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               <Field>
                 <FieldLabel htmlFor="goal-name">Goal name</FieldLabel>
                 <Input
+                  name="name"
                   id="goal-name"
                   maxLength={240}
                   required
@@ -363,6 +376,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               <Field>
                 <FieldLabel htmlFor="goal-target">Target amount (USD)</FieldLabel>
                 <Input
+                  name="target"
                   id="goal-target"
                   type="number"
                   min="0"
@@ -376,6 +390,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               <Field>
                 <FieldLabel htmlFor="goal-deadline">Deadline</FieldLabel>
                 <Input
+                  name="deadline"
                   id="goal-deadline"
                   type="date"
                   value={deadline}
@@ -385,6 +400,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               <Field>
                 <FieldLabel htmlFor="goal-priority">Priority</FieldLabel>
                 <NativeSelect
+                  name="priority"
                   id="goal-priority"
                   value={priority}
                   onChange={(event) => setPriority(event.target.value as FinanceGoal["priority"])}
@@ -396,24 +412,16 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               </Field>
             </FieldGroup>
           </FieldSet>
-          {save.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Goal was not saved</AlertTitle>
-              <AlertDescription>
-                {errorMessage(save.error)}
-                {goal ? " Close and reopen the goal to load its latest version." : ""}
-              </AlertDescription>
-            </Alert>
-          ) : null}
+
           <DialogFooter>
             <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
               Cancel
             </Button>
-            <Button disabled={save.isPending || !validTarget || !name.trim()} type="submit">
+            <Button disabled={save.isPending} type="submit">
               {save.isPending ? "Saving goal…" : goal ? "Save goal" : "Create goal"}
             </Button>
           </DialogFooter>
-        </form>
+        </FeedbackForm>
       </DialogContent>
     </Dialog>
   );

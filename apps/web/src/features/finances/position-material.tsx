@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/card";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage } from "../../api.js";
 import { formatMoney } from "./format.js";
 
 export function refreshFinancePosition(client: QueryClient) {
@@ -42,7 +41,13 @@ export function FinanceSourceState({
   query,
 }: {
   label: string;
-  query: { isPending: boolean; isError: boolean; error: unknown; refetch: () => Promise<unknown> };
+  query: {
+    data?: unknown;
+    isPending: boolean;
+    isError: boolean;
+    error: unknown;
+    refetch: () => Promise<unknown>;
+  };
 }) {
   if (query.isPending)
     return (
@@ -56,7 +61,11 @@ export function FinanceSourceState({
     <Alert variant="destructive">
       <AlertTitle>{label} unavailable</AlertTitle>
       <AlertDescription>
-        <p>{errorMessage(query.error)}</p>
+        <p>
+          {query.data !== undefined
+            ? "Showing the last available update. Refresh before relying on this information."
+            : "Couldn’t load this information. Try again."}
+        </p>
         <Button onClick={() => void query.refetch()} size="sm" variant="outline">
           Retry {label.toLowerCase()}
         </Button>

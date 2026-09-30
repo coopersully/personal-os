@@ -8,7 +8,11 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   history: vi.fn(),
   remove: vi.fn(),
+  automatic: vi.fn(),
+  desktop: false,
 }));
+vi.mock("../desktop/bridge.js", () => ({ isDesktop: () => mocks.desktop }));
+vi.mock("./ritual-local.js", () => ({ RitualLocal: () => null }));
 vi.mock("../../api.js", () => ({
   api: {
     listRituals: mocks.list,
@@ -20,10 +24,64 @@ vi.mock("../../api.js", () => ({
 }));
 vi.mock("../desktop/ritual-bridge.js", () => ({
   ritualDeviceId: () => "test",
-  enableRitualPresentation: vi.fn(),
+  enableRitualPresentation: mocks.automatic,
   showRitualPreview: vi.fn(),
 }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mocks.desktop = false;
+});
+
+it("allows retrying a failed preview without implying settings were saved", async () => {
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.save.mockClear();
+  mocks.history
+    .mockRejectedValueOnce(new Error("private failure"))
+    .mockResolvedValue({ items: [], nextCursor: null });
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings timeZone="UTC" />
+    </QueryClientProvider>,
+  );
+  const show = await screen.findByRole("button", { name: "Show morning ritual" });
+  fireEvent.click(show);
+  expect(await screen.findByText("Couldn’t show this ritual. Try again.")).toBeInTheDocument();
+  expect(mocks.save).not.toHaveBeenCalled();
+  fireEvent.click(show);
+  expect(await screen.findByRole("dialog", { name: "Ritual preview" })).toBeInTheDocument();
+  expect(screen.queryByText("Couldn’t show this ritual. Try again.")).not.toBeInTheDocument();
+});
+
+it.each([
+  [true, "Enable", "enable"],
+  [false, "Pause", "pause"],
+] as const)("names and safely retries automatic presentation enabled=%s", async (enabled, button, action) => {
+  mocks.desktop = true;
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.automatic
+    .mockReset()
+    .mockRejectedValueOnce(new Error("private failure"))
+    .mockResolvedValue(undefined);
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings timeZone="UTC" />
+    </QueryClientProvider>,
+  );
+  const toggle = await screen.findByRole("button", { name: button });
+  fireEvent.click(toggle);
+  expect(
+    await screen.findByText(`Couldn’t ${action} automatic rituals. Try again.`),
+  ).toBeInTheDocument();
+  fireEvent.click(toggle);
+  expect(
+    await screen.findByText(enabled ? "Automatic rituals enabled" : "Automatic rituals paused"),
+  ).toBeInTheDocument();
+  expect(mocks.automatic).toHaveBeenLastCalledWith(enabled);
+});
 it("offers opt-in defaults and saves explicit steps", async () => {
   mocks.list.mockResolvedValue({ rituals: [] });
   mocks.history.mockResolvedValue({ items: [], nextCursor: null });
@@ -74,7 +132,7 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
   fireEvent.keyDown(screen.getByRole("button", { name: "Reorder step 3" }), { key: "ArrowUp" });
   fireEvent.keyDown(screen.getByRole("button", { name: "Reorder step 1" }), { key: "ArrowDown" });
   fireEvent.click(screen.getAllByRole("button", { name: "Remove step" })[2]!);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Settings changed");
+  expect(await screen.findByRole("alert")).toHaveTextContent("save ritual settings");
   expect(screen.getByDisplayValue("07:15")).toBeInTheDocument();
   expect(mocks.save).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -86,6 +144,10 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
       ],
     }),
   );
+  mocks.list.mockRejectedValueOnce(new Error("private refresh failure"));
+  fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+  expect(await screen.findByText("Couldn’t refresh ritual settings. Try again.")).toBeVisible();
+  expect(screen.queryByText(/making the change twice/)).not.toBeInTheDocument();
   mocks.save.mockImplementation(async (input) => ({ ...input, id: input.kind, revision: 1 }));
   fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
   await waitFor(() => expect(screen.queryByText("Changes not saved")).not.toBeInTheDocument());
@@ -112,7 +174,7 @@ it("recovers from an unavailable server and retains definition revisions", async
       <RitualSettings timeZone="America/New_York" />
     </QueryClientProvider>,
   );
-  expect(await screen.findByRole("alert")).toHaveTextContent("Server unavailable");
+  expect(await screen.findByRole("status")).toHaveTextContent("Couldn’t load ritual settings");
   mocks.list.mockResolvedValue({ rituals: [definition] });
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByDisplayValue("05:45")).toBeInTheDocument();

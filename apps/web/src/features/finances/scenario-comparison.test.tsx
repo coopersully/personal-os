@@ -182,7 +182,7 @@ it("keeps a failed comparison recoverable and blocks duplicate pending requests"
   expect(screen.getByRole("button", { name: "Comparing…" })).toBeDisabled();
   expect(screen.getByLabelText("Baseline monthly income")).toBeDisabled();
   await act(async () => reject(new Error("Comparison service unavailable")));
-  expect(await screen.findByText("Comparison failed")).toBeInTheDocument();
+  expect(await screen.findByText(/Couldn’t compare these scenarios/)).toBeInTheDocument();
   expect(screen.getByLabelText("Baseline monthly income")).toHaveValue("2000");
   await userEvent.click(screen.getByRole("button", { name: "Compare scenarios" }));
   expect(await screen.findByText("Hypothetical comparison")).toBeInTheDocument();
@@ -200,4 +200,63 @@ it("rejects a sub-cent amount and exposes duplicate-name validation before calli
   await userEvent.click(screen.getByRole("button", { name: "Compare scenarios" }));
   expect(screen.getByText("Give each scenario a different name.")).toBeInTheDocument();
   expect(api.compareFinanceScenarios).not.toHaveBeenCalled();
+});
+
+it("validates money after blur and clears it when corrected without submitting", async () => {
+  mount();
+  const cash = screen.getByLabelText("Baseline starting cash");
+  fireEvent.change(cash, { target: { value: "1.001" } });
+  expect(cash).not.toHaveAttribute("aria-invalid", "true");
+  fireEvent.blur(cash);
+  expect(cash).toHaveAttribute("aria-invalid", "true");
+  fireEvent.change(cash, { target: { value: "-20.50" } });
+  expect(cash).toHaveAttribute("aria-invalid", "false");
+  const income = screen.getByLabelText("Baseline monthly income");
+  fireEvent.change(income, { target: { value: "-1" } });
+  fireEvent.blur(income);
+  expect(income).toHaveAttribute("aria-invalid", "true");
+  fireEvent.change(income, { target: { value: "" } });
+  expect(income).toHaveAttribute("aria-invalid", "false");
+  expect(api.compareFinanceScenarios).not.toHaveBeenCalled();
+});
+
+it("keeps independent categorized spending rows intact when another row changes", async () => {
+  const otherCategory = "22222222-2222-4222-8222-222222222222";
+  api.getFinanceCategories.mockResolvedValue([
+    { id: categoryId, name: "Groceries" },
+    { id: otherCategory, name: "Transport" },
+  ]);
+  mount();
+  await fillRequired();
+  await userEvent.click(screen.getByRole("button", { name: "Add baseline spending" }));
+  await userEvent.click(screen.getByRole("button", { name: "Add baseline spending" }));
+  await userEvent.selectOptions(screen.getByLabelText("Baseline spending 1 category"), categoryId);
+  await userEvent.selectOptions(
+    screen.getByLabelText("Baseline spending 2 category"),
+    otherCategory,
+  );
+  fireEvent.change(screen.getByLabelText("Baseline spending 1 amount"), {
+    target: { value: "100" },
+  });
+  fireEvent.change(screen.getByLabelText("Baseline spending 2 amount"), {
+    target: { value: "45" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Compare scenarios" }));
+  await waitFor(() => expect(api.compareFinanceScenarios).toHaveBeenCalled());
+  expect(api.compareFinanceScenarios.mock.calls[0]?.[0].baseline.budgetAllocations).toEqual([
+    { categoryId, limit: 100 },
+    { categoryId: otherCategory, limit: 45 },
+  ]);
+});
+
+it("recovers category reads while retaining scenario amounts", async () => {
+  api.getFinanceCategories.mockRejectedValueOnce(new Error("private category error"));
+  mount();
+  await fillRequired();
+  expect(await screen.findByText("Spending categories unavailable")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Retry categories" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Spending categories unavailable")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByLabelText("Baseline monthly income")).toHaveValue("2000");
 });

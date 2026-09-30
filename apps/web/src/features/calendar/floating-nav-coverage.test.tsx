@@ -78,6 +78,24 @@ describe("Calendar floating navigation edge states", () => {
     mocks.searchWeatherLocations.mockReset();
   });
 
+  it("validates the title on submission and recovers a failed calendar search", async () => {
+    const browser = userEvent.setup();
+    mocks.listEvents.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue([]);
+    renderCalendar();
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    await browser.click(screen.getByRole("button", { name: "Create event" }));
+    expect(screen.getByPlaceholderText("Event title")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByPlaceholderText("Event title")).toHaveFocus();
+    expect(mocks.createEvent).not.toHaveBeenCalled();
+    await browser.click(screen.getByRole("button", { name: "Close" }));
+    await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
+    expect(await screen.findByText("Couldn’t search the full calendar.")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Couldn’t search the full calendar.")).not.toBeInTheDocument(),
+    );
+  });
+
   it("shows honest pending and empty search states", async () => {
     const browser = userEvent.setup();
     let resolveEvents: (events: never[]) => void = () => undefined;
@@ -134,6 +152,9 @@ describe("Calendar floating navigation edge states", () => {
     expect(await screen.findByRole("button", { name: "Creating…" })).toBeDisabled();
     rejectCreate(new Error("Provider rejected creation"));
     expect(await screen.findByRole("button", { name: "Create event" })).toBeEnabled();
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could create the event/),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(mocks.createEvent).toHaveBeenCalledWith(
         expect.objectContaining({

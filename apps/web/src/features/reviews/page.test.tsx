@@ -157,7 +157,7 @@ describe("Reviews", () => {
 
     mocks.listAgentAccessWorkItems.mockRejectedValueOnce(new Error("Queue unavailable"));
     await browser.click(screen.getByRole("radio", { name: "Review" }));
-    expect(await screen.findByText("Queue unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load your reviews.")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Review newsletters")).toBeInTheDocument();
   });
@@ -292,7 +292,7 @@ describe("Reviews", () => {
     renderPage();
     expect(await screen.findByText("First review")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Next page" }));
-    expect(await screen.findByText("The Agent Access cursor has expired.")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load your reviews.")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() =>

@@ -22,7 +22,8 @@ export function FinanceReimbursementList() {
     queryKey: ["finance-reimbursements"],
   });
   if (query.isPending) return <Spinner label="Loading reimbursements" />;
-  if (query.error) return <InlineError error={query.error} />;
+  if (query.error && !query.data)
+    return <InlineError error={query.error} retry={() => query.refetch()} />;
   const items = query.data?.reimbursements ?? [];
   return (
     <Card>
@@ -33,6 +34,9 @@ export function FinanceReimbursementList() {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {query.isError ? (
+          <InlineError error={query.error} retry={() => query.refetch()} stale />
+        ) : null}
         {items.length === 0 ? (
           <EmptyState icon={<CircleCheckIcon />} title="No reimbursements outstanding">
             Reimbursable transaction splits and matched credits will appear here.

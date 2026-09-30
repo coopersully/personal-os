@@ -1,6 +1,6 @@
 import type { Reminder } from "@personal-os/domain";
 import { EmptyState } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   CircleCheckIcon,
@@ -15,7 +15,6 @@ import {
   ReminderItemActions,
   ReminderItemCompletion,
   ReminderItemContent,
-  ReminderItemDescription,
   ReminderItemDue,
   ReminderItemPrimaryAction,
   ReminderItemTitle,
@@ -31,8 +30,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { api, errorMessage } from "../../api.js";
-import { InlineError, PageLoading } from "../../components/async-state.js";
+import { api } from "../../api.js";
+import { InlineError, PageLoading, QueryFeedback } from "../../components/async-state.js";
+import { useConfirmAction } from "../../components/confirm-action.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import {
   WorkspaceSearch,
   workspaceSearchFromParams,
@@ -40,6 +41,7 @@ import {
 } from "../../components/workspace-search.js";
 import { formatRelativeMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export function RemindersCreateButton({ onCreate }: { onCreate: () => void }) {
   return (
@@ -117,10 +119,11 @@ export function RemindersPage({
   });
   return (
     <div className="narrow-page">
+      <QueryFeedback query={reminders} title="Couldn’t refresh reminders." staleOnly />
       {reminders.isPending ? (
         <PageLoading />
-      ) : reminders.isError ? (
-        <InlineError error={reminders.error} />
+      ) : reminders.isError && !reminders.data ? (
+        <InlineError error={reminders.error} retry={reminders.refetch} />
       ) : reminders.data.items.length === 0 ? (
         search ? (
           <EmptyState icon={<SearchIcon />} title="No matching reminders">
@@ -162,15 +165,17 @@ export function ReminderRow({
   timeZone: string;
 }) {
   const queryClient = useQueryClient();
-  const complete = useMutation({
+  const complete = useFeedbackMutation({
+    feedback: { action: "update this reminder", safeToRetry: true, form: false },
     mutationFn: () => api.completeReminder(reminder.id, !reminder.completedAt),
     onSuccess: () => invalidateMaterial(queryClient),
   });
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "delete this reminder", safeToRetry: false, form: false },
     mutationFn: () => api.deleteReminder(reminder.id),
     onSuccess: () => invalidateMaterial(queryClient),
   });
-  const mutationError = complete.error ?? remove.error;
+  const { confirm, confirmation } = useConfirmAction();
   const completeReminder = reminder.completedAt !== null;
   const overdue =
     reminder.dueAt !== null && new Date(reminder.dueAt).getTime() < Date.now() && !completeReminder;
@@ -201,18 +206,23 @@ export function ReminderRow({
         <ShadcnButton
           aria-label={`Delete ${reminder.title}`}
           disabled={remove.isPending}
-          onClick={() => remove.mutate()}
+          onClick={() =>
+            confirm({
+              title: "Delete this reminder?",
+              description: "This permanently removes the reminder.",
+              actionLabel: "Delete reminder",
+              onConfirm: () => remove.mutate(),
+            })
+          }
           size="icon-xs"
           variant="ghost"
         >
           <TrashIcon className="size-[15px]" />
         </ShadcnButton>
       </ReminderItemActions>
-      {mutationError ? (
-        <ReminderItemDescription className="basis-full text-destructive" role="alert">
-          {errorMessage(mutationError)}
-        </ReminderItemDescription>
-      ) : null}
+      <MutationFeedback feedback={complete.feedback} />
+      <MutationFeedback feedback={remove.feedback} />
+      {confirmation}
     </ReminderItem>
   );
 }

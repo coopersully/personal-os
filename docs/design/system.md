@@ -204,8 +204,11 @@ overlay behavior, or semantic anatomy.
   it does not expose controls that cannot take effect there.
 - Persistent blockers use a semantic inline `Alert` with clear visual severity
   and an action only when that action works in the current environment.
-- Transient results—saved, refreshed, copied, or failed mutations—use Sonner.
-  They do not remain as stacked inline messages after their moment has passed.
+- Transient results—saved, refreshed, copied, or safely retryable failed
+  actions—prefer Sonner. Field validation stays beside the input; unresolved
+  blockers and essential recovery stay visible beside the affected work.
+  Follow the [feedback and validation rubric](feedback.md) to classify the
+  cause, choose the surface, and check timing and accessibility.
 
 ### Reference surfaces
 
@@ -417,8 +420,9 @@ A page change is not ready when any applicable answer is “no.”
   without opening a detail view?
 - Are controls that cannot work absent or plainly explained at the affected
   material, rather than enabled and failing later?
-- Is every persistent warning semantic and actionable? Is every transient result
-  a toast rather than a permanent inline message?
+- Does feedback follow the [feedback and validation rubric](feedback.md)? Are
+  transient results handled with Sonner, field corrections beside their inputs,
+  and ongoing blockers or essential recovery persistently discoverable?
 - Does disclosure keep the result/status visible and hide only configuration,
   raw detail, or history?
 - Can a keyboard user reach, operate, and dismiss every interactive element?

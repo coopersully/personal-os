@@ -1,5 +1,5 @@
 import type { MailReview, MailStatus, MailStewardshipQuestion } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangleIcon, ArrowLeftIcon, CircleCheckIcon, RefreshIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,7 +14,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export const mailStewardshipQueryKeys = {
   review: (id: string) => ["mail-stewardship-review", id] as const,
@@ -49,7 +52,8 @@ export function MailStewardshipPage() {
     queryFn: api.getMailStatus,
     queryKey: mailStewardshipQueryKeys.status,
   });
-  const maintain = useMutation({
+  const maintain = useFeedbackMutation({
+    feedback: { action: "maintain the mail workspace" },
     mutationFn: () => api.maintainMail({ scope: { type: "all_outstanding" } }),
     onSuccess: async (result) => {
       await Promise.all([
@@ -63,7 +67,8 @@ export function MailStewardshipPage() {
     queryFn: () => api.getMailReview(status.data?.details.latestReview?.id as string),
     queryKey: mailStewardshipQueryKeys.review(status.data?.details.latestReview?.id ?? "none"),
   });
-  const answer = useMutation({
+  const answer = useFeedbackMutation({
+    feedback: { action: "save the answer", form: true },
     mutationFn: ({ question, value }: { question: MailStewardshipQuestion; value: string }) =>
       api.answerMailQuestion(question.id, {
         answer: value,
@@ -76,17 +81,8 @@ export function MailStewardshipPage() {
   });
 
   if (status.isPending) return <MailStewardshipSkeleton />;
-  if (status.isError) {
-    return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
-        <Alert variant="destructive">
-          <AlertTriangleIcon aria-hidden="true" />
-          <AlertTitle>Mail stewardship is unavailable</AlertTitle>
-          <AlertDescription>{errorMessage(status.error)}</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
+  if (status.isError && !status.data)
+    return <QueryFeedback query={status} title="Couldn’t load mail stewardship." />;
 
   const value = status.data;
   const copy = stateCopy[value.state];
@@ -120,13 +116,8 @@ export function MailStewardshipPage() {
         </Button>
       </header>
 
-      {maintain.isError ? (
-        <Alert variant="destructive">
-          <AlertTriangleIcon aria-hidden="true" />
-          <AlertTitle>Maintenance could not settle</AlertTitle>
-          <AlertDescription>{errorMessage(maintain.error)}</AlertDescription>
-        </Alert>
-      ) : null}
+      <MutationFeedback feedback={maintain.feedback} />
+      <QueryFeedback query={status} title="Couldn’t refresh workspace status." staleOnly />
       {maintain.data ? (
         <Alert>
           <CircleCheckIcon aria-hidden="true" />
@@ -259,6 +250,8 @@ export function MailStewardshipPage() {
       </section>
 
       <HealthPanel status={value} />
+      <MutationFeedback feedback={answer.feedback} />
+      <QueryFeedback query={review} title="Couldn’t load the mail review." />
       <ReviewPanel review={review.data ?? null} pending={review.isLoading} />
       <AuthorityPanel status={value} />
     </div>

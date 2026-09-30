@@ -255,6 +255,11 @@ describe("complete finance plan", () => {
     fireEvent.change(screen.getByLabelText("Allocation 1 amount"), {
       target: { value: "3000.001" },
     });
+    expect(screen.getByLabelText("Allocation 1 amount")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    fireEvent.blur(screen.getByLabelText("Allocation 1 amount"));
     expect(screen.getByLabelText("Allocation 1 amount")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("button", { name: "Save proposal" })).toBeDisabled();
     expect(api.reviseFinanceBudget).not.toHaveBeenCalled();

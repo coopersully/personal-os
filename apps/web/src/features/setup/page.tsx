@@ -1,5 +1,5 @@
 import type { AccountSetupStep, AccountSetupWorkspace, User } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
@@ -9,7 +9,6 @@ import {
   CalendarIcon,
   CheckIcon,
   CircleCheckIcon,
-  CloudIcon,
   ExternalLinkIcon,
   MailIcon,
   ShieldCheckIcon,
@@ -39,7 +38,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { type WorkspaceId, workspaceIdentities } from "@/components/workspace-identity";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { ConnectionAuthorizationOutcome } from "../connections/authorization-outcome.js";
 import { PlaidConnectButton } from "../finances/plaid-connect.js";
 import { ConnectionList } from "./connection-list.js";
@@ -130,7 +132,8 @@ export function SetupPage({ user }: { user: User }) {
     queryFn: api.getFinanceOverview,
     queryKey: ["finance-overview", "setup"],
   });
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save setup progress", safeToRetry: true, form: false },
     mutationFn: api.updateAccountSetup,
     onSuccess: (nextUser, mutation) => {
       if (mutation.action !== "progress") setCompletionSucceeded(true);
@@ -147,7 +150,8 @@ export function SetupPage({ user }: { user: User }) {
       currentStep: nextStep,
       selectedWorkspaces: nextWorkspaces,
     });
-  const checkVerification = useMutation({
+  const checkVerification = useFeedbackMutation({
+    feedback: { action: "check email verification", safeToRetry: true, form: false },
     mutationFn: api.getMe,
     onSuccess: (nextUser) => {
       if (nextUser.emailVerified) {
@@ -157,7 +161,10 @@ export function SetupPage({ user }: { user: User }) {
       }
     },
   });
-  const resendVerification = useMutation({ mutationFn: api.resendEmailVerification });
+  const resendVerification = useFeedbackMutation({
+    feedback: { action: "send a confirmation email", safeToRetry: false, form: false },
+    mutationFn: api.resendEmailVerification,
+  });
   const steps = setupSteps(selectedWorkspaces, user.emailVerified);
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
   const exitSetup = () => {
@@ -231,7 +238,6 @@ export function SetupPage({ user }: { user: User }) {
         ) : null}
         {currentStep === "verify_email" ? (
           <VerifyEmailStep
-            checkError={checkVerification.error}
             checkFailed={
               checkVerification.isSuccess && checkVerification.data.emailVerified === false
             }
@@ -276,13 +282,9 @@ export function SetupPage({ user }: { user: User }) {
             selectedWorkspaces={selectedWorkspaces}
           />
         ) : null}
-        {save.isError ? (
-          <Alert variant="destructive">
-            <ShieldCheckIcon />
-            <AlertTitle>Setup progress was not saved</AlertTitle>
-            <AlertDescription>{errorMessage(save.error)}</AlertDescription>
-          </Alert>
-        ) : null}
+        <MutationFeedback feedback={save.feedback} />
+        <MutationFeedback feedback={checkVerification.feedback} />
+        <MutationFeedback feedback={resendVerification.feedback} />
       </div>
     </SetupFrame>
   );
@@ -347,14 +349,12 @@ function WorkspacesStep({
 }
 
 function VerifyEmailStep({
-  checkError,
   checkFailed,
   email,
   resend,
   resendPending,
   resendSucceeded,
 }: {
-  checkError: Error | null;
   checkFailed: boolean;
   email: string;
   resend: () => void;
@@ -392,13 +392,6 @@ function VerifyEmailStep({
           <AlertDescription>Open the link in your inbox, then check again.</AlertDescription>
         </Alert>
       ) : null}
-      {checkError ? (
-        <Alert variant="destructive">
-          <ShieldCheckIcon />
-          <AlertTitle>Verification could not be checked</AlertTitle>
-          <AlertDescription>{errorMessage(checkError)}</AlertDescription>
-        </Alert>
-      ) : null}
     </div>
   );
 }
@@ -425,7 +418,8 @@ function GoogleStep({
   const [calendar, setCalendar] = useState(selectedWorkspaces.includes("calendar"));
   const [mail, setMail] = useState(selectedWorkspaces.includes("mail"));
   const [addOpen, setAddOpen] = useState(false);
-  const connect = useMutation({
+  const connect = useFeedbackMutation({
+    feedback: { action: "connect this account", safeToRetry: false, form: true },
     mutationFn: async () => {
       const url = await api.getGoogleAuthorizationUrl({
         returnTo: "/setup",
@@ -493,13 +487,7 @@ function GoogleStep({
                 setCalendar={setCalendar}
                 setMail={setMail}
               />
-              {connect.isError ? (
-                <Alert variant="destructive">
-                  <CloudIcon />
-                  <AlertTitle>Google did not open</AlertTitle>
-                  <AlertDescription>{errorMessage(connect.error)}</AlertDescription>
-                </Alert>
-              ) : null}
+              <MutationFeedback feedback={connect.feedback} />
             </ResponsiveDialogBody>
             <ResponsiveDialogFooter>
               <ResponsiveDialogActions>
@@ -542,7 +530,8 @@ function ICloudStep({
   const [mail, setMail] = useState(selectedWorkspaces.includes("mail"));
   const [addOpen, setAddOpen] = useState(false);
   const queryClient = useQueryClient();
-  const connect = useMutation({
+  const connect = useFeedbackMutation({
+    feedback: { action: "connect this account", safeToRetry: false, form: true },
     mutationFn: (form: FormData) =>
       api.connectICloud({
         appSpecificPassword: String(form.get("appSpecificPassword")),
@@ -599,7 +588,12 @@ function ICloudStep({
               </ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
             <ResponsiveDialogBody>
-              <form id="setup-icloud-form" onSubmit={submit}>
+              <FeedbackForm
+                fieldNames={{ email: "appleAccountEmail" }}
+                feedback={connect.feedback}
+                id="setup-icloud-form"
+                onSubmit={submit}
+              >
                 <FieldGroup>
                   <Field>
                     <FieldLabel htmlFor="setup-icloud-email">Apple Account email</FieldLabel>
@@ -642,14 +636,7 @@ function ICloudStep({
                     setMail={setMail}
                   />
                 </FieldGroup>
-              </form>
-              {connect.isError ? (
-                <Alert variant="destructive">
-                  <CloudIcon />
-                  <AlertTitle>Apple did not connect</AlertTitle>
-                  <AlertDescription>{errorMessage(connect.error)}</AlertDescription>
-                </Alert>
-              ) : null}
+              </FeedbackForm>
             </ResponsiveDialogBody>
             <ResponsiveDialogFooter>
               <ResponsiveDialogActions>

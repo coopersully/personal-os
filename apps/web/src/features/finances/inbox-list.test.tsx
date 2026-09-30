@@ -151,7 +151,9 @@ it("supports immediate categorization and preserves input after a failed save", 
   await userEvent.selectOptions(screen.getByLabelText("Category"), categoryId);
   await userEvent.type(screen.getByLabelText("Your answer"), "Groceries delivery");
   await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText("Network unavailable")).toBeInTheDocument();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this review/),
+  ).toBeInTheDocument();
   expect(screen.getByLabelText("Your answer")).toHaveValue("Groceries delivery");
   const firstKey = api.answerFinanceReview.mock.calls[0]?.[1].idempotencyKey;
   await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
@@ -212,7 +214,7 @@ it("discloses failed, empty and truncated nearby activity", async () => {
   const client = mount([item("1")]);
   await userEvent.click(screen.getByRole("button", { name: "Review Merchant 1" }));
   await userEvent.click(screen.getByRole("button", { name: "Nearby account activity" }));
-  expect(await screen.findByText("Account activity unavailable")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   api.listFinanceTransactions.mockResolvedValueOnce({ items: [], nextCursor: null });
   await client.invalidateQueries({ queryKey: ["finance-review-nearby"] });
   expect(await screen.findByText("No other activity in this window.")).toBeVisible();

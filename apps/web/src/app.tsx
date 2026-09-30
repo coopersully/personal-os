@@ -5551,27 +5551,27 @@ function MailSyncButton({
   });
 
   return (
-    <div className="mail-sync-control">
-      {accounts.isPending || enabledAccounts.length === 0 ? null : (
-        <small className="mail-sync-control__timing">
-          <span>{lastSyncLabel}</span>
-          <span>{nextSyncLabel}</span>
-        </small>
-      )}
-      <ShadcnButton
-        aria-label="Sync all mail accounts"
-        disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
-        onClick={() => {
-          onSelect?.();
-          sync.mutate();
-        }}
-        size="sm"
-        variant={variant}
-      >
-        <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-        <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
-      </ShadcnButton>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <ShadcnButton
+          aria-label="Sync all mail accounts"
+          disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
+          onClick={() => {
+            onSelect?.();
+            sync.mutate();
+          }}
+          size="sm"
+          variant={variant}
+        >
+          <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
+          <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
+        </ShadcnButton>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{lastSyncLabel}</p>
+        <p>{nextSyncLabel}</p>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

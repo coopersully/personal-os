@@ -240,3 +240,5 @@ The approved workspace journeys extend the compatibility checks below:
 6. Fail either readiness request and confirm an actionable local error while
    the financial profile remains usable.
 7. Verify keyboard operation and narrow/mobile wrapping.
+
+The overview has no secondary app bar: Financial setup is already available in the sidebar. Other Finance views retain their contextual controls.

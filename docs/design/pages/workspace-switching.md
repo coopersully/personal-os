@@ -95,3 +95,5 @@ The desktop workspace rail can also be minimized by dragging its trailing edge i
 Rail and sidebar width changes, header space reservation, and the compact picker slide use the shared fast motion duration (140ms) and spatial easing. Layout moves with the controls; hidden navigation is inert. Reduced-motion users receive the same final layout immediately.
 
 The compact picker uses the active workspace's filled, unframed icon and colored selection surface. Dropdown destinations use neutral outline icons; only the current workspace receives its palette, filled icon, and selected surface, matching the rail.
+
+Primary and secondary navigation text remains on one line and clips at constrained widths. Mail sync timing is available from the Sync button tooltip on hover or keyboard focus instead of taking permanent header space.

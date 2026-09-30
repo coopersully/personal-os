@@ -7749,6 +7749,11 @@ describe("ilo web app", () => {
       within(topNavigation).getByRole("button", { name: "1 of 1 mail accounts" }),
     );
     expect(await screen.findByRole("checkbox", { name: "Hide Google" })).toBeDisabled();
+    const syncControl = screen.getByRole("button", { name: "Sync all mail accounts" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await browser.hover(syncControl);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/Last synced|Not synced yet/);
+    await browser.unhover(syncControl);
     await browser.click(screen.getByRole("button", { name: "Sync all mail accounts" }));
     await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledWith(secondId));
     view.unmount();

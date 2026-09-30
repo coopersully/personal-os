@@ -3600,8 +3600,7 @@ p {
   grid-row: 2;
   position: relative;
 }
-.week-all-day-day::after,
-.week-all-day-corner::after {
+.week-all-day-day::after {
   /* theme-contract-allow-start: functional-calendar-grid */
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
@@ -3619,9 +3618,6 @@ p {
   pointer-events: none;
   position: absolute;
   z-index: 0;
-}
-.week-all-day-corner::after {
-  inset: 0;
 }
 .week-all-day-event {
   --week-all-day-edge-padding: 4px;
@@ -3987,22 +3983,6 @@ p {
 }
 .mail-app-bar__controls .mail-topbar__search {
   flex: 1;
-}
-.mail-sync-control {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  gap: 0.5rem;
-}
-.mail-sync-control__timing {
-  color: var(--content-secondary);
-  display: flex;
-  flex-direction: column;
-  font-size: 0.6875rem;
-  line-height: 1.2;
-  max-width: 9rem;
-  text-align: right;
-  white-space: nowrap;
 }
 .mail-accounts-trigger {
   position: relative;
@@ -7549,3 +7529,14 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 
 .workspace-navigation-item > svg { color: inherit; }
+
+/* Navigation stays single-line at constrained widths; popovers render outside these bars. */
+.workspace-app-bar, .workspace-secondary-app-bar {
+  white-space: nowrap;
+  overflow: clip;
+}
+:is(.workspace-app-bar, .workspace-secondary-app-bar) :is(h1, h2, h3, p, small, span, a, button, label) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}

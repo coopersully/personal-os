@@ -1,0 +1,14 @@
+name: Verify desktop signing branch restriction
+on:
+  push:
+    tags: ["desktop-signing-policy-probe/20260930"]
+permissions:
+  contents: read
+jobs:
+  reject-tag:
+    runs-on: ubuntu-latest
+    environment: desktop-signing
+    timeout-minutes: 1
+    steps:
+      - name: Must never start for a tag
+        run: exit 99

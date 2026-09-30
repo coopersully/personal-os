@@ -34,7 +34,13 @@ base64-encoded `WINDOWS_CERTIFICATE` PFX plus
 Actions variable. The release workflow intentionally fails before building if
 any required signing or production-API value is missing.
 
-Store all signing material only as GitHub Actions secrets. Never commit
+Export the Developer ID certificate **with its private key** as a password-protected
+PKCS#12 (`.p12`) bundle. Verify that macOS `security import` accepts it before
+uploading its base64 contents. OpenSSL 3 default PKCS#12 exports can be rejected
+by Keychain as a password/MAC error; use Keychain Access export or a macOS-compatible
+PKCS#12 export and repeat the import check.
+
+Store all CI signing material only as GitHub Actions secrets. Never commit
 certificates, provisioning profiles, Apple credentials, or updater private
 keys.
 

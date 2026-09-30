@@ -11,8 +11,8 @@ overrides:
   brace-expansion@5.0.7: 5.0.8
   hono@<4.13.5: 4.13.5
   html-to-text@10.0.0>deepmerge-ts: 8.0.1
-  ip-address@>=10.0.0 <10.5.1: 10.5.1
-  nodemailer@<10.0.2: 10.0.2
+  ip-address@>=10.0.0 <10.7.1: 10.7.1
+  nodemailer@<10.0.9: 10.0.9
   postcss@8.5.17: 8.5.23
   qs: 6.16.0
 
@@ -294,7 +294,7 @@ importers:
         specifier: ^3.9.23
         version: 3.9.23
       nodemailer:
-        specifier: ^10.0.2
+        specifier: ^10.0.9
         version: 10.0.12
       tsdav:
         specifier: ^2.3.1
@@ -4801,8 +4801,8 @@ packages:
     resolution: {integrity: sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==}
     engines: {node: '>=12'}
 
-  ip-address@10.5.1:
-    resolution: {integrity: sha512-EXujUp9jyOI/chPgtqk6uy7fDq8AeCB/WlfEuPg9LN0fN9lzKAKfuDYi60SMhHwgUiEhZvVYsbGZN+RUU1INiA==}
+  ip-address@10.7.1:
+    resolution: {integrity: sha512-4OUAqU9Z1i3vCnS05hzGiFnEMDpQ+62pAD/MVQOp83fYyNC8GleCqaS0QikQBmcWCrKFiUs/B8ztRRiYOAXuCA==}
     engines: {node: '>= 12'}
 
   ipaddr.js@1.9.1:
@@ -5682,8 +5682,8 @@ packages:
     resolution: {integrity: sha512-PQ46oNbNMuH/Sno7B5IWIU9etytwrO0xdTFvWXpIQFRXhBAXtzD48243AS+BCbQQTPD8y3fqUrgLn0tSo77gvg==}
     engines: {node: '>=20.0.0'}
 
-  nodemailer@10.0.2:
-    resolution: {integrity: sha512-83mO0TnWXySiJXdMAIUYmlXYdJ2KUq/w8EJgc4ogKU2UssaHf7ZPeuHcb4YCxeNiM0DDshnm291U0/ClrSZZsg==}
+  nodemailer@10.0.9:
+    resolution: {integrity: sha512-BF0qcyplCwp+jMk6HCjFykBz/YhhZSsxrARhOldLwFWH+8kGjQsd2WIMIZhqEuyXRoGFi0ONbDeWDMDoL8MhLw==}
     engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
@@ -11179,7 +11179,7 @@ snapshots:
   express-rate-limit@8.5.2(express@5.2.1):
     dependencies:
       express: 5.2.1
-      ip-address: 10.5.1
+      ip-address: 10.7.1
 
   express@5.2.1:
     dependencies:
@@ -11644,7 +11644,7 @@ snapshots:
 
   internmap@2.0.3: {}
 
-  ip-address@10.5.1: {}
+  ip-address@10.7.1: {}
 
   ipaddr.js@1.9.1: {}
 
@@ -12164,7 +12164,7 @@ snapshots:
       iconv-lite: 0.7.3
       libmime: 5.4.3
       linkify-it: 5.0.2
-      nodemailer: 10.0.2
+      nodemailer: 10.0.9
       punycode.js: 2.3.1
       tlds: 1.261.0
 
@@ -12626,7 +12626,7 @@ snapshots:
 
   nodemailer@10.0.12: {}
 
-  nodemailer@10.0.2: {}
+  nodemailer@10.0.9: {}
 
   normalize-path@3.0.0: {}
 
@@ -13645,7 +13645,7 @@ snapshots:
 
   socks@2.8.9:
     dependencies:
-      ip-address: 10.5.1
+      ip-address: 10.7.1
       smart-buffer: 4.2.0
 
   sonic-boom@4.2.1:

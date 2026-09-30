@@ -54,6 +54,12 @@ type RequestOptions = {
 };
 
 describe.sequential("ilo API", () => {
+  it("serves public desktop distribution status without requiring a session", async () => {
+    const response = await app.request("/v1/desktop-release");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "disabled", release: null });
+  });
+
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
   let app: PersonalOsApp;
@@ -5408,6 +5414,7 @@ describe.sequential("ilo API", () => {
       status: "ready",
     });
     expect(ready.headers.get("x-ilo-drain-protocol")).toBe("quiesce-v1");
+    expect(ready.headers.get("cache-control")).toBe("no-store");
     const openApiDocument = await payload(await request("/openapi.json", { auth: "none" }));
     expect(openApiDocument.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(openApiDocument.paths["/v1/calendars/status"].get.responses[200].description).toBe(

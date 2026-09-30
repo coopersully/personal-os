@@ -68,6 +68,22 @@ data. A physical host reboot remains untested. The active Wi-Fi address is DHCP;
 a router reservation is not yet verified. The outbound tunnel does not require a
 static LAN or public IP.
 
+## Public API build provenance
+
+Archived production builds include an optional `revision` in `/health/ready`, alongside the
+existing ready status after the database check. Git's `export-subst` stamps only
+`apps/api/src/release-revision.ts` with the exact archived commit. The installed controller's
+existing `git archive` build path supplies this without a controller/configuration upgrade or a
+new credential. Normal development checkouts omit revision; arbitrary environment values cannot
+claim production provenance. Responses use `Cache-Control: no-store` and expose only a public
+40-character Git SHA, never configuration, controller state or credentials.
+
+The desktop release workflow waits for this ready API revision to match its CI-verified source,
+and for that source to remain current main. This proves the API is serving that source and its
+database check passes; it does not attest to the controller's final transaction state, unrelated
+MCP operations, or provider connectivity. The private controller status remains the authoritative
+operational ledger. The historical AWS workflows/statuses are not release gates.
+
 ## Required configuration
 
 | Variable | Purpose |

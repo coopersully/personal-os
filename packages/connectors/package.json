@@ -18,7 +18,7 @@
     "ical.js": "^2.2.1",
     "imapflow": "^1.7.0",
     "mailparser": "^3.9.23",
-    "nodemailer": "^10.0.2",
+    "nodemailer": "^10.0.9",
     "tsdav": "^2.3.1",
     "twilio": "^6.1.0",
     "zod": "^4.0.5"

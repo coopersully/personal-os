@@ -84,3 +84,14 @@ If a session expires with pending edits, the signed-out connection screen retain
 Offline responses enter a Keychain-backed encrypted outbox before dismissal. Up to seven days of server-resolved scheduling are cached. Unavailable history always requests snooze confirmation. Delivery failures show a redacted stage and retry time in Settings. Conflicting late writes remain visible under local recovery in settings and can be exported or explicitly discarded; they cannot reopen a terminal ritual. Sign-out requires pending changes to sync or be discarded. Account deletion removes the matching local evidence on authenticated reconciliation.
 
 The implementation requires the matching ritual API/migration. Unsupported servers display an unavailable message. Installed-app, multi-display, Spaces and VoiceOver acceptance remains a separate release gate; compilation alone does not establish those results.
+
+### Distribution and updates
+
+See [release operations](../../docs/releasing.md) for the complete signing and
+publication contract. Official Mac releases use the production API and a fixed
+GitHub update feed. A startup gate checks and verifies newer releases before
+interactive work starts; Open now keeps the current app running. Settings →
+Desktop app and `/downloads` expose installed/latest version and release notes.
+Development and unsigned/unconfigured builds do not automatically update.
+The updater archive includes the final notarized host and widget extension;
+never package the initial pre-extension Tauri app as an update.

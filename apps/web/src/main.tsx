@@ -8,6 +8,7 @@ import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
 import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
+import { DesktopStartupGate } from "./features/desktop/updates.js";
 import { createAppQueryClient } from "./lib/query-client.js";
 import "./styles.css";
 
@@ -54,7 +55,13 @@ createRoot(root).render(
     <MotionProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          {desktop && window.location.hash === "#ritual" ? <RitualOverlay /> : <App />}
+          {desktop && window.location.hash === "#ritual" ? (
+            <RitualOverlay />
+          ) : (
+            <DesktopStartupGate>
+              <App />
+            </DesktopStartupGate>
+          )}
         </BrowserRouter>
       </QueryClientProvider>
     </MotionProvider>

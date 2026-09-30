@@ -302,6 +302,7 @@ import {
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./features/connections/health.js";
+import { DesktopDownloads } from "./features/desktop/downloads.js";
 import { useDesktopActions } from "./features/desktop/events.js";
 import { resetDesktopSession } from "./features/desktop/session.js";
 import { DesktopSettingsPanel } from "./features/desktop/settings.js";
@@ -474,6 +475,14 @@ export function selectTodayTasks(
 }
 export function App() {
   const location = useLocation();
+  if (location.pathname === "/downloads") {
+    return (
+      <>
+        <DesktopDownloads standalone />
+        <Toaster position="bottom-right" theme="system" />
+      </>
+    );
+  }
   if (ErrorPagePreview && location.pathname === "/dev/errors") {
     return (
       <Suspense
@@ -5792,7 +5801,7 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
         (item) =>
           (item.id !== "invitations" || canManageInvitations) &&
           (item.id !== "wallpaper" || isTauri()) &&
-          (isTauri() || !["desktop", "pet", "notifications"].includes(item.id)),
+          (isTauri() || !["pet", "notifications"].includes(item.id)),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -5928,6 +5937,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         {section === "invitations" ? <InvitationsSettings /> : null}
         {section === "sessions" ? <SessionsSettings /> : null}
         {section === "texting" ? <TextingSettings /> : null}
+        {section === "desktop" ? <DesktopDownloads /> : null}
         {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
         {isTauri() &&
         (section === "desktop" || section === "pet" || section === "notifications") ? (

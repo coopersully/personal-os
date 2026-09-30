@@ -46,6 +46,7 @@ import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
 import { createDesktopActivityService } from "./desktop-activity-service.js";
+import { createDesktopReleaseService } from "./desktop-release-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
@@ -76,6 +77,7 @@ import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
+import { readinessPayload } from "./release-revision.js";
 import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { createRitualService } from "./ritual-service.js";
@@ -723,13 +725,21 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/auth/password-reset", rateLimitAuth);
   app.use("/v1/auth/email-verification/confirm", rateLimitAuth);
 
+  const desktopRelease = createDesktopReleaseService(
+    dependencies.config.apiBaseUrl,
+    undefined,
+    dependencies.log,
+  );
+  app.get("/v1/desktop-release", async (context) => context.json(await desktopRelease()));
+
   app.get("/health/live", (context) => context.json({ status: "ok" }));
   app.get("/health/ready", async (context) => {
     await dependencies.db.execute(sql`select 1`);
     if (dependencies.runtimeLifecycle) {
       context.header("X-Ilo-Drain-Protocol", "quiesce-v1");
     }
-    return context.json({ status: "ready" });
+    context.header("Cache-Control", "no-store");
+    return context.json(readinessPayload());
   });
   app.get("/openapi.json", (context) =>
     context.json(createOpenApiDocument(dependencies.config.apiBaseUrl)),

@@ -6,11 +6,11 @@ import {
   type Database,
   domainProfileApprovals,
   domainProfiles,
+  executionPolicySettings,
   financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
-  financeAutomationSettings,
   financeBudgetBucketCategories,
   financeBudgetBuckets,
   financeBudgetPlans,
@@ -18,6 +18,8 @@ import {
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
+  financeEconomicEvents,
+  financeEventTransactions,
   financeIncomeStreams,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
@@ -45,7 +47,6 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAlert,
-  FinanceAutomationSettings,
   FinanceBudget,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
@@ -81,12 +82,12 @@ import type {
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
-  UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
+  UpdateFinancialProfileInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
@@ -95,6 +96,7 @@ import {
   financeMaintenanceCandidateItemPageSchema,
   financeMaintenanceCandidateItemProjectionSchema,
   financeMaintenanceCandidateSchema,
+  financeReviewReasonSchema,
   idSchema,
   localDateAt,
   toCents,
@@ -119,13 +121,17 @@ import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
-import { createFinanceAccountService } from "./finance/account-service.js";
+import {
+  createFinanceAccountService,
+  serializeFinanceAccountRows,
+} from "./finance/account-service.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
-import { createMaintenanceService } from "./finance/maintenance-service.js";
+import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
+import { appendFinanceProfile } from "./finance/profile-writer.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
   financeCandidateActionFingerprint,
@@ -566,7 +572,10 @@ function account(
   row: typeof financeAccounts.$inferSelect,
   item?: typeof financeProviderItems.$inferSelect,
 ): FinanceAccount {
-  const synchronization = item ?? row;
+  // A healthy Item cannot certify an account absent from its latest snapshot.
+  // Item-wide failures still take precedence so repair targets the connection.
+  const synchronization =
+    item?.syncState === "current" && row.syncState === "blocked" ? row : (item ?? row);
   return {
     balance: currency(row.balance),
     createdAt: row.createdAt.toISOString(),
@@ -583,7 +592,12 @@ function account(
     provider: row.provider,
     providerSubtype: row.providerSubtype,
     providerType: row.providerType,
-    status: item ? (item.syncRecovery === "reconnect" ? "needs_reauth" : "connected") : row.status,
+    status:
+      synchronization === row
+        ? row.status
+        : item?.syncRecovery === "reconnect"
+          ? "needs_reauth"
+          : "connected",
     synchronization: {
       failureCode: synchronization.syncErrorCode,
       failureCount: synchronization.syncFailureCount,
@@ -753,7 +767,6 @@ export function createFinanceService({
   const budgetBuckets = createFinanceBudgetBucketService({ db, now });
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
-  const maintenance = createMaintenanceService({ db, inbox, now });
   const planning = createProfileBudgetService({ db, now });
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
@@ -803,36 +816,7 @@ export function createFinanceService({
   }
 
   async function serializeAccounts(rows: Array<typeof financeAccounts.$inferSelect>) {
-    const itemIds = [
-      ...new Set(
-        rows.flatMap((row) => (row.providerItemRecordId ? [row.providerItemRecordId] : [])),
-      ),
-    ];
-    const items =
-      itemIds.length === 0
-        ? []
-        : await db
-            .select()
-            .from(financeProviderItems)
-            .where(inArray(financeProviderItems.id, itemIds));
-    const itemById = new Map(items.map((item) => [item.id, item]));
-    if (
-      rows.some((row) => {
-        if (!row.providerItemRecordId) return false;
-        const item = itemById.get(row.providerItemRecordId);
-        return (
-          !item ||
-          row.provider !== "plaid" ||
-          item.provider !== "plaid" ||
-          item.userId !== row.userId
-        );
-      })
-    ) {
-      throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
-    }
-    return rows.map((row) =>
-      account(row, row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined),
-    );
+    return serializeFinanceAccountRows(db, rows);
   }
   async function reimbursementProjection(
     userId: string,
@@ -3962,7 +3946,6 @@ export function createFinanceService({
     classifyFinanceTransactions: canonicalLedger.classifyTransactions,
     linkFinanceTransactions: canonicalLedger.linkTransactions,
     ...inbox,
-    ...maintenance,
     ...planning,
     ...setup,
     async listReimbursements(userId: string) {
@@ -3981,55 +3964,13 @@ export function createFinanceService({
       }
       return reimbursements.reconcile(input, context, executor);
     },
-    async getAutomationSettings(userId: string): Promise<FinanceAutomationSettings> {
+    async getAutomationSettings(userId: string) {
       const [settings] = await db
-        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-        .from(financeAutomationSettings)
-        .where(eq(financeAutomationSettings.userId, userId))
+        .select({ reviewBypassEnabled: executionPolicySettings.reviewBypassEnabled })
+        .from(executionPolicySettings)
+        .where(eq(executionPolicySettings.userId, userId))
         .limit(1);
       return settings ?? { reviewBypassEnabled: false };
-    },
-    async updateAutomationSettings(
-      input: UpdateFinanceAutomationSettingsInput,
-      context: MutationContext,
-    ): Promise<FinanceAutomationSettings> {
-      return db.transaction(async (tx) => {
-        const [existing] = await tx
-          .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-          .from(financeAutomationSettings)
-          .where(eq(financeAutomationSettings.userId, context.principal.userId))
-          .for("update")
-          .limit(1);
-        const before = existing ?? { reviewBypassEnabled: false };
-        if (before.reviewBypassEnabled === input.reviewBypassEnabled) return before;
-        const [saved] = await tx
-          .insert(financeAutomationSettings)
-          .values({
-            reviewBypassEnabled: input.reviewBypassEnabled,
-            userId: context.principal.userId,
-          })
-          .onConflictDoUpdate({
-            set: { reviewBypassEnabled: input.reviewBypassEnabled, updatedAt: now() },
-            target: financeAutomationSettings.userId,
-          })
-          .returning({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled });
-        const settings = requireDatabaseRecord(
-          saved,
-          "Finance automation settings were not saved.",
-        );
-        await tx.insert(auditEvents).values(
-          auditValues({
-            action: "finance.review_bypass_updated",
-            after: settings,
-            before,
-            entityId: context.principal.userId,
-            entityType: "finance_automation_settings",
-            principal: context.principal,
-            requestId: context.requestId,
-          }),
-        );
-        return settings;
-      });
     },
     async upsertAttentionItem(
       transactionId: string,
@@ -4391,8 +4332,9 @@ export function createFinanceService({
     async updateProfile(
       input: UpdateFinanceProfileInput,
       context: MutationContext,
-      executor: FinanceWriteExecutor = db,
-    ) {
+      executor: FinanceWriteExecutor & Pick<Database, "execute" | "query"> = db,
+    ): Promise<FinanceProfile> {
+      if (executor === db) return db.transaction((tx) => this.updateProfile(input, context, tx));
       if (input.payAccountId)
         await ownedAccount(context.principal.userId, input.payAccountId, executor);
       const before = await this.getProfile(context.principal.userId, undefined, executor);
@@ -4462,6 +4404,45 @@ export function createFinanceService({
           ...context,
         }),
       );
+      if (input.effectiveDate <= now().toISOString().slice(0, 10)) {
+        const periods =
+          input.payFrequency === "monthly"
+            ? 12
+            : input.payFrequency === "semimonthly"
+              ? 24
+              : input.payFrequency === "biweekly"
+                ? 26
+                : input.payFrequency === "weekly"
+                  ? 52
+                  : null;
+        const changes: UpdateFinancialProfileInput["changes"] = {};
+        if (input.householdSize !== undefined) changes.householdSize = input.householdSize;
+        if (input.dependents !== undefined) changes.dependents = input.dependents;
+        if (input.expectedNetPay === null) changes.expectedMonthlyTakeHome = null;
+        else if (input.expectedNetPay !== undefined && periods !== null)
+          changes.expectedMonthlyTakeHome =
+            Math.round((input.expectedNetPay * 100 * periods) / 12) / 100;
+        if (Object.keys(changes).length > 0) {
+          await appendFinanceProfile(
+            executor,
+            { changes },
+            {
+              actorId: context.principal.actorId,
+              actorType: context.principal.actorType,
+              userId: context.principal.userId,
+              requestId: context.requestId,
+              canMutate: context.principal.scopes.has("finances:write"),
+              bypassEnabled: false,
+              canSelfApprove: false,
+            },
+            now(),
+            {
+              sourceId: saved.id,
+              evidence: { source: "finance_profile", effectiveDate: input.effectiveDate },
+            },
+          );
+        }
+      }
       return value;
     },
     async listIncomeStreams(userId: string) {
@@ -5752,7 +5733,7 @@ export function createFinanceService({
     async listTransactions(userId: string, query: TransactionListQuery) {
       return listTransactionsPage(userId, query);
     },
-    async listReviewQueue(userId: string, limit = 50): Promise<FinanceReviewCase[]> {
+    async listReviewQueue(userId: string, limit = 50, id?: string): Promise<FinanceReviewCase[]> {
       const categories = new Map((await existingCategories(userId)).map((item) => [item.id, item]));
       const reviews = await db
         .select()
@@ -5760,6 +5741,7 @@ export function createFinanceService({
         .where(
           and(
             eq(financeReviewCases.userId, userId),
+            id ? eq(financeReviewCases.id, id) : undefined,
             inArray(financeReviewCases.status, ["deferred", "open"]),
           ),
         )
@@ -5839,8 +5821,12 @@ export function createFinanceService({
       if (!transactionIds.length) return {};
       const rows = await db
         .select({
+          id: financeReviewCases.id,
+          evidence: financeReviewCases.evidence,
           rationale: financeReviewCases.rationale,
+          resolution: financeReviewCases.resolution,
           reason: financeReviewCases.reason,
+          reasonCode: financeReviewCases.reasonCode,
           transactionId: financeReviewCases.transactionId,
         })
         .from(financeReviewCases)
@@ -5849,27 +5835,371 @@ export function createFinanceService({
             eq(financeReviewCases.userId, userId),
             inArray(financeReviewCases.transactionId, transactionIds),
             inArray(financeReviewCases.status, ["deferred", "open"]),
-            inArray(financeReviewCases.reason, ["possible_reimbursement", "possible_transfer"]),
+            or(
+              inArray(financeReviewCases.reason, ["possible_reimbursement", "possible_transfer"]),
+              inArray(financeReviewCases.reasonCode, ["reimbursement", "possible_transfer"]),
+              sql`${financeReviewCases.resolution}->>'type' = 'clarify'`,
+              sql`jsonb_typeof(${financeReviewCases.evidence}->'clarification') = 'string'`,
+            ),
           ),
         )
         .orderBy(desc(financeReviewCases.updatedAt));
       const contexts: Record<
         string,
-        { underlyingAction: "reimbursement" | "transaction"; why: string }
+        {
+          reviewCaseId: string;
+          reviewReason: string;
+          underlyingAction: "reimbursement" | "transaction";
+          why: string;
+        }
       > = {};
       for (const row of rows) {
         if (contexts[row.transactionId]) continue;
+        const reviewReason =
+          row.reason === "possible_reimbursement"
+            ? "reimbursement"
+            : row.reason === "possible_transfer"
+              ? "possible_transfer"
+              : row.reasonCode;
         contexts[row.transactionId] = {
-          underlyingAction:
-            row.reason === "possible_reimbursement" ? "reimbursement" : "transaction",
+          reviewCaseId: row.id,
+          reviewReason,
+          underlyingAction: reviewReason === "reimbursement" ? "reimbursement" : "transaction",
           why:
-            row.rationale ??
-            (row.reason === "possible_reimbursement"
-              ? "This transaction may be reimbursable and needs a bounded reimbursement decision."
-              : "This transaction may be a transfer and needs a bounded transfer decision."),
+            row.resolution?.type === "clarify"
+              ? `Resolve the saved clarification through the Finance Inbox before changing this transaction: ${String(row.resolution.answer ?? row.resolution.clarification ?? "User context is awaiting an explicit decision.")}`.slice(
+                  0,
+                  1000,
+                )
+              : typeof row.evidence.clarification === "string"
+                ? `Resolve the saved clarification through the Finance Inbox before changing this transaction: ${row.evidence.clarification}`.slice(
+                    0,
+                    1000,
+                  )
+                : (row.rationale ??
+                  (reviewReason === "reimbursement"
+                    ? "This transaction may be reimbursable and needs a bounded reimbursement decision."
+                    : "This transaction may be a transfer and needs a bounded transfer decision.")),
         };
       }
       return contexts;
+    },
+    async projectMaintenanceCandidateQuestionsForUser(input: {
+      candidateId: string;
+      candidateRevision: string;
+      context: MutationContext;
+      runId: string;
+      userId: string;
+    }) {
+      return db.transaction(async (tx) => {
+        await assertMaintenanceClaim(tx, input.context);
+        const [candidate] = await tx
+          .select({ id: financeMaintenanceCandidates.id })
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.id, input.candidateId),
+              eq(financeMaintenanceCandidates.runId, input.runId),
+              eq(financeMaintenanceCandidates.userId, input.userId),
+              eq(financeMaintenanceCandidates.revision, input.candidateRevision),
+              eq(financeMaintenanceCandidates.state, "challenged"),
+            ),
+          )
+          .limit(1);
+        if (!candidate)
+          throw new AppError(
+            "conflict",
+            "The challenged Finance candidate changed before its questions reached Review.",
+          );
+        const supersedeAndRebuild = async () => {
+          const rebuilt = await supersedeFinanceMaintenanceLineage(
+            tx,
+            input.userId,
+            {
+              candidateId: candidate.id,
+              candidateRevision: input.candidateRevision,
+              runId: input.runId,
+            },
+            now(),
+          );
+          if (!rebuilt.rebuilt)
+            throw new AppError("conflict", "The Finance maintenance run changed during rebuild.");
+          return {
+            created: 0,
+            rebuild: true as const,
+            successorRunId: rebuilt.successorRunId,
+            total: 0,
+          };
+        };
+        const items = await tx
+          .select()
+          .from(financeMaintenanceCandidateItems)
+          .where(
+            and(
+              eq(financeMaintenanceCandidateItems.candidateId, candidate.id),
+              eq(financeMaintenanceCandidateItems.disposition, "question"),
+            ),
+          )
+          .orderBy(financeMaintenanceCandidateItems.ordinal);
+        const activeReviewIds = new Set<string>();
+        for (const item of items) {
+          const payload = item.privatePayload as {
+            choices?: unknown;
+            prompt?: unknown;
+            reviewCaseId?: unknown;
+            reviewReason?: unknown;
+            transactionId?: unknown;
+            underlyingAction?: unknown;
+            why?: unknown;
+          };
+          const sourceRefs = item.sourceRefs as Array<Record<string, unknown>>;
+          const transactionId =
+            typeof payload.transactionId === "string" ? payload.transactionId : null;
+          if (!transactionId)
+            throw new AppError(
+              "conflict",
+              "A challenged Finance question is missing its transaction lineage.",
+            );
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-question:${input.userId}:${transactionId}`}, 0))`,
+          );
+          const [projected] = await tx
+            .select({ id: financeReviewCases.id, status: financeReviewCases.status })
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.userId, input.userId),
+                sql`${financeReviewCases.evidence}->>'candidateItemId' = ${item.id}`,
+                sql`${financeReviewCases.evidence}->>'candidateRevision' = ${input.candidateRevision}`,
+              ),
+            )
+            .limit(1);
+          if (projected?.status === "resolved") return supersedeAndRebuild();
+          const [transaction] = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.id, transactionId),
+                eq(financeTransactions.userId, input.userId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!transaction) return supersedeAndRebuild();
+          const exactProjected = projected
+            ? (
+                await tx
+                  .select({ status: financeReviewCases.status })
+                  .from(financeReviewCases)
+                  .where(
+                    and(
+                      eq(financeReviewCases.id, projected.id),
+                      eq(financeReviewCases.userId, input.userId),
+                    ),
+                  )
+                  .for("update")
+                  .limit(1)
+              )[0]
+            : null;
+          if (exactProjected?.status === "resolved") return supersedeAndRebuild();
+          const legacy =
+            typeof payload.reviewCaseId === "string"
+              ? (
+                  await tx
+                    .select()
+                    .from(financeReviewCases)
+                    .where(
+                      and(
+                        eq(financeReviewCases.id, payload.reviewCaseId),
+                        eq(financeReviewCases.userId, input.userId),
+                        eq(financeReviewCases.transactionId, transactionId),
+                      ),
+                    )
+                    .for("update")
+                    .limit(1)
+                )[0]
+              : null;
+          if (typeof payload.reviewCaseId === "string" && !legacy) return supersedeAndRebuild();
+          if (legacy?.status === "resolved") {
+            return supersedeAndRebuild();
+          }
+          if (
+            !transaction.needsReview ||
+            (item.expectedRevision !== null &&
+              item.expectedRevision !== transaction.updatedAt.toISOString())
+          )
+            return supersedeAndRebuild();
+          let [eventLink] = await tx
+            .select({ economicEventId: financeEventTransactions.economicEventId })
+            .from(financeEventTransactions)
+            .innerJoin(
+              financeEconomicEvents,
+              and(
+                eq(financeEconomicEvents.id, financeEventTransactions.economicEventId),
+                eq(financeEconomicEvents.userId, financeEventTransactions.userId),
+              ),
+            )
+            .where(
+              and(
+                eq(financeEventTransactions.userId, input.userId),
+                eq(financeEconomicEvents.userId, input.userId),
+                eq(financeEventTransactions.transactionId, transaction.id),
+              ),
+            )
+            .limit(1);
+          if (!eventLink) {
+            const [event] = await tx
+              .insert(financeEconomicEvents)
+              .values({
+                kind:
+                  transaction.direction === "income"
+                    ? "income"
+                    : transaction.direction === "transfer"
+                      ? "transfer"
+                      : "purchase",
+                stableKey: `transaction:${transaction.id}`,
+                userId: input.userId,
+              })
+              .onConflictDoUpdate({
+                set: { updatedAt: now() },
+                target: [financeEconomicEvents.userId, financeEconomicEvents.stableKey],
+              })
+              .returning({ id: financeEconomicEvents.id });
+            if (!event)
+              throw new AppError("internal_error", "The Finance event could not be prepared.");
+            await tx
+              .insert(financeEventTransactions)
+              .values({
+                economicEventId: event.id,
+                transactionId: transaction.id,
+                userId: input.userId,
+              })
+              .onConflictDoNothing();
+            [eventLink] = await tx
+              .select({ economicEventId: financeEventTransactions.economicEventId })
+              .from(financeEventTransactions)
+              .innerJoin(
+                financeEconomicEvents,
+                and(
+                  eq(financeEconomicEvents.id, financeEventTransactions.economicEventId),
+                  eq(financeEconomicEvents.userId, financeEventTransactions.userId),
+                ),
+              )
+              .where(
+                and(
+                  eq(financeEventTransactions.userId, input.userId),
+                  eq(financeEconomicEvents.userId, input.userId),
+                  eq(financeEventTransactions.transactionId, transaction.id),
+                ),
+              )
+              .limit(1);
+          }
+          if (!eventLink)
+            throw new AppError("internal_error", "The Finance event link could not be prepared.");
+          const underlyingAction =
+            typeof payload.underlyingAction === "string" ? payload.underlyingAction : "transaction";
+          const why =
+            typeof payload.why === "string"
+              ? payload.why.slice(0, 1_000)
+              : "This transaction needs user evidence before Finance maintenance can continue.";
+          const prompt =
+            typeof payload.prompt === "string"
+              ? payload.prompt.slice(0, 1_000)
+              : "How should this transaction be handled?";
+          const canonicalReason = financeReviewReasonSchema.safeParse(payload.reviewReason);
+          const reason = canonicalReason.success
+            ? canonicalReason.data
+            : payload.reviewReason === "possible_reimbursement" ||
+                underlyingAction === "reimbursement"
+              ? ("reimbursement" as const)
+              : underlyingAction === "transaction"
+                ? ("missing_provenance" as const)
+                : ("category_ambiguity" as const);
+          const stableKey = `${eventLink.economicEventId}:${reason}`;
+          const [canonical] = await tx
+            .select()
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.userId, input.userId),
+                eq(financeReviewCases.stableKey, stableKey),
+                inArray(financeReviewCases.status, ["open", "deferred"]),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          const clarification =
+            typeof legacy?.evidence.clarification === "string"
+              ? legacy.evidence.clarification
+              : legacy?.resolution?.type === "clarify"
+                ? String(legacy.resolution.clarification ?? legacy.resolution.answer ?? "").slice(
+                    0,
+                    1_000,
+                  )
+                : null;
+          const evidence = {
+            candidateId: candidate.id,
+            candidateItemId: item.id,
+            candidateRevision: input.candidateRevision,
+            choices: Array.isArray(payload.choices) ? payload.choices : [],
+            ...(clarification ? { clarification } : {}),
+            maintenanceRunId: input.runId,
+            merchant: transaction.merchant,
+            prompt,
+            sourceRefs,
+            why,
+          };
+          const mergedEvidence = {
+            ...(legacy?.evidence ?? {}),
+            ...(canonical?.evidence ?? {}),
+            ...evidence,
+            ...(clarification ? { clarification } : {}),
+          };
+          if (legacy && legacy.id !== canonical?.id) {
+            if (canonical) {
+              await tx
+                .update(financeReviewCases)
+                .set({
+                  resolution: {
+                    rationale: "Consolidated into the canonical Finance Inbox case.",
+                    type: "dismiss",
+                  },
+                  resolvedAt: now(),
+                  status: "resolved",
+                  updatedAt: now(),
+                })
+                .where(eq(financeReviewCases.id, legacy.id));
+            } else {
+              await tx
+                .update(financeReviewCases)
+                .set({
+                  economicEventId: eventLink.economicEventId,
+                  evidence: mergedEvidence,
+                  impactAmount: Math.abs(transaction.amount),
+                  lastSeenAt: now(),
+                  reasonCode: reason,
+                  stableKey,
+                  updatedAt: now(),
+                })
+                .where(eq(financeReviewCases.id, legacy.id));
+            }
+          }
+          const projectedReview = await inbox.upsertFinanceReview(
+            {
+              economicEventId: eventLink.economicEventId,
+              evidence: mergedEvidence,
+              impactAmount: Math.abs(transaction.amount) / 100,
+              reason,
+              transactionId: transaction.id,
+              userId: input.userId,
+            },
+            tx,
+          );
+          activeReviewIds.add(projectedReview.id);
+        }
+        return { created: items.length, total: activeReviewIds.size };
+      });
     },
     async beginMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
@@ -8121,7 +8451,7 @@ export function createFinanceService({
         this.getProfile(userId, nowDate.toISOString().slice(0, 10)),
       ]);
       const { accountSemantics, totals } = summarizeFinanceAccounts(
-        accounts.map((item) => account(item)),
+        await serializeAccounts(accounts),
       );
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =

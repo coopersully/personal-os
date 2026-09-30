@@ -9,7 +9,7 @@ import {
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { CircleCheckIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -22,15 +22,17 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FinanceContextualQuestionPage } from "./contextual-question.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { savedClarification } from "./review-note.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 
 const inboxKey = ["finance-inbox"];
 const resolutions = {
   classify_transaction: "Choose a category",
   link_transactions: "Link another transaction",
-  clarify: "Add clarification and keep open",
+  clarify: "Leave a note for maintenance",
   dismiss: "Dismiss with a reason",
 } as const;
 type ResolutionType = keyof typeof resolutions;
@@ -103,6 +105,15 @@ function TransactionEvidence({ id }: { id: string }) {
 }
 
 export function FinanceReviewPage() {
+  const [search] = useSearchParams();
+  const contextualQuestion = search.get("contextualQuestion");
+  return contextualQuestion ? (
+    <FinanceContextualQuestionPage key={contextualQuestion} id={contextualQuestion} />
+  ) : (
+    <FinanceInboxReviewPage />
+  );
+}
+function FinanceInboxReviewPage() {
   const queryClient = useQueryClient();
   const inbox = useQuery({
     queryKey: inboxKey,
@@ -110,14 +121,32 @@ export function FinanceReviewPage() {
   });
   const result = inbox.data;
   const question = result?.communication.nextQuestion;
-  const review = result?.data.find((item) => item.id === question?.id);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedItem = searchParams.get("item");
+  const requestedQuestion = searchParams.get("question") ?? undefined;
+  const requestedApproval = searchParams.get("approval") ?? undefined;
+  const review =
+    requestedItem !== null
+      ? result?.data.find((item) => item.id === requestedItem)
+      : requestedQuestion !== undefined || requestedApproval !== undefined
+        ? undefined
+        : (result?.data.find((item) => item.id === question?.id) ??
+          (!question
+            ? result?.data.find(
+                (item) =>
+                  item.resolution?.type === "clarify" ||
+                  typeof item.evidence.clarification === "string",
+              )
+            : undefined));
   const [olderOpen, setOlderOpen] = useState(false);
+  const targetedAgentWork = requestedQuestion !== undefined || requestedApproval !== undefined;
   function acceptResponse(response: FinanceToolResult<FinanceInboxCase[]>) {
     queryClient.setQueryData(inboxKey, response);
     void queryClient.invalidateQueries({
       predicate: (query) =>
         typeof query.queryKey[0] === "string" &&
-        query.queryKey[0].startsWith("finance-") &&
+        (query.queryKey[0].startsWith("finance-") ||
+          query.queryKey[0] === "agent-access-work-items") &&
         query.queryKey[0] !== "finance-inbox",
     });
   }
@@ -137,33 +166,62 @@ export function FinanceReviewPage() {
           <AlertDescription>{disclosure.message}</AlertDescription>
         </Alert>
       ))}
-      {question && review ? (
+      {result && result.data.length > 1 ? (
+        <Field>
+          <FieldLabel htmlFor="finance-inbox-item">Outstanding items</FieldLabel>
+          <NativeSelect
+            id="finance-inbox-item"
+            value={review?.id ?? ""}
+            onChange={(event) => setSearchParams({ item: event.target.value })}
+          >
+            {result.data.map((item) => (
+              <NativeSelectOption key={item.id} value={item.id}>
+                {item.context
+                  ? `${item.context.date} · ${item.context.merchant} · ${item.context.amount}`
+                  : (item.prompt ?? item.reason.replaceAll("_", " "))}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      ) : null}
+      {review ? (
         <ReviewQuestion
           key={review.id}
           onResponse={acceptResponse}
-          prompt={question.prompt}
+          prompt={
+            question && review.id === question.id
+              ? question.prompt
+              : (review.prompt ?? "What should we know about this item?")
+          }
           review={review}
           headline={result?.communication.headline ?? ""}
         />
       ) : null}
-      {result && !question && result.data.length === 0 ? (
+      {result &&
+      !question &&
+      result.data.length === 0 &&
+      requestedItem === null &&
+      !targetedAgentWork ? (
         <EmptyState icon={<CircleCheckIcon />} title="No open Inbox questions">
           {result.communication.headline}
         </EmptyState>
       ) : null}
-      {result && ((!question && result.data.length > 0) || (question && !review)) ? (
+      {result &&
+      !review &&
+      !targetedAgentWork &&
+      (requestedItem !== null || result.data.length > 0) ? (
         <Alert>
           <AlertTitle>Review question unavailable</AlertTitle>
           <AlertDescription>
-            The Inbox has work, but its current question and evidence could not be matched. Reload
-            to request the current state.
+            The requested item is no longer available. It may have been resolved or may not belong
+            to this account. Reload to request its current state.
           </AlertDescription>
           <Button onClick={() => void inbox.refetch()} variant="outline">
             Reload review
           </Button>
         </Alert>
       ) : null}
-      <Collapsible onOpenChange={setOlderOpen} open={olderOpen}>
+      <Collapsible onOpenChange={setOlderOpen} open={olderOpen || targetedAgentWork}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost">Older questions and approvals</Button>
         </CollapsibleTrigger>
@@ -171,14 +229,19 @@ export function FinanceReviewPage() {
           <Button asChild variant="outline" className="justify-self-start">
             <Link to="/finances/review/legacy">Earlier transaction reviews</Link>
           </Button>
-          {olderOpen ? <FinanceAgentReviewQueue /> : null}
+          {olderOpen || targetedAgentWork ? (
+            <FinanceAgentReviewQueue
+              questionId={requestedQuestion}
+              approvalId={requestedApproval}
+            />
+          ) : null}
         </CollapsibleContent>
       </Collapsible>
     </section>
   );
 }
 
-function ReviewQuestion({
+export function ReviewQuestion({
   review,
   prompt,
   headline,
@@ -247,10 +310,15 @@ function ReviewQuestion({
     (resolutionType === "link_transactions" &&
       (!idSchema.safeParse(relatedTransactionId).success || relatedTransactionId === primaryId));
   const answerLimit = resolutionType === "classify_transaction" ? 500 : 1000;
-  const invalidAnswer = !answer.trim() || answer.trim().length > answerLimit;
+  const clarification = savedClarification(review);
+  const invalidAnswer =
+    (resolutionType !== "classify_transaction" && !answer.trim()) ||
+    answer.trim().length > answerLimit;
   function submit() {
     if (mutation.isPending || invalidAnswer || missingSelection) return;
-    const value = answer.trim();
+    const value =
+      answer.trim() ||
+      `Categorized as ${categories.data?.find((category) => category.id === categoryId)?.name}.`;
     let resolution: FinanceReviewResolution;
     if (resolutionType === "classify_transaction")
       resolution = { type: "classify_transaction", categoryId, meaning: value };
@@ -279,9 +347,24 @@ function ReviewQuestion({
         </div>
       </CardHeader>
       <CardContent className="grid gap-4">
-        {(
-          ["merchant", "date", "questionReason", "rationale", "summary", "clarification"] as const
-        ).map((key) =>
+        {review.context ? (
+          <p className="text-sm">
+            {review.context.date} · {review.context.institution} {review.context.accountName} ·{" "}
+            {review.context.direction === "income"
+              ? "Money in"
+              : review.context.direction === "transfer"
+                ? "Transfer"
+                : "Money out"}{" "}
+            · {review.context.pending ? "Pending" : "Posted"}
+          </p>
+        ) : null}
+        {clarification ? (
+          <Alert>
+            <AlertTitle>Note saved · awaiting maintenance</AlertTitle>
+            <AlertDescription>{clarification}</AlertDescription>
+          </Alert>
+        ) : null}
+        {(["merchant", "date", "questionReason", "rationale", "summary"] as const).map((key) =>
           typeof review.evidence[key] === "string" ? (
             <p className="text-sm" key={key}>
               {review.evidence[key]}
@@ -300,6 +383,9 @@ function ReviewQuestion({
             available evidence.
           </p>
         )}
+        {review.context ? (
+          <NearbyActivity context={review.context} transactionId={primaryId} />
+        ) : null}
         {proposedCategory ? (
           <p className="text-sm">Proposed category: {proposedCategory.name}</p>
         ) : null}
@@ -428,8 +514,17 @@ function ReviewQuestion({
                 maxLength={answerLimit}
                 disabled={mutation.isPending}
                 onChange={(event) => setAnswer(event.target.value)}
-                required
+                required={resolutionType !== "classify_transaction"}
               />
+              {resolutionType === "classify_transaction" ? (
+                <FieldDescription>A note is optional when choosing a category.</FieldDescription>
+              ) : null}
+              {resolutionType === "clarify" ? (
+                <FieldDescription>
+                  Your note stays with this item for the next maintenance pass. Choose a category or
+                  link a transaction to apply a correction now.
+                </FieldDescription>
+              ) : null}
               {answer.trim().length > answerLimit ? (
                 <FieldDescription>
                   Use {answerLimit} characters or fewer for this resolution.
@@ -459,5 +554,72 @@ function ReviewQuestion({
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function NearbyActivity({
+  context,
+  transactionId,
+}: {
+  context: NonNullable<FinanceInboxCase["context"]>;
+  transactionId: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const bounds = (offset: number) => {
+    const day = new Date(`${context.date}T12:00:00Z`);
+    day.setUTCDate(day.getUTCDate() + offset);
+    return day.toISOString().slice(0, 10);
+  };
+  const from = bounds(-7);
+  const to = bounds(7);
+  const nearby = useQuery({
+    queryKey: ["finance-review-nearby", context.accountId, from, to],
+    queryFn: () =>
+      api.listFinanceTransactions({ accountId: context.accountId, from, to, limit: 50 }),
+    enabled: open,
+  });
+  const items = nearby.data?.items.filter((item) => item.id !== transactionId);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="ghost">
+          Nearby account activity
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="grid gap-2">
+        <p className="text-sm text-muted-foreground">
+          Same account · {from} through {to}. Nearby activity does not establish a relationship.
+        </p>
+        {nearby.isPending ? <Spinner label="Loading nearby activity" /> : null}
+        {nearby.error ? <InlineError error={nearby.error} /> : null}
+        <ItemGroup>
+          {items?.map((item) => (
+            <Item key={item.id}>
+              <ItemContent>
+                <ItemTitle>
+                  <Link to={`/finances/transactions?transactionId=${encodeURIComponent(item.id)}`}>
+                    {item.merchant}
+                  </Link>
+                </ItemTitle>
+                <ItemDescription>
+                  {item.date} · {item.amount} {item.currencyCode ?? "currency unavailable"} ·{" "}
+                  {item.direction} · {item.pending ? "Pending" : "Posted"}
+                </ItemDescription>
+              </ItemContent>
+            </Item>
+          ))}
+        </ItemGroup>
+        {items?.length === 0 ? <p className="text-sm">No other activity in this window.</p> : null}
+        {nearby.data?.nextCursor ? (
+          <p className="text-sm">
+            Showing the latest 50 records in this window.{" "}
+            <Link to={`/finances/transactions?accountId=${encodeURIComponent(context.accountId)}`}>
+              Open account transactions
+            </Link>{" "}
+            to inspect more.
+          </p>
+        ) : null}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

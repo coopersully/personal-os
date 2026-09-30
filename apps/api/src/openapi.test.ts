@@ -13,9 +13,30 @@ type OpenApiOperation = {
     required?: boolean;
     schema?: Record<string, unknown>;
   }>;
-  responses?: Record<number, { description?: string }>;
+  responses?: Record<
+    number,
+    {
+      content?: { "application/json"?: { schema?: { $ref?: string } } };
+      description?: string;
+    }
+  >;
   "x-required-scopes"?: string[];
   "x-successor-operation"?: string;
+};
+
+type JsonSchema = {
+  additionalProperties?: boolean;
+  anyOf?: JsonSchema[];
+  const?: unknown;
+  default?: unknown;
+  enum?: unknown[];
+  format?: string;
+  items?: JsonSchema;
+  oneOf?: JsonSchema[];
+  properties?: Record<string, JsonSchema>;
+  required?: string[];
+  type?: string;
+  $ref?: string;
 };
 
 function taskOperation(path: string, method: string): OpenApiOperation {
@@ -198,6 +219,159 @@ describe("canonical Tasks OpenAPI surface", () => {
     expect(
       taskOperation("/v1/tasks", "get").parameters?.find(({ name }) => name === "query")?.schema,
     ).toMatchObject({ maxLength: 200, minLength: 1, type: "string" });
+  });
+});
+
+describe("Finance maintenance OpenAPI surface", () => {
+  const document = createOpenApiDocument("https://api.example.com");
+  const paths = document.paths as unknown as Record<string, Record<string, OpenApiOperation>>;
+  const schemas = document.components.schemas as unknown as Record<string, JsonSchema>;
+
+  it("documents the required start and resume maintenance inputs", () => {
+    const operation = paths["/v1/finances/maintenance"]?.post;
+    expect(operation?.requestBody).toMatchObject({
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/FinanceMaintenanceInput" },
+        },
+      },
+      required: true,
+    });
+    expect(operation?.requestBody?.content?.["application/json"]).toMatchObject({
+      examples: {
+        allOutstanding: {
+          value: { operation: "start", scope: { type: "all_outstanding" } },
+        },
+        resume: {
+          value: {
+            operation: "resume",
+            runId: "11111111-1111-4111-8111-111111111111",
+          },
+        },
+      },
+    });
+
+    const [start, resume] = schemas.FinanceMaintenanceInput?.oneOf ?? [];
+    expect(start).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        operation: { const: "start", type: "string" },
+        scope: { default: { type: "all_outstanding" } },
+      },
+      required: ["operation"],
+      type: "object",
+    });
+    expect(start?.properties?.scope?.oneOf?.map((scope) => scope.properties?.type?.const)).toEqual([
+      "all_outstanding",
+      "window",
+      "target",
+    ]);
+    expect(resume).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        operation: { const: "resume", type: "string" },
+        runId: { format: "uuid", type: "string" },
+      },
+      required: ["operation", "runId"],
+      type: "object",
+    });
+  });
+
+  it("documents the synchronous POST tool result envelope", () => {
+    const operation = paths["/v1/finances/maintenance"]?.post;
+    expect(Object.keys(operation?.responses ?? {}).toSorted()).toEqual([
+      "200",
+      "403",
+      "404",
+      "409",
+    ]);
+    expect(operation?.responses?.[200]).toMatchObject({
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/FinanceMaintenanceResult" },
+        },
+      },
+      description: "Finance maintenance result with current durable run state",
+    });
+    expect(operation?.responses?.[404]).toEqual({
+      description: "Finance maintenance run not found for this user",
+    });
+    expect(schemas.FinanceMaintenanceResult).toMatchObject({
+      properties: {
+        data: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+        outcome: {
+          enum: [
+            "completed",
+            "work_remaining",
+            "user_input_required",
+            "external_action_required",
+            "failed",
+          ],
+        },
+        schemaVersion: { const: 1 },
+      },
+      required: ["changes", "communication", "data", "outcome", "remainingWork", "schemaVersion"],
+      type: "object",
+    });
+  });
+
+  it("documents paginated history separately from the exact-run payload", () => {
+    const collection = paths["/v1/finances/maintenance"]?.get;
+    expect(collection?.parameters?.map(({ name }) => name)).toEqual(["cursor", "limit", "status"]);
+    expect(collection?.parameters?.find(({ name }) => name === "cursor")?.schema).toEqual({
+      format: "uuid",
+      type: "string",
+    });
+    expect(collection?.parameters?.find(({ name }) => name === "limit")?.schema).toEqual({
+      default: 20,
+      maximum: 100,
+      minimum: 1,
+      type: "integer",
+    });
+    expect(collection?.parameters?.find(({ name }) => name === "status")?.schema).toMatchObject({
+      enum: expect.arrayContaining(["awaiting_agent_challenge", "failed_terminal"]),
+      type: "string",
+    });
+    expect(collection?.responses?.[200]?.content?.["application/json"]?.schema?.$ref).toBe(
+      "#/components/schemas/FinanceMaintenanceHistoryPage",
+    );
+    expect(schemas.FinanceMaintenanceHistoryPage).toMatchObject({
+      properties: {
+        items: {
+          items: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+          type: "array",
+        },
+        nextCursor: {
+          anyOf: expect.arrayContaining([
+            expect.objectContaining({ format: "uuid", type: "string" }),
+            { type: "null" },
+          ]),
+        },
+      },
+      required: ["items", "nextCursor"],
+      type: "object",
+    });
+
+    const exact = paths["/v1/finances/maintenance/{id}"]?.get;
+    expect(exact?.parameters).toContainEqual({
+      in: "path",
+      name: "id",
+      required: true,
+      schema: { format: "uuid", type: "string" },
+    });
+    expect(exact?.responses?.[200]?.content?.["application/json"]?.schema?.$ref).toBe(
+      "#/components/schemas/FinanceMaintenancePayload",
+    );
+    expect(schemas.FinanceMaintenancePayload).toMatchObject({
+      properties: {
+        challengeId: { anyOf: expect.arrayContaining([{ type: "null" }]) },
+        nextAction: { anyOf: expect.arrayContaining([{ type: "null" }]) },
+        recovery: { anyOf: expect.arrayContaining([{ type: "null" }]) },
+        run: { anyOf: expect.arrayContaining([{ type: "null" }]) },
+      },
+      required: ["run", "challengeId", "nextAction", "recovery"],
+      type: "object",
+    });
   });
 });
 

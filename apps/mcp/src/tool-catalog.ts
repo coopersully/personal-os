@@ -320,11 +320,6 @@ export const iloToolCatalog = {
     idempotent: true,
     policy: "approved_rule",
   }),
-  disconnect_finance_account: write("finances", ["finances:write"], {
-    destructive: true,
-    idempotent: true,
-    policy: "approved_rule",
-  }),
   add_finance_transaction: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),
@@ -365,6 +360,10 @@ export const iloToolCatalog = {
   sync_x_bookmarks: write("bookmarks", ["bookmarks:read"], { openWorld: true }),
 
   read_text_conversation: read("texting", ["texting:read"]),
+  get_texting_finance_reply_status: {
+    ...read("texting", ["texting:read", "finances:read"]),
+    scopeMatch: "all",
+  },
   send_text_message: write("texting", ["texting:write"], {
     openWorld: true,
     policy: "approved_rule",

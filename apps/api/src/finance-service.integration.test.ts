@@ -9,17 +9,20 @@ import {
   type DatabaseClient,
   domainProfileApprovals,
   domainProfiles,
+  executionPolicySettings,
   financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
-  financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeMerchants,
+  financePeriodReviews,
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
@@ -36,6 +39,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
@@ -361,7 +365,7 @@ describe.sequential("finance service", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
-    const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
+    const legacyMigrations = await migrationsWithout(migrationsFolder, "nohmi-finance-legacy-", [
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
@@ -415,6 +419,15 @@ describe.sequential("finance service", () => {
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
+      "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
+      "0084_finance_setup_profile_lineage",
+      "0085_finance_context_capture",
+      "0086_notification_foundation",
+      "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
+      "0089_finance_contextual_questions",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -901,17 +914,21 @@ describe.sequential("finance service", () => {
 
   it("keeps review bypass off until a signed-in user explicitly enables it", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
+    const executionPolicy = createExecutionPolicyService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "finance-review-bypass" };
 
     await expect(service.getAutomationSettings(userId)).resolves.toEqual({
       reviewBypassEnabled: false,
     });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
     await expect(service.getAutomationSettings(userId)).resolves.toEqual({
       reviewBypassEnabled: true,
     });
+    await expect(
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
+    ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
       humanOnlyActions: [
         "connect_or_disconnect_source",
@@ -922,16 +939,16 @@ describe.sequential("finance service", () => {
     });
     await expect(
       database.db
-        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
-        .from(financeAutomationSettings)
-        .where(eq(financeAutomationSettings.userId, userId)),
+        .select({ reviewBypassEnabled: executionPolicySettings.reviewBypassEnabled })
+        .from(executionPolicySettings)
+        .where(eq(executionPolicySettings.userId, userId)),
     ).resolves.toEqual([{ reviewBypassEnabled: true }]);
     await expect(
       database.db
         .select({ action: auditEvents.action, actorType: auditEvents.actorType })
         .from(auditEvents)
         .where(eq(auditEvents.requestId, context.requestId)),
-    ).resolves.toEqual([{ action: "finance.review_bypass_updated", actorType: "user" }]);
+    ).resolves.toEqual([{ action: "execution_policy.review_bypass_updated", actorType: "user" }]);
   });
 
   it("logs receipt Mail search failures without exposing the error", async () => {
@@ -8326,6 +8343,438 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([]);
   });
 
+  it("publishes challenged connected-provider questions into one canonical Inbox case", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Candidate question owner",
+        email: `candidate-question-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Candidate question owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const userContext = {
+      principal: financePrincipal(owner.id),
+      requestId: "candidate-question-fixture",
+    };
+    const account = await service.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      userContext,
+    );
+    await database.db
+      .update(financeAccounts)
+      .set({ provider: "plaid", providerAccountId: "connected-account" })
+      .where(eq(financeAccounts.id, account.id));
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 6_301,
+        direction: "income",
+        merchant: "Venmo",
+        needsReview: true,
+        pending: false,
+        providerTransactionId: "provider-venmo-credit",
+        transactionDate: "2026-08-20",
+        userId: owner.id,
+      })
+      .returning();
+    if (!transaction) throw new Error("Candidate question transaction was not created.");
+    const [legacyReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        evidence: { clarification: "Friends paid me back for dinner." },
+        rationale: "This credit may reimburse a shared meal.",
+        reason: "possible_reimbursement",
+        resolution: {
+          answer: "Friends paid me back for dinner.",
+          clarification: "Friends paid me back for dinner.",
+          type: "clarify",
+        },
+        status: "open",
+        transactionId: transaction.id,
+        userId: owner.id,
+      })
+      .returning();
+    if (!legacyReview) throw new Error("Legacy review case was not created.");
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: owner.id,
+    });
+    const candidateRevision = `sha256:${"a".repeat(64)}`;
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        revision: candidateRevision,
+        runId,
+        state: "challenged",
+        userId: owner.id,
+      })
+      .returning();
+    if (!candidate) throw new Error("Candidate question packet was not created.");
+    const exactPrompt = "Was this Venmo credit repayment for a shared meal?";
+    await database.db.insert(financeMaintenanceCandidateItems).values({
+      actionKind: "question",
+      candidateId: candidate.id,
+      disposition: "question",
+      expectedRevision: transaction.updatedAt.toISOString(),
+      fingerprint: `sha256:${"b".repeat(64)}`,
+      ordinal: 0,
+      privatePayload: {
+        choices: [],
+        prompt: exactPrompt,
+        reviewCaseId: legacyReview.id,
+        reviewReason: "possible_reimbursement",
+        transactionId: transaction.id,
+        underlyingAction: "reimbursement",
+        why: "This credit may reimburse a shared meal.",
+      },
+      sourceRefs: [
+        {
+          accountId: account.id,
+          provider: "plaid",
+          remoteId: "provider-venmo-credit",
+          revision: transaction.updatedAt.toISOString(),
+          sourceType: "finance_transaction",
+        },
+      ],
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:challenge_resolve",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(owner.id),
+      requestId: `maintenance:${runId}:challenge_resolve`,
+    };
+    const input = {
+      candidateId: candidate.id,
+      candidateRevision,
+      context: maintenanceContext,
+      runId,
+      userId: owner.id,
+    };
+
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 1,
+      total: 1,
+    });
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 1,
+      total: 1,
+    });
+    const inbox = await service.getFinanceInbox(owner.id);
+    expect(inbox.communication.nextQuestion).toBeUndefined();
+    expect(inbox.data).toHaveLength(1);
+    expect(inbox.data[0]).toMatchObject({
+      economicEventId: expect.any(String),
+      evidence: { clarification: "Friends paid me back for dinner." },
+      id: legacyReview.id,
+      prompt: exactPrompt,
+      reason: "reimbursement",
+      transactionId: transaction.id,
+    });
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, owner.id),
+            inArray(financeReviewCases.status, ["open", "deferred"]),
+          ),
+        ),
+    ).resolves.toEqual([{ id: legacyReview.id }]);
+
+    const [category] = await service.listCategories(owner.id);
+    if (!category) throw new Error("Default Finance categories were not seeded.");
+    const financeContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: financePrincipal(owner.id),
+      requestId: "candidate-question-answer",
+    });
+    await database.db.insert(financePeriodReviews).values({
+      cutoff: now,
+      periodEnd: "2026-08-31",
+      periodStart: "2026-08-01",
+      report: {},
+      runId,
+      sourceIds: [],
+      status: "completed_with_questions",
+      userId: owner.id,
+    });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        leaseClaimId: null,
+        leaseExpiresAt: null,
+        settledResult: { questions: { created: 1, total: 1 } },
+        status: "completed_with_questions",
+      })
+      .where(eq(workspaceMaintenanceRuns.id, runId));
+    const [existingSuccessor] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        domain: "finances",
+        leaseClaimId: crypto.randomUUID(),
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+        rulebookVersion: "rules:v1",
+        scope: {
+          entityType: "finance_transaction",
+          id: crypto.randomUUID(),
+          type: "target",
+        },
+        status: "running",
+        userId: owner.id,
+      })
+      .returning({ id: workspaceMaintenanceRuns.id });
+    if (!existingSuccessor) throw new Error("Existing successor run was not created.");
+    const [committedSuccessorCandidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        revision: `sha256:${"9".repeat(64)}`,
+        runId: existingSuccessor.id,
+        state: "committed",
+        userId: owner.id,
+      })
+      .returning({ id: financeMaintenanceCandidates.id });
+    if (!committedSuccessorCandidate)
+      throw new Error("Committed successor candidate was not created.");
+    const [pendingSuccessorApproval] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "maintenance_turn",
+        fingerprint: `sha256:${"8".repeat(64)}`,
+        maintenanceRunId: existingSuccessor.id,
+        privatePayload: {},
+        requestingAgentId: "successor-agent",
+        userId: owner.id,
+      })
+      .returning({ id: financeAgentActionReviews.id });
+    if (!pendingSuccessorApproval) throw new Error("Pending successor approval was not created.");
+    await expect(
+      service.answerFinanceReview(
+        legacyReview.id,
+        {
+          answer: "Treat this as dining reimbursement context.",
+          idempotencyKey: "candidate-question-answer",
+          resolution: {
+            categoryId: category.id,
+            meaning: "Dining reimbursement",
+            type: "classify_transaction",
+          },
+        },
+        financeContext,
+      ),
+    ).resolves.toMatchObject({ outcome: "completed" });
+    await expect(service.getFinanceInbox(owner.id)).resolves.toMatchObject({
+      data: [],
+      outcome: "completed",
+    });
+    await expect(
+      database.db
+        .select({ needsReview: financeTransactions.needsReview })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ needsReview: false }]);
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({ id: workspaceMaintenanceRuns.id, status: workspaceMaintenanceRuns.status })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.userId, owner.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: runId, status: "completed_with_questions" },
+        { id: existingSuccessor.id, status: "failed_terminal" },
+        { id: expect.any(String), status: "queued" },
+      ]),
+    );
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, committedSuccessorCandidate.id)),
+    ).resolves.toEqual([{ state: "committed" }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, pendingSuccessorApproval.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+  });
+
+  it("rebuilds a challenged question packet when its transaction changes after projection", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Stale candidate question owner",
+        email: `stale-candidate-question-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Stale candidate question owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const account = await service.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      { principal: financePrincipal(owner.id), requestId: "stale-candidate-question" },
+    );
+    const [transaction, laterTransaction] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 4_200,
+          direction: "expense",
+          merchant: "Restaurant",
+          needsReview: true,
+          pending: false,
+          transactionDate: "2026-08-20",
+          userId: owner.id,
+        },
+        {
+          accountId: account.id,
+          amount: 900,
+          direction: "expense",
+          merchant: "Coffee shop",
+          needsReview: true,
+          pending: false,
+          transactionDate: "2026-08-21",
+          userId: owner.id,
+        },
+      ])
+      .returning();
+    if (!transaction || !laterTransaction)
+      throw new Error("Stale candidate transactions were not created.");
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: owner.id,
+    });
+    const candidateRevision = `sha256:${"c".repeat(64)}`;
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({ revision: candidateRevision, runId, state: "challenged", userId: owner.id })
+      .returning();
+    if (!candidate) throw new Error("Stale candidate packet was not created.");
+    await database.db.insert(financeMaintenanceCandidateItems).values([
+      {
+        actionKind: "question",
+        candidateId: candidate.id,
+        disposition: "question",
+        expectedRevision: transaction.updatedAt.toISOString(),
+        fingerprint: `sha256:${"d".repeat(64)}`,
+        ordinal: 0,
+        privatePayload: {
+          choices: [],
+          prompt: "How should this restaurant charge be recorded?",
+          reviewCaseId: null,
+          reviewReason: "category_ambiguity",
+          transactionId: transaction.id,
+          underlyingAction: "categorization",
+          why: "The category is ambiguous.",
+        },
+        sourceRefs: [],
+      },
+      {
+        actionKind: "question",
+        candidateId: candidate.id,
+        disposition: "question",
+        expectedRevision: laterTransaction.updatedAt.toISOString(),
+        fingerprint: `sha256:${"f".repeat(64)}`,
+        ordinal: 1,
+        privatePayload: {
+          choices: [],
+          prompt: "How should this coffee charge be recorded?",
+          reviewCaseId: null,
+          reviewReason: "merchant_identity",
+          transactionId: laterTransaction.id,
+          underlyingAction: "categorization",
+          why: "The merchant identity is ambiguous.",
+        },
+        sourceRefs: [],
+      },
+    ]);
+    const input = {
+      candidateId: candidate.id,
+      candidateRevision,
+      context: {
+        maintenance: {
+          idempotencyKey: "finances:rules:v1:challenge_resolve",
+          policy: "approved_rule" as const,
+          rulebookVersion: "rules:v1",
+          runId,
+        },
+        maintenanceClaim: { claimId, runId },
+        principal: financeAgentPrincipal(owner.id),
+        requestId: `maintenance:${runId}:challenge_resolve`,
+      },
+      runId,
+      userId: owner.id,
+    };
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 2,
+      total: 2,
+    });
+    const projectedInbox = await service.getFinanceInbox(owner.id);
+    expect(projectedInbox.data).toHaveLength(2);
+    expect(projectedInbox.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: "category_ambiguity" }),
+        expect.objectContaining({ reason: "merchant_identity" }),
+      ]),
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ updatedAt: new Date(now.getTime() + 1_000) })
+      .where(eq(financeTransactions.id, laterTransaction.id));
+    await expect(service.projectMaintenanceCandidateQuestionsForUser(input)).resolves.toEqual({
+      created: 0,
+      rebuild: true,
+      successorRunId: null,
+      total: 0,
+    });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({ status: workspaceMaintenanceRuns.status })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, runId)),
+    ).resolves.toEqual([{ status: "queued" }]);
+    await expect(service.getFinanceInbox(owner.id)).resolves.toMatchObject({ data: [] });
+  });
+
   it("repairs legacy heuristic transfers in bounded resumable claim-fenced slices", async () => {
     const userId = crypto.randomUUID();
     await database.db.insert(users).values({
@@ -9691,6 +10140,7 @@ describe.sequential("finance service", () => {
       .returning();
     if (!owner) throw new Error("Finance summary owner was not created.");
     const service = createFinanceService({ db: database.db, now: () => now });
+    const executionPolicy = createExecutionPolicyService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(owner.id), requestId: "finance-summary" };
     const accounts = await Promise.all([
       service.createAccount(
@@ -9744,7 +10194,8 @@ describe.sequential("finance service", () => {
     await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
       accountSemantics: {
         excludedAccountIds: [otherAccount.id],
-        trustworthy: true,
+        // The included wallet has no observed balance.
+        trustworthy: false,
         unresolvedOwnershipAccountIds: [],
       },
       investments: 250,
@@ -9860,14 +10311,143 @@ describe.sequential("finance service", () => {
       spendingThisMonth: expect.any(Number),
     });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: false }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: false });
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: false, version: 1 });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
     await expect(
-      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      executionPolicy.update({ expectedVersion: 2, reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
+  });
+
+  it("treats a current account snapshot as untrustworthy when its Provider Item is blocked", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Blocked Provider Item summary",
+        email: `blocked-item-summary-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Blocked Provider Item summary owner was not created.");
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    await providerItems.upsertConnection({
+      accessToken: "blocked-item-summary-token",
+      accounts: [
+        {
+          accountId: "blocked-item-summary-account",
+          balanceCurrent: 100,
+          currencyCode: "USD",
+          name: "Blocked Item checking",
+          officialName: null,
+        },
+      ],
+      context: {
+        principal: financePrincipal(owner.id),
+        requestId: "blocked-item-summary-connect",
+      },
+      institution: "Blocked Item Bank",
+      itemId: "blocked-item-summary",
+    });
+    await database.db
+      .update(financeAccounts)
+      .set({
+        lastSyncedAt: now,
+        nextSyncAt: null,
+        ownershipShareBps: 10_000,
+        ownershipType: "individual",
+        syncState: "current",
+      })
+      .where(eq(financeAccounts.userId, owner.id));
+    await database.db
+      .update(financeProviderItems)
+      .set({ lastSyncedAt: now, nextSyncAt: null, syncState: "current" })
+      .where(eq(financeProviderItems.userId, owner.id));
+    const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.listFinanceAccounts(owner.id, { includeExcluded: true }),
+    ).resolves.toMatchObject({
+      accountSemantics: { trustworthy: true },
+      accounts: [
+        expect.objectContaining({
+          status: "connected",
+          synchronization: expect.objectContaining({ state: "current" }),
+        }),
+      ],
+    });
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      accountSemantics: {
+        trustworthy: true,
+      },
+      cash: 100,
+    });
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: null,
+        syncError: "The source needs attention.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "blocked_item_summary",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncState: "blocked",
+      })
+      .where(eq(financeProviderItems.userId, owner.id));
+    const [storedAccount] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.userId, owner.id));
+    if (!storedAccount) throw new Error("Blocked Provider Item account was not created.");
+    await expect(
+      service.updateFinanceAccount(
+        storedAccount.id,
+        { idempotencyKey: crypto.randomUUID(), name: "Renamed blocked account" },
+        {
+          actorId: owner.id,
+          actorType: "user",
+          bypassEnabled: false,
+          canMutate: true,
+          canSelfApprove: false,
+          requestId: "blocked-item-summary-update",
+          userId: owner.id,
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        status: "needs_reauth",
+        synchronization: {
+          failureCode: "blocked_item_summary",
+          state: "blocked",
+        },
+      },
+    });
+
+    await expect(
+      service.listFinanceAccounts(owner.id, { includeExcluded: true }),
+    ).resolves.toMatchObject({
+      accountSemantics: { trustworthy: false },
+      accounts: [
+        expect.objectContaining({
+          status: "needs_reauth",
+          synchronization: expect.objectContaining({
+            failureCode: "blocked_item_summary",
+            state: "blocked",
+          }),
+        }),
+      ],
+    });
+    await expect(service.getWealthSummary(owner.id)).resolves.toMatchObject({
+      accountSemantics: {
+        trustworthy: false,
+      },
+      cash: 100,
+    });
   });
 
   it("runs and replays each canonical Finance compatibility mutation", async () => {

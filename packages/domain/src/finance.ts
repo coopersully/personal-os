@@ -1,4 +1,7 @@
 import { z } from "zod";
+
+export * from "./finance/setup-planning.js";
+
 import {
   attentionItemImportanceSchema,
   attentionItemKindSchema,
@@ -52,18 +55,6 @@ export const financeProviderItemHealthSchema = z.object({
   synchronization: financeSynchronizationSchema,
 });
 export type FinanceProviderItemHealth = z.infer<typeof financeProviderItemHealthSchema>;
-
-export const financeAutomationSettingsSchema = z.object({
-  reviewBypassEnabled: z.boolean().default(false),
-});
-export type FinanceAutomationSettings = z.infer<typeof financeAutomationSettingsSchema>;
-
-export const updateFinanceAutomationSettingsInputSchema = z
-  .object({ reviewBypassEnabled: z.boolean() })
-  .strict();
-export type UpdateFinanceAutomationSettingsInput = z.infer<
-  typeof updateFinanceAutomationSettingsInputSchema
->;
 
 const maxFinanceAmount = 100_000_000;
 
@@ -1334,8 +1325,12 @@ export * from "./finance/buckets.js";
 // Canonical Finance contracts are split by responsibility while this file
 // remains the stable public barrel for existing consumers.
 export * from "./finance/budget.js";
+export * from "./finance/budget-policy.js";
+export * from "./finance/budget-policy-management.js";
 export * from "./finance/capabilities.js";
 export * from "./finance/common.js";
+export * from "./finance/context.js";
+export * from "./finance/contextual-questions.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";
@@ -1343,3 +1338,4 @@ export * from "./finance/playbook.js";
 export * from "./finance/presentation.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";
+export * from "./finance/workflow-contracts.js";

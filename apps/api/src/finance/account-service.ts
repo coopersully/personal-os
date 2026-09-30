@@ -3,6 +3,7 @@ import {
   type Database,
   financeAccountConnections,
   financeAccounts,
+  financeProviderItems,
 } from "@personal-os/database";
 import type {
   FinanceAccount,
@@ -11,7 +12,7 @@ import type {
   FinanceAccountQuery,
   FinanceToolResult,
 } from "@personal-os/domain";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { accountMatchesQuery, summarizeFinanceAccounts } from "./account-semantics.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
@@ -42,7 +43,14 @@ function result<T>(
   };
 }
 
-function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
+function account(
+  row: typeof financeAccounts.$inferSelect,
+  item?: typeof financeProviderItems.$inferSelect,
+): FinanceAccount {
+  // A healthy Item cannot certify an account absent from its latest snapshot.
+  // Item-wide failures still take precedence so repair targets the connection.
+  const synchronization =
+    item?.syncState === "current" && row.syncState === "blocked" ? row : (item ?? row);
   return {
     balance: row.balance === null ? null : row.balance / 100,
     createdAt: row.createdAt.toISOString(),
@@ -52,23 +60,31 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
     institution: row.institution,
     kind: row.kind,
     kindSource: row.kindSource,
-    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+    lastSyncedAt: synchronization.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
     ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
     ownershipType: row.ownershipType,
     provider: row.provider,
     providerSubtype: row.providerSubtype,
     providerType: row.providerType,
-    status: row.status,
+    status:
+      synchronization === row
+        ? row.status
+        : item?.syncRecovery === "reconnect"
+          ? "needs_reauth"
+          : "connected",
     synchronization: {
-      failureCode: row.syncErrorCode,
-      failureCount: row.syncFailureCount,
-      lastAttemptAt: row.lastSyncAttemptAt?.toISOString() ?? null,
-      lastSuccessAt: row.lastSyncedAt?.toISOString() ?? null,
-      message: row.syncError,
-      nextRetryAt: row.syncFailureCount > 0 ? (row.nextSyncAt?.toISOString() ?? null) : null,
-      recovery: row.syncRecovery,
-      state: row.syncState,
+      failureCode: synchronization.syncErrorCode,
+      failureCount: synchronization.syncFailureCount,
+      lastAttemptAt: synchronization.lastSyncAttemptAt?.toISOString() ?? null,
+      lastSuccessAt: synchronization.lastSyncedAt?.toISOString() ?? null,
+      message: synchronization.syncError,
+      nextRetryAt:
+        synchronization.syncFailureCount > 0
+          ? (synchronization.nextSyncAt?.toISOString() ?? null)
+          : null,
+      recovery: synchronization.syncRecovery,
+      state: synchronization.syncState,
     },
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -86,6 +102,54 @@ function accountAudit(row: typeof financeAccounts.$inferSelect) {
     status: row.status,
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+type AccountWithProviderItem = {
+  account: typeof financeAccounts.$inferSelect;
+  item: typeof financeProviderItems.$inferSelect | null;
+};
+
+function serializeAccountPairs(pairs: AccountWithProviderItem[]): FinanceAccount[] {
+  if (
+    pairs.some(
+      ({ account: row, item }) =>
+        row.providerItemRecordId !== null &&
+        (!item ||
+          row.provider !== "plaid" ||
+          item.provider !== "plaid" ||
+          item.userId !== row.userId),
+    )
+  ) {
+    throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+  }
+  return pairs.map(({ account: row, item }) => account(row, item ?? undefined));
+}
+
+export async function serializeFinanceAccountRows(
+  executor: Pick<Database, "select">,
+  rows: Array<typeof financeAccounts.$inferSelect>,
+): Promise<FinanceAccount[]> {
+  if (rows.length === 0) return [];
+  const pairs = await executor
+    .select({ account: financeAccounts, item: financeProviderItems })
+    .from(financeAccounts)
+    .leftJoin(
+      financeProviderItems,
+      eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
+    )
+    .where(
+      inArray(
+        financeAccounts.id,
+        rows.map((row) => row.id),
+      ),
+    );
+  const pairById = new Map(pairs.map((pair) => [pair.account.id, pair]));
+  return serializeAccountPairs(
+    rows.flatMap((row) => {
+      const pair = pairById.get(row.id);
+      return pair ? [pair] : [];
+    }),
+  );
 }
 
 function connection(row: typeof financeAccountConnections.$inferSelect): FinanceAccountConnection {
@@ -129,11 +193,17 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
 
   return {
     async list(userId: string, query: FinanceAccountQuery): Promise<FinanceAccountList> {
-      const rows = await db
-        .select()
+      const pairs = await db
+        .select({ account: financeAccounts, item: financeProviderItems })
         .from(financeAccounts)
+        .leftJoin(
+          financeProviderItems,
+          eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
+        )
         .where(eq(financeAccounts.userId, userId));
-      const matching = rows.map(account).filter((item) => accountMatchesQuery(item, query));
+      const matching = serializeAccountPairs(pairs).filter((item) =>
+        accountMatchesQuery(item, query),
+      );
       const { accountSemantics, totals } = summarizeFinanceAccounts(matching);
       return {
         accounts: query.includeExcluded
@@ -219,6 +289,10 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "conflict",
               "This account changed. Reload it before saving your changes.",
             );
+          const [serialized] = await serializeFinanceAccountRows(tx, [updated]);
+          if (!serialized) {
+            throw new AppError("internal_error", "The financial account could not be loaded.");
+          }
           await tx.insert(auditEvents).values({
             action: "finance.account_updated",
             actorId: context.actorId,
@@ -230,7 +304,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
             requestId: context.requestId,
             userId: context.userId,
           });
-          return result(account(updated), "Account updated.", [
+          return result(serialized, "Account updated.", [
             {
               affectedEntityId: id,
               description: "Updated the account details.",
@@ -248,20 +322,92 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
         context,
         {
           idempotencyKey,
+          lockIdentities: [`finance-provider-topology:${context.userId}`],
           operation: "finance.account.disconnect",
           payload: { id },
         },
         async (tx) => {
+          // Match connection/relink lock order: topology, Item, then accounts.
+          const [candidate] = await tx
+            .select()
+            .from(financeAccounts)
+            .where(and(eq(financeAccounts.id, id), eq(financeAccounts.userId, context.userId)))
+            .limit(1);
+          if (!candidate) throw new AppError("not_found", "The financial account was not found.");
+          const itemId = candidate.providerItemRecordId;
+          let lastLinkedAccount = false;
+          if (itemId) {
+            const [item] = await tx
+              .select({
+                userId: financeProviderItems.userId,
+                activeClaim: sql<boolean>`${financeProviderItems.syncClaimId} IS NOT NULL AND ${financeProviderItems.syncClaimExpiresAt} > CURRENT_TIMESTAMP`,
+              })
+              .from(financeProviderItems)
+              .where(eq(financeProviderItems.id, itemId))
+              .for("update");
+            if (!item || item.userId !== context.userId || candidate.provider !== "plaid") {
+              throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+            }
+            if (item.activeClaim) {
+              throw new AppError(
+                "conflict",
+                "The Plaid connection is synchronizing. Retry disconnection after it finishes.",
+              );
+            }
+            const siblings = await tx
+              .select()
+              .from(financeAccounts)
+              .where(eq(financeAccounts.providerItemRecordId, itemId))
+              .orderBy(financeAccounts.id)
+              .for("update");
+            if (siblings.some((row) => row.userId !== context.userId || row.provider !== "plaid")) {
+              throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+            }
+            lastLinkedAccount = siblings.length === 1;
+          }
           const before = await owned(tx, context.userId, id);
+          if (before.providerItemRecordId !== itemId) {
+            throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
+          }
+          const [activeAccountClaim] = await tx
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.id, id),
+                sql`${financeAccounts.syncClaimId} IS NOT NULL AND ${financeAccounts.syncClaimExpiresAt} > CURRENT_TIMESTAMP`,
+              ),
+            );
+          if (activeAccountClaim) {
+            throw new AppError(
+              "conflict",
+              "The account is synchronizing. Retry disconnection after it finishes.",
+            );
+          }
           const [updated] = await tx
             .update(financeAccounts)
             .set({
               encryptedCredentials: null,
-              providerAccountId: null,
+              // Keep remote identity so a later consented reconnect reuses ledger history.
               providerItemId: null,
+              providerItemRecordId: null,
               status: before.provider === "manual" ? "manual" : "needs_reauth",
               syncCursor: null,
-              updatedAt: now(),
+              syncClaimId: null,
+              syncClaimExpiresAt: null,
+              nextSyncAt: null,
+              ...(before.provider === "plaid"
+                ? {
+                    syncState: "blocked" as const,
+                    syncError:
+                      "This account is disconnected. Connect it again to resume synchronization.",
+                    syncErrorCode: "finance_account_disconnected",
+                    syncErrorCategory: "authorization" as const,
+                    syncRecovery: "reconnect" as const,
+                    syncFailureCount: 1,
+                  }
+                : {}),
+              updatedAt: new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1)),
             })
             .where(eq(financeAccounts.id, before.id))
             .returning();
@@ -270,6 +416,9 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "internal_error",
               "The financial account could not be disconnected.",
             );
+          if (itemId && lastLinkedAccount) {
+            await tx.delete(financeProviderItems).where(eq(financeProviderItems.id, itemId));
+          }
           const connections = await tx
             .select()
             .from(financeAccountConnections)
@@ -279,14 +428,18 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
                 eq(financeAccountConnections.provider, before.provider),
               ),
             );
-          const connectionIds = connections
-            .filter((connection) => connection.accountIds.includes(id))
-            .map((connection) => connection.id);
-          for (const connectionId of connectionIds) {
+          for (const connection of connections.filter((connection) =>
+            connection.accountIds.includes(id),
+          )) {
+            const remainingIds = connection.accountIds.filter((accountId) => accountId !== id);
             await tx
               .update(financeAccountConnections)
-              .set({ status: "disconnected", updatedAt: now() })
-              .where(eq(financeAccountConnections.id, connectionId));
+              .set({
+                accountIds: remainingIds,
+                status: remainingIds.length === 0 ? "disconnected" : connection.status,
+                updatedAt: now(),
+              })
+              .where(eq(financeAccountConnections.id, connection.id));
           }
           await tx.insert(auditEvents).values({
             action: "finance.account_disconnected",
@@ -303,7 +456,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
             {
               affectedEntityId: id,
               description:
-                "Removed provider access while preserving the account and its transactions.",
+                "Stopped local synchronization while preserving the account and its transactions. Provider consent is managed at the institution.",
               reversible: true,
               type: "account_disconnected",
             },

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
   createFinanceBudgetInputSchema,
@@ -378,6 +379,8 @@ const financeCandidateQuestionDraftSchema = financeCandidateDraftBaseSchema.exte
       choices: financeQuestionSchema.shape.choices,
       expectedAnswer: financeQuestionSchema.shape.expectedAnswer,
       prompt: z.string().trim().min(1).max(1_000),
+      reviewCaseId: idSchema.nullable().optional(),
+      reviewReason: z.string().trim().min(1).max(100).nullable().optional(),
       underlyingAction: financeActionKindSchema.exclude(["question", "maintenance_turn"]),
       transactionId: idSchema.nullable().default(null),
       why: z.string().trim().min(1).max(1_000),
@@ -610,6 +613,7 @@ export const financePeriodReviewSchema = z
       .object({
         cashLowPoint: financePeriodReviewMoneySchema,
         closing: financePeriodReviewMoneySchema,
+        evidence: financePositionEvidenceCheckpointSchema.optional(),
         opening: financePeriodReviewMoneySchema,
       })
       .strict(),

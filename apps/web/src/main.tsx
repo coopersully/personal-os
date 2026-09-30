@@ -3,6 +3,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { RitualOverlay } from "./features/tracking/ritual-overlay.js";
 import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
@@ -43,7 +44,7 @@ const queryClient = new QueryClient({
   queryCache: new QueryCache({ onError: notifyError }),
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: queryWindowFocusPolicy(desktop),
+      refetchOnWindowFocus: queryWindowFocusPolicy(desktop, window.location.hash),
       retry: false,
       staleTime: 15_000,
     },
@@ -53,12 +54,15 @@ const queryClient = new QueryClient({
 const root = document.getElementById("root");
 if (!root) throw new Error("The application root is missing.");
 
+if (desktop && window.location.hash === "#ritual")
+  document.documentElement.classList.add("ritual-window");
+
 createRoot(root).render(
   <StrictMode>
     <MotionProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          {desktop && window.location.hash === "#ritual" ? <RitualOverlay /> : <App />}
         </BrowserRouter>
       </QueryClientProvider>
     </MotionProvider>

@@ -84,6 +84,10 @@ History (collapsed)
   than a structural divider or second page-sized card.
 - **Narrow/mobile:** use one sequence: moment → day flow → decision queue →
   history. Do not move urgent material behind horizontal scrolling or a tab.
+- All-day occasion content must shrink within its card at narrow widths. Long
+  titles truncate visually while the full title remains in the accessible name
+  and event details; they must never expand the layout viewport or displace the
+  workspace dock’s hit targets.
 - The app frame keeps capture available. Conditions may compress to icon buttons
   with accessible labels and popovers; narrow navigation is the shell-owned
   bottom workspace dock and contextual Actions sheet.

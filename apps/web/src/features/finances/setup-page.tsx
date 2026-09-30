@@ -5,6 +5,7 @@ import type {
   FinanceSetupPayload,
   FinanceToolResult,
 } from "@personal-os/domain";
+import { financeMaintenanceInputSchema } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
@@ -21,6 +22,7 @@ import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { SetupAnswerFields } from "./setup-answer-fields.js";
 
 const setupStages: Record<FinanceSetupPayload["stage"], string> = {
   collecting_profile: "Building your financial profile",
@@ -29,18 +31,22 @@ const setupStages: Record<FinanceSetupPayload["stage"], string> = {
   initial_maintenance: "Initial maintenance remains",
   settled: "Setup complete",
 };
-const maintenanceStages: Record<FinanceMaintenancePayload["stage"], string> = {
-  deterministic_processing: "Processing transaction evidence",
-  agent_reasoning: "Transaction judgment required",
-  reconciliation: "Reconciliation remains",
-  agent_audit: "Audit judgment required",
-  settled: "Maintenance settled",
-  failed: "Maintenance failed",
+const maintenanceStages: Record<NonNullable<FinanceMaintenancePayload["run"]>["status"], string> = {
+  queued: "Maintenance queued",
+  running: "Processing transaction evidence",
+  completed: "Maintenance complete",
+  completed_with_questions: "Maintenance complete with questions",
+  awaiting_agent_challenge: "Ledger challenge required",
+  awaiting_approval: "Action approval required",
+  blocked: "Maintenance blocked",
+  failed_recoverable: "Maintenance needs recovery",
+  failed_terminal: "Maintenance failed",
 };
 
 export function FinanceSetupPage() {
   const queryClient = useQueryClient();
   const [result, setResult] = useState<FinanceToolResult<FinanceSetupPayload> | null>(null);
+  const [maintenanceInstructionVersion, setMaintenanceInstructionVersion] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const requestKey = useRef({ signature: "", key: "" });
   const session = result?.data;
@@ -60,6 +66,7 @@ export function FinanceSetupPage() {
         return;
       }
       setResult(response);
+      setMaintenanceInstructionVersion((version) => version + 1);
       if (input.operation === "answer")
         setAnswers((current) => ({ ...current, [`${input.sessionId}:${input.questionId}`]: "" }));
       requestKey.current = { signature: "", key: "" };
@@ -92,14 +99,24 @@ export function FinanceSetupPage() {
       session ? { operation: "resume", sessionId: session.sessionId } : { operation: "start" },
     );
   }
-  function submitAnswer() {
-    if (!session || !question || setup.isPending || !answer.trim()) return;
+  function submitAnswer(value = answer) {
+    if (!session || !question || setup.isPending || !value.trim()) return;
     const input = {
-      answer: answer.trim(),
+      answer: value.trim(),
       expectedVersion: session.version,
       operation: "answer" as const,
       questionId: question.id,
       sessionId: session.sessionId,
+    };
+    setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
+  }
+  function skip() {
+    if (!session || !question || setup.isPending) return;
+    const input = {
+      operation: "skip" as const,
+      sessionId: session.sessionId,
+      expectedVersion: session.version,
+      questionId: question.id,
     };
     setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
   }
@@ -117,6 +134,7 @@ export function FinanceSetupPage() {
     const input = {
       approvalSource: "user_instruction" as const,
       budgetVersionId: exactPlan.id,
+      expectedProfileVersionId: exactPlan.profileVersionId ?? null,
       expectedVersion: session.version,
       operation: "approve_budget" as const,
       sessionId: session.sessionId,
@@ -139,7 +157,7 @@ export function FinanceSetupPage() {
           </CardTitle>
           <CardDescription>
             {result?.communication.headline ??
-              "Answer one question at a time, review the complete budget, then approve it. Existing progress will resume."}
+              "Build your first plan one question at a time. Unknown details can wait, and existing progress will resume."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -168,7 +186,19 @@ export function FinanceSetupPage() {
               {setup.isPending ? "Loading saved progress…" : "Start or resume setup"}
             </Button>
           ) : null}
-          {session?.stage === "collecting_profile" && question ? (
+          {session?.stage === "collecting_profile" &&
+          question &&
+          (question.id.startsWith("planning:") || question.id === "profile:debts") ? (
+            <section aria-label={question.prompt}>
+              <p>{question.prompt}</p>
+              <SetupAnswerFields
+                key={`${session.sessionId}:${question.id}`}
+                questionId={question.id}
+                pending={setup.isPending}
+                onSubmit={submitAnswer}
+              />
+            </section>
+          ) : session?.stage === "collecting_profile" && question ? (
             <form
               key={question.id}
               className="grid gap-4"
@@ -206,6 +236,20 @@ export function FinanceSetupPage() {
                 {setup.isPending ? "Saving answer…" : "Save answer"}
               </Button>
             </form>
+          ) : null}
+          {session?.stage === "collecting_profile" && question ? (
+            <Button variant="ghost" disabled={setup.isPending} onClick={skip}>
+              Skip for now — keep unknown
+            </Button>
+          ) : null}
+          {session?.stage === "budget_proposal" ? (
+            <Alert>
+              <AlertTitle>First plan saved; evidence remains incomplete</AlertTitle>
+              <AlertDescription>
+                Unknown amounts stay unknown. Planned contributions do not mean money moved. You can
+                keep bookkeeping while qualified position evidence is unavailable.
+              </AlertDescription>
+            </Alert>
           ) : null}
           {session?.budgetVersionId ? (
             <>
@@ -250,7 +294,9 @@ export function FinanceSetupPage() {
               </Button>
             </div>
           ) : null}
-          {session?.stage === "initial_maintenance" ? <SetupMaintenance session={session} /> : null}
+          {session?.stage === "initial_maintenance" ? (
+            <SetupMaintenance key={maintenanceInstructionVersion} nextAction={result?.nextAction} />
+          ) : null}
           {session?.stage === "settled" &&
           (result?.outcome !== "completed" || (result?.remainingWork.count ?? 0) > 0) ? (
             <Alert>
@@ -296,6 +342,9 @@ export function FinanceSetupPage() {
         <Button asChild variant="ghost">
           <Link to="/finances/accounts">Manage accounts</Link>
         </Button>
+        <Button asChild variant="ghost">
+          <Link to="/finances/transactions">Continue bookkeeping</Link>
+        </Button>
       </nav>
     </section>
   );
@@ -317,7 +366,9 @@ function SetupBudget({
         </Badge>
       </div>
       <p className="text-sm">{plan.rationale}</p>
-      <h4 className="font-medium">Resources · {formatMoney(plan.expectedResources)}</h4>
+      <h4 className="font-medium">
+        Known planned resources · {formatMoney(plan.expectedResources)}
+      </h4>
       <ItemGroup>
         {plan.resources.map((resource) => (
           <Item key={resource.key}>
@@ -352,7 +403,10 @@ function SetupBudget({
           </Item>
         ))}
       </ItemGroup>
-      <p className="text-sm">Unallocated: {formatMoney(plan.balanceDelta)}</p>
+      <p className="text-sm">
+        {plan.balanceDelta < 0 ? "Unfunded known needs" : "Unallocated known resources"}:{" "}
+        {formatMoney(Math.abs(plan.balanceDelta))}
+      </p>
       <h4 className="font-medium">Assumptions</h4>
       {plan.assumptions.length ? (
         <ul className="list-disc pl-5 text-sm grid gap-2">
@@ -367,21 +421,30 @@ function SetupBudget({
   );
 }
 
-function SetupMaintenance({ session }: { session: FinanceSetupPayload }) {
+function SetupMaintenance({
+  nextAction,
+}: {
+  nextAction: FinanceToolResult<FinanceSetupPayload>["nextAction"];
+}) {
   const queryClient = useQueryClient();
   const [run, setRun] = useState<FinanceMaintenancePayload | null>(null);
   const [communication, setCommunication] = useState<
     FinanceToolResult<FinanceMaintenancePayload>["communication"] | null
   >(null);
+  const instructedInput =
+    nextAction?.tool === "maintain_finances"
+      ? financeMaintenanceInputSchema.safeParse(nextAction.arguments)
+      : null;
+  const input = run?.run
+    ? { operation: "resume" as const, runId: run.run.id }
+    : instructedInput?.success
+      ? instructedInput.data
+      : null;
   const maintenance = useMutation({
-    mutationFn: async () =>
-      requireFinanceResult(
-        await api.maintainFinances(
-          run || session.maintenanceRunId
-            ? { operation: "resume", runId: run?.runId ?? session.maintenanceRunId ?? "" }
-            : { operation: "start", scope: { type: "all_outstanding" } },
-        ),
-      ),
+    mutationFn: async () => {
+      if (!input) throw new Error("Refresh setup progress to load the next maintenance action.");
+      return requireFinanceResult(await api.maintainFinances(input));
+    },
     onSuccess: (response) => {
       setRun(response.data);
       setCommunication(response.communication);
@@ -394,24 +457,20 @@ function SetupMaintenance({ session }: { session: FinanceSetupPayload }) {
   return (
     <section className="grid gap-3" aria-label="Initial maintenance">
       <h3 className="font-medium">
-        {run ? maintenanceStages[run.stage] : "Maintain transaction evidence"}
+        {run?.run
+          ? maintenanceStages[run.run.status]
+          : run?.recovery
+            ? "Maintenance recovery"
+            : "Maintain transaction evidence"}
       </h3>
       <p className="text-sm text-muted-foreground">
         {communication?.headline ??
           "Your profile and budget are saved. Categorization, reconciliation, and audit still need to run."}
       </p>
-      {run?.stage === "agent_reasoning" ? (
-        <p className="text-sm">
-          {run.reasoningBatch.length} transactions need judgment from a connected Finance agent.
-          This page does not supply those judgments.
-        </p>
-      ) : null}
-      {run?.stage === "agent_audit" ? (
-        <p className="text-sm">
-          The audit needs a connected Finance agent to inspect the evidence and submit findings.
-        </p>
-      ) : null}
-      {run?.reviewQuestion ? (
+      {run?.recovery ? <p className="text-sm">{run.recovery.reason}</p> : null}
+      {run?.nextAction ? <p className="text-sm">{run.nextAction.reason}</p> : null}
+      {run?.run?.status === "awaiting_approval" ||
+      run?.run?.status === "completed_with_questions" ? (
         <Button asChild variant="outline">
           <Link to="/finances/review">Answer in Review</Link>
         </Button>
@@ -424,17 +483,17 @@ function SetupMaintenance({ session }: { session: FinanceSetupPayload }) {
       {maintenance.error ? <InlineError error={maintenance.error} /> : null}
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={maintenance.isPending}
+          disabled={maintenance.isPending || !input}
           onClick={() => maintenance.mutate()}
           variant="outline"
         >
           {maintenance.isPending
             ? "Checking maintenance…"
-            : run || session.maintenanceRunId
+            : input?.operation === "resume"
               ? "Check maintenance progress"
               : "Start initial maintenance"}
         </Button>
-        {run?.stage === "agent_reasoning" || run?.stage === "agent_audit" ? (
+        {run?.nextAction?.tool === "get_finance_ledger_challenge" ? (
           <Button asChild variant="ghost">
             <Link to="/settings?section=agent-connections">Connected agents</Link>
           </Button>

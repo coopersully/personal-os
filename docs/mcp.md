@@ -265,12 +265,12 @@ record's kind and read-only state; mutations still use the owning domain's guard
 reserved time is a Task schedule, not a new notification or autonomous execution guarantee.
 
 Finance exposes the same canonical records and mutations as the portal. Read operations
-require `finances:read`; canonical setup, maintenance, ledger, financial-profile, complete-budget,
-Inbox, and goal mutations require `finances:write`. Budgets can be created, revised, and approved
-through MCP. `approve_finance_budget` accepts explicit person approval as `user_instruction`;
-`agent_self_approval` additionally requires the persisted Finance bypass setting. Only the
-signed-in person can change that setting. Connection handoffs, synchronization, account
-corrections/disconnection, and transaction import have scoped tools; provider authentication
+require `finances:read`; canonical setup, ledger, financial-profile, complete-budget,
+Inbox, and goal mutations require `finances:write`. Budgets can be created and revised through MCP. Activation requires an authenticated person
+and `user_instruction`; an agent cannot gain that authority by supplying the same label, even
+with global review bypass enabled. No agent budget-activation policy is registered. Connection handoffs, synchronization, account
+corrections, and transaction import have scoped tools; disconnection remains a signed-in-person
+portal action, and provider authentication
 and consent may still require the person. Money movement, bill payment, trading, and external
 subscription cancellation are not supported Finance effects.
 
@@ -379,17 +379,27 @@ correction, or goal is visible through the same records in the portal; neither c
 an independent financial model. Unknown amounts remain unavailable and API-owned evidence,
 classification, ownership, freshness, and totals govern financial interpretation.
 
+The Finance playbook uses the canonical `nohmi-finance` identity and owner.
 Start a financial interview with `get_finance_playbook` and `setup_finances` using
 `operation: start`. The API resumes an active session and returns one question. Persist each
-answer with its session ID, question ID, expected session version, and idempotency key. Resume
-on conflicts or interruptions. When setup requests budget approval, read `get_finance_budget`,
-show all resources, allocations, rationale, and assumptions, and approve the matching
-`budgetVersionId`. Setup approval uses the setup session version; direct
-`approve_finance_budget` uses the budget version. The portal follows this same protocol without
-asking the person to copy instructions into an agent.
+answer with its session ID, question ID, expected session version, and idempotency key. Optional planning questions support `operation: skip` with that same revision-bound identity;
+a skip leaves facts unknown. Reliable income, uncertain income, dated one-time resources,
+obligations, goal contributions, and protected priorities persist as typed profile facts.
+Confirmed none is distinct from unknown. Resume on conflicts or interruptions. First plans
+remain `incomplete` while the qualified position producer reports `producer_not_registered`;
+uncertain income, exceptional resources, and liquid reserves do not silently fund them.
+Bookkeeping remains available during setup. When setup requests budget approval, the host reads
+`get_finance_budget` and presents the exact proposal, including all resources, allocations,
+rationale, and assumptions, for person-authenticated approval in the portal. The MCP agent cannot
+approve or activate a budget. The person-authenticated API approval operation
+`approve_finance_budget` uses the budget version; person-authenticated setup approval uses the
+setup session version. Both bind the matching `budgetVersionId` and echo
+`expectedProfileVersionId` from the displayed proposal. A changed profile or superseding proposal
+requires the person to review again. The portal follows this protocol without asking the person
+to copy instructions into an agent.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
-the latest complete plan and `get_finance_budget_status` the active plan. Creation and revision
+the latest plan, including an explicit incomplete draft, and `get_finance_budget_status` the active plan. Creation and revision
 retain resource/allocation identities and relationships, balance to the cent, and create
 versioned proposals. `get_finance_inbox` returns transaction-backed cases and the exact next
 question. `answer_finance_review` submits a typed classification, relationship, profile update,
@@ -397,27 +407,23 @@ clarification, or dismissal; it returns the next authoritative Inbox state. The 
 bounded classification, relationship, clarification, and dismissal forms. Older questions and
 approvals remain available separately and are not added to the canonical Inbox count.
 
-`maintain_finances` uses the canonical `finances:write` protocol. Call it with
-`operation: start` and an all-outstanding, account, or since-date scope; `resume` uses the run ID.
-The API runs deterministic processing and returns bounded reasoning or audit work immediately.
-The caller must inspect that evidence and submit `submit_judgments` or `submit_audit` with the
-run's expected version and an idempotency key, then continue from the returned state. A saved
-run, profile, approved budget, or access grant does not start a scheduled worker or guarantee
-completion. `agent_reasoning`, `agent_audit`, failed, and remaining-work results must stay
-explicit. `get_finance_maintenance_history` and exact-run API reads expose saved progress. The
-portal can start/resume initial maintenance and disclose its stage; it does not synthesize
-agent judgments or audit findings.
+`maintain_finances` requires an explicit `finances:maintain` grant. Start with
+`operation: start` and `all_outstanding`, `window` (start/end), or `target` (entityType/id)
+scope; use `operation: resume` with the persisted run ID to continue. The canonical API
+is `POST /v1/finances/maintenance`; history and exact-run reads use that same collection.
+Results include a canonical run, a typed next action, a challenge ID, and any legacy recovery.
+Follow `get_finance_ledger_challenge` using the returned challenge ID through its final cursor,
+then `submit_finance_ledger_challenge` with complete coverage. Required action approval remains
+separate. Verify the resulting run and immutable `get_finance_period_review` artifact.
+Blocked and failed states remain explicit; the portal displays those states without supplying
+agent judgments. `get_finance_status` exposes readiness, freshness, questions, and recovery.
+`get_finance_guided_setup` supplies domain-guidance and readiness context alongside setup.
 
-`get_finance_status` and the advanced stewardship tools still expose compatibility readiness,
-freshness, questions, and recoverable maintenance state. Compatibility challenge work reported
-as `awaiting_agent_challenge` uses `get_finance_ledger_challenge` through the final cursor and
-`submit_finance_ledger_challenge` with complete structured coverage. That older maintenance and
-challenge path retains `finances:maintain`; this scope does not replace the canonical protocol's
-`finances:write` requirement. Immutable period artifacts remain readable with
-`get_finance_period_review`. `get_finance_guided_setup` supplies compatibility domain-guidance,
-source, readiness, and workflow context; it does not replace the canonical setup interview.
-Agents should inspect ledger health and relevant exact transactions before giving budget or
-cash-flow guidance.
+Old `/maintenance/protocol` payloads, including direct judgment and audit submissions, are
+unsupported. Refresh host tool discovery or reconnect, and explicitly authorize
+`finances:maintain`. Keep `finances:read` and `finances:write` grants separate: reconnecting
+or migrating saved work never grants scopes. Resume saved work by its run ID; inspect blocked
+legacy recovery before selecting a new supported scope.
 
 `list_finance_accounts` accepts optional account text, kind, status, and inclusion filters. Its
 structured result includes planning totals plus excluded-account, unresolved-ownership, and
@@ -488,7 +494,7 @@ revision checks, database invariants, and audit records enforce Finance safety.
 Every Finance read tool declares all four annotation hints explicitly. The
 shared API result helper supplies `structuredContent` and preserves structured
 API failures. The shared MCP registration surface adds the same output envelope
-and Ilo workflow metadata used by every other domain; Finance does not create a
+and shared workflow metadata used by every other domain; Finance does not create a
 domain-local result convention. OAuth uses
 the MCP resource indicator, scopes remain least-privilege read/write grants,
 and provider tokens never cross the MCP boundary.
@@ -624,3 +630,22 @@ date window and amount/merchant match. Results contain redacted source IDs,
 matched fields, dates, and confidence—not message bodies. A missing,
 conflicting, disabled, or failed lookup asks the person what they
 bought or paid for; it never applies a category or creates a merchant rule.
+
+### Finance Inbox notes and direct resolution
+
+The Finance dashboard exposes the same outstanding Inbox cases as `get_finance_inbox`,
+including deferred cases. A compact list opens the shared review editor; each case includes a
+transaction-backed context (date, account, merchant, amount, currency, direction, posting status)
+and its question. Nearby activity is inspectable, but is never proof of a relationship.
+
+`answer_finance_review` with `clarify` saves the answer and actor provenance separately from
+replaceable provider evidence. It leaves the case open. Later findings preserve the note, and
+`get_finance_inbox` exposes saved cases independently of the current
+maintenance transaction batch. Existing exact merchant rules defer to saved notes awaiting judgment.
+Agents should read those notes and use a supported typed resolution to apply the answer and close
+the case; they must not treat freeform text as an executable instruction or a category ID.
+
+Users can instead choose a category or link an exact related transaction immediately. Both paths
+use the same authenticated, idempotent API and conditional case mutation. Failed saves retain the
+user's input and retry key. A saved note remains visibly outstanding until actually resolved, but is excluded from the next unanswered question. An Inbox containing only saved notes reports work remaining, not completion.
+An empty Inbox or a completed maintenance run does not establish budget balance or source completeness.

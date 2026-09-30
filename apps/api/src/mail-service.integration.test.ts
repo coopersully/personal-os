@@ -120,6 +120,15 @@ describe.sequential("mail service", () => {
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
+      "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
+      "0084_finance_setup_profile_lineage",
+      "0085_finance_context_capture",
+      "0086_notification_foundation",
+      "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
+      "0089_finance_contextual_questions",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -192,6 +201,15 @@ describe.sequential("mail service", () => {
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
+      "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
+      "0084_finance_setup_profile_lineage",
+      "0085_finance_context_capture",
+      "0086_notification_foundation",
+      "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
+      "0089_finance_contextual_questions",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

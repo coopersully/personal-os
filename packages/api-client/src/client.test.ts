@@ -942,9 +942,9 @@ function apiFetch() {
           version: 1,
         }),
       );
-    if (url.pathname === "/v1/finances/automation-settings")
+    if (url.pathname === "/v1/assistant/execution-policy")
       return json({
-        settings: { reviewBypassEnabled: method === "PATCH" },
+        settings: { reviewBypassEnabled: method === "PATCH", version: method === "PATCH" ? 2 : 1 },
       });
     if (url.pathname === "/v1/finances/guided-setup")
       return json({
@@ -1721,23 +1721,51 @@ describe("ilo API client", () => {
         });
         if (url.pathname === "/v1/finances/status") return json({ status: financeStatus });
         if (url.pathname === "/v1/finances/maintenance" && init?.method === "POST")
-          return json({ run: financeMaintenanceRun }, 202);
+          return json(
+            financeEnvelope({
+              run: financeMaintenanceRun,
+              challengeId: null,
+              nextAction: null,
+              recovery: null,
+            }),
+          );
         if (url.pathname === `/v1/finances/maintenance/${id}`)
-          return json({ run: financeMaintenanceRun });
+          return json({
+            run: financeMaintenanceRun,
+            challengeId: null,
+            nextAction: null,
+            recovery: null,
+          });
         return json({ error: { code: "not_found", message: "Not found" } }, 404);
       },
     });
 
     await expect(api.getFinanceStatus()).resolves.toEqual(financeStatus);
     await expect(
-      api.startFinanceMaintenance({ type: "window", start: "2026-08-01", end: "2026-08-16" }),
-    ).resolves.toEqual(financeMaintenanceRun);
-    await expect(api.getWorkspaceFinanceMaintenanceRun(id)).resolves.toEqual(financeMaintenanceRun);
+      api.maintainFinances({
+        operation: "start",
+        scope: { type: "window", start: "2026-08-01", end: "2026-08-16" },
+      }),
+    ).resolves.toEqual(
+      financeEnvelope({
+        run: financeMaintenanceRun,
+        challengeId: null,
+        nextAction: null,
+        recovery: null,
+      }),
+    );
+    await expect(api.getFinanceMaintenanceRun(id)).resolves.toEqual({
+      run: financeMaintenanceRun,
+      challengeId: null,
+      nextAction: null,
+      recovery: null,
+    });
 
     expect(requests).toEqual([
       { body: null, method: "GET", path: "/v1/finances/status" },
       {
         body: JSON.stringify({
+          operation: "start",
           scope: { type: "window", start: "2026-08-01", end: "2026-08-16" },
         }),
         method: "POST",
@@ -1908,6 +1936,26 @@ describe("ilo API client", () => {
     );
   });
 
+  it("targets exact Finance reads without losing the bounded limit", async () => {
+    const paths: string[] = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        paths.push(`${url.pathname}${url.search}`);
+        return json({ reviews: [], questions: [] });
+      },
+    });
+    await api.getFinanceReviewQueue(1, id);
+    await api.listFinanceActionReviews(1, id);
+    await api.listFinanceQuestions(1, id);
+    expect(paths).toEqual(
+      ["review", "action-reviews", "questions"].map(
+        (path) => `/v1/finances/${path}?limit=1&id=${id}`,
+      ),
+    );
+  });
+
   it("uses exact action-review transport paths and result envelopes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const review = { id, status: "dismissed" };
@@ -2017,7 +2065,9 @@ describe("ilo API client", () => {
         ),
     });
 
-    await expect(api.startFinanceMaintenance()).rejects.toMatchObject({
+    await expect(
+      api.maintainFinances({ operation: "start", scope: { type: "all_outstanding" } }),
+    ).rejects.toMatchObject({
       code: "conflict",
       details: { activeRunId: id },
       requestId: "finance-maintenance-request-123",
@@ -2239,11 +2289,11 @@ describe("ilo API client", () => {
         if (url.pathname === `/v1/finances/period-reviews/${id}/presentation`)
           return json(financeEnvelope(review));
         if (url.pathname === "/v1/finances/playbook") return json({ version: "1" });
-        if (url.pathname === "/v1/finances/maintenance/protocol" && init?.method === "POST")
+        if (url.pathname === "/v1/finances/maintenance" && init?.method === "POST")
           return json(financeEnvelope({ id }));
         if (url.pathname === "/v1/finances/maintenance")
           return json({ items: [], nextCursor: null });
-        if (url.pathname === `/v1/finances/maintenance/protocol/${id}`) return json({ id });
+        if (url.pathname === `/v1/finances/maintenance/${id}`) return json({ id });
         return json({ error: { code: "not_found", message: "Not found" } }, 404);
       },
     });
@@ -2268,7 +2318,7 @@ describe("ilo API client", () => {
       financeEnvelope(review),
     );
     await expect(api.getFinancePlaybook()).resolves.toEqual({ version: "1" });
-    await expect(api.maintainFinances({ operation: "inspect" } as never)).resolves.toEqual(
+    await expect(api.maintainFinances({ operation: "resume", runId: id })).resolves.toEqual(
       financeEnvelope({ id }),
     );
     await expect(api.getFinanceMaintenanceHistory({ limit: 25 })).resolves.toEqual({
@@ -2588,12 +2638,13 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
-    await expect(api.getFinanceAutomationSettings()).resolves.toEqual({
+    await expect(api.getExecutionPolicySettings()).resolves.toEqual({
       reviewBypassEnabled: false,
+      version: 1,
     });
     await expect(
-      api.updateFinanceAutomationSettings({ reviewBypassEnabled: true }),
-    ).resolves.toEqual({ reviewBypassEnabled: true });
+      api.updateExecutionPolicySettings({ expectedVersion: 1, reviewBypassEnabled: true }),
+    ).resolves.toEqual({ reviewBypassEnabled: true, version: 2 });
     await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
       accountSources: [financeAccount],
       humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),

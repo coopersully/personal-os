@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { assessFinancePlaybook, financePlaybookSchema, ILO_FINANCE_PLAYBOOK } from "./playbook.js";
+import {
+  assessFinancePlaybook,
+  financePlaybookSchema,
+  NOHMI_FINANCE_PLAYBOOK,
+} from "./playbook.js";
 
 describe("Finance playbook", () => {
   it("is an approved, ordered, source-lineaged server policy", () => {
+    expect(NOHMI_FINANCE_PLAYBOOK).toMatchObject({ id: "nohmi-finance", owner: "nohmi-finance" });
     expect(
-      financePlaybookSchema.parse(ILO_FINANCE_PLAYBOOK).steps.map((step) => step.rank),
+      financePlaybookSchema.parse(NOHMI_FINANCE_PLAYBOOK).steps.map((step) => step.rank),
     ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(
-      ILO_FINANCE_PLAYBOOK.researchSources.some((source) => source.stability === "time_sensitive"),
+      NOHMI_FINANCE_PLAYBOOK.researchSources.some(
+        (source) => source.stability === "time_sensitive",
+      ),
     ).toBe(true);
-    expect(ILO_FINANCE_PLAYBOOK.webResearchPolicy.neverClaimResearchWithoutEvidence).toBe(true);
+    expect(NOHMI_FINANCE_PLAYBOOK.webResearchPolicy.neverClaimResearchWithoutEvidence).toBe(true);
   });
 
   it("keeps incomplete facts from looking on track", () => {

@@ -3,10 +3,10 @@ import {
   auditEvents,
   createDatabaseClient,
   domainProfiles,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
-  financeAutomationSettings,
   financeBudgets,
   financeCategories,
   financeCategoryRules,
@@ -96,8 +96,9 @@ async function settleWithoutDeadlock(operations: Promise<unknown>[]) {
 async function waitForAdvisoryLockWaiters(
   pool: ReturnType<typeof createDatabaseClient>["pool"],
   minimum = 1,
+  timeoutMs = 5_000,
 ) {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = await pool.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'",
@@ -108,12 +109,12 @@ async function waitForAdvisoryLockWaiters(
   throw new Error(`Expected ${minimum} reimbursement topology lock waiter(s).`);
 }
 
-function createStatementTimedDatabase(connectionUri: string) {
+function createStatementTimedDatabase(connectionUri: string, statementTimeoutMs = 5_000) {
   const url = new URL(connectionUri);
   // Every writer session gets a server-side ceiling as well as the test's
   // client-side completion assertion, so a reversed lock order cannot hang
   // this suite indefinitely.
-  url.searchParams.set("options", "-c statement_timeout=5000");
+  url.searchParams.set("options", `-c statement_timeout=${statementTimeoutMs}`);
   return createDatabaseClient(url.toString());
 }
 
@@ -414,7 +415,7 @@ describe.sequential("finance action service", () => {
       .returning();
     if (!owner) throw new Error("Settlement fixture user was not created.");
     const ownerId = owner.id;
-    await database.db.insert(financeAutomationSettings).values({
+    await database.db.insert(executionPolicySettings).values({
       reviewBypassEnabled: options.bypass,
       userId: ownerId,
     });
@@ -934,6 +935,45 @@ describe.sequential("finance action service", () => {
           ),
         ),
     ).toEqual(Array.from({ length: 101 }, () => ({ categoryId: null })));
+    await expect(
+      fixture.actions.dismiss(first.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "settlement-review-dismiss",
+      }),
+    ).resolves.toMatchObject({ status: "dismissed" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({
+          lastSafeError: workspaceMaintenanceRuns.lastSafeError,
+          status: workspaceMaintenanceRuns.status,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, fixture.run.id)),
+    ).resolves.toEqual([
+      {
+        lastSafeError: expect.objectContaining({
+          code: "finance_maintenance_review_dismissed",
+        }),
+        status: "failed_terminal",
+      },
+    ]);
+    await expect(
+      database.db
+        .insert(workspaceMaintenanceRuns)
+        .values({
+          domain: "finances",
+          rulebookVersion: "test-v1",
+          scope: { type: "all_outstanding" },
+          userId: fixture.ownerId,
+        })
+        .returning({ id: workspaceMaintenanceRuns.id }),
+    ).resolves.toHaveLength(1);
   });
 
   it("commits a human-approved maintenance turn once and requeues the same run", async () => {
@@ -1009,6 +1049,59 @@ describe.sequential("finance action service", () => {
         status: "queued",
       },
     ]);
+  });
+
+  it("keeps a maintenance review pending when its dismissal lineage is incomplete or stale", async () => {
+    const fixture = await createSettlementFixture({ bypass: false, label: "Dismissal lineage" });
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "dismissal-lineage-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a maintenance review.");
+    const [stored] = await database.db
+      .select({ privatePayload: financeAgentActionReviews.privatePayload })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.id, queued.review.id));
+    if (!stored) throw new Error("Expected the maintenance review payload.");
+
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({ privatePayload: { candidateId: fixture.candidate.id } })
+      .where(eq(financeAgentActionReviews.id, queued.review.id));
+    await expect(
+      fixture.actions.dismiss(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "dismissal-lineage-incomplete",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({ privatePayload: stored.privatePayload })
+      .where(eq(financeAgentActionReviews.id, queued.review.id));
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, fixture.run.id));
+    await expect(
+      fixture.actions.dismiss(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "dismissal-lineage-stale-run",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "awaiting_approval" }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "pending" }]);
   });
 
   it("commits the same real candidate directly when review bypass is enabled", async () => {
@@ -1198,11 +1291,11 @@ describe.sequential("finance action service", () => {
   it("queues prepared agent work when durable bypass is disabled, then applies the same action after it is enabled", async () => {
     // A regression that applies before queueing would make the first assertion fail.
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const updateProfile = vi.fn(async () => ({ id: "profile-1", updatedAt: now.toISOString() }));
     const service = createFinanceActionService({
@@ -1226,11 +1319,11 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ status: "pending" }]);
 
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     await expect(service.performDirect("profile", input, context)).resolves.toMatchObject({
       result: { id: "profile-1" },
@@ -1308,11 +1401,11 @@ describe.sequential("finance action service", () => {
       rationale: "Alex agreed to repay this share",
     } as const;
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const queued = await actions.performDirect("reimbursement", input, {
       principal: agent(userId),
@@ -1362,9 +1455,9 @@ describe.sequential("finance action service", () => {
       }),
     ).resolves.toMatchObject({ result: { status: "expected" }, status: "applied" });
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const appliedReimbursement = await actions.performDirect("reimbursement", input, {
       principal: agent(userId),
       requestId: "reimbursement-apply",
@@ -1422,9 +1515,9 @@ describe.sequential("finance action service", () => {
   it("locks a pending review so repeated human approval applies its prepared action once", async () => {
     // A regression that replays an applied review would call updateProfile twice.
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const updateProfile = vi.fn(async () => ({ id: "profile-approved" }));
     const service = createFinanceActionService({
       db: database.db,
@@ -1462,9 +1555,9 @@ describe.sequential("finance action service", () => {
       now: () => now,
     });
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     await expect(
       service.performDirect(
         "profile",
@@ -1480,9 +1573,9 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([]);
 
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const queued = await service.performDirect(
       "profile",
       { effectiveDate: "2026-12-11", employer: "Approved profile" },
@@ -1570,9 +1663,9 @@ describe.sequential("finance action service", () => {
 
   it("holds the bypass settings lock until a bypassed agent action is applied", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     let writerStarted!: () => void;
     let releaseWriter!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -1599,9 +1692,9 @@ describe.sequential("finance action service", () => {
     );
     await started;
     const disabling = database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const disabledBeforeApply = await Promise.race([
       disabling.then(() => true),
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
@@ -1622,9 +1715,9 @@ describe.sequential("finance action service", () => {
     // with a missing executor before the injected failure and cannot prove the
     // writer/review rollback boundary.
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const updateProfile = vi.fn(async (_input, _context, executor) => {
       await executor.insert(financeProfiles).values({
         effectiveDate: "2026-08-19",
@@ -1791,11 +1884,11 @@ describe.sequential("finance action service", () => {
 
   it("audits approved refreshes redactively and rolls the audit back when review terminalization fails", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const service = createFinanceActionService({
       db: database.db,
@@ -1905,9 +1998,9 @@ describe.sequential("finance action service", () => {
 
   it("supersedes a stale prepared transaction instead of applying it on approval", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -2044,9 +2137,9 @@ describe.sequential("finance action service", () => {
 
   it("orders account locks before pending transaction approval locks during account deletion", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -2194,11 +2287,11 @@ describe.sequential("finance action service", () => {
     const context = { principal: agent(userId), requestId: "action-disposition-matrix" };
     const updateBypass = async (enabled: boolean) => {
       await database.db
-        .insert(financeAutomationSettings)
+        .insert(executionPolicySettings)
         .values({ reviewBypassEnabled: enabled, userId })
         .onConflictDoUpdate({
           set: { reviewBypassEnabled: enabled, updatedAt: now },
-          target: financeAutomationSettings.userId,
+          target: executionPolicySettings.userId,
         });
     };
 
@@ -2275,11 +2368,11 @@ describe.sequential("finance action service", () => {
     });
     const updateBypass = async (enabled: boolean) => {
       await database.db
-        .insert(financeAutomationSettings)
+        .insert(executionPolicySettings)
         .values({ reviewBypassEnabled: enabled, userId })
         .onConflictDoUpdate({
           set: { reviewBypassEnabled: enabled, updatedAt: now },
-          target: financeAutomationSettings.userId,
+          target: executionPolicySettings.userId,
         });
     };
     const breakdown = (
@@ -2405,11 +2498,11 @@ describe.sequential("finance action service", () => {
 
   it("makes an evidence-backed future merchant rule independently reviewable and rejects mixed history", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const breakdown = (
       await seedActionCases(database, userId, `Future rule ${crypto.randomUUID()}`)
@@ -2476,9 +2569,9 @@ describe.sequential("finance action service", () => {
       .where(eq(financeTransactions.id, row.id));
     if (!updatedTransaction) throw new Error("Approved future-rule transaction was not found.");
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     await expect(
       service.performDirect(
         "transaction_breakdown",
@@ -2539,9 +2632,9 @@ describe.sequential("finance action service", () => {
       }),
     ).resolves.toMatchObject({ status: "needs_input" });
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     await expect(
       service.performDirect("transaction_breakdown", proposedMixedRule, {
         principal: agent(userId),
@@ -2598,11 +2691,11 @@ describe.sequential("finance action service", () => {
 
   it("records a legacy category correction when an approved agent breakdown replaces an unbackfilled row", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const breakdown = (
       await seedActionCases(database, userId, `Legacy agent ${crypto.randomUUID()}`)
@@ -2677,9 +2770,9 @@ describe.sequential("finance action service", () => {
 
   it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -2789,9 +2882,9 @@ describe.sequential("finance action service", () => {
       service.performDirect("categorization", decision(0.965, "always"), context),
     ).resolves.toMatchObject({ status: "applied" });
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [nextTransaction] = await database.db
       .insert(financeTransactions)
       .values({
@@ -2827,9 +2920,9 @@ describe.sequential("finance action service", () => {
 
   it("excludes question rows from approvals and terminalizes a valid answer", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -2962,11 +3055,11 @@ describe.sequential("finance action service", () => {
 
   it("asks for a replacement pay account and resumes the original profile action", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [ownedAccount] = await database.db
       .insert(financeAccounts)
@@ -3036,11 +3129,11 @@ describe.sequential("finance action service", () => {
 
   it("projects only bounded material profile changes into a pending review", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const service = createFinanceActionService({
       db: database.db,
@@ -3065,9 +3158,9 @@ describe.sequential("finance action service", () => {
 
   it("summarizes every material profile field while redacting private employer and role values", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -3168,9 +3261,9 @@ describe.sequential("finance action service", () => {
 
   it("describes and recovers each representative invalid profile field", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const updateProfile = vi.fn(async () => ({ id: "recovered-profile" }));
     const service = createFinanceActionService({
       db: database.db,
@@ -3236,9 +3329,9 @@ describe.sequential("finance action service", () => {
       expect.anything(),
     );
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
   });
 
   it("marks every nullable profile correction and rejects null for effective date", async () => {
@@ -3359,9 +3452,9 @@ describe.sequential("finance action service", () => {
 
   it("serializes concurrent changed profile proposals on their semantic target", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const service = createFinanceActionService({
       db: database.db,
       finances: { updateProfile: vi.fn() } as never,
@@ -3383,9 +3476,9 @@ describe.sequential("finance action service", () => {
 
   it("reuses one pending review for concurrent exact profile proposals", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const service = createFinanceActionService({
       db: database.db,
       finances: { updateProfile: vi.fn() } as never,
@@ -3519,11 +3612,11 @@ describe.sequential("finance action service", () => {
 
   it("prepares and applies a bucket mutation through the budget action family", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const mutateFinanceBudgetBucket = vi.fn(async (input: unknown) => ({ input }));
     const service = createFinanceActionService({
@@ -3548,11 +3641,11 @@ describe.sequential("finance action service", () => {
       expect(mutateFinanceBudgetBucket).toHaveBeenCalledOnce();
     } finally {
       await database.db
-        .insert(financeAutomationSettings)
+        .insert(executionPolicySettings)
         .values({ reviewBypassEnabled: false, userId })
         .onConflictDoUpdate({
           set: { reviewBypassEnabled: false, updatedAt: now },
-          target: financeAutomationSettings.userId,
+          target: executionPolicySettings.userId,
         });
     }
 
@@ -3640,11 +3733,11 @@ describe.sequential("finance action service", () => {
   it("applies a bypassed bucket mutation in the action transaction without nesting a writer", async () => {
     const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
     await contentionDatabase.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const finances = createFinanceService({ db: contentionDatabase.db, now: () => now });
     const service = createFinanceActionService({
@@ -3956,11 +4049,11 @@ describe.sequential("finance action service", () => {
       });
     } finally {
       await contentionDatabase.db
-        .insert(financeAutomationSettings)
+        .insert(executionPolicySettings)
         .values({ reviewBypassEnabled: false, userId })
         .onConflictDoUpdate({
           set: { reviewBypassEnabled: false, updatedAt: now },
-          target: financeAutomationSettings.userId,
+          target: executionPolicySettings.userId,
         });
       await contentionDatabase.close();
     }
@@ -4020,11 +4113,11 @@ describe.sequential("finance action service", () => {
 
   it("supersedes a complete budget plan when a capacity input changes before approval", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [category] = await database.db
       .insert(financeCategories)
@@ -4213,11 +4306,11 @@ describe.sequential("finance action service", () => {
 
   it("queues and revalidates a maximum-size budget plan with a bounded public revision", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const categories = await database.db
       .insert(financeCategories)
@@ -4271,11 +4364,11 @@ describe.sequential("finance action service", () => {
 
   it("queues, revalidates, and atomically approves a two-item evidence-backed categorization batch", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -4447,11 +4540,11 @@ describe.sequential("finance action service", () => {
 
   it("queues a maximum-size categorization review with bounded public evidence", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -4518,11 +4611,11 @@ describe.sequential("finance action service", () => {
 
   it("queues and approves a merchant merge when selected rows sort target before source", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const merchants = await database.db
       .insert(financeMerchants)
@@ -4612,11 +4705,11 @@ describe.sequential("finance action service", () => {
 
   it("asks only for the failed prerequisite and accepts its correction across every action family", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [foreignUser] = await database.db
       .insert(users)
@@ -4962,11 +5055,11 @@ describe.sequential("finance action service", () => {
 
   it("requires agent transaction categories to satisfy categorization evidence before applying", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -5165,9 +5258,9 @@ describe.sequential("finance action service", () => {
       suggestionBasis: "merchant_rule" as const,
     });
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const bypass = await service.performDirect("transaction", proposal(bypassTransaction), {
       principal: agent(userId),
       requestId: "merchant-rule-bypass",
@@ -5181,9 +5274,9 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ categorySource: "rule" }]);
 
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const queued = await service.performDirect("transaction", proposal(approvalTransaction), {
       principal: agent(userId),
       requestId: "merchant-rule-queue",
@@ -5234,11 +5327,11 @@ describe.sequential("finance action service", () => {
 
   it("resumes a human answer with the requesting agent authority and audits the responder", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -5293,9 +5386,9 @@ describe.sequential("finance action service", () => {
       }),
     );
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const secondQuestion = await service.performDirect(
       "profile",
       {
@@ -5321,9 +5414,9 @@ describe.sequential("finance action service", () => {
 
   it("resolves a maintenance expense reimbursement answer through the bounded answer object", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -5514,11 +5607,11 @@ describe.sequential("finance action service", () => {
 
   it("keeps stale and contradictory maintenance reimbursement evidence recoverable", async () => {
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -5830,9 +5923,9 @@ describe.sequential("finance action service", () => {
       now: () => now,
     });
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
 
     const uncertain = await createExpense(10_000);
     const uncertainQuestion = await storeReimbursementQuestion(database, {
@@ -5933,9 +6026,9 @@ describe.sequential("finance action service", () => {
     ).resolves.toContainEqual({ outcome: "confirmed" });
 
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const queued = await createExpense(13_000);
     const queuedQuestion = await storeReimbursementQuestion(database, {
       accountId: account.id,
@@ -5968,9 +6061,9 @@ describe.sequential("finance action service", () => {
 
   it("matches a partial combined credit and dismisses an unrelated credit without a match", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -6132,11 +6225,11 @@ describe.sequential("finance action service", () => {
     // If either writer stops locking the reimbursement case before its credit
     // work, this real PostgreSQL barrier can deadlock or persist two matches.
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -6314,11 +6407,11 @@ describe.sequential("finance action service", () => {
     // The barrier lets either writer acquire the expense lock first; the other
     // must recover without deleting an allocation backing a reimbursement case.
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: true, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: true, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -6889,11 +6982,11 @@ describe.sequential("finance action service", () => {
     // two-session barrier could cycle: approval held the review while waiting
     // for topology, while queueing held topology while superseding the review.
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -6981,13 +7074,19 @@ describe.sequential("finance action service", () => {
     if (queued.status !== "pending_review")
       throw new Error("Expected a pending reimbursement review.");
 
-    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const waiterObservationTimeoutMs = 15_000;
+    const writerStatementTimeoutMs = 30_000;
+    const contentionDatabase = createStatementTimedDatabase(
+      container.getConnectionUri(),
+      writerStatementTimeoutMs,
+    );
     const actions = createFinanceActionService({
       db: contentionDatabase.db,
       finances: createFinanceService({ db: contentionDatabase.db, now: () => now }),
       now: () => now,
     });
     const blocker = await database.pool.connect();
+    let operationSettlement: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
       await blocker.query("BEGIN");
       await blocker.query("SET LOCAL statement_timeout = '5s'");
@@ -7003,9 +7102,11 @@ describe.sequential("finance action service", () => {
         { ...input, expectedAmount: 180, rationale: "Alex owes the smaller shared portion." },
         { principal: agent(userId, "competing-agent"), requestId: "review-order-competing" },
       );
-      await waitForAdvisoryLockWaiters(database.pool, 2);
+      const operations = [approval, competingRequest];
+      operationSettlement = Promise.allSettled(operations);
+      await waitForAdvisoryLockWaiters(database.pool, 2, waiterObservationTimeoutMs);
       await blocker.query("COMMIT");
-      const outcomes = await settleWithoutDeadlock([approval, competingRequest]);
+      const outcomes = await settleWithoutDeadlock(operations);
       expect(
         outcomes.every(
           (outcome) =>
@@ -7015,6 +7116,7 @@ describe.sequential("finance action service", () => {
       ).toBe(true);
     } finally {
       await blocker.query("ROLLBACK").catch(() => undefined);
+      await operationSettlement;
       blocker.release();
       await contentionDatabase.close();
     }
@@ -7061,18 +7163,18 @@ describe.sequential("finance action service", () => {
       expect(cases).toEqual([]);
       expect(reviews.filter((review) => review.status === "pending")).toHaveLength(1);
     }
-  }, 15_000);
+  }, 40_000);
 
   it("serializes a reimbursement maintenance answer before a competing same-target agent request", async () => {
     // This barriers a question terminalization and a competing review queue
     // behind the actual PostgreSQL topology lock. The server-side timeout is
     // the regression fence for a reversed question-row/topology lock order.
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId })
       .onConflictDoUpdate({
         set: { reviewBypassEnabled: false, updatedAt: now },
-        target: financeAutomationSettings.userId,
+        target: executionPolicySettings.userId,
       });
     const [account] = await database.db
       .insert(financeAccounts)
@@ -7263,9 +7365,9 @@ describe.sequential("finance action service", () => {
 
   it("accepts canonical provider-backed expense and credit evidence and rejects a stale provider revision", async () => {
     await database.db
-      .update(financeAutomationSettings)
+      .update(executionPolicySettings)
       .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(financeAutomationSettings.userId, userId));
+      .where(eq(executionPolicySettings.userId, userId));
     const [category] = await database.db
       .insert(financeCategories)
       .values({

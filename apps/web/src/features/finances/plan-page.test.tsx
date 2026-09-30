@@ -180,6 +180,7 @@ describe("complete finance plan", () => {
         budgetVersionId: id,
         expectedVersion: 3,
         approvalSource: "user_instruction",
+        expectedProfileVersionId: null,
         idempotencyKey: expect.any(String),
       }),
     );

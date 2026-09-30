@@ -162,6 +162,9 @@ describe("canonical Finance contracts", () => {
   });
 
   it("maps every Finance capability to an unambiguous API operation and MCP tool", () => {
+    expect(financeCapabilityManifest.map((item) => item.mcpTool)).not.toContain(
+      "disconnect_finance_account",
+    );
     expect(financeCapabilityManifest).toContainEqual({
       capability: "workflow.setup",
       apiOperation: "setupFinances",

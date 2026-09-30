@@ -16,7 +16,7 @@ import {
   type SubmitFinanceLedgerChallengeInput,
   submitFinanceLedgerChallengeInputSchema,
 } from "@personal-os/domain";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import { stableFinanceActionInput } from "./finance-action-identity.js";
 import type { createFinanceActionService, SupportedActionKind } from "./finance-action-service.js";
@@ -283,6 +283,14 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
               tx,
               "agent",
             );
+            if (
+              draft.disposition === "question" &&
+              typeof draft.privatePayload.transactionId !== "string"
+            )
+              throw new AppError(
+                "invalid_request",
+                "A replacement Finance question must reference one transaction.",
+              );
             await tx
               .update(financeMaintenanceCandidateItems)
               .set({
@@ -298,6 +306,26 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
               })
               .where(eq(financeMaintenanceCandidateItems.id, item.id));
           } else if (finding.resolution.type === "question" && item) {
+            const originalPayload = item.privatePayload as {
+              input?: { decisions?: Array<{ transactionId?: unknown }> };
+              reviewCaseId?: unknown;
+              reviewReason?: unknown;
+              transactionId?: unknown;
+            };
+            const categorizationTransactionId =
+              originalPayload.input?.decisions?.length === 1 &&
+              typeof originalPayload.input.decisions[0]?.transactionId === "string"
+                ? originalPayload.input.decisions[0].transactionId
+                : null;
+            const transactionId =
+              typeof originalPayload.transactionId === "string"
+                ? originalPayload.transactionId
+                : categorizationTransactionId;
+            if (!transactionId)
+              throw new AppError(
+                "invalid_request",
+                "A challenged Finance question must reference one transaction.",
+              );
             const fingerprint = `sha256:${createHash("sha256")
               .update(stableFinanceActionInput({ finding, itemId: item.id }))
               .digest("hex")}`;
@@ -307,14 +335,22 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
                 actionKind: "question",
                 disposition: "question",
                 evidence: { confidence: 0, rationale: finding.evidence },
-                expectedRevision: null,
+                expectedRevision: item.expectedRevision,
                 fingerprint,
                 privatePayload: {
                   asOf: now().toISOString(),
                   choices: finding.resolution.choices.map((value) => ({ label: value, value })),
                   expectedAnswer: [{ name: "answer", required: true, type: "string" }],
                   prompt: finding.resolution.prompt,
-                  transactionId: null,
+                  reviewCaseId:
+                    typeof originalPayload.reviewCaseId === "string"
+                      ? originalPayload.reviewCaseId
+                      : null,
+                  reviewReason:
+                    typeof originalPayload.reviewReason === "string"
+                      ? originalPayload.reviewReason
+                      : null,
+                  transactionId,
                   underlyingAction: item.actionKind,
                   why: finding.resolution.why,
                 },
@@ -400,7 +436,7 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
             and(
               eq(financeLedgerChallenges.runId, runId),
               eq(financeLedgerChallenges.userId, userId),
-              eq(financeLedgerChallenges.state, "submitted"),
+              inArray(financeLedgerChallenges.state, ["submitted", "resolved"]),
             ),
           )
           .orderBy(desc(financeLedgerChallenges.createdAt), desc(financeLedgerChallenges.id))
@@ -422,18 +458,20 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
           .select({ disposition: financeMaintenanceCandidateItems.disposition })
           .from(financeMaintenanceCandidateItems)
           .where(eq(financeMaintenanceCandidateItems.candidateId, challenge.candidateId));
-        const [resolved] = await tx
-          .update(financeLedgerChallenges)
-          .set({ state: "resolved", updatedAt: now() })
-          .where(
-            and(
-              eq(financeLedgerChallenges.id, challenge.id),
-              eq(financeLedgerChallenges.state, "submitted"),
-            ),
-          )
-          .returning({ id: financeLedgerChallenges.id });
-        if (!resolved)
-          throw new AppError("conflict", "The Finance challenge changed before resolution.");
+        if (challenge.state === "submitted") {
+          const [resolved] = await tx
+            .update(financeLedgerChallenges)
+            .set({ state: "resolved", updatedAt: now() })
+            .where(
+              and(
+                eq(financeLedgerChallenges.id, challenge.id),
+                eq(financeLedgerChallenges.state, "submitted"),
+              ),
+            )
+            .returning({ id: financeLedgerChallenges.id });
+          if (!resolved)
+            throw new AppError("conflict", "The Finance challenge changed before resolution.");
+        }
         return {
           candidateId: challenge.candidateId,
           candidateRevision: candidate?.revision,

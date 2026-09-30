@@ -45,7 +45,6 @@ import {
   featureIds,
   financeAccountSchema,
   financeActionOutcomeSchema,
-  financeAutomationSettingsSchema,
   financeBudgetPlanSchema,
   financeCandidateLedgerProjectionSchema,
   financeGuidedPreferencesSchema,
@@ -121,7 +120,6 @@ import {
   updateAccountSetupInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
-  updateFinanceAutomationSettingsInputSchema,
   updateFinanceProfileInputSchema,
   updateFinanceTransactionInputSchema,
   updateGoalInputSchema,
@@ -2314,14 +2312,6 @@ describe("finance agent contracts", () => {
         reserveRunwayMonths: null,
       }).success,
     ).toBe(false);
-  });
-
-  it("keeps the Finance review bypass explicit and off by default", () => {
-    expect(financeAutomationSettingsSchema.parse({})).toEqual({ reviewBypassEnabled: false });
-    expect(updateFinanceAutomationSettingsInputSchema.parse({ reviewBypassEnabled: true })).toEqual(
-      { reviewBypassEnabled: true },
-    );
-    expect(updateFinanceAutomationSettingsInputSchema.safeParse({}).success).toBe(false);
   });
 
   it("validates Finance health policy preferences", () => {

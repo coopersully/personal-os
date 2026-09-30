@@ -101,13 +101,11 @@ const savedFinanceProfile = {
 
 const mocks = vi.hoisted(() => ({
   getDomainProfile: vi.fn(),
-  getFinanceAutomationSettings: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getFinanceOverview: vi.fn(),
   getFinanceProfile: vi.fn(),
   getFinancialProfile: vi.fn(),
   updateFinanceProfile: vi.fn(),
-  updateFinanceAutomationSettings: vi.fn(),
   upsertDomainProfile: vi.fn(),
 }));
 
@@ -134,7 +132,6 @@ describe("Finance settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDomainProfile.mockResolvedValue(draftProfile);
-    mocks.getFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
     mocks.getFinanceGuidedSetup.mockResolvedValue(guidedSetupFixture);
     mocks.getFinanceOverview.mockResolvedValue({
       accounts: [],
@@ -146,31 +143,11 @@ describe("Finance settings", () => {
     mocks.getFinanceProfile.mockResolvedValue(null);
     mocks.getFinancialProfile.mockResolvedValue({ outcome: "completed", data: null });
     mocks.updateFinanceProfile.mockResolvedValue(savedFinanceProfile);
-    mocks.updateFinanceAutomationSettings.mockImplementation(async (settings) => {
-      mocks.getFinanceAutomationSettings.mockResolvedValue(settings);
-      return settings;
-    });
     mocks.upsertDomainProfile.mockResolvedValue({
       ...draftProfile,
       status: "active",
       version: 2,
     });
-  });
-
-  it("lets the signed-in person enable the MCP review bypass with one switch", async () => {
-    renderSettings();
-    const bypass = await screen.findByRole("switch", {
-      name: "Let agents apply confident Finance changes",
-    });
-
-    expect(bypass).not.toBeChecked();
-    await userEvent.setup().click(bypass);
-    expect(bypass).toBeChecked();
-    await waitFor(() =>
-      expect(mocks.updateFinanceAutomationSettings).toHaveBeenCalledWith({
-        reviewBypassEnabled: true,
-      }),
-    );
   });
 
   it("reviews and activates draft guidance without claiming a scheduled automation", async () => {

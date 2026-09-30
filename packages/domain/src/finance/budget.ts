@@ -47,9 +47,10 @@ export const financeBudgetVersionSchema = z
     effectiveFrom: financeMonthSchema,
     expectedResources: financePositiveMoneySchema,
     id: idSchema,
+    profileVersionId: idSchema.nullable().optional(),
     planId: idSchema,
     rationale: z.string().trim().min(1).max(4_000),
-    resources: z.array(financeBudgetResourceSchema).min(1).max(100),
+    resources: z.array(financeBudgetResourceSchema).max(100),
     status: z.enum(["incomplete", "proposed", "active", "retired"]),
     version: z.number().int().positive(),
   })
@@ -64,7 +65,10 @@ export const financeBudgetVersionSchema = z
       resourceTotal === roundCents(value.expectedResources) &&
       allocationTotal === roundCents(value.allocatedTotal) &&
       roundCents(resourceTotal - allocationTotal) === roundCents(value.balanceDelta) &&
-      roundCents(value.balanceDelta) === 0;
+      (value.status === "incomplete" ||
+        (roundCents(value.balanceDelta) === 0 &&
+          value.resources.length > 0 &&
+          value.allocations.length > 0));
 
     if (!balances) {
       context.addIssue({
@@ -78,13 +82,19 @@ export type FinanceBudgetVersion = z.infer<typeof financeBudgetVersionSchema>;
 
 export const createFinanceBudgetVersionInputSchema = z
   .object({
-    allocations: z.array(financeBudgetAllocationSchema).min(1).max(500),
+    allocations: z.array(financeBudgetAllocationSchema).max(500),
     assumptions: z.array(z.string().trim().min(1).max(1_000)).max(100),
     effectiveFrom: financeMonthSchema,
+    status: z.enum(["incomplete", "proposed"]).optional(),
     name: z.string().trim().min(1).max(160).default("Monthly plan"),
     rationale: z.string().trim().min(1).max(4_000),
-    resources: z.array(financeBudgetResourceSchema).min(1).max(100),
+    resources: z.array(financeBudgetResourceSchema).max(100),
   })
+  .refine(
+    (value) =>
+      value.status === "incomplete" || (value.resources.length > 0 && value.allocations.length > 0),
+    "A complete plan needs explicit resources and allocations.",
+  )
   .and(financeMutationMetaSchema);
 export type CreateFinanceBudgetVersionInput = z.infer<typeof createFinanceBudgetVersionInputSchema>;
 
@@ -100,6 +110,7 @@ export const approveFinanceBudgetInputSchema = financeMutationMetaSchema.and(
   z.object({
     approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
     budgetVersionId: idSchema,
+    expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),
   }),
 );

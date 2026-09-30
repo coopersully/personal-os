@@ -97,6 +97,7 @@ import {
 } from "../finances/agent-access.js";
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
+import { ExecutionPolicySettingsCard } from "./execution-policy.js";
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
@@ -111,6 +112,8 @@ const scopeLabels: Record<AccessScope, string> = {
     "Maintain Finances: sync providers, reconcile and categorize under approved rules, create durable runs; questions and approvals stay pending",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
+  "tracking:read": "Read private ritual responses",
+  "tracking:write": "Manage rituals and responses",
   "mail:read": "Read mail",
   "mail:write": "Manage mail",
   "reminders:read": "Read reminders",
@@ -123,7 +126,7 @@ const scopeLabels: Record<AccessScope, string> = {
 
 const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
 const selectableScopes = (Object.keys(scopeLabels) as AccessScope[]).filter(
-  (scope) => scope !== "automations:write",
+  (scope) => scope !== "automations:write" && scope !== "tracking:write",
 );
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
@@ -159,6 +162,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "reminders:write",
       "tasks:read",
       "tasks:write",
+      "tracking:read",
       "mail:read",
       "mail:write",
       "finances:read",
@@ -180,7 +184,12 @@ export function ConnectedAgentsSettings() {
 }
 
 export function WorkspaceAccessSettings() {
-  return <AgentAccessSettings view="access" />;
+  return (
+    <>
+      <ExecutionPolicySettingsCard />
+      <AgentAccessSettings view="access" />
+    </>
+  );
 }
 
 export function WorkspaceSettings({ domain }: { domain: SetupDomain }) {

@@ -10,6 +10,9 @@ code names, an old PR, or a historical plan when a current document exists.
 
 ## Route to the narrowest current docs
 
+For unfamiliar work, begin with `docs/engineering/agent-context.md`. For a development-network
+assignment, also read `docs/engineering/autonomous-development.md` and preserve the assigned role.
+
 | Need | Read |
 | --- | --- |
 | System boundary and technology | `docs/architecture/0001-system-shape.md`, `0002-technology.md` |
@@ -48,8 +51,8 @@ contracts, authorization, policy levels, connector capability/freshness, synchro
 deployment, recovery, or established engineering patterns change.
 
 Durable knowledge is information a future contributor needs to avoid guessing. Keep transient
-progress in GitHub Issues/PRs; keep commands and operational contracts in current docs; keep
-implementation detail in code and tests.
+progress in the live Nohmi Linear Project with GitHub PR evidence; keep commands and operational
+contracts in current docs; keep implementation detail in code and tests.
 
 Do not promote `docs/product/master-plan.md` intent to shipped truth without checking the
 implementation log and code. When docs disagree, identify the conflict, resolve it from current code

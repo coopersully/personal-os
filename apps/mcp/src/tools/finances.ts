@@ -7,6 +7,7 @@ import {
   financeMaintenanceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
+  maintenanceRunStatusSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
@@ -140,7 +141,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read Ilo's approved, versioned Finance playbook and current assessment before setup, recommendations, or maintenance. It defaults toward cash-flow stability, resilience, risk protection, costly-debt removal, retirement, diversified long-term investing, and a sustainable good life. Use native web search for current tax, retirement, insurance, accounting, or product facts; never imply research occurred without recorded evidence.",
+        "Read nohmi's approved, versioned Finance playbook and current assessment before setup, recommendations, or maintenance. It defaults toward cash-flow stability, resilience, risk protection, costly-debt removal, retirement, diversified long-term investing, and a sustainable good life. Use native web search for current tax, retirement, insurance, accounting, or product facts; never imply research occurred without recorded evidence.",
       inputSchema: {},
       title: "Get Finance playbook",
     },
@@ -169,7 +170,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, show the proposed budget, accept a plain approval or authorized bypass self-approval, then continue into maintenance. Do not ask the user to name a tool or visit the ilo web app.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation requires an authenticated user decision bound to the current profile and proposal; agent tokens cannot activate it. Do not ask the user to name a tool.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -182,7 +183,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: true },
       description:
-        "Use this to autonomously categorize outstanding transactions, reconcile relationships, account for the active budget, and red-team audit recent activity. It runs deterministic rules first and returns bounded reasoning or audit work immediately; it never queues an automation or waits for the user. Continue until stage settled. Uncertainty becomes deduplicated transaction-backed Inbox rows.",
+        "Start or resume durable Finance maintenance with finances:maintain. This tool never queues an automation; recurring schedules belong to the external host. Follow the returned typed next action: inspect the candidate, complete its ledger challenge, obtain required action approval, then verify the result and immutable period review. Resume persisted work by run ID; questions, approval, and recovery states remain explicit.",
       inputSchema: financeMaintenanceInputSchema,
       title: "Maintain finances",
     },
@@ -195,10 +196,10 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read resumable and settled Finance maintenance runs. These are caller-driven protocol stages, never queued jobs.",
+        "Read resumable and settled Finance maintenance runs. Results expose canonical run status, typed next actions, and legacy recovery.",
       inputSchema: {
         limit: z.number().int().min(1).max(100).default(20),
-        status: z.enum(["agent_reasoning", "agent_audit", "settled", "failed"]).optional(),
+        status: maintenanceRunStatusSchema.optional(),
       },
       title: "Get Finance maintenance history",
     },
@@ -360,10 +361,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Activate a shown balanced proposal. When the user says approve, call with user_instruction. A fully scoped bypass agent may use agent_self_approval autonomously.",
+        "Submit an exact displayed proposal and profile revision for approval. Activation requires an authenticated user decision; agent tokens cannot activate a budget by claiming user_instruction or enabling review bypass.",
       inputSchema: {
         approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
         budgetVersionId: id,
+        expectedProfileVersionId: id.nullable().optional(),
         expectedVersion: z.number().int().positive(),
         idempotencyKey,
       },
@@ -435,7 +437,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Call immediately after the user's answer. It applies the change and resolves the row atomically. Briefly acknowledge changes, then ask only the returned next question.",
+        "Record the user's answer against its exact case. A classify or link resolution applies the change and resolves the row atomically. A clarify resolution saves a durable note for the next maintenance pass and keeps the case open. Inspect context for the transaction date, account, direction, and posting status before asking a question; provide supporting context rather than an unexplained amount.",
       inputSchema: answerFinanceReviewToolInputSchema,
       title: "Answer Finance review",
     },
@@ -627,19 +629,6 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async ({ accountId, ...input }) =>
       financeApiResult(() => api.updateFinanceAccount(accountId, input)),
-  );
-
-  server.registerTool(
-    "disconnect_finance_account",
-    {
-      annotations: { idempotentHint: true, openWorldHint: true },
-      description:
-        "Disconnect a provider account and remove its stored provider credentials while preserving the account and every historical ledger transaction. Use only when the user asks to disconnect or provider access must be revoked.",
-      inputSchema: { accountId: id, idempotencyKey },
-      title: "Disconnect Finance account",
-    },
-    async ({ accountId, ...input }) =>
-      financeApiResult(() => api.disconnectFinanceAccount(accountId, input)),
   );
 
   server.registerTool(

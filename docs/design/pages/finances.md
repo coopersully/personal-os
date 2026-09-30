@@ -14,7 +14,7 @@ Seven primary destinations serve distinct jobs:
 | Destination | Immediate job |
 | --- | --- |
 | Overview | Understand the ownership-qualified position and next material decision. |
-| Review | Answer the current transaction-backed Inbox question. |
+| Review | Select an outstanding Inbox item and supply context or apply a correction. |
 | Transactions | Inspect exact records with URL-backed filters and server pagination. |
 | Plan | Inspect, create, revise, and approve the complete versioned budget. |
 | Cash flow | Distinguish current evidence, dated forecasts, recurring items, subscriptions, and reimbursements. |
@@ -54,21 +54,58 @@ failed request, or pending request keeps an explicit recovery state. Proposals
 remain visible before approval; a category-only budget view is not a substitute
 for the complete plan shared with MCP.
 
+## Transaction context questions
+
+For a known manual account, an unresolved, posted, uncategorized expense or income transaction
+may expose **Add context** beside its transaction actions. The server checks full eligibility.
+Creation opens the exact `?contextualQuestion=` destination, which reads the current typed
+question rather than substituting the next Inbox item. A missing or foreign question is unavailable.
+
+Show the source merchant, date and amount, one persistent prompt label and freeform answer field.
+Save the server's exact work/action reference and retain the operation key for retries of the same
+answer. Disable editing while saving. Loading, read failure, unavailable and stale states are explicit;
+stale questions have no answer form. Confirmation says **Context saved. The financial review remains
+open.** Source links connect the transaction and distinct financial case. No saved answer implies a
+category change, bookkeeping result or scheduled maintenance.
+
 ## Canonical Review contract
 
-Review renders the exact `communication.nextQuestion` returned by the canonical
-Inbox and matches it to its case by ID. It asks one question at a time, displays
-the case evidence and exact transaction links, and never guesses a transaction
-from merchant text or substitutes a client-authored question. Missing or failed
-source evidence is explicit. Typed resolutions support classification,
-transaction relationships, clarification that keeps the case open, and dismissal
-with a reason. Raw JSON is not an answer field.
+Overview includes one compact outstanding list from the canonical Inbox, including
+open and deferred cases. Show five rows initially with an explicit expansion for the rest;
+do not duplicate its first question in a second next-step block. Each row identifies
+the merchant, transaction date, account, amount, direction, posting state, and review reason.
+Amounts from distinct review reasons are not summed into a synthetic financial loss.
 
-The submitted answer and selections remain visible while pending or failed.
-Successful responses replace the Inbox state before the next question appears.
-Ambiguous transport retries reuse the same idempotency key; a confirmed terminal
-failure needs a new attempt. Existing agent questions and prepared approvals
-remain under **Older questions and approvals**, which is closed initially.
+Selecting a row opens the shared review editor. Review also allows choosing any outstanding
+case. The API supplies each case's prompt and transaction context. Exact transaction links
+and same-account activity within seven days are inspectable; nearby activity is not proof of
+a transfer, refund, or reimbursement. Loading, unavailable source context, failed reads,
+and truncated activity remain explicit.
+
+A freeform note is the default action. It stays attached to the case, survives refreshed
+findings, and appears as “Note saved · awaiting maintenance” until a supported resolution is
+applied. Saving it does not start or schedule an agent. The next maintenance response includes
+those saved notes. A user may instead choose a category, link a related transaction, or dismiss
+with a reason immediately using the same authenticated, idempotent answer API as MCP.
+Failed saves preserve input and the retry key; resolved cases disappear only after success.
+
+Legacy questions and approvals remain under the existing disclosure in Review. Unified Reviews
+projects each pending question/approval with its persisted action-review ID and each open/deferred
+case with its case ID. Canonical cases use `?item=`, earlier cases use the legacy review destination,
+and `?question=` or `?approval=` opens the exact corresponding work in the disclosure. Targeted
+reads apply ownership and identity before the list limit. A missing, resolved, or inaccessible
+item never substitutes another item; invalid IDs reject at the API boundary. Saved notes remain
+open work rather than completed operations.
+
+Finance accounts requiring renewed authorization also appear in Reviews, linking to their existing
+account row. Automatic retries and operator-only failures do not become user reconnect requests.
+The shared list retains redacted summaries; source evidence and mutation controls stay in Finance.
+Historical effects use the authoritative Finance evidence helper and its explicit manual repair.
+They remain visible even when a transaction no longer has `needsReview`. Identical repair actions
+for the same transaction set appear once; a note or unrelated edit cannot clear them. Only the
+helper's exact superseding evidence retires the repair. Operator-only changes retain their explicit
+operator repair label rather than offering an invented approval.
+If a Finance projection fails, available sibling work remains visible and affected counts are unknown.
 
 ## Financial setup contract
 
@@ -78,12 +115,25 @@ an explicit click. A remounted page discovers interrupted progress through
 current question ID, exact session version, and an idempotency key. Conflicts
 preserve entered text and offer a resume action.
 
-Budget approval loads the complete proposal and shows its resources,
-allocations, assumptions, rationale, and totals before enabling approval. The
-loaded budget must match the session's `budgetVersionId`. Setup approval sends
-that exact ID and the setup session version; the API guards the budget revision
-as part of the same operation. Resuming reconciles a proposal revised or approved
-through Plan or MCP with the saved setup session.
+Setup reuses current profile facts and asks about income reliability, obligations and timing,
+reserves, debt minimums, goals, protected priorities, and a chosen buffer. Structured answers use
+labelled fields. Blank amounts remain unknown; **Confirm none** records an empty list. **Skip for
+now** records progress against the current profile revision without confirming a fact. A concurrent
+profile change requires resume before an old answer or skip can apply.
+
+The first plan uses only stated recurring resources and chosen needs, preserves exact-cent deficits,
+and excludes uncertain income, exceptional resources, and reserves from recurring funding. Debt
+minimums already represented in obligations are counted once. Planned contributions never update
+goal balances. Missing position evidence is reported through the shared unavailable contract;
+the generated first plan remains incomplete and cannot be activated. Manual bookkeeping remains
+available throughout setup.
+
+Budget approval loads the complete proposal and shows its resources, allocations, assumptions,
+rationale, totals, and status. The app submits its exact budget and bound profile revision. The API
+requires an authenticated user decision and checks the current profile and latest proposal under the
+same lock. A caller-supplied `user_instruction` label is not user authentication; agent activation
+is unavailable. Resuming reconciles a proposal revised or approved through Plan with saved setup.
+Legacy unbound proposals with a current profile need a new bound revision before approval.
 
 Saving a profile or approving a budget does not imply maintained finances.
 Initial maintenance starts on request and displays the returned run stage.

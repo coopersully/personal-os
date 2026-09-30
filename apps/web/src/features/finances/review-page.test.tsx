@@ -64,13 +64,13 @@ function response(
     schemaVersion: 1,
   };
 }
-function mount() {
+function mount(path = "/finances/review") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
         <FinanceReviewPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -340,4 +340,102 @@ it("reloads failed inbox and category sources and renews a confirmed failed answ
   const first = api.answerFinanceReview.mock.calls[0]?.[1].idempotencyKey;
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(api.answerFinanceReview.mock.calls[1]?.[1].idempotencyKey).not.toBe(first);
+});
+
+it("keeps saved notes inspectable when no unanswered question remains", async () => {
+  const data = response([
+    {
+      ...review(),
+      prompt: "Where did this money go?",
+      resolution: { type: "clarify", clarification: "A savings transfer" },
+    },
+  ]);
+  delete data.communication.nextQuestion;
+  data.outcome = "work_remaining";
+  api.getFinanceInbox.mockResolvedValue(data);
+  mount();
+  expect(await screen.findByText("Note saved · awaiting maintenance")).toBeVisible();
+  expect(screen.getByText("A savings transfer")).toBeVisible();
+  expect(screen.queryByText("Review question unavailable")).not.toBeInTheDocument();
+  expect(screen.queryByText("No open Inbox questions")).not.toBeInTheDocument();
+});
+
+it("keeps legacy clarification evidence inspectable as a saved note", async () => {
+  const data = response([
+    {
+      ...review(),
+      prompt: "Where did this money go?",
+      evidence: { clarification: "A legacy savings transfer note" },
+    },
+  ]);
+  delete data.communication.nextQuestion;
+  data.outcome = "work_remaining";
+  api.getFinanceInbox.mockResolvedValue(data);
+  mount();
+  expect(await screen.findByText("Note saved · awaiting maintenance")).toBeVisible();
+  expect(screen.getByText("A legacy savings transfer note")).toBeVisible();
+});
+
+it("lets the user choose a later case using its own server-authored question", async () => {
+  const later = {
+    ...review(nextId),
+    prompt: "Was this a gift?",
+    context: {
+      accountId: transactionId,
+      accountName: "Checking",
+      institution: "Bank",
+      date: "2026-09-03",
+      amount: 63,
+      currencyCode: "USD",
+      direction: "income" as const,
+      pending: false,
+      merchant: "Transfer",
+    },
+  };
+  api.getFinanceInbox.mockResolvedValue(response([review(), later]));
+  mount();
+  await userEvent.selectOptions(await screen.findByLabelText("Outstanding items"), nextId);
+  expect(screen.getByRole("heading", { name: "Was this a gift?" })).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).not.toBeInTheDocument();
+});
+
+it("does not substitute another question for an inaccessible exact case", async () => {
+  mount("/finances/review?item=99999999-9999-4999-8999-999999999999");
+  expect(await screen.findByText("Review question unavailable")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).not.toBeInTheDocument();
+  expect(api.answerFinanceReview).not.toHaveBeenCalled();
+});
+
+it("opens an exact legacy question without showing the canonical question", async () => {
+  api.listFinanceQuestions.mockResolvedValue([
+    {
+      id: nextId,
+      actionKind: "profile",
+      prompt: "Exact question",
+      why: "Needs evidence",
+      choices: [],
+      sourceRefs: [],
+      expectedAnswer: [],
+    },
+  ]);
+  mount(`/finances/review?question=${nextId}`);
+  expect(await screen.findByText("Exact question")).toBeInTheDocument();
+  expect(api.listFinanceQuestions).toHaveBeenCalledWith(50, nextId);
+  expect(api.listFinanceActionReviews).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows an unavailable exact approval without offering another pending approval", async () => {
+  api.listFinanceActionReviews.mockResolvedValue([{ id: reviewId, status: "pending" }]);
+  mount(`/finances/review?approval=${nextId}`);
+  expect(await screen.findByText("Requested review unavailable")).toBeInTheDocument();
+  expect(api.listFinanceActionReviews).toHaveBeenCalledWith(50, nextId);
+  expect(api.listFinanceQuestions).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
 });

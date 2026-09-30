@@ -15,6 +15,8 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Product Documentation
 
+- Start unfamiliar work with `docs/engineering/agent-context.md`; it maps product decisions to
+  authoritative docs and implementation skills.
 - Treat `docs/product/master-design.md`, `docs/product/workspaces.md`,
   `docs/product/workspace-stewardship.md`, and `docs/product/user-knowledge.md` as the canonical
   target product contract.
@@ -33,6 +35,20 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 - Before opening or materially refining a pull request, use the repository `create-pr` workflow. Resolve or create the direct Nohmi issue before PR creation, include the required Work map in the PR body, then add the resulting PR as a structured link on every direct Linear issue.
 - An open PR keeps its direct issues `In Progress` unless live Linear metadata exposes a compatible review status. The PR title, body, branch, Linear links, status, and audit record must agree before handoff.
 - Workspace-wide read-only portfolio questions are allowed, but repository-scoped skills and automations must filter their issue results to the `Nohmi` Project.
+
+## Autonomous Development Assignments
+
+- Network assignments follow `docs/engineering/autonomous-development.md`. The automation head
+  maps and assigns work; orchestrators own acceptance and merging; implementation workers own
+  every code change, fix, test, and conflict resolution.
+- Keep the head and outcome orchestrators in persistent tasks; use implementation and independent
+  read-only review subagents by default, with explicit worktree isolation for writable work.
+  Standalone workers are exceptions for independent scheduling, user collaboration, or host needs.
+- A head or orchestrator never implements, and a worker never merges or enables auto-merge.
+  These boundaries remain in force when invoking another skill, including `ship-it`.
+- Only an assigned orchestrator with user-authorized merge scope may merge after all documented
+  gates pass, including current CodeRabbit coverage and zero unresolved review threads.
+- Ordinary contribution tasks retain their existing workflows unless assigned a network role.
 
 ## Codex Local Environment
 

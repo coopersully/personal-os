@@ -1,6 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import { financeCapabilityManifest } from "@personal-os/domain";
 import { registerFinanceTools } from "./finances.js";
 
@@ -14,6 +14,50 @@ const base = {
 };
 
 describe("Finance MCP workflows", () => {
+  it("forwards exact approval profile evidence and setup skips without hiding agent denial", async () => {
+    const approveFinanceBudget = vi.fn(async () => {
+      throw new ApiClientError({
+        status: 403,
+        code: "forbidden",
+        message: "Budget activation requires an authenticated user decision.",
+      });
+    });
+    const setupFinances = vi.fn(async () => ({ ...base, data: {} }));
+    const server = new McpServer({ name: "finance-approval-parity", version: "1" });
+    registerFinanceTools(server, {
+      approveFinanceBudget,
+      setupFinances,
+    } as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const input = {
+      approvalSource: "user_instruction",
+      budgetVersionId: id,
+      expectedProfileVersionId: id,
+      expectedVersion: 3,
+      idempotencyKey: "exact-decision",
+    };
+    const result = await client.callTool({ name: "approve_finance_budget", arguments: input });
+    expect(approveFinanceBudget).toHaveBeenCalledWith(input);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain("authenticated user decision");
+    const skip = {
+      operation: "skip",
+      sessionId: id,
+      expectedVersion: 2,
+      questionId: "planning:obligations",
+      idempotencyKey: "skip-unknown",
+    };
+    await client.callTool({ name: "setup_finances", arguments: skip });
+    expect(setupFinances).toHaveBeenCalledWith(skip);
+    const tools = await client.listTools();
+    expect(
+      tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
+    ).toContain("agent tokens cannot activate");
+    await client.close();
+    await server.close();
+  });
   it("forwards ledger search and versioned ownership corrections without dropping fields", async () => {
     const api = {
       listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
@@ -82,6 +126,49 @@ describe("Finance MCP workflows", () => {
     });
   });
 
+  it("delivers saved Inbox notes and account context to the next maintenance caller", async () => {
+    const inboxCases = [
+      {
+        id,
+        transactionId: id,
+        resolution: { type: "clarify", clarification: "A weekly transfer to savings" },
+        context: {
+          date: "2026-09-08",
+          accountName: "Checking",
+          amount: 99,
+          direction: "expense",
+          pending: false,
+        },
+      },
+    ];
+    const api = {
+      maintainFinances: vi.fn(async () => ({
+        ...base,
+        data: {
+          runId: id,
+          version: 1,
+          stage: "agent_reasoning",
+          reasoningBatch: [],
+          auditContext: null,
+          reviewQuestion: null,
+          inboxCases,
+        },
+      })),
+    };
+    const server = new McpServer({ name: "finance-notes-test", version: "1" });
+    registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const called = await client.callTool({
+      name: "maintain_finances",
+      arguments: { operation: "start", scope: { type: "all_outstanding" } },
+    });
+    expect(called.structuredContent).toMatchObject({ data: { inboxCases } });
+    await client.close();
+    await server.close();
+  });
+
   it("routes natural setup intent and returns one concise question without queue state", async () => {
     const api = {
       setupFinances: vi.fn(async () => ({
@@ -118,6 +205,7 @@ describe("Finance MCP workflows", () => {
     expect(maintenance?.description).toContain("never queues an automation");
     expect(tools.tools.map((tool) => tool.name)).not.toContain("get_finance_review_queue");
     expect(tools.tools.map((tool) => tool.name)).not.toContain("apply_finance_categorizations");
+    expect(tools.tools.map((tool) => tool.name)).not.toContain("disconnect_finance_account");
     expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual(
       financeCapabilityManifest.map((capability) => capability.mcpTool).toSorted(),
     );

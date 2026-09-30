@@ -10,6 +10,7 @@ import {
   connectorSubscriptions,
   connectorSyncTriggers,
   domainProfileApprovals,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
@@ -17,6 +18,7 @@ import {
   financeBudgetBuckets,
   financeBudgets,
   financeBudgetTaxonomies,
+  financeContextualAnswers,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
@@ -35,8 +37,11 @@ import {
   mailStewardshipQuestions,
   mailThreadDispositions,
   oauthStates,
+  textInboundClaims,
   textingConsentEvents,
   textingVerificationChallenges,
+  textMessages,
+  textReplyBindings,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "./schema.js";
@@ -48,6 +53,116 @@ function requiredTable(name: string): PgTable {
 }
 
 describe("database schema contracts", () => {
+  it("fences Finance SMS provenance by owner and binding without a Texting retention dependency", () => {
+    const answers = getTableConfig(financeContextualAnswers);
+    const bindingIndex = answers.indexes.find(
+      (index) => index.config.name === "finance_contextual_answers_sms_binding_unique",
+    );
+    expect(bindingIndex).toMatchObject({ config: { unique: true } });
+    expect(
+      bindingIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "source_reply_binding_id"]);
+    expect(
+      answers.columns.find((column) => column.name === "source_reply_binding_id")?.getSQLType(),
+    ).toBe("uuid");
+    expect(answers.foreignKeys.map((key) => getTableName(key.reference().foreignTable))).toEqual([
+      "finance_contextual_questions",
+    ]);
+    const provenance = answers.checks.find(
+      (check) => check.name === "finance_contextual_answers_provenance_check",
+    );
+    if (!provenance) throw new Error("Missing provenance constraint");
+    const sql = new PgDialect().sqlToQuery(provenance.value).sql;
+    expect(sql).toContain('"source_reply_binding_id" IS NULL');
+    expect(sql).toContain('"source_reply_binding_id" IS NOT NULL');
+    expect(sql).toContain('"source_message_id" IS NOT NULL');
+    expect(sql).toContain('"actor_id"="finance_contextual_answers"."user_id"::text');
+  });
+  it("keeps signed inbound claims and recoverable per-child bindings aligned with 0090", async () => {
+    const claims = getTableConfig(textInboundClaims);
+    const messages = getTableConfig(textMessages);
+    const bindings = getTableConfig(textReplyBindings);
+    expect(claims.indexes.map((index) => index.config.name)).toContain(
+      "text_inbound_claims_message_idx",
+    );
+    expect(bindings.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "text_reply_bindings_operation_idx",
+        "text_reply_bindings_outbound_item_idx",
+        "text_reply_bindings_inbound_item_idx",
+        "text_reply_bindings_recovery_idx",
+      ]),
+    );
+    expect(bindings.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "answer_mode",
+        "answer_vocabulary",
+        "inbound_claim_id",
+        "canonical_answer",
+        "operation_id",
+      ]),
+    );
+    expect(messages.columns.map((column) => column.name)).toContain("provider_submitted_at");
+    const providerSubmittedCheck = messages.checks.find(
+      (constraint) => constraint.name === "text_messages_provider_submitted_check",
+    );
+    expect(providerSubmittedCheck).toBeDefined();
+    if (!providerSubmittedCheck) throw new Error("Provider submission schema check is missing.");
+    const providerSubmittedSql = new PgDialect().sqlToQuery(providerSubmittedCheck.value).sql;
+    expect(providerSubmittedSql).toContain('"provider_submitted_at" IS NULL');
+    expect(providerSubmittedSql).toContain("\"direction\" = 'outbound'");
+    expect(providerSubmittedSql).toContain('"provider_message_sid" IS NOT NULL');
+    const migration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0090_texting_inbound_work_binding.sql"),
+      "utf8",
+    );
+    for (const name of [
+      "text_inbound_claims",
+      "text_reply_bindings",
+      "text_messages_owner_id_connection_idx",
+    ])
+      expect(migration).toContain(name);
+    expect(migration).toContain("DEFERRABLE INITIALLY DEFERRED");
+    expect(migration).toContain("FOREIGN KEY (user_id, inbound_claim_id, connection_id)");
+    expect(migration).toContain("FOREIGN KEY (user_id, outbound_message_id, connection_id)");
+    expect(migration).toContain("answer_mode = 'free_text' AND answer_vocabulary IS NULL");
+    expect(migration).toContain("state IN ('open','expired','pending','waiting','uncertain'");
+    expect(migration).toContain("NEW.state = 'expired' AND CURRENT_TIMESTAMP >= OLD.expires_at");
+    expect(migration).not.toMatch(
+      /REFERENCES (?:text_messages|text_inbound_claims)\([^;]+?ON DELETE CASCADE/iu,
+    );
+    const providerEvidenceMigration = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0091_texting_provider_submission_evidence.sql",
+      ),
+      "utf8",
+    );
+    expect(providerEvidenceMigration).toContain("ADD COLUMN provider_submitted_at timestamptz");
+    expect(providerEvidenceMigration).toContain("text_messages_provider_submitted_check");
+    expect(providerEvidenceMigration).toContain("text_messages_provider_submitted_immutable");
+  });
+  it("stores revisioned global policy and preserves only aligned explicit legacy grants", async () => {
+    const policy = getTableConfig(executionPolicySettings);
+    expect(policy.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["user_id", "review_bypass_enabled", "version"]),
+    );
+    expect(policy.checks.map((constraint) => constraint.name)).toContain(
+      "execution_policy_settings_version_check",
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0083_global_execution_policy.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "execution_policy_settings"');
+    expect(migrationSql).toContain('"review_bypass_enabled" boolean DEFAULT false NOT NULL');
+    expect(migrationSql).toContain('count(*) = 2 AND bool_and("legacy"."review_bypass_enabled")');
+    expect(migrationSql).toContain('FROM "finance_automation_settings"');
+    expect(migrationSql).toContain('FROM "finance_agent_settings"');
+    expect(migrationSql).toContain('GROUP BY "legacy"."user_id"');
+  });
+
   it("keeps the Mail stewardship ledger owned, revisioned, and historically reviewable", async () => {
     const obligations = getTableConfig(mailObligations);
     const dispositions = getTableConfig(mailThreadDispositions);
@@ -358,6 +473,19 @@ describe("database schema contracts", () => {
       "0078_mail_workspace_stewardship_reconciliation",
       "0079_mail_stewardship_integrity",
       "0080_mail_reply_metadata",
+      "0081_finance_legacy_disconnect_repair",
+      "0082_finance_maintenance_lineage",
+      "0083_global_execution_policy",
+      "0084_finance_setup_profile_lineage",
+      "0085_finance_context_capture",
+      "0086_notification_foundation",
+      "0087_finance_budget_policy_management",
+      "0088_finance_budget_policy_nonempty_text",
+      "0089_finance_contextual_questions",
+      "0090_texting_inbound_work_binding",
+      "0091_texting_provider_submission_evidence",
+      "0092_finance_sms_answer_provenance",
+      "0093_ritual_tracking",
     ]);
   });
 

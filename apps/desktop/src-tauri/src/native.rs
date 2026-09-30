@@ -73,6 +73,9 @@ pub async fn call(app: &tauri::AppHandle, value: Value) -> Result<Value, String>
     {
         let _ = app;
         let operation = value["op"].as_str().unwrap_or("");
+        if operation.starts_with("ritual_") {
+            return Err("Desktop ritual presentation is available only on macOS. Configure rituals and view account history in Settings.".into());
+        }
         if operation.starts_with("keychain_") {
             let origin = value["serverUrl"].as_str().ok_or("Missing server origin")?;
             let entry = keyring::Entry::new("app.personal-os.desktop.session", origin)

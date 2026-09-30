@@ -152,6 +152,15 @@ Rules:
   button. Its whole surface is the hit target, and its preview shows the result
   rather than repeating the label in prose.
 
+### Shrinking material content
+
+Material-card compositions must let their flex content shrink to the available
+inline space before truncating text. Long provider titles must not widen the
+mobile layout viewport or displace shell navigation. Preserve the full name in
+the accessible label and detail surface. `OccasionCard` owns this constraint for
+all-day Calendar previews; verify overflow against the configured device width,
+not only `innerWidth`, which mobile browsers may expand with overflowing content.
+
 ### Stable choices and controls
 
 Use this contract whenever a setting presents a small, mutually exclusive set

@@ -1,6 +1,178 @@
 # nohmi — Implementation Log
 
+## 2026-09-29 — Morning and evening rituals
+
+- Added account-owned ritual definitions, immutable daily snapshots, checkbox, short-entry, time, date, number, and multiple-choice
+  responses, and an append-only escape history. Settings default to 06:00 and 21:00 in the
+  selected time zone; an unfinished ritual remains available until the next enabled boundary.
+- Added autosaving schedules and draggable steps in Morning and Evening settings tabs, with
+  history filters, export, and deletion in a separate History and data tab. Full-screen previews
+  replay today’s saved answers without changing account data. Valid entries save immediately;
+  explicit completion requires every configured response.
+- Added a resident macOS checklist with native blurred backdrops on connected displays,
+  sky colors, sunrise/moonlight gradients, and bundled intro sounds. The shadow-free card
+  resolves before the wordmark and supporting text fade in together; completion dismisses it
+  upward while the backdrop fades. Delivery
+  catches up after sleep and app restart without waking the Mac. Snooze lasts ten minutes; two
+  prior confirmed snoozes for the same ritual within 72 hours trigger an explicit count-based
+  confirmation. Every press, confirmation, cancellation, and skip is retained.
+- Native offline responses use authenticated encryption with a Keychain-held key and are scoped
+  to server and account. Restart recovery requires the same retained session credential. Late
+  conflicts remain available for export/discard while later valid writes continue syncing.
+  A seven-day server-resolved schedule avoids guessing future time-zone rules while offline.
+- Tracking writes require a human session; legacy agent tokens gain no new scopes. Account
+  invalidation destroys the private checklist window. Deletion removes ritual data and tombstones
+  cached replay bodies that could otherwise retain deleted answers.
+- Implementation and acceptance evidence are tracked in
+  [the ritual plan](../superpowers/plans/2026-09-29-morning-night-rituals.md) and
+  [COO-62 — Deliver morning and night desktop rituals](https://linear.app/coopersully/issue/COO-62/deliver-morning-and-night-desktop-rituals).
+  Source completion does not imply hosted rollout or replacement of the installed desktop app.
+- Retry records retain compact operation receipts rather than copied private response histories.
+  Replays preserve the original outcome while returning current account state; deletion removes
+  legacy private snapshots without invalidating the other ritual’s compact receipts. Redacted
+  audits distinguish settings, answers, and each terminal/escape operation.
+- Settings exposes redacted native delivery failures and retry timing. Unknown/unavailable
+  session state prevents presentation; switching servers clears the prior encrypted ritual store
+  and credentials after pending changes are settled.
+
+## 2026-09-25 — Canonical Finance position maintenance checkpoint
+
+- Finance maintenance now consumes the registered canonical position reader for the run's exact
+  window or current status month. Target scopes fail closed as unsupported instead of widening to a
+  tenant-wide read.
+- The projection step durably stores only the position revision, exact scope, and per-fact quality
+  and public reason codes. Verification rereads the same exact scope and requires the same revision
+  before it and newly published immutable period reviews carry the checkpoint; amounts, source
+  references and provider details stay out of maintenance metadata.
+- Any unavailable required position fact leaves the maintenance run explicitly blocked, so no
+  maintained-period claim is produced from incomplete position evidence. Existing period reviews
+  remain readable without the new checkpoint. A retry preserves the blocked run and starts a fresh
+  read, direct replays validate the durable checkpoint before challenge or verification, and
+  historical placeholder records fail closed and can recover only through a preserved fresh-run
+  retry. Period review dates come from that checkpoint rather than the publication date, and
+  publication fails closed if current status has advanced to another month.
+- This slice does not apply budgets, publish notifications, request host continuation, add a
+  migration, activate production behavior, or change legacy status arithmetic.
+
+## 2026-09-23 — Canonical Finance position read registration
+
+- Registered the canonical `PositionEvidence` producer at the authenticated read-only
+  `/v1/finances/position` route and exposed the same bounded scope through the typed API client.
+  The server derives the owner from the authenticated principal; callers supply only an ordered
+  date window and an optional list of at most 100 account IDs.
+- The Finance workflow manifest now advertises `readPosition` alongside the existing maintenance
+  resume port. Invalid dates, foreign or unknown accounts, excess account scope and missing
+  `finances:read` access fail closed.
+- This registration does not change maintenance or status arithmetic, enable budget execution,
+  publish notifications, activate host continuation, or add provider effects. Those integrations
+  remain later Finance MVP slices.
+
+## 2026-09-21 — Contextual Finance question source implementation
+
+- Added the manual transaction-purpose producer, immutable typed answers, exact-reference resolver,
+  HTTP route module/client and targeted transaction-context UI. Answers are accepted context and
+  leave financial cases and transaction semantics unchanged.
+- Migration 0089 adds private parent generations, question identity and immutable answer storage.
+  Published migrations 0081–0088 are unchanged. Prospective context in 0085 remains separate.
+- Added and registered a revalidated unified Reviews source reader and injected the contextual
+  service into the application route composition. No MCP answer availability, SMS, host
+  continuation, deployment or production activation is claimed by this source slice.
+- Focused local PostgreSQL and UI evidence covers transaction admission, both lock directions,
+  SET NULL/ABA, multi-item maintenance, exact replay, caller rollback and retry identity.
+  Full verification and browser acceptance remain pending the shared verification slot.
+
+
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
+
+## 2026-09-20 — Finance budget-policy management groundwork
+
+- Strict policy contracts require explicit period, timezone, baseline, caps, directions,
+  protections, rollover and gross-usage accounting terms. The pure evaluator compares supplied
+  profile/plan/policy/evidence revisions and returns an exact hypothetical preview or denial.
+- Resource changes, protected releases, missing or unqualified evidence, stale revisions and
+  cap violations are denied. Previewing does not change baseline, plan or cumulative usage.
+- Migration `0087` and the management service add explicit human-confirmed monthly baselines,
+  draft policy versions, inactive revision proposals, immutable saved preview packets, and
+  revision-checked disable/withdraw. Database triggers reject history/identity rewrites, composite
+  keys bind exact plan and proposal lineage, and strict immutable JSON validators keep stored
+  packets readable. Audit and idempotency receipts use owner admission followed by the shared
+  profile mutex and sorted dependency key-share locks. No historical policy is inferred.
+- Saved packets retain their original evidence; history reads calculate current stale/expired
+  and lifecycle status separately; deleted candidate dependencies mark the packet stale. The
+  [storage contract](../engineering/finance-budget-policy-management.md) records lock ordering
+  and validator scope. Missing position and cumulative usage producers remain
+  unavailable, including when a caller supplies plausible evidence or global bypass is enabled.
+- Human-session management/read HTTP routes and typed API-client methods are registered. The
+  source implementation represented here passed full `pnpm verify`, including 2,469 tests and
+  28 desktop/mobile E2E checks. This verification does not establish production activation.
+- Every result keeps `executionAvailable:false`. No automatic application, policy activation,
+  usage ledger, scheduler, commit-time position fence, MCP capability, user interface, host or
+  Texting activation is implemented.
+
+## 2026-09-18 — Progressive Finance first-plan source implementation
+
+- Setup reuses canonical profile facts and records optional planning answers as typed,
+  provenance-bearing revisions. Unknown amounts and dates remain unknown; confirmed none and
+  revision-bound skips are explicit. Profile edits, Inbox answers, and current legacy profile
+  edits share the append-only canonical writer.
+- First plans preserve stated obligations, debt minimums, priorities, goal contributions, and
+  buffers. They disclose deficits without inventing cash or funding goals. Uncertain income,
+  one-time resources, and liquid reserves do not silently become recurring plan resources.
+- Migration `0084` adds profile/proposal lineage and skipped-question state without inventing
+  evidence for historical rows. Approval checks the authenticated person and exact current
+  profile/proposal revisions; global bypass does not grant agent activation authority.
+- This is source implementation evidence, not production verification. Generated first plans
+  remain incomplete while qualified position evidence is unavailable. Automatic activation and
+  goal-aware period reviews remain later work; manual bookkeeping remains available.
+
+## 2026-09-16 — Exact Finance work in unified Reviews
+
+- Unified Reviews now includes pending Finance questions and approvals alongside open/deferred
+  cases, account authorization repairs, and unverified historical-effect repairs. Stable IDs reference the existing domain records;
+  no second work store or migration is introduced. Notes remain evidence on open cases.
+  Historical repairs reuse authoritative effect identity and repair actions, deduplicate identical
+  actions, and disappear only when the domain evidence helper confirms exact superseding evidence.
+- Case, question, and approval links select exact owned work. Existing bounded question, approval,
+  and earlier-review reads accept an optional validated ID before applying their limit. A stale or
+  inaccessible destination never falls back to another actionable record. Existing Finance action
+  handlers retain authority, evidence validation and idempotency behavior.
+- Prospective context, the F0b answer port, matching, User Knowledge, and Texting routing remain
+  later milestones. This change provides no production Finance or host-journey proof.
+
+## 2026-09-15 — Finance workflow authority foundation
+
+- Published strict, versioned Finance workflow contracts for position evidence, human work,
+  outcomes, continuations, and the seven approved cross-domain ports. Only the existing canonical
+  Finance maintenance resume route is registered as available; every other port reports
+  `producer_not_registered` until its owning stream supplies a real implementation.
+- Replaced two drifting Finance review-bypass controls with one revisioned account execution
+  policy. Migration `0083` preserves aligned explicit legacy grants and resolves conflicts or
+  missing legacy controls to OFF. Settings is the sole editing
+  surface. Finance consumers read the global value; the former Finance endpoint and editor are
+  removed.
+- The shared evaluator permits direct execution only for exact registered, reversible Finance
+  operations that are already policy-authorized and within the caller's scopes. Missing
+  capabilities, missing information, blocked work, irreversible actions, and Mail, Calendar,
+  Reminders, Tasks, and Goals remain unavailable, blocked, or review-bound as appropriate.
+- Money evidence accepts canonical reason codes only, keeping provider messages and private source
+  text outside cross-domain payloads. Review bypass never supplies budget activation authority;
+  agent self-approval fails closed until an explicit Finance budget policy is registered.
+
+## 2026-09-15 — Canonical Finance maintenance lifecycle
+
+- The live maintenance intent now uses shared durable runs, staged candidates, complete evidence
+  challenges, action settlement, verification and immutable period reviews. The old direct
+  judgment/audit protocol is retired; existing clients must use the canonical start/resume contract
+  and explicitly authorize `finances:maintain` when reconnecting.
+- Question-bearing candidates publish a qualified review of the actual ledger after health refresh
+  and verification. Unapplied proposals remain excluded, and setup stays incomplete.
+- Historical runs, judgments, findings and economic effects remain unverified evidence. In-flight
+  adoption preserves exact account/date scope and durable lineage; multiple-account runs receive
+  an explicit per-account repair path. Unverified historical effects block maintained claims until
+  supported canonical validation or an explicit later user decision.
+- Setup completion requires its exact full canonical run, completed verification and the matching
+  immutable review. Finance-local recovery handles accepted challenge handoffs and setup settlement
+  after a crash. This source change does not establish production or external-host journey proof.
 
 ## 2026-09-10 — Complete target product doctrine reconciled
 
@@ -467,3 +639,15 @@ This log records delivered vertical slices against the master plan. It does not 
   CVS, and other mixed retailers remain transaction-specific; optional bounded
   Mail evidence is sanitized and review-only, with a person question when it
   is absent or ambiguous.
+
+### Finance context capture foundation
+
+- Added the internal zero-link context adapter: immutable capture revisions, exact historical
+  receipts, revision-checked replacement/cancellation, and synchronous expiry on current read.
+- Migration 0085 enforces same-tenant pointer/snapshot integrity and snapshot update rejection.
+  Capture provenance identifies a server-owned snapshot; expected amounts do not create money.
+- The opt-in user admission fence preserves standalone failure receipts and caller-owned transaction
+  atomicity. Existing Finance writers retain their previous helper behavior.
+- This source slice does not register HTTP/MCP/SMS operations or ship matching, work answers,
+  disputes, reopening, connector evidence intake or production activation. See the
+  [capture contract](../engineering/finance-context-capture.md) for exact authority and transaction rules.

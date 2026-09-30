@@ -10,7 +10,6 @@ import { FinancePeriodReviewPage } from "./period-review-page.js";
 const api = vi.hoisted(() => ({
   getFinancePeriodReview: vi.fn(),
   maintainFinances: vi.fn(),
-  startFinanceMaintenance: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({
   api,
@@ -136,7 +135,6 @@ describe("Saved Finance period review", () => {
       "/finances/review",
     );
     expect(api.maintainFinances).not.toHaveBeenCalled();
-    expect(api.startFinanceMaintenance).not.toHaveBeenCalled();
   });
 
   it("shows a completed review's recorded empty recommendations and closed evidence", async () => {

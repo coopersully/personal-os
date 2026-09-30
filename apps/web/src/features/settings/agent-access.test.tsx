@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   deleteAccessToken: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getExecutionPolicySettings: vi.fn(),
   getIloSetup: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   previewSavedMailRule: vi.fn(),
   revokeOAuthClient: vi.fn(),
   toastError: vi.fn(),
+  updateExecutionPolicySettings: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -89,6 +91,14 @@ function readinessOverview(label: string) {
 describe("agent access settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getExecutionPolicySettings.mockResolvedValue({
+      reviewBypassEnabled: false,
+      version: 1,
+    });
+    mocks.updateExecutionPolicySettings.mockResolvedValue({
+      reviewBypassEnabled: true,
+      version: 2,
+    });
     mocks.getAgentConnectionGuide.mockResolvedValue({
       domains: [
         {
@@ -540,6 +550,21 @@ describe("agent access settings", () => {
     });
   });
 
+  it("edits the global execution policy from the account access surface", async () => {
+    renderSettings();
+    const bypass = await screen.findByRole("switch", {
+      name: "Apply eligible work without waiting in Review",
+    });
+    expect(bypass).not.toBeChecked();
+    await userEvent.setup().click(bypass);
+    await waitFor(() =>
+      expect(mocks.updateExecutionPolicySettings).toHaveBeenCalledWith({
+        expectedVersion: 1,
+        reviewBypassEnabled: true,
+      }),
+    );
+  });
+
   it("keeps workspace access limited to agent authority and separates connected agents", async () => {
     const browser = userEvent.setup();
     renderSettings("/settings?section=workspace-access&workspace=mail");
@@ -719,13 +744,20 @@ describe("agent access settings", () => {
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("radio", { name: /Full nohmi/ }));
     await browser.click(screen.getByText(/Fine-tune permissions/));
+    expect(screen.getByLabelText("Read private ritual responses")).toBeChecked();
+    expect(screen.queryByLabelText("Manage rituals and responses")).not.toBeInTheDocument();
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
     await waitFor(() =>
       expect(mocks.createAccessToken).toHaveBeenCalledWith(
         expect.objectContaining({
-          scopes: expect.arrayContaining(["finances:read", "finances:write", "mail:write"]),
+          scopes: expect.arrayContaining([
+            "finances:read",
+            "finances:write",
+            "mail:write",
+            "tracking:read",
+          ]),
         }),
       ),
     );

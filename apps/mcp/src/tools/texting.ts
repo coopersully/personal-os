@@ -9,6 +9,21 @@ export function registerTextingTools(
   timeZone: string,
 ) {
   server.registerTool(
+    "get_texting_finance_reply_status",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the redacted status of one signed Finance SMS reply by its inbound message ID. Requires both Texting and Finance read access. This does not retry work or send a text.",
+      inputSchema: {
+        inboundMessageId: z.uuid().describe("Exact local ID of the inbound SMS message."),
+      },
+      title: "Get Finance SMS reply status",
+    },
+    async ({ inboundMessageId }) =>
+      apiResult(() => api.getFinanceTextReplyStatus(inboundMessageId)),
+  );
+
+  server.registerTool(
     "read_text_conversation",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },

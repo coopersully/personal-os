@@ -4,9 +4,9 @@ import {
   type DatabaseClient,
   domainProfileApprovals,
   domainProfiles,
+  executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
-  financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
@@ -305,6 +305,7 @@ describe.sequential("Finance status service", () => {
     if (!allocation) throw new Error("Reimbursement scan allocation was not created.");
     await database.db.insert(financeReimbursements).values({
       allocationId: allocation.id,
+      dueDate: "2026-08-20",
       expectedAmount: 10_000,
       receivedAmount: 0,
       rationale: "A shared dinner is expected to be repaid.",
@@ -411,7 +412,7 @@ describe.sequential("Finance status service", () => {
     const userId = await makeUser("Planning evidence Finance");
     const source = await account(userId, "current");
     await database.db
-      .insert(financeAutomationSettings)
+      .insert(executionPolicySettings)
       .values({ reviewBypassEnabled: false, userId });
     await database.db.insert(financeProfiles).values({
       effectiveDate: "2026-08-01",
@@ -1338,6 +1339,19 @@ describe.sequential("Finance status service", () => {
     expect(reviewStatus.details.review).toEqual({ byReason: { low_confidence: 1 }, total: 1 });
     expect(transactionStatus.activeRun).toMatchObject({ id: run.id, status: "awaiting_approval" });
     expect(transactionStatus.work.awaitingApproval).toBe(1);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "awaiting_agent_challenge", checkpoint: { phase: "challenge" } })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const awaitingChallenge = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(awaitingChallenge.activeRun).toMatchObject({
+      id: run.id,
+      status: "awaiting_agent_challenge",
+    });
+    const otherOwner = await makeUser("Challenge status tenant isolation");
+    expect(
+      (await service().getFinanceStatus(otherOwner, { type: "all_outstanding" })).activeRun,
+    ).toBeNull();
 
     await expect(
       service().getFinanceStatus(userId, {

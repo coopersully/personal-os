@@ -1,5 +1,15 @@
 # nohmi — Complete Implementation Plan
 
+## Morning and evening rituals delivery slice — 2026-09-29
+
+The agreed first ritual slice combines daily start/shutdown, Tracking check-ins, and the macOS desktop overlay. The source implementation includes autosaving configuration, six response types, explicit completion, account history, native presentation, and encrypted offline recovery. Hosted rollout and installed acceptance remain separate delivery gates. Repeated observations belong to the newer Tasks/Tracking design described in the specification, rather than recurring Task records.
+
+- [Ritual specification](../superpowers/specs/2026-09-29-morning-night-rituals-design.md)
+- [Ritual implementation plan](../superpowers/plans/2026-09-29-morning-night-rituals.md)
+- [COO-62 — Deliver morning and night desktop rituals](https://linear.app/coopersully/issue/COO-62/deliver-morning-and-night-desktop-rituals)
+
+The linked plan records the desktop foundation dependency, six implementation units, and the hosted API plus installed-app acceptance required for completion. Linear owns current execution status.
+
 - Status: Proposed execution plan
 - Date: 2026-07-18
 - Last reconciled: 2026-09-10
@@ -257,6 +267,10 @@ flowchart TD
   category the person excluded.
 
 ### Epic 9 — Finance platform, Plaid, budgets, and review queue
+
+The [Finance MVP specification](finance-workspace-plan.md) defines the first complete user journey,
+agreed autonomy boundaries, both-host SMS requirement and release limits approved on 2026-09-14. Its linked
+delivery plan maps current capabilities and remaining work into independently reviewable milestones.
 
 **Implement**
 

@@ -17,6 +17,7 @@ import {
   WorkspaceSecondaryAppBarActions,
 } from "@/components/workspace-secondary-app-bar";
 import { api } from "../../api.js";
+import { FinanceInboxList } from "./inbox-list.js";
 import {
   FinancePositionMaterial,
   FinanceSourceState,
@@ -26,12 +27,15 @@ import {
 } from "./position-material.js";
 
 const maintenanceLabels = {
-  deterministic_processing: "Processing records",
-  agent_reasoning: "Awaiting agent reasoning",
-  reconciliation: "Reconciling records",
-  agent_audit: "Awaiting agent audit",
-  settled: "Settled",
-  failed: "Failed",
+  queued: "Maintenance queued",
+  running: "Processing transaction evidence",
+  completed: "Maintenance complete",
+  completed_with_questions: "Maintenance complete with questions",
+  awaiting_agent_challenge: "Ledger challenge required",
+  awaiting_approval: "Action approval required",
+  blocked: "Maintenance blocked",
+  failed_recoverable: "Maintenance needs recovery",
+  failed_terminal: "Maintenance failed",
 };
 
 export function FinanceOverviewPage() {
@@ -54,8 +58,7 @@ export function FinanceOverviewPage() {
     queryFn: () => api.getFinanceMaintenanceHistory({ limit: 3 }),
   });
   const plan = budget.data?.data;
-  const reviewCount = inbox.data?.data.filter((item) => item.status === "open").length;
-  const question = inbox.data?.communication.nextQuestion?.prompt;
+  const reviewCount = inbox.data?.data.filter((item) => item.status !== "resolved").length;
   const latestReview = status.data?.details.latestReview;
   const nextPriority =
     playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
@@ -70,58 +73,52 @@ export function FinanceOverviewPage() {
       </WorkspaceSecondaryAppBar>
       <FinanceSourceState label="Financial position" query={snapshot} />
       {snapshot.data ? <FinancePositionMaterial result={snapshot.data} /> : null}
-      <section aria-label="Next step" className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Next step</h2>
-        <FinanceSourceState label="Review inbox" query={inbox} />
-        <ItemGroup>
-          <Item>
-            <ItemContent>
-              <ItemTitle>
-                {question ??
-                  (reviewCount
-                    ? `${reviewCount} ${reviewCount === 1 ? "question needs" : "questions need"} review`
-                    : snapshot.data && !snapshot.data.data.ledger.trustworthy
-                      ? "Confirm the evidence behind your position"
-                      : plan?.status === "proposed"
-                        ? "Inspect your proposed plan"
-                        : "Keep your financial context current")}
-              </ItemTitle>
-              <ItemDescription>
-                {reviewCount
-                  ? "Review the source evidence and answer the next open question."
-                  : snapshot.data && !snapshot.data.data.ledger.trustworthy
+      <FinanceSourceState label="Review inbox" query={inbox} />
+      {inbox.data ? <FinanceInboxList result={inbox.data} /> : null}
+      {inbox.isSuccess && reviewCount === 0 ? (
+        <section aria-label="Next step" className="flex flex-col gap-3">
+          <h2 className="text-base font-medium">Next step</h2>
+          <ItemGroup>
+            <Item>
+              <ItemContent>
+                <ItemTitle>
+                  {snapshot.data && !snapshot.data.data.ledger.trustworthy
+                    ? "Confirm the evidence behind your position"
+                    : plan?.status === "proposed"
+                      ? "Inspect your proposed plan"
+                      : "Keep your financial context current"}
+                </ItemTitle>
+                <ItemDescription>
+                  {snapshot.data && !snapshot.data.data.ledger.trustworthy
                     ? "Check account ownership, inclusion, and source freshness."
                     : plan?.status === "proposed"
                       ? "Your proposed version is waiting for a decision."
                       : "Financial setup resumes from your saved progress."}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Button asChild size="sm">
-                <Link
-                  to={
-                    reviewCount
-                      ? "/finances/review"
-                      : snapshot.data && !snapshot.data.data.ledger.trustworthy
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button asChild size="sm">
+                  <Link
+                    to={
+                      snapshot.data && !snapshot.data.data.ledger.trustworthy
                         ? "/finances/accounts"
                         : plan?.status === "proposed"
                           ? "/finances/plan"
                           : "/finances/setup"
-                  }
-                >
-                  {reviewCount
-                    ? "Answer next question"
-                    : snapshot.data && !snapshot.data.data.ledger.trustworthy
+                    }
+                  >
+                    {snapshot.data && !snapshot.data.data.ledger.trustworthy
                       ? "Inspect accounts"
                       : plan?.status === "proposed"
                         ? "Review proposal"
                         : "Resume setup"}
-                </Link>
-              </Button>
-            </ItemActions>
-          </Item>
-        </ItemGroup>
-      </section>
+                  </Link>
+                </Button>
+              </ItemActions>
+            </Item>
+          </ItemGroup>
+        </section>
+      ) : null}
       <section aria-label="Complete plan" className="flex flex-col gap-3">
         <h2 className="text-base font-medium">Complete plan</h2>
         <FinanceSourceState label="Complete plan" query={budget} />
@@ -261,16 +258,17 @@ export function FinanceOverviewPage() {
             <CollapsibleContent>
               <ItemGroup>
                 {maintenance.data.items.map((run) => (
-                  <Item key={run.runId}>
+                  <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
                     <ItemContent>
-                      <ItemTitle>{maintenanceLabels[run.stage]}</ItemTitle>
+                      <ItemTitle>
+                        {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
+                      </ItemTitle>
                       <ItemDescription>
-                        {run.reviewQuestion?.prompt ??
-                          (run.stage === "settled"
-                            ? "The recorded maintenance run settled."
-                            : run.stage === "failed"
-                              ? "This run needs recovery."
-                              : "This run still has outstanding work.")}
+                        {run.recovery?.reason ??
+                          run.nextAction?.reason ??
+                          (run.run?.status === "completed"
+                            ? "The recorded maintenance run completed."
+                            : "Inspect the recorded run and its evidence.")}
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions>

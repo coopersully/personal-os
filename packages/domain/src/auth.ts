@@ -204,6 +204,8 @@ export const accessScopeSchema = z.enum([
   "mail:write",
   "goals:read",
   "goals:write",
+  "tracking:read",
+  "tracking:write",
   "automations:read",
   "automations:write",
   "audit:read",

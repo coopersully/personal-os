@@ -10,6 +10,33 @@ const required = {
 };
 
 describe("API configuration", () => {
+  it.each([
+    "not a URL",
+    "/relative",
+    "ftp://app.example.com",
+    "https://person@app.example.com",
+    "https://:password@app.example.com",
+    "https://app.example.com/base",
+    "https://app.example.com?mode=1",
+    "https://app.example.com#section",
+    "https://app.example.com?",
+    "https://app.example.com#",
+  ])("rejects a non-origin APP_BASE_URL: %s", (appBaseUrl) => {
+    expect(() => loadConfig({ ...required, APP_BASE_URL: appBaseUrl })).toThrow();
+  });
+
+  it.each([
+    ["https://app.example.com", "https://app.example.com"],
+    ["https://APP.example.com:443/", "https://app.example.com"],
+    ["http://localhost:8081/", "http://localhost:8081"],
+  ])("normalizes the browser origin %s", (input, origin) => {
+    expect(loadConfig({ ...required, APP_BASE_URL: input })).toMatchObject({
+      appBaseUrl: origin,
+      allowedOrigins: [origin],
+      agentSkillSourceUrl: `${origin}${officialAgentSkill.sourcePath}`,
+    });
+  });
+
   it("applies development defaults", () => {
     expect(loadConfig(required)).toEqual({
       agentSkillRevision: officialAgentSkill.revision,

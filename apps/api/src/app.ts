@@ -48,6 +48,16 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import { createDesktopActivityService } from "./desktop-activity-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createExecutionPolicyService } from "./execution-policy-service.js";
+import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
+import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
+import {
+  type ContextualPrincipal,
+  contextualTransaction,
+} from "./finance/contextual-question-store.js";
+import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { createFinancePositionService } from "./finance/position-service.js";
+import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
@@ -61,19 +71,23 @@ import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-a
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
+import { createNotificationService } from "./notification-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
+import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
+import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
+import { registerRitualRoutes } from "./routes/rituals.js";
 import {
   requestMetadata as metadata,
   parseBody,
@@ -86,11 +100,14 @@ import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
+import { registerTextingRecoveryRoutes } from "./routes/texting-recovery.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import { createTaskWorkspaceService } from "./task-workspace-service.js";
+import { createTextingRecoveryService } from "./texting-recovery-service.js";
 import { createTextingService } from "./texting-service.js";
+import { createSmsAdmission } from "./texting-sms-admission.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -397,6 +414,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const audit = createAuditService(dependencies.db);
+  const executionPolicy = createExecutionPolicyService({ db: dependencies.db, now });
   const mail = createMailService({
     db: dependencies.db,
     gateway: connectors.mailGateway,
@@ -427,6 +445,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     searchReceiptCandidates: mail.searchReceiptCandidates,
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
+  });
+  const financeBudgetPolicies = createFinanceBudgetPolicyService({ db: dependencies.db, now });
+  const financeContextualQuestions = createFinanceContextualQuestionService({
+    db: dependencies.db,
+    now,
+  });
+  const financeSms = createFinanceSmsPort({
+    admitSmsAnswer: createSmsAdmission({ enabled: () => textingConfig.enabled }),
+    db: dependencies.db,
+    now,
   });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financePlaybook = createFinancePlaybookService({ finances, now });
@@ -550,6 +578,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
     actions: financeActions,
     db: dependencies.db,
@@ -558,7 +587,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const financePeriodReviews = createFinancePeriodReviewService({
     db: dependencies.db,
-    now,
+    finances,
     status: financeStatus,
   });
   const financeMaintenance = createFinanceMaintenanceService({
@@ -568,7 +597,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
     periodReviews: financePeriodReviews,
+    position: financePosition,
     status: financeStatus,
+  });
+  const canonicalFinanceMaintenance = createFinanceMaintenanceIntentService({
+    db: dependencies.db,
+    maintenance: financeMaintenance,
+    status: financeStatus,
+    recoverHandoff: financeActions.recoverFinanceMaintenanceHandoff,
+    now,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
   const twilio =
@@ -588,6 +625,34 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     senderPhoneNumber: textingConfig.senderPhoneNumber,
     ...(twilio ? { twilio } : {}),
+    now,
+  });
+  const textingRecovery = createTextingRecoveryService({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    finance: {
+      inspectSmsReceipt: financeSms.inspectSmsReceipt,
+      executeAnswer: (userId, command) => {
+        const context: ContextualPrincipal = {
+          principal: {
+            actorId: userId,
+            actorType: "user",
+            scopes: new Set(["finances:write"]),
+            userId,
+          },
+          requestId: command.operationId,
+        };
+        return contextualTransaction(dependencies.db, undefined, (tx) =>
+          financeSms.answerSmsWork(command, context, tx),
+        );
+      },
+    },
+    now,
+  });
+  const notifications = createNotificationService({
+    db: dependencies.db,
+    origin: dependencies.config.appBaseUrl,
+    transport: texting,
     now,
   });
 
@@ -966,6 +1031,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/mail/*", authenticate);
   app.use("/v1/goals/*", authenticate);
   app.use("/v1/goals", authenticate);
+  app.use("/v1/rituals", authenticate);
+  app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
   app.use("/v1/motives", authenticate);
   app.use("/v1/finances/*", authenticate);
@@ -1239,19 +1306,29 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     app,
     assistant,
     connectionGuide: agentConnectionGuide,
+    executionPolicy,
     mutationContext,
   });
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
+  registerRitualRoutes({
+    app,
+    rituals: createRitualService({ db: dependencies.db, now }),
+    mutationContext,
+  });
 
   registerFinanceRoutes({
     actions: financeActions,
     app,
     db: dependencies.db,
     financeChallenges,
+    financeBudgetPolicies,
+    contextualQuestions: financeContextualQuestions,
+    canonicalFinanceMaintenance,
     financeMaintenance,
     financePeriodReviews,
     financePlaybook,
+    financePosition,
     financeStatus,
     finances,
     mutationContext,
@@ -1278,6 +1355,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     texting,
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
+  registerTextingRecoveryRoutes({ app, recovery: textingRecovery });
+  registerNotificationRoutes({ app, notifications });
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());
@@ -1429,7 +1508,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async dispatchDueFinanceMaintenance() {
+      const recovery = await canonicalFinanceMaintenance.recoverAcceptedWork();
       await financeMaintenance.dispatchDue(5);
+      if (recovery.failedRecoveries)
+        throw new Error("Some Finance maintenance handoffs could not be recovered.");
     },
   });
 }
@@ -1475,6 +1557,8 @@ const oauthScopeLabels: Record<string, string> = {
     "Maintain Finances: create a durable Finance maintenance run that can use provider synchronization and rule-approved categorization and reconciliation; questions and approvals stay pending rather than guessed.",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
+  "tracking:read": "Read private ritual responses",
+  "tracking:write": "Manage rituals and responses",
   "mail:read": "Read connected mail",
   "mail:write": "Manage mail and approved Mail rules",
   "reminders:read": "Read reminders",

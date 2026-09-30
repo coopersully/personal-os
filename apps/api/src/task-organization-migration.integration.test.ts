@@ -21,6 +21,15 @@ const migrationsAfterTaskOrganization = [
   "0078_mail_workspace_stewardship_reconciliation",
   "0079_mail_stewardship_integrity",
   "0080_mail_reply_metadata",
+  "0081_finance_legacy_disconnect_repair",
+  "0082_finance_maintenance_lineage",
+  "0083_global_execution_policy",
+  "0084_finance_setup_profile_lineage",
+  "0085_finance_context_capture",
+  "0086_notification_foundation",
+  "0087_finance_budget_policy_management",
+  "0088_finance_budget_policy_nonempty_text",
+  "0089_finance_contextual_questions",
 ];
 
 function databaseUri(connectionUri: string, databaseName: string): string {
@@ -354,6 +363,26 @@ describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
         finalReconciliationMigration,
         ...migrationsAfterTaskOrganization,
       ],
+      [
+        "0055_finance_sync_health",
+        "0056_workspace_maintenance_runs",
+        "0057_finance_currency_evidence",
+        "0058_finance_provider_items",
+        "0059_finance_automation_settings",
+        "0060_finance_agent_action_reviews",
+        "0061_finance_transaction_allocations",
+        "0062_finance_reimbursements",
+        "0063_finance_maintenance_candidates",
+        "0064_finance_ledger_challenges",
+        "0065_finance_period_reviews",
+        "0066_finance_plan_versions",
+        "0067_finance_ledger_protocol",
+        "0068_finance_mutation_leases",
+        "0069_finance_legacy_budget_backfill",
+        "0070_calendar_stewardship_foundations",
+        "0071_calendar_event_links",
+        "0072_finance_parallel_migration_reconciliation",
+      ],
     );
     temporaryMigrationFolders.push(financeHistory);
     await migrateDatabase(database.db, financeHistory);
@@ -415,7 +444,7 @@ describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
     const database = await createIsolatedDatabase("finance_after_task_parallel_history");
     const taskHistory = await migrationsWithout(
       migrationsFolder,
-      "ilo-finance-after-task-parallel-history-",
+      "nohmi-finance-after-task-parallel-history-",
       [
         "0055_finance_sync_health",
         "0059_finance_automation_settings",
@@ -434,6 +463,12 @@ describe.sequential("Task organization migration", { timeout: 15_000 }, () => {
         "0072_finance_parallel_migration_reconciliation",
         finalReconciliationMigration,
         ...migrationsAfterTaskOrganization,
+      ],
+      [
+        "0056_workspace_maintenance_runs",
+        "0057_finance_currency_evidence",
+        "0058_finance_provider_items",
+        reconciliationMigration,
       ],
     );
     temporaryMigrationFolders.push(taskHistory);

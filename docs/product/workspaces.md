@@ -164,6 +164,12 @@ without obscuring provider truth.
 
 ## Finances
 
+The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
+journey against this larger target. Both Codex and Claude must support separately verified
+maintenance and two-way Finance SMS at launch, including durable answers and continuation after
+the original agent session ends. Users retain equivalent inspection and manual correction in the
+app. Shared Texting owns the conversation; Finance owns meaning, policy and bookkeeping.
+
 ### Goal
 
 Finances is a unified budget, cash-flow, account-balance, transaction, and net-worth application
@@ -184,6 +190,9 @@ investment analysis, auditing, and coaching without claiming professional creden
   meaningful: overspending can threaten obligations, while persistent underspending can indicate
   that a stated goal, need, or quality-of-life priority is not actually being served.
 - Visible data freshness, missing evidence, connector failures, material risks, and review state.
+- Transaction context questions identify exact work and retain immutable answers. Saving context
+  completes the question while leaving the financial decision open. Context questions may coexist
+  with other financial cases; source links keep those separate decisions understandable.
 
 ### Agent interface
 

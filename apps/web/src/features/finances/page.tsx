@@ -95,6 +95,7 @@ import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import { AddTransactionContext } from "./contextual-question.js";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
 
@@ -117,6 +118,7 @@ export function FinancesPage() {
   const transactionParams = new URLSearchParams(location.search);
   const transactionFilters = financeTransactionFilters(transactionParams);
   const linkedTransactionId = transactionParams.get("transactionId");
+  const linkedReviewId = transactionParams.get("item") ?? undefined;
   const queryClient = useQueryClient();
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
@@ -201,8 +203,8 @@ export function FinancesPage() {
   });
   const reviewQueue = useQuery({
     enabled: section === "review",
-    queryFn: () => api.getFinanceReviewQueue(),
-    queryKey: ["finance-review-queue"],
+    queryFn: () => api.getFinanceReviewQueue(50, linkedReviewId),
+    queryKey: ["finance-review-queue", linkedReviewId],
   });
   const [reviewOnly, setReviewOnly] = useState(true);
   const [institution, setInstitution] = useState("");
@@ -252,7 +254,9 @@ export function FinancesPage() {
   }>({ sortBy: "date", sortDirection: "desc" });
   const refresh = () =>
     queryClient.invalidateQueries({
-      predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
+      predicate: (query) =>
+        String(query.queryKey[0]).startsWith("finance-") ||
+        query.queryKey[0] === "agent-access-work-items",
     });
   const transactionList = useQuery({
     enabled: section === "transactions",
@@ -593,6 +597,13 @@ export function FinancesPage() {
               ) : null}
               {section === "transactions" ? (
                 <FinanceTransactionsTable
+                  manualAccountIds={
+                    overview.data?.accounts
+                      .filter(
+                        (account) => account.provider === "manual" && account.status === "manual",
+                      )
+                      .map((account) => account.id) ?? []
+                  }
                   hasPreviousPage={transactionCursorHistory.length > 0}
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
@@ -640,6 +651,16 @@ export function FinancesPage() {
                   }
                   onDefer={(id) => resolveReview.mutate({ action: "defer", id })}
                 />
+              ) : section === "review" && linkedReviewId !== undefined ? (
+                reviewQueue.isPending ? (
+                  <p role="status">Loading requested review…</p>
+                ) : reviewQueue.error ? (
+                  <InlineError error={reviewQueue.error} />
+                ) : (
+                  <EmptyState icon={<CircleCheckIcon />} title="Requested review unavailable">
+                    This item may have been resolved or may not belong to this account.
+                  </EmptyState>
+                )
               ) : visibleTransactions.length === 0 ? (
                 <EmptyState
                   icon={<CircleCheckIcon />}
@@ -849,7 +870,7 @@ export function FinancesPage() {
               ) : (
                 <ShadcnItemGroup>
                   {finance.accounts.map((item) => (
-                    <ShadcnItem key={item.id} variant="outline">
+                    <ShadcnItem id={`account-${item.id}`} key={item.id} variant="outline">
                       <ShadcnItemContent>
                         <ShadcnItemTitle>{item.name}</ShadcnItemTitle>
                         <ShadcnItemDescription>
@@ -2327,6 +2348,7 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 }
 
 function FinanceTransactionsTable({
+  manualAccountIds,
   hasPreviousPage,
   isCategorizing,
   isLoading,
@@ -2339,6 +2361,7 @@ function FinanceTransactionsTable({
   sort,
   transactions,
 }: {
+  manualAccountIds: string[];
   hasPreviousPage: boolean;
   isCategorizing: boolean;
   isLoading: boolean;
@@ -2523,6 +2546,7 @@ function FinanceTransactionsTable({
                       colSpan={row.getVisibleCells().length}
                     >
                       <TransactionDetails
+                        canAddContext={manualAccountIds.includes(row.original.accountId)}
                         isCategorizing={isCategorizing}
                         onBreakdown={onBreakdown}
                         onCategorize={onCategorize}
@@ -2606,11 +2630,13 @@ function transactionTableColumnClass(columnId: string) {
 }
 
 export function TransactionDetails({
+  canAddContext = false,
   isCategorizing,
   onBreakdown,
   onCategorize,
   transaction,
 }: {
+  canAddContext?: boolean;
   isCategorizing: boolean;
   onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
@@ -2633,6 +2659,14 @@ export function TransactionDetails({
         <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
           Split purchase
         </ShadcnButton>
+        {canAddContext &&
+        transaction.needsReview &&
+        !transaction.pending &&
+        !transaction.categoryId &&
+        !transaction.category &&
+        (transaction.direction === "expense" || transaction.direction === "income") ? (
+          <AddTransactionContext key={transaction.id} transactionId={transaction.id} />
+        ) : null}
         {transaction.needsReview ? (
           <ShadcnButton
             disabled={isCategorizing}

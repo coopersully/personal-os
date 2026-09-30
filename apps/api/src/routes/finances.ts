@@ -8,18 +8,26 @@ import {
   createFinanceAccountInputSchema,
   createFinanceBudgetBucketInputSchema,
   createFinanceBudgetInputSchema,
+  createFinanceBudgetPolicySchema,
+  createFinanceBudgetRevisionProposalSchema,
   createFinanceBudgetVersionInputSchema,
+  createFinanceContextualQuestionInputSchema,
   createFinanceTransactionInputSchema,
+  designateFinanceBudgetBaselineSchema,
   disconnectFinanceAccountInputSchema,
   exchangePlaidTokenInputSchema,
   financeAccountQuerySchema,
+  financeAnswerSchema,
   financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
+  financeBudgetPolicyLifecycleSchema,
+  financeBudgetPolicyListSchema,
   financeBudgetStatusQuerySchema,
   financeCsvImportInputSchema,
   financeMaintenanceHistoryQuerySchema,
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
+  financePositionReadScopeSchema,
   financeReceiptReviewInputSchema,
   financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
@@ -27,22 +35,23 @@ import {
   financeTransactionQuerySchema,
   idSchema,
   linkFinanceTransactionsInputSchema,
-  maintenanceRequestSchema,
   maintenanceScopeQuerySchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
   mergeFinanceMerchantsInputSchema,
+  previewFinanceBudgetPolicySchema,
   reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
   reviseFinanceBudgetInputSchema,
+  reviseFinanceBudgetPolicySchema,
+  saveFinanceBudgetPolicyPreviewSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
   splitFinanceTransactionInputSchema,
   startFinanceAccountConnectionInputSchema,
   submitFinanceLedgerChallengeInputSchema,
   updateFinanceAccountInputSchema,
-  updateFinanceAutomationSettingsInputSchema,
   updateFinanceBudgetBucketInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
@@ -54,7 +63,11 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
+import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
+import type { createFinanceMaintenanceIntentService } from "../finance/maintenance-intent-service.js";
+import type { createFinancePositionService } from "../finance/position-service.js";
 import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
@@ -68,13 +81,7 @@ import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import {
-  parseBody,
-  parseOptionalBody,
-  requireFeatureAccess,
-  requireHuman,
-  requireScope,
-} from "./support.js";
+import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = {
   principal: Principal;
@@ -86,9 +93,13 @@ type FinanceRouteOptions = {
   db?: Database;
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
+  contextualQuestions?: ReturnType<typeof createFinanceContextualQuestionService>;
+  financeBudgetPolicies?: ReturnType<typeof createFinanceBudgetPolicyService>;
   financeMaintenance: FinanceMaintenanceService;
+  canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
   financePeriodReviews?: FinancePeriodReviewService;
   financePlaybook?: ReturnType<typeof createFinancePlaybookService>;
+  financePosition?: ReturnType<typeof createFinancePositionService>;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -100,19 +111,31 @@ export function registerFinanceRoutes({
   actions,
   db,
   financeChallenges,
-  financeMaintenance,
+  contextualQuestions,
+  financeBudgetPolicies,
+  canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
+  financePosition,
   financeStatus,
   finances,
   mutationContext,
 }: FinanceRouteOptions) {
+  const canonicalMaintenance = () => {
+    if (!canonicalFinanceMaintenance)
+      throw new Error("The canonical Finance maintenance service is required.");
+    return canonicalFinanceMaintenance;
+  };
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
   const requireFinanceMaintenance = requireScope("finances:maintain");
   const requireActions = () => {
     if (!actions) throw new Error("Finance action service is required for Finance mutations.");
     return actions;
+  };
+  const budgetPolicies = () => {
+    if (!financeBudgetPolicies) throw new Error("Finance budget policy service is unavailable.");
+    return financeBudgetPolicies;
   };
   const financeMutationContext = (context: Context<AppEnv>): MutationContext =>
     mutationContext(context);
@@ -148,10 +171,11 @@ export function registerFinanceRoutes({
       return;
     }
     if (
-      context.req.method === "POST" &&
-      ["/v1/finances/categorizations/propose", "/v1/finances/scenarios/compare"].includes(
-        context.req.path,
-      )
+      (context.req.method === "GET" && context.req.path === "/v1/finances/position") ||
+      (context.req.method === "POST" &&
+        ["/v1/finances/categorizations/propose", "/v1/finances/scenarios/compare"].includes(
+          context.req.path,
+        ))
     ) {
       await requireFinanceRead(context, next);
       return;
@@ -160,21 +184,181 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
-  app.post("/v1/finances/maintenance", async (context) => {
-    const request = await parseOptionalBody(context, maintenanceRequestSchema);
-    const created = await financeMaintenance.startOrResume(
-      context.get("principal").userId,
-      request.scope,
-    );
-    return context.json({ run: created }, 202);
+  const questions = () => {
+    if (!contextualQuestions)
+      throw new Error("Finance contextual question service is unavailable.");
+    return contextualQuestions;
+  };
+  const position = () => {
+    if (!financePosition) throw new Error("Finance position service is unavailable.");
+    return financePosition;
+  };
+  app.get("/v1/finances/position", async (context) => {
+    const accountIds = context.req.query("accountIds");
+    const scope = financePositionReadScopeSchema.parse({
+      ...context.req.query(),
+      ...(accountIds === undefined ? {} : { accountIds: accountIds.split(",").filter(Boolean) }),
+    });
+    context.header("Cache-Control", "no-store");
+    return context.json({
+      position: await position().readPosition(context.get("principal").userId, scope),
+    });
   });
-  app.get("/v1/finances/maintenance/:id", async (context) =>
+  app.post("/v1/finances/transactions/:id/contextual-question", requireHuman, async (context) =>
+    context.json(
+      await questions().createQuestion(
+        routeId(context),
+        await parseBody(context, createFinanceContextualQuestionInputSchema),
+        financeMutationContext(context),
+      ),
+    ),
+  );
+  app.get("/v1/finances/contextual-questions/:id", async (context) =>
+    context.json(await questions().getQuestion(routeId(context), financeMutationContext(context))),
+  );
+  app.post("/v1/finances/contextual-questions/answer", async (context) =>
+    context.json(
+      await questions().answerWork(
+        await parseBody(context, financeAnswerSchema),
+        financeMutationContext(context),
+      ),
+    ),
+  );
+  app.use("/v1/finances/budget-policies", requireHuman);
+  app.use("/v1/finances/budget-policies/*", requireHuman);
+  app.get("/v1/finances/budget-policies", async (context) => {
+    const beforeId = context.req.query("beforeId");
+    const limit = context.req.query("limit");
+    return context.json({
+      policies: await budgetPolicies().listPolicies(
+        context.get("principal").userId,
+        financeBudgetPolicyListSchema.parse({
+          ...(beforeId ? { beforeId } : {}),
+          limit: limit === undefined ? 50 : Number(limit),
+        }),
+      ),
+    });
+  });
+  app.post("/v1/finances/budget-policies", async (context) =>
+    context.json(
+      {
+        policy: await budgetPolicies().createPolicy(
+          await financeContext(context),
+          await parseBody(context, createFinanceBudgetPolicySchema),
+        ),
+      },
+      201,
+    ),
+  );
+  app.post("/v1/finances/budget-policies/preview", async (context) =>
     context.json({
-      run: await financeMaintenance.getRun(
+      evaluation: await budgetPolicies().previewPolicy(
+        context.get("principal").userId,
+        await parseBody(context, previewFinanceBudgetPolicySchema),
+      ),
+    }),
+  );
+  app.post("/v1/finances/budget-policies/baselines", async (context) =>
+    context.json(
+      {
+        baseline: await budgetPolicies().designateBaseline(
+          await financeContext(context),
+          await parseBody(context, designateFinanceBudgetBaselineSchema),
+        ),
+      },
+      201,
+    ),
+  );
+  app.post("/v1/finances/budget-policies/proposals", async (context) =>
+    context.json(
+      {
+        proposal: await budgetPolicies().createProposal(
+          await financeContext(context),
+          await parseBody(context, createFinanceBudgetRevisionProposalSchema),
+        ),
+      },
+      201,
+    ),
+  );
+  app.get("/v1/finances/budget-policies/proposals/:id", async (context) =>
+    context.json({
+      proposal: await budgetPolicies().getProposal(
+        context.get("principal").userId,
+        routeId(context),
+      ),
+    }),
+  );
+  app.post("/v1/finances/budget-policies/proposals/:id/withdraw", async (context) =>
+    context.json({
+      proposal: await budgetPolicies().withdrawProposal(
+        await financeContext(context),
+        routeId(context),
+        await parseBody(context, financeBudgetPolicyLifecycleSchema),
+      ),
+    }),
+  );
+  app.post("/v1/finances/budget-policies/proposals/:id/previews", async (context) =>
+    context.json(
+      {
+        preview: await budgetPolicies().savePreview(
+          await financeContext(context),
+          routeId(context),
+          await parseBody(context, saveFinanceBudgetPolicyPreviewSchema),
+        ),
+      },
+      201,
+    ),
+  );
+  app.get("/v1/finances/budget-policies/proposals/:id/previews/:previewId", async (context) =>
+    context.json({
+      preview: await budgetPolicies().getPreview(
+        context.get("principal").userId,
+        routeId(context),
+        idSchema.parse(context.req.param("previewId")),
+      ),
+    }),
+  );
+  app.get("/v1/finances/budget-policies/:id", async (context) =>
+    context.json({
+      policy: await budgetPolicies().getPolicy(context.get("principal").userId, routeId(context)),
+    }),
+  );
+  app.post("/v1/finances/budget-policies/:id/revisions", async (context) =>
+    context.json(
+      {
+        policy: await budgetPolicies().revisePolicy(
+          await financeContext(context),
+          routeId(context),
+          await parseBody(context, reviseFinanceBudgetPolicySchema),
+        ),
+      },
+      201,
+    ),
+  );
+  app.post("/v1/finances/budget-policies/:id/disable", async (context) =>
+    context.json({
+      policy: await budgetPolicies().disablePolicy(
+        await financeContext(context),
+        routeId(context),
+        await parseBody(context, financeBudgetPolicyLifecycleSchema),
+      ),
+    }),
+  );
+  app.post("/v1/finances/maintenance", async (context) =>
+    context.json(
+      await canonicalMaintenance().maintainFinances(
+        await parseBody(context, financeMaintenanceInputSchema),
+        context.get("principal"),
+      ),
+    ),
+  );
+  app.get("/v1/finances/maintenance/:id", async (context) =>
+    context.json(
+      await canonicalMaintenance().getRun(
         context.get("principal").userId,
         idSchema.parse(context.req.param("id")),
       ),
-    }),
+    ),
   );
   app.get("/v1/finances/maintenance/challenges/:id", async (context) => {
     if (!financeChallenges) throw new Error("Finance challenge service is unavailable.");
@@ -280,19 +464,6 @@ export function registerFinanceRoutes({
         await financeContext(context),
       ),
     ),
-  );
-  app.get("/v1/finances/automation-settings", async (context) =>
-    context.json({
-      settings: await finances.getAutomationSettings(context.get("principal").userId),
-    }),
-  );
-  app.patch("/v1/finances/automation-settings", requireHuman, async (context) =>
-    context.json({
-      settings: await finances.updateAutomationSettings(
-        await parseBody(context, updateFinanceAutomationSettingsInputSchema),
-        financeMutationContext(context),
-      ),
-    }),
   );
   app.get("/v1/finances/guided-setup", async (context) =>
     context.json({
@@ -549,33 +720,18 @@ export function registerFinanceRoutes({
       reviews: await finances.listReviewQueue(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+        idSchema.optional().parse(context.req.query("id")),
       ),
     }),
   );
   app.get("/v1/finances/inbox", async (context) =>
     context.json(await finances.getFinanceInbox(context.get("principal").userId)),
   );
-  app.post("/v1/finances/maintenance/protocol", async (context) =>
-    context.json(
-      await finances.maintainFinances(
-        await parseBody(context, financeMaintenanceInputSchema),
-        await financeContext(context),
-      ),
-    ),
-  );
   app.get("/v1/finances/maintenance", async (context) =>
     context.json(
-      await finances.getFinanceMaintenanceHistory(
+      await canonicalMaintenance().history(
         context.get("principal").userId,
         financeMaintenanceHistoryQuerySchema.parse(context.req.query()),
-      ),
-    ),
-  );
-  app.get("/v1/finances/maintenance/protocol/:id", async (context) =>
-    context.json(
-      await finances.getFinanceMaintenanceRun(
-        context.get("principal").userId,
-        context.req.param("id"),
       ),
     ),
   );
@@ -620,6 +776,7 @@ export function registerFinanceRoutes({
       reviews: await requireActions().listReviews(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+        idSchema.optional().parse(context.req.query("id")),
       ),
     }),
   );
@@ -628,6 +785,7 @@ export function registerFinanceRoutes({
       questions: await requireActions().listQuestions(
         context.get("principal").userId,
         financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+        idSchema.optional().parse(context.req.query("id")),
       ),
     }),
   );
@@ -952,7 +1110,7 @@ export function registerFinanceRoutes({
       ),
     ),
   );
-  app.post("/v1/finances/accounts/:id/disconnect", async (context) => {
+  app.post("/v1/finances/accounts/:id/disconnect", requireHuman, async (context) => {
     const input = await parseBody(context, disconnectFinanceAccountInputSchema);
     return context.json(
       await finances.disconnectFinanceAccount(

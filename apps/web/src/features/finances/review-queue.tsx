@@ -25,15 +25,23 @@ function label(kind: string) {
     : kind.replaceAll("_", " ").replace(/^./u, (value) => value.toUpperCase());
 }
 
-export function FinanceAgentReviewQueue() {
+export function FinanceAgentReviewQueue({
+  questionId,
+  approvalId,
+}: {
+  questionId?: string | undefined;
+  approvalId?: string | undefined;
+} = {}) {
   const queryClient = useQueryClient();
   const questions = useQuery({
-    queryFn: () => api.listFinanceQuestions(),
-    queryKey: ["finance-questions"],
+    queryFn: () => api.listFinanceQuestions(50, questionId),
+    queryKey: ["finance-questions", questionId],
+    enabled: approvalId === undefined,
   });
   const reviews = useQuery({
-    queryFn: () => api.listFinanceActionReviews(),
-    queryKey: ["finance-action-reviews"],
+    queryFn: () => api.listFinanceActionReviews(50, approvalId),
+    queryKey: ["finance-action-reviews", approvalId],
+    enabled: questionId === undefined,
   });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const refresh = async () => {
@@ -41,6 +49,7 @@ export function FinanceAgentReviewQueue() {
       queryClient.invalidateQueries({ queryKey: ["finance-questions"] }),
       queryClient.invalidateQueries({ queryKey: ["finance-action-reviews"] }),
       queryClient.invalidateQueries({ queryKey: ["finance-status"] }),
+      queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
     ]);
   };
   const answer = useMutation({
@@ -50,8 +59,19 @@ export function FinanceAgentReviewQueue() {
   });
   const approve = useMutation({ mutationFn: api.approveFinanceActionReview, onSuccess: refresh });
   const dismiss = useMutation({ mutationFn: api.dismissFinanceActionReview, onSuccess: refresh });
-  const pendingQuestions = questions.data ?? [];
-  const pendingReviews = (reviews.data ?? []).filter((item) => item.status === "pending");
+  const pendingQuestions =
+    approvalId === undefined
+      ? (questions.data ?? []).filter((item) => questionId === undefined || item.id === questionId)
+      : [];
+  const pendingReviews =
+    questionId === undefined
+      ? (reviews.data ?? []).filter(
+          (item) =>
+            item.status === "pending" && (approvalId === undefined || item.id === approvalId),
+        )
+      : [];
+  const loading = questions.isLoading || reviews.isLoading;
+  const targeted = questionId !== undefined || approvalId !== undefined;
   const error = questions.error ?? reviews.error ?? answer.error ?? approve.error ?? dismiss.error;
 
   return (
@@ -63,9 +83,7 @@ export function FinanceAgentReviewQueue() {
         </p>
       </div>
       {error ? <InlineError error={error} /> : null}
-      {questions.isPending || reviews.isPending ? (
-        <Spinner label="Loading Finance review work" />
-      ) : null}
+      {loading ? <Spinner label="Loading Finance review work" /> : null}
       {pendingQuestions.map((question) => (
         <QuestionCard
           answer={answers[question.id] ?? ""}
@@ -85,12 +103,14 @@ export function FinanceAgentReviewQueue() {
           review={review}
         />
       ))}
-      {!questions.isPending &&
-      !reviews.isPending &&
-      pendingQuestions.length + pendingReviews.length === 0 ? (
-        <EmptyState icon={<CircleCheckIcon />} title="Nothing needs review">
-          Confident work is handled according to your Finance setting. Ambiguous activity will
-          appear here.
+      {!loading && !error && pendingQuestions.length + pendingReviews.length === 0 ? (
+        <EmptyState
+          icon={<CircleCheckIcon />}
+          title={targeted ? "Requested review unavailable" : "Nothing needs review"}
+        >
+          {targeted
+            ? "This item may have been resolved or may not belong to this account."
+            : "Confident work is handled according to your Finance setting. Ambiguous activity will appear here."}
         </EmptyState>
       ) : null}
     </section>

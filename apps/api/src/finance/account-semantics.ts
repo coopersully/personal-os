@@ -57,12 +57,27 @@ export function summarizeFinanceAccounts(accounts: FinanceAccount[]): {
   const possibleDuplicateGroups = [...duplicateIds.values()]
     .filter((accountIds) => accountIds.length > 1)
     .map((accountIds) => ({ accountIds: accountIds.sort() }));
+  const includedIds = new Set(
+    accounts.filter((account) => account.includeInPlanning).map((account) => account.id),
+  );
   return {
     accountSemantics: {
       excludedAccountIds: excludedAccountIds.sort(),
       possibleDuplicateGroups,
       trustworthy:
-        unresolvedOwnershipAccountIds.length === 0 && possibleDuplicateGroups.length === 0,
+        includedIds.size > 0 &&
+        unresolvedOwnershipAccountIds.length === 0 &&
+        !possibleDuplicateGroups.some(
+          (group) => group.accountIds.filter((id) => includedIds.has(id)).length > 1,
+        ) &&
+        accounts.every(
+          (account) =>
+            !account.includeInPlanning ||
+            (account.balance !== null &&
+              account.status !== "needs_reauth" &&
+              (account.provider !== "plaid" || account.synchronization.lastSuccessAt !== null) &&
+              account.synchronization.state === "current"),
+        ),
       unresolvedOwnershipAccountIds: unresolvedOwnershipAccountIds.sort(),
     },
     totals,

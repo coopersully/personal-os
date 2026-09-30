@@ -13,13 +13,17 @@ import {
 } from "@personal-os/database";
 import {
   type FinancePeriodReview,
+  type FinancePositionEvidenceCheckpoint,
   type FinanceStatus,
   financeCandidateLedgerProjectionSchema,
+  financeLedgerChallengeChecks,
   financePeriodReviewSchema,
+  financePositionEvidenceCheckpointSchema,
   type MaintenanceScope,
 } from "@personal-os/domain";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import type { createFinanceService } from "./finance-service.js";
 
 type StatusReader = {
   getFinanceStatus: (
@@ -28,7 +32,11 @@ type StatusReader = {
     executor?: Parameters<Parameters<Database["transaction"]>[0]>[0],
   ) => Promise<FinanceStatus>;
 };
-type Options = { db: Database; now: () => Date; status: StatusReader };
+type Options = {
+  db: Database;
+  finances: Pick<ReturnType<typeof createFinanceService>, "maintenanceCandidateSnapshot">;
+  status: StatusReader;
+};
 
 function isSerializationFailure(error: unknown): boolean {
   let current = error;
@@ -54,14 +62,34 @@ async function retrySerializationFailure<Result>(
   throw new Error("Unreachable serialization retry state.");
 }
 
-function periodFor(scope: MaintenanceScope, now: Date) {
-  if (scope.type === "window") return { end: scope.end, start: scope.start };
-  const month = now.toISOString().slice(0, 7);
+function finalDayOfMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const monthNumber = Number(month.slice(5, 7));
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+}
+
+function periodFor(scope: MaintenanceScope, positionEvidence: FinancePositionEvidenceCheckpoint) {
+  const period = {
+    end: positionEvidence.scope.through,
+    start: positionEvidence.scope.from,
+  };
+  if (scope.type === "window") {
+    if (period.start !== scope.start || period.end !== scope.end)
+      throw new AppError(
+        "conflict",
+        "Canonical Finance position evidence does not match the maintenance period.",
+      );
+    return period;
+  }
+  if (scope.type === "target") return period;
+  const month = period.start.slice(0, 7);
   const start = `${month}-01`;
-  const endDate = new Date(`${start}T00:00:00.000Z`);
-  endDate.setUTCMonth(endDate.getUTCMonth() + 1);
-  endDate.setUTCDate(0);
-  return { end: endDate.toISOString().slice(0, 10), start };
+  if (period.start !== start || period.end !== finalDayOfMonth(month))
+    throw new AppError(
+      "conflict",
+      "Canonical Finance position evidence does not identify one complete month.",
+    );
+  return period;
 }
 
 function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriodReview {
@@ -78,21 +106,18 @@ function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriod
   });
 }
 
-/** Reproducible, immutable close report created only after challenged work commits. */
-export function createFinancePeriodReviewService({ db, now, status }: Options) {
+/** Immutable review of committed work or a fully challenged turn awaiting user answers. */
+export function createFinancePeriodReviewService({ db, finances, status }: Options) {
   return {
-    async createForRun(userId: string, runId: string): Promise<FinancePeriodReview> {
+    async createForRun(
+      userId: string,
+      runId: string,
+      positionEvidence: FinancePositionEvidenceCheckpoint,
+    ): Promise<FinancePeriodReview> {
+      const canonicalPosition = financePositionEvidenceCheckpointSchema.parse(positionEvidence);
       return retrySerializationFailure(
         db,
         async (tx) => {
-          const [existing] = await tx
-            .select()
-            .from(financePeriodReviews)
-            .where(
-              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
-            )
-            .limit(1);
-          if (existing) return serialize(existing);
           const [run] = await tx
             .select()
             .from(workspaceMaintenanceRuns)
@@ -102,8 +127,17 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
                 eq(workspaceMaintenanceRuns.userId, userId),
               ),
             )
+            .for("update")
             .limit(1);
           if (!run) throw new AppError("not_found", "The Finance maintenance run was not found.");
+          const [existing] = await tx
+            .select()
+            .from(financePeriodReviews)
+            .where(
+              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
+            )
+            .limit(1);
+          if (existing) return serialize(existing);
           const observed = await status.getFinanceStatus(userId, run.scope, tx);
           if (
             observed.freshness.state !== "current" ||
@@ -114,6 +148,15 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
               "conflict",
               "Finance verification is not current enough to publish.",
             );
+          const period = periodFor(run.scope, canonicalPosition);
+          if (
+            run.scope.type === "all_outstanding" &&
+            observed.details.budget.month !== period.start.slice(0, 7)
+          )
+            throw new AppError(
+              "invalid_request",
+              "Canonical Finance position evidence no longer matches the current review period.",
+            );
           const [candidate] = await tx
             .select()
             .from(financeMaintenanceCandidates)
@@ -121,12 +164,15 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
               and(
                 eq(financeMaintenanceCandidates.runId, runId),
                 eq(financeMaintenanceCandidates.userId, userId),
-                eq(financeMaintenanceCandidates.state, "committed"),
+                inArray(financeMaintenanceCandidates.state, ["committed", "challenged"]),
               ),
             )
             .limit(1);
           if (!candidate)
-            throw new AppError("conflict", "A committed Finance candidate is required.");
+            throw new AppError(
+              "conflict",
+              "A committed or fully challenged Finance candidate is required.",
+            );
           const [challenge] = await tx
             .select()
             .from(financeLedgerChallenges)
@@ -146,6 +192,23 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             .from(financeMaintenanceCandidateItems)
             .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
             .orderBy(asc(financeMaintenanceCandidateItems.ordinal));
+          const questionReview = candidate.state !== "committed";
+          const coverage = challenge.coverage as {
+            checked?: string[];
+            reviewedItemIds?: string[];
+          };
+          if (
+            questionReview &&
+            (!items.some((item) => item.disposition === "question") ||
+              !challenge.submittedAt ||
+              !challenge.submittingAgentId ||
+              !financeLedgerChallengeChecks.every((check) => coverage.checked?.includes(check)) ||
+              !items.every((item) => coverage.reviewedItemIds?.includes(item.id)))
+          )
+            throw new AppError(
+              "conflict",
+              "Complete question candidate challenge coverage is required.",
+            );
           const findings = await tx
             .select()
             .from(financeLedgerChallengeFindings)
@@ -181,7 +244,27 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             .select()
             .from(financeAgentActionReviews)
             .where(eq(financeAgentActionReviews.maintenanceRunId, runId));
-          const projection = financeCandidateLedgerProjectionSchema.parse(candidate.projection);
+          const actualSnapshot = questionReview
+            ? await finances.maintenanceCandidateSnapshot(
+                userId,
+                run.scope,
+                items,
+                candidate.discoveryRevision,
+                tx,
+              )
+            : null;
+          if (
+            actualSnapshot &&
+            (actualSnapshot.revision !== candidate.revision ||
+              actualSnapshot.revision !== challenge.candidateRevision)
+          )
+            throw new AppError(
+              "conflict",
+              "The challenged Finance candidate no longer matches current ledger evidence.",
+            );
+          const projection = financeCandidateLedgerProjectionSchema.parse(
+            actualSnapshot?.projection ?? candidate.projection,
+          );
           const cash = observed.details.wealth.cash;
           const net = observed.details.cashFlow.net;
           const closing = cash;
@@ -197,7 +280,9 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
               findings: findings.length,
               observations: findings.filter((finding) => finding.kind === "observation").length,
             },
-            closeReadiness: observed.details.closeReadiness,
+            closeReadiness: questionReview
+              ? { ...observed.details.closeReadiness, ready: false }
+              : observed.details.closeReadiness,
             goalsAndDebt: {
               activeGoals: observed.details.activeGoals.length,
               debt: observed.details.wealth.debt,
@@ -212,19 +297,42 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             position: {
               cashLowPoint: observed.details.cashFlow.projectedLowestBalance,
               closing,
+              evidence: canonicalPosition,
               opening,
             },
             recommendations: [
               {
-                assumptions: ["Only posted, current ledger evidence is treated as reliable."],
-                disposition: observed.details.closeReadiness.ready ? "ready" : "monitor",
+                assumptions: [
+                  "Only posted, current ledger evidence is treated as reliable.",
+                  ...(questionReview
+                    ? [
+                        "The candidate has not committed. Totals reflect the current ledger; prepared changes remain unapplied.",
+                      ]
+                    : []),
+                ],
+                disposition: questionReview
+                  ? "needs_input"
+                  : observed.details.closeReadiness.ready
+                    ? "ready"
+                    : "monitor",
                 evidence: [
                   `${observed.details.closeReadiness.uncategorized} uncategorized transactions`,
                   `${observed.details.reimbursements.outstanding} outstanding reimbursements`,
+                  ...(questionReview
+                    ? [
+                        `Candidate revision: ${candidate.revision}`,
+                        `Challenge candidate revision: ${challenge.candidateRevision}`,
+                        `Source revision: ${actualSnapshot?.sourceRevision}`,
+                        `Discovery revision: ${candidate.discoveryRevision ?? "unavailable"}`,
+                        `${items.filter((item) => item.disposition === "prepared").length} prepared actions remain unapplied`,
+                      ]
+                    : []),
                 ],
-                recommendation: observed.details.closeReadiness.ready
-                  ? "Keep the current plan and review new exceptions as they arrive."
-                  : "Resolve the remaining ledger exceptions before treating the period as closed.",
+                recommendation: questionReview
+                  ? "Answer the remaining Finance questions before the candidate can commit or the period can be considered maintained."
+                  : observed.details.closeReadiness.ready
+                    ? "Keep the current plan and review new exceptions as they arrive."
+                    : "Resolve the remaining ledger exceptions before treating the period as closed.",
                 tradeoffs: ["Waiting for evidence preserves ledger accuracy."],
               },
             ],
@@ -249,7 +357,6 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
             ...findings.map((finding) => finding.id),
           ];
           const reviewStatus = questions > 0 ? "completed_with_questions" : "completed";
-          const period = periodFor(run.scope, now());
           const [created] = await tx
             .insert(financePeriodReviews)
             .values({
@@ -268,7 +375,9 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
           const [replayed] = await tx
             .select()
             .from(financePeriodReviews)
-            .where(eq(financePeriodReviews.runId, runId))
+            .where(
+              and(eq(financePeriodReviews.runId, runId), eq(financePeriodReviews.userId, userId)),
+            )
             .limit(1);
           if (!replayed) throw new Error("The Finance period review could not be published.");
           return serialize(replayed);

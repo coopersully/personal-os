@@ -334,6 +334,8 @@ import { TaskDialog } from "./features/tasks/task-dialog.js";
 import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
+import { RitualSettings } from "./features/tracking/ritual-settings.js";
+import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
 import { notifyError, useErrorNotification } from "./lib/error-notification.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
@@ -1332,6 +1334,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                 {pageTitle && navigationOwner.kind !== "account-utility" ? (
                   <h1 className="sr-only">{pageTitle}</h1>
                 ) : null}
+                {isTauri() ? <RitualSetupOffer userId={user.id} /> : null}
                 <WorkspaceRoutes
                   calendarTodaySnap={calendarTodaySnap}
                   calendars={calendars.data ?? []}
@@ -5445,6 +5448,7 @@ type SettingsSectionId =
   | "desktop"
   | "pet"
   | "notifications"
+  | "rituals"
   | "workspace-access";
 
 const settingsNavigation: Array<{
@@ -5458,6 +5462,7 @@ const settingsNavigation: Array<{
   {
     label: "Personal",
     items: [
+      { icon: SparklesIcon, id: "rituals", label: "Rituals" },
       { icon: TargetIcon, id: "goals", label: "Goals" },
       { icon: CompassIcon, id: "motives", label: "Motives" },
       { icon: ShieldCheckIcon, id: "reviews", label: "Reviews" },
@@ -5674,6 +5679,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
         {section === "activity" ? <ActivityPage /> : null}
         {section === "appearance" ? <ThemeSettings user={user} /> : null}
+        {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
         {section === "goals" ? <GoalsPage /> : null}
         {section === "motives" ? <MotivesPage /> : null}
         {section === "profile" ? <ProfileSettings user={user} /> : null}

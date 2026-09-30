@@ -17,6 +17,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceProviderItemSyncService } from "./finance-provider-item-sync-service.js";
+import { createFinanceService } from "./finance-service.js";
 import { encryptJson } from "./security.js";
 import type { Principal, RequestLog } from "./types.js";
 
@@ -434,6 +435,52 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .from(financeAccounts)
         .where(eq(financeAccounts.id, present.id)),
     ).resolves.toEqual([{ balance: 8_125, state: "current" }]);
+
+    const finance = createFinanceService({ db: database.db, now: () => now });
+    const overview = await finance.listOverview(userId);
+    expect(overview.accounts.find((account) => account.id === missing.id)).toMatchObject({
+      balance: null,
+      status: "needs_reauth",
+      lastSyncedAt: staleAt.toISOString(),
+      synchronization: {
+        state: "blocked",
+        failureCode: "plaid_account_missing_from_item",
+        recovery: "operator",
+      },
+    });
+    expect(overview.accounts.find((account) => account.id === present.id)).toMatchObject({
+      balance: 81.25,
+      status: "connected",
+      synchronization: { state: "current" },
+    });
+    const other = await fixture({ accountCount: 1 });
+    expect(
+      (await finance.listOverview(other.userId)).accounts.map((account) => account.id),
+    ).not.toContain(missing.id);
+
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        syncState: "blocked",
+        syncError: "Reconnect this institution.",
+        syncErrorCode: "plaid_authorization_failed",
+        syncErrorCategory: "authorization",
+        syncRecovery: "reconnect",
+        syncFailureCount: 1,
+        nextSyncAt: null,
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    const blockedOverview = await finance.listOverview(userId);
+    for (const account of blockedOverview.accounts) {
+      expect(account).toMatchObject({
+        status: "needs_reauth",
+        synchronization: {
+          state: "blocked",
+          failureCode: "plaid_authorization_failed",
+          recovery: "reconnect",
+        },
+      });
+    }
   });
 
   it("stops before projection when a linked account loses the mirrored Item lease", async () => {

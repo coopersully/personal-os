@@ -1,4 +1,14 @@
-import { taskWorkspacePageSchema } from "@personal-os/domain";
+import {
+  financeMaintenanceInputSchema,
+  financeMaintenancePayloadSchema,
+  financeToolResultSchema,
+  idSchema,
+  maintenanceRunStatusSchema,
+  ritualActionInputSchema,
+  ritualDefinitionInputSchema,
+  ritualResponseInputSchema,
+  taskWorkspacePageSchema,
+} from "@personal-os/domain";
 import { z } from "zod";
 
 export function createOpenApiDocument(apiBaseUrl: string) {
@@ -36,145 +46,33 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     responses: { [status]: { description } },
     "x-required-scopes": taskWriteScope,
   });
+  const financeMaintenanceResultSchema = z.toJSONSchema(financeToolResultSchema, { io: "input" });
   return {
     components: {
       schemas: {
+        RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
+        RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
+        RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
         TaskWorkspacePage: z.toJSONSchema(taskWorkspacePageSchema, { io: "input" }),
-        FinanceMaintenanceRequest: {
+        FinanceMaintenanceHistoryPage: {
           properties: {
-            scope: { $ref: "#/components/schemas/MaintenanceScope" },
+            items: {
+              items: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+              type: "array",
+            },
+            nextCursor: z.toJSONSchema(idSchema.nullable(), { io: "input" }),
           },
+          required: ["items", "nextCursor"],
           type: "object",
         },
+        FinanceMaintenanceInput: z.toJSONSchema(financeMaintenanceInputSchema, { io: "input" }),
+        FinanceMaintenancePayload: z.toJSONSchema(financeMaintenancePayloadSchema, { io: "input" }),
         FinanceMaintenanceResult: {
+          ...financeMaintenanceResultSchema,
           properties: {
-            applied: {
-              properties: {
-                categorizations: { minimum: 0, type: "integer" },
-                transfers: { minimum: 0, type: "integer" },
-              },
-              required: ["categorizations", "transfers"],
-              type: "object",
-            },
-            asOf: { format: "date-time", type: "string" },
-            health: {
-              properties: {
-                applicability: { enum: ["not_run", "applied", "skipped_scoped"], type: "string" },
-                confidence: {
-                  enum: ["insufficient", "provisional", "reliable"],
-                  type: "string",
-                },
-                refreshed: { type: "boolean" },
-              },
-              required: ["applicability", "confidence", "refreshed"],
-              type: "object",
-            },
-            questions: {
-              properties: {
-                created: { minimum: 0, type: "integer" },
-                total: { minimum: 0, type: "integer" },
-              },
-              required: ["created", "total"],
-              type: "object",
-            },
-            verification: {
-              properties: {
-                duplicateActions: { minimum: 0, type: "integer" },
-                freshness: {
-                  enum: ["current", "stale", "partial", "unavailable"],
-                  type: "string",
-                },
-                state: {
-                  enum: ["clean", "needs_work", "needs_input", "blocked"],
-                  type: "string",
-                },
-              },
-              required: ["duplicateActions", "freshness", "state"],
-              type: "object",
-            },
+            ...financeMaintenanceResultSchema.properties,
+            data: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
           },
-          required: ["applied", "asOf", "health", "questions", "verification"],
-          type: "object",
-        },
-        FinanceMaintenanceRunResponse: {
-          properties: { run: { $ref: "#/components/schemas/MaintenanceRun" } },
-          required: ["run"],
-          type: "object",
-        },
-        MaintenanceFailureResult: {
-          properties: {
-            code: { type: "string" },
-            message: { type: "string" },
-          },
-          required: ["code", "message"],
-          type: "object",
-        },
-        MaintenanceRun: {
-          properties: {
-            id: { format: "uuid", type: "string" },
-            rulebookVersion: { type: "string" },
-            scope: { $ref: "#/components/schemas/MaintenanceScope" },
-            settledResult: {
-              anyOf: [
-                { $ref: "#/components/schemas/FinanceMaintenanceResult" },
-                { $ref: "#/components/schemas/MaintenanceFailureResult" },
-                { type: "null" },
-              ],
-            },
-            status: {
-              enum: [
-                "queued",
-                "running",
-                "completed",
-                "completed_with_questions",
-                "awaiting_approval",
-                "blocked",
-                "failed_recoverable",
-                "failed_terminal",
-              ],
-              type: "string",
-            },
-          },
-          required: ["id", "rulebookVersion", "scope", "settledResult", "status"],
-          type: "object",
-        },
-        MaintenanceScope: {
-          discriminator: {
-            mapping: {
-              all_outstanding: "#/components/schemas/MaintenanceScopeAllOutstanding",
-              target: "#/components/schemas/MaintenanceScopeTarget",
-              window: "#/components/schemas/MaintenanceScopeWindow",
-            },
-            propertyName: "type",
-          },
-          oneOf: [
-            { $ref: "#/components/schemas/MaintenanceScopeAllOutstanding" },
-            { $ref: "#/components/schemas/MaintenanceScopeWindow" },
-            { $ref: "#/components/schemas/MaintenanceScopeTarget" },
-          ],
-        },
-        MaintenanceScopeAllOutstanding: {
-          properties: { type: { const: "all_outstanding" } },
-          required: ["type"],
-          type: "object",
-        },
-        MaintenanceScopeTarget: {
-          properties: {
-            entityType: { type: "string" },
-            id: { format: "uuid", type: "string" },
-            type: { const: "target" },
-          },
-          required: ["type", "entityType", "id"],
-          type: "object",
-        },
-        MaintenanceScopeWindow: {
-          properties: {
-            end: { format: "date", type: "string" },
-            start: { format: "date", type: "string" },
-            type: { const: "window" },
-          },
-          required: ["type", "start", "end"],
-          type: "object",
         },
         TaskListArchiveInput: {
           additionalProperties: false,
@@ -481,14 +379,46 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         },
       },
       "/v1/finances/maintenance": {
+        get: {
+          parameters: [
+            queryParameter("cursor", { format: "uuid", type: "string" }),
+            queryParameter("limit", { default: 20, maximum: 100, minimum: 1, type: "integer" }),
+            queryParameter("status", {
+              enum: maintenanceRunStatusSchema.options,
+              type: "string",
+            }),
+          ],
+          responses: {
+            200: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceMaintenanceHistoryPage" },
+                },
+              },
+              description: "Owned Finance maintenance history",
+            },
+            403: { description: "The caller lacks finances:read" },
+            404: { description: "Finance maintenance history cursor not found for this user" },
+          },
+          security,
+        },
         post: {
           requestBody: {
             content: {
               "application/json": {
                 examples: {
-                  allOutstanding: { value: { scope: { type: "all_outstanding" } } },
+                  allOutstanding: {
+                    value: { operation: "start", scope: { type: "all_outstanding" } },
+                  },
+                  resume: {
+                    value: {
+                      operation: "resume",
+                      runId: "11111111-1111-4111-8111-111111111111",
+                    },
+                  },
                   target: {
                     value: {
+                      operation: "start",
                       scope: {
                         entityType: "finance_transaction",
                         id: "11111111-1111-4111-8111-111111111111",
@@ -498,25 +428,27 @@ export function createOpenApiDocument(apiBaseUrl: string) {
                   },
                   window: {
                     value: {
+                      operation: "start",
                       scope: { end: "2026-08-15", start: "2026-08-01", type: "window" },
                     },
                   },
                 },
-                schema: { $ref: "#/components/schemas/FinanceMaintenanceRequest" },
+                schema: { $ref: "#/components/schemas/FinanceMaintenanceInput" },
               },
             },
-            required: false,
+            required: true,
           },
           responses: {
-            202: {
+            200: {
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+                  schema: { $ref: "#/components/schemas/FinanceMaintenanceResult" },
                 },
               },
-              description: "Finance maintenance run durably accepted for background work",
+              description: "Finance maintenance result with current durable run state",
             },
             403: { description: "The caller lacks finances:maintain" },
+            404: { description: "Finance maintenance run not found for this user" },
             409: { description: "A conflicting Finance maintenance run or rulebook is active" },
           },
           security,
@@ -531,10 +463,10 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             200: {
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+                  schema: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
                 },
               },
-              description: "Owned Finance maintenance run",
+              description: "Owned Finance maintenance payload",
             },
             403: { description: "The caller lacks finances:read" },
             404: { description: "Finance maintenance run not found for this user" },
@@ -1097,6 +1029,83 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/assistant/attention/{domain}/{id}": {
         patch: { security, responses: { 200: { description: "Attention item updated" } } },
+      },
+      "/v1/rituals": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Ritual definitions" } },
+        },
+      },
+      "/v1/rituals/current": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Current reconciled ritual" } },
+        },
+      },
+      "/v1/rituals/history": {
+        get: {
+          security,
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
+            queryParameter("dateFrom", { type: "string", format: "date" }),
+            queryParameter("dateTo", { type: "string", format: "date" }),
+          ],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Paginated ritual history" } },
+        },
+      },
+      "/v1/rituals/export": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Private ritual export; interactive user only" } },
+        },
+      },
+      "/v1/rituals/{kind}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualDefinitionInput"),
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Revision-bound ritual configuration" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/responses/{stepId}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualResponseInput"),
+          parameters: [
+            { in: "path", name: "id", required: true, schema: { type: "string" } },
+            { in: "path", name: "stepId", required: true, schema: { type: "string" } },
+          ],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Save draft or submitted ritual response" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/actions": {
+        post: {
+          security,
+          requestBody: jsonRequest("RitualActionInput"),
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Record snooze/skip press, confirm or cancel" } },
+        },
+      },
+      "/v1/rituals/{kind}/data": {
+        delete: {
+          security,
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: {
+            204: { description: "Delete ritual and its history; interactive user only" },
+          },
+        },
       },
       "/v1/audit": { get: { security, responses: { 200: { description: "Activity history" } } } },
     },

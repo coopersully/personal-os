@@ -31,6 +31,11 @@ import type {
   ConnectorSyncStatus,
   ConnectorSyncTriggerReason,
   DomainProfile,
+  FinanceBudgetPolicyEvaluation,
+  FinanceBudgetPolicyEvaluationInput,
+  FinanceBudgetPolicyPlanSnapshot,
+  FinanceBudgetPolicyTerms,
+  FinanceHumanWorkRef,
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
@@ -51,6 +56,8 @@ import type {
   MaintenanceRunStatus,
   MaintenanceScope,
   MaterialSourceReference,
+  NotificationDeliveryState,
+  NotificationPreferences,
   TaskContainerAvailability,
   TaskLifecycle,
   TaskListIcon,
@@ -67,6 +74,7 @@ import type {
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   bigserial,
   boolean,
   check,
@@ -75,6 +83,7 @@ import {
   index,
   integer,
   jsonb,
+  type PgTableExtraConfigValue,
   pgTable,
   text,
   timestamp,
@@ -2277,6 +2286,7 @@ export const financeProviderItems = pgTable(
   ],
 );
 
+/** @deprecated Migration-only source retained for historical rows after the 0083 cutover. */
 export const financeAutomationSettings = pgTable("finance_automation_settings", {
   userId: uuid("user_id")
     .primaryKey()
@@ -2285,9 +2295,24 @@ export const financeAutomationSettings = pgTable("finance_automation_settings", 
   ...timestamps,
 });
 
+/** Account-wide review bypass; domains must still be registered by the execution-policy seam. */
+export const executionPolicySettings = pgTable(
+  "execution_policy_settings",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [check("execution_policy_settings_version_check", sql`${table.version} > 0`)],
+);
+
 export const financeAccounts = pgTable(
   "finance_accounts",
   {
+    contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2343,6 +2368,8 @@ export const financeAccounts = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_accounts_contextual_owner_unique").on(table.userId, table.id),
+    check("finance_accounts_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     index("finance_accounts_user_idx").on(table.userId),
     index("finance_accounts_provider_item_record_id_idx").on(table.providerItemRecordId),
     index("finance_accounts_sync_claim_idx")
@@ -2554,6 +2581,7 @@ export const financeMerchantAliases = pgTable(
 export const financeTransactions = pgTable(
   "finance_transactions",
   {
+    contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2592,6 +2620,12 @@ export const financeTransactions = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_transactions_contextual_parent_unique").on(
+      table.userId,
+      table.id,
+      table.accountId,
+    ),
+    check("finance_transactions_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     uniqueIndex("finance_transactions_id_user_id_unique").on(table.id, table.userId),
     index("finance_transactions_user_date_idx").on(table.userId, table.transactionDate),
     index("finance_transactions_review_idx").on(table.userId, table.needsReview),
@@ -2888,6 +2922,7 @@ export const financeClassificationDecisions = pgTable(
 export const financeReviewCases = pgTable(
   "finance_review_cases",
   {
+    contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2951,6 +2986,12 @@ export const financeReviewCases = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_review_cases_contextual_parent_unique").on(
+      table.userId,
+      table.id,
+      table.transactionId,
+    ),
+    check("finance_review_cases_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     index("finance_review_cases_user_status_idx").on(table.userId, table.status),
     uniqueIndex("finance_review_cases_active_stable_key_unique")
       .on(table.userId, table.stableKey)
@@ -2960,7 +3001,7 @@ export const financeReviewCases = pgTable(
   ],
 );
 
-/** Synchronous, caller-resumable maintenance protocol state; never a background job queue. */
+/** Retained historical protocol evidence; live execution uses workspaceMaintenanceRuns. */
 export const financeMaintenanceRuns = pgTable(
   "finance_maintenance_runs",
   {
@@ -2976,16 +3017,49 @@ export const financeMaintenanceRuns = pgTable(
         | "failed"
         | "reconciliation"
         | "settled"
+        | "superseded"
       >()
       .notNull()
       .default("deterministic_processing"),
     scope: jsonb("scope").$type<Record<string, unknown>>().notNull(),
+    canonicalRunId: uuid("canonical_run_id"),
+    recovery: jsonb("recovery").$type<{
+      legacyRunId: string;
+      state: "adopted" | "blocked";
+      originalStage: string;
+      originalScope: Record<string, unknown>;
+      throughDate: string | null;
+      reason: string;
+    }>(),
     version: integer("version").notNull().default(1),
     error: jsonb("error").$type<Record<string, unknown>>(),
     settledAt: timestamp("settled_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [index("finance_maintenance_runs_user_stage_idx").on(table.userId, table.stage)],
+  (table) => [
+    index("finance_maintenance_runs_user_stage_idx").on(table.userId, table.stage),
+    check(
+      "finance_maintenance_runs_stage_check",
+      sql`${table.stage} IN ('agent_audit', 'agent_reasoning', 'deterministic_processing', 'failed', 'reconciliation', 'settled', 'superseded')`,
+    ),
+    foreignKey({
+      columns: [table.canonicalRunId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+      name: "finance_maintenance_runs_canonical_user_fk",
+    }),
+    check(
+      "finance_maintenance_runs_recovery_check",
+      sql`(
+      (${table.recovery} IS NULL AND ${table.canonicalRunId} IS NULL AND ${table.stage} <> 'superseded')
+      OR (${table.recovery} IS NOT NULL AND ${table.stage} = 'superseded'
+        AND ${table.recovery}->>'legacyRunId' = ${table.id}::text
+        AND ${table.recovery}->'originalScope' = ${table.scope}
+        AND ${table.recovery}->>'originalStage' IN ('deterministic_processing', 'agent_reasoning', 'reconciliation', 'agent_audit')
+        AND ((${table.recovery}->>'state' = 'adopted' AND ${table.canonicalRunId} IS NOT NULL)
+          OR (${table.recovery}->>'state' = 'blocked' AND ${table.canonicalRunId} IS NULL)))
+    ) IS TRUE`,
+    ),
+  ],
 );
 
 export const financeMaintenanceJudgments = pgTable(
@@ -3129,7 +3203,7 @@ export const financeBudgets = pgTable(
   ],
 );
 
-/** Per-user controls for agent-initiated Finance mutations. */
+/** @deprecated Migration-only source retained for historical rows after the 0083 cutover. */
 export const financeAgentSettings = pgTable("finance_agent_settings", {
   userId: uuid("user_id")
     .primaryKey()
@@ -3159,6 +3233,7 @@ export const financeProfileVersions = pgTable(
     liquidReserves: integer("liquid_reserves_cents"),
     debts: jsonb("debts").$type<Record<string, unknown>[]>().notNull().default([]),
     insurance: jsonb("insurance").$type<Record<string, unknown>[]>().notNull().default([]),
+    planning: jsonb("planning").$type<Record<string, unknown>>(),
     preferences: jsonb("preferences")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -3172,6 +3247,7 @@ export const financeProfileVersions = pgTable(
   },
   (table) => [
     uniqueIndex("finance_profile_versions_user_version_idx").on(table.userId, table.version),
+    uniqueIndex("finance_profile_versions_id_user_idx").on(table.id, table.userId),
     index("finance_profile_versions_user_created_idx").on(table.userId, table.createdAt),
   ],
 );
@@ -3197,6 +3273,7 @@ export const financeBudgetPlans = pgTable(
   },
   (table) => [
     index("finance_budget_plans_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_budget_plans_id_user_idx").on(table.id, table.userId),
     uniqueIndex("finance_budget_plans_user_month_idx").on(table.userId, table.month),
   ],
 );
@@ -3234,6 +3311,7 @@ export const financeBudgetVersions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
+    profileVersionId: uuid("profile_version_id"),
     status: text("status")
       .$type<"active" | "incomplete" | "proposed" | "retired">()
       .notNull()
@@ -3253,7 +3331,17 @@ export const financeBudgetVersions = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_budget_versions_id_plan_user_idx").on(
+      table.id,
+      table.planId,
+      table.userId,
+    ),
     uniqueIndex("finance_budget_versions_plan_version_idx").on(table.planId, table.version),
+    foreignKey({
+      columns: [table.profileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+      name: "finance_budget_versions_profile_user_fk",
+    }),
     index("finance_budget_versions_user_status_idx").on(
       table.userId,
       table.status,
@@ -3317,9 +3405,16 @@ export const financeSetupSessions = pgTable(
       .notNull()
       .default("collecting_profile"),
     currentQuestionKey: text("current_question_key"),
+    skippedQuestions: jsonb("skipped_questions")
+      .$type<Array<{ questionId: string; profileVersion: number }>>()
+      .notNull()
+      .default([]),
+    questionProfileVersionId: uuid("question_profile_version_id"),
+    proposalProfileVersionId: uuid("proposal_profile_version_id"),
     budgetVersionId: uuid("budget_version_id").references(() => financeBudgetVersions.id, {
       onDelete: "set null",
     }),
+    canonicalMaintenanceRunId: uuid("canonical_maintenance_run_id"),
     maintenanceRunId: uuid("maintenance_run_id").references(() => financeMaintenanceRuns.id, {
       onDelete: "set null",
     }),
@@ -3327,6 +3422,21 @@ export const financeSetupSessions = pgTable(
     ...timestamps,
   },
   (table) => [
+    foreignKey({
+      columns: [table.questionProfileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+      name: "finance_setup_sessions_question_profile_user_fk",
+    }),
+    foreignKey({
+      columns: [table.proposalProfileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+      name: "finance_setup_sessions_proposal_profile_user_fk",
+    }),
+    foreignKey({
+      columns: [table.canonicalMaintenanceRunId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+      name: "finance_setup_sessions_canonical_user_fk",
+    }),
     index("finance_setup_sessions_user_status_idx").on(table.userId, table.status),
     uniqueIndex("finance_setup_sessions_user_active_idx")
       .on(table.userId)
@@ -3551,6 +3661,7 @@ export const textingConnections = pgTable(
   },
   (table) => [
     uniqueIndex("texting_connections_user_idx").on(table.userId),
+    uniqueIndex("texting_connections_owner_id_idx").on(table.userId, table.id),
     uniqueIndex("texting_connections_active_phone_idx")
       .on(table.phoneFingerprint)
       .where(sql`${table.state} <> 'disconnected'`),
@@ -3604,14 +3715,155 @@ export const textMessages = pgTable(
     seriesTotal: integer("series_total"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     occurredAtSource: text("occurred_at_source").$type<TextOccurredAtSource>().notNull(),
+    providerSubmittedAt: timestamp("provider_submitted_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
+    check(
+      "text_messages_provider_submitted_check",
+      sql`${table.providerSubmittedAt} IS NULL OR (${table.direction} = 'outbound' AND ${table.providerMessageSid} IS NOT NULL)`,
+    ),
     uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
+    uniqueIndex("text_messages_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("text_messages_owner_id_connection_idx").on(
+      table.userId,
+      table.id,
+      table.connectionId,
+    ),
     index("text_messages_conversation_idx").on(table.connectionId, table.occurredAt, table.id),
     index("text_messages_user_outbound_idx").on(table.userId, table.direction, table.createdAt),
+  ],
+);
+
+/** Created only by the validated inbound webhook, never from a public message or SID assertion. */
+export const textInboundClaims = pgTable(
+  "text_inbound_claims",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    consentEpoch: integer("consent_epoch").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("text_inbound_claims_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("text_inbound_claims_owner_id_connection_idx").on(
+      table.userId,
+      table.id,
+      table.connectionId,
+    ),
+    uniqueIndex("text_inbound_claims_message_idx").on(table.messageId),
+    foreignKey({
+      name: "text_inbound_claims_connection_fk",
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }).onDelete("no action"),
+    foreignKey({
+      name: "text_inbound_claims_message_fk",
+      columns: [table.userId, table.messageId, table.connectionId],
+      foreignColumns: [textMessages.userId, textMessages.id, textMessages.connectionId],
+    }).onDelete("no action"),
+    check("text_inbound_claims_epoch_check", sql`${table.consentEpoch} > 0`),
+  ],
+);
+
+/** One immutable outbound work item with one stable, independently recoverable child operation. */
+export const textReplyBindings = pgTable(
+  "text_reply_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    outboundMessageId: uuid("outbound_message_id").notNull(),
+    consentEpoch: integer("consent_epoch").notNull(),
+    itemNumber: integer("item_number").notNull(),
+    workKind: text("work_kind").$type<"question" | "approval" | "repair">().notNull(),
+    workId: uuid("work_id").notNull(),
+    workRevision: text("work_revision").notNull(),
+    actionRevision: text("action_revision").notNull(),
+    answerMode: text("answer_mode").$type<"choices" | "free_text">().notNull(),
+    answerVocabulary: jsonb("answer_vocabulary").$type<string[]>(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    operationId: uuid("operation_id").notNull(),
+    inboundClaimId: uuid("inbound_claim_id"),
+    canonicalAnswer: text("canonical_answer"),
+    state: text("state")
+      .$type<
+        | "open"
+        | "expired"
+        | "pending"
+        | "waiting"
+        | "uncertain"
+        | "accepted"
+        | "blocked"
+        | "unavailable"
+      >()
+      .notNull()
+      .default("open"),
+    resultRevision: text("result_revision"),
+    reasonCode: text("reason_code"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("text_reply_bindings_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("text_reply_bindings_operation_idx").on(table.userId, table.operationId),
+    uniqueIndex("text_reply_bindings_outbound_item_idx").on(
+      table.userId,
+      table.outboundMessageId,
+      table.itemNumber,
+    ),
+    uniqueIndex("text_reply_bindings_inbound_item_idx")
+      .on(table.inboundClaimId, table.itemNumber)
+      .where(sql`${table.inboundClaimId} IS NOT NULL`),
+    index("text_reply_bindings_recovery_idx").on(table.state, table.updatedAt),
+    foreignKey({
+      name: "text_reply_bindings_connection_fk",
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }).onDelete("no action"),
+    foreignKey({
+      name: "text_reply_bindings_outbound_fk",
+      columns: [table.userId, table.outboundMessageId, table.connectionId],
+      foreignColumns: [textMessages.userId, textMessages.id, textMessages.connectionId],
+    }).onDelete("no action"),
+    foreignKey({
+      name: "text_reply_bindings_claim_fk",
+      columns: [table.userId, table.inboundClaimId, table.connectionId],
+      foreignColumns: [
+        textInboundClaims.userId,
+        textInboundClaims.id,
+        textInboundClaims.connectionId,
+      ],
+    }).onDelete("no action"),
+    check("text_reply_bindings_epoch_check", sql`${table.consentEpoch} > 0`),
+    check("text_reply_bindings_item_check", sql`${table.itemNumber} BETWEEN 1 AND 3`),
+    check(
+      "text_reply_bindings_work_check",
+      sql`${table.workKind} IN ('question','approval','repair') AND length(${table.workRevision}) BETWEEN 1 AND 200 AND length(${table.actionRevision}) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "text_reply_bindings_state_check",
+      sql`${table.state} IN ('open','expired','pending','waiting','uncertain','accepted','blocked','unavailable')`,
+    ),
+    check(
+      "text_reply_bindings_mode_check",
+      sql`(${table.answerMode} = 'choices' AND ${table.answerVocabulary} IS NOT NULL) OR (${table.answerMode} = 'free_text' AND ${table.answerVocabulary} IS NULL)`,
+    ),
+    check(
+      "text_reply_bindings_vocabulary_check",
+      sql`CASE WHEN ${table.answerVocabulary} IS NULL THEN ${table.answerMode} = 'free_text' WHEN jsonb_typeof(${table.answerVocabulary}) = 'array' THEN jsonb_array_length(${table.answerVocabulary}) BETWEEN 1 AND 8 ELSE false END`,
+    ),
+    check(
+      "text_reply_bindings_attachment_check",
+      sql`(${table.state} IN ('open','expired') AND ${table.inboundClaimId} IS NULL AND ${table.canonicalAnswer} IS NULL AND ${table.resultRevision} IS NULL AND ${table.reasonCode} IS NULL) OR (${table.state} NOT IN ('open','expired') AND ${table.inboundClaimId} IS NOT NULL AND ${table.canonicalAnswer} IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -3629,7 +3881,7 @@ export const textingConsentEvents = pgTable(
         "verified_opt_in" | "provider_stop" | "provider_start" | "provider_block" | "disconnected"
       >()
       .notNull(),
-    source: text("source").$type<"ilo" | "twilio">().notNull(),
+    source: text("source").$type<"nohmi" | "twilio">().notNull(),
     providerEventId: text("provider_event_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3692,5 +3944,913 @@ export const desktopMailActivity = pgTable(
   (table) => [
     uniqueIndex("desktop_mail_activity_remote_idx").on(table.accountId, table.remoteMessageId),
     index("desktop_mail_activity_user_sequence_idx").on(table.userId, table.sequence),
+  ],
+);
+
+/** Capture pointers and immutable snapshots; migration 0085 defers both cycle FKs. */
+export const financeContexts = pgTable(
+  "finance_contexts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    currentRevision: bigint("current_revision", { mode: "bigint" }).notNull(),
+    ...timestamps,
+  },
+  (table): PgTableExtraConfigValue[] => [
+    uniqueIndex("finance_contexts_user_id_unique").on(table.userId, table.id),
+    index("finance_contexts_user_updated_idx").on(table.userId, table.updatedAt, table.id),
+    check("finance_contexts_revision_check", sql`${table.currentRevision} > 0`),
+    // Drizzle does not express DEFERRABLE INITIALLY DEFERRED; 0085 supplies it.
+    foreignKey({
+      name: "finance_contexts_current_revision_fk",
+      columns: [table.userId, table.id, table.currentRevision],
+      foreignColumns: [
+        financeContextRevisions.userId,
+        financeContextRevisions.contextId,
+        financeContextRevisions.revision,
+      ],
+    }),
+  ],
+);
+
+export const financeContextRevisions = pgTable(
+  "finance_context_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    contextId: uuid("context_id").notNull(),
+    revision: bigint("revision", { mode: "bigint" }).notNull(),
+    text: text("text").notNull(),
+    validFrom: timestamp("valid_from", { withTimezone: true }),
+    validThrough: timestamp("valid_through", { withTimezone: true }),
+    participants: jsonb("participants").$type<string[]>().notNull().default([]),
+    paymentChannel: text("payment_channel"),
+    expectedCents: bigint("expected_cents", { mode: "bigint" }),
+    categoryId: uuid("category_id"),
+    transactionIds: jsonb("transaction_ids").$type<string[]>().notNull().default([]),
+    status: text("status").$type<"active" | "expired" | "cancelled">().notNull(),
+    sourceKind: text("source_kind").$type<"app" | "agent" | "expiry">().notNull(),
+    actorType: text("actor_type").$type<"user" | "agent" | "system">().notNull(),
+    actorId: text("actor_id").notNull(),
+    requestId: text("request_id").notNull(),
+    operationId: uuid("operation_id"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table): PgTableExtraConfigValue[] => [
+    uniqueIndex("finance_context_revisions_user_context_revision_unique").on(
+      table.userId,
+      table.contextId,
+      table.revision,
+    ),
+    foreignKey({
+      name: "finance_context_revisions_context_fk",
+      columns: [table.userId, table.contextId],
+      foreignColumns: [financeContexts.userId, financeContexts.id],
+    }).onDelete("cascade"),
+    check("finance_context_revisions_revision_check", sql`${table.revision} > 0`),
+    check(
+      "finance_context_revisions_text_check",
+      sql`char_length(${table.text}) BETWEEN 1 AND 10000 AND ${table.text}=btrim(${table.text})`,
+    ),
+    check(
+      "finance_context_revisions_window_check",
+      sql`${table.validFrom} IS NULL OR ${table.validThrough} IS NULL OR ${table.validFrom} <= ${table.validThrough}`,
+    ),
+    check(
+      "finance_context_revisions_participants_check",
+      sql`COALESCE(finance_context_participants_valid(${table.participants}), false)`,
+    ),
+    check(
+      "finance_context_revisions_payment_check",
+      sql`${table.paymentChannel} IS NULL OR (char_length(${table.paymentChannel}) BETWEEN 1 AND 100 AND ${table.paymentChannel}=btrim(${table.paymentChannel}))`,
+    ),
+    check(
+      "finance_context_revisions_cents_check",
+      sql`${table.expectedCents} IS NULL OR ${table.expectedCents} BETWEEN -9007199254740991 AND 9007199254740991`,
+    ),
+    check("finance_context_revisions_category_check", sql`${table.categoryId} IS NULL`),
+    check(
+      "finance_context_revisions_transactions_check",
+      sql`${table.transactionIds} = '[]'::jsonb`,
+    ),
+    check(
+      "finance_context_revisions_status_check",
+      sql`${table.status} IN ('active','expired','cancelled')`,
+    ),
+    check(
+      "finance_context_revisions_source_check",
+      sql`${table.sourceKind} IN ('app','agent','expiry')`,
+    ),
+    check(
+      "finance_context_revisions_actor_check",
+      sql`${table.actorType} IN ('user','agent','system') AND char_length(${table.actorId}) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "finance_context_revisions_request_check",
+      sql`char_length(${table.requestId}) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "finance_context_revisions_operation_check",
+      sql`(${table.sourceKind}='expiry')=(${table.operationId} IS NULL)`,
+    ),
+    check(
+      "finance_context_revisions_provenance_check",
+      sql`(${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent') OR (${table.sourceKind}='expiry' AND ${table.actorType}='system' AND ${table.actorId}='finance-context-expiry')`,
+    ),
+  ],
+);
+
+function notificationReferenceCheck(column: AnyPgColumn) {
+  return sql`COALESCE(jsonb_typeof(${column}) = 'object'
+    AND ${column} ?& ARRAY['id','domain','kind','revision','actionRevision']
+    AND (${column} - ARRAY['id','domain','kind','revision','actionRevision']) = '{}'::jsonb
+    AND ${column}->>'id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    AND ${column}->>'domain' = 'finances'
+    AND ${column}->>'kind' IN ('question','approval','repair')
+    AND jsonb_typeof(${column}->'revision') = 'string'
+    AND char_length(btrim(${column}->>'revision')) BETWEEN 1 AND 200
+    AND jsonb_typeof(${column}->'actionRevision') = 'string'
+    AND char_length(btrim(${column}->>'actionRevision')) BETWEEN 1 AND 200, false)`;
+}
+
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scope: text("scope").$type<"global" | "finances">().notNull(),
+    revision: integer("revision").notNull(),
+    preferences: jsonb("preferences").$type<NotificationPreferences>().notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notification_preferences_owner_scope_idx").on(table.userId, table.scope),
+    check("notification_preferences_scope_check", sql`${table.scope} IN ('global', 'finances')`),
+    check("notification_preferences_revision_check", sql`${table.revision} > 0`),
+    check(
+      "notification_preferences_value_check",
+      sql`COALESCE(
+    jsonb_typeof(${table.preferences}) = 'object'
+    AND ${table.preferences} ?& ARRAY['enabled','quietMode','quietStartMinute','quietEndMinute','reminderDays','detail']
+    AND (${table.preferences} - ARRAY['enabled','quietMode','quietStartMinute','quietEndMinute','reminderDays','detail']) = '{}'::jsonb
+    AND jsonb_typeof(${table.preferences}->'enabled') = 'boolean'
+    AND ${table.preferences}->>'quietMode' IN ('window','any_time')
+    AND ${table.preferences}->>'detail' IN ('minimal','context')
+    AND (${table.preferences}->>'quietStartMinute')::numeric BETWEEN 0 AND 1439
+    AND mod((${table.preferences}->>'quietStartMinute')::numeric, 1) = 0
+    AND jsonb_typeof(${table.preferences}->'quietStartMinute') = 'number'
+    AND (${table.preferences}->>'quietEndMinute')::numeric BETWEEN 0 AND 1439
+    AND mod((${table.preferences}->>'quietEndMinute')::numeric, 1) = 0
+    AND jsonb_typeof(${table.preferences}->'quietEndMinute') = 'number'
+    AND (${table.preferences}->>'quietMode' = 'any_time' OR ${table.preferences}->>'quietStartMinute' <> ${table.preferences}->>'quietEndMinute')
+    AND (${table.preferences}->'reminderDays' = 'null'::jsonb OR
+      (jsonb_typeof(${table.preferences}->'reminderDays') = 'number' AND (${table.preferences}->>'reminderDays')::numeric BETWEEN 1 AND 365 AND mod((${table.preferences}->>'reminderDays')::numeric, 1) = 0)), false)`,
+    ),
+  ],
+);
+
+export const notificationIntents = pgTable(
+  "notification_intents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<"finances">().notNull(),
+    workId: uuid("work_id").notNull(),
+    work: jsonb("work").$type<FinanceHumanWorkRef>().notNull(),
+    state: text("state").notNull().default("pending"),
+    reason: text("reason"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notification_intents_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("notification_intents_work_idx").on(table.userId, table.domain, table.workId),
+    check(
+      "notification_intents_work_check",
+      sql`${table.domain} = 'finances' AND ${table.work}->>'domain' = ${table.domain} AND ${table.work}->>'id' = ${table.workId}::text`,
+    ),
+    check(
+      "notification_intents_state_check",
+      sql`${table.state} IN ('pending','deferred','blocked','resolved')`,
+    ),
+    check("notification_intents_ref_check", notificationReferenceCheck(table.work)),
+    index("notification_intents_owner_state_idx").on(table.userId, table.state),
+  ],
+);
+
+export const notificationDeliveryAttempts = pgTable(
+  "notification_delivery_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    state: text("state").$type<NotificationDeliveryState>().notNull(),
+    reason: text("reason"),
+    claimId: uuid("claim_id").notNull(),
+    generation: integer("generation").notNull().default(1),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }).notNull(),
+    connectionId: uuid("connection_id"),
+    consentEpoch: integer("consent_epoch"),
+    messageId: uuid("message_id"),
+    timeZone: text("time_zone"),
+    timezoneRevision: timestamp("timezone_revision", { withTimezone: true }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notification_attempts_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("notification_attempts_message_idx").on(table.messageId),
+    foreignKey({
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }),
+    foreignKey({
+      columns: [table.userId, table.messageId],
+      foreignColumns: [textMessages.userId, textMessages.id],
+    }),
+    index("notification_attempts_due_idx").on(table.userId, table.state, table.leaseUntil),
+    check(
+      "notification_attempts_generation_check",
+      sql`${table.generation} > 0 AND ${table.consentEpoch} > 0`,
+    ),
+    check(
+      "notification_attempts_connection_check",
+      sql`${table.connectionId} IS NOT NULL AND ${table.consentEpoch} IS NOT NULL`,
+    ),
+    check(
+      "notification_attempts_state_check",
+      sql`${table.state} IN ('claimed','submitting','accepted','uncertain','failed','suppressed')`,
+    ),
+    check(
+      "notification_attempts_submission_check",
+      sql`${table.state} IN ('claimed','suppressed') OR (${table.messageId} IS NOT NULL AND ${table.connectionId} IS NOT NULL AND ${table.consentEpoch} IS NOT NULL AND ${table.submittedAt} IS NOT NULL AND ${table.timeZone} IS NOT NULL AND ${table.timezoneRevision} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const notificationAttemptItems = pgTable(
+  "notification_attempt_items",
+  {
+    userId: uuid("user_id").notNull(),
+    attemptId: uuid("attempt_id").notNull(),
+    intentId: uuid("intent_id").notNull(),
+    work: jsonb("work").$type<FinanceHumanWorkRef>().notNull(),
+  },
+  (table) => [
+    uniqueIndex("notification_attempt_items_idx").on(table.attemptId, table.intentId),
+    check("notification_attempt_items_ref_check", notificationReferenceCheck(table.work)),
+    foreignKey({
+      columns: [table.userId, table.attemptId],
+      foreignColumns: [notificationDeliveryAttempts.userId, notificationDeliveryAttempts.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.intentId],
+      foreignColumns: [notificationIntents.userId, notificationIntents.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const financeBudgetPolicies = pgTable(
+  "finance_budget_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    lifecycleRevision: integer("lifecycle_revision").notNull(),
+    state: text("state").notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+    disabledByActorId: text("disabled_by_actor_id"),
+  },
+  (table) => [
+    check(
+      "finance_budget_policies_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(updated_at) AND updated_at>='0001-01-01T00:00:00Z'::timestamptz AND updated_at<'10000-01-01T00:00:00Z'::timestamptz AND (disabled_at IS NULL OR (isfinite(disabled_at) AND disabled_at>='0001-01-01T00:00:00Z'::timestamptz AND disabled_at<'10000-01-01T00:00:00Z'::timestamptz))`,
+    ),
+    check("finance_budget_policies_revision_check", sql`lifecycle_revision >= 1`),
+    check(
+      "finance_budget_policies_state_check",
+      sql`(state = 'draft' AND disabled_at IS NULL AND disabled_by_actor_id IS NULL) OR (state = 'disabled' AND disabled_at IS NOT NULL AND disabled_by_actor_id IS NOT NULL)`,
+    ),
+    foreignKey({
+      name: "finance_budget_policies_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_policies_plan_fk",
+      columns: [table.planId, table.userId],
+      foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
+    }),
+    uniqueIndex("finance_budget_policies_id_plan_user_idx").on(
+      table.id,
+      table.planId,
+      table.userId,
+    ),
+    uniqueIndex("finance_budget_policies_id_user_idx").on(table.id, table.userId),
+    index("finance_budget_policies_user_updated_idx").on(table.userId, table.updatedAt, table.id),
+    index("finance_budget_policies_user_plan_state_idx").on(
+      table.userId,
+      table.planId,
+      table.state,
+    ),
+  ],
+);
+
+export const financeBudgetPolicyVersions = pgTable(
+  "finance_budget_policy_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    policyId: uuid("policy_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    version: integer("version").notNull(),
+    baselineBudgetVersionId: uuid("baseline_budget_version_id").notNull(),
+    periodMonth: text("period_month").notNull(),
+    periodFrom: text("period_from").notNull(),
+    periodThrough: text("period_through").notNull(),
+    timezone: text("timezone").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    perChangeCapCents: integer("per_change_cap_cents").notNull(),
+    monthlyCapCents: integer("monthly_cap_cents").notNull(),
+    currency: text("currency").notNull(),
+    rollover: text("rollover").notNull(),
+    accounting: text("accounting").notNull(),
+    usageScope: text("usage_scope").notNull(),
+    directions: jsonb("directions").$type<FinanceBudgetPolicyTerms["directions"]>().notNull(),
+    protections: jsonb("protections").$type<FinanceBudgetPolicyTerms["protections"]>().notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "finance_budget_policy_versions_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(baseline_budget_version_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(expires_at) AND expires_at>='0001-01-01T00:00:00Z'::timestamptz AND expires_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_policy_versions_contract_check",
+      sql`finance_budget_policy_json_valid(directions,'directions') IS TRUE AND finance_budget_policy_json_valid(protections,'protections') IS TRUE AND finance_budget_policy_json_valid(jsonb_build_object('from',period_from,'through',period_through,'timezone',timezone),'period') IS TRUE`,
+    ),
+    check("finance_budget_policy_versions_version_check", sql`version >= 1`),
+    check(
+      "finance_budget_policy_versions_period_check",
+      sql`period_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND period_from = period_month || '-01' AND period_through = to_char((period_from::date + interval '1 month - 1 day'), 'YYYY-MM-DD') AND char_length(timezone) BETWEEN 1 AND 100`,
+    ),
+    check(
+      "finance_budget_policy_versions_caps_check",
+      sql`per_change_cap_cents >= 0 AND monthly_cap_cents >= 0`,
+    ),
+    check(
+      "finance_budget_policy_versions_terms_check",
+      sql`currency = 'USD' AND rollover = 'none' AND accounting = 'gross_positive_allocation_deltas' AND usage_scope = 'user_month_all_policy_versions'`,
+    ),
+    check(
+      "finance_budget_policy_versions_directions_check",
+      sql`jsonb_typeof(directions) = 'array' AND octet_length(directions::text) <= 131072`,
+    ),
+    check(
+      "finance_budget_policy_versions_protections_check",
+      sql`jsonb_typeof(protections) = 'array' AND octet_length(protections::text) <= 131072`,
+    ),
+    check(
+      "finance_budget_policy_versions_entries_check",
+      sql`jsonb_array_length(directions) <= 500 AND jsonb_array_length(protections) <= 500`,
+    ),
+    foreignKey({
+      name: "finance_budget_policy_versions_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_policy_versions_policy_fk",
+      columns: [table.policyId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetPolicies.id,
+        financeBudgetPolicies.planId,
+        financeBudgetPolicies.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_policy_versions_baseline_fk",
+      columns: [table.baselineBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    uniqueIndex("finance_budget_policy_versions_id_user_idx").on(table.id, table.userId),
+    uniqueIndex("finance_budget_policy_versions_policy_owner_idx").on(
+      table.id,
+      table.policyId,
+      table.planId,
+      table.userId,
+    ),
+    uniqueIndex("finance_budget_policy_versions_policy_version_idx").on(
+      table.policyId,
+      table.version,
+    ),
+    index("finance_budget_policy_versions_user_policy_version_idx").on(
+      table.userId,
+      table.policyId,
+      table.version,
+    ),
+    index("finance_budget_policy_versions_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
+
+export const financeBudgetRevisionProposals = pgTable(
+  "finance_budget_revision_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    policyId: uuid("policy_id").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    profileVersionId: uuid("profile_version_id"),
+    baselineBudgetVersionId: uuid("baseline_budget_version_id").notNull(),
+    activeBudgetVersionId: uuid("active_budget_version_id"),
+    latestBudgetVersionId: uuid("latest_budget_version_id"),
+    candidateSnapshot: jsonb("candidate_snapshot")
+      .$type<FinanceBudgetPolicyPlanSnapshot>()
+      .notNull(),
+    candidateHash: text("candidate_hash").notNull(),
+    state: text("state").notNull(),
+    lifecycleRevision: integer("lifecycle_revision").notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    withdrawnByActorId: text("withdrawn_by_actor_id"),
+  },
+  (table) => [
+    check(
+      "finance_budget_revision_proposals_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_version_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(baseline_budget_version_id),'uuid') IS TRUE AND (profile_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(profile_version_id),'uuid') IS TRUE)) AND (active_budget_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(active_budget_version_id),'uuid') IS TRUE)) AND (latest_budget_version_id IS NULL OR (finance_budget_policy_json_valid(to_jsonb(latest_budget_version_id),'uuid') IS TRUE)) AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(updated_at) AND updated_at>='0001-01-01T00:00:00Z'::timestamptz AND updated_at<'10000-01-01T00:00:00Z'::timestamptz AND (withdrawn_at IS NULL OR (isfinite(withdrawn_at) AND withdrawn_at>='0001-01-01T00:00:00Z'::timestamptz AND withdrawn_at<'10000-01-01T00:00:00Z'::timestamptz))`,
+    ),
+    check(
+      "finance_budget_revision_proposals_contract_check",
+      sql`finance_budget_policy_json_valid(candidate_snapshot,'plan') IS TRUE AND candidate_snapshot->>'userId'=user_id::text AND candidate_snapshot->>'planId'=plan_id::text`,
+    ),
+    check("finance_budget_revision_proposals_revision_check", sql`lifecycle_revision >= 1`),
+    check(
+      "finance_budget_revision_proposals_state_check",
+      sql`(state = 'inactive' AND withdrawn_at IS NULL AND withdrawn_by_actor_id IS NULL) OR (state = 'withdrawn' AND withdrawn_at IS NOT NULL AND withdrawn_by_actor_id IS NOT NULL)`,
+    ),
+    check(
+      "finance_budget_revision_proposals_candidate_snapshot_check",
+      sql`jsonb_typeof(candidate_snapshot) = 'object' AND octet_length(candidate_snapshot::text) <= 524288`,
+    ),
+    check(
+      "finance_budget_revision_proposals_hash_check",
+      sql`candidate_hash ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    foreignKey({
+      name: "finance_budget_revision_proposals_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_revision_proposals_policy_version_fk",
+      columns: [table.policyVersionId, table.policyId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetPolicyVersions.id,
+        financeBudgetPolicyVersions.policyId,
+        financeBudgetPolicyVersions.planId,
+        financeBudgetPolicyVersions.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_plan_fk",
+      columns: [table.planId, table.userId],
+      foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_profile_fk",
+      columns: [table.profileVersionId, table.userId],
+      foreignColumns: [financeProfileVersions.id, financeProfileVersions.userId],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_baseline_fk",
+      columns: [table.baselineBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_active_fk",
+      columns: [table.activeBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_revision_proposals_latest_fk",
+      columns: [table.latestBudgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    uniqueIndex("finance_budget_proposals_version_user_idx").on(
+      table.id,
+      table.policyVersionId,
+      table.userId,
+    ),
+    uniqueIndex("finance_budget_revision_proposals_id_user_idx").on(table.id, table.userId),
+    index("finance_budget_revision_proposals_user_state_created_idx").on(
+      table.userId,
+      table.state,
+      table.createdAt,
+      table.id,
+    ),
+    index("finance_budget_revision_proposals_user_policy_created_idx").on(
+      table.userId,
+      table.policyId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const financeBudgetPolicyPreviews = pgTable(
+  "finance_budget_policy_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    proposalId: uuid("proposal_id").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    policyLifecycleRevision: integer("policy_lifecycle_revision").notNull(),
+    proposalLifecycleRevision: integer("proposal_lifecycle_revision").notNull(),
+    inputSnapshot: jsonb("input_snapshot").$type<FinanceBudgetPolicyEvaluationInput>().notNull(),
+    resultSnapshot: jsonb("result_snapshot").$type<FinanceBudgetPolicyEvaluation>().notNull(),
+    previewHash: text("preview_hash").notNull(),
+    evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdByActorId: text("created_by_actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "finance_budget_policy_previews_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(proposal_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(policy_version_id),'uuid') IS TRUE AND isfinite(created_at) AND created_at>='0001-01-01T00:00:00Z'::timestamptz AND created_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(evaluated_at) AND evaluated_at>='0001-01-01T00:00:00Z'::timestamptz AND evaluated_at<'10000-01-01T00:00:00Z'::timestamptz AND isfinite(expires_at) AND expires_at>='0001-01-01T00:00:00Z'::timestamptz AND expires_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_policy_previews_contract_check",
+      sql`finance_budget_policy_json_valid(input_snapshot,'input') IS TRUE AND finance_budget_policy_json_valid(result_snapshot,'result') IS TRUE AND result_snapshot->'input'=input_snapshot AND (input_snapshot->>'evaluatedAt')::timestamptz=evaluated_at AND expires_at <= (input_snapshot->'terms'->>'expiresAt')::timestamptz AND input_snapshot->'observed'->>'userId'=user_id::text AND input_snapshot->'observed'->'policy'->>'id'=policy_version_id::text`,
+    ),
+    check(
+      "finance_budget_policy_previews_revision_check",
+      sql`policy_lifecycle_revision >= 1 AND proposal_lifecycle_revision >= 1`,
+    ),
+    check("finance_budget_policy_previews_expiry_check", sql`expires_at > evaluated_at`),
+    check(
+      "finance_budget_policy_previews_input_snapshot_check",
+      sql`jsonb_typeof(input_snapshot) = 'object' AND octet_length(input_snapshot::text) <= 2097152`,
+    ),
+    check(
+      "finance_budget_policy_previews_result_snapshot_check",
+      sql`jsonb_typeof(result_snapshot) = 'object' AND octet_length(result_snapshot::text) <= 4194304`,
+    ),
+    check("finance_budget_policy_previews_hash_check", sql`preview_hash ~ '^sha256:[0-9a-f]{64}$'`),
+    check(
+      "finance_budget_policy_previews_execution_check",
+      sql`COALESCE(result_snapshot->'executionAvailable' = 'false'::jsonb AND result_snapshot->>'kind' IN ('hypothetical_preview','denied'), false)`,
+    ),
+    foreignKey({
+      name: "finance_budget_policy_previews_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_policy_previews_proposal_fk",
+      columns: [table.proposalId, table.policyVersionId, table.userId],
+      foreignColumns: [
+        financeBudgetRevisionProposals.id,
+        financeBudgetRevisionProposals.policyVersionId,
+        financeBudgetRevisionProposals.userId,
+      ],
+    }),
+    foreignKey({
+      name: "finance_budget_policy_previews_policy_version_fk",
+      columns: [table.policyVersionId, table.userId],
+      foreignColumns: [financeBudgetPolicyVersions.id, financeBudgetPolicyVersions.userId],
+    }),
+    uniqueIndex("finance_budget_policy_previews_id_user_idx").on(table.id, table.userId),
+    index("finance_budget_policy_previews_user_proposal_created_idx").on(
+      table.userId,
+      table.proposalId,
+      table.createdAt,
+      table.id,
+    ),
+    index("finance_budget_policy_previews_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
+
+export const financeBudgetPeriodBaselines = pgTable(
+  "finance_budget_period_baselines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    periodMonth: text("period_month").notNull(),
+    periodFrom: text("period_from").notNull(),
+    periodThrough: text("period_through").notNull(),
+    timezone: text("timezone").notNull(),
+    budgetVersionId: uuid("budget_version_id").notNull(),
+    confirmedByActorId: text("confirmed_by_actor_id").notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "finance_budget_period_baselines_scalar_contract_check",
+      sql`finance_budget_policy_json_valid(to_jsonb(id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(user_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(plan_id),'uuid') IS TRUE AND finance_budget_policy_json_valid(to_jsonb(budget_version_id),'uuid') IS TRUE AND isfinite(confirmed_at) AND confirmed_at>='0001-01-01T00:00:00Z'::timestamptz AND confirmed_at<'10000-01-01T00:00:00Z'::timestamptz`,
+    ),
+    check(
+      "finance_budget_period_baselines_contract_check",
+      sql`finance_budget_policy_json_valid(jsonb_build_object('from',period_from,'through',period_through,'timezone',timezone),'period') IS TRUE`,
+    ),
+    check(
+      "finance_budget_period_baselines_period_check",
+      sql`period_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND period_from = period_month || '-01' AND period_through = to_char((period_from::date + interval '1 month - 1 day'), 'YYYY-MM-DD') AND char_length(timezone) BETWEEN 1 AND 100`,
+    ),
+    foreignKey({
+      name: "finance_budget_period_baselines_owner_fk",
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_budget_period_baselines_plan_fk",
+      columns: [table.planId, table.userId],
+      foreignColumns: [financeBudgetPlans.id, financeBudgetPlans.userId],
+    }),
+    foreignKey({
+      name: "finance_budget_period_baselines_budget_fk",
+      columns: [table.budgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    uniqueIndex("finance_budget_period_baselines_id_user_idx").on(table.id, table.userId),
+    uniqueIndex("finance_budget_period_baselines_user_month_idx").on(
+      table.userId,
+      table.periodMonth,
+    ),
+  ],
+);
+
+/** One explicit human-created purpose question; answering never settles its financial case. */
+export const financeContextualQuestions = pgTable(
+  "finance_contextual_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subtype: text("subtype").$type<"manual_transaction_purpose_v1">().notNull(),
+    reviewCaseId: uuid("review_case_id").notNull(),
+    transactionId: uuid("transaction_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    workRevision: bigint("work_revision", { mode: "bigint" }).notNull().default(1n),
+    actionRevision: bigint("action_revision", { mode: "bigint" }).notNull().default(1n),
+    accountRevision: bigint("account_revision", { mode: "bigint" }).notNull(),
+    transactionRevision: bigint("transaction_revision", { mode: "bigint" }).notNull(),
+    reviewRevision: bigint("review_revision", { mode: "bigint" }).notNull(),
+    dependencyAdapterVersion: integer("dependency_adapter_version").notNull().default(1),
+    state: text("state").$type<"open" | "answered" | "invalidated">().notNull().default("open"),
+    prompt: text("prompt").notNull(),
+    disclosure: text("disclosure").$type<"minimal">().notNull().default("minimal"),
+    merchant: text("merchant").notNull(),
+    transactionDate: text("transaction_date").notNull(),
+    amount: integer("amount_cents").notNull(),
+    currencyCode: text("currency_code"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_contextual_questions_owner_unique").on(table.userId, table.id),
+    uniqueIndex("finance_contextual_questions_case_unique").on(
+      table.userId,
+      table.reviewCaseId,
+      table.subtype,
+    ),
+    uniqueIndex("finance_contextual_questions_transaction_unique").on(
+      table.userId,
+      table.transactionId,
+      table.subtype,
+    ),
+    foreignKey({
+      name: "finance_contextual_questions_case_fk",
+      columns: [table.userId, table.reviewCaseId, table.transactionId],
+      foreignColumns: [
+        financeReviewCases.userId,
+        financeReviewCases.id,
+        financeReviewCases.transactionId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_contextual_questions_transaction_fk",
+      columns: [table.userId, table.transactionId, table.accountId],
+      foreignColumns: [
+        financeTransactions.userId,
+        financeTransactions.id,
+        financeTransactions.accountId,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_contextual_questions_account_fk",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_contextual_questions_subtype_check",
+      sql`${table.subtype} = 'manual_transaction_purpose_v1'`,
+    ),
+    check(
+      "finance_contextual_questions_revisions_check",
+      sql`${table.workRevision} > 0 AND ${table.actionRevision} > 0 AND ${table.accountRevision} > 0 AND ${table.transactionRevision} > 0 AND ${table.reviewRevision} > 0 AND ${table.dependencyAdapterVersion} = 1`,
+    ),
+    check(
+      "finance_contextual_questions_state_check",
+      sql`${table.state} IN ('open','answered','invalidated')`,
+    ),
+    check(
+      "finance_contextual_questions_presentation_check",
+      sql`char_length(${table.prompt}) BETWEEN 1 AND 1000 AND ${table.prompt}=btrim(${table.prompt}) AND ${table.disclosure}='minimal' AND char_length(${table.merchant}) BETWEEN 1 AND 1000 AND ${table.transactionDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND (${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$')`,
+    ),
+  ],
+);
+
+export const financeContextualAnswers = pgTable(
+  "finance_contextual_answers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
+    operationId: uuid("operation_id").notNull(),
+    answeredWorkRevision: bigint("answered_work_revision", { mode: "bigint" }).notNull(),
+    answeredActionRevision: bigint("answered_action_revision", { mode: "bigint" }).notNull(),
+    resultingWorkRevision: bigint("resulting_work_revision", { mode: "bigint" }).notNull(),
+    text: text("text").notNull(),
+    sourceKind: text("source_kind").$type<"app" | "agent" | "sms">().notNull(),
+    sourceMessageId: text("source_message_id"),
+    sourceReplyBindingId: uuid("source_reply_binding_id"),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    actorId: text("actor_id").notNull(),
+    requestId: text("request_id").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_contextual_answers_sms_binding_unique").on(
+      table.userId,
+      table.sourceReplyBindingId,
+    ),
+    uniqueIndex("finance_contextual_answers_operation_unique").on(table.userId, table.operationId),
+    uniqueIndex("finance_contextual_answers_revision_unique").on(
+      table.userId,
+      table.questionId,
+      table.answeredWorkRevision,
+    ),
+    foreignKey({
+      name: "finance_contextual_answers_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [financeContextualQuestions.userId, financeContextualQuestions.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_contextual_answers_revisions_check",
+      sql`${table.answeredWorkRevision} > 0 AND ${table.answeredActionRevision} > 0 AND ${table.resultingWorkRevision}::numeric = ${table.answeredWorkRevision}::numeric + 1`,
+    ),
+    check(
+      "finance_contextual_answers_text_check",
+      sql`char_length(${table.text}) BETWEEN 1 AND 10000 AND ${table.text}=btrim(${table.text})`,
+    ),
+    check(
+      "finance_contextual_answers_provenance_check",
+      sql`((((${table.sourceKind}='app' AND ${table.actorType}='user') OR (${table.sourceKind}='agent' AND ${table.actorType}='agent')) AND ${table.sourceMessageId} IS NULL AND ${table.sourceReplyBindingId} IS NULL) OR (${table.sourceKind}='sms' AND ${table.actorType}='user' AND ${table.actorId}=${table.userId}::text AND ${table.sourceMessageId} IS NOT NULL AND ${table.sourceMessageId} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND ${table.sourceReplyBindingId} IS NOT NULL)) AND char_length(${table.actorId}) BETWEEN 1 AND 240 AND char_length(${table.requestId}) BETWEEN 1 AND 240`,
+    ),
+  ],
+);
+
+/** Account-owned ritual definitions; immutable snapshots live with occurrences. */
+export const ritualDefinitions = pgTable(
+  "ritual_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualDefinition>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_definition_owner_kind").on(t.userId, t.kind),
+    uniqueIndex("ritual_definition_owner_id").on(t.userId, t.id),
+    check("ritual_kind", sql`${t.kind} in ('morning','night')`),
+  ],
+);
+export const ritualOccurrences = pgTable(
+  "ritual_occurrences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    ritualId: uuid("ritual_id").notNull(),
+    localDate: text("local_date").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualOccurrence>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_occurrence_date").on(t.userId, t.ritualId, t.localDate),
+    uniqueIndex("ritual_occurrence_owner_id").on(t.userId, t.id),
+    foreignKey({
+      columns: [t.userId, t.ritualId],
+      foreignColumns: [ritualDefinitions.userId, ritualDefinitions.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualDefinitionRevisions = pgTable(
+  "ritual_definition_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    ritualId: uuid("ritual_id").notNull(),
+    revision: integer("revision").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualDefinition>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_definition_revision").on(t.ritualId, t.revision),
+    check("ritual_revision_positive", sql`${t.revision} > 0`),
+    foreignKey({
+      columns: [t.userId, t.ritualId],
+      foreignColumns: [ritualDefinitions.userId, ritualDefinitions.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualResponses = pgTable(
+  "ritual_responses",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    occurrenceId: uuid("occurrence_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualResponse>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_response_request").on(t.userId, t.requestId),
+    foreignKey({
+      columns: [t.userId, t.occurrenceId],
+      foreignColumns: [ritualOccurrences.userId, ritualOccurrences.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualActions = pgTable(
+  "ritual_actions",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    occurrenceId: uuid("occurrence_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    kind: text("kind").notNull(),
+    data: jsonb("data").$type<import("@personal-os/domain").RitualAction>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_action_request_kind").on(t.userId, t.requestId, t.kind),
+    foreignKey({
+      columns: [t.userId, t.occurrenceId],
+      foreignColumns: [ritualOccurrences.userId, ritualOccurrences.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const ritualRequests = pgTable(
+  "ritual_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestId: uuid("request_id").notNull(),
+    ritualId: uuid("ritual_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    result: jsonb("result").$type<unknown>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("ritual_request_owner").on(t.userId, t.requestId),
+    foreignKey({
+      columns: [t.userId, t.ritualId],
+      foreignColumns: [ritualDefinitions.userId, ritualDefinitions.id],
+    }).onDelete("cascade"),
   ],
 );

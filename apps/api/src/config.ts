@@ -5,7 +5,25 @@ export const officialAgentSkill = iloSetupRelease;
 
 const configSchema = z
   .object({
-    APP_BASE_URL: z.url(),
+    APP_BASE_URL: z.url().transform((value, context) => {
+      const url = new URL(value);
+      if (
+        !["http:", "https:"].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.pathname !== "/" ||
+        url.href.includes("?") ||
+        url.href.includes("#")
+      ) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "APP_BASE_URL must be an absolute HTTP(S) origin without credentials, path, query, or fragment.",
+        });
+        return z.NEVER;
+      }
+      return url.origin;
+    }),
     ALLOWED_ORIGINS: z.string().optional(),
     AUTH_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(1_000).default(20),
     AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3_600).default(300),

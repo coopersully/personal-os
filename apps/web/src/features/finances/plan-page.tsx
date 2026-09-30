@@ -283,6 +283,7 @@ export function FinancePlanPage() {
         await api.approveFinanceBudget({
           budgetVersionId: displayed.id,
           expectedVersion: displayed.version,
+          expectedProfileVersionId: displayed.profileVersionId ?? null,
           approvalSource: "user_instruction",
           idempotencyKey: key,
         }),

@@ -518,7 +518,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
   getFinancePlaybook: vi.fn(),
-  getFinanceAutomationSettings: vi.fn(),
+  getExecutionPolicySettings: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
@@ -541,7 +541,7 @@ const mocks = vi.hoisted(() => ({
   getPlaidStatus: vi.fn(),
   invoke: vi.fn(),
   updateFinanceTransaction: vi.fn(),
-  updateFinanceAutomationSettings: vi.fn(),
+  updateExecutionPolicySettings: vi.fn(),
   setFinanceTransactionBreakdown: vi.fn(),
   answerFinanceQuestion: vi.fn(),
   approveFinanceActionReview: vi.fn(),
@@ -823,8 +823,11 @@ function defaults() {
     assessment: { blockers: [], nextActions: [], readiness: "on_track", uncertainty: [] },
     playbook: { steps: [], version: "1.0.0" },
   });
-  mocks.getFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
-  mocks.updateFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
+  mocks.getExecutionPolicySettings.mockResolvedValue({ reviewBypassEnabled: false, version: 1 });
+  mocks.updateExecutionPolicySettings.mockResolvedValue({
+    reviewBypassEnabled: false,
+    version: 1,
+  });
   mocks.listFinanceActionReviews.mockResolvedValue([]);
   mocks.listFinanceQuestions.mockResolvedValue([]);
   mocks.listFinanceReimbursements.mockResolvedValue({ reimbursements: [], unmatchedCredits: [] });
@@ -4911,18 +4914,21 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("prioritizes canonical Finance position, proposals, and the next Inbox question", async () => {
+  it("prioritizes canonical Finance position, proposals, and selectable outstanding work", async () => {
     configureFinanceWorkspace();
     const view = setup("/finances");
-    const position = await screen.findByRole("region", { name: "Financial position" });
+    const position = await screen.findByRole(
+      "region",
+      { name: "Financial position" },
+      { timeout: 10_000 },
+    );
     expect(within(position).getByText("$250.00")).toBeInTheDocument();
     expect(within(position).getByText("$42.50")).toBeInTheDocument();
     expect(within(position).getByText("$300.00")).toBeInTheDocument();
     expect(await screen.findByText("Proposed · Version 4")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Answer next question" })).toHaveAttribute(
-      "href",
-      "/finances/review",
-    );
+    const outstanding = screen.getByRole("region", { name: "Outstanding finance items" });
+    expect(within(outstanding).getByText("Outstanding (1)")).toBeInTheDocument();
+    expect(within(outstanding).getByRole("button", { name: "Review item" })).toBeEnabled();
     const sidebar = screen.getByRole("complementary", { name: "Finances Sidebar" });
     expect(within(sidebar).getByRole("link", { name: "Review 1" })).toHaveAttribute(
       "href",
@@ -5083,6 +5089,7 @@ describe("ilo web app", () => {
       expect(mocks.approveFinanceBudget).toHaveBeenCalledWith({
         approvalSource: "user_instruction",
         budgetVersionId: thirdId,
+        expectedProfileVersionId: null,
         expectedVersion: 4,
         idempotencyKey: expect.any(String),
       }),

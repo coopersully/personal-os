@@ -8,6 +8,7 @@ export type TwilioConfig = {
 };
 
 export type TwilioMessage = {
+  dateCreated?: Date | null;
   numSegments?: string | null;
   sid: string;
   status: string;

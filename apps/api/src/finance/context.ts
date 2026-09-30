@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { type Database, financeAgentSettings, financeMutationRecords } from "@personal-os/database";
+import {
+  type Database,
+  executionPolicySettings,
+  financeMutationRecords,
+  users,
+} from "@personal-os/database";
 import { and, eq, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -15,12 +20,12 @@ export type FinanceMutationContext = {
 };
 
 export async function loadFinanceAuthorization(input: {
-  db: Database;
+  db: Database | FinanceTransaction;
   principal: Principal;
   requestId: string;
 }): Promise<FinanceMutationContext> {
-  const setting = await input.db.query.financeAgentSettings.findFirst({
-    where: eq(financeAgentSettings.userId, input.principal.userId),
+  const setting = await input.db.query.executionPolicySettings.findFirst({
+    where: eq(executionPolicySettings.userId, input.principal.userId),
   });
   const canMutate = input.principal.scopes.has("finances:write");
   const bypassEnabled = setting?.reviewBypassEnabled ?? false;
@@ -29,7 +34,9 @@ export async function loadFinanceAuthorization(input: {
     actorType: input.principal.actorType,
     bypassEnabled,
     canMutate,
-    canSelfApprove: input.principal.actorType === "agent" && canMutate && bypassEnabled,
+    // Review bypass controls timing, not authority to activate a budget.
+    // Fail closed until the explicit Finance budget policy supplies that authority.
+    canSelfApprove: false,
     requestId: input.requestId,
     userId: input.principal.userId,
   };
@@ -45,7 +52,7 @@ export function requireFinanceMutation(
   if (options.approvalSource === "agent_self_approval" && !context.canSelfApprove) {
     throw new AppError(
       "forbidden",
-      "Agent self-approval requires Finance bypass mode and the finances:write scope.",
+      "Agent self-approval requires an explicit Finance budget activation policy.",
     );
   }
 }
@@ -55,8 +62,31 @@ type IdempotentOperation = {
   lockIdentities?: string[];
   operation: string;
   payload: unknown;
+  /** Acquire owner deletion/key-change admission before every receipt or child lock. */
+  requireUserAdmission?: boolean;
 };
-type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+export type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+export type FinanceAdmittedMutationOperation = {
+  idempotencyKey: string;
+  operation: string;
+  payload: unknown;
+  sourceKind: "agent" | "app" | "sms";
+};
+
+export type FinanceMutationAdmission<TPrepared, TResult extends Record<string, unknown>> =
+  | { prepared: TPrepared; state: "admitted" }
+  | { result: TResult; state: "unavailable" };
+
+async function admitFinanceUser(tx: FinanceTransaction, userId: string): Promise<boolean> {
+  const [owner] = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, userId))
+    .for("key share")
+    .limit(1);
+  return owner !== undefined;
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -76,6 +106,23 @@ function requestHash(operation: IdempotentOperation): string {
     .digest("hex")}`;
 }
 
+function admittedRequestHash(
+  context: FinanceMutationContext,
+  operation: FinanceAdmittedMutationOperation,
+): string {
+  return `sha256:${createHash("sha256")
+    .update(
+      stableJson({
+        actorId: context.actorId,
+        actorType: context.actorType,
+        operation: operation.operation,
+        payload: operation.payload,
+        sourceKind: operation.sourceKind,
+      }),
+    )
+    .digest("hex")}`;
+}
+
 function assertMatchingMutation(
   record: typeof financeMutationRecords.$inferSelect,
   operation: IdempotentOperation,
@@ -87,6 +134,100 @@ function assertMatchingMutation(
       "That idempotency key was already used for different Finance work.",
     );
   }
+}
+
+/** Read-only exact receipt lookup, sharing mutation authorization, locks and hash semantics. */
+export async function readFinanceAdmittedReceipt(
+  executor: FinanceTransaction,
+  context: FinanceMutationContext,
+  operation: FinanceAdmittedMutationOperation,
+) {
+  requireFinanceMutation(context);
+  if (!(await admitFinanceUser(executor, context.userId))) {
+    throw new AppError("not_found", "Account not found.");
+  }
+  const hash = admittedRequestHash(context, operation);
+  const lockIdentity = `finance-mutation:${context.userId}:${operation.idempotencyKey}`;
+  const whereKey = and(
+    eq(financeMutationRecords.userId, context.userId),
+    eq(financeMutationRecords.idempotencyKey, operation.idempotencyKey),
+  );
+  await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
+  const existing = await executor.query.financeMutationRecords.findFirst({ where: whereKey });
+  if (existing) {
+    if (
+      existing.operation !== operation.operation ||
+      existing.requestHash !== hash ||
+      existing.actorType !== context.actorType ||
+      existing.actorId !== context.actorId
+    ) {
+      throw new AppError(
+        "invalid_request",
+        "That idempotency key was already used for different Finance work.",
+      );
+    }
+  }
+  return existing;
+}
+
+/**
+ * Runs a newly admitted Finance mutation inside a transaction owned by its caller.
+ * Preparation happens before the receipt is inserted so unsupported or contended
+ * work can leave no durable idempotency claim.
+ */
+export async function executeFinanceAdmittedMutation<
+  TPrepared,
+  TResult extends Record<string, unknown>,
+>(
+  executor: FinanceTransaction,
+  context: FinanceMutationContext,
+  operation: FinanceAdmittedMutationOperation,
+  prepare: (tx: FinanceTransaction) => Promise<FinanceMutationAdmission<TPrepared, TResult>>,
+  mutate: (tx: FinanceTransaction, prepared: TPrepared) => Promise<TResult>,
+): Promise<TResult> {
+  const existing = await readFinanceAdmittedReceipt(executor, context, operation);
+  if (existing) {
+    if (existing.status === "completed" && existing.response) {
+      return existing.response as TResult;
+    }
+    if (existing.status === "failed") {
+      throw new AppError(
+        "conflict",
+        "That Finance mutation previously failed; use a new idempotency key to retry.",
+      );
+    }
+    throw new AppError("conflict", "That Finance mutation is already in progress.");
+  }
+
+  const admission = await prepare(executor);
+  if (admission.state === "unavailable") return admission.result;
+  const [record] = await executor
+    .insert(financeMutationRecords)
+    .values({
+      actorId: context.actorId,
+      actorType: context.actorType,
+      idempotencyKey: operation.idempotencyKey,
+      operation: operation.operation,
+      requestHash: admittedRequestHash(context, operation),
+      status: "started",
+      userId: context.userId,
+    })
+    .returning({ id: financeMutationRecords.id });
+  /* v8 ignore start -- PostgreSQL INSERT ... RETURNING yields the inserted row or throws. */
+  if (!record) throw new AppError("internal_error", "Finance mutation state was not created.");
+  /* v8 ignore stop */
+  const response = await mutate(executor, admission.prepared);
+  await executor
+    .update(financeMutationRecords)
+    .set({
+      completedAt: new Date(),
+      leaseExpiresAt: null,
+      response,
+      status: "completed",
+      updatedAt: new Date(),
+    })
+    .where(eq(financeMutationRecords.id, record.id));
+  return response;
 }
 
 export async function executeFinanceIdempotently<T extends Record<string, unknown>>(
@@ -106,6 +247,9 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   );
 
   const execute = async (tx: FinanceTransaction, markClaimed: () => void) => {
+    if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId))) {
+      throw new AppError("not_found", "Account not found.");
+    }
     // Agent actions acquire semantic locks while revalidating. Direct writers
     // must take those same locks before their idempotency lock so the two paths
     // cannot form a reversed-order advisory-lock cycle.
@@ -191,6 +335,10 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
       if (isUniqueViolation(error) && !claimed && attempt === 0) continue;
       if (claimed) {
         await db.transaction(async (tx) => {
+          // The owner may have been deleted after the operation rolled back. In that case a
+          // user-owned failure receipt cannot survive, so preserve the original operation error.
+          if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId)))
+            return;
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`);
           const existing = await tx.query.financeMutationRecords.findFirst({ where: whereKey });
           if (existing?.status === "completed" || existing?.status === "failed") return;

@@ -79,3 +79,11 @@ until that acceptance completes.
 3. Cover retries, immutable public assets, stale sources, partial artifacts, rollout switch and failures.
 4. Update release documentation and Linear, run repository verification and independent PR review.
 5. Merge, build the first complete draft, prove the installed upgrade, then enable automatic publication.
+
+## Signing and manifest review refinements
+
+- Signing credentials moved from repository scope to the `desktop-signing` environment, whose sole allowed deployment ref is the main branch. Updater keys are further isolated in the separate main-only `desktop-updater-signing` environment. A negative tag probe was rejected before a runner started.
+- Retired pre-merge tag-selected signing. Complete drafts from verified main provide candidate delivery while automatic publication is paused.
+- The Mac builder never receives the updater private key. A separate publication runner uses only pinned Tauri CLI dependencies to sign the final archives.
+- Pinned the local updater dependency with a 1 MiB streaming manifest cap; all 9 dependency tests and 50 application native tests passed.
+- Recheck main after the production probe immediately before publication. The timing regression is covered by the 19 release tests.

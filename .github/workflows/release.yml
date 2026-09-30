@@ -1,8 +1,6 @@
 name: Release desktop installers
 
 on:
-  push:
-    tags: ["v*", "desktop-candidate/*"]
   workflow_run:
     workflows: ["CI"]
     branches: [main]
@@ -11,7 +9,7 @@ on:
 permissions:
   contents: read
 
-# Serialize version reservation, packaging and publication across manual and automatic runs.
+# Serialize version reservation, packaging and publication for verified main.
 concurrency:
   group: desktop-stable-release
   cancel-in-progress: false
@@ -19,51 +17,38 @@ concurrency:
 jobs:
   prepare:
     if: >-
-      github.event_name == 'push' ||
-      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
     outputs:
-      build: ${{ steps.auto.outputs.build || steps.tag.outputs.build }}
-      tag: ${{ steps.auto.outputs.tag || steps.tag.outputs.tag }}
-      ref: ${{ steps.auto.outputs.ref || steps.tag.outputs.ref }}
+      build: ${{ steps.auto.outputs.build }}
+      tag: ${{ steps.auto.outputs.tag }}
+      ref: ${{ steps.auto.outputs.ref }}
       source: ${{ steps.auto.outputs.source }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Reserve a release for desktop changes on verified main
-        if: github.event_name == 'workflow_run'
         id: auto
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: node apps/desktop/scripts/automatic-release.mjs
-      - name: Use explicitly pushed release or candidate tag
-        if: github.event_name == 'push'
-        id: tag
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          {
-            echo 'build=true'
-            echo "tag=$RELEASE_TAG"
-            echo "ref=$(git rev-parse HEAD)"
-          } >> "$GITHUB_OUTPUT"
-
   macos:
     needs: prepare
     if: needs.prepare.outputs.build == 'true'
     timeout-minutes: 60
+    environment: desktop-signing
     name: macOS DMG
     strategy:
       fail-fast: false
@@ -92,9 +77,6 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           release_tag="$RELEASE_TAG"
-          if [[ "$release_tag" == desktop-candidate/* ]]; then
-            release_tag="v$(node -p "require('./apps/desktop/package.json').version")"
-          fi
           node apps/desktop/scripts/release-metadata.mjs "$release_tag"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @personal-os/web build
@@ -130,8 +112,6 @@ jobs:
           ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
           ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
           NOHMI_UPDATER_PUBLIC_KEY: ${{ vars.NOHMI_UPDATER_PUBLIC_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ILO_KEYCHAIN_ACCESS_GROUP: ${{ vars.ILO_KEYCHAIN_ACCESS_GROUP }}
         run: bash macos/scripts/release.sh
       - uses: actions/upload-artifact@v7
@@ -146,6 +126,7 @@ jobs:
     needs: [prepare, macos]
     timeout-minutes: 280
     runs-on: ubuntu-latest
+    environment: desktop-updater-signing
     steps:
       - uses: actions/checkout@v7
         with:
@@ -159,6 +140,19 @@ jobs:
           path: release-assets
           pattern: macos-installer-*
           merge-multiple: true
+      - name: Prepare the pinned signer without application dependencies
+        run: npm install --prefix "$RUNNER_TEMP/nohmi-signer" --ignore-scripts --no-audit --no-fund @tauri-apps/cli@2.12.0
+      - name: Sign only the final notarized updater archives
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          for arch in aarch64 x86_64; do
+            archive="$GITHUB_WORKSPACE/release-assets/nohmi_${RELEASE_TAG#v}_${arch}.app.tar.gz"
+            test -f "$archive"
+            "$RUNNER_TEMP/nohmi-signer/node_modules/.bin/tauri" signer sign --app-version "${RELEASE_TAG#v}" "$archive"
+          done
       - name: Assemble and publish the complete release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -88,8 +88,23 @@ pub fn setup(app: &tauri::AppHandle) {
         }),
         operation: tokio::sync::Mutex::new(()),
     });
-    if supported() {
-        schedule(app);
+}
+fn release_startup(status: &mut Status) -> bool {
+    if status.phase == "installing" {
+        return false;
+    }
+    status.startup_blocking = false;
+    true
+}
+fn is_external_intent(action: &str) -> bool {
+    matches!(action, "open" | "join" | "complete" | "capture")
+}
+pub fn external_intent(app: &tauri::AppHandle, action: &str) {
+    if !is_external_intent(action) {
+        return;
+    }
+    if let Some(state) = app.try_state::<UpdateState>() {
+        release_startup(&mut state.session.lock().unwrap().status);
     }
 }
 pub fn startup_blocking(app: &tauri::AppHandle) -> bool {
@@ -127,6 +142,33 @@ fn fail(app: &tauri::AppHandle, message: &str) {
     session.status.phase = "error".into();
     session.status.error = Some(message.into());
     session.status.startup_blocking = false;
+}
+fn check_failure(error: Option<&tauri_plugin_updater::Error>) -> (&'static str, &'static str) {
+    use tauri_plugin_updater::Error;
+    match error {
+        None => ("timeout", "The update check timed out. Please try again"),
+        Some(Error::Reqwest(error)) if error.is_timeout() => {
+            ("timeout", "The update check timed out. Please try again")
+        }
+        Some(Error::Reqwest(_)) => (
+            "transport",
+            "Could not reach the update service. Please try again",
+        ),
+        Some(Error::Serialization(_) | Error::Io(_) | Error::Semver(_)) => (
+            "invalid_feed",
+            "The update service returned invalid release information. Please try again later",
+        ),
+        Some(_) => (
+            "release_unavailable",
+            "Update information is unavailable. Please try again later",
+        ),
+    }
+}
+fn report_check_failure(app: &tauri::AppHandle, error: Option<&tauri_plugin_updater::Error>) {
+    let (code, message) = check_failure(error);
+    // Static categories only: never log provider bodies, URLs or signature content.
+    eprintln!("{{\"event\":\"desktop_update_check_failed\",\"code\":\"{code}\"}}");
+    fail(app, message);
 }
 async fn check(app: &tauri::AppHandle, manual: bool) {
     let state = app.state::<UpdateState>();
@@ -167,11 +209,12 @@ async fn check(app: &tauri::AppHandle, manual: bool) {
             session.status.startup_blocking = false;
             return;
         }
-        _ => {
-            fail(
-                app,
-                "Could not check for updates. Try again when you are online",
-            );
+        Ok(Err(error)) => {
+            report_check_failure(app, Some(&error));
+            return;
+        }
+        Err(_) => {
+            report_check_failure(app, None);
             return;
         }
     };
@@ -279,11 +322,11 @@ pub fn desktop_update_open(app: tauri::AppHandle, window: WebviewWindow) -> Resu
     main_window(&window)?;
     let state = app.state::<UpdateState>();
     let mut session = state.session.lock().unwrap();
-    if session.status.phase == "installing" {
-        return Err("Installation is already in progress".into());
+    if release_startup(&mut session.status) {
+        Ok(())
+    } else {
+        Err("Installation is already in progress".into())
     }
-    session.status.startup_blocking = false;
-    Ok(())
 }
 #[tauri::command]
 pub async fn desktop_update_check(
@@ -310,6 +353,40 @@ pub async fn desktop_update_restart(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn check_errors_preserve_redacted_categories_without_blaming_connectivity() {
+        use tauri_plugin_updater::Error;
+        assert_eq!(check_failure(None).0, "timeout");
+        let invalid = Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "private body",
+        ));
+        let (code, message) = check_failure(Some(&invalid));
+        assert_eq!(code, "invalid_feed");
+        assert!(!message.contains("private body"));
+        assert!(!message.contains("online"));
+        assert_eq!(
+            check_failure(Some(&Error::ReleaseNotFound)).0,
+            "release_unavailable"
+        );
+    }
+    #[test]
+    fn an_external_intent_releases_automatic_install_authority() {
+        for action in ["open", "join", "complete", "capture"] {
+            assert!(is_external_intent(action));
+        }
+        for action in ["refresh", "ritual_refresh", "hide", ""] {
+            assert!(!is_external_intent(action));
+        }
+        let mut status = ready();
+        assert!(release_startup(&mut status));
+        assert!(!can_install(&status, false));
+        assert!(can_install(&status, true));
+        status.phase = "installing".into();
+        status.startup_blocking = true;
+        assert!(!release_startup(&mut status));
+        assert!(status.startup_blocking);
+    }
     fn ready() -> Status {
         Status {
             installed_version: "0.1.0".into(),

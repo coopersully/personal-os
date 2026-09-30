@@ -14,7 +14,7 @@ Use the HTTPS GitHub latest release feed with default newer-only version compari
 
 ## User experience and lifecycle
 
-A fresh release build checks for updates before mounting the interactive app. Show a compact startup status with an Open now escape while checking/downloading. Checking has an 8-second deadline; downloads have a 120-second deadline and reject payloads over 256 MiB. On failure, open the existing app and expose the failure in Settings. A successful signed download installs and relaunches automatically only while the startup gate still owns the session. Open now irrevocably releases that automatic-install authority for this launch. Once the app is interactive, checks may download but never install or restart automatically. Settings offers Restart to update with explicit confirmation to save work; an active ritual blocks it.
+A fresh release build checks for updates before mounting the interactive app. Show a compact startup status with an Open now escape while checking/downloading. Checking has an 8-second deadline and a client-enforced 1 MiB manifest cap; downloads have a 120-second deadline and reject payloads over 256 MiB. On failure, open the existing app and expose the failure in Settings. A successful signed download installs and relaunches automatically only while the startup gate still owns the session. Open now irrevocably releases that automatic-install authority for this launch. Once the app is interactive, checks may download but never install or restart automatically. Settings offers Restart to update with explicit confirmation to save work; an active ritual blocks it.
 
 Check once on cold launch and on reopening, at most once per six hours unless manually requested. Serialize all operations. The native process owns status and verified downloaded bytes so closing a settings view does not interrupt the operation. Do not persist an unverified install instruction. A later fresh launch can re-download; a killed process safely starts again. Keep updates disabled in development, unsupported platforms, or builds without a signing key. No unbounded retries. Installation is not cancellable after its commit point; suppress the startup escape at that stage.
 
@@ -26,7 +26,7 @@ Settings shows installed version, available version, check/download/install stat
 - Authority: HTTPS fixed repository feed and embedded updater public key; Apple Developer ID, notarization and host/widget profiles for distribution.
 - Transport: outbound HTTPS 443 to GitHub and its release-asset hosts; no API credentials attached. Production API remains independently configured.
 - Bounds: check 8 seconds; download 120 seconds and 256 MiB; one native operation; six-hour automatic retry throttle; metadata response size cap and five-minute cache.
-- Commit point: signed bytes verified before plugin installation. Before install, failure/cancel leaves current bundle untouched. During install, rely on the updater's replacement/rollback behavior; do not kill the operation with a deadline.
+- Commit point: signed bytes verified before plugin installation. Before install, failure/cancel leaves current bundle untouched. Installation atomically exchanges the old and new macOS bundle names on the same filesystem. A failed exchange leaves the old bundle intact; no delete or privileged fallback is allowed. Do not kill the operation with a deadline.
 - Recovery: failure opens current app and preserves an actionable status; next launch/manual check retries. Offline launch works. Bad release recovery uses a higher signed version.
 - Observation: sanitized statuses only, version and time visible; no secret values or raw remote errors in UI.
 - Disconfirming case: green mocks cannot prove Apple authorization, Gatekeeper acceptance, release artifact accessibility, installed widget continuity or replacement from /Applications. Require a signed old-to-new installed-app smoke before calling distribution verified.
@@ -52,3 +52,5 @@ main source revision, and the rollout switch. The existing controller's Git arch
 revision; this proves API source and database readiness, not completion of the private controller
 transaction. Initial installed-upgrade acceptance precedes enabling the switch.
 See `docs/releasing.md` for exact scope, deadlines, recovery and operator actions.
+
+Signing credentials reside only in main-only GitHub environments, with updater keys isolated from Apple/build credentials. Unmerged/tag-selected workflows cannot use them. The updater private key is injected only into archive signing on a separate publication runner with no application dependencies. Signed candidate delivery uses complete drafts from verified main.

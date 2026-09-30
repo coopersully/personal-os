@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -114,13 +115,38 @@ export async function publishRelease({
     // CI and production deploy run independently. Never offer a client before its API is live.
     const deadline = now() + 270 * 60_000;
     while (true) {
+      const ready = await deploymentReady(source);
       const main = JSON.parse(github("api", `repos/${repo}/git/ref/heads/main`)).object.sha;
       if (main !== source) {
         console.log("Source superseded: keeping the complete release as a draft");
         break;
       }
-      if (await deploymentReady(source)) {
-        github("release", "edit", tag, "--draft=false", "--latest");
+      if (ready) {
+        try {
+          github("release", "edit", tag, "--draft=false", "--latest");
+        } catch (error) {
+          // A timeout can follow a successful server-side publication. Confirm the
+          // exact uploaded bytes and notes, without mutating an already-public release.
+          const confirmed = JSON.parse(github("api", `repos/${repo}/releases/tags/${tag}`));
+          const matches =
+            confirmed.tag_name === tag &&
+            confirmed.draft === false &&
+            confirmed.prerelease === false &&
+            confirmed.body === readFileSync("release-notes.md", "utf8") &&
+            confirmed.assets?.length === assets.length &&
+            assets.every((path) => {
+              const name = path.slice("release-assets/".length);
+              const found = confirmed.assets.filter((asset) => asset.name === name);
+              return (
+                found.length === 1 &&
+                found[0].state === "uploaded" &&
+                found[0].digest ===
+                  `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`
+              );
+            });
+          if (!matches) throw error;
+          console.log(`Confirmed ${tag} was published despite the command failure`);
+        }
         console.log(`Published ${tag}: installers and automatic updates are live`);
         break;
       }

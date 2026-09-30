@@ -724,7 +724,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/auth/password-reset", rateLimitAuth);
   app.use("/v1/auth/email-verification/confirm", rateLimitAuth);
 
-  const desktopRelease = createDesktopReleaseService(dependencies.config.apiBaseUrl);
+  const desktopRelease = createDesktopReleaseService(
+    dependencies.config.apiBaseUrl,
+    undefined,
+    dependencies.log,
+  );
   app.get("/v1/desktop-release", async (context) => context.json(await desktopRelease()));
 
   app.get("/health/live", (context) => context.json({ status: "ok" }));

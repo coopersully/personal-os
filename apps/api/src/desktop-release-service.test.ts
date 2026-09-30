@@ -14,3 +14,26 @@ it("advertises official downloads only for the official API", async () => {
   });
   expect(read).toHaveBeenCalledOnce();
 });
+
+it("sends release failures through the API structured logger", async () => {
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response(null, { status: 429 }));
+  const log = vi.fn();
+  try {
+    const read = createDesktopReleaseService("https://nohmi-api.coopersully.me", undefined, log);
+    expect(await read()).toEqual({ status: "unavailable", release: null });
+    await read();
+    expect(log).toHaveBeenCalledExactlyOnceWith({
+      event: "desktop_release_unavailable",
+      code: "http",
+      status: 429,
+      durationMs: expect.any(Number),
+      method: "GET",
+      path: "/v1/desktop-release",
+      requestId: expect.any(String),
+    });
+  } finally {
+    fetcher.mockRestore();
+  }
+});

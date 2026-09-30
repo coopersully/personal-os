@@ -25,7 +25,7 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
 libc = "0.2"
 chrono = "0.4"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "=2.12.0", path = "vendor/tauri-plugin-updater" }
 
 [target.'cfg(target_os = "macos")'.build-dependencies]
 swift-rs = { version = "1", features = ["build"] }

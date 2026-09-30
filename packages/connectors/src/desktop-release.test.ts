@@ -62,3 +62,43 @@ describe("desktop release metadata", () => {
     ).toBe("unavailable");
   });
 });
+
+it("reports redacted failure categories once per upstream attempt, not cached read", async () => {
+  const secret = "private upstream content";
+  for (const [response, reason, status] of [
+    [new Response(secret, { status: 429 }), "http", 429],
+    [new Response(null), "body", 200],
+    [new Response("x".repeat(1_048_577)), "body", 200],
+    [new Response(secret), "metadata", 200],
+  ] as const) {
+    const observe = vi.fn();
+    const read = createDesktopReleaseReader(vi.fn().mockResolvedValue(response), Date.now, observe);
+    expect(await read()).toEqual({ status: "unavailable", release: null });
+    await read();
+    expect(observe).toHaveBeenCalledExactlyOnceWith({
+      reason,
+      status,
+      durationMs: expect.any(Number),
+    });
+    expect(JSON.stringify(observe.mock.calls)).not.toContain(secret);
+  }
+  for (const [error, reason] of [
+    [new Error(secret), "transport"],
+    [new DOMException(secret, "TimeoutError"), "timeout"],
+  ] as const) {
+    const observe = vi.fn();
+    await createDesktopReleaseReader(vi.fn().mockRejectedValue(error), Date.now, observe)();
+    expect(observe).toHaveBeenCalledExactlyOnceWith({
+      reason,
+      status: 0,
+      durationMs: expect.any(Number),
+    });
+  }
+  const observe = vi.fn();
+  await createDesktopReleaseReader(
+    vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
+    Date.now,
+    observe,
+  )();
+  expect(observe).not.toHaveBeenCalled();
+});

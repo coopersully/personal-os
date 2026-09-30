@@ -32,6 +32,8 @@ pub fn run() {
                 });
             }
             lifecycle::setup(app.handle())?;
+            // Capture cold-start URLs before update installation can claim startup.
+            updates::schedule(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

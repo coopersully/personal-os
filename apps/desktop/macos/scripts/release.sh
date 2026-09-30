@@ -13,7 +13,8 @@ set -euo pipefail
 : "${NOHMI_UPDATER_PUBLIC_KEY:?Updater public key required}"
 : "${VITE_API_BASE_URL:?Production API required}"
 [[ "$VITE_API_BASE_URL" == "https://nohmi-api.coopersully.me" ]] || { echo "Official installers require the production nohmi API" >&2; exit 1; }
-: "${TAURI_SIGNING_PRIVATE_KEY:?Updater signing key required}"
+# The separate publication runner alone receives the updater key.
+unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 root="$(cd "$(dirname "$0")/.." && pwd)"
 desktop="$(cd "$root/.." && pwd)"
 workspace="$(mktemp -d)"
@@ -87,4 +88,3 @@ xcrun stapler validate "$image"
 # Archive only the final widget-embedded, signed and stapled bundle.
 archive="$desktop/src-tauri/target/release/bundle/dmg/nohmi_${version}_${update_arch}.app.tar.gz"
 COPYFILE_DISABLE=1 tar -czf "$archive" -C "$(dirname "$app")" "$(basename "$app")"
-pnpm exec tauri signer sign --app-version "$version" "$archive"

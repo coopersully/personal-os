@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +15,9 @@ async function scenario({
   enabled = true,
   timedOut = false,
   incomplete = false,
+  supersedeDuringProbe = false,
+  publishTimeout = false,
+  confirmedMismatch = false,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), "nohmi-publish-test-"));
   const cwd = process.cwd();
@@ -39,12 +43,32 @@ async function scenario({
           const path = args.find((arg) => arg.startsWith("repos/"));
           if (path.endsWith("generate-notes")) return JSON.stringify({ body: "Release notes" });
           if (path.includes("releases?")) return JSON.stringify([existing ? [existing] : []]);
+          if (path.includes("releases/tags/"))
+            return JSON.stringify({
+              tag_name: "v0.1.1",
+              draft: false,
+              prerelease: false,
+              body: readFileSync("release-notes.md", "utf8"),
+              assets: [
+                {
+                  name: "latest.json",
+                  state: "uploaded",
+                  digest: confirmedMismatch
+                    ? "sha256:wrong"
+                    : `sha256:${createHash("sha256").update(readFileSync("release-assets/latest.json")).digest("hex")}`,
+                },
+              ],
+            });
           if (path.endsWith("heads/main")) return JSON.stringify({ object: { sha: main } });
           throw new Error(`Unexpected API request ${path}`);
         }
+        if (publishTimeout && args.includes("--draft=false")) throw new Error("Publish timed out");
         return "";
       },
-      deploymentReady: async () => state === "success",
+      deploymentReady: async () => {
+        if (supersedeDuringProbe) main = "b".repeat(40);
+        return state === "success";
+      },
       now: () => {
         time += timedOut ? 271 * 60_000 : 0;
         return time;
@@ -76,6 +100,9 @@ test("manual tag remains draft", async () => {
 });
 test("superseded source remains draft", async () => {
   assert.equal(published(await scenario({ main: "b".repeat(40) })), false);
+});
+test("source superseded during the production probe remains draft", async () => {
+  assert.equal(published(await scenario({ supersedeDuringProbe: true })), false);
 });
 test("failed, missing or timed-out deployment cannot publish", async () => {
   for (const state of ["failure", "error", undefined, "pending"]) {
@@ -144,5 +171,13 @@ test("public deployment probe requires matching ready revision without credentia
       throw new Error("network timeout");
     }),
     false,
+  );
+});
+
+test("reconciles a publish timeout only when public source notes and every uploaded digest match", async () => {
+  assert.equal(published(await scenario({ publishTimeout: true })), true);
+  await assert.rejects(
+    scenario({ publishTimeout: true, confirmedMismatch: true }),
+    /Publish timed out/,
   );
 });

@@ -39,13 +39,22 @@ export function parseDesktopRelease(input: unknown): DesktopRelease {
     installers,
   };
 }
+type ReleaseFailure = {
+  reason: "transport" | "timeout" | "http" | "body" | "metadata";
+  status: number;
+  durationMs: number;
+};
 export function createDesktopReleaseReader(
   request: typeof fetch = globalThis.fetch,
   now = Date.now,
+  observeFailure?: (failure: ReleaseFailure) => void,
 ) {
   let cached: { until: number; value: DesktopReleaseStatus } | undefined;
   let pending: Promise<DesktopReleaseStatus> | undefined;
   async function load(): Promise<DesktopReleaseStatus> {
+    const startedAt = now();
+    let reason: ReleaseFailure["reason"] = "transport";
+    let status = 0;
     try {
       const response = await providerFetch(
         request,
@@ -59,8 +68,12 @@ export function createDesktopReleaseReader(
         },
         5_000,
       );
+      status = response.status;
       if (response.status === 404) return { status: "not_published", release: null };
-      if (!response.ok || !response.body) throw new Error("Release unavailable");
+      reason = "http";
+      if (!response.ok) throw new Error("Release unavailable");
+      reason = "body";
+      if (!response.body) throw new Error("Missing release body");
       const reader = response.body.getReader();
       const chunks: Uint8Array[] = [];
       let length = 0;
@@ -81,9 +94,15 @@ export function createDesktopReleaseReader(
         bytes.set(chunk, offset);
         offset += chunk.byteLength;
       }
+      reason = "metadata";
       const release = parseDesktopRelease(JSON.parse(new TextDecoder().decode(bytes)));
       return { status: "available", release };
-    } catch {
+    } catch (error) {
+      observeFailure?.({
+        reason: error instanceof Error && error.name === "TimeoutError" ? "timeout" : reason,
+        status,
+        durationMs: now() - startedAt,
+      });
       return { status: "unavailable", release: null };
     }
   }

@@ -68,8 +68,17 @@ beforeEach(() => {
   });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Export revokes each blob URL after the browser has consumed the download.
+  // Keep the browser mock installed until those callbacks have actually settled.
+  await waitFor(
+    () =>
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(
+        vi.mocked(URL.createObjectURL).mock.calls.length,
+      ),
+    { timeout: 3_000 },
+  );
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

@@ -32,7 +32,7 @@ Automatic publication requires Actions variable `NOHMI_DESKTOP_AUTO_PUBLISH=true
 still being current main, and the public Mac API readiness response reporting that exact source revision.
 The publication wait is bounded to 270 minutes (covering the Mac controller’s four-hour build budget and polling/backoff), with an eight-second/4 KiB public API probe and
 30-second polling; each GitHub command is bounded to 60 seconds.
-Mac packaging has a 60-minute job limit. Manual tag pushes always create drafts.
+Mac packaging has a 60-minute job limit. Only the verified-main workflow can access signing credentials; manually pushed tags do not trigger packaging.
 
 The first rollout keeps automatic publication disabled until installed-app acceptance is complete.
 After enabling it, the normal operator action is simply merging an approved PR. Release notes,
@@ -58,14 +58,13 @@ then discover the newer version on launch; Downloads and Settings show that same
   despite passing source tests. Actions logs, draft state, tag/source association, and release assets
   provide recovery evidence without printing secrets.
 
-## Manual release checklist
+## First release or paused automatic publication
 
-1. Merge reviewed source into main after verification. Ensure production deployed successfully.
-2. For an explicitly versioned manual release, update all desktop version files in a reviewed PR,
-   then create and push the matching annotated `vX.Y.Z` tag.
-3. Wait for both signed/notarized architectures and the complete draft release.
-4. Complete installed-app acceptance, inspect release notes and artifacts, and publish the draft.
-5. Verify Downloads, Settings and the installed update path against the published version.
+1. Keep `NOHMI_DESKTOP_AUTO_PUBLISH` disabled and merge reviewed source into main after verification.
+2. Successful main CI reserves the version; use the documented commit trailer for a minor or major bump.
+3. Wait for both signed/notarized architectures, final archive signatures and the complete draft.
+4. Confirm the matching live API revision, inspect notes/artifacts, and publish the complete draft for the controlled first rollout.
+5. Verify Downloads, Settings and the installed upgrade, then enable automatic publication.
 
 ## Signing requirements
 
@@ -83,7 +82,16 @@ uploading its base64 contents. OpenSSL 3 default PKCS#12 exports can be rejected
 by Keychain as a password/MAC error; use Keychain Access export or a macOS-compatible
 PKCS#12 export and repeat the import check.
 
-Store all CI signing material only as GitHub Actions secrets. Never commit
+Store Apple and Windows signing credentials in the `desktop-signing` GitHub environment.
+Store the updater private key and password separately in `desktop-updater-signing`, so
+build jobs cannot access them. Both environments must have a selected **branch** policy
+allowing only `main` (no tag policy). Do not retain
+repository-level copies: those would be exposed to workflows defined by arbitrary
+pushed tags. The [environment branch policy](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments) is enforced by GitHub independently of the
+checked-out source. The release workflow uses `workflow_run` on the default branch,
+then checks out only its CI-verified main source and generated version commit.
+The Windows manual workflow is a scaffold until Windows signing credentials are provisioned;
+it is not part of this macOS rollout. It uses `desktop-signing` and must run from main. Never commit
 certificates, provisioning profiles, Apple credentials, or updater private
 keys.
 
@@ -109,7 +117,10 @@ The Mac workflow builds Apple Silicon and Intel separately. `vX.Y.Z` must match
 produces immutable `nohmi_X.Y.Z_aarch64.dmg` and `nohmi_X.Y.Z_x86_64.dmg`, matching
 `.app.tar.gz` updater archives and `.sig` files, `SHA256SUMS`, and `latest.json`.
 The updater archive is created **after** embedding widgets, Developer ID signing,
-notarization and stapling. `tauri signer sign --app-version` binds its version into
+notarization and stapling. A fresh Linux publication runner installs only the pinned
+Tauri CLI (without install scripts or application dependencies). Only its final signing
+step receives the updater private key; Mac compilation, widgets and notarization never
+receive it. `tauri signer sign --app-version` binds its version into
 the signed trusted comment; the installed app requires that binding. Windows
 installers have an independent manually dispatched workflow and do not block Mac
 releases. That workflow supplies a CI artifact, not an automatic Windows update.
@@ -133,7 +144,7 @@ The production connection remains `https://nohmi-api.coopersully.me`, independen
 of the updater's fixed GitHub HTTPS endpoint.
 
 A release build checks at startup before mounting interactive forms. Check timeout
-is eight seconds; download timeout is 120 seconds, with a 256 MiB download cap.
+is eight seconds with a client-enforced 1 MiB manifest cap; download timeout is 120 seconds, with a 256 MiB download cap. The pinned local updater dependency documents this narrow streaming-limit patch in `apps/desktop/src-tauri/vendor/tauri-plugin-updater/README.nohmi.md`.
 **Open now** permanently cancels automatic installation authority for that launch.
 After opening, native state retains verified downloaded bytes; Settings can offer
 **Restart to update**. Confirmation tells the person to save work, and an active
@@ -161,11 +172,34 @@ If first-upgrade acceptance fails, leave automation disabled, preserve the insta
 repair with a higher signed version. Apple credential presence and green unit tests alone do not
 prove installed replacement. Subsequent releases use the automatic publication gates above.
 
-### Signed candidate builds
+### Signed candidates
 
-Push a unique `desktop-candidate/<description>` tag to exercise the same Mac
-signing and notarization pipeline before merging or publishing a stable release.
-Candidate runs validate agreement between source versions and upload both Mac
-architecture artifacts to Actions. They skip GitHub release creation and never
-change the public update feed. Download the candidate artifacts from that run
-for installed-app acceptance. Never move or reuse a candidate tag.
+Use a complete draft from verified main with automatic publication disabled. Drafts
+include both notarized installers and signed updater archives without changing the
+public feed. The earlier `desktop-candidate/*` bootstrap path is retired: unmerged
+branches and tag-selected workflows cannot access the main-only signing environment.
+
+### Release discovery failures
+
+The API emits `desktop_release_unavailable` structured log events with a redacted `code`
+(`transport`, `timeout`, `http`, `body`, or `metadata`), upstream HTTP status (`0` before
+receiving headers), and duration. No upstream body, error message, or credentials are logged.
+One event is emitted per failed upstream attempt; cached unavailable reads do not repeat it.
+A GitHub 404 before the first release is expected and is not logged as a failure. Downloads
+shows a generic unavailable state and retries after the 30-second failure cache expires.
+
+### Interrupted publication and installation
+
+If the final publish command times out, the publisher reads the resulting release
+and accepts success only when it is public and its tag, source notes, asset names
+and every SHA-256 digest exactly match the attempted upload. It never overwrites
+public assets. After process loss, rerun **all jobs**, not only the failed publication
+job: preparation sees the public source as already released and performs no new build.
+
+macOS replacement uses an atomic filesystem exchange. A failed exchange leaves the
+installed app untouched. Install through the DMG when the app directory is not writable
+or its filesystem cannot atomically exchange directories; the updater does not delete
+the installed bundle or request elevated permission as a fallback. Incoming cold-start
+open/join/widget actions release automatic-install authority before the startup check
+is scheduled, so their intent remains in the running process. Background refresh events
+do not release that authority.

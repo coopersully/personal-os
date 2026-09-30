@@ -751,4 +751,32 @@ describe("FloatingMailComposer", () => {
       expect(screen.queryByText(/Couldn’t send the message/)).not.toBeInTheDocument(),
     );
   });
+  it("confirms dismissal after uncertain creation without saving again and permits a fresh draft", async () => {
+    const create = vi
+      .spyOn(api, "createMailDraft")
+      .mockRejectedValueOnce(new Error("Create response lost"))
+      .mockResolvedValue(draft);
+    renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Keep until checked" } });
+    await waitFor(() => expect(create).toHaveBeenCalledOnce(), { timeout: 2_000 });
+    expect(await screen.findByText(/Automatic saving is paused/)).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    expect(await screen.findByRole("dialog", { name: "Close this local copy?" })).toBeVisible();
+    expect(screen.getByText(/It does not delete a saved draft/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Subject")).toHaveValue("Keep until checked");
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(create).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Close local copy" }));
+    await userEvent.click(screen.getByRole("button", { name: "Discard local copy" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(create).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    expect(screen.getByLabelText("Subject")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Fresh draft" } });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2), { timeout: 2_000 });
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "Fresh draft" }));
+    expect(screen.getByText("Saved")).toBeVisible();
+  });
 });

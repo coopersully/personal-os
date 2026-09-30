@@ -270,8 +270,7 @@ function RitualForm({
       else setPreview(state);
     } catch (e) {
       setMessage(
-        classifyMutationError(e, { action: "save ritual settings", form: true, safeToRetry: false })
-          .message,
+        classifyMutationError(e, { action: "show this ritual", safeToRetry: true }).message,
       );
     } finally {
       setOpening(false);
@@ -284,8 +283,10 @@ function RitualForm({
       setMessage(enabled ? "Automatic rituals enabled" : "Automatic rituals paused");
     } catch (e) {
       setMessage(
-        classifyMutationError(e, { action: "save ritual settings", form: true, safeToRetry: false })
-          .message,
+        classifyMutationError(e, {
+          action: enabled ? "enable automatic rituals" : "pause automatic rituals",
+          safeToRetry: true,
+        }).message,
       );
     }
   }

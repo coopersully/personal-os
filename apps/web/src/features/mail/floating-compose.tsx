@@ -30,6 +30,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
+import { useConfirmAction } from "../../components/confirm-action.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { classifyMutationError, type MutationFeedbackState } from "../../lib/feedback.js";
 
@@ -88,6 +89,7 @@ export function FloatingMailComposer({
     () => accounts.filter((account) => account.sendCapability === "reconnect"),
     [accounts],
   );
+  const { confirm: confirmDiscard, confirmation: discardConfirmation } = useConfirmAction();
   const [open, setOpen] = useState(false);
   const [accountId, setAccountId] = useState(available[0]?.accountId ?? "");
   const [to, setTo] = useState("");
@@ -150,6 +152,19 @@ export function FloatingMailComposer({
     if (saveTimeoutRef.current !== null) {
       window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
+    }
+    if (!skipSave && uncertainCreateRef.current) {
+      confirmDiscard({
+        title: "Close this local copy?",
+        description:
+          "A saved draft may already exist. Check Drafts first. Closing discards the message held in this composer, including any edits made after the failed save. It does not delete a saved draft.",
+        actionLabel: "Discard local copy",
+        returnFocus: triggerRef.current,
+        onConfirm: () => {
+          void close(true);
+        },
+      });
+      return;
     }
     if (!skipSave && dirty && accountId && !sendUncertain) {
       setSaveState("saving");
@@ -600,6 +615,9 @@ export function FloatingMailComposer({
                   >
                     Retry saving after checking
                   </Button>
+                  <Button type="button" variant="ghost" onClick={() => void close()}>
+                    Close local copy
+                  </Button>
                 </div>
               ) : null}
             </FeedbackForm>
@@ -741,6 +759,7 @@ export function FloatingMailComposer({
           </ResponsiveDialogFooter>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
+      {discardConfirmation}
     </>
   );
 }

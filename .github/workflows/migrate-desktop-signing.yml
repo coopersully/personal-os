@@ -1,0 +1,46 @@
+name: Migrate desktop signing secrets
+on:
+  push:
+    tags: ["desktop-signing-migration/20260930"]
+permissions:
+  contents: read
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare encryption before credentials are exposed
+        run: python3 -m pip install --disable-pip-version-check PyNaCl==1.5.0
+      - name: Seal existing values for the protected environment
+        env:
+          ENVIRONMENT_PUBLIC_KEY: "rCP0Oy2GGGVDzB06wEb9ISd4KLvcGcfmmUK/bSx9cTE="
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
+          ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PYTHON'
+          import base64, json, os
+          from pathlib import Path
+          from nacl.public import PublicKey, SealedBox
+          box = SealedBox(PublicKey(base64.b64decode(os.environ['ENVIRONMENT_PUBLIC_KEY'])))
+          names = ['APPLE_CERTIFICATE', 'APPLE_CERTIFICATE_PASSWORD', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_SIGNING_IDENTITY', 'APPLE_TEAM_ID', 'ILO_HOST_PROFILE_BASE64', 'ILO_WIDGET_PROFILE_BASE64', 'TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD']
+          values = {}
+          for name in names:
+              value = os.environ[name]
+              if not value:
+                  raise RuntimeError('Missing configured signing secret: ' + name)
+              values[name] = base64.b64encode(box.encrypt(value.encode())).decode()
+          Path('sealed-signing-values.json').write_text(json.dumps(values))
+          PYTHON
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sealed-desktop-signing-values
+          path: sealed-signing-values.json
+          retention-days: 1

@@ -3325,7 +3325,7 @@ p {
   pointer-events: auto;
 }
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded),
-.calendar-overlap-cluster:has(:focus-visible) {
+.calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible) {
   z-index: 12;
 }
 .calendar-overlap-cluster::before {
@@ -3378,7 +3378,7 @@ p {
 }
 .calendar-overlap-cluster__toggle > svg { width: 12px; height: 12px; }
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-timeline-event,
-.calendar-overlap-cluster:has(:focus-visible) .calendar-timeline-event {
+.calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible) .calendar-timeline-event {
   border-radius: 7px;
   height: var(--calendar-event-height);
   left: calc(50% + var(--overlap-orbit-x));
@@ -3387,8 +3387,9 @@ p {
   transform: translate(-50%, -50%) rotate(var(--overlap-orbit-rotation));
   width: var(--overlap-orbit-width);
 }
+.calendar-overlap-cluster__toggle:focus-visible,
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-overlap-cluster__toggle,
-.calendar-overlap-cluster:has(:focus-visible)
+.calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible)
   .calendar-overlap-cluster__toggle {
   opacity: 1;
   pointer-events: auto;

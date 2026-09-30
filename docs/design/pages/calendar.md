@@ -250,7 +250,9 @@ readable height, and scroll when that minimum exceeds the available height.
 Hovering any event brings it above every sibling, whether the overlap stack is pinned
 or transiently expanded. The hover and control layers derive from the group size,
 so large stacks cannot cover the hovered event or their toggle. The stack toggle has no tooltip and appears at the center only while the stack is
-open (hovered, pinned, or keyboard-focused). Its resting state is visually hidden on hover-capable devices. Touch/coarse-pointer
+open (hovered, pinned, or an event card is keyboard-focused). The toggle also stays
+visible when it has keyboard focus, without forcing cards open; Escape closes the
+stack and returns focus to that toggle. Its resting state is visually hidden on hover-capable devices. Touch/coarse-pointer
 devices keep the control visible so users can open and close the stack. Opening a stack changes card positions only; it
 does not apply hover styling to every card. A stationary padded hover envelope covers
 the resting and spread cards, including their gaps, to prevent hover flicker during

@@ -97,3 +97,6 @@ Rail and sidebar width changes, header space reservation, and the compact picker
 The compact picker uses the active workspace's filled, unframed icon and colored selection surface. Dropdown destinations use neutral outline icons; only the current workspace receives its palette, filled icon, and selected surface, matching the rail.
 
 Primary and secondary navigation text remains on one line and clips at constrained widths. Mail sync timing is available from the Sync button tooltip on hover or keyboard focus instead of taking permanent header space.
+
+Minimizing the rail from its keyboard handle transfers focus to the compact picker.
+Showing the rail returns focus to its active workspace link, never to an inert control.

@@ -61,6 +61,12 @@ test("the repository QA fixture login exposes representative workspace data", as
       Math.abs(pinBounds.y + pinBounds.height / 2 - groupBounds.y - groupBounds.height / 2),
     ).toBeLessThan(1);
   }
+  if (!test.info().project.use.isMobile) {
+    await page.getByRole("button", { name: "Collapse 5 overlapping events" }).press("Escape");
+    await expect(overlapPin).toBeFocused();
+    await expect(overlapPin).toHaveAttribute("aria-expanded", "false");
+    await expect(overlappingCards.first()).toHaveCSS("transform", "none");
+  }
   if (test.info().project.use.isMobile) {
     await overlapPin.tap();
     const collapse = page.getByRole("button", { name: "Collapse 5 overlapping events" });
@@ -137,6 +143,17 @@ test("desktop navigation fills the viewport while long content scrolls independe
       );
     expect(new Set(colors).size).toBe(1);
   }
+  const railHandle = page.getByRole("separator", { name: "Minimize workspace rail" });
+  await railHandle.press("Enter");
+  const compactPicker = page.getByRole("button", { name: "Switch workspace", exact: true });
+  await expect(compactPicker).toBeFocused();
+  await compactPicker.press("Enter");
+  await page.getByRole("menuitem", { name: "Show workspace rail" }).press("Enter");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Workspace navigation" })
+      .getByRole("link", { name: "Finances", exact: true }),
+  ).toBeFocused();
   const railEdge = await page
     .getByRole("separator", { name: "Minimize workspace rail" })
     .boundingBox();

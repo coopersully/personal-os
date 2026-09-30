@@ -1146,7 +1146,12 @@ function AuthenticatedApp({ user }: { user: User }) {
       return false;
     }
   });
+  const railContainer = useRef<HTMLDivElement>(null);
+  const compactSwitcher = useRef<HTMLDivElement>(null);
+  const pendingRailFocus = useRef(false);
   const updateRailCollapsed = (collapsed: boolean) => {
+    pendingRailFocus.current =
+      !collapsed || !!railContainer.current?.contains(document.activeElement);
     setRailCollapsed(collapsed);
     try {
       window.localStorage.setItem("nohmi.workspace-rail-collapsed.v1", String(collapsed));
@@ -1154,6 +1159,25 @@ function AuthenticatedApp({ user }: { user: User }) {
       /* Navigation remains usable when storage is unavailable. */
     }
   };
+
+  useEffect(() => {
+    if (!pendingRailFocus.current) return;
+    pendingRailFocus.current = false;
+    // Wait for dropdown dismissal focus restoration before focusing the newly
+    // visible navigation. Neither target is allowed to remain in an inert tree.
+    let frame = window.requestAnimationFrame(function focusVisibleNavigation() {
+      const target = railCollapsed
+        ? compactSwitcher.current?.querySelector<HTMLButtonElement>("button")
+        : (railContainer.current?.querySelector<HTMLAnchorElement>('a[aria-current="page"]') ??
+          railContainer.current?.querySelector<HTMLAnchorElement>("a"));
+      if (target && window.getComputedStyle(target).visibility !== "visible") {
+        frame = window.requestAnimationFrame(focusVisibleNavigation);
+        return;
+      }
+      target?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [railCollapsed]);
 
   const sidebarState = sidebarWidth === collapsedSidebarWidth ? "collapsed" : "expanded";
   const location = useLocation();
@@ -1284,6 +1308,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         </a>
         {!isMobileWorkspaceDock ? (
           <div
+            ref={railContainer}
             className="workspace-rail-container"
             inert={railCollapsed}
             aria-hidden={railCollapsed}
@@ -1304,6 +1329,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         ) : null}
         {!isMobileWorkspaceDock ? (
           <div
+            ref={compactSwitcher}
             className="workspace-switcher-floating"
             inert={!railCollapsed}
             aria-hidden={!railCollapsed}
@@ -4451,9 +4477,10 @@ function TimelineOverlapCluster({
       id={clusterId}
       onKeyDown={(event) => {
         const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
-        if (event.key !== "Escape" || (!expanded && !focusedEvent)) return;
+        if (event.key !== "Escape" || (!expanded && !hovered && !focusedEvent)) return;
         event.stopPropagation();
         setExpanded(false);
+        setHovered(false);
         toggle.current?.focus();
       }}
       onPointerEnter={(event) => {

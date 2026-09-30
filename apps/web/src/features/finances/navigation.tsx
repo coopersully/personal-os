@@ -14,6 +14,7 @@ import {
 import {
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
@@ -94,56 +95,64 @@ export function FinanceSidebarNavigation({
   section: FinanceSection;
 }) {
   return navigation.map((group) => (
-    <SidebarGroup key={group.label}>
-      <SidebarGroupContent>
-        <nav aria-label={group.label}>
+    <div key={group.label}>
+      <SidebarGroup>
+        <SidebarGroupLabel>Views</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <nav aria-label={group.label}>
+            <SidebarMenu>
+              {group.items.map(({ icon: Icon, id, label }) => (
+                <SidebarMenuItem key={id}>
+                  <SidebarMenuButton asChild isActive={financeNavigationActive(section, id)}>
+                    <Link
+                      aria-current={financeNavigationActive(section, id) ? "page" : undefined}
+                      aria-label={
+                        id === "review" && reviewCount > 0 ? `${label} ${reviewCount}` : label
+                      }
+                      onClick={onNavigate}
+                      to={id === "overview" ? "/finances" : `/finances/${id}`}
+                    >
+                      <Icon
+                        aria-hidden="true"
+                        weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
+                      />
+                      <span>{label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                  {id === "review" && reviewCount > 0 ? (
+                    <SidebarMenuBadge aria-hidden="true">{reviewCount}</SidebarMenuBadge>
+                  ) : null}
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </nav>
+        </SidebarGroupContent>
+      </SidebarGroup>
+      <SidebarGroup>
+        <SidebarGroupLabel>Manage</SidebarGroupLabel>
+        <SidebarGroupContent>
           <SidebarMenu>
-            {group.items.map(({ icon: Icon, id, label }) => (
-              <SidebarMenuItem key={id}>
-                <SidebarMenuButton asChild isActive={financeNavigationActive(section, id)}>
-                  <Link
-                    aria-current={financeNavigationActive(section, id) ? "page" : undefined}
-                    aria-label={
-                      id === "review" && reviewCount > 0 ? `${label} ${reviewCount}` : label
-                    }
-                    onClick={onNavigate}
-                    to={id === "overview" ? "/finances" : `/finances/${id}`}
-                  >
-                    <Icon
-                      aria-hidden="true"
-                      weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
-                    />
-                    <span>{label}</span>
-                  </Link>
-                </SidebarMenuButton>
-                {id === "review" && reviewCount > 0 ? (
-                  <SidebarMenuBadge aria-hidden="true">{reviewCount}</SidebarMenuBadge>
-                ) : null}
-              </SidebarMenuItem>
-            ))}
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={section === "setup"}>
+                <Link
+                  aria-current={section === "setup" ? "page" : undefined}
+                  onClick={onNavigate}
+                  to="/finances/setup"
+                >
+                  <ShieldCheckIcon /> <span>Financial setup</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild>
+                <Link onClick={onNavigate} to="/settings?section=finances">
+                  <SettingsIcon /> <span>Finance settings</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
-        </nav>
-        <SidebarMenu className="mt-6">
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={section === "setup"}>
-              <Link
-                aria-current={section === "setup" ? "page" : undefined}
-                onClick={onNavigate}
-                to="/finances/setup"
-              >
-                <ShieldCheckIcon /> <span>Financial setup</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <Link onClick={onNavigate} to="/settings?section=finances">
-                <SettingsIcon /> <span>Finance settings</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </div>
   ));
 }

@@ -270,8 +270,10 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   that owns the immediate task carries the strongest page-level emphasis.
 - Workspace-switcher triggers show the workspace glyph without its frame,
   including the mobile dock. Keep framed workspace icons inside the picker;
-  preserve the same glyph and workspace color in both contexts.
-- Desktop account-management actions live in Settings, reached from the workspace picker. A
+  in the desktop rail, inactive destinations use neutral outline glyphs and only
+  the selected destination uses a filled glyph on its colored control surface, without an icon frame. Preserve the same glyph
+  across states; color is reserved for the selected rail destination.
+- Desktop account-management actions live in Settings, reached from the bottom of the workspace rail. A
   workspace may use compact account avatars in its app bar only as a source-visibility filter; that
   filter must surface health and link to Settings for repair rather than duplicating management.
 - App-bar source filters use the shared `AccountSelectionTrigger`: show compact provider identities,

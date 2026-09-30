@@ -68,6 +68,7 @@
   --inverse-content-tertiary: #858580;
   --app-shell-background: var(--canvas);
   --desktop-sidebar-background: var(--surface-subtle);
+  --workspace-rail-background: var(--surface);
   --control-hover-background: var(--surface-strong);
   --overlay-subtle: color-mix(in srgb, var(--inverse-surface) 18%, transparent);
   --overlay: color-mix(in srgb, var(--inverse-surface) 58%, transparent);
@@ -554,47 +555,38 @@ p {
   --acid: var(--accent);
   --chrome-height: 3.25rem;
   --sidebar-expanded-width: 16rem;
+  --workspace-rail-width: 4rem;
   --workspace-inline-padding: 0.75rem;
   background: var(--paper-deep);
   display: grid;
-  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
+  grid-template-columns: var(--workspace-rail-width) var(--sidebar-expanded-width) minmax(0, 1fr);
   min-height: 100vh;
 }
 .app-shell--calendar {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: var(--workspace-rail-width) minmax(0, 1fr);
 }
-.app-shell--mail {
-  grid-template-columns: var(--mail-sidebar-width, var(--sidebar-expanded-width)) 1px minmax(0, 1fr);
+.app-shell[data-sidebar-state] {
+  grid-template-columns: var(--workspace-rail-width) var(--sidebar-width, var(--sidebar-expanded-width)) 1px minmax(0, 1fr);
 }
-.app-shell--mail[data-sidebar-state="collapsed"] {
-  grid-template-columns: var(--mail-sidebar-width) 1px minmax(0, 1fr);
-}
-.app-shell--mail[data-sidebar-state="collapsed"] .sidebar {
+.app-shell[data-sidebar-state="collapsed"] .sidebar {
   padding-inline: 8px;
 }
-.app-shell--mail[data-sidebar-state="collapsed"] .sidebar__header {
-  padding-inline: 0;
-}
-.app-shell--mail[data-sidebar-state="collapsed"] .sidebar__workspace-trigger {
-  border-radius: var(--radius-md);
-  height: 2rem;
-  justify-content: center;
-  margin-inline: auto;
-  min-height: 2rem;
-  padding-inline: 0;
-  width: 2rem;
-}
-.app-shell--mail[data-sidebar-state="collapsed"]
-  .sidebar__workspace-trigger
-  > :not(.workspace-icon),
-.app-shell--mail[data-sidebar-state="collapsed"] [data-slot="sidebar-group-label"],
-.app-shell--mail[data-sidebar-state="collapsed"]
-  [data-slot="sidebar-menu-button"]
-  > span:not(.workspace-icon),
-.app-shell--mail[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-button"] > b {
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-group-label"],
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-sub"],
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-action"],
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-group-action"],
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-badge"] {
   display: none;
 }
-.app-shell--mail[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-button"] {
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-button"] > span,
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-button"] > b {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-menu-button"] {
   border-radius: var(--radius-md);
   height: 2rem;
   justify-content: center;
@@ -603,11 +595,12 @@ p {
   padding-inline: 0;
   width: 2rem;
 }
-.app-shell--mail[data-sidebar-state="collapsed"] [data-slot="sidebar-group"] {
+.app-shell[data-sidebar-state="collapsed"] [data-slot="sidebar-group"] {
   padding-inline: 0;
 }
-.mail-sidebar-resize-handle {
-  background: var(--line);
+.sidebar-collapse-handle {
+  background: var(--sidebar);
+  border: 0;
   cursor: col-resize;
   height: 100%;
   outline: none;
@@ -616,20 +609,94 @@ p {
   width: 1px;
   z-index: 46;
 }
-.mail-sidebar-resize-handle::after {
+.sidebar-collapse-handle::after {
   content: "";
   inset: 0 -5px;
   position: absolute;
 }
-.mail-sidebar-resize-handle:hover,
-.mail-sidebar-resize-handle:focus-visible {
+.sidebar-collapse-handle:hover,
+.sidebar-collapse-handle:focus-visible {
   background: var(--content-primary);
 }
-.mail-sidebar-resize-handle:focus-visible {
+.sidebar-collapse-handle:focus-visible {
   width: 3px;
 }
 .app-shell--full-width {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: var(--workspace-rail-width) minmax(0, 1fr);
+}
+.workspace-rail {
+  align-items: center;
+  background: var(--workspace-rail-background);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem;
+  position: sticky;
+  top: 0;
+}
+.workspace-rail__destinations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.workspace-rail__link {
+  border-radius: var(--radius-lg);
+  flex-shrink: 0;
+  height: 3rem;
+  width: 3rem;
+}
+.workspace-rail__link,
+.workspace-navigation-item {
+  --workspace-icon-accent: var(--content-secondary);
+  color: var(--content-secondary);
+}
+.workspace-rail__link[aria-current="page"],
+.workspace-navigation-item[data-active="true"] {
+  background: color-mix(in oklab, var(--workspace-icon-accent) 18%, var(--surface-raised));
+  color: var(--workspace-icon-accent);
+}
+@media (min-width: 901px) {
+  .app-shell {
+    grid-template-rows: minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app-shell > .workspace-rail,
+  .app-shell > .sidebar {
+    height: 100%;
+    min-height: 0;
+  }
+  .workspace {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  .workspace-app-bar,
+  .workspace-secondary-slot {
+    flex-shrink: 0;
+  }
+  .app-shell .workspace-stage,
+  .app-shell .workspace-route {
+    min-height: 100%;
+  }
+  .content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    width: 100%;
+  }
+}
+.workspace-rail__settings {
+  margin-top: auto;
+}
+.desktop .workspace-rail {
+  height: 100%;
 }
 .calendar-workspace-switcher {
   flex: 0 0 auto;
@@ -725,18 +792,11 @@ p {
   flex-direction: column;
   height: 100vh;
   min-width: 0;
-  padding: 0 8px 8px;
+  padding: 0;
+  width: 100%;
   position: sticky;
   top: 0;
   z-index: 45;
-}
-.sidebar__header {
-  align-items: center;
-  display: flex;
-  flex-direction: row;
-  gap: 0;
-  height: var(--chrome-height);
-  padding: 0 8px;
 }
 .sidebar__workspace-trigger {
   color: var(--secondary-foreground);
@@ -761,16 +821,24 @@ p {
   flex: 0 0 auto;
   justify-content: center;
 }
-.workspace-icon[data-workspace="calendar"] {
+.workspace-icon[data-workspace="calendar"],
+.workspace-rail__link[data-workspace="calendar"],
+.workspace-navigation-item[data-workspace="calendar"] {
   --workspace-icon-accent: var(--workspace-calendar-accent);
 }
-.workspace-icon[data-workspace="tasks"] {
+.workspace-icon[data-workspace="tasks"],
+.workspace-rail__link[data-workspace="tasks"],
+.workspace-navigation-item[data-workspace="tasks"] {
   --workspace-icon-accent: var(--workspace-tasks-accent);
 }
-.workspace-icon[data-workspace="mail"] {
+.workspace-icon[data-workspace="mail"],
+.workspace-rail__link[data-workspace="mail"],
+.workspace-navigation-item[data-workspace="mail"] {
   --workspace-icon-accent: var(--workspace-mail-accent);
 }
-.workspace-icon[data-workspace="finances"] {
+.workspace-icon[data-workspace="finances"],
+.workspace-rail__link[data-workspace="finances"],
+.workspace-navigation-item[data-workspace="finances"] {
   --workspace-icon-accent: var(--workspace-finances-accent);
 }
 .workspace-icon[data-size="sm"] {
@@ -836,14 +904,21 @@ p {
   overflow: hidden;
   width: 112px;
 }
+.workspace-sidebar__header {
+  height: var(--chrome-height);
+  flex-shrink: 0;
+  justify-content: center;
+  padding-inline: 1rem;
+}
+.app-shell[data-sidebar-state="collapsed"] .workspace-sidebar__header > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 .sidebar__content {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px 0 8px;
-  scrollbar-width: thin;
 }
 .sidebar__content--app,
 .sidebar__content--context {
@@ -867,12 +942,6 @@ p {
 }
 .context-sidebar__meta {
   margin: 1rem 0.75rem 0;
-}
-.context-sidebar__mailboxes {
-  padding-top: 0;
-}
-.mail-sidebar__menu {
-  gap: 0.125rem;
 }
 .sidebar-group + .sidebar-group {
   margin-top: 13px;
@@ -973,7 +1042,7 @@ p {
 }
 .workspace-app-bar {
   align-items: center;
-  background: var(--paper-deep);
+  background: var(--sidebar);
   display: grid;
   gap: 0.5rem;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
@@ -982,6 +1051,12 @@ p {
   position: sticky;
   top: 0;
   z-index: 20;
+}
+.workspace-app-bar:has(> .workspace-app-bar__identity:empty) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.workspace-app-bar__identity:empty {
+  display: none;
 }
 .workspace-app-bar__identity {
   align-items: center;
@@ -1061,7 +1136,7 @@ p {
 }
 .workspace-secondary-app-bar {
   align-items: stretch;
-  background: var(--paper);
+  background: var(--sidebar);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: var(--chrome-height);
@@ -6372,6 +6447,7 @@ p {
   --status-warning-foreground: var(--status-warning);
   --app-shell-background: var(--canvas);
   --desktop-sidebar-background: var(--surface-subtle);
+  --workspace-rail-background: var(--surface-strong);
   --control-hover-background: var(--surface-strong);
   --overlay-subtle: color-mix(in srgb, var(--inverse-surface) 18%, transparent);
   --overlay: color-mix(in srgb, var(--inverse-surface) 58%, transparent);
@@ -7413,3 +7489,63 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   .ritual-exiting .ritual-card { animation: none; opacity: 0; }
   .ritual-exiting .ritual-logo, .ritual-exiting .ritual-support { transition: none; }
 }
+
+/* The minimized rail returns its space to the workspace, keeping a header-sized switcher. */
+.app-shell { position: relative; }
+.workspace-rail-container { position: relative; min-height: 0; }
+.workspace-rail-collapse-handle {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  background: transparent;
+}
+.app-shell[data-rail-collapsed="true"] { --workspace-rail-width: 0px; }
+.workspace-switcher-floating {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0.5rem;
+  height: var(--chrome-height);
+  display: flex;
+  align-items: center;
+  z-index: 47;
+}
+.app-shell[data-rail-collapsed="true"] .workspace-sidebar__header {
+  padding-inline-start: 3rem;
+}
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar {
+  padding-inline-start: 3rem;
+}
+
+/* Shared navigation motion: short layout shifts with the existing spatial easing. */
+.workspace-rail-container { overflow: clip; }
+.workspace-rail-container > .workspace-rail { width: 4rem; }
+.workspace-switcher-floating {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-100%);
+}
+.app-shell[data-rail-collapsed="true"] .workspace-rail-container > .workspace-rail {
+  transform: translateX(-100%);
+  visibility: hidden;
+}
+.app-shell[data-rail-collapsed="true"] .workspace-switcher-floating {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+@media (min-width: 901px) and (prefers-reduced-motion: no-preference) {
+  .app-shell {
+    transition: grid-template-columns var(--motion-duration-fast) var(--motion-ease-spatial);
+  }
+  .workspace-sidebar__header, .workspace-app-bar {
+    transition: padding-inline-start var(--motion-duration-fast) var(--motion-ease-spatial);
+  }
+  .workspace-rail-container > .workspace-rail, .workspace-switcher-floating {
+    transition:
+      transform var(--motion-duration-fast) var(--motion-ease-spatial),
+      opacity var(--motion-duration-fast) var(--motion-ease-spatial),
+      visibility var(--motion-duration-fast);
+  }
+}
+
+.workspace-navigation-item > svg { color: inherit; }

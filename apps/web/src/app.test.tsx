@@ -1990,9 +1990,11 @@ describe("ilo web app", () => {
     const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
-    expect(within(sidebar).getByRole("button", { name: "Switch workspace" })).toHaveTextContent(
-      "Settings",
-    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Settings",
+      }),
+    ).toHaveAttribute("aria-current", "page");
     expect(within(sidebar).queryByRole("button", { name: "Account menu" })).not.toBeInTheDocument();
     view.unmount();
 
@@ -2719,83 +2721,75 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("calendar unavailable");
   });
 
-  it("organizes and opens the full navigation across screen sizes", async () => {
+  it("keeps desktop workspaces directly reachable beside contextual navigation", async () => {
     setup();
     const browser = userEvent.setup();
     await screen.findByRole("heading", { name: "To take care of" });
-    const topNavigation = screen.getByRole("navigation", { name: "Top navigation" });
+    const rail = screen.getByRole("navigation", { name: "Workspace navigation" });
     expect(
-      within(topNavigation).getByRole("heading", { name: "Monday, July 13th" }),
-    ).toBeInTheDocument();
-    expect(within(topNavigation).queryByRole("link", { name: "Journal" })).not.toBeInTheDocument();
+      within(rail)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("aria-label")),
+    ).toEqual(["Today at a Glance", "Calendar", "Tasks", "Mail", "Finances", "Settings"]);
+    expect(screen.queryByRole("button", { name: "Switch workspace" })).not.toBeInTheDocument();
+    expect(within(rail).getByRole("link", { name: "Today at a Glance" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(
-      within(screen.getByRole("main")).queryByRole("heading", { name: "Monday, July 13th" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("complementary", { name: "Today Sidebar" })).not.toBeInTheDocument();
-    expect(
-      within(topNavigation).getByRole("button", { name: "Switch workspace" }),
-    ).toHaveTextContent("Today at a Glance");
-    expect(
-      within(topNavigation).queryByRole("button", { name: "Account menu" }),
-    ).not.toBeInTheDocument();
-
-    await browser.click(within(topNavigation).getByRole("button", { name: "Switch workspace" }));
-    const settingsMenu = screen.getByRole("menu", { name: "Switch workspace" });
-    expect(within(settingsMenu).getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
-    expect(
-      within(settingsMenu).queryByRole("menuitem", { name: "Log out" }),
-    ).not.toBeInTheDocument();
-    await browser.click(within(settingsMenu).getByRole("menuitem", { name: "Settings" }));
-    const settingsSidebar = await screen.findByRole("complementary", {
+      within(rail)
+        .getByRole("link", { name: "Today at a Glance" })
+        .querySelector(".workspace-icon"),
+    ).toBeNull();
+    for (const label of ["Calendar", "Tasks", "Mail", "Finances"]) {
+      expect(
+        within(rail).getByRole("link", { name: label }).querySelector(".workspace-icon"),
+      ).toBeNull();
+      expect(within(rail).getByRole("link", { name: label }).querySelector("svg")).not.toBeNull();
+    }
+    await browser.click(within(rail).getByRole("link", { name: "Settings" }));
+    const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
-    expect(
-      within(settingsSidebar).getByRole("navigation", { name: "Personal" }),
-    ).toBeInTheDocument();
-    expect(
-      within(settingsSidebar).getByRole("navigation", { name: "History & access" }),
-    ).toBeInTheDocument();
-    for (const destination of ["Goals", "Motives", "Reviews", "Activity"]) {
-      expect(within(settingsSidebar).getByRole("link", { name: destination })).toBeInTheDocument();
-    }
-    await browser.click(within(settingsSidebar).getByRole("link", { name: "Goals" }));
+    await browser.click(within(sidebar).getByRole("link", { name: "Goals" }));
     expect(await screen.findByText("Active outcomes")).toBeInTheDocument();
-    await browser.click(within(settingsSidebar).getByRole("link", { name: "Motives" }));
-    expect(await screen.findByText("Decision context")).toBeInTheDocument();
-    await browser.click(within(settingsSidebar).getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Today at a Glance" }));
-
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
+    expect(within(rail).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(rail).getByRole("link", { name: "Today at a Glance" })).not.toHaveAttribute(
+      "aria-current",
+    );
+    await browser.click(within(rail).getByRole("link", { name: "Tasks" }));
+    await screen.findByRole("heading", { name: "Tasks" });
+    const taskSidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    expect(taskSidebar).toHaveAttribute("data-slot", "sidebar");
+    expect(taskSidebar.querySelector('[data-slot="sidebar-header"]')).toHaveTextContent("Tasks");
+    expect(within(taskSidebar).getByText("Views")).toBeVisible();
     expect(
-      within(workspaceMenu).getByRole("menuitem", { name: "Today at a Glance" }),
-    ).toHaveAttribute("aria-current", "page");
+      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByText("Tasks"),
+    ).toBeNull();
     expect(
-      workspaceMenu.querySelector('[data-slot="dropdown-menu-separator"]'),
-    ).toBeInTheDocument();
-    for (const [label, workspace] of [
-      ["Calendar", "calendar"],
-      ["Tasks", "tasks"],
-      ["Mail", "mail"],
-      ["Finances", "finances"],
-    ] as const) {
-      expect(
-        within(workspaceMenu)
-          .getByRole("menuitem", { name: label })
-          .querySelector(`[data-workspace="${workspace}"]`),
-      ).not.toBeNull();
-    }
-    expect(within(workspaceMenu).getByRole("menuitem", { name: "Finances" })).toBeInTheDocument();
-    await browser.click(within(workspaceMenu).getByRole("menuitem", { name: "Finances" }));
+      within(rail).getByRole("link", { name: "Tasks" }).querySelector(".workspace-icon"),
+    ).toBeNull();
+    expect(
+      within(rail)
+        .getByRole("link", { name: "Today at a Glance" })
+        .querySelector(".workspace-icon"),
+    ).toBeNull();
+    expect(within(rail).getByRole("link", { name: "Tasks" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await browser.click(within(rail).getByRole("link", { name: "Finances" }));
     expect(
       await screen.findByRole("region", { name: "Financial position" }, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    const financesSidebar = screen.getByRole("complementary", { name: "Finances Sidebar" });
-    const financesSwitcher = within(financesSidebar).getByRole("button", {
-      name: "Switch workspace",
-    });
-    expect(financesSwitcher).toHaveTextContent("Finances");
-    expect(financesSwitcher.querySelector('[data-workspace="finances"]')).not.toBeNull();
+    expect(screen.getByRole("complementary", { name: "Finances Sidebar" })).toBeInTheDocument();
+    expect(within(rail).getByRole("link", { name: "Finances" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   }, 15_000);
 
   it("uses a mobile workspace dock and contextual action sheet", async () => {
@@ -2979,20 +2973,23 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps Today sidebar-free with navigation in the desktop app bar", async () => {
+  it("keeps Today free of contextual navigation beside the desktop rail", async () => {
     setup("/today");
 
     await screen.findByRole("heading", { name: "To take care of" });
     expect(screen.queryByRole("complementary", { name: "Today Sidebar" })).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Workspace dock" })).not.toBeInTheDocument();
     const topNavigation = screen.getByRole("navigation", { name: "Top navigation" });
-    expect(within(topNavigation).getByRole("button", { name: "Switch workspace" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
+    expect(
+      within(topNavigation).queryByRole("button", { name: "Switch workspace" }),
+    ).not.toBeInTheDocument();
     expect(
       within(topNavigation).queryByRole("button", { name: "Account menu" }),
     ).not.toBeInTheDocument();
   });
 
-  it("uses a direct workspace menu without hover previews or destination prefetch", async () => {
+  it("uses a direct workspace rail without hover previews or destination prefetch", async () => {
     const view = setup("/tasks");
     const browser = userEvent.setup();
     await screen.findByRole("heading", { name: "Tasks" });
@@ -3003,16 +3000,10 @@ describe("ilo web app", () => {
     mocks.listMailThreads.mockClear();
     mocks.getFinanceOverview.mockClear();
 
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
-    expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(6);
-    expect(within(workspaceMenu).getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
-    expect(within(workspaceMenu).getAllByRole("menuitem").at(-1)).toHaveAccessibleName("Settings");
-    expect(within(workspaceMenu).getByRole("menuitem", { name: "Tasks" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    fireEvent.pointerMove(within(workspaceMenu).getByRole("menuitem", { name: "Calendar" }));
+    const rail = screen.getByRole("navigation", { name: "Workspace navigation" });
+    const calendar = within(rail).getByRole("link", { name: "Calendar" });
+    await browser.hover(calendar);
+    calendar.focus();
     expect(view.container.querySelector(".workspace-preview")).not.toBeInTheDocument();
     expect(mocks.getDailyBrief).not.toHaveBeenCalled();
     expect(mocks.listEvents).not.toHaveBeenCalled();
@@ -3022,8 +3013,9 @@ describe("ilo web app", () => {
 
     await browser.keyboard("{Escape}");
     expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Switch workspace" })).not.toHaveTextContent(
-      "Calendar",
+    expect(within(rail).getByRole("link", { name: "Tasks" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
     expect(view.container.querySelector(".workspace-route")).toHaveAttribute(
       "data-direction",
@@ -3036,8 +3028,11 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     await screen.findByRole("heading", { name: "To take care of" });
 
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Tasks" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Tasks",
+      }),
+    );
 
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     expect(view.container.querySelector(".workspace-route")).toHaveAttribute(
@@ -3045,8 +3040,11 @@ describe("ilo web app", () => {
       "down",
     );
 
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Calendar" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Calendar",
+      }),
+    );
 
     expect(await screen.findByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
     expect(
@@ -4886,10 +4884,12 @@ describe("ilo web app", () => {
     // The account utility is a tenant of the shell: same frame, same app bar.
     const appBar = screen.getByRole("navigation", { name: "Top navigation" });
     expect(within(appBar).getByText("Appearance")).toBeInTheDocument();
-    // ...but it stays neutral and uses the shared selector instead of a workspace identity.
-    expect(within(sidebar).getByRole("button", { name: "Switch workspace" })).toHaveTextContent(
-      "Settings",
-    );
+    // Account utilities stay neutral and are selected separately from workspaces.
+    expect(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Settings",
+      }),
+    ).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("heading", { name: "Test User" })).not.toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "Account menu" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("link", { name: "Appearance" })).toHaveAttribute(
@@ -4900,15 +4900,18 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("returns from Settings through the shared workspace picker", async () => {
+  it("returns from Settings through the workspace rail", async () => {
     const view = setup("/settings?section=appearance");
     const browser = userEvent.setup();
 
-    const sidebar = await screen.findByRole("complementary", {
+    await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
-    await browser.click(within(sidebar).getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Mail" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Mail",
+      }),
+    );
     expect(await screen.findByRole("heading", { name: "Mail" })).toBeInTheDocument();
 
     view.unmount();
@@ -5420,7 +5423,11 @@ describe("ilo web app", () => {
       '[data-slot="workspace-app-bar-identity"]',
     ) as HTMLElement;
     const controls = screen.getByRole("group", { name: "Calendar controls" });
-    expect(within(identity).getByRole("button", { name: "Switch workspace" })).toBeVisible();
+    expect(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Calendar",
+      }),
+    ).toHaveAttribute("aria-current", "page");
     expect(identity.querySelector(".calendar-app-bar__identity-cluster")).toContainElement(
       within(identity).getByRole("heading", { name: "July 12–18, 2026" }),
     );
@@ -6967,8 +6974,11 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
     expect(await screen.findByText("Jul 13, 11:00 PM – Jul 14, 1:00 AM")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Today at a Glance" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Today at a Glance",
+      }),
+    );
     await browser.click(screen.getByRole("button", { name: /^11:00 PM New year work/ }));
     await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
     expect(
@@ -7315,8 +7325,11 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "View Monday, July 13, 2026" }));
     expect(await screen.findByRole("radio", { name: "Day", checked: true })).toBeInTheDocument();
 
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Tasks" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Tasks",
+      }),
+    );
     await browser.click(screen.getByRole("link", { name: "All" }));
     await browser.click(screen.getByRole("button", { name: "Filters" }));
     await browser.selectOptions(screen.getByLabelText("Type"), "reminder");
@@ -7345,10 +7358,16 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Open Test reminder" }));
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Today at a Glance" }));
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Settings" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Today at a Glance",
+      }),
+    );
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Settings",
+      }),
+    );
     const accountSidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
@@ -7573,8 +7592,11 @@ describe("ilo web app", () => {
       await screen.findByRole("heading", { name: "Shape a block of time" }),
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Settings" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Settings",
+      }),
+    );
     const settingsSidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
@@ -7623,7 +7645,7 @@ describe("ilo web app", () => {
     const mailSidebar = screen.getByRole("complementary", { name: "Mail Sidebar" });
     expect(mailSidebar).toHaveAttribute("data-state", "expanded");
     expect(within(topNavigation).queryByRole("button", { name: "Toggle Sidebar" })).toBeNull();
-    const navigationResize = screen.getByRole("separator", { name: "Resize mail navigation" });
+    const navigationResize = screen.getByRole("separator", { name: "Collapse or show sidebar" });
     navigationResize.focus();
     await browser.keyboard("{Home}");
     expect(mailSidebar).toHaveAttribute("data-state", "collapsed");
@@ -8305,8 +8327,11 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Create reminder" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save");
     await browser.click(screen.getByRole("button", { name: "Close" }));
-    await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Settings" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Settings",
+      }),
+    );
     await browser.click(await findSettingsLink("Connections"));
     expect(await screen.findByText(/No external calendars connected/)).toBeInTheDocument();
   });

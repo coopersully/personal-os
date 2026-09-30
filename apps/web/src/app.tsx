@@ -250,6 +250,7 @@ import {
 } from "@/components/ui/popover";
 import { ScrollArea as ShadcnScrollArea } from "@/components/ui/scroll-area";
 import {
+  Sidebar as ShadcnSidebar,
   SidebarContent as ShadcnSidebarContent,
   SidebarGroup as ShadcnSidebarGroup,
   SidebarGroupContent as ShadcnSidebarGroupContent,
@@ -961,64 +962,63 @@ function AuthActionShell({
   );
 }
 
-const mailSidebarWidthStorageKey = "ilo.mail.sidebar-width.v1";
-const collapsedMailSidebarWidth = 48;
-const defaultMailSidebarWidth = 256;
-const minimumMailSidebarWidth = 208;
-const maximumMailSidebarWidth = 360;
-
-function clampExpandedMailSidebarWidth(width: number) {
-  return Math.min(maximumMailSidebarWidth, Math.max(minimumMailSidebarWidth, width));
+const sidebarWidthStorageKey = "nohmi.sidebar-width.v1";
+const collapsedSidebarWidth = 48;
+const defaultSidebarWidth = 256;
+function normalizeSidebarWidth(width: number) {
+  return width < (collapsedSidebarWidth + defaultSidebarWidth) / 2
+    ? collapsedSidebarWidth
+    : defaultSidebarWidth;
 }
 
-function normalizeMailSidebarWidth(width: number) {
-  return width <= collapsedMailSidebarWidth
-    ? collapsedMailSidebarWidth
-    : clampExpandedMailSidebarWidth(width);
-}
-
-function storedMailSidebarWidth() {
+function storedSidebarWidth() {
   try {
-    if (typeof window === "undefined") return defaultMailSidebarWidth;
-    const stored = Number(window.localStorage.getItem(mailSidebarWidthStorageKey));
+    if (typeof window === "undefined") return defaultSidebarWidth;
+    const stored = Number(window.localStorage.getItem(sidebarWidthStorageKey));
     return Number.isFinite(stored) && stored > 0
-      ? normalizeMailSidebarWidth(stored)
-      : defaultMailSidebarWidth;
+      ? normalizeSidebarWidth(stored)
+      : defaultSidebarWidth;
   } catch {
-    return defaultMailSidebarWidth;
+    return defaultSidebarWidth;
   }
 }
 
-function persistMailSidebarWidth(width: number) {
+function persistSidebarWidth(width: number) {
   try {
-    window.localStorage.setItem(mailSidebarWidthStorageKey, String(width));
+    window.localStorage.setItem(sidebarWidthStorageKey, String(width));
   } catch {
     // A browser storage restriction must not prevent layout resizing.
   }
 }
 
-function MailNavigationResizeHandle({
+function SidebarCollapseHandle({
   onResize,
+  collapsedWidth = collapsedSidebarWidth,
+  expandedWidth = defaultSidebarWidth,
+  label = "Collapse or show sidebar",
+  controls = "app-sidebar",
+  className = "",
   width,
 }: {
   onResize: (width: number, persist: boolean) => void;
   width: number;
+  collapsedWidth?: number;
+  expandedWidth?: number;
+  label?: string;
+  controls?: string;
+  className?: string;
 }) {
   const resizeFromKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const next =
-      event.key === "Home"
-        ? collapsedMailSidebarWidth
-        : event.key === "End"
-          ? maximumMailSidebarWidth
-          : event.key === "ArrowLeft"
-            ? width <= minimumMailSidebarWidth
-              ? collapsedMailSidebarWidth
-              : width - 16
-            : event.key === "ArrowRight"
-              ? width === collapsedMailSidebarWidth
-                ? minimumMailSidebarWidth
-                : width + 16
-              : null;
+      event.key === "Home" || event.key === "ArrowLeft"
+        ? collapsedWidth
+        : event.key === "End" || event.key === "ArrowRight"
+          ? expandedWidth
+          : event.key === "Enter" || event.key === " "
+            ? width === collapsedWidth
+              ? expandedWidth
+              : collapsedWidth
+            : null;
     if (next === null) return;
     event.preventDefault();
     onResize(next, true);
@@ -1026,13 +1026,17 @@ function MailNavigationResizeHandle({
 
   return (
     <hr
-      aria-label="Resize mail navigation"
+      aria-label={label}
+      aria-controls={controls}
+      aria-valuetext={width === collapsedWidth ? "Collapsed" : "Expanded"}
       aria-orientation="vertical"
-      aria-valuemax={maximumMailSidebarWidth}
-      aria-valuemin={collapsedMailSidebarWidth}
+      aria-valuemax={expandedWidth}
+      aria-valuemin={collapsedWidth}
       aria-valuenow={width}
-      className="mail-sidebar-resize-handle"
-      onDoubleClick={() => onResize(defaultMailSidebarWidth, true)}
+      className={`sidebar-collapse-handle ${className}`}
+      onDoubleClick={() =>
+        onResize(width === collapsedWidth ? expandedWidth : collapsedWidth, true)
+      }
       onKeyDown={resizeFromKeyboard}
       onPointerDown={(event) => {
         event.preventDefault();
@@ -1044,8 +1048,8 @@ function MailNavigationResizeHandle({
         let finished = false;
         const move = (moveEvent: PointerEvent) => {
           finalWidth = Math.min(
-            maximumMailSidebarWidth,
-            Math.max(collapsedMailSidebarWidth, startWidth + moveEvent.clientX - startX),
+            expandedWidth,
+            Math.max(collapsedWidth, startWidth + moveEvent.clientX - startX),
           );
           onResize(finalWidth, false);
         };
@@ -1084,9 +1088,24 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
-  const [mailSidebarWidth, setMailSidebarWidth] = useState(storedMailSidebarWidth);
-  const mailSidebarState =
-    mailSidebarWidth === collapsedMailSidebarWidth ? "collapsed" : "expanded";
+  const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem("nohmi.workspace-rail-collapsed.v1") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const updateRailCollapsed = (collapsed: boolean) => {
+    setRailCollapsed(collapsed);
+    try {
+      window.localStorage.setItem("nohmi.workspace-rail-collapsed.v1", String(collapsed));
+    } catch {
+      /* Navigation remains usable when storage is unavailable. */
+    }
+  };
+
+  const sidebarState = sidebarWidth === collapsedSidebarWidth ? "collapsed" : "expanded";
   const location = useLocation();
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
@@ -1198,18 +1217,55 @@ function AuthenticatedApp({ user }: { user: User }) {
     <>
       <div
         className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
-        data-sidebar-state={sidebarMode === "mail" ? mailSidebarState : undefined}
+        data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
+        data-sidebar-state={!isMobileWorkspaceDock && sidebarMode ? sidebarState : undefined}
         style={
-          sidebarMode === "mail"
-            ? ({ "--mail-sidebar-width": `${mailSidebarWidth}px` } as CSSProperties)
-            : undefined
+          sidebarMode ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined
         }
       >
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
+        {!isMobileWorkspaceDock ? (
+          <div
+            className="workspace-rail-container"
+            inert={railCollapsed}
+            aria-hidden={railCollapsed}
+          >
+            <WorkspaceRail pathname={shellPathname} user={user} weather={weather.data} />
+            <SidebarCollapseHandle
+              className="workspace-rail-collapse-handle"
+              label="Minimize workspace rail"
+              controls="workspace-rail"
+              collapsedWidth={0}
+              expandedWidth={64}
+              width={64}
+              onResize={(width, persist) => {
+                if (persist) updateRailCollapsed(width < 32);
+              }}
+            />
+          </div>
+        ) : null}
+        {!isMobileWorkspaceDock ? (
+          <div
+            className="workspace-switcher-floating"
+            inert={!railCollapsed}
+            aria-hidden={!railCollapsed}
+          >
+            <WorkspaceSwitcher
+              compact
+              onShowRail={() => updateRailCollapsed(false)}
+              onNavigate={closeMobileMenu}
+              pathname={shellPathname}
+              user={user}
+              weather={weather.data}
+            />
+          </div>
+        ) : null}
         {!isMobileWorkspaceDock && !isCalendarWorkspace && !isTodayWorkspace ? (
-          <aside
+          <ShadcnSidebar
+            collapsible="none"
+            role="complementary"
             aria-label={
               navigationOwner.kind !== "workspace"
                 ? "Account utility navigation"
@@ -1218,17 +1274,13 @@ function AuthenticatedApp({ user }: { user: User }) {
                   : "Today Sidebar"
             }
             className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
-            data-state={sidebarMode === "mail" ? mailSidebarState : "expanded"}
+            data-state={sidebarState}
             id="app-sidebar"
           >
-            <ShadcnSidebarHeader className="sidebar__header">
-              <WorkspaceSwitcher
-                compact
-                onNavigate={closeMobileMenu}
-                pathname={location.pathname}
-                user={user}
-                weather={weather.data}
-              />
+            <ShadcnSidebarHeader className="workspace-sidebar__header">
+              <span className="truncate text-sm font-semibold">
+                {sidebarMode === "settings" ? "Settings" : activeWorkspace?.label}
+              </span>
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
@@ -1253,16 +1305,16 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
             </ShadcnSidebarContent>
-          </aside>
+          </ShadcnSidebar>
         ) : null}
-        {!isMobileWorkspaceDock && sidebarMode === "mail" ? (
-          <MailNavigationResizeHandle
+        {!isMobileWorkspaceDock && sidebarMode ? (
+          <SidebarCollapseHandle
             onResize={(width, persist) => {
-              const normalized = normalizeMailSidebarWidth(width);
-              setMailSidebarWidth(normalized);
-              if (persist) persistMailSidebarWidth(normalized);
+              const normalized = normalizeSidebarWidth(width);
+              setSidebarWidth(normalized);
+              if (persist) persistSidebarWidth(normalized);
             }}
-            width={mailSidebarWidth}
+            width={sidebarWidth}
           />
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
@@ -1299,8 +1351,11 @@ function AuthenticatedApp({ user }: { user: User }) {
           primaryNavigation={
             <WorkspaceAppBarForRoute
               activeSettingsSection={activeSettingsSection}
+              sidebarOwnsTitle={
+                !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
+              }
               workspaceSwitcher={
-                isCalendarWorkspace || (isTodayWorkspace && !isMobileWorkspaceDock) ? (
+                isCalendarWorkspace && isMobileWorkspaceDock ? (
                   <WorkspaceSwitcher
                     onNavigate={closeMobileMenu}
                     pathname={location.pathname}
@@ -1563,6 +1618,7 @@ function NavigationIcon({
 
 function WorkspaceAppBarForRoute({
   activeSettingsSection,
+  sidebarOwnsTitle,
   onCalendarToday,
   pageTitle,
   pathname,
@@ -1575,6 +1631,7 @@ function WorkspaceAppBarForRoute({
   workspaceSwitcher,
 }: {
   activeSettingsSection: SettingsSectionId;
+  sidebarOwnsTitle: boolean;
   onCalendarToday: () => void;
   pageTitle: string | null;
   pathname: string;
@@ -1588,11 +1645,13 @@ function WorkspaceAppBarForRoute({
 }) {
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
-  const identity = isSpatialCalendar ? (
+  const identity = sidebarOwnsTitle ? null : isSpatialCalendar ? (
     <CalendarAppBarIdentity user={user} workspaceSwitcher={workspaceSwitcher} />
   ) : pathname === "/today" ? (
     <div className="calendar-app-bar__identity-cluster">
-      <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      {workspaceSwitcher ? (
+        <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      ) : null}
       {todayBrief ? (
         <TodayNavigationTitle
           generatedAt={todayBrief.generatedAt}
@@ -1671,14 +1730,82 @@ function WorkspaceAppBarForRoute({
   );
 }
 
+function WorkspaceRail({
+  pathname,
+  user,
+  weather,
+}: {
+  pathname: string;
+  user: User;
+  weather: WeatherSnapshot | undefined;
+}) {
+  const owner = navigationOwnerForLocation(pathname);
+  return (
+    <nav aria-label="Workspace navigation" className="workspace-rail" id="workspace-rail">
+      <div className="workspace-rail__destinations">
+        {workspaceDefinitions.map((workspace) => {
+          const active = owner.kind === "workspace" && owner.workspace === workspace.id;
+          const Icon =
+            workspace.id === "today"
+              ? todayWeatherIcon(weather, user.planningTimezone)
+              : workspace.icon;
+          return (
+            <Tooltip key={workspace.id}>
+              <TooltipTrigger asChild>
+                <ShadcnButton
+                  asChild
+                  className="workspace-rail__link"
+                  size="icon"
+                  variant={active ? "secondary" : "ghost"}
+                >
+                  <Link
+                    aria-current={active ? "page" : undefined}
+                    aria-label={workspace.label}
+                    data-workspace={workspace.id}
+                    to={workspace.path}
+                  >
+                    <Icon aria-hidden="true" weight={active ? "Filled" : "Outline"} />
+                  </Link>
+                </ShadcnButton>
+              </TooltipTrigger>
+              <TooltipContent side="right">{workspace.label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ShadcnButton
+            asChild
+            className="workspace-rail__link workspace-rail__settings"
+            size="icon"
+            variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
+          >
+            <Link
+              aria-current={owner.kind === "account-utility" ? "page" : undefined}
+              aria-label="Settings"
+              to="/settings"
+            >
+              <SettingsIcon aria-hidden="true" />
+            </Link>
+          </ShadcnButton>
+        </TooltipTrigger>
+        <TooltipContent side="right">Settings</TooltipContent>
+      </Tooltip>
+    </nav>
+  );
+}
+
 function WorkspaceSwitcher({
   compact = false,
+  onShowRail,
   onNavigate,
   pathname,
   user,
   weather: currentWeather,
 }: {
   compact?: boolean;
+  onShowRail?: () => void;
   onNavigate: () => void;
   pathname: string;
   user: User;
@@ -1688,6 +1815,11 @@ function WorkspaceSwitcher({
   const isSettings = pathname === "/settings";
   const section = isSettings ? "Settings" : (workspace?.label ?? "Home OS");
   const activeWorkspaceId = workspace ? workspaceIdForPath(workspace.path) : undefined;
+  const CurrentWorkspaceIcon = isSettings
+    ? SettingsIcon
+    : workspace?.id === "today"
+      ? todayWeatherIcon(currentWeather, user.planningTimezone)
+      : (workspace?.icon ?? GridIcon);
 
   return (
     <ShadcnSidebarMenu>
@@ -1696,10 +1828,19 @@ function WorkspaceSwitcher({
           <DropdownMenuTrigger asChild>
             <ShadcnButton
               aria-label="Switch workspace"
-              className="sidebar__workspace-trigger w-full justify-start"
+              className={
+                compact
+                  ? "sidebar__workspace-trigger workspace-navigation-item"
+                  : "sidebar__workspace-trigger w-full justify-start"
+              }
+              data-workspace={compact ? workspace?.id : undefined}
+              data-active={compact ? "true" : undefined}
+              size={compact ? "icon" : "default"}
               variant="secondary"
             >
-              {isSettings ? (
+              {compact ? (
+                <CurrentWorkspaceIcon aria-hidden="true" weight="Filled" />
+              ) : isSettings ? (
                 <SettingsIcon aria-hidden="true" />
               ) : activeWorkspaceId ? (
                 <WorkspaceIcon size="sm" workspace={activeWorkspaceId} />
@@ -1708,14 +1849,16 @@ function WorkspaceSwitcher({
               ) : (
                 <LogoMark compact />
               )}
-              <span>{section}</span>
-              <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
+              {!compact ? <span>{section}</span> : null}
+              {!compact ? (
+                <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
+              ) : null}
             </ShadcnButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
             aria-label="Switch workspace"
-            className={compact ? "w-64" : "w-[--radix-popper-anchor-width]"}
+            className={compact ? "w-56" : "w-[--radix-popper-anchor-width]"}
           >
             <DropdownMenuGroup>
               <WorkspaceMenuItem
@@ -1754,6 +1897,12 @@ function WorkspaceSwitcher({
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuGroup>
+            {onShowRail ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onShowRail}>Show workspace rail</DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </ShadcnSidebarMenuItem>
@@ -1774,26 +1923,22 @@ function WorkspaceMenuItem({
   timeZone: string;
   weather: WeatherSnapshot | undefined;
 }) {
-  const { icon: Icon, label, path } = item;
+  const { label, path } = item;
+  const Icon = item.id === "today" ? todayWeatherIcon(weather, timeZone) : item.icon;
   const isActive = workspaceForPath(pathname)?.path === path;
-  const workspaceId = workspaceIdForPath(path);
   return (
     <DropdownMenuItem asChild>
       <Link
         aria-current={isActive ? "page" : undefined}
         aria-label={label}
+        className="workspace-navigation-item"
+        data-workspace={item.id}
+        data-active={isActive ? "true" : undefined}
         onClick={onNavigate}
         to={path}
       >
-        {item.id === "today" ? (
-          <TodayWorkspaceIcon timeZone={timeZone} weather={weather} />
-        ) : workspaceId ? (
-          <WorkspaceIcon size="sm" workspace={workspaceId} />
-        ) : (
-          <Icon aria-hidden="true" />
-        )}
+        <Icon aria-hidden="true" weight={isActive ? "Filled" : "Outline"} />
         <span>{label}</span>
-        {isActive ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
       </Link>
     </DropdownMenuItem>
   );
@@ -2934,7 +3079,9 @@ function CalendarAppBarIdentity({
 
   return (
     <div className="calendar-app-bar__identity-cluster">
-      <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      {workspaceSwitcher ? (
+        <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      ) : null}
       <div className="calendar-app-bar__orientation">
         <h2>
           <span className="calendar-app-bar__title-full">{title}</span>

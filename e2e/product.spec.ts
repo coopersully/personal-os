@@ -28,6 +28,99 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
 });
 
+test("desktop navigation fills the viewport while long content scrolls independently", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "Desktop shell geometry");
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(page.locator(".app-shell")).toHaveCSS("transition-duration", "0.14s");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(
+    await page
+      .locator(".app-shell")
+      .evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration)),
+  ).toBeLessThanOrEqual(0.00001);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+
+  for (const workspace of ["Tasks", "Mail", "Finances"]) {
+    await page
+      .getByRole("navigation", { name: "Workspace navigation" })
+      .getByRole("link", { name: workspace, exact: true })
+      .click();
+    const sidebar = page.getByRole("complementary", { name: `${workspace} Sidebar` });
+    await expect(sidebar).toHaveAttribute("data-slot", "sidebar");
+    await expect(sidebar.locator('[data-slot="sidebar-header"]')).toHaveText(workspace);
+    await expect(
+      page
+        .getByRole("navigation", { name: "Top navigation" })
+        .getByText(workspace, { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator(".workspace-rail .workspace-icon")).toHaveCount(0);
+    const handle = page.getByRole("separator", { name: "Collapse or show sidebar" });
+    const edge = await handle.boundingBox();
+    if (!edge) throw new Error("Missing sidebar drag handle");
+    await page.mouse.move(edge.x, edge.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(edge.x - 220, edge.y + 100);
+    await page.mouse.up();
+    await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    await handle.press("ArrowRight");
+    await expect(sidebar).toHaveAttribute("data-state", "expanded");
+    await handle.press("End");
+    await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
+    const colors = await page
+      .locator(".sidebar, .workspace-app-bar, .workspace-secondary-app-bar")
+      .evaluateAll((elements) =>
+        elements.map((element) => getComputedStyle(element).backgroundColor),
+      );
+    expect(new Set(colors).size).toBe(1);
+  }
+  const railEdge = await page
+    .getByRole("separator", { name: "Minimize workspace rail" })
+    .boundingBox();
+  if (!railEdge) throw new Error("Missing rail drag handle");
+  await page.mouse.move(railEdge.x, railEdge.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(railEdge.x - 60, railEdge.y + 100);
+  await page.mouse.up();
+  await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toHaveCount(0);
+  const switcher = page.getByRole("button", { name: "Switch workspace", exact: true });
+  await expect(switcher).toBeVisible();
+  await switcher.click();
+  await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
+  await expect(page.locator(".workspace-app-bar")).toHaveCSS("padding-left", "48px");
+  await page.reload();
+  await expect(switcher).toBeVisible();
+  await switcher.click();
+  await page.getByRole("menuitem", { name: "Show workspace rail", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Workspace navigation" })
+    .getByRole("link", { name: "Settings" })
+    .click();
+  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  for (const selector of [".workspace-rail", ".sidebar"]) {
+    const bounds = await page.locator(selector).boundingBox();
+    expect(bounds?.y).toBe(0);
+    expect(bounds?.height).toBe(480);
+  }
+  const layout = await page.locator("main").evaluate((main) => ({
+    documentHeight: document.documentElement.scrollHeight,
+    viewport: innerHeight,
+    overflow: getComputedStyle(main).overflowY,
+    scrolls: main.scrollHeight > main.clientHeight,
+  }));
+  expect(layout.documentHeight).toBe(layout.viewport);
+  expect(layout.overflow).toBe("auto");
+  expect(layout.scrolls).toBe(true);
+});
+
 test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@ilo.test");
@@ -100,9 +193,15 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const eventTitle = `Material event ${suffix}`;
   const allDayTitle = `All-day ${eventTitle} with a long descriptive occasion title`;
   const mobile = testInfo.project.name === "mobile-chromium";
-  // The desktop switcher and the narrow dock expose the same five destinations
-  // under the same accessible names, so workspace movement is one path.
+  // Desktop links and the narrow dock share destination names.
   const openWorkspace = async (name: string) => {
+    if (!mobile) {
+      await page
+        .getByRole("navigation", { name: "Workspace navigation" })
+        .getByRole("link", { name, exact: true })
+        .click();
+      return;
+    }
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await page
       .getByRole("menu", { name: "Switch workspace" })
@@ -146,9 +245,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
   });
   await expect(applicationSidebar).toHaveCount(0);
   if (!mobile) {
-    await page.getByRole("button", { name: "Switch workspace" }).click();
-    const workspaceMenu = page.getByRole("menu", { name: "Switch workspace" });
-    const calendarWorkspace = workspaceMenu.getByRole("menuitem", { name: "Calendar" });
+    const rail = page.getByRole("navigation", { name: "Workspace navigation" });
+    await expect(rail.getByRole("link")).toHaveCount(6);
+    const calendarWorkspace = rail.getByRole("link", { name: "Calendar" });
     await calendarWorkspace.hover();
     await expect(page.locator(".workspace-preview")).toHaveCount(0);
     await expect(page).toHaveURL(/\/today$/);
@@ -428,9 +527,11 @@ test("a person and an agent share one reminder and calendar surface", async ({
     ).toBeVisible();
   } else {
     await expect(settingsSidebar).toBeVisible();
-    await expect(settingsSidebar.getByRole("button", { name: "Switch workspace" })).toContainText(
-      "Settings",
-    );
+    await expect(
+      page
+        .getByRole("navigation", { name: "Workspace navigation" })
+        .getByRole("link", { name: "Settings" }),
+    ).toHaveAttribute("aria-current", "page");
   }
   await expect(page.getByRole("tablist", { name: "Settings sections" })).toHaveCount(0);
   await page.getByLabel("Planning day starts").fill("10:00");
@@ -491,8 +592,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await page.getByRole("menuitem", { name: "Today at a Glance" }).click();
   } else {
-    await settingsSidebar.getByRole("button", { name: "Switch workspace" }).click();
-    await page.getByRole("menuitem", { name: "Today at a Glance" }).click();
+    await openWorkspace("Today at a Glance");
   }
   await expect(page).toHaveURL(/\/today$/);
 });

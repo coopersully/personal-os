@@ -4,7 +4,7 @@ import type {
   ManageFinanceRecurringItemInput,
 } from "@personal-os/domain";
 import { formatDateOnly } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +25,10 @@ import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarContent,
 } from "@/components/workspace-secondary-app-bar";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatMoney } from "./format";
 import { FinanceSourceState, requireFinanceResult } from "./position-material.js";
 import { FinanceReimbursementList } from "./reimbursement-list";
@@ -73,7 +75,8 @@ export function FinanceCashflowPage() {
     client.invalidateQueries({
       predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
     });
-  const update = useMutation({
+  const update = useFeedbackMutation({
+    feedback: { action: "save this recurring payment", safeToRetry: false, form: true },
     mutationFn: async (input: ManageFinanceRecurringItemInput) =>
       requireFinanceResult(await api.manageFinanceRecurringItem(input)),
     onSuccess: refresh,
@@ -180,7 +183,7 @@ export function FinanceCashflowPage() {
             </TabsList>
           </WorkspaceSecondaryAppBarContent>
         </WorkspaceSecondaryAppBar>
-        {update.isError ? <InlineError error={update.error} /> : null}
+        {update.isError ? <MutationFeedback feedback={update.feedback} /> : null}
         {recurring.isError ? (
           <Alert variant="destructive">
             <AlertTitle>
@@ -189,7 +192,7 @@ export function FinanceCashflowPage() {
                 : "Recurring activity unavailable"}
             </AlertTitle>
             <AlertDescription>
-              <p>{errorMessage(recurring.error)}</p>
+              <p>{"Couldn’t refresh this information. Try again."}</p>
               <Button size="sm" variant="outline" onClick={() => void recurring.refetch()}>
                 Retry recurring activity
               </Button>
@@ -243,8 +246,20 @@ export function FinanceCashflowPage() {
                     </div>
                   </dl>
                 )}
-                {snapshot.isError ? <InlineError error={snapshot.error} /> : null}
-                {forecast.isError ? <InlineError error={forecast.error} /> : null}
+                {snapshot.isError ? (
+                  <InlineError
+                    error={snapshot.error}
+                    retry={() => snapshot.refetch()}
+                    stale={snapshot.data !== undefined}
+                  />
+                ) : null}
+                {forecast.isError ? (
+                  <InlineError
+                    error={forecast.error}
+                    retry={() => forecast.refetch()}
+                    stale={forecast.data !== undefined}
+                  />
+                ) : null}
                 {accounts.isError ? (
                   <FinanceSourceState label="Forecast account scope" query={accounts} />
                 ) : null}

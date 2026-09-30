@@ -295,16 +295,14 @@ describe("Calendar schedule health", () => {
     mocks.createCalendarReview.mockRejectedValueOnce(new Error("Assessment unavailable"));
     renderPage();
 
-    expect(await screen.findByText("Status unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Schedule health is unavailable")).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
     await browser.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("This review is stale")).toBeInTheDocument();
     expect(screen.getByText("Busy events overlap")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Assess calendar" }));
     expect(
-      await screen.findByText("Assessment unavailable", {
-        selector: '[data-slot="alert-title"]',
-      }),
+      await screen.findByText(/Couldn’t confirm whether we could assess the calendar/),
     ).toBeInTheDocument();
   });
 

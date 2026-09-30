@@ -206,18 +206,26 @@ export function FinanceLinkedTransaction({
     queryFn: async () => requireFinanceResult(await api.getFinanceTransaction(id)),
   });
   if (transaction.isPending) return <p role="status">Loading source transaction…</p>;
-  if (transaction.isError)
+  if (transaction.isError && !transaction.data)
     return (
       <div>
-        <InlineError error={transaction.error} />
+        <InlineError
+          error={transaction.error}
+          retry={() => transaction.refetch()}
+          stale={transaction.data !== undefined}
+        />
         <Button variant="outline" onClick={() => void transaction.refetch()}>
           Retry
         </Button>
       </div>
     );
+  if (!transaction.data) return null;
   const item = transaction.data.data;
   return (
     <section aria-label="Source transaction" className="rounded-lg border p-4">
+      {transaction.isError ? (
+        <InlineError error={transaction.error} retry={() => transaction.refetch()} stale />
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">Source transaction</p>

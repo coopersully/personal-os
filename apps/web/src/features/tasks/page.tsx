@@ -4,7 +4,6 @@ import { EmptyState } from "@personal-os/ui";
 import {
   type InfiniteData,
   useInfiniteQuery,
-  useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -63,12 +62,15 @@ import {
   WorkspaceSecondaryAppBarContent,
 } from "@/components/workspace-secondary-app-bar";
 import { cn } from "@/lib/utils";
-import { api, errorMessage } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { api } from "../../api.js";
+import { InlineError, QueryFeedback } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatMaterialDateTime, formatRelativeMaterialDateTime } from "../../lib/date-format.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { type DatePreset, datePresets, identifyPreset, presetBounds } from "./task-filter-presets";
 import {
   archiveScopeFromParams,
@@ -326,8 +328,18 @@ export function TasksPage({
     if (lists.isPending || projects.isPending || (archiveScope !== "all" && tasks.isPending)) {
       return <WorkspaceSkeleton kind="tasks" />;
     }
-    if (lists.isError) return <InlineError error={lists.error} />;
-    if (projects.isError) return <InlineError error={projects.error} />;
+    if (lists.isError && !lists.data)
+      return (
+        <InlineError error={lists.error} retry={lists.refetch} stale={lists.data !== undefined} />
+      );
+    if (projects.isError && !projects.data)
+      return (
+        <InlineError
+          error={projects.error}
+          retry={projects.refetch}
+          stale={projects.data !== undefined}
+        />
+      );
     if (archiveScope === "all") {
       const archivedLists = lists.data.items.filter((list) => list.availability === "archived");
       const terminalProjects = projects.data.items.filter(
@@ -338,7 +350,7 @@ export function TasksPage({
     if (tasks.isError && !tasks.data) {
       return (
         <div className="narrow-page">
-          <InlineError error={tasks.error} />
+          <InlineError error={tasks.error} retry={tasks.refetch} stale={tasks.data !== undefined} />
           <Button onClick={() => void tasks.refetch()} size="sm" variant="outline">
             Retry Tasks
           </Button>
@@ -348,6 +360,9 @@ export function TasksPage({
 
     return (
       <div className="narrow-page flex flex-col gap-4">
+        <QueryFeedback query={tasks} title="Couldn’t refresh tasks." staleOnly />
+        <QueryFeedback query={lists} title="Couldn’t refresh lists." staleOnly />
+        <QueryFeedback query={projects} title="Couldn’t refresh projects." staleOnly />
         {taskItems.length === 0 ? (
           search ||
           Object.keys(taskTimingFiltersFromParams(searchParams)).length > 0 ||
@@ -510,9 +525,7 @@ function DependencyFailure({
 }) {
   return (
     <div className="flex flex-col items-start gap-2 px-2">
-      <p className="text-xs text-destructive" role="alert">
-        {errorMessage(error)}
-      </p>
+      <InlineError error={error} title={`Couldn’t load ${name.toLowerCase()}.`} />
       <Button onClick={retry} size="sm" variant="ghost">
         Retry {name}
       </Button>
@@ -542,12 +555,12 @@ export function TaskRow({
   timeZone: string;
 }) {
   const queryClient = useQueryClient();
-  const transition = useMutation({
+  const transition = useFeedbackMutation({
+    feedback: { action: "update this task", safeToRetry: false, form: false },
     mutationFn: () =>
       task.lifecycle === "completed"
         ? api.reopenTask(task.id, { expectedRevision: task.revision })
         : api.completeTask(task.id, { expectedRevision: task.revision }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: async () => {
       toast.success(task.lifecycle === "completed" ? "Task reopened." : "Task completed.");
       await invalidateMaterial(queryClient);
@@ -555,20 +568,40 @@ export function TaskRow({
   });
   const isCompleted = task.lifecycle === "completed";
   const isTrashed = task.deletedAt !== null;
-  const remove = useMutation({
+  // The row disappears after trashing; Undo must own feedback outside its lifecycle.
+  const restore = async (trashed: Task) => {
+    try {
+      await api.restoreTask(trashed.id, { expectedRevision: trashed.revision });
+    } catch (error) {
+      const failure = classifyMutationError(error, {
+        action: "restore this task",
+        safeToRetry: false,
+      });
+      toast.error(`${failure.message} Open Trash to check the task and restore it.`, {
+        duration: Number.POSITIVE_INFINITY,
+      });
+      return;
+    }
+    try {
+      await invalidateMaterial(queryClient);
+    } catch {
+      toast.error(
+        "The task was restored, but the view couldn’t refresh. Refresh the page to see it.",
+        {
+          duration: Number.POSITIVE_INFINITY,
+        },
+      );
+    }
+  };
+  const remove = useFeedbackMutation({
+    feedback: { action: "move this task to Trash", safeToRetry: false, form: false },
     mutationFn: () => api.trashTask(task.id, { expectedRevision: task.revision }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: async (trashed) => {
       toast.success("Task moved to Trash.", {
         action: {
           label: "Undo",
-          onClick: async () => {
-            try {
-              await api.restoreTask(trashed.id, { expectedRevision: trashed.revision });
-              await invalidateMaterial(queryClient);
-            } catch (error) {
-              toast.error(errorMessage(error));
-            }
+          onClick: () => {
+            void restore(trashed);
           },
         },
       });
@@ -699,6 +732,8 @@ export function TaskRow({
           </span>
         </TaskItemMetadata>
       ) : null}
+      <MutationFeedback feedback={transition.feedback} />
+      <MutationFeedback feedback={remove.feedback} />
     </TaskItem>
   );
 }

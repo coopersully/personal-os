@@ -4,7 +4,7 @@ import type {
   FinanceProfile,
 } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,10 @@ import {
 } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { api } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { InlineError, QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceProfileEditor } from "./profile-editor.js";
 
 const financeHumanOnlyActionLabels = {
@@ -108,7 +111,8 @@ export function FinanceSettings() {
     queryFn: api.getFinanceProfile,
     queryKey: ["finance-profile"],
   });
-  const activate = useMutation({
+  const activate = useFeedbackMutation({
+    feedback: { action: "activate financial planning", safeToRetry: false, form: false },
     mutationFn: async () => {
       const current = agentProfile.data;
       if (!current) throw new Error("No Finance guidance draft is available to activate.");
@@ -133,7 +137,8 @@ export function FinanceSettings() {
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]),
   });
-  const saveProfile = useMutation({
+  const saveProfile = useFeedbackMutation({
+    feedback: { action: "save your financial profile", safeToRetry: false, form: true },
     mutationFn: () =>
       api.updateFinanceProfile({
         effectiveDate: form.effectiveDate,
@@ -168,29 +173,41 @@ export function FinanceSettings() {
   return (
     <div className="agent-access" id="guidance">
       <FinanceProfileEditor />
+      <QueryFeedback query={setup} title="Couldn’t load finance setup." />
+      <QueryFeedback query={agentProfile} title="Couldn’t load finance guidance." />
+      <MutationFeedback feedback={activate.feedback} />
       <FinanceAgentGuidancePanel
         activating={activate.isPending}
         activationEligible={
           agentProfile.data?.status === "draft" && agentProfile.data.sourceContexts.length > 0
         }
-        error={setup.error ?? agentProfile.error ?? activate.error}
+        error={null}
         loading={setup.isPending || agentProfile.isPending}
         onActivate={() => activate.mutate()}
         profileStatus={agentProfile.data?.status ?? null}
         setup={setup.data}
       />
-      <FinancialProfilePanel
-        accounts={overview.data?.accounts ?? []}
-        error={financialProfile.error ?? saveProfile.error}
-        form={form}
-        loading={financialProfile.isPending || overview.isPending}
-        onChange={(update) => {
-          setFormDirty(true);
-          setForm(update);
+      <QueryFeedback query={financialProfile} title="Couldn’t load financial profile." />
+      <QueryFeedback query={overview} title="Couldn’t load finance accounts." />
+      <FeedbackForm
+        feedback={saveProfile.feedback}
+        onSubmit={(event) => {
+          event.preventDefault();
+          saveProfile.mutate();
         }}
-        onSave={() => saveProfile.mutate()}
-        saving={saveProfile.isPending}
-      />
+      >
+        <FinancialProfilePanel
+          accounts={overview.data?.accounts ?? []}
+          error={null}
+          form={form}
+          loading={financialProfile.isPending || overview.isPending}
+          onChange={(update) => {
+            setFormDirty(true);
+            setForm(update);
+          }}
+          saving={saveProfile.isPending}
+        />
+      </FeedbackForm>
     </div>
   );
 }
@@ -417,7 +434,6 @@ function FinancialProfilePanel({
   form,
   loading,
   onChange,
-  onSave,
   saving,
 }: {
   accounts: FinanceAccount[];
@@ -425,7 +441,6 @@ function FinancialProfilePanel({
   form: FinanceProfileForm;
   loading: boolean;
   onChange: React.Dispatch<React.SetStateAction<FinanceProfileForm>>;
-  onSave: () => void;
   saving: boolean;
 }) {
   return (
@@ -437,7 +452,7 @@ function FinancialProfilePanel({
           change without your confirmation.
         </CardDescription>
         <CardAction>
-          <Button disabled={loading || saving} onClick={onSave}>
+          <Button disabled={loading || saving} type="submit">
             {saving ? "Saving…" : "Save profile"}
           </Button>
         </CardAction>
@@ -461,6 +476,7 @@ function FinancialProfilePanel({
           <Field>
             <FieldLabel htmlFor="finance-employment-type">Employment type</FieldLabel>
             <NativeSelect
+              name="employmentType"
               id="finance-employment-type"
               onChange={(event) =>
                 onChange((value) => ({
@@ -500,6 +516,7 @@ function FinancialProfilePanel({
           <Field>
             <FieldLabel htmlFor="finance-pay-frequency">Pay frequency</FieldLabel>
             <NativeSelect
+              name="payFrequency"
               id="finance-pay-frequency"
               onChange={(event) =>
                 onChange((value) => ({
@@ -527,6 +544,7 @@ function FinancialProfilePanel({
           <Field>
             <FieldLabel htmlFor="finance-pay-account">Pay account</FieldLabel>
             <NativeSelect
+              name="payAccountId"
               id="finance-pay-account"
               onChange={(event) =>
                 onChange((value) => ({ ...value, payAccountId: event.target.value }))
@@ -565,6 +583,16 @@ function ProfileTextField({
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Input
         id={id}
+        name={
+          {
+            "finance-employer": "employer",
+            "finance-role": "role",
+            "finance-effective-date": "effectiveDate",
+            "finance-gross-income": "grossAnnualIncome",
+            "finance-net-pay": "expectedNetPay",
+            "finance-next-payday": "nextPayday",
+          }[id] ?? id
+        }
         inputMode={type === "text" ? "text" : undefined}
         onChange={(event) => onChange(event.target.value)}
         type={type}

@@ -177,7 +177,7 @@ describe("Finance position pages", () => {
       target: { value: "Household checking" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
-    await screen.findByText("Account was not saved");
+    await screen.findByText(/Couldn’t confirm whether we could save this account/);
     expect(screen.getByLabelText("Account name")).toHaveValue("Household checking");
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
     await waitFor(() => expect(api.updateFinanceAccount).toHaveBeenCalledTimes(2));
@@ -195,7 +195,7 @@ describe("Finance position pages", () => {
       target: { value: "Household checking" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
-    await screen.findByText("Account was not saved");
+    await screen.findByText(/Couldn’t confirm whether we could save this account/);
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
     await waitFor(() => expect(api.updateFinanceAccount).toHaveBeenCalledTimes(2));
     expect(api.updateFinanceAccount.mock.calls[1]?.[1]).toEqual(
@@ -216,7 +216,7 @@ describe("Finance position pages", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit Emergency reserve" }));
     fireEvent.change(screen.getByLabelText("Target amount (USD)"), { target: { value: "6500" } });
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
-    await screen.findByText("Goal was not saved");
+    await screen.findByText(/Couldn’t confirm whether we could save this goal/);
     expect(screen.getByLabelText("Target amount (USD)")).toHaveValue(6500);
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
@@ -281,7 +281,7 @@ describe("Finance position pages", () => {
   it("keeps a failed source local while displaying the successful snapshot", async () => {
     api.getFinancePlaybook.mockRejectedValue(new Error("Priorities source offline"));
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Priorities source offline")).toBeInTheDocument();
+    expect(await screen.findByText("Wealth-building priorities unavailable")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Financial position" })).toBeInTheDocument();
     expect(screen.getByText("Proposed · Version 3")).toBeInTheDocument();
   });
@@ -289,7 +289,7 @@ describe("Finance position pages", () => {
   it("waits for a successful empty Inbox before showing next-step guidance", async () => {
     api.getFinanceInbox.mockRejectedValue(new Error("Inbox unavailable"));
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Inbox unavailable")).toBeVisible();
+    expect(await screen.findByText("Review inbox unavailable")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
   });
 
@@ -600,14 +600,22 @@ describe("Finance position pages", () => {
   });
 
   it("preserves an account correction after a conflict", async () => {
-    api.updateFinanceAccount.mockRejectedValue(new Error("Account changed. Reload before saving."));
+    api.updateFinanceAccount.mockRejectedValue(
+      new ApiClientError({
+        code: "conflict",
+        message: "Account changed. Reload before saving.",
+        status: 409,
+      }),
+    );
     mount(<FinanceAccountsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
       target: { value: "Household checking" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
-    expect(await screen.findByText("Account changed. Reload before saving.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(/This item changed or is no longer available/),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Account name")).toHaveValue("Household checking");
     expect(api.updateFinanceAccount).toHaveBeenCalledTimes(1);
   });
@@ -701,7 +709,9 @@ describe("Finance position pages", () => {
     fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Household" } });
     fireEvent.change(screen.getByLabelText("Balance"), { target: { value: "42" } });
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
-    expect(await screen.findByText("Manual account unavailable")).toBeVisible();
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could create this account/),
+    ).toBeVisible();
     expect(api.createFinanceAccount).toHaveBeenCalledWith(expect.objectContaining({ balance: 42 }));
   });
 
@@ -750,7 +760,7 @@ describe("Finance position pages", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit Emergency reserve" }));
     fireEvent.change(screen.getByLabelText("Target amount (USD)"), { target: { value: "6500" } });
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
-    await screen.findByText(/Goal changed\. Reload it\./);
+    await screen.findByText(/Couldn’t confirm whether we could save this goal/);
     expect(screen.getByLabelText("Target amount (USD)")).toHaveValue(6500);
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
@@ -796,7 +806,7 @@ describe("Finance position pages", () => {
   it("keeps real goal records available when wealth evidence fails", async () => {
     api.getFinanceSnapshot.mockRejectedValue(new Error("Snapshot unavailable"));
     mount(<FinanceWealthPage />);
-    expect(await screen.findByText("Snapshot unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Wealth snapshot unavailable")).toBeInTheDocument();
     expect(
       await screen.findByRole("button", { name: "Edit Emergency reserve" }),
     ).toBeInTheDocument();
@@ -968,4 +978,59 @@ describe("Finance position pages", () => {
       } as never),
     ).toThrow("No result");
   });
+});
+
+it.each([
+  "proposed",
+  "active",
+])("shows the next action for a %s plan when evidence is trustworthy", async (status) => {
+  const snapshot = await api.getFinanceSnapshot();
+  const plan = await api.getFinanceBudget();
+  api.getFinanceSnapshot.mockResolvedValue({
+    ...snapshot,
+    data: { ...snapshot.data, ledger: { ...snapshot.data.ledger, trustworthy: true } },
+  });
+  api.getFinanceBudget.mockResolvedValue({ ...plan, data: { ...plan.data, status } });
+  mount(<FinanceOverviewPage />);
+  const next = await screen.findByRole("region", { name: "Next step" });
+  if (status === "proposed") {
+    expect(
+      within(next).getByText("Your proposed version is waiting for a decision."),
+    ).toBeVisible();
+    expect(within(next).getByRole("link", { name: "Review proposal" })).toHaveAttribute(
+      "href",
+      "/finances/plan",
+    );
+  } else {
+    expect(
+      within(next).getByText("Financial setup resumes from your saved progress."),
+    ).toBeVisible();
+    expect(within(next).getByRole("link", { name: "Resume setup" })).toHaveAttribute(
+      "href",
+      "/finances/setup",
+    );
+    expect(screen.getByText("Active · Version 3")).toBeVisible();
+  }
+});
+
+it("keeps account evidence visible when its refresh fails and allows source-specific recovery", async () => {
+  const snapshot = await api.getFinanceSnapshot();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["finance-snapshot"], snapshot);
+  api.getFinanceSnapshot
+    .mockRejectedValueOnce(new Error("private snapshot refresh failure"))
+    .mockResolvedValue(snapshot);
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <FinanceOverviewPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  expect(screen.getByRole("region", { name: "Financial position" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Retry financial position" }));
+  await waitFor(() =>
+    expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
+  );
 });

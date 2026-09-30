@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: mocks.toastError, success: vi.fn() },
+  toast: { dismiss: vi.fn(), error: mocks.toastError, success: vi.fn() },
 }));
 
 vi.mock("../../api.js", () => ({
@@ -648,13 +648,20 @@ describe("agent access settings", () => {
 
     await browser.click(await screen.findByRole("button", { name: "Revoke Claude" }));
     await browser.click(screen.getByRole("button", { name: "Revoke access" }));
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not revoke host"));
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Couldn’t revoke this agent connection. Try again.",
+        expect.any(Object),
+      ),
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not create token"));
+    expect(
+      await screen.findByText(/confirm whether we could create an agent token/),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Copy this token now")).not.toBeInTheDocument();
   });
 
@@ -901,7 +908,7 @@ describe("agent access settings", () => {
     mocks.listOAuthClients.mockResolvedValue([]);
     renderSettings("/settings?section=mail");
 
-    expect(await screen.findByText("Connection guide unavailable")).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn’t load the connection guide/)).toBeInTheDocument();
     expect(screen.getByText("Mail readiness")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     expect(screen.getByText("Mail is not available in this deployment.")).toBeInTheDocument();

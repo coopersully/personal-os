@@ -144,3 +144,11 @@ History (collapsed)
    scan still reads Moment → Day flow → Decision queue.
 5. Confirm each event, task, and reminder retains the existing direct action
    and accessible name.
+
+## Feedback contract
+
+Follow [feedback and validation](../feedback.md). Keep cached plan and completed
+material visible when a background refresh fails, with a contextual stale status
+and Retry. An initial failure replaces only the unavailable region. Task and
+reminder actions use shared mutation feedback; irreversible deletion requires a
+named confirmation. Forms preserve values and show corrections at their inputs.

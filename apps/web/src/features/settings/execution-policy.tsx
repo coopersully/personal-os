@@ -1,7 +1,8 @@
 import type { ExecutionPolicySettings } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import {
   Card,
   CardContent,
@@ -11,18 +12,20 @@ import {
 } from "../../components/ui/card.js";
 import { Field, FieldContent, FieldDescription, FieldLabel } from "../../components/ui/field.js";
 import { Switch } from "../../components/ui/switch.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 const queryKey = ["execution-policy"] as const;
 
 export function ExecutionPolicySettingsCard() {
   const queryClient = useQueryClient();
   const settings = useQuery({ queryFn: api.getExecutionPolicySettings, queryKey });
-  const update = useMutation<
+  const update = useFeedbackMutation<
     ExecutionPolicySettings,
     Error,
     boolean,
     { previous: ExecutionPolicySettings | undefined }
   >({
+    feedback: { action: "save agent review policy", safeToRetry: false, form: false },
     mutationFn: (reviewBypassEnabled) => {
       if (!settings.data) throw new Error("Execution policy is unavailable.");
       return api.updateExecutionPolicySettings({
@@ -53,9 +56,8 @@ export function ExecutionPolicySettingsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="settings-section__body">
-        {settings.error || update.error ? (
-          <InlineError error={settings.error ?? update.error ?? new Error("Unknown error")} />
-        ) : null}
+        <QueryFeedback query={settings} title="Couldn’t load agent review policy." />
+        <MutationFeedback feedback={update.feedback} />
         <Field data-disabled={unavailable} orientation="horizontal">
           <FieldContent>
             <FieldLabel htmlFor="global-review-bypass">

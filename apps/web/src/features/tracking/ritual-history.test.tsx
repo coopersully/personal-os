@@ -119,23 +119,26 @@ it("requires explicit deletion and keeps failure visible for retry", async () =>
   fireEvent.click(screen.getByRole("button", { name: "Delete evening data" }));
   mocks.remove.mockRejectedValueOnce(new Error("Deletion unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
-  expect(await screen.findByText("Deletion unavailable")).toBeInTheDocument();
+  expect(await screen.findByText(/Couldn’t delete ritual history/)).toBeInTheDocument();
   mocks.history.mockResolvedValue({ items: [], nextCursor: null });
+  fireEvent.click(screen.getByRole("button", { name: "Delete evening data" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   expect(await screen.findByText("Your ritual history will appear here.")).toBeInTheDocument();
-  expect(screen.queryByText("Deletion unavailable")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Couldn’t delete ritual history/)).not.toBeInTheDocument();
   expect(mocks.remove).toHaveBeenLastCalledWith("night");
   mocks.export.mockRejectedValueOnce(new Error("Export unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
-  expect(await screen.findByText("Export unavailable")).toBeInTheDocument();
+  expect(await screen.findByText(/Couldn’t export ritual history/)).toBeInTheDocument();
   mocks.export.mockResolvedValue({ occurrences: [] });
   fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
-  await waitFor(() => expect(screen.queryByText("Export unavailable")).not.toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.queryByText(/Couldn’t export ritual history/)).not.toBeInTheDocument(),
+  );
 });
 it("reports unavailable account history", async () => {
   mocks.history.mockRejectedValue(new Error("History unavailable"));
   mount(<RitualHistory />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("History unavailable");
+  expect(await screen.findByRole("status")).toHaveTextContent("Couldn’t load ritual history");
 });
 it("exports pending native evidence and only discards after explicit confirmation", async () => {
   mocks.invoke.mockResolvedValue({
@@ -154,7 +157,7 @@ it("exports pending native evidence and only discards after explicit confirmatio
   fireEvent.click(screen.getByRole("button", { name: "Discard pending changes" }));
   mocks.invoke.mockRejectedValueOnce(new Error("Storage locked"));
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-  expect(await screen.findByText("Storage locked")).toBeInTheDocument();
+  expect(await screen.findByText(/update automatic rituals/)).toBeInTheDocument();
   mocks.invoke.mockResolvedValue({ enabled: false, queue: [], localHistory: [] });
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
   await waitFor(() =>

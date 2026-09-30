@@ -1,6 +1,6 @@
 import type { Task, TaskMovePreview, User } from "@personal-os/domain";
 import { localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -26,9 +26,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { listAllTaskLists, listAllTaskProjects } from "./page.js";
 
 type TaskFields = {
@@ -104,7 +107,8 @@ export function TaskDialog({
     close();
   };
 
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this task", safeToRetry: false, form: true },
     mutationFn: async ({ fields }: { fields: TaskFields }) => {
       if (!task) {
         return api.createTask({
@@ -141,8 +145,7 @@ export function TaskDialog({
       setCurrentTask(movedTask);
       return api.updateTask(task.id, { ...fields, expectedRevision: movedTask.revision });
     },
-    onError: async (error) => {
-      toast.error(errorMessage(error));
+    onError: async (_error) => {
       await invalidateMaterial(queryClient);
     },
     onSuccess: async (result) => {
@@ -150,7 +153,8 @@ export function TaskDialog({
     },
   });
 
-  const confirmMove = useMutation({
+  const confirmMove = useFeedbackMutation({
+    feedback: { action: "move and save this task", safeToRetry: false, form: true },
     mutationFn: async () => {
       if (!task || !pendingMove) throw new Error("The Task move preview is no longer available.");
       const movedTask = await api.moveTask(task.id, {
@@ -168,14 +172,14 @@ export function TaskDialog({
         expectedRevision: movedTask.revision,
       });
     },
-    onError: async (error) => {
-      toast.error(errorMessage(error));
+    onError: async (_error) => {
       await invalidateMaterial(queryClient);
     },
     onSuccess: () => finish("Task moved and updated."),
   });
 
-  const transition = useMutation({
+  const transition = useFeedbackMutation({
+    feedback: { action: "update this task", safeToRetry: false, form: false },
     mutationFn: async (action: "cancel" | "complete" | "reopen" | "restore" | "trash") => {
       const persistedTask = currentTask ?? task;
       if (!persistedTask) throw new Error("Save the Task before changing its lifecycle.");
@@ -186,7 +190,6 @@ export function TaskDialog({
       if (action === "trash") return api.trashTask(persistedTask.id, input);
       return api.reopenTask(persistedTask.id, input);
     },
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: (_result, action) => finish(taskActionResult(action)),
   });
 
@@ -237,9 +240,14 @@ export function TaskDialog({
               Keep the commitment separate from its deadline and reserved time.
             </EditorDescription>
           </EditorHeader>
+          <MutationFeedback feedback={transition.feedback} />
           {lists.isError ? (
             <div className="flex flex-col gap-3">
-              <InlineError error={lists.error} />
+              <InlineError
+                error={lists.error}
+                retry={lists.refetch}
+                stale={lists.data !== undefined}
+              />
               <Button onClick={() => lists.refetch()} type="button" variant="outline">
                 Retry Lists
               </Button>
@@ -247,13 +255,21 @@ export function TaskDialog({
           ) : null}
           {projects.isError ? (
             <div className="flex flex-col gap-3">
-              <InlineError error={projects.error} />
+              <InlineError
+                error={projects.error}
+                retry={projects.refetch}
+                stale={projects.data !== undefined}
+              />
               <Button onClick={() => projects.refetch()} type="button" variant="outline">
                 Retry Projects
               </Button>
             </div>
           ) : null}
-          <form className={task ? "px-4" : undefined} onSubmit={submit}>
+          <FeedbackForm
+            feedback={save.feedback}
+            className={task ? "px-4" : undefined}
+            onSubmit={submit}
+          >
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="task-title">Task</FieldLabel>
@@ -377,9 +393,7 @@ export function TaskDialog({
                 </FieldGroup>
               </details>
             </FieldGroup>
-            {save.isError || confirmMove.isError ? (
-              <InlineError error={save.error ?? confirmMove.error} />
-            ) : null}
+            <MutationFeedback feedback={confirmMove.feedback} />
             <EditorFooter className={task ? "mt-5 p-0" : "mt-5"}>
               <Button onClick={close} type="button" variant="outline">
                 Cancel
@@ -391,7 +405,7 @@ export function TaskDialog({
                 {save.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
               </Button>
             </EditorFooter>
-          </form>
+          </FeedbackForm>
           {task ? (
             <div className="flex flex-col gap-4 px-4 pb-4">
               <details className="rounded-lg border border-border px-3 py-2">
@@ -465,7 +479,7 @@ export function TaskDialog({
                 open in the selected List.
               </DialogDescription>
             </DialogHeader>
-            {confirmMove.isError ? <InlineError error={confirmMove.error} /> : null}
+            <MutationFeedback feedback={confirmMove.feedback} />
             <DialogFooter>
               <Button
                 onClick={() => {

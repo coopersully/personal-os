@@ -11,7 +11,7 @@ import {
   UserIcon,
 } from "@/components/icons";
 import { api } from "../../api.js";
-import { InlineError, PageLoading } from "../../components/async-state.js";
+import { InlineError, PageLoading, QueryFeedback } from "../../components/async-state.js";
 import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 
@@ -25,12 +25,20 @@ export function ActivityPage() {
   const activity = useQuery({ queryFn: () => api.listActivity(100), queryKey: ["activity"] });
 
   if (activity.isPending) return <PageLoading />;
-  if (activity.isError) return <InlineError error={activity.error} />;
+  if (activity.isError && !activity.data)
+    return (
+      <InlineError
+        error={activity.error}
+        retry={activity.refetch}
+        stale={activity.data !== undefined}
+      />
+    );
 
   const entries = filterActivityEvents(activity.data, search);
   return (
     <div className="narrow-page">
       <h1 className="sr-only">Activity</h1>
+      <QueryFeedback query={activity} title="Couldn’t refresh activity." staleOnly />
       {activity.data.length === 0 ? (
         <EmptyState icon={<ActivityIcon />} title="No activity yet">
           Changes made by you, agents, connectors, and nohmi will collect here.

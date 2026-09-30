@@ -7,7 +7,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Reorder, useDragControls } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
 import { CheckIcon, MenuIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
 import {
@@ -25,6 +26,7 @@ import { NativeSelect, NativeSelectOption } from "../../components/ui/native-sel
 import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import { isDesktop } from "../desktop/bridge.js";
 import {
   enableRitualPresentation,
@@ -48,17 +50,18 @@ export function RitualSettings({ timeZone }: { timeZone: string }) {
   const query = useQuery({ queryKey: ["rituals"], queryFn: api.listRituals });
   const [selected, setSelected] = useState<"morning" | "night" | "history">("morning");
   if (query.isPending) return <p>Loading rituals…</p>;
-  if (query.isError)
+  if (query.isError && !query.data)
     return (
       <Card>
         <CardContent>
-          <p role="alert">{errorMessage(query.error)}</p>
+          <QueryFeedback query={query} title="Couldn’t load ritual settings." />
           <Button onClick={() => void query.refetch()}>Retry</Button>
         </CardContent>
       </Card>
     );
   return (
     <div className="flex flex-col gap-6">
+      <QueryFeedback query={query} title="Couldn’t refresh ritual settings." staleOnly />
       <ToggleGroup
         type="single"
         variant="outline"
@@ -200,7 +203,13 @@ function RitualForm({
           void cache.invalidateQueries({ queryKey: ["rituals"] });
         })
         .catch(async (e: unknown) => {
-          setError(errorMessage(e));
+          setError(
+            classifyMutationError(e, {
+              action: "save ritual settings",
+              form: true,
+              safeToRetry: false,
+            }).message,
+          );
           if (typeof e === "object" && e !== null && "status" in e && e.status === 409) {
             try {
               const latest = await api.listRituals();
@@ -226,7 +235,9 @@ function RitualForm({
       cache.setQueryData(["rituals"], latest);
       setError("");
     } catch (e) {
-      setError(errorMessage(e));
+      setError(
+        classifyMutationError(e, { action: "refresh ritual settings", safeToRetry: true }).message,
+      );
     } finally {
       setBusy(false);
     }
@@ -257,7 +268,9 @@ function RitualForm({
       if (isDesktop()) await showRitualPreview(state);
       else setPreview(state);
     } catch (e) {
-      setMessage(errorMessage(e));
+      setMessage(
+        classifyMutationError(e, { action: "show this ritual", safeToRetry: true }).message,
+      );
     } finally {
       setOpening(false);
     }
@@ -268,7 +281,12 @@ function RitualForm({
       await cache.invalidateQueries({ queryKey: ["ritual-local"] });
       setMessage(enabled ? "Automatic rituals enabled" : "Automatic rituals paused");
     } catch (e) {
-      setMessage(errorMessage(e));
+      setMessage(
+        classifyMutationError(e, {
+          action: enabled ? "enable automatic rituals" : "pause automatic rituals",
+          safeToRetry: true,
+        }).message,
+      );
     }
   }
   return (
@@ -362,7 +380,9 @@ function RitualForm({
                 </Button>
               </>
             ) : null}
-            {dirty && !input.success ? <p role="alert">{input.error.issues[0]?.message}</p> : null}
+            {dirty && !input.success ? (
+              <p>Complete each ritual step with a label and valid answer options to save.</p>
+            ) : null}
           </CardContent>
         </Card>
       </div>

@@ -272,18 +272,25 @@ async fn check(app: &tauri::AppHandle, manual: bool) {
     }
     let _ = install(app, false).await;
 }
+fn ritual_install_guard(status: &mut Status, visible: bool, manual: bool) -> Result<(), String> {
+    if visible {
+        if !manual {
+            release_startup(status);
+        }
+        return Err("Finish or snooze the ritual before restarting".into());
+    }
+    Ok(())
+}
 async fn install(app: &tauri::AppHandle, manual: bool) -> Result<(), String> {
     let ritual = app.state::<crate::ritual::RitualRuntime>();
     let _ritual_guard = ritual.lock.lock().await;
-    if app
+    let ritual_visible = app
         .get_webview_window("ritual")
-        .is_some_and(|window| window.is_visible().unwrap_or(true))
-    {
-        return Err("Finish or snooze the ritual before restarting".into());
-    }
+        .is_some_and(|window| window.is_visible().unwrap_or(true));
     let staged = {
         let state = app.state::<UpdateState>();
         let mut session = state.session.lock().unwrap();
+        ritual_install_guard(&mut session.status, ritual_visible, manual)?;
         if !can_install(&session.status, manual) {
             return Ok(());
         }
@@ -353,6 +360,17 @@ pub async fn desktop_update_restart(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_visible_ritual_releases_startup_but_preserves_the_staged_update() {
+        let mut status = ready();
+        assert!(ritual_install_guard(&mut status, true, false).is_err());
+        assert!(!status.startup_blocking);
+        assert_eq!(status.phase, "ready");
+        assert!(!can_install(&status, false));
+        assert!(ritual_install_guard(&mut status, true, true).is_err());
+        assert!(ritual_install_guard(&mut status, false, true).is_ok());
+        assert!(can_install(&status, true));
+    }
     #[test]
     fn check_errors_preserve_redacted_categories_without_blaming_connectivity() {
         use tauri_plugin_updater::Error;

@@ -100,3 +100,8 @@ Primary and secondary navigation text remains on one line and clips at constrain
 
 Minimizing the rail from its keyboard handle transfers focus to the compact picker.
 Showing the rail returns focus to its active workspace link, never to an inert control.
+
+The contextual sidebar's Shadcn provider is controlled by the same persisted state as its
+collapse handle and width. Cmd/Ctrl+B and collapsed-item tooltips therefore follow the
+visible sidebar. Mail sync recovery details open in a portaled popover, outside clipped
+navigation chrome; the compact Sync/Retry action remains reachable at narrow widths.

@@ -560,11 +560,7 @@ function AuthenticatedExperience({ user }: { user: User }) {
   if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
     return <Navigate replace to="/setup" />;
   }
-  return (
-    <ShadcnSidebarProvider className="contents">
-      <AuthenticatedApp user={user} />
-    </ShadcnSidebarProvider>
-  );
+  return <AuthenticatedApp user={user} />;
 }
 
 type DeviceWeatherLocation = {
@@ -1294,7 +1290,15 @@ function AuthenticatedApp({ user }: { user: User }) {
   };
 
   return (
-    <>
+    <ShadcnSidebarProvider
+      className="contents"
+      open={sidebarState === "expanded"}
+      onOpenChange={(open) => {
+        const width = open ? defaultSidebarWidth : collapsedSidebarWidth;
+        setSidebarWidth(width);
+        persistSidebarWidth(width);
+      }}
+    >
       <div
         className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
         data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
@@ -1515,7 +1519,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           <CalendarDialog close={() => setEditor(null)} user={user} />
         )}
       </div>
-    </>
+    </ShadcnSidebarProvider>
   );
 }
 
@@ -5825,18 +5829,33 @@ function MailSyncButton({
 
   return (
     <div className="mail-sync-control">
-      <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
-      <MutationFeedback feedback={sync.feedback} />
-      {partialOutcome ? (
-        <p className="text-sm text-muted-foreground" role="status">
-          {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
-          {failedAccountIds.length}{" "}
-          {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
-        </p>
+      {accounts.isError || sync.feedback?.persistent || partialOutcome ? (
+        <ShadcnPopover defaultOpen>
+          <ShadcnPopoverTrigger asChild>
+            <ShadcnButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
+              <AlertTriangleIcon aria-hidden="true" />
+            </ShadcnButton>
+          </ShadcnPopoverTrigger>
+          <ShadcnPopoverContent className="space-y-3" align="end">
+            <ShadcnPopoverHeader>
+              <ShadcnPopoverTitle>Mail sync needs attention</ShadcnPopoverTitle>
+            </ShadcnPopoverHeader>
+            <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
+            <MutationFeedback feedback={sync.feedback} />
+            {partialOutcome ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
+                {failedAccountIds.length}{" "}
+                {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
+              </p>
+            ) : null}
+          </ShadcnPopoverContent>
+        </ShadcnPopover>
       ) : null}
       <Tooltip>
         <TooltipTrigger asChild>
           <ShadcnButton
+            className="mail-sync-control__action"
             aria-label={
               failedAccountIds.length ? "Retry failed mail accounts" : "Sync all mail accounts"
             }
@@ -5849,13 +5868,7 @@ function MailSyncButton({
             variant={variant}
           >
             <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-            <span>
-              {sync.isPending
-                ? "Syncing…"
-                : failedAccountIds.length
-                  ? "Retry failed mail accounts"
-                  : "Sync"}
-            </span>
+            <span>{sync.isPending ? "Syncing…" : failedAccountIds.length ? "Retry" : "Sync"}</span>
           </ShadcnButton>
         </TooltipTrigger>
         <TooltipContent>

@@ -5926,11 +5926,11 @@ p {
   .mail-app-bar__identity-cluster [data-slot="sidebar-trigger"] {
     display: none;
   }
-  .mail-app-bar__controls [aria-label="Sync all mail accounts"] {
+  .mail-app-bar__controls .mail-sync-control__action {
     padding-inline: 0;
     width: 1.75rem;
   }
-  .mail-app-bar__controls [aria-label="Sync all mail accounts"] > span,
+  .mail-app-bar__controls .mail-sync-control__action > span,
   .mail-accounts-trigger .account-selection-trigger__count,
   .mail-sync-control__timing {
     display: none;

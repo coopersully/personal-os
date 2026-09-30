@@ -132,6 +132,14 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await page.mouse.move(edge.x - 220, edge.y + 100);
     await page.mouse.up();
     await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    if (workspace === "Mail") {
+      await sidebar.getByRole("link", { name: "Starred", exact: true }).hover();
+      await expect(page.getByRole("tooltip", { name: "Starred", exact: true })).toBeVisible();
+    }
+    await page.keyboard.press("Control+b");
+    await expect(sidebar).toHaveAttribute("data-state", "expanded");
+    await page.keyboard.press("Control+b");
+    await expect(sidebar).toHaveAttribute("data-state", "collapsed");
     await handle.press("ArrowRight");
     await expect(sidebar).toHaveAttribute("data-state", "expanded");
     await handle.press("End");
@@ -799,4 +807,56 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await page.unroute("**/v1/me");
   await page.getByRole("radio", { name: "Dark", exact: true }).click();
   await expect(page.getByRole("radio", { name: "Dark", exact: true })).toBeChecked();
+});
+
+test("Mail sync recovery remains reachable in constrained headers", async ({ page }, testInfo) => {
+  if (testInfo.project.name === "desktop-chromium") {
+    await page.setViewportSize({ width: 950, height: 640 });
+  }
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  const failedId = "22222222-2222-4222-8222-222222222222";
+  await page.route("**/v1/connectors", async (route) => {
+    const response = await route.fetch();
+    const { accounts } = await response.json();
+    const account = accounts.find((item: { mailEnabled: boolean }) => item.mailEnabled);
+    if (!account) throw new Error("Missing fixture mail account");
+    await route.fulfill({ json: { accounts: [account, { ...account, id: failedId }] } });
+  });
+  let retry = false;
+  const synced: string[] = [];
+  await page.route("**/v1/connectors/*/sync", async (route) => {
+    const id = route.request().url().split("/").at(-2) ?? "";
+    synced.push(id);
+    await route.fulfill(
+      id === failedId && !retry
+        ? { status: 503, json: { error: { code: "unavailable", message: "Sync unavailable" } } }
+        : { json: { result: { changed: 0 } } },
+    );
+  });
+  await page.goto("/mail");
+  await page.getByRole("button", { name: "Sync all mail accounts" }).click();
+  await expect(
+    page.getByText("1 of 2 mail accounts synced. 1 account needs another attempt."),
+  ).toBeVisible();
+  const details = page
+    .locator('[data-slot="popover-content"]')
+    .filter({ hasText: "Mail sync needs attention" });
+  const bounds = await details.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds?.x).toBeGreaterThanOrEqual(0);
+  expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(
+    page.viewportSize()?.width ?? 0,
+  );
+  await page.keyboard.press("Escape");
+  const action = page.getByRole("button", { name: "Retry failed mail accounts" });
+  await expect(action).toBeInViewport();
+  retry = true;
+  await action.click();
+  await expect(page.getByRole("button", { name: "Sync all mail accounts" })).toBeEnabled();
+  expect(synced).toHaveLength(3);
+  expect(synced.at(-1)).toBe(failedId);
 });

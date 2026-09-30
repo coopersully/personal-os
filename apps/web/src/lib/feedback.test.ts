@@ -3,6 +3,44 @@ import { describe, expect, it } from "vitest";
 import { classifyMutationError } from "./feedback.js";
 
 describe("mutation feedback classification", () => {
+  it.each([
+    ["task_list_reserved_name", "That name is reserved for a Task view. Choose another name."],
+    ["task_list_name_conflict", "A list with that name already exists. Choose another name."],
+  ])("maps %s to a correctable name field", (code, message) => {
+    const result = classifyMutationError(
+      new ApiClientError({
+        code: "conflict",
+        status: 409,
+        message: "private diagnostic",
+        details: { code },
+      }),
+      { action: "save this list", form: true },
+    );
+    expect(result).toEqual({
+      kind: "validation",
+      persistent: true,
+      fields: { name: message },
+      message,
+    });
+  });
+  it.each([
+    null,
+    {},
+    { code: "task_list_revision_conflict" },
+    { code: "toString" },
+  ])("retains generic conflict recovery for unrecognized details %j", (details) => {
+    expect(
+      classifyMutationError(
+        new ApiClientError({
+          code: "conflict",
+          status: 409,
+          message: "private diagnostic",
+          details,
+        }),
+        { action: "save this list", form: true },
+      ),
+    ).toMatchObject({ kind: "conflict", fields: {} });
+  });
   it("keeps uncertain writes persistent without exposing diagnostics", () => {
     expect(
       classifyMutationError(new Error("secret SQL"), { action: "create the event" }),

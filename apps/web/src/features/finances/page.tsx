@@ -1286,6 +1286,9 @@ export function FinancesPage() {
               ) : null}
             </ShadcnFieldGroup>
           ) : null}
+          <MutationFeedback
+            feedback={categorizing?.reviewId ? resolveReview.feedback : categorize.feedback}
+          />
           <ShadcnDialogFooter>
             {categorizing ? (
               <ShadcnButton

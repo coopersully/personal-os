@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1305,4 +1305,78 @@ it("shows a failed exact legacy review request instead of an unavailable record"
   expect(await screen.findByText("Couldn’t load transaction review queue.")).toBeVisible();
   expect(screen.queryByText("Requested review unavailable")).not.toBeInTheDocument();
   expect(api.resolveFinanceReview).not.toHaveBeenCalled();
+});
+
+it.each([
+  "transactions",
+  "review/legacy",
+])("keeps a rejected category save visible inside the %s dialog and retries the preserved draft", async (section) => {
+  const transaction = {
+    accountId: "checking",
+    amount: 18.5,
+    category: null,
+    categoryConfidence: null,
+    categoryId: null,
+    categorySource: null,
+    createdAt: "2026-08-23T12:00:00.000Z",
+    date: "2026-08-23",
+    direction: "expense",
+    id: "meal",
+    merchant: "Cafe",
+    merchantId: null,
+    needsReview: true,
+    notes: "Lunch",
+    pending: false,
+    rawMerchant: "SQ CAFE",
+    updatedAt: "2026-08-23T12:00:00.000Z",
+  };
+  api.getFinanceCategories.mockResolvedValue([
+    {
+      id: "dining",
+      name: "Dining",
+      color: null,
+      group: "Spending",
+      isSystem: true,
+      slug: "dining",
+    },
+  ]);
+  api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
+  api.getFinanceReviewQueue.mockResolvedValue([
+    {
+      id: "meal-review",
+      createdAt: transaction.createdAt,
+      rationale: "Confirm this category.",
+      reason: "low_confidence",
+      status: "open",
+      suggestedCategory: "Dining",
+      transaction,
+    },
+  ]);
+  const save = section === "transactions" ? api.updateFinanceTransaction : api.resolveFinanceReview;
+  save.mockRejectedValueOnce(new Error("private database details")).mockResolvedValue({});
+  renderPage(`/finances/${section}`);
+  if (section === "transactions")
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: section === "transactions" ? "Categorize" : "Change",
+    }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Categorize Cafe" });
+  fireEvent.change(within(dialog).getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save category" }));
+  const message =
+    section === "transactions"
+      ? "Couldn’t save this category. Your changes are still unsaved. Try again."
+      : "Couldn’t save this transaction review. Your changes are still unsaved. Try again.";
+  expect(await within(dialog).findByText(message)).toBeVisible();
+  expect(within(dialog).getByLabelText("Category")).toHaveValue("Dining");
+  expect(screen.queryByText("private database details")).not.toBeInTheDocument();
+  expect(screen.getAllByText(message)).toHaveLength(1);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save category" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Categorize Cafe" })).not.toBeInTheDocument(),
+  );
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save.mock.calls[1]).toEqual(save.mock.calls[0]);
 });

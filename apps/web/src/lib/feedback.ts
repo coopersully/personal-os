@@ -77,6 +77,25 @@ export function classifyMutationError(
 ): MutationFeedbackState {
   const base = { fields: {}, persistent: true };
   if (error instanceof ApiClientError) {
+    if (
+      error.status === 409 &&
+      error.details &&
+      typeof error.details === "object" &&
+      "code" in error.details
+    ) {
+      const nameCorrections: Record<string, string> = {
+        task_list_reserved_name: "That name is reserved for a Task view. Choose another name.",
+        task_list_name_conflict: "A list with that name already exists. Choose another name.",
+      };
+      const code = error.details.code;
+      const message =
+        typeof code === "string" && Object.hasOwn(nameCorrections, code)
+          ? nameCorrections[code]
+          : undefined;
+      if (message) {
+        return { ...base, kind: "validation", fields: { name: message }, message };
+      }
+    }
     const correction = Object.hasOwn(knownCorrections, error.message)
       ? knownCorrections[error.message]
       : undefined;

@@ -34,6 +34,18 @@ security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
 security import "$workspace/certificate.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+# Fresh runners may not have Apple's Developer ID G2 intermediate installed.
+# Import the public intermediate into this temporary keychain without changing trust.
+curl --fail --silent --show-error --location --max-time 30 \
+  https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+  -o "$workspace/DeveloperIDG2CA.cer"
+printf '%s  %s\n' f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a "$workspace/DeveloperIDG2CA.cer" | shasum -a 256 -c -
+security import "$workspace/DeveloperIDG2CA.cer" -k "$keychain" >/dev/null
+# Prove identity lookup, private-key access and timestamping before compiling.
+security find-identity -v -p codesigning "$keychain"
+cp /usr/bin/true "$workspace/signing-probe"
+codesign --force --timestamp --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$workspace/signing-probe"
+codesign --verify --strict "$workspace/signing-probe"
 cd "$desktop"
 # The initial bundle is ad-hoc; embedding signs the complete bundle exactly once with Developer ID.
 env -u APPLE_CERTIFICATE -u APPLE_CERTIFICATE_PASSWORD -u APPLE_SIGNING_IDENTITY -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID pnpm exec tauri build --bundles app --ci

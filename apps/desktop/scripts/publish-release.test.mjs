@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { publishRelease } from "./publish-release.mjs";
+import { productionReady, publishRelease } from "./publish-release.mjs";
 
 const source = "a".repeat(40);
 async function scenario({
@@ -40,16 +40,13 @@ async function scenario({
           if (path.endsWith("generate-notes")) return JSON.stringify({ body: "Release notes" });
           if (path.includes("releases?")) return JSON.stringify([existing ? [existing] : []]);
           if (path.endsWith("heads/main")) return JSON.stringify({ object: { sha: main } });
-          if (path.endsWith("/status"))
-            return JSON.stringify({
-              statuses: state ? [{ context: "production/ilo", state }] : [],
-            });
           throw new Error(`Unexpected API request ${path}`);
         }
         return "";
       },
+      deploymentReady: async () => state === "success",
       now: () => {
-        time += timedOut ? 31 * 60_000 : 0;
+        time += timedOut ? 271 * 60_000 : 0;
         return time;
       },
       sleep: () => {
@@ -115,5 +112,37 @@ test("older versions cannot become latest after a newer public release", async (
   await assert.rejects(
     scenario({ existing: { tag_name: "v0.2.0", draft: false } }),
     (error) => /newer public/.test(error.message) && !error.calls.some((a) => a[0] === "release"),
+  );
+});
+
+test("public deployment probe requires matching ready revision without credentials", async () => {
+  let seen;
+  assert.equal(
+    await productionReady(source, async (url, options) => {
+      seen = { url, options };
+      return Response.json({ status: "ready", revision: source });
+    }),
+    true,
+  );
+  assert.equal(seen.url, `https://nohmi-api.coopersully.me/health/ready?release=${source}`);
+  assert.equal(seen.options.redirect, "error");
+  assert.equal(seen.options.cache, "no-store");
+  assert.equal(seen.options.headers, undefined);
+  assert.ok(seen.options.signal instanceof AbortSignal);
+  for (const response of [
+    Response.json({ status: "ready" }),
+    Response.json({ status: "ready", revision: "b".repeat(40) }),
+    Response.json({ status: "failed", revision: source }),
+    new Response("bad json"),
+    new Response("x".repeat(4097)),
+    new Response("unavailable", { status: 503 }),
+  ]) {
+    assert.equal(await productionReady(source, async () => response), false);
+  }
+  assert.equal(
+    await productionReady(source, async () => {
+      throw new Error("network timeout");
+    }),
+    false,
   );
 });

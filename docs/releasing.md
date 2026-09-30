@@ -29,8 +29,9 @@ so it does not depend on a bot-pushed tag triggering a second workflow.
 
 Both architectures must build, sign, notarize, and upload before the complete draft is assembled.
 Automatic publication requires Actions variable `NOHMI_DESKTOP_AUTO_PUBLISH=true`, the same source
-still being current main, and successful `production/ilo` deployment status for that source.
-The publication wait is bounded to 30 minutes; each GitHub command is bounded to 60 seconds.
+still being current main, and the public Mac API readiness response reporting that exact source revision.
+The publication wait is bounded to 270 minutes (covering the Mac controller’s four-hour build budget and polling/backoff), with an eight-second/4 KiB public API probe and
+30-second polling; each GitHub command is bounded to 60 seconds.
 Mac packaging has a 60-minute job limit. Manual tag pushes always create drafts.
 
 The first rollout keeps automatic publication disabled until installed-app acceptance is complete.
@@ -46,13 +47,13 @@ then discover the newer version on launch; Downloads and Settings show that same
 - Rerun **all jobs** of a failed release while its source is current main. It reuses the reserved
   tag and can repair draft uploads. Public assets are never overwritten. If the source has moved,
   rerun CI on current main instead; it reserves a newer version and includes unpublished changes.
-- A failed or missing deployment status, incomplete artifact set, API failure, or superseded source
+- An unhealthy API, missing or mismatched deployment revision, incomplete artifact set, API failure, or superseded source
   leaves the release unpublished. Inspect the Actions run and draft. Never publish a partial draft.
-- To pause new public updates, clear `NOHMI_DESKTOP_AUTO_PUBLISH`; packaging continues into drafts.
+- To pause new public updates, clear `NOHMI_DESKTOP_AUTO_PUBLISH` and cancel any in-flight
+  release run that already captured the enabled flag; subsequent packaging continues into drafts.
   To recover from an already published defect, merge a fix and ship a higher version.
 - Authority: the workflow's repository-scoped token can create tags, manage releases, and read
-  deployment statuses. Apple and updater signing use existing Actions secrets. HTTPS to GitHub and
-  Apple is required. The durable reservation is the tag; public release publication is the client
+  public release metadata. Apple and updater signing use existing Actions secrets. HTTPS to GitHub, Apple and the official nohmi API is required. The durable reservation is the tag; public release publication is the client
   delivery commit point. GitHub/Apple outages and revoked credentials can still prevent delivery
   despite passing source tests. Actions logs, draft state, tag/source association, and release assets
   provide recovery evidence without printing secrets.

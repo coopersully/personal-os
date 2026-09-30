@@ -75,7 +75,7 @@ until that acceptance completes.
 ## Automatic release delivery extension
 
 1. Add version reservation and release-scope reconciliation with real temporary Git integration tests.
-2. Extend the existing signed pipeline to consume the reserved source and publish only after production success.
+2. Extend the existing signed pipeline to consume the reserved source and publish only after the live Mac API reports readiness and the same source revision.
 3. Cover retries, immutable public assets, stale sources, partial artifacts, rollout switch and failures.
 4. Update release documentation and Linear, run repository verification and independent PR review.
 5. Merge, build the first complete draft, prove the installed upgrade, then enable automatic publication.

@@ -5414,6 +5414,7 @@ describe.sequential("ilo API", () => {
       status: "ready",
     });
     expect(ready.headers.get("x-ilo-drain-protocol")).toBe("quiesce-v1");
+    expect(ready.headers.get("cache-control")).toBe("no-store");
     const openApiDocument = await payload(await request("/openapi.json", { auth: "none" }));
     expect(openApiDocument.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(openApiDocument.paths["/v1/calendars/status"].get.responses[200].description).toBe(

@@ -78,6 +78,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
@@ -142,14 +143,14 @@ jobs:
     if: startsWith(needs.prepare.outputs.tag, 'v')
     permissions:
       contents: write
-      statuses: read
     needs: [prepare, macos]
-    timeout-minutes: 35
+    timeout-minutes: 280
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22

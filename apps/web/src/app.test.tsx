@@ -423,6 +423,7 @@ function iloSetupFixture() {
 }
 
 const mocks = vi.hoisted(() => ({
+  getDesktopRelease: vi.fn(),
   completeReminder: vi.fn(),
   completeTask: vi.fn(),
   completeTaskProject: vi.fn(),
@@ -1690,6 +1691,25 @@ afterEach(() => {
 });
 
 describe("ilo web app", () => {
+  it("shows link-opening failures on the standalone downloads route", async () => {
+    mocks.getDesktopRelease.mockResolvedValue({
+      status: "available",
+      release: {
+        version: "0.2.0",
+        publishedAt: now,
+        notes: "",
+        releaseUrl: "https://github.com/coopersully/personal-os/releases/tag/v0.2.0",
+        installers: [],
+      },
+    });
+    setup("/downloads");
+    const link = await screen.findByRole("link", { name: "View release on GitHub" });
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    mocks.openUrl.mockRejectedValueOnce(new Error("No browser available"));
+    fireEvent.click(link);
+    expect(await screen.findByText("Could not open the download in your browser")).toBeVisible();
+  });
+
   it("lays out transitive overlaps in stable columns and preserves repeated DST hours", () => {
     const timelineEvent = { ...event, conferenceUrl: null };
     const overlappingEvents = [

@@ -47,6 +47,8 @@ A successful main push CI run reconciles desktop changes against the last public
 an immutable increasing version, and packages both signed architectures. Default increment is
 patch; standalone merged-commit `Desktop-Release: minor` or `major` trailers select larger bumps.
 Release-only version commits preserve main's protected PR history and record their verified source.
-Publication requires a complete artifact set, the current main source's successful production
-status, and the rollout switch. Initial installed-upgrade acceptance precedes enabling the switch.
+Publication requires a complete artifact set, the live Mac API reporting readiness and the current
+main source revision, and the rollout switch. The existing controller's Git archive stamps the
+revision; this proves API source and database readiness, not completion of the private controller
+transaction. Initial installed-upgrade acceptance precedes enabling the switch.
 See `docs/releasing.md` for exact scope, deadlines, recovery and operator actions.

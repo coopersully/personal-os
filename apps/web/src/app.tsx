@@ -470,7 +470,14 @@ export function selectTodayTasks(
 }
 export function App() {
   const location = useLocation();
-  if (location.pathname === "/downloads") return <DesktopDownloads standalone />;
+  if (location.pathname === "/downloads") {
+    return (
+      <>
+        <DesktopDownloads standalone />
+        <Toaster position="bottom-right" theme="system" />
+      </>
+    );
+  }
   if (ErrorPagePreview && location.pathname === "/dev/errors") {
     return (
       <Suspense

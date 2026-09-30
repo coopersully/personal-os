@@ -9,12 +9,52 @@ const run = (command, args) =>
   execFileSync(command, args, { encoding: "utf8", timeout: 60_000 }).trim();
 const gh = (...args) => run("gh", args);
 const repo = "coopersully/personal-os";
+export async function productionReady(source, request = fetch) {
+  try {
+    const response = await request(
+      `https://nohmi-api.coopersully.me/health/ready?release=${source}`,
+      {
+        signal: AbortSignal.timeout(8_000),
+        redirect: "error",
+        cache: "no-store",
+      },
+    );
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      return false;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = "",
+      size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 4096) {
+          await reader.cancel();
+          return false;
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      const body = JSON.parse(text + decoder.decode());
+      return body.status === "ready" && body.revision === source;
+    } finally {
+      reader.releaseLock();
+    }
+  } catch {
+    return false;
+  }
+}
+
 export async function publishRelease({
   env = process.env,
   command = run,
   github = gh,
   sleep = setTimeout,
   now = Date.now,
+  deploymentReady = productionReady,
 } = {}) {
   const tag = env.RELEASE_TAG;
   if (!stableTag.test(tag ?? "")) throw new Error("Stable tag required");
@@ -72,23 +112,18 @@ export async function publishRelease({
   }
   if (automatic && env.AUTO_PUBLISH_ENABLED === "true") {
     // CI and production deploy run independently. Never offer a client before its API is live.
-    const deadline = now() + 30 * 60_000;
+    const deadline = now() + 270 * 60_000;
     while (true) {
       const main = JSON.parse(github("api", `repos/${repo}/git/ref/heads/main`)).object.sha;
       if (main !== source) {
         console.log("Source superseded: keeping the complete release as a draft");
         break;
       }
-      const status = JSON.parse(
-        github("api", `repos/${repo}/commits/${source}/status`),
-      ).statuses.find((entry) => entry.context === "production/ilo");
-      if (status?.state === "success") {
+      if (await deploymentReady(source)) {
         github("release", "edit", tag, "--draft=false", "--latest");
         console.log(`Published ${tag}: installers and automatic updates are live`);
         break;
       }
-      if (["failure", "error"].includes(status?.state))
-        throw new Error("Production deployment failed; release remains draft");
       if (now() >= deadline)
         throw new Error("Production deployment deadline exceeded; release remains draft");
       await sleep(30_000);

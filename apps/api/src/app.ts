@@ -77,6 +77,7 @@ import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
+import { readinessPayload } from "./release-revision.js";
 import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { createRitualService } from "./ritual-service.js";
@@ -732,7 +733,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     if (dependencies.runtimeLifecycle) {
       context.header("X-Ilo-Drain-Protocol", "quiesce-v1");
     }
-    return context.json({ status: "ready" });
+    context.header("Cache-Control", "no-store");
+    return context.json(readinessPayload());
   });
   app.get("/openapi.json", (context) =>
     context.json(createOpenApiDocument(dependencies.config.apiBaseUrl)),

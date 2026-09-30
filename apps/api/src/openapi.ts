@@ -276,7 +276,16 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         },
       },
       "/health/live": { get: { responses: { 200: { description: "Process is alive" } } } },
-      "/health/ready": { get: { responses: { 200: { description: "Dependencies are ready" } } } },
+      "/health/ready": {
+        get: {
+          responses: {
+            200: {
+              description:
+                "Dependencies are ready; archived production builds include their public source revision",
+            },
+          },
+        },
+      },
       "/v1/auth/register": { post: { responses: { 201: { description: "Account created" } } } },
       "/v1/auth/invitations/validate": {
         post: { responses: { 200: { description: "Invitation validity checked" } } },

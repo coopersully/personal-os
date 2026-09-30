@@ -83,7 +83,10 @@ describe("query feedback", () => {
   });
   it("makes loading perceivable to assistive technology", () => {
     render(<PageLoading />);
-    expect(screen.getByText("Loading").closest('[role="status"]')).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading content" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
     expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
   });
 });

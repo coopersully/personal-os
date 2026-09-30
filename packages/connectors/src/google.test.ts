@@ -1,4 +1,16 @@
-import { ConnectorError, createGoogleConnector } from "./google.js";
+import { ConnectorError } from "./failures.js";
+import {
+  createGoogleConnector,
+  googleGrantedServices,
+  googleMailSendGranted,
+  projectGmailAttachments,
+} from "./google.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_ATTACHMENT_METADATA_LENGTH,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_MIME_DEPTH,
+} from "./mail-attachments.js";
 import type { GoogleCredentials } from "./types.js";
 
 const now = new Date("2026-07-13T12:00:00.000Z");
@@ -10,8 +22,10 @@ const fresh: GoogleCredentials = {
   tokenType: "Bearer",
 };
 const expired: GoogleCredentials = { ...fresh, expiresAt: "2026-07-13T11:00:00.000Z" };
+const credentialsWith = (scope: string): GoogleCredentials => ({ ...fresh, scope });
 const timedEvent = {
   conferenceData: {
+    createRequest: { status: { statusCode: "success" } },
     entryPoints: [
       { entryPointType: "phone", uri: "tel:+15551234567" },
       { entryPointType: "video", uri: "https://meet.google.com/abc-defg-hij" },
@@ -51,19 +65,113 @@ function queued(...responses: Response[]) {
 }
 
 describe("Google Calendar connector", () => {
+  it("bounds nested Gmail MIME trees and calendar attachment metadata", () => {
+    let nested: Record<string, unknown> = {
+      body: {},
+      filename: "",
+      mimeType: "text/plain",
+      partId: "leaf",
+      parts: [],
+    };
+    for (let depth = 0; depth <= MAX_MAIL_MIME_DEPTH; depth += 1) {
+      nested = {
+        body: {},
+        filename: "",
+        mimeType: "multipart/mixed",
+        partId: `nested-${String(depth)}`,
+        parts: [nested],
+      };
+    }
+    expect(projectGmailAttachments(nested as never)).toEqual([
+      calendarAttachmentProjectionOverflow("part:projection-overflow"),
+    ]);
+
+    const excessiveCalendarParts = {
+      body: {},
+      filename: "",
+      headers: [],
+      mimeType: "multipart/mixed",
+      partId: "root",
+      parts: Array.from({ length: MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE + 1 }, (_, index) => ({
+        body: { attachmentId: `body-${String(index)}`, size: 1 },
+        filename: "",
+        headers: [],
+        mimeType: "text/calendar",
+        partId: String(index),
+        parts: [],
+      })),
+    };
+    expect(projectGmailAttachments(excessiveCalendarParts)).toEqual([
+      calendarAttachmentProjectionOverflow("part:projection-overflow"),
+    ]);
+
+    const oversizedIdentifier = {
+      body: {},
+      filename: "",
+      headers: [],
+      mimeType: "text/calendar",
+      partId: "x".repeat(MAX_MAIL_ATTACHMENT_METADATA_LENGTH + 1),
+      parts: [],
+    };
+    const overflow = projectGmailAttachments(oversizedIdentifier);
+    expect(overflow).toEqual([calendarAttachmentProjectionOverflow("part:projection-overflow")]);
+    expect(JSON.stringify(overflow)).not.toContain(oversizedIdentifier.partId);
+  });
+
+  it("preserves attendee responses separately from the event confirmation status", async () => {
+    const google = connector(
+      queued(
+        response({
+          items: [
+            {
+              ...timedEvent,
+              attendees: [
+                { email: "cooper@example.com", displayName: "Cooper", responseStatus: "declined" },
+                { email: "host@example.com", responseStatus: "accepted", organizer: true },
+                { email: "maybe@example.com", responseStatus: "tentative" },
+                { email: "new@example.com" },
+              ],
+            },
+          ],
+          nextSyncToken: "next",
+        }),
+      ),
+    );
+    const result = await google.syncCalendar(fresh, "primary", null);
+    expect(result.value.changes[0]).toMatchObject({
+      kind: "upsert",
+      event: {
+        status: "confirmed",
+        attendees: [
+          { email: "cooper@example.com", name: "Cooper", response: "declined", isOrganizer: false },
+          { email: "host@example.com", name: null, response: "accepted", isOrganizer: true },
+          { email: "maybe@example.com", name: null, response: "tentative", isOrganizer: false },
+          { email: "new@example.com", name: null, response: "needs_action", isOrganizer: false },
+        ],
+      },
+    });
+  });
+
   it("builds authorization and exchanges an offline code", async () => {
     const fetch = queued(
       response({ access_token: "new", expires_in: 3600, refresh_token: "offline" }),
     );
     const google = connector(fetch);
-    const url = new URL(google.authorizationUrl("state-value", "test@example.com"));
+    const url = new URL(
+      google.authorizationUrl("state-value", "pkce-challenge", "test@example.com"),
+    );
     expect(url.origin).toBe("https://accounts.google.com");
     expect(url.searchParams.get("state")).toBe("state-value");
     expect(url.searchParams.get("scope")).toContain("calendar.events");
     expect(url.searchParams.get("scope")).toContain("gmail.modify");
     expect(url.searchParams.get("scope")).toContain("gmail.send");
     expect(url.searchParams.get("login_hint")).toBe("test@example.com");
-    await expect(google.exchangeCode("code")).resolves.toEqual({
+    expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.toString()).not.toContain("pkce-verifier");
+    await expect(
+      google.exchangeCode("code", "pkce-verifier", "https://original.example.com/callback"),
+    ).resolves.toEqual({
       accessToken: "new",
       expiresAt: "2026-07-13T13:00:00.000Z",
       refreshToken: "offline",
@@ -72,11 +180,170 @@ describe("Google Calendar connector", () => {
     });
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/token");
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("grant_type=authorization_code");
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("code_verifier=pkce-verifier");
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain(
+      "redirect_uri=https%3A%2F%2Foriginal.example.com%2Fcallback",
+    );
 
-    expect(() => connector(fetch, false).authorizationUrl("state")).toThrow("not configured");
+    expect(() => connector(fetch, false).authorizationUrl("state", "challenge")).toThrow(
+      "not configured",
+    );
     await expect(
-      connector(queued(response({ access_token: "new", expires_in: 3600 }))).exchangeCode("code"),
+      connector(queued(response({ access_token: "new", expires_in: 3600 }))).exchangeCode(
+        "code",
+        "verifier",
+      ),
     ).rejects.toMatchObject({ name: "ConnectorError", status: 400 });
+  });
+
+  it("requests only the Google services selected during setup", () => {
+    const google = connector(queued());
+    const calendarScopes = new URL(
+      google.authorizationUrl("calendar-state", "calendar-challenge", undefined, ["calendar"]),
+    ).searchParams.get("scope");
+    const mailScopes = new URL(
+      google.authorizationUrl("mail-state", "mail-challenge", undefined, ["mail"]),
+    ).searchParams.get("scope");
+
+    expect(calendarScopes).toContain("calendar.events");
+    expect(calendarScopes).not.toContain("gmail.modify");
+    expect(mailScopes).toContain("gmail.modify");
+    expect(mailScopes).toContain("gmail.send");
+    expect(mailScopes).not.toContain("calendar.events");
+  });
+
+  it("derives enabled services only from the complete granted scope set", () => {
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          [
+            "openid",
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/gmail.modify",
+          ].join(" "),
+        ),
+      ),
+    ).toEqual(["calendar", "mail"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/gmail.modify",
+        ),
+      ),
+    ).toEqual(["mail"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        ),
+      ),
+    ).toEqual(["calendar"]);
+    expect(
+      googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.modify")),
+    ).toEqual(["mail"]);
+    expect(
+      googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
+    ).toEqual([]);
+    expect(
+      googleMailSendGranted(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
+    ).toBe(true);
+    expect(
+      googleMailSendGranted(credentialsWith("https://www.googleapis.com/auth/gmail.modify")),
+    ).toBe(false);
+    expect(googleMailSendGranted(credentialsWith("https://mail.google.com/"))).toBe(true);
+    expect(
+      googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/calendar")),
+    ).toEqual(["calendar"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
+        ),
+      ),
+    ).toEqual(["calendar"]);
+    expect(googleGrantedServices(credentialsWith("https://mail.google.com/"))).toEqual(["mail"]);
+    expect(googleGrantedServices(credentialsWith(""))).toEqual([]);
+  });
+
+  it("submits a plain-text message once with the confirmed provider thread", async () => {
+    const fetch = queued(response({ id: "message-1", threadId: "thread-1" }));
+    const google = connector(fetch);
+    if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
+
+    await expect(
+      google.sendMail(
+        {
+          ...fresh,
+          scope:
+            "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+        },
+        {
+          body: "Prepared response",
+          cc: [{ address: "copy@example.com", name: null }],
+          from: "sender@example.com",
+          inReplyTo: "<prior@example.com>",
+          references: ["<root@example.com>", "<prior@example.com>"],
+          subject: "Follow up",
+          threadId: "thread-1",
+          to: [{ address: "person@example.com", name: "Person" }],
+        },
+      ),
+    ).resolves.toMatchObject({ accessToken: "access" });
+
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    );
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as {
+      raw: string;
+      threadId: string;
+    };
+    expect(body.threadId).toBe("thread-1");
+    const raw = Buffer.from(body.raw, "base64url").toString();
+    expect(raw).toContain("person@example.com");
+    expect(raw).toContain("In-Reply-To: <prior@example.com>");
+    expect(raw).toContain("References: <root@example.com> <prior@example.com>");
+  });
+
+  it("rejects Mail delivery before provider submission when send authority is absent", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const google = connector(fetch);
+    if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
+
+    await expect(
+      google.sendMail(credentialsWith("https://www.googleapis.com/auth/gmail.modify"), {
+        body: "Prepared response",
+        cc: [],
+        from: "sender@example.com",
+        subject: "Follow up",
+        to: [{ address: "person@example.com", name: null }],
+      }),
+    ).rejects.toMatchObject({ name: "MailSendPreAcceptanceError" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("classifies credential failure before provider submission as known non-acceptance", async () => {
+    const fetch = queued(response({ error: "invalid_grant" }, 400));
+    const google = connector(fetch);
+    if (!google.sendMail) throw new Error("Google Mail delivery capability is missing.");
+
+    await expect(
+      google.sendMail(
+        {
+          ...expired,
+          scope: "https://www.googleapis.com/auth/gmail.send",
+        },
+        {
+          body: "Prepared response",
+          cc: [],
+          from: "sender@example.com",
+          subject: "Follow up",
+          to: [{ address: "person@example.com", name: null }],
+        },
+      ),
+    ).rejects.toMatchObject({ name: "MailSendPreAcceptanceError" });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/token");
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("refreshes credentials and reads a paginated profile and calendar list", async () => {
@@ -153,6 +420,50 @@ describe("Google Calendar connector", () => {
     );
   });
 
+  it("aborts an in-flight multi-page calendar sync before fetching more pages", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("runtime quiescing");
+    let markSecondPageStarted: () => void = () => {};
+    const secondPageStarted = new Promise<void>((resolve) => {
+      markSecondPageStarted = resolve;
+    });
+    const fetch = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        if (fetch.mock.calls.length === 1) {
+          return response({ items: [], nextPageToken: "page-2" });
+        }
+        markSecondPageStarted();
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+
+    const sync = connector(fetch).syncCalendar(fresh, "calendar", null, {
+      deadlineMs: Date.now() + 105_000,
+      signal: controller.signal,
+    });
+    await secondPageStarted;
+    controller.abort(interrupted);
+
+    await expect(sync).rejects.toBe(interrupted);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an expired provider deadline before starting network work", async () => {
+    const fetch = queued(response({ items: [] }));
+
+    await expect(
+      connector(fetch).syncCalendar(fresh, "calendar", null, {
+        deadlineMs: Date.now() - 1,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("creates, updates, and deletes timed and all-day events", async () => {
     const fetch = queued(
       response(timedEvent),
@@ -181,6 +492,7 @@ describe("Google Calendar connector", () => {
       endsAt: "2026-07-13T14:00:00.000Z",
       timezone: "America/New_York",
       allDay: false,
+      conferenceProvider: "google_meet",
     });
     expect(created.value).toMatchObject({
       title: "Focus",
@@ -188,14 +500,24 @@ describe("Google Calendar connector", () => {
       timezone: "America/New_York",
       etag: "etag-1",
       conferenceUrl: "https://meet.google.com/abc-defg-hij",
+      conferenceStatus: "success",
       notes: "Notes",
       location: "Desk",
       recurrence: ["RRULE:FREQ=DAILY"],
     });
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toMatchObject({
+      conferenceData: {
+        createRequest: {
+          conferenceSolutionKey: { type: "hangoutsMeet" },
+          requestId: expect.any(String),
+        },
+      },
       summary: "Focus",
       start: { dateTime: "2026-07-13T13:00:00.000Z", timeZone: "America/New_York" },
     });
+    expect(
+      new URL(String(fetch.mock.calls[0]?.[0])).searchParams.get("conferenceDataVersion"),
+    ).toBe("1");
 
     const allDay = await google.createEvent(fresh, "primary", {
       calendarId: "11111111-1111-4111-8111-111111111111",
@@ -276,6 +598,12 @@ describe("Google Calendar connector", () => {
           { id: "Label_1", name: "Projects", type: "USER" },
         ],
       }),
+      response({
+        emailAddress: "user@example.com",
+        historyId: "history-full",
+        messagesTotal: 4,
+        threadsTotal: 4,
+      }),
       response({ threads: [{ id: "thread/1" }, { id: "thread-2" }], nextPageToken: "next" }),
       response({ threads: [{ id: "thread-3" }, { id: "thread-4" }] }),
       response({
@@ -288,9 +616,10 @@ describe("Google Calendar connector", () => {
             payload: { headers: [], mimeType: "multipart/alternative", parts: [] },
           },
           {
+            historyId: "history-2",
             id: "m2",
             internalDate: "1783958460000",
-            labelIds: ["INBOX"],
+            labelIds: ["SENT"],
             payload: {
               headers: [
                 { name: "Subject", value: "Project update" },
@@ -306,6 +635,21 @@ describe("Google Calendar connector", () => {
                   filename: "brief.pdf",
                   headers: [],
                   mimeType: "application/pdf",
+                  partId: "2",
+                },
+                {
+                  body: { data: encoded("BEGIN:VCALENDAR"), size: 15 },
+                  filename: "",
+                  headers: [],
+                  mimeType: "text/calendar; method=REQUEST",
+                  partId: "3",
+                },
+                {
+                  body: { attachmentId: "calendar-attachment-1", size: 84 },
+                  filename: "invite.ics",
+                  headers: [],
+                  mimeType: "text/calendar",
+                  partId: "4",
                 },
               ],
             },
@@ -356,7 +700,12 @@ describe("Google Calendar connector", () => {
     );
     const syncMail = connector(fetch).syncMail;
     if (!syncMail) throw new Error("Google Mail connector is missing.");
-    const result = await syncMail(fresh);
+    const result = await syncMail(fresh, null);
+    expect(result.value).toMatchObject({
+      deletedThreadIds: [],
+      nextSyncToken: "history-full",
+      reset: true,
+    });
     expect(result.value.mailboxes.map((mailbox) => mailbox.role)).toEqual([
       "inbox",
       "sent",
@@ -370,7 +719,8 @@ describe("Google Calendar connector", () => {
     expect(result.value.threads[0]).toMatchObject({
       bodyText: "Plain body",
       from: { address: "ada@example.com", name: "Ada Lovelace" },
-      mailboxIds: ["INBOX", "UNREAD", "STARRED"],
+      mailboxIds: ["INBOX", "UNREAD", "STARRED", "SENT"],
+      messagesComplete: true,
       messageCount: 2,
       remoteThreadId: "thread/1",
       starred: true,
@@ -386,9 +736,36 @@ describe("Google Calendar connector", () => {
         contentType: "application/pdf",
         filename: "brief.pdf",
         id: "attachment-1",
+        providerAttachmentId: "attachment-1",
+        providerPartId: "2",
         size: 42,
       },
+      {
+        contentType: "text/calendar; method=REQUEST",
+        filename: "",
+        id: "part:3",
+        providerAttachmentId: null,
+        providerPartId: "3",
+        size: 15,
+      },
+      {
+        contentType: "text/calendar",
+        filename: "invite.ics",
+        id: "calendar-attachment-1",
+        providerAttachmentId: "calendar-attachment-1",
+        providerPartId: "4",
+        size: 84,
+      },
     ]);
+    expect(result.value.threads[0]?.messages?.[1]).toMatchObject({
+      providerRevision: "history-2",
+    });
+    expect(result.value.threads[0]?.messages?.[0]?.mailboxIds).toEqual([
+      "INBOX",
+      "UNREAD",
+      "STARRED",
+    ]);
+    expect(result.value.threads[0]?.messages?.[1]?.mailboxIds).toEqual(["SENT"]);
     expect(result.value.threads[1]).toMatchObject({
       bodyText: "Fallback body",
       receivedAt: new Date(0),
@@ -399,7 +776,217 @@ describe("Google Calendar connector", () => {
       from: { address: "anonymous@example.com", name: null },
       receivedAt: new Date(0),
     });
-    expect(String(fetch.mock.calls[2]?.[0])).toContain("pageToken=next");
+    expect(String(fetch.mock.calls[3]?.[0])).toContain("pageToken=next");
+  });
+
+  it("uses Gmail history incrementally and records only definitively missing threads", async () => {
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/labels")) return response({ labels: [] });
+      if (url.pathname.endsWith("/history")) {
+        if (url.searchParams.get("pageToken") === "next") {
+          return response({
+            history: [
+              {
+                id: "105",
+                messagesDeleted: [{ message: { id: "message-gone", threadId: "thread-gone" } }],
+                labelsRemoved: [{ message: { id: "message-2", threadId: "thread-2" } }],
+              },
+            ],
+            historyId: "105",
+          });
+        }
+        return response({
+          history: [
+            {
+              id: "102",
+              messagesAdded: [{ message: { id: "message-1", threadId: "thread-1" } }],
+              labelsAdded: [{ message: { id: "message-2", threadId: "thread-2" } }],
+            },
+          ],
+          historyId: "102",
+          nextPageToken: "next",
+        });
+      }
+      if (url.pathname.endsWith("/thread-gone")) return response({ error: "gone" }, 404);
+      const id = url.pathname.split("/").at(-1);
+      return response({
+        id,
+        messages: [{ id: `message-${id}`, payload: { headers: [], mimeType: "text/plain" } }],
+      });
+    });
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    const result = await syncMail(fresh, "100");
+
+    expect(result.value).toMatchObject({
+      deletedThreadIds: ["thread-gone"],
+      nextSyncToken: "105",
+      reset: false,
+    });
+    expect(result.value.threads.map((thread) => thread.remoteThreadId)).toEqual([
+      "thread-1",
+      "thread-2",
+    ]);
+    const historyCalls = fetch.mock.calls.filter(([input]) => String(input).includes("/history"));
+    expect(String(historyCalls[0]?.[0])).toContain("startHistoryId=100");
+    expect(String(historyCalls[1]?.[0])).toContain("pageToken=next");
+  });
+
+  it("falls back safely when one Gmail history record contains an oversized change array", async () => {
+    const messagesAdded = Array.from({ length: 1_001 }, (_, index) => ({
+      message: { id: `message-${index}`, threadId: `thread-${index}` },
+    }));
+    const fetch = queued(
+      response({ labels: [] }),
+      response({ history: [{ id: "101", messagesAdded }], historyId: "101" }),
+      response({ historyId: "history-reset" }),
+      response({ threads: [] }),
+    );
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    await expect(syncMail(fresh, "100")).resolves.toMatchObject({
+      value: { nextSyncToken: "history-reset", reset: true },
+    });
+  });
+
+  it("rejects repeated full-sync page tokens instead of polling Gmail indefinitely", async () => {
+    const fetch = queued(
+      response({ labels: [] }),
+      response({ historyId: "history-reset" }),
+      response({ nextPageToken: "repeated", threads: [] }),
+      response({ nextPageToken: "repeated", threads: [] }),
+    );
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    await expect(syncMail(fresh, null)).rejects.toMatchObject({
+      code: "google_mail_page_limit_exceeded",
+      disposition: "retry",
+    });
+  });
+
+  it("falls back to a bounded full Gmail sync when the history cursor expires", async () => {
+    const fetch = queued(
+      response({ labels: [] }),
+      response({ error: "history expired" }, 404),
+      response({
+        emailAddress: "user@example.com",
+        historyId: "history-reset",
+        messagesTotal: 0,
+        threadsTotal: 0,
+      }),
+      response({ threads: [] }),
+    );
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    await expect(syncMail(fresh, "expired-history")).resolves.toMatchObject({
+      value: {
+        deletedThreadIds: [],
+        nextSyncToken: "history-reset",
+        reset: true,
+        threads: [],
+      },
+    });
+    expect(String(fetch.mock.calls[1]?.[0])).toContain("startHistoryId=expired-history");
+    expect(String(fetch.mock.calls[3]?.[0])).not.toContain("startHistoryId=");
+  });
+
+  it("registers Gmail and Calendar watches and stops Calendar channels", async () => {
+    const fetch = queued(
+      response({ expiration: "1783972800000", historyId: "gmail-history" }),
+      response({
+        expiration: "1783976400000",
+        id: "calendar-list-channel",
+        resourceId: "calendar-list-resource",
+      }),
+      response({
+        expiration: "1783980000000",
+        id: "events-channel",
+        resourceId: "events-resource",
+      }),
+      response({}, 204),
+    );
+    const google = connector(fetch);
+    if (
+      !google.watchGmail ||
+      !google.watchCalendarList ||
+      !google.watchCalendarEvents ||
+      !google.stopCalendarWatch
+    ) {
+      throw new Error("Google watch capabilities are missing.");
+    }
+
+    await expect(
+      google.watchGmail(fresh, "projects/ilo/topics/gmail-notifications"),
+    ).resolves.toMatchObject({
+      credentials: fresh,
+      value: { expiresAt: "2026-07-13T20:00:00.000Z", historyId: "gmail-history" },
+    });
+    const channel = {
+      address: "https://api.example.com/v1/connectors/google/calendar/notifications",
+      id: "calendar-list-channel",
+      token: "opaque-verification-token",
+    };
+    await expect(google.watchCalendarList(fresh, channel)).resolves.toMatchObject({
+      value: { expiresAt: "2026-07-13T21:00:00.000Z", resourceId: "calendar-list-resource" },
+    });
+    await expect(
+      google.watchCalendarEvents(fresh, "calendar/primary", {
+        ...channel,
+        id: "events-channel",
+      }),
+    ).resolves.toMatchObject({
+      value: { expiresAt: "2026-07-13T22:00:00.000Z", resourceId: "events-resource" },
+    });
+    await expect(
+      google.stopCalendarWatch(fresh, "events-channel", "events-resource"),
+    ).resolves.toEqual(fresh);
+
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
+      topicName: "projects/ilo/topics/gmail-notifications",
+    });
+    expect(String(fetch.mock.calls[1]?.[0]).endsWith("/users/me/calendarList/watch")).toBe(true);
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toEqual({
+      address: channel.address,
+      id: channel.id,
+      token: channel.token,
+      type: "web_hook",
+    });
+    expect(String(fetch.mock.calls[2]?.[0])).toContain(
+      "/calendars/calendar%2Fprimary/events/watch",
+    );
+    expect(JSON.parse(String(fetch.mock.calls[3]?.[1]?.body))).toEqual({
+      id: "events-channel",
+      resourceId: "events-resource",
+    });
+  });
+
+  it("persists refreshed credentials from watch registration and rejects malformed expiry", async () => {
+    const refresh = response({
+      access_token: "watch-access",
+      expires_in: 3600,
+      scope: fresh.scope,
+    });
+    const google = connector(
+      queued(
+        refresh,
+        response({ expiration: "1783972800000", historyId: "gmail-history" }),
+        response({ expiration: "not-a-timestamp", historyId: "gmail-history" }),
+      ),
+    );
+    if (!google.watchGmail) throw new Error("Gmail watch capability is missing.");
+    await expect(
+      google.watchGmail(expired, "projects/ilo/topics/gmail-notifications"),
+    ).resolves.toMatchObject({
+      credentials: { accessToken: "watch-access", refreshToken: fresh.refreshToken },
+    });
+    await expect(
+      google.watchGmail(fresh, "projects/ilo/topics/gmail-notifications"),
+    ).rejects.toBeDefined();
   });
 
   it("caps a Gmail synchronization at one hundred conversations", async () => {
@@ -409,6 +996,14 @@ describe("Google Calendar connector", () => {
     const fetch = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/labels")) return response({ labels: [] });
+      if (url.pathname.endsWith("/profile")) {
+        return response({
+          emailAddress: "user@example.com",
+          historyId: "history-100",
+          messagesTotal: 100,
+          threadsTotal: 100,
+        });
+      }
       if (url.pathname.endsWith("/threads")) {
         return response({ nextPageToken: "ignored", threads: threadIds });
       }
@@ -423,54 +1018,65 @@ describe("Google Calendar connector", () => {
     });
     const syncMail = connector(fetch).syncMail;
     if (!syncMail) throw new Error("Google Mail connector is missing.");
-    const result = await syncMail(fresh);
+    const result = await syncMail(fresh, null);
     expect(result.value.threads).toHaveLength(100);
-    expect(fetch).toHaveBeenCalledTimes(102);
+    expect(result.value.nextSyncToken).toBe("history-100");
+    expect(fetch).toHaveBeenCalledTimes(103);
     expect(maximumThreadRequests).toBe(1);
   });
 
-  it("writes Gmail labels and sends composed mail", async () => {
-    const fetch = queued(response({}), response({}), response({}));
+  it("writes Gmail labels", async () => {
+    const fetch = queued(response({}));
     const google = connector(fetch);
-    if (!google.updateMailThread || !google.sendMail)
-      throw new Error("Google Mail writes are missing.");
+    if (!google.updateMailThread) throw new Error("Google Mail writes are missing.");
     await google.updateMailThread(fresh, "thread/1", {
       addMailboxIds: ["STARRED"],
       removeMailboxIds: ["UNREAD"],
-    });
-    await google.sendMail(fresh, {
-      body: "Hello",
-      cc: [{ address: "cc@example.com", name: "CC" }],
-      subject: "Subject",
-      threadId: "thread/1",
-      to: [{ address: "to@example.com", name: "To" }],
-    });
-    await google.sendMail(fresh, {
-      body: "Hello",
-      cc: [],
-      subject: "Subject",
-      to: [{ address: "to@example.com", name: null }],
     });
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
       addLabelIds: ["STARRED"],
       removeLabelIds: ["UNREAD"],
     });
-    const firstMessage = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
-    expect(firstMessage.threadId).toBe("thread/1");
-    expect(Buffer.from(firstMessage.raw, "base64url").toString()).toContain(
-      "Cc: CC <cc@example.com>",
+  });
+
+  it("reads exact minimal Gmail state and uses recoverable Trash", async () => {
+    const fetch = queued(
+      response({
+        id: "thread/1",
+        messages: [
+          { id: "message-1", labelIds: ["INBOX", "UNREAD"] },
+          { id: "message-2", labelIds: ["STARRED"] },
+        ],
+      }),
+      response({ id: "thread/1", messages: [] }),
     );
-    const secondMessage = JSON.parse(String(fetch.mock.calls[2]?.[1]?.body));
-    expect(secondMessage.threadId).toBeUndefined();
-    expect(Buffer.from(secondMessage.raw, "base64url").toString()).toContain("To: to@example.com");
+    const google = connector(fetch);
+    if (!google.getMailThreadState || !google.trashMailThread)
+      throw new Error("Google Mail durable-work operations are missing.");
+    await expect(google.getMailThreadState(fresh, "thread/1")).resolves.toEqual({
+      credentials: fresh,
+      value: {
+        mailboxIds: ["INBOX", "UNREAD", "STARRED"],
+        remoteThreadId: "thread/1",
+        starred: true,
+        unread: true,
+      },
+    });
+    await expect(google.trashMailThread(fresh, "thread/1")).resolves.toEqual(fresh);
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("thread%2F1?format=minimal");
+    expect(String(fetch.mock.calls[1]?.[0])).toContain("thread%2F1/trash");
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
   });
 
   it("surfaces provider, synchronization, and malformed-event failures", async () => {
     const google = connector(queued(new Response("unavailable", { status: 503 })));
     await expect(google.getProfile(fresh)).rejects.toMatchObject({
+      category: "temporary",
+      code: "google_temporary_failure",
+      disposition: "retry",
       name: "ConnectorError",
       status: 503,
-      message: expect.stringContaining("unavailable"),
+      message: "Google is temporarily unavailable.",
     });
     await expect(
       connector(queued(response({ items: [] }))).syncCalendar(fresh, "primary", null),
@@ -533,7 +1139,13 @@ describe("Google Calendar connector", () => {
         allDay: false,
       }),
     ).rejects.toThrow("invalid dates");
-    const error = new ConnectorError("x", 418);
+    const error = new ConnectorError({
+      category: "rejected",
+      code: "test_rejected",
+      disposition: "operator",
+      message: "Rejected.",
+      status: 418,
+    });
     expect(error.name).toBe("ConnectorError");
     expect(error.status).toBe(418);
   });
@@ -582,11 +1194,10 @@ describe("Google Calendar connector", () => {
     ).resolves.toBeDefined();
   });
 
-  it("writes Gmail thread labels and sends RFC 2822 mail", async () => {
-    const fetch = queued(response({}), response({ id: "sent" }));
+  it("writes Gmail thread labels", async () => {
+    const fetch = queued(response({}));
     const google = connector(fetch);
-    if (!google.updateMailThread || !google.sendMail)
-      throw new Error("Mail writes are unavailable.");
+    if (!google.updateMailThread) throw new Error("Mail writes are unavailable.");
     await expect(
       google.updateMailThread(fresh, "thread/1", {
         addMailboxIds: ["STARRED"],
@@ -598,19 +1209,5 @@ describe("Google Calendar connector", () => {
       addLabelIds: ["STARRED"],
       removeLabelIds: ["UNREAD"],
     });
-
-    await expect(
-      google.sendMail(fresh, {
-        body: "Hello",
-        cc: [{ address: "cc@example.com", name: "CC" }],
-        subject: "Hello there",
-        threadId: "thread/1",
-        to: [{ address: "to@example.com", name: "To" }],
-      }),
-    ).resolves.toEqual(fresh);
-    const sent = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
-    expect(sent.threadId).toBe("thread/1");
-    expect(Buffer.from(sent.raw, "base64url").toString()).toContain("Cc: CC <cc@example.com>");
-    expect(Buffer.from(sent.raw, "base64url").toString()).toContain("Subject: Hello there");
   });
 });

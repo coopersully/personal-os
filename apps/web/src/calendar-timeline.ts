@@ -8,5 +8,5 @@ export function scrollTimelineToMinute(container: TimelineScrollContainer | null
 }
 
 export function minuteToTimelinePixels(minute: number) {
-  return minute * (64 / 60);
+  return minute * (48 / 60);
 }

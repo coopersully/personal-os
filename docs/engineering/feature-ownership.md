@@ -2,7 +2,7 @@
 
 ## Purpose
 
-ilo has several composition roots that must remain stable while
+nohmi has several composition roots that must remain stable while
 independent product domains evolve. This document is the source of truth for
 parallel worktree ownership. It complements the system boundary in
 [`ADR 0001`](../architecture/0001-system-shape.md).
@@ -31,11 +31,21 @@ parallel worktree ownership. It complements the system boundary in
 | --- | --- | --- |
 | Finances | `apps/web/src/features/finances`, `apps/api/src/routes/finances.ts`, `apps/api/src/finance-*`, `packages/domain/src/finance.ts`, `packages/api-client/src/features/finances.ts`, `apps/mcp/src/tools/finances.ts`, `packages/connectors/src/plaid*` | Sessions, generic OAuth, Today composition, global navigation |
 | Mail | `apps/web/src/features/mail`, `apps/api/src/routes/mail.ts`, `apps/api/src/mail-*`, `packages/domain/src/mail.ts`, `packages/connectors/src/google/mail.ts`, `packages/connectors/src/icloud-mail*` | Google OAuth core, Calendar provider adapter, Today composition |
+| Tasks | `apps/web/src/features/tasks`, `apps/api/src/routes/tasks.ts`, `apps/api/src/routes/task-lists.ts`, `apps/api/src/routes/task-projects.ts`, `apps/api/src/task-service.ts`, `apps/api/src/task-list-service.ts`, `apps/api/src/task-project-service.ts`, `packages/domain/src/task.ts`, `packages/domain/src/task-organization.ts`, `packages/api-client/src/features/tasks.ts`, `apps/mcp/src/tools/planning.ts` | Reminder lifecycle, Today composition, global navigation, generic Add menu, physical database extraction |
+| Reminders | `apps/web/src/features/reminders`, `apps/api/src/routes/reminders.ts`, `apps/api/src/reminder-service.ts`, `packages/domain/src/reminder.ts`, `packages/api-client/src/features/reminders.ts`, `apps/mcp/src/tools/reminders.ts` | Task/List/Project lifecycle, Prompt migration, Today composition, global navigation |
+| Tracking | `apps/web/src/features/tracking`, `apps/api/src/routes/rituals.ts`, `apps/api/src/ritual-service.ts`, `packages/domain/src/ritual.ts`, `packages/api-client/src/features/rituals.ts`; future Tracking adapters | Tasks, Reminders, Today composition, global navigation, provider health bridges |
+| User Knowledge (planned) | future `apps/web/src/features/knowledge`, User Knowledge route/service modules, `packages/domain` knowledge and context contracts, typed client and MCP adapters | Workspace ledgers, domain playbooks, action policy, provider records |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
-| Integration | app/API/MCP composition roots, global navigation, Today, shared shadcn primitives, shared style tokens, cross-domain automations, migration journal | Feature-specific implementation details owned above |
+| Texting | `apps/web/src/features/texting`, `apps/api/src/routes/texting.ts`, `apps/api/src/texting-*`, `packages/domain/src/texting.ts`, `packages/connectors/src/twilio.ts`, `packages/api-client/src/features/texting.ts`, `apps/mcp/src/tools/texting.ts` | Workspace ledgers/playbooks, domain policy decisions, account authentication, global navigation, migration journal |
+| Integration | app/API/MCP composition roots, global navigation, Today, Reviews composition, shared shadcn primitives, shared style tokens, migration journal | Feature-specific implementation details owned above |
 
 The following are Integration-owned until they are reduced to thin registries:
+
+- The typed workspace/navigation-owner manifest is the source of truth for the
+  four workspace defaults plus Today and route-to-sidebar ownership. Feature routes must
+  register an owner or explicitly use the account-utility owner; they must not
+  infer sidebar composition from a leaf route.
 
 - `apps/web/src/app.tsx`
 - `apps/api/src/app.ts`
@@ -47,6 +57,77 @@ The following are Integration-owned until they are reduced to thin registries:
 Feature owners may add new feature modules freely. The Integration owner wires
 those modules into the composition roots, which keeps parallel feature branches
 from repeatedly conflicting on the same file.
+
+### Tasks domain boundary
+
+Tasks owns four distinct concepts:
+
+- a **View** is a query (`today`, `upcoming`, `scheduled`, `completed`, `cancelled`, or `trash`) and
+  owns no material;
+- a **List** is a persistent organizational context, including the one protected system Inbox;
+- a **Project** is a finite outcome inside exactly one List;
+- a **Task** is one independently completable action in exactly one List and optionally one
+  same-List Project.
+
+The web uses the canonical URL model `view | list + optional project`: a View excludes container
+selection, a Project implies its List, and Inbox is `/tasks` without a generated identifier. Task
+lifecycle (`open`, `completed`, `cancelled`), timing (`dueAt`, `scheduledAt`), container
+availability, and deletion are independent axes.
+
+`packages/database` currently stores Task rows in `reminders` beside Reminder rows, with Task-only
+columns protected by checks and foreign keys. That is a transitional physical boundary, not shared
+domain ownership. Task services must query `kind = 'task'`; Reminder services retain their own
+contract. Physical extraction is Integration/database-migration work and cannot begin until the
+compatibility observation gate in the Tasks and Tracking design is satisfied.
+
+Lists, Projects, and Tasks are local-only in v1. Their public `MaterialSourceReference` is derived
+from stable entity ID and revision (`provider: local`, no account), not accepted from callers or
+stored as a second provenance record. A future provider-backed container requires a new reviewed
+storage and source contract.
+
+The target Tasks workspace performs a one-time external-provider import and becomes authoritative
+for subsequent work. The person may explicitly re-trigger that heavily rate-limited migration;
+stable source identity and deduplication add new commitments without silently overwriting
+nohmi-owned edits, while conflicts enter review. Continuous inbound and bidirectional multi-provider
+synchronization remain possible later extensions, not current requirements. The durable container
+above Projects remains required; **Lists** is the provisional user-facing label and may change
+without changing the model.
+
+The completed [Tasks workspace charter](../product/tasks-workspace-charter.md) maps this shipped foundation and
+its explicit follow-ups to the workspace-stewardship doctrine. It does not turn the unimplemented
+maintenance, question, learning, status, or review layers into Integration-owned behavior.
+
+## Workspace stewardship ownership
+
+A workspace owner owns the semantics of its steward: living ledger, researched expert playbook,
+definition of maintained, rulebook, surgical operations, maintenance-step graph, questions and
+proposals, knowledge contract, learning behavior, health/advisory model, review artifact, and domain status. These
+contracts stay in the domain's normal paths and are described in a completed
+[`workspace steward charter`](../product/workspace-charter-template.md).
+
+Integration may own generic durable maintenance infrastructure such as run/step identifiers,
+leases, fencing, idempotency, retry history, terminal settlement, and shared result envelopes. It
+does not own domain judgment. A shared service must not decide what counts as a Finance transfer, a
+Mail response obligation, a Calendar conflict, a healthy budget, or a useful recommendation.
+
+Parallel workspace branches should deliver independently testable vertical slices and list shared
+schema, migration-journal, registry, and composition-root changes as explicit Integration handoffs.
+Do not move orchestration into an MCP host or coding-agent skill to avoid those seams. The governing
+product and architecture contracts are
+[`nohmi workspace stewardship`](../product/workspace-stewardship.md),
+[`User Knowledge`](../product/user-knowledge.md), and
+[`ADR 0004`](../architecture/0004-workspace-stewardship.md).
+
+User Knowledge owns shared personal facts, relationships, goals, priorities, motives, preferences,
+constraints, routines, decisions, reinforcement, promotion, provenance, and the typed personal-context
+contract. Workspace owners declare what knowledge a workflow requires and remain responsible for
+their own action rules; `apps/api` performs authorized, purpose-bound context assembly. Shared
+knowledge never becomes an Integration-owned domain decision or an alternate authorization layer.
+
+Texting owns the shared conversation, consent, delivery, inbound claims, intent routing, child-run
+coordination, channel settings, and response composition. A workspace owns every routed operation,
+work node, policy decision, and terminal result. Workspace maintainers publish typed notification
+intents rather than rendered SMS and never call Twilio or consume the shared conversation directly.
 
 ## Required seams
 
@@ -67,8 +148,21 @@ from repeatedly conflicting on the same file.
   adapters consume it through capability-specific interfaces.
 - A connector reports selected accounts/sources, granted capabilities, freshness,
   retry/reconnect state, and provider error. UI never calls a provider directly.
-- Read/write capability is checked before a UI, MCP, or automation operation is
+- Read/write capability is checked before a UI, MCP, or agent operation is
   offered or executed.
+
+### External dependencies
+
+- A feature owner owns the capability, domain state, degraded behavior, and repair path for an
+  external dependency it introduces.
+- Integration owns shared edge deadlines, composition-root wiring, runtime configuration, network
+  policy, deployment ordering, and cross-feature infrastructure. A change that adds a credential,
+  callback, webhook, host class, protocol, port, queue, or native bridge crosses both ownership
+  surfaces.
+- The feature and Integration owners use the boundary record in
+  [`external-boundary-reliability.md`](external-boundary-reliability.md) to agree on the durable
+  commit point and production evidence. Neither side may infer that the other supplied the missing
+  runtime contract.
 
 ### Agent actions and source links
 
@@ -89,7 +183,7 @@ and redacted before/after state.
 ## Integration queue
 
 Feature work must not directly add cross-domain behavior to Today, the global
-Add menu, or generic automations. Each feature instead supplies a typed
+Add menu, or a generic routine catalog. Each feature instead supplies a typed
 candidate/proposal surface. The Integration owner composes these after the
 vertical features are independently verified.
 

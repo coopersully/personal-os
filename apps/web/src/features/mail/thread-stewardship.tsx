@@ -1,0 +1,576 @@
+import type {
+  MailDispositionKind,
+  MailObligationKind,
+  MailObligationState,
+  MailResponseBrief,
+  MailStewardshipFeedbackKind,
+} from "@personal-os/domain";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { ShieldCheckIcon } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import type { MutationFeedbackState } from "../../lib/feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+
+const dispositions: MailDispositionKind[] = [
+  "active",
+  "deferred",
+  "waiting",
+  "delegated",
+  "reference",
+  "noise",
+  "resolved",
+];
+const obligationKinds: MailObligationKind[] = [
+  "reply",
+  "follow_up",
+  "decide",
+  "schedule",
+  "record",
+  "security_review",
+];
+const obligationStates: MailObligationState[] = [
+  "open",
+  "waiting",
+  "deferred",
+  "resolved",
+  "dismissed",
+];
+
+export function ThreadStewardship({ threadId }: { threadId: string }) {
+  const queryClient = useQueryClient();
+  const queryKey = ["mail-thread-stewardship", threadId] as const;
+  const stewardship = useQuery({ queryFn: () => api.getMailThreadStewardship(threadId), queryKey });
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey }),
+      queryClient.invalidateQueries({ queryKey: ["mail-stewardship-status"] }),
+    ]);
+  };
+  const disposition = useFeedbackMutation({
+    feedback: { action: "save the disposition", form: true },
+    mutationFn: ({ rationale, value }: { rationale: string; value: MailDispositionKind }) =>
+      api.setMailDisposition(threadId, {
+        disposition: value,
+        expectedThreadUpdatedAt: stewardship.data?.threadUpdatedAt as string,
+        rationale,
+      }),
+    onError: refresh,
+    onSuccess: refresh,
+  });
+  const createObligation = useFeedbackMutation({
+    feedback: { action: "create the obligation", form: true },
+    mutationFn: ({ kind, rationale }: { kind: MailObligationKind; rationale: string }) =>
+      api.createMailObligation(threadId, {
+        dueAt: null,
+        goalIds: [],
+        kind,
+        nextReviewAt: null,
+        owner: { kind: "user" },
+        rationale,
+        sourceMessageId: null,
+        sourceThreadRevision: stewardship.data?.threadUpdatedAt as string,
+      }),
+    onError: refresh,
+    onSuccess: refresh,
+  });
+  const updateObligation = useFeedbackMutation({
+    feedback: { action: "update the obligation", form: true },
+    mutationFn: ({
+      id,
+      state,
+      version,
+    }: {
+      id: string;
+      state: MailObligationState;
+      version: number;
+    }) => api.updateMailObligation(id, { expectedVersion: version, state }),
+    onError: refresh,
+    onSuccess: refresh,
+  });
+  const answer = useFeedbackMutation({
+    feedback: { action: "save the answer", form: true },
+    mutationFn: ({
+      answer: value,
+      generalize,
+      id,
+      version,
+    }: {
+      answer: string;
+      generalize: boolean;
+      id: string;
+      version: number;
+    }) => api.answerMailQuestion(id, { answer: value, expectedVersion: version, generalize }),
+    onError: refresh,
+    onSuccess: refresh,
+  });
+  const feedback = useFeedbackMutation({
+    feedback: { action: "record the feedback", form: true },
+    mutationFn: ({
+      comment,
+      kind,
+      targetId,
+      targetType,
+    }: {
+      comment: string;
+      kind: MailStewardshipFeedbackKind;
+      targetId: string;
+      targetType: "obligation" | "disposition" | "question";
+    }) => api.createMailStewardshipFeedback({ comment, kind, targetId, targetType }),
+    onError: refresh,
+    onSuccess: refresh,
+  });
+  const brief = useFeedbackMutation({
+    feedback: { action: "prepare the response brief", form: true, safeToRetry: true },
+    mutationFn: (purpose: string) =>
+      api.previewMailResponseBrief(threadId, {
+        expectedThreadUpdatedAt: stewardship.data?.threadUpdatedAt as string,
+        factsToAddress: [],
+        materialsNeeded: [],
+        openQuestions: [],
+        purpose,
+        toneConsiderations: [],
+      }),
+    onError: refresh,
+  });
+  if (stewardship.isPending)
+    return <Skeleton aria-label="Loading thread stewardship" className="m-6 h-48" />;
+  if (stewardship.isError && !stewardship.data)
+    return <QueryFeedback query={stewardship} title="Couldn’t load thread stewardship." />;
+  return (
+    <div className="mail-thread-stewardship">
+      <header>
+        <p className="eyebrow">Persistent stewardship</p>
+        <h3>Thread ledger</h3>
+        <p>Private guidance and exact, version-checked controls. Agents never send email.</p>
+      </header>
+      <QueryFeedback query={stewardship} title="Couldn’t refresh thread stewardship." staleOnly />
+      <MutationFeedback feedback={updateObligation.feedback} />
+      <MutationFeedback feedback={answer.feedback} />
+      <DispositionControl
+        mutationFeedback={disposition.feedback}
+        current={stewardship.data.disposition?.disposition ?? null}
+        pending={disposition.isPending}
+        save={(value, rationale) => disposition.mutate({ rationale, value })}
+      />
+      <ObligationControl
+        mutationFeedback={createObligation.feedback}
+        create={(kind, rationale) => createObligation.mutate({ kind, rationale })}
+        obligations={stewardship.data.obligations}
+        pending={createObligation.isPending || updateObligation.isPending}
+        setState={(id, version, state) => updateObligation.mutate({ id, state, version })}
+      />
+      <QuestionControl
+        answer={(id, version, value, generalize) =>
+          answer.mutate({ answer: value, generalize, id, version })
+        }
+        pending={answer.isPending}
+        questions={stewardship.data.questions}
+      />
+      <ResponseBriefControl
+        mutationFeedback={brief.feedback}
+        brief={brief.data ?? null}
+        pending={brief.isPending}
+        preview={(purpose) => brief.mutate(purpose)}
+      />
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle>Calendar commitment evidence</CardTitle>
+          <CardDescription>
+            Open Calendar’s preview surface to evaluate evidence. No event is created automatically.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/calendar/review">Open Calendar review</Link>
+          </Button>
+        </CardContent>
+      </Card>
+      <FeedbackControl
+        mutationFeedback={feedback.feedback}
+        currentDispositionId={stewardship.data.disposition?.id ?? null}
+        pending={feedback.isPending}
+        submit={(targetId, kind, comment) =>
+          feedback.mutate({ comment, kind, targetId, targetType: "disposition" })
+        }
+      />
+    </div>
+  );
+}
+
+function DispositionControl({
+  mutationFeedback,
+  current,
+  pending,
+  save,
+}: {
+  mutationFeedback: MutationFeedbackState | null;
+  current: MailDispositionKind | null;
+  pending: boolean;
+  save: (value: MailDispositionKind, rationale: string) => void;
+}) {
+  const [value, setValue] = useState<MailDispositionKind>(current ?? "active");
+  const [rationale, setRationale] = useState("User confirmed this thread disposition.");
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Disposition</CardTitle>
+        <CardDescription>How this conversation belongs in the durable workspace.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FeedbackForm
+          feedback={mutationFeedback}
+          className="mail-stewardship-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save(value, rationale);
+          }}
+        >
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mail-disposition">Disposition</FieldLabel>
+              <NativeSelect
+                id="mail-disposition"
+                name="disposition"
+                onChange={(event) => setValue(event.currentTarget.value as MailDispositionKind)}
+                value={value}
+              >
+                {dispositions.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {label(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-disposition-rationale">Rationale</FieldLabel>
+              <Input
+                id="mail-disposition-rationale"
+                name="rationale"
+                onChange={(event) => setRationale(event.currentTarget.value)}
+                value={rationale}
+              />
+            </Field>
+          </FieldGroup>
+          <Button disabled={pending} size="sm" type="submit">
+            Save disposition
+          </Button>
+        </FeedbackForm>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ObligationControl({
+  mutationFeedback,
+  create,
+  obligations,
+  pending,
+  setState,
+}: {
+  mutationFeedback: MutationFeedbackState | null;
+  create: (kind: MailObligationKind, rationale: string) => void;
+  obligations: Awaited<ReturnType<typeof api.getMailThreadStewardship>>["obligations"];
+  pending: boolean;
+  setState: (id: string, version: number, state: MailObligationState) => void;
+}) {
+  const [kind, setKind] = useState<MailObligationKind>("follow_up");
+  const [rationale, setRationale] = useState("");
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Obligations</CardTitle>
+        <CardDescription>
+          Explicit commitments and follow-through, never inferred from prose in v1.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {obligations.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No obligations recorded.</p>
+        ) : (
+          obligations.map((obligation) => (
+            <div className="mail-obligation-row" key={obligation.id}>
+              <div>
+                <strong>{label(obligation.kind)}</strong>
+                <p>{obligation.rationale}</p>
+              </div>
+              <NativeSelect
+                aria-label={`State for ${label(obligation.kind)}`}
+                disabled={pending}
+                onChange={(event) =>
+                  setState(
+                    obligation.id,
+                    obligation.version,
+                    event.currentTarget.value as MailObligationState,
+                  )
+                }
+                value={obligation.state}
+              >
+                {obligationStates.map((state) => (
+                  <NativeSelectOption key={state} value={state}>
+                    {label(state)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+          ))
+        )}
+        <FeedbackForm
+          feedback={mutationFeedback}
+          className="mail-stewardship-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (rationale.trim()) create(kind, rationale.trim());
+          }}
+        >
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mail-obligation-kind">New obligation</FieldLabel>
+              <NativeSelect
+                id="mail-obligation-kind"
+                name="obligation"
+                onChange={(event) => setKind(event.currentTarget.value as MailObligationKind)}
+                value={kind}
+              >
+                {obligationKinds.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {label(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-obligation-rationale">Why this is explicit</FieldLabel>
+              <Input
+                id="mail-obligation-rationale"
+                name="rationale"
+                onChange={(event) => setRationale(event.currentTarget.value)}
+                value={rationale}
+              />
+            </Field>
+          </FieldGroup>
+          <Button disabled={pending} size="sm" type="submit">
+            Record obligation
+          </Button>
+        </FeedbackForm>
+      </CardContent>
+    </Card>
+  );
+}
+
+function QuestionControl({
+  answer,
+  pending,
+  questions,
+}: {
+  answer: (id: string, version: number, value: string, generalize: boolean) => void;
+  pending: boolean;
+  questions: Awaited<ReturnType<typeof api.getMailThreadStewardship>>["questions"];
+}) {
+  const [generalize, setGeneralize] = useState(false);
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Questions</CardTitle>
+        <CardDescription>
+          Answer the exact case. Reusable learning is a separate explicit proposal.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {questions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No open questions.</p>
+        ) : (
+          questions.map((question) => (
+            <div className="space-y-2" key={question.id}>
+              <p>{question.reason}</p>
+              <div className="flex flex-wrap gap-2">
+                {question.options.map((option) => (
+                  <Button
+                    disabled={pending}
+                    key={option.value}
+                    onClick={() => answer(question.id, question.version, option.value, generalize)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+        {questions.length > 0 ? (
+          <Field orientation="horizontal">
+            <Checkbox
+              checked={generalize}
+              id="mail-generalize-answer"
+              onCheckedChange={(checked) => setGeneralize(checked === true)}
+            />
+            <FieldLabel htmlFor="mail-generalize-answer">
+              Propose this answer as a reusable rule
+            </FieldLabel>
+          </Field>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ResponseBriefControl({
+  mutationFeedback,
+  brief,
+  pending,
+  preview,
+}: {
+  mutationFeedback: MutationFeedbackState | null;
+  brief: MailResponseBrief | null;
+  pending: boolean;
+  preview: (purpose: string) => void;
+}) {
+  const [purpose, setPurpose] = useState("");
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Private response brief</CardTitle>
+        <CardDescription>
+          An advisory checklist only. It has no recipient, message body, copy action, or delivery
+          path.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <FeedbackForm
+          feedback={mutationFeedback}
+          className="mail-stewardship-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (purpose.trim()) preview(purpose.trim());
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor="mail-response-purpose">Purpose</FieldLabel>
+            <Input
+              id="mail-response-purpose"
+              name="purpose"
+              required
+              onChange={(event) => setPurpose(event.currentTarget.value)}
+              placeholder="What must a response accomplish?"
+              value={purpose}
+            />
+          </Field>
+          <Button disabled={pending} size="sm" type="submit">
+            Preview private brief
+          </Button>
+        </FeedbackForm>
+        {brief ? (
+          <section aria-label="Private response brief" className="rounded-lg bg-muted p-3">
+            <Badge variant="outline">Not transmittable</Badge>
+            <h4 className="mt-2 font-medium">{brief.purpose}</h4>
+            <Checklist label="Facts to address" values={brief.factsToAddress} />
+            <Checklist label="Open questions" values={brief.openQuestions} />
+            <Checklist label="Materials needed" values={brief.materialsNeeded} />
+            <Checklist label="Tone considerations" values={brief.toneConsiderations} />
+          </section>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FeedbackControl({
+  mutationFeedback,
+  currentDispositionId,
+  pending,
+  submit,
+}: {
+  mutationFeedback: MutationFeedbackState | null;
+  currentDispositionId: string | null;
+  pending: boolean;
+  submit: (targetId: string, kind: MailStewardshipFeedbackKind, comment: string) => void;
+}) {
+  const [kind, setKind] = useState<MailStewardshipFeedbackKind>("correct");
+  const [comment, setComment] = useState("");
+  if (!currentDispositionId) return null;
+  return (
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>Teach through review</CardTitle>
+        <CardDescription>
+          Feedback is durable evidence; it does not silently change a reusable rule.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FeedbackForm
+          feedback={mutationFeedback}
+          className="mail-stewardship-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (comment.trim()) submit(currentDispositionId, kind, comment.trim());
+          }}
+        >
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mail-feedback-kind">Feedback</FieldLabel>
+              <NativeSelect
+                id="mail-feedback-kind"
+                name="feedback"
+                onChange={(event) =>
+                  setKind(event.currentTarget.value as MailStewardshipFeedbackKind)
+                }
+                value={kind}
+              >
+                {["correct", "incorrect", "outdated", "exception"].map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {label(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-feedback-comment">Comment</FieldLabel>
+              <Textarea
+                id="mail-feedback-comment"
+                name="comment"
+                required
+                onChange={(event) => setComment(event.currentTarget.value)}
+                value={comment}
+              />
+            </Field>
+          </FieldGroup>
+          <Button disabled={pending} size="sm" type="submit">
+            <ShieldCheckIcon aria-hidden="true" data-icon="inline-start" />
+            Record feedback
+          </Button>
+        </FeedbackForm>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Checklist({ label: heading, values }: { label: string; values: string[] }) {
+  return values.length > 0 ? (
+    <div className="mt-3">
+      <strong>{heading}</strong>
+      <ul className="list-disc pl-5">
+        {values.map((value) => (
+          <li key={value}>{value}</li>
+        ))}
+      </ul>
+    </div>
+  ) : null;
+}
+function label(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}

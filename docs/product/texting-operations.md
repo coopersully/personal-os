@@ -1,0 +1,481 @@
+# nohmi texting and SMS
+
+- Status: Living target product contract; transport foundation shipped, general inbox pending
+- Last reconciled: 2026-09-11
+
+## Product role
+
+Texting is nohmi's shared conversational channel. It is a general inbox through which the person can
+ask free-form questions, request work from any authorized workspace, answer outstanding questions,
+review exact reversible proposals, and receive concise maintenance results with useful links.
+
+Texting is not a fifth workspace and does not own Mail, Tasks, Calendar, or Finances behavior. It
+owns conversation state, delivery, inbound processing, intent routing, response composition, and
+channel policy; each workspace continues to own its ledger, expertise, authorization, operations,
+questions, and definition of maintained.
+
+## General inbox and dispatch
+
+Every valid inbound message enters one durable nohmi conversation. The Texting coordinator should:
+
+1. claim each unprocessed inbound message exactly once;
+2. load the bounded conversation and User Knowledge needed to understand the request;
+3. distinguish an answer to an existing work node from a new free-form request;
+4. route each intent to the workspace or shared service that owns it;
+5. create linked child intents when one message spans several workspaces;
+6. wait for, resume, or summarize their durable results without duplicating effects;
+7. ask one concise clarification when routing or action remains ambiguous; and
+8. send one coherent reply with completed work, unresolved questions, and relevant deep links.
+
+For example, “Move tomorrow's meeting and mark last night's dinner reimbursable” becomes separate
+Calendar and Finances child intents. Texting coordinates the response but cannot reproduce either
+workspace's scheduling or transaction-classification logic.
+
+Inbound processing should be event-driven so a text receives a timely response. A target
+`maintain_texting` intent drains unprocessed messages, resumes interrupted child work, reconciles
+uncertain delivery, and verifies that every claimed message reached an honest terminal state. A
+manual or externally scheduled invocation is a catch-up and recovery path, not the only trigger.
+
+## Workspace maintenance notifications
+
+Every workspace may publish a typed notification intent when setup or maintenance reaches a useful
+state. The intent contains the workspace, run and work-node identities, a safe result summary,
+available questions or review actions, the minimum useful entity context, canonical timestamps,
+sensitivity, expiry, and first-party destination; it does not contain a client-authored procedure
+or an already-rendered provider message.
+
+The Texting service applies global and per-workspace settings, renders the smallest useful message,
+and owns provider delivery. A workspace never calls Twilio, reads the general SMS conversation, or
+polls for replies directly.
+
+Proactive maintenance SMS is quiet by default unless the run needs an answer or action from the
+person, such as a bounded question, exact review, connector repair, or recovery step. A routine
+successful run or automatically recoverable failure sends no text; Texting still answers messages
+the person initiates.
+
+A maintenance message should normally contain:
+
+- one outcome sentence;
+- as many currently available questions or exact review actions as remain easy to scan, with a hard
+  cap of three and permission to include only one or two when the items need more context;
+- the unified Reviews link whenever two or more items are included, plus one brief overflow summary
+  when additional items remain or the available items cannot fit cleanly;
+- the useful merchant, sender, event, task, or other entity name needed to understand it;
+- explicit reply choices when the answer vocabulary is bounded; and
+- one short first-party review or recovery link only when additional context is useful, several
+  items are involved, or the necessary content is too long for a reasonable text.
+
+Messages are formal, concise, and immediately scannable. They omit greetings, sign-offs,
+conversational filler, repeated status, and the full contents of a large queue. A multi-item message
+contains no more than three directly answerable items and may contain fewer when clarity requires;
+Texting sends one cross-workspace notification rather than one proactive message per item or
+workspace.
+
+A short, self-contained single question does not include a redundant link. The message stays brief
+and directly answerable by text unless evidence or context is needed to decide safely.
+
+The multi-item link opens the existing unified Reviews destination at
+`/settings?section=reviews`, where the person can see all outstanding Review and Attention work
+across available workspaces—including questions, approvals, connector failures, and recovery
+steps—filter it, and follow each item to its owning domain. A single-item context link may still open
+that exact item or owning workspace.
+
+Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
+approval authority, answer, or sensitive item content; possession of the phone or receipt of the
+SMS is not a web session. If authentication is required, nohmi returns the person to the requested
+review destination after sign-in.
+
+Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
+unsure.”
+
+Multi-item example: “Two questions: 1) Archive 18 promotional emails? 2) Move Friday's
+dentist event to 3 PM? Reply `1 yes, 2 no`. Review: [link]”
+
+The numeric labels are short references bound internally to the exact message and proposal
+revisions; they are not durable public IDs. A reply to one unambiguous active item may use its
+bounded answer directly, such as `yes`, `no`, or `unsure`. A message with two or three items requires
+the reply to name each answered number so nohmi never guesses which proposal the person approved.
+
+Overflow example: “Several items need review. Review: [link]”
+
+Privacy-safe does not mean context-free. Merchant display names, sender display names, event titles,
+task titles, and comparable identifiers are included when they are needed to understand the action;
+account numbers, message bodies, event descriptions, and unnecessary sensitive detail remain
+excluded unless the person's channel-detail preference and workspace disclosure policy allow them.
+
+### Time and date rendering
+
+Notification intents retain canonical instants and the source time zone. Immediately before the
+provider send, Texting converts them into the person's current time zone and uses relative language
+for nearby dates: `today`, `yesterday`, or `tomorrow`. It includes a local clock time only when the
+decision depends on it and uses an unambiguous weekday or date for events outside that relative
+window.
+
+Relative labels are generated by Texting, not supplied by a workspace. If a queued message crosses
+a local date boundary before the provider call, Texting renders it again so `today` and `yesterday`
+remain accurate; the linked nohmi record preserves the exact date and time.
+
+### Quiet hours
+
+Quiet hours are enabled by default from 10:00 PM through 8:00 AM in the person's current time zone.
+The person may change that window or select `any time`, which explicitly disables quiet-hour
+deferral.
+
+During quiet hours, proactive maintenance texts wait until the window ends. Before release, Texting
+revalidates that each question or action is still current, suppresses resolved or expired items,
+recomputes relative dates, and consolidates multiple remaining items into one Reviews notification.
+Replies to a conversation the person initiated are immediate and are not proactive maintenance
+notifications.
+
+### Reminder suppression
+
+Texting sends the initial actionable notification once. Repeated maintenance runs do not repeat an
+unchanged question, review, connector failure, or recovery step; reminder eligibility is attached
+to the durable work item rather than the number of times maintenance discovers it.
+
+The same unresolved item becomes eligible for an earlier notification only when new information
+materially changes what the person must do or the consequence of acting or not acting. New wording,
+evidence, confidence, maintenance rediscovery, or internal progress does not qualify when the
+required action and consequence remain the same. An eligible material change still respects quiet
+hours and is revalidated immediately before delivery.
+
+An unresolved item may be mentioned again only after the person's configured reminder interval has
+fully elapsed. The default is 7 days; the person may choose another interval or `never`, which
+disables repeat notifications while leaving the item visible in Reviews. nohmi prefers silence and
+a less complete notification history over becoming repetitive or annoying. Before any reminder,
+Texting revalidates the item, suppresses resolved or expired work, and consolidates multiple
+eligible items into one unified Reviews alert.
+
+## Global review bypass and SMS approval
+
+Review bypass is a global execution setting. It applies consistently to app, API, MCP, scheduled,
+and SMS-initiated work; per-workspace SMS settings cannot override it or widen authority.
+
+| Action state | Review bypass off | Review bypass on |
+| --- | --- | --- |
+| Read-only | Execute | Execute |
+| Policy-authorized and reversible | Queue an exact review | Execute directly |
+| Missing or ambiguous information | Ask a question | Ask a question |
+| Outside scope, unsupported, or blocked | Block | Block |
+| Irreversible or explicitly approval-bound | Require its stronger approval path | Require its stronger approval path |
+
+When bypass is off, a verified SMS reply may approve or reject an exact reversible proposal. The
+outbound review must bind the reply to one unexpired proposal, disclose the action and consequence,
+and accept only its bounded answer vocabulary. A bare “yes” cannot approve an older, superseded,
+ambiguous, recipient-changing, scope-changing, credential, irreversible, or unavailable action.
+
+Texting may route any request represented by an MCP-equivalent capability; SMS is not a smaller
+domain surface. It still uses the same API policy, provider capability, approval requirements, and
+audit contract as app, API, MCP, and scheduled work. Authority remains caller-specific: an inbound
+message uses the verified user's Texting identity and channel policy, while an external model or
+automation uses its connected-agent credential and scopes. Channel access never creates authority
+that the corresponding operation would not have elsewhere.
+
+Cross-workspace child operations settle independently. Texting preserves every verified success
+when a sibling operation fails, remains blocked, or becomes uncertain; it retries only safely
+replayable remaining work and reports the exact completed, failed, blocked, and uncertain results.
+It never describes the whole request as successful when only part of it completed and never rolls
+back a verified success merely to make the combined response look atomic.
+
+Review bypass never grants scopes, creates a domain rule, supplies missing facts, or converts model
+confidence into authority. Every direct action and SMS approval retains actor, channel, source,
+policy, proposal version, conversation revision, effect, delivery, and undo or recovery evidence.
+
+The global execution-policy setting is shared across workspaces. SMS-bound approvals and Finance
+reply routing remain unavailable; notification preferences never grant execution authority.
+
+## Global defaults and per-workspace controls
+
+The target settings contract is defined in
+[`per-workspace settings`](workspace-settings.md). A shared notification policy evaluates the work
+item once across SMS, in-app, push, email, and future channels; Texting only decides how an eligible
+intent is delivered over SMS. Shared preferences are configured globally and inherited by every
+workspace; the person may deliberately override a workspace when it needs different behavior.
+SMS-specific controls cannot create eligibility, bypass shared quiet hours or reminder suppression,
+widen authority, or exceed the shared privacy ceiling. The configurable SMS preferences are:
+
+- whether general inbound texts may route work into that workspace;
+- whether maintenance may send SMS at all;
+- whether to keep the questions-and-actions-only default, turn maintenance SMS off, or send every
+  completed run;
+- whether SMS replies may answer questions and review exact reversible proposals;
+- useful contextual identifiers with privacy-safe detail, or explicitly expanded content;
+- whether to include first-party review and recovery links; and
+- the default 10:00 PM–8:00 AM quiet window, a custom window, or `any time` delivery; and
+- the 7-day default reminder interval, a custom interval, or `never` for no repeat notifications.
+
+Custom maintenance instructions are workspace guidance, not Texting configuration. They apply to
+every setup or maintenance invocation regardless of whether it began in the app, MCP, an external
+schedule, or SMS.
+
+## Finance MVP requirement
+
+Two-way Finance maintenance conversations with external agents are in MVP scope. A person can
+answer a bookkeeping question, clarify an earlier answer, provide context before an event, and
+inspect or correct the resulting Finance record in the app. The full cross-workspace general
+inbox remains the larger target; Finance must use shared Texting foundations rather than create
+its own SMS consumer. This is target scope, not delivered behavior.
+
+The minimum complete journey is:
+
+1. An authorized external automation invokes Finance maintenance and persists a question or exact
+   review under a durable Finance identity also visible in unified Reviews.
+2. Finance publishes a typed notification intent. Shared policy and Texting validate consent,
+   apply privacy, quiet hours and reminder suppression, and send a concise contextual question.
+3. A provider-authenticated inbound webhook is durably claimed, associated with the verified user's
+   Texting identity, and bound to the current question and outbound revision. Free-form facts remain user-authored context; ambiguous answers produce clarification
+   rather than a guessed classification or approval. New prospective context can exist without a
+   transaction. General requests outside the delivered slice receive an honest response.
+4. Texting acknowledges accepted context promptly and routes it to Finance. An acknowledgment does
+   not claim bookkeeping completed. The domain applies only authorized operations and records the
+   result, or leaves explicit work awaiting agent reasoning or user review.
+5. An external agent can retrieve and resume the durable work after its original session ended.
+   An approved host adapter may request event-driven continuation where the host supports it;
+   otherwise the reply remains available for its next invocation, with honest waiting status.
+6. Completion updates the same Finance case and app projection. Manual resolution, duplicate SMS,
+   overlapping agents, expired proposals and delayed responses cannot cause duplicate effects.
+
+Both Codex and Claude are required for the Finance MVP. Prove prompt continuation independently
+on each exact supported host surface. MCP read/send tools alone cannot wake a suspended
+third-party task. A recurring next-pass-only integration is useful but cannot be advertised as
+immediate conversational agent support. External hosts retain schedule ownership; continuation
+of an accepted run does not grant nohmi authority to create recurring maintenance schedules.
+
+MVP work includes shared inbound claims/routing, work-bound replies and prospective context,
+notification policy, resumable Finance API/MCP contracts, a proven host continuation path, and
+visible delivery/processing/recovery states. Bounded reversible approvals must follow the existing
+authority contract; ambiguous or stronger approvals go to the authenticated app. Facts supplied by
+SMS cannot change budget boundaries or activate a rule.
+
+Release evidence must exercise a real authorized outbound question, inbound answer after the
+original agent session ends, safe resumption and visible app result, including a duplicate reply,
+manual resolution race, host outage, STOP and uncertain delivery. Existing mocked transport tests
+do not establish this journey. No production test text is authorized by this planning document.
+
+## Current transport foundation
+
+The shipped implementation uses Twilio Programmable Messaging with one shared toll-free sender,
+not Twilio Conversations. One verified US or Canadian recipient belongs to one nohmi account at a
+time. Phone numbers are encrypted; fingerprints exist only for routing and uniqueness.
+
+Twilio STOP/START state is authoritative. STOP immediately marks the account opted out and only an
+inbound START restores it. Provider error 21610 also marks the account opted out. Website
+verification records consent but cannot clear a retained provider STOP event.
+
+Inbound webhook bodies are capped before parsing. For each signed inbound message, nohmi fetches
+Twilio's provider creation time and orders consent events by that time rather than webhook arrival
+time. Delayed START cannot override newer STOP, and STOP wins when provider times tie. Consent
+keywords remain consent events only: they never enter the agent-readable conversation or advance
+its revision.
+
+Starting verification persists a durable challenge before requesting Twilio Verify. Uncertain
+provider outcomes require a new verification request rather than an automatic retry. Disabling
+`TEXTING_ENABLED` stops setup and sends while retaining credentials so STOP/START webhooks can
+still synchronize.
+
+Every outbound request persists a queued message before making one provider call with a bounded
+timeout. A queued message without a provider identifier and an `unknown` result both mean uncertain
+delivery: do not automatically resend identical content until provider or recipient evidence
+resolves the uncertainty. Status webhooks may advance delivery state but never regress a terminal
+state.
+
+For manual agent sends, only a current uncursored conversation read issues the short-lived receipt
+required to send. The
+receipt binds user, agent, connection, consent epoch, conversation revision, and time zone, and the
+send path revalidates all of them under lock. Every displayed message includes UTC time and an
+explicit local offset.
+
+## Current gaps
+
+The shipped implementation provides verification, consent, conversation history, guarded manual
+reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
+also has the authenticated Settings-owned Reviews destination, which aggregates available Review
+and Attention work across the four workspaces with filters and domain-owned action links. Current
+sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
+recovery coverage remains target work. Texting does not yet provide general-inbox intent
+classification, work-node answers, cross-workspace child
+intents, event-driven agent dispatch, `maintain_texting`, available Finance notification producers, general per-workspace SMS controls, or SMS-bound approvals.
+The T0 foundation below stores notification preferences and delivery lifecycle separately from the
+unavailable producer and routing capabilities.
+
+Local tests prove validation, persistence, signed-webhook handling, and degraded provider behavior
+with mocks. They do not prove production sender registration, carrier reachability, callback
+routing, or STOP/START behavior; production enablement still requires an authorized end-to-end test
+that records identifiers, timestamps, and final states without retaining phone numbers or bodies.
+
+## T1 inbound and answer-admission boundary
+
+The T1 storage slice adds an owner-scoped claim to each ordinary inbound message committed through
+the signed Twilio route while Texting is active. The claim captures the connected recipient and
+current consent epoch in the same transaction as the message. STOP and START remain consent-only;
+disabled Texting continues to synchronize those keywords but creates no new answer claims. A raw
+message row or provider identifier is not an authentication claim. Provider duplicates retain one
+message and one claim. A reconnect, newer STOP or START, or provider block advances the connection's
+consent epoch; admission requires both claim and outbound binding to match the currently active epoch.
+
+An internal outbound binding names one exact queued message and one numbered Finance question,
+including its work/action revisions, answer mode, expiry, and stable child operation UUID. It is
+created only in that outbound message's transaction. Choices use a bounded vocabulary. A single
+unambiguous free-text question accepts the person's trimmed answer; multiple free-text answers use
+`1: answer` followed by a line containing only `---` and then `2: answer`. Commas, semicolons,
+ordinary line breaks, case, punctuation, and internal whitespace stay in the answer. Missing,
+duplicate, unknown, or delimiter-looking selectors require clarification. Each child stores only
+its canonical submitted answer, not the transport envelope or routing syntax. The same inbound
+claim may bind several distinct children; each has its own operation UUID and outcome.
+Numbered `N: answer` syntax remains valid when earlier siblings have already been answered,
+including when the remaining item uses bounded choices; numeric choice vocabulary also permits
+`2:1`. A single free-text answer beginning `1:15` stays literal, while ambiguous multi-item
+numeric prefixes require clarification. For one choice item, an exact vocabulary term such as
+`2 pm` is preserved before reading it as a numbered selector; if both interpretations are valid
+and different, Texting asks for clarification instead of changing the answer.
+An unattached reply may answer only a binding whose database creation preceded the signed claim's
+database receipt and whose exact outbound Twilio `dateCreated` preceded the inbound Twilio
+`dateCreated`. The latter provider timestamp is persisted once with the successful outbound SID;
+an unacknowledged or historical outbound with no trustworthy provider time stays unconfirmed,
+without a fabricated backfill. These two comparisons stay within their respective clocks. An old
+or delayed webhook cannot be retargeted to a newer question; equal or uncertain provider times
+fail closed and require clarification or a fresh reply. Twilio's
+[message `dateCreated`](https://www.twilio.com/docs/messaging/api/message-resource) is
+second-granularity, so a genuine same-second answer may need resending.
+T2 must surface that unsupported ordering honestly rather than silently accepting a different item.
+
+Binding a reply commits each child as pending before any Finance call. An internal Finance port
+receives a server-composed same-transaction admission callback. After Finance's owner and operation
+locks, Texting takes connection SHARE NOWAIT, inbound message SHARE NOWAIT, outbound message SHARE
+NOWAIT, and exact binding UPDATE NOWAIT. It verifies the signed claim, owner, recipient, active consent epoch, direction, causal reply order, exact work
+and action revisions, canonical answer, operation UUID, expiry, and pending state. The one-shot
+consume callback may run only within Finance's first accepted mutation before its receipt completes;
+it changes exactly that child to accepted or rolls back both sides. Completed exact Finance receipt
+replay skips admission and consume. Blocked or unavailable child outcomes are projected later through
+an idempotent Texting-only transaction. Temporary failures remain waiting or uncertain for recovery;
+they are not a terminal invalid-source finding. This slice does not register Finance dispatch or
+promise a provider acknowledgment as proof that bookkeeping finished.
+
+The exact outbound message is locked SHARE NOWAIT before its binding. A definitively failed or
+undelivered outbound cannot acquire a new reply or admit an unconsumed answer. A queued message
+without a provider SID or provider `dateCreated`, or one with unknown delivery, remains retryable
+rather than producing a terminal Finance receipt; queued messages with a SID and accepted, sending,
+sent, or delivered messages may proceed only with immutable provider handoff time earlier than the
+inbound provider occurrence. An already accepted Finance receipt remains authoritative if a later callback
+reports delivery failure. A temporary Texting disablement also leaves signed claims and pending
+children recoverable: bind waits, and admission throws a typed retryable error without a terminal
+Finance receipt. Disabling between verification and consume rolls back the shared Finance/Texting
+transaction. T2 must durably retry waiting claims when policy or delivery evidence changes.
+If a provider response omitted `dateCreated`, later status callbacks cannot manufacture the
+missing creation-time evidence; T2 needs a bounded clarification/resend path after exact Finance
+receipt reconciliation rather than silently retrying that binding forever.
+
+An idempotent sweep can change only an expired, unattached open binding to terminal `expired` under
+its row lock. Attached pending, waiting, and uncertain children are never swept without first
+checking the exact Finance receipt. T1 adds no host schedule for the sweep, so bounded retention is
+not claimed until T2 wires invocation and reconciliation.
+
+Texting history cleanup must retain any inbound claim or outbound binding while its child is open,
+pending, waiting, or uncertain. Database foreign keys reject deletion of their source message or
+connection while the claim or binding exists; guards reject deletion of unfinished bindings and
+owner-live claims. Terminal bindings may be purged after the applicable retention decision, but
+signed inbound claims and their source messages remain until account deletion. A full-history purge
+cannot discard unfinished child outcomes. Account deletion cascades all owner records in one
+transaction. Finance's eventual accepted provenance retains only local UUIDs with
+no Texting foreign key, so disconnect or later Texting cleanup cannot erase an accepted Finance
+answer; the intentionally submitted Finance answer text remains a Finance record.
+
+## T2 exact Finance reply recovery and status foundation
+
+The composed recovery service can inspect one signed inbound claim and its numbered Finance
+children by the exact owner and inbound-message UUID. The read-only
+`GET /v1/texting/finance-replies/:inboundMessageId/status` and
+`get_texting_finance_reply_status` MCP tool require both `texting:read` and `finances:read`;
+missing and other-owner claims have the same not-found response. Status inspects the exact Finance
+receipt but does not execute Finance, bind a reply, or transition a Texting child. Its finite
+per-child `accepted`, `waiting`, `uncertain`, `blocked`, and `unavailable` states distinguish
+verified success from unresolved siblings. Public reasons are redacted: a terminal non-accepted
+answer with an unrecognized private reason is `answer_not_applied`, while an unknown nonterminal
+reason remains `processing_uncertain`. The response omits answer text, operation and binding UUIDs,
+provider IDs, phone data, and raw Finance outcomes; its only destination is the ordinary
+`/settings?section=reviews` page.
+
+An internal, owner-scoped `runPage` reconciles bounded unfinished claims. For attached children,
+it inspects the exact Finance receipt before same-key execution or result projection; unattached
+claims may first be bound. It preserves accepted siblings independently,
+does not re-execute incomplete Finance receipts, and can invoke the unattached-open-binding expiry
+sweep. Composition does not schedule or call that pass: there is no public recovery POST, agent
+write trigger or trigger audit, host continuation, provider activation, or general Texting inbox.
+This foundation adds no 0093 recovery marker and does not settle the clarification/resend design
+for permanently missing provider creation time. It is not the complete Finance SMS conversation.
+
+## T0 notification implementation boundary
+
+The T0 notification slice adds owner-scoped notification preferences, durable work intents, and
+separate delivery-attempt history. It does not enable Finance SMS replies. Production notification status reports `producer_not_registered` until the authoritative Finance
+work resolver is registered. Only authenticated status and human preference updates are registered;
+publication and draining have no public route or client method. The internal publication/drain
+methods return unavailable without a producer and create no intents or provider calls.
+No schedule, startup drain, host continuation, inbound claim, or approval binding is added by T0.
+
+Callers publish only bounded `FinanceHumanWorkRef` values. They cannot submit rendered SMS, current
+work status, a disclosure level, a destination, another user's identity, or execution authority.
+A future domain resolver must use the caller's transaction and lock every authoritative work/status
+and disclosure row through the queued-message commit. The real Finance writer/lock protocol is not
+registered or proven by T0; only an injected transactional fixture exercises the coordinator. It validates ownership and all reference fields,
+returns missing or foreign work without disclosing its existence, and treats superseded references
+as stale. Finance display IDs and date-only bank records are not substitutes for canonical work
+identities, revisions, or timestamps. Missing occurrence instants remain null.
+
+An intent keeps its stable owner/domain/work identity while its evidence revision can refresh.
+Immutable attempt membership records the exact work and semantic action revision considered for
+that delivery. Wording or evidence changes cannot erase reminder history. Reminders use elapsed
+24-hour days (seven by default), not calendar-day rollover. `never` suppresses repeats. An uncertain
+attempt suppresses further sends for its work even if a new action revision appears, until provider
+or operator evidence reconciles that delivery.
+
+Eligibility and relative dates use `users.planningTimezone` at send time; the attempt records that
+zone and the user's revision timestamp. Missing or invalid zones fail closed. Quiet hours evaluate
+local wall time at each invocation: both occurrences of a repeated DST hour remain quiet; a skipped
+hour has no invented offset. The next bounded invocation rechecks eligibility against the current
+zone, preferences, expiry and domain state. No nohmi recurring notification schedule is introduced.
+
+T0 messages summarize up to three safe contextual labels, with an overflow count and an ordinary
+authenticated link to `/settings?section=reviews`. This is a general Reviews destination, not an
+exact-item or approval link. Messages do not advertise reply choices or numeric answer references.
+A domain disclosure ceiling and the global privacy ceiling constrain workspace preferences; a user
+preference cannot expand the permitted context. Sensitive or oversized content falls back to a
+short review summary. Notification rows contain references and delivery state, not copies of SMS
+bodies, phone numbers, domain results, or host credentials.
+
+### Durable send and recovery boundary
+
+Texting owns the existing Twilio HTTPS submission and its bounded timeout. Configuration, sender
+registration, consent, webhook authentication and provider credentials retain the transport's
+existing requirements. The notification coordinator creates a leased claim, then revalidates
+current work, consent epoch, timezone and policy before atomically storing the queued SMS and its
+attempt link. All database locks end before the single provider call. A resolution after that commit
+cannot retract an in-flight text; it remains resolved in Finance and does not produce domain effects.
+
+An expired pre-submission lease may be reclaimed with a new fencing token. Once queued for provider
+submission, neither lease expiry nor another drain resends the attempt. A queued message without a
+provider ID becomes uncertain after its bounded submission window. Provider status evidence can
+reconcile it; failed or uncertain delivery remains inspectable, with app review or delivery
+reconciliation as recovery. STOP, disablement and consent changes prevent new submissions while
+retaining history. Status reads are bounded and tenant-scoped; no public endpoint exposes claim
+or deliver primitives.
+
+The additive migration also cuts Texting runtime provenance tokens over to `nohmi`. It changes only
+matching application-origin source fields; historical message bodies, provider provenance, consent
+kinds, event times, identities and epochs are preserved. Applying that value transformation again
+has no additional effect. Rollback disables notification entry points and preserves pending and
+uncertain rows for repair; it does not delete accepted evidence or restore former runtime tokens.
+
+Local adapter and transport tests establish deterministic code behavior only. The Finance producer
+still needs its own real mutation-versus-resolver race proof. Authorized production evidence must
+separately establish sender/carrier reachability, callback routing, consent and uncertain delivery;
+Codex and Claude continuation remains a later independently evidenced release gate. A mock resolver
+or passing test does not make production Finance SMS available.
+
+T0's private coordinator serializes the canonical user with `FOR NO KEY UPDATE` before acquiring a
+Texting connection lock. This preserves preference/timezone serialization while allowing consent
+and message foreign-key checks. Whole-batch resolution precedes notification writes; status
+reconciliation uses a separate bounded transaction and processes only changed delivery states.
+This local order does not establish a shared Finance gate or make any Finance work kind available.
+The configured first-party origin is validated at construction (HTTP or HTTPS, no credentials,
+path, query or fragment); request headers cannot choose the destination.

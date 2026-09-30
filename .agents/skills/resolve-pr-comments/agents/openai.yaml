@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resolve PR Comments"
+  short_description: "Address GitHub review feedback completely."
+  default_prompt: "Use $resolve-pr-comments to address all actionable feedback on the current pull request."

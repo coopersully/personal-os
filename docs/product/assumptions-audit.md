@@ -1,4 +1,4 @@
-# ilo — Assumptions and Load-Bearing Choices Audit
+# nohmi — Assumptions and Load-Bearing Choices Audit
 
 - Date: 2026-07-18
 - Method: **exactly five** independent passes. Each pass starts from a different failure mode, cites current primary documentation or research, and can overturn an earlier conclusion.
@@ -9,10 +9,13 @@
 
 | Critical choice | Assumption tested | Verdict | Load-bearing decision |
 | --- | --- | --- | --- |
-| Unified ilo | One generic “material” table can make mail, events, tasks, journals, and transactions unified. | Reject. | Keep native, domain-specific records as their source of truth; create a typed link/annotation graph and a shared activity/search projection above them. |
+| Unified nohmi | One generic “material” table can make mail, events, tasks, journals, and transactions unified. | Reject. | Keep native, domain-specific records as their source of truth; create a typed link/annotation graph and a shared activity/search projection above them. |
+| User Knowledge | A semantic note database can safely serve as the person's persistent memory. | Reject. | Keep typed, versioned, provenance-bearing knowledge as truth; use semantic search only as a purpose- and permission-filtered retrieval index. |
 | Provider synchronization | Local copies can be treated as a convenient cache. | Refine. | Local provider projections are disposable and revisioned; user-authored links, policies, approvals, local material, and audit evidence are not. |
 | Agent authorization | MCP scopes, descriptions, and UI confirmations make an agent safe enough. | Reject. | The API policy engine enforces scope, source selection, action tier, origin/egress checks, rate limits, idempotency, and approval state. Tool annotations are never authority. |
-| Automation host | A Codex or Claude subscription can own schedules and durable routine state. | Reject. | ilo owns trigger evaluation, queue, state machine, cancellation, retries, and emergency stop. A model host is a bounded, revocable runner adapter. |
+| Automation host | An external agent platform can own the complete maintenance workflow. | Refine. | The external platform may own cadence and invocation; nohmi owns domain procedure, durable execution state, policy, questions, retries, recovery, and completion truth. |
+| General SMS inbox | Each workspace can independently read and answer the same text conversation. | Reject. | Texting owns one durable conversation and coordinator; it routes linked child intents while each workspace owns its operations, policy, work nodes, and terminal truth. |
+| Former names | Deployed or protocol identifiers require permanent compatibility aliases. | Reject. | The target contains only internal `personal-os` and user-facing lowercase `nohmi`; existing former identifiers require one coordinated, recoverable hard cutover. |
 | Gmail automation | Mail read, archive, triage, rules, and sending are a single ordinary connector integration. | Refine. | Incremental, separately disclosed scopes and provider-compliance gates are required. Read, manage, send, settings/filters, and permanent deletion are distinct capabilities. |
 | Finance data | Transactions are a stable ledger once shown. | Reject. | Transactions are a cursor-driven change stream: added, modified, removed, pending, posted, and reconciliation-linked. Pending data is explicitly provisional. |
 | “Free” product posture | Subscription agent hosts and Plaid remove meaningful operating cost. | Reject. | The core works manually/local-first; paid connectors and model hosts are optional, visible dependencies with graceful degraded modes. |
@@ -22,7 +25,7 @@
 
 ## Pass 1 of 5 — Data ownership and synchronization
 
-**Challenge.** Does “one ilo” mean one data model, and can a reset safely replace everything stored locally?
+**Challenge.** Does “one nohmi” mean one data model, and can a reset safely replace everything stored locally?
 
 **Evidence.** Google Calendar’s incremental sync requires a persisted token, returns deleted entries during change sync, and can return `410 Gone`, requiring the client to wipe its synchronized event store and re-sync. It also requires preserving the same query shape across incremental pages. [Google Calendar synchronization](https://developers.google.com/workspace/calendar/api/guides/sync) Gmail and Plaid likewise expose incremental histories/change streams rather than immutable snapshots; Plaid’s `/transactions/sync` returns `added`, `modified`, and `removed` updates from a cursor. [Plaid Transactions](https://plaid.com/docs/transactions/)
 
@@ -31,6 +34,12 @@
 **Decision.** Unification happens through a typed graph, not premature universal storage. Every native record has a stable internal ID, provider/source ID where relevant, source revision, projection status, and links to other records. A provider full sync may replace that provider’s normalized projection and cursor only. It may never clear user-authored links, tags, notes, projects, rules, approvals, journal data, or audit evidence.
 
 **Plan changes required.** Add an explicit `material_links`/source-reference contract and connector-reconciliation contract before message-to-task, busy-mirroring, or agent-generated material ships. Test a forced provider reset preserving local overlay data.
+
+**Persistent-knowledge consequence.** The same rejection applies to a generic vector memory store.
+User Knowledge uses typed records, immutable revisions, provenance, scope, sensitivity, temporal
+validity, contradiction, reinforcement, and promotion state. Full-text and vector search are
+rebuildable indexes, and purpose-bound context assembly retrieves only what one workflow needs.
+Workspace policy remains separate because a remembered preference cannot authorize an action.
 
 ## Pass 2 of 5 — Security boundaries and agent authority
 
@@ -46,15 +55,25 @@
 
 ## Pass 3 of 5 — Automation reliability, human control, and daily planning
 
-**Challenge.** Can scheduled Claude/Codex jobs safely be the product’s automation backbone, and can a planning system help without becoming coercive?
+**Challenge.** Can scheduled agent-platform jobs safely invoke nohmi maintenance, and can a planning system help without becoming coercive?
 
 **Evidence.** Codex explicitly supports focused inbox and verified-operation workflows, which validates it as a capable optional worker—not as the owner of another product’s state. [Codex automation use cases](https://developers.openai.com/codex/use-cases?category=automation&category=data) Research finds time-perception differences associated with ADHD and evidence of planning/prospective-memory challenges, supporting an accommodation-oriented planner rather than a diagnostic one. [2024 time-perception meta-analysis](https://pubmed.ncbi.nlm.nih.gov/38145491/) [Adult prospective-memory study](https://pmc.ncbi.nlm.nih.gov/articles/PMC3590133/)
 
 **What fails in practice.** External model hosts can be paused, change permissions, lose credentials, duplicate a retry, or return an ambiguous result. A daily planner that auto-fills every open minute makes a brittle schedule and can turn normal incompletion into a shame signal. “Run every morning” without a durable run identity, input snapshot, timeout, and cancellation model produces duplicate or invisible actions.
 
-**Decision.** ilo owns a durable routine definition, trigger evaluator, queue, worker lease, idempotency key, structured run state, limits, approval queue, retry policy, cancellation, dead letter, and audit log. Runner adapters receive only a bounded job plus a scoped short-lived credential and return a structured proposal/result. Today uses Now, Next, Remaining, and Done; capacity is a conservative suggestion based on explicit work hours, hard events, buffers, and user estimates. It offers defer/split/reduce/schedule choices and never silently moves hard events or presents health/productivity judgments.
+**Decision.** External platforms may own cadence and invoke a small maintenance intent through MCP.
+nohmi owns the domain procedure, required context, durable handoff, run and step state, leases,
+idempotency, limits, approvals, retries, cancellation, recovery, questions, and audit. Repeated
+invocation resumes or verifies prior work rather than duplicating it. Today uses Now, Next,
+Remaining, and Done; capacity is a conservative suggestion based on explicit work hours, hard
+events, buffers, and user estimates. It offers defer/split/reduce/schedule choices and never
+silently moves hard events or presents health/productivity judgments.
 
-**Plan changes required.** Make dry-run, replay, cancellation, duplicate-delivery, runner-unavailable, and approval-expiry acceptance tests prerequisite to enabling any recurring routine. Add a low-stimulation Today usability study before making capacity recommendations a default.
+**Plan changes required.** Make dry-run, replay, cancellation, duplicate invocation,
+runner-unavailable, and approval-expiry acceptance tests prerequisite to enabling any recurring
+maintenance intent. Document verified invocation patterns for ChatGPT, Codex, Claude, Gemini, and
+operating-system schedulers without moving workflow logic into their prompts. Add a low-stimulation
+Today usability study before making capacity recommendations a default.
 
 ## Pass 4 of 5 — Provider capability, compliance, and financial truth
 
@@ -64,7 +83,7 @@
 
 **What fails in practice.** The roadmap would be unsafe if it treats “archive,” “trash,” “delete,” “unsubscribe,” “send,” and “create a mail filter” as the same level of permission. Likewise, a finance categorization engine that learns from pending purchases can create duplicate rules, distort a budget, and present false certainty.
 
-**Decision.** Connector capability is data, not hard-coded UI. Gmail uses incremental consent and distinct product operation classes; because Google's `gmail.modify` grant itself permits compose/send, ilo must separately deny sending unless its own `mail:send` policy and approval requirements are satisfied. Ordinary cleanup may move to Trash, while permanent deletion is a separate explicit capability and policy. A provider-compliance/security review is a gate before public Gmail mutation. Finance uses `/transactions/sync` cursor application as the canonical reconciliation path, preserves pending→posted linkage where supplied, and never learns durable rules or makes settled-budget/safe-to-spend statements from pending data. Manual, CSV, and OFX sources remain parity paths, not import afterthoughts.
+**Decision.** Connector capability is data, not hard-coded UI. Gmail uses incremental consent and distinct product operation classes; because Google's `gmail.modify` grant itself permits compose/send, nohmi must separately deny sending unless its own `mail:send` policy and approval requirements are satisfied. Ordinary cleanup may move to Trash, while permanent deletion is a separate explicit capability and policy. A provider-compliance/security review is a gate before public Gmail mutation. Finance uses `/transactions/sync` cursor application as the canonical reconciliation path, preserves pending→posted linkage where supplied, and never learns durable rules or makes settled-budget/safe-to-spend statements from pending data. Manual, CSV, and OFX sources remain parity paths, not import afterthoughts.
 
 **Plan changes required.** Split connector epics into a sandbox/private-user release path and a public-production/compliance path. Add a formal capability matrix, provider webhooks/signature validation, re-authentication state, and transaction-change fixtures before promising broad automation.
 
@@ -82,6 +101,11 @@
 
 ## Result after five passes
 
-The direction should be **ironed out and refined, not narrowed**. The key correction is sequencing: make native material contracts, policy/approval enforcement, reconciliation, and routine orchestration real before adding broad autonomous behavior or native shell surfaces. That preserves the comprehensive ambition while avoiding the two most expensive failure modes: a product that appears unified but corrupts provider/user-owned state, and an agent system that appears safe but can be bypassed by content or retries.
+The direction should be **ironed out and refined, not narrowed**. The key correction is sequencing:
+make native material contracts, User Knowledge, policy and approval enforcement, reconciliation,
+and domain-owned maintenance real before adding broad autonomous behavior. That preserves the
+comprehensive ambition while avoiding the most expensive failure modes: false unification,
+untraceable beliefs about the person, and automation that appears safe but can be bypassed by
+content or retries.
 
 The master plan and design now incorporate these as mandatory implementation and release gates. Any future feature proposal must identify: its native source of truth; link/ownership model; least privilege and policy tier; provider capability and repair behavior; idempotency/reversal behavior; privacy surface; degraded/manual path; and the evidence required to enable it by default.

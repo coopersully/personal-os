@@ -1,9 +1,9 @@
 ---
 name: personal-os-database
-description: Safely evolve ilo PostgreSQL storage with Drizzle. Use when modifying `packages/database/src/schema.ts`, adding SQL migrations, changing repositories or persistence models, or reviewing migration safety.
+description: Safely evolve nohmi PostgreSQL storage with Drizzle. Use when modifying `packages/database/src/schema.ts`, adding SQL migrations, changing repositories or persistence models, or reviewing migration safety.
 ---
 
-# ilo database
+# personal-os database
 
 Follow `docs/engineering/database-migrations.md`. The Drizzle schema,
 generated SQL, and migration journal must describe the same release transition.
@@ -35,3 +35,10 @@ schema/read paths first; run large backfills as resumable, observable jobs; and
 enforce constraints or remove obsolete fields only after callers converge. Do
 not put an unbounded backfill in a deploy-time migration. Treat restore as an
 incident operation, not a normal rollback path.
+
+## Preserve User Knowledge integrity
+
+Before changing profiles, goals, motives, memory, semantic indexes, or cross-workspace context, read
+`docs/product/user-knowledge.md` and `docs/architecture/0005-user-knowledge.md`. Keep typed records,
+immutable revisions, provenance, scope, sensitivity, promotion state, and policy in PostgreSQL;
+full-text and vector representations are rebuildable indexes, not sources of truth.

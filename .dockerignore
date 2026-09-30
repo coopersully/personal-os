@@ -1,5 +1,6 @@
 .git
 .env
+.env.codex.local
 **/coverage
 **/dist
 **/node_modules
@@ -13,3 +14,7 @@ infra/backend.hcl
 infra/bootstrap/terraform.tfvars
 infra/terraform.tfvars
 .DS_Store
+
+**/.build
+.superpowers
+.context

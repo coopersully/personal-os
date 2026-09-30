@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>me.coopersully.nohmi.colima</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/sudo</string>
+    <string>-n</string><string>-H</string><string>-u</string><string>nohmi-production</string>
+    <string>/usr/bin/env</string>
+    <string>PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/opt/homebrew/bin/colima</string>
+    <string>start</string><string>nohmi-production</string><string>--foreground</string>
+    <string>--cpu</string><string>2</string><string>--memory</string><string>4</string>
+    <string>--disk</string><string>24</string><string>--activate=false</string>
+    <string>--mount</string><string>/Users/nohmi-production/nohmi-production:w</string>
+    <string>--mount-type</string><string>virtiofs</string>
+    <string>--ssh-config=false</string><string>--port-forwarder=none</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ExitTimeOut</key><integer>120</integer>
+  <key>WorkingDirectory</key><string>/Users/anchor</string>
+  <key>StandardOutPath</key><string>/Users/anchor/Library/Logs/nohmi-production/colima.log</string>
+  <key>StandardErrorPath</key><string>/Users/anchor/Library/Logs/nohmi-production/colima.log</string>
+</dict>
+</plist>

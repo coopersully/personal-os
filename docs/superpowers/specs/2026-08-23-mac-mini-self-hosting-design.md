@@ -1,8 +1,8 @@
 # Mac Mini Self-Hosting and AWS Cutover Design
 
 **Status:** Hardened proposal for implementation; three adversarial review cycles incorporated
-**Date:** 2026-08-23  
-**Owner:** Cooper  
+**Date:** 2026-08-23
+**Owner:** Cooper
 **Repository:** `coopersully/personal-os`
 
 ## Summary

@@ -1,6 +1,6 @@
 # Feedback and validation
 
-This is ilo's toast-first feedback policy, informed by the sources below and a
+This is nohmi's toast-first feedback policy, informed by the sources below and a
 source-code review on 2026-09-30. It defines the intended standard; the audit
 records implementation gaps. The implementation notes below distinguish the original audit from the resulting shared behavior.
 
@@ -61,7 +61,7 @@ require field correction, reconnecting, conflict resolution, or a safe retry.
   form open on failure. Map known server field errors to the same field UI.
 - On failed submission, focus the first invalid field in a short form. For a
   long form, multiple errors, or errors outside the viewport, show and focus a
-  summary with links to the fields. This is ilo's adaptation; GOV.UK requires
+  summary with links to the fields. This is nohmi's adaptation; GOV.UK requires
   a summary for every validation error in its own system.
 - Associate error text using `aria-describedby`, mark the input
   `aria-invalid`, and describe the correction in text rather than color alone.
@@ -150,7 +150,7 @@ unsaved state, and connection blockers persistent.
   choose announcement urgency appropriately.
 
 The decision tree, toast preference, duration default, and acceptance rubric are
-ilo policy synthesized from these principles, not a claim of one universal UX
+nohmi policy synthesized from these principles, not a claim of one universal UX
 standard or proof of WCAG conformance.
 
 ## Implemented ownership
@@ -175,3 +175,18 @@ The migration covers Settings, Today, Calendar, Tasks, Reminders, Goals, Motives
 Automations, Mail, Finances, and authentication. Product interaction tests cover
 validation, preserved drafts, load/retry, stale state, clipboard errors, and
 confirmations; desktop/mobile acceptance checks cover field focus and toasts.
+
+## Main integration audit
+
+The 2026-09-30 integration with main (`8831d9b4`) preserves the current workspace
+navigation, finance architecture, setup flows, and desktop rituals. Feedback
+ownership follows the extracted features rather than the previous app-shell
+locations. The obsolete calendar sidebar is replaced by the floating navigation.
+
+The audit extends the rubric to Tasks Lists and Projects, finance editors and
+reviews, mail draft autosave/send, setup, agent access, texting, desktop settings,
+and rituals. Global query-error toasts are removed: polling failures stay with
+their affected material, and each action has one notification owner. Uncertain
+mail creation stops automatic retries while retaining the draft for reconciliation.
+Concurrent mutation attempts cannot dismiss newer outcome feedback. Failed logout
+retains the session and recovery action.

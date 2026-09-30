@@ -1,14 +1,10 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { Spinner } from "@personal-os/ui";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert.js";
 import { Button } from "./ui/button.js";
+import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
 
-export function PageLoading() {
-  return (
-    <div className="page-loading">
-      <Spinner label="Loading" />
-    </div>
-  );
+export function PageLoading({ workspace = "generic" }: { workspace?: WorkspaceSkeletonKind }) {
+  return <WorkspaceSkeleton kind={workspace} />;
 }
 
 export function InlineError({

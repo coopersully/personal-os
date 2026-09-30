@@ -1,0 +1,183 @@
+# Mail-to-Calendar Commitment Intake
+
+This prerequisite boundary specializes
+[`external-boundary-reliability.md`](external-boundary-reliability.md) and
+[`connector-reliability.md`](connector-reliability.md). It does not create Calendar events.
+
+## Current durable handoff
+
+- Mail connector sync recognizes only calendar MIME attachment metadata (`text/calendar`,
+  `text/x-vcalendar`, or `application/ics`). Cached prose and every other attachment remain outside
+  this intake path.
+- One durable intake identity binds the owning user/account, provider thread/message, explicit
+  MIME `partId`, separate attachment-body retrieval ID when present, local thread/message, local
+  thread revision, attachment metadata fingerprint, and a fingerprint of the complete cached
+  message projection. Filename-less inline calendar MIME parts and attachment-backed parts are both
+  projected. The snapshot also preserves per-message provider labels/revision and a hash of the
+  OAuth userinfo account-address hint. Google userinfo is not authoritative Gmail mailbox identity.
+  Account/message/part uniqueness, a stable idempotency key, and a transaction-scoped advisory lock
+  make concurrent first observation converge on one row and audit.
+- Google identity is provider message ID plus MIME `partId`; attachment ID is retained only as the
+  byte-retrieval locator. iCloud preview identity is provider mailbox plus IMAP UIDVALIDITY plus UID
+  plus parsed part index, never CID, RFC Message-ID, or filename. UIDVALIDITY is requested and read
+  from the selected mailbox while its IMAP lock is held, projected even for empty mailboxes, included
+  in message/thread/part identities and message revision, and rechecked under the same selected
+  mailbox lock before write-through. Migration 0047 removes pre-release iCloud preview rows and
+  cached threads recorded without UIDVALIDITY; normal Mail sync recreates them under the durable
+  identity.
+- The durable database insert is the handoff. It survives the sync request and does not depend on
+  an MCP caller or in-memory task.
+- Every current row is `provider_projected_unverified` and `preview_only`. Attachment type, name,
+  sender, body text, or caller classification is not evidence that the person committed.
+- Database and domain constraints prevent unverified evidence from entering pending, claimed,
+  reconciliation, succeeded, or failed execution states.
+- Re-observing the exact source preserves a later lifecycle state. A changed source fingerprint
+  demotes the same identity to unverified preview so stale verification cannot authorize work.
+- Message projection and intake reconciliation commit in one transaction. A currently missing or
+  no-longer-calendar part is demoted and audited rather than silently retaining prior authority.
+  A full Gmail thread response is an explicit completeness boundary: stored messages absent from a
+  still-observed complete thread are locked, demoted as `source_message_missing`, audited, and
+  removed from the cache. iCloud synthetic one-message threads do not claim cross-sync completeness.
+  An iCloud mailbox UIDVALIDITY change similarly locks and demotes every intake from the prior
+  mailbox generation before replacing its cache.
+  Mail capability disable demotes its intakes in the same account transaction; disconnect audits
+  invalidation before account cascade deletion. Disabled Mail accounts are excluded from setup
+  readiness counts.
+- Every connector sync has a persisted claim ID and monotonically increasing account generation.
+  Credential/capability transitions advance the generation and clear the claim. Connector
+  projection, durable Mail-rule enqueue, refreshed-credential persistence, and terminal status
+  updates require the exact claimed generation. Every approved Mail rule effect is claimed from
+  the durable provider-effect ledger after sync commits; connection lifecycle changes refuse while
+  claimed effects are settling, and stale claims reconcile exact provider state after restart.
+  An old sync response cannot become current after disable and re-enable or overwrite a newer sync.
+- Audit records contain safe IDs, state, fingerprints, and hashes of remote identities. They omit
+  message bodies, addresses, subjects, filenames, provider payloads, and credentials.
+- Mail setup reports preview-only intake count, zero server-verified items, and
+  `automaticCreationEnabled: false`. Preferences remain separate from authorization.
+
+The evidence-kind column is an open server-owned vocabulary. A later authenticated MIME verifier
+can promote the existing message/part identity to a deterministic kind without changing the
+storage shape merely to add that kind. Lifecycle states also reserve pending, claimed,
+reconciliation, succeeded, and failed work, but this prerequisite does not enter them.
+
+## External boundary record
+
+| Concern | Current answer |
+| --- | --- |
+| Capability and owner | Mail owns provider source capture. Integration will own verification and the cross-domain handoff. Calendar owns destination validation and provider effects. |
+| Configuration and authority | Existing Mail read authority permits projection only. No profile preference, MCP annotation, attachment, or caller payload authorizes Calendar creation. |
+| Transport | Existing Google HTTPS or iCloud IMAP sync transports supply metadata. No attachment download, verifier, queue, port, or credential is added. |
+| Time and capacity | Intake is bounded by the provider sync page, 256 MIME nodes, depth 24, 1,024-character MIME metadata, and 16 eligible calendar parts per message. iCloud RFC822 retrieval is additionally capped at 10 MiB before MIME parsing. Any of these overflows collapses to one redacted preview-only record and audit. Stable identity and persisted sync generation make repeat and reordered delivery deterministic. Approved Mail rule effects use a separate six-conversation durable claim budget with two workers. |
+| Commit point | Exact Mail message projection, intake reconciliation, and redacted audit commit in one transaction. |
+| Delivery semantics | Duplicate observation converges on one account/message/part row. Changed, missing, ineligible, reset-mailbox, or superseded-sync source material cannot preserve verification state. |
+| Degraded behavior | Failure fails the owning sync visibly; a later sync retries the same deterministic insert. Calendar remains unchanged. |
+| Recovery and observation | Setup exposes preview-only count. Database state and redacted activity identify the source handoff without exposing content. |
+| Evidence | Unit tests cover MIME boundaries, Gmail completeness, UIDVALIDITY reset/reuse, and revision fingerprints; database tests cover identity and sync-claim constraints; connector integration covers missing-message demotion, reset-mailbox demotion, stale-sync fencing, persistence, and audit redaction. |
+
+Migration 0047 soft-retires pre-UIDVALIDITY iCloud cache rows so snoozes, draft links, and attention
+provenance retain their historical source identity; new UIDVALIDITY-qualified messages project as
+distinct current rows. Migration 0048 introduces the sync fence. A pre-migration binary already
+inside provider I/O cannot honor either invariant.
+Production deployment therefore requires a separately deployed, non-migrating lifecycle bootstrap
+before this migration release can run. The drain workflow fails before scaling mutation unless the
+exact live primary and every running API task share the expected image/task-definition projection,
+one nonempty image digest, the 120-second stop timeout, exactly one
+`API_SHUTDOWN_TIMEOUT_MS=105000` task environment entry, and the live readiness endpoint returns the hard-coded
+`X-Ilo-Drain-Protocol: quiesce-v1` header. Only then does it scale the
+API service to zero and wait for the current task to drain before the new migration-capable task
+starts. ECS dynamic/scheduled scaling is suspended during the
+drain. The API rejects new HTTP and detached/background claims, awaits tracked request/provider
+work within 105 seconds, and closes PostgreSQL only after that work and the HTTP server finish; ECS
+allows the essential API container 120 seconds before force-stop. The bound includes database closure,
+and rejected tracked work fails the drain. Zero desired/running/pending service counts are required.
+ECS desired-`RUNNING` inventory includes last-status `PENDING`; already-stopping and replacement
+tasks are reconciled from a capped STOPPED baseline plus post-drain inventories across the full
+five-minute ECS eventual-consistency bound. Only tasks described with complete STOPPED evidence in
+the initial pre-mutation snapshot are historical; incomplete and later observations enter the exact
+proof without cross-system clock comparisons. Every exact at-most-100 task must then report a
+successful API-container exit
+without kill/timeout evidence. After that
+proof, circuit-breaker rollback is disabled before the new task can run migrations and stays disabled
+until the new API is the sole completed primary deployment on the exact new task definition. The
+declared rollback-enabled configuration and exact prior scaling suspension state are then restored and
+verified. Pre-zero failures restore prior scaling and preserve the healthy old service. Once zero may
+have committed, shell errors re-suspend and stop at zero; every AWS operation after suspension begins
+is interruptible so delivered cancellation signals can stop the child before tightly bounded
+single-attempt mutations. Abrupt control-plane runner loss still requires operator
+verification before retry. The immutable release task definition retains the pre-drain desired count
+and exact scaling suspension state. A later run may enter recovery only from the recognizable
+zero/all-suspended posture plus an explicit immutable failed-rollout marker tied to the failed
+release. Posture alone may be an intentional stop and cannot authorize restart. Handled failures
+persist and verify the marker; failure to do so requires manual operator recovery. The next release
+retains it on the recovery candidate through all pre-script failure windows and restores recorded
+intent only after exact-primary health. A marker-cleared normal-metadata revision is registered and
+verified before autoscaling resumes; cleanup failure fails closed with a new marker. A missing
+marker/recovery record or legacy live task fails before migration. Recovery still launches exactly
+one migration-capable task; after exact-primary health and rollback restoration it may scale to the
+recorded steady-state count before autoscaling suspension is restored. The recovery record also
+accumulates at most 100 unique prior post-drain task-definition ARNs. Only stopped tasks on that
+explicit set may be treated as failed migration-rollout evidence; all other recent stopped tasks
+retain the exit-zero/no-kill requirement. Abrupt runner loss cannot create the marker and remains a
+fail-closed manual path.
+
+The deploy role's narrowly scoped API
+`application-autoscaling:RegisterScalableTarget` authority and its separately isolated
+`ecs:ListTasks` authority on `*` must already be applied and verified before a drain-required rollout
+begins. The latter wildcard is required by AWS for task enumeration, is constrained to the production
+cluster with `ArnEquals ecs:cluster`, and does not grant task mutation.
+The role also needs isolated `application-autoscaling:DescribeScalableTargets` on `*`; AWS does not
+support resource-level scope for that read, while the workflow filters to the exact API target.
+The application workflow cannot grant its own new authority; this release is not safe as a
+mixed-version rolling deployment.
+
+All tests can be green while production provider metadata is incomplete, MIME part IDs change, or
+the deployed connector lacks access to attachment bytes and authentication results. Those remain
+explicit evidence gaps, not provider success.
+
+## Follow-up acceptance: verifier
+
+- The first auto-eligible class is Google-only paired iTIP. An inbound `METHOD:REQUEST` is
+  insufficient by itself; require a later per-message Gmail `SENT`-labeled `METHOD:REPLY` with the
+  same UID, ORGANIZER, and highest non-cancelled SEQUENCE.
+- The reply must contain exactly one nondelegated attendee matching the authenticated Gmail profile
+  address with `PARTSTAT=ACCEPTED`. Inbound `PARTSTAT=ACCEPTED` is not acceptance evidence.
+- Initially accept only one non-recurring timed UTC VEVENT with explicit DTSTART and DTEND.
+  Recurrence, floating/local times, all-day values, multiple events, cancellation, delegation, or
+  ambiguity remain preview-only.
+- Fetch the exact provider message and MIME part with a bounded timeout, explicit size limit, and
+  stable provider revision; verify the downloaded digest against the claimed part.
+- Fetch `gmail.users.getProfile.emailAddress` and bind it to the same authorized Gmail account
+  before attendee comparison. OAuth userinfo email remains only an account hint. Validate provider
+  authentication and sender/organizer identity using provider-supplied, server-checked results.
+  Cached prose, filenames, and caller assertions never satisfy this gate.
+- Parse only the bounded iCalendar contract above and bind every decision to exact message label,
+  provider revision, MIME part identity, and downloaded digest.
+- Persist a redacted verification result and deterministic evidence kind against the unchanged
+  intake fingerprint. Source disappearance or revision drift demotes the intake and any dependent
+  rule/profile authorization.
+- Serialize verification with `mailCommitmentMessageLockKey`, lock the intake row, and compare the
+  expected source fingerprint, provider revision/labels, MIME part identity, and attachment digest
+  before a CAS promotion. Sync uses the same lock so stale projection cannot overwrite a concurrent
+  promotion and source drift cannot preserve one. Also lock the owning account row and require
+  current `mailEnabled`, sync generation, and source mailbox/message revision in the promotion
+  transaction so capability changes, UIDVALIDITY reset, and newer synchronization fence
+  verification.
+- Add separately specified authenticated ticket/reservation formats only when their issuer,
+  commitment status, time, and stable provider identity can be verified without prose inference.
+
+## Follow-up acceptance: durable Calendar execution
+
+- Require one fresh signed-in acceptance that promotes a disabled preview rule to
+  `approved_rule`; the versioned cross-domain rule binds the source Google Mail account to one local
+  Calendar destination. Setup preferences alone never authorize execution.
+- Snapshot exact Mail intake, Mail rule/profile, Calendar profile, writable destination, and all
+  revisions into durable work before acknowledging acceptance.
+- Revalidate ownership, source presence, evidence digest, rule/profile versions, destination
+  capability/freshness, time zone/all-day boundaries, and exact-source deduplication before write.
+- Use a deterministic event identity and the Calendar provider-effect ledger. Persist pending,
+  claimed, indeterminate/reconciliation, succeeded, and terminal failure states with bounded lease,
+  retry, and repair behavior.
+- Reconcile an indeterminate provider create by exact provider identity before replay. Never report
+  success from a mock, an MCP caller staying alive, or a provider response that was not projected
+  and audited.
+- Leave ambiguous prose and unsupported ticket/reservation evidence preview-only.

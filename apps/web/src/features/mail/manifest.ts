@@ -1,8 +1,4 @@
-import { Mail } from "lucide-react";
+import { workspaceIdentities } from "@/components/workspace-identity";
 
 /** Mail-owned navigation metadata. The shell decides placement. */
-export const mailNavigationItem = {
-  icon: Mail,
-  label: "Mail",
-  path: "/mail",
-};
+export const mailNavigationItem = workspaceIdentities.mail;

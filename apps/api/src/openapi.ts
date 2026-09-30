@@ -1,7 +1,249 @@
+import {
+  financeMaintenanceInputSchema,
+  financeMaintenancePayloadSchema,
+  financeToolResultSchema,
+  idSchema,
+  maintenanceRunStatusSchema,
+  ritualActionInputSchema,
+  ritualDefinitionInputSchema,
+  ritualResponseInputSchema,
+  taskWorkspacePageSchema,
+} from "@personal-os/domain";
+import { z } from "zod";
+
 export function createOpenApiDocument(apiBaseUrl: string) {
   const security = [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }];
+  const taskReadScope = ["tasks:read"];
+  const taskWriteScope = ["tasks:write"];
+  const taskIdParameter = {
+    in: "path",
+    name: "id",
+    required: true,
+    schema: { format: "uuid", type: "string" },
+  };
+  const queryParameter = (name: string, schema: Record<string, unknown>) => ({
+    in: "query",
+    name,
+    required: false,
+    schema,
+  });
+  const paginationParameters = [
+    queryParameter("cursor", { minLength: 1, type: "string" }),
+    queryParameter("limit", { maximum: 100, minimum: 1, type: "integer" }),
+  ];
+  const jsonRequest = (schema: string, required = true) => ({
+    content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } },
+    required,
+  });
+  const taskRead = (description: string) => ({
+    security,
+    responses: { 200: { description } },
+    "x-required-scopes": taskReadScope,
+  });
+  const taskWrite = (description: string, schema?: string, status: 200 | 201 | 204 = 200) => ({
+    ...(schema ? { requestBody: jsonRequest(schema) } : {}),
+    security,
+    responses: { [status]: { description } },
+    "x-required-scopes": taskWriteScope,
+  });
+  const financeMaintenanceResultSchema = z.toJSONSchema(financeToolResultSchema, { io: "input" });
   return {
     components: {
+      schemas: {
+        RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
+        RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
+        RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
+        TaskWorkspacePage: z.toJSONSchema(taskWorkspacePageSchema, { io: "input" }),
+        FinanceMaintenanceHistoryPage: {
+          properties: {
+            items: {
+              items: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+              type: "array",
+            },
+            nextCursor: z.toJSONSchema(idSchema.nullable(), { io: "input" }),
+          },
+          required: ["items", "nextCursor"],
+          type: "object",
+        },
+        FinanceMaintenanceInput: z.toJSONSchema(financeMaintenanceInputSchema, { io: "input" }),
+        FinanceMaintenancePayload: z.toJSONSchema(financeMaintenancePayloadSchema, { io: "input" }),
+        FinanceMaintenanceResult: {
+          ...financeMaintenanceResultSchema,
+          properties: {
+            ...financeMaintenanceResultSchema.properties,
+            data: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+          },
+        },
+        TaskListArchiveInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+            resolution: {
+              enum: ["move_active_contents", "archive_contents_together", "cancel"],
+              type: "string",
+            },
+          },
+          type: "object",
+        },
+        TaskListCreateInput: {
+          additionalProperties: false,
+          properties: {
+            color: { type: ["string", "null"] },
+            description: { type: ["string", "null"] },
+            idempotencyKey: { format: "uuid", type: "string" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+        TaskListUpdateInput: {
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            color: { type: ["string", "null"] },
+            description: { type: ["string", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+          },
+          type: "object",
+        },
+        TaskProjectArchiveInput: {
+          additionalProperties: false,
+          properties: { expectedRevision: { minimum: 1, type: "integer" } },
+          type: "object",
+        },
+        TaskProjectCancelInput: {
+          additionalProperties: false,
+          properties: { expectedRevision: { minimum: 1, type: "integer" } },
+          type: "object",
+        },
+        TaskProjectCompleteInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            destinationProjectId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+            resolution: {
+              enum: [
+                "complete_open_tasks",
+                "cancel_open_tasks",
+                "move_open_tasks",
+                "keep_project_open",
+              ],
+              type: "string",
+            },
+          },
+          type: "object",
+        },
+        TaskProjectCreateInput: {
+          additionalProperties: false,
+          properties: {
+            idempotencyKey: { format: "uuid", type: "string" },
+            listId: { format: "uuid", type: "string" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+            notes: { type: ["string", "null"] },
+            targetDate: { format: "date", type: ["string", "null"] },
+            why: { type: ["string", "null"] },
+          },
+          required: ["listId", "name"],
+          type: "object",
+        },
+        TaskProjectMoveInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+            previewToken: { maxLength: 512, minLength: 1, type: "string" },
+          },
+          required: ["destinationListId", "previewToken"],
+          type: "object",
+        },
+        TaskProjectMovePreviewInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            expectedRevision: { minimum: 1, type: "integer" },
+          },
+          required: ["destinationListId"],
+          type: "object",
+        },
+        TaskProjectUpdateInput: {
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            expectedRevision: { minimum: 1, type: "integer" },
+            name: { maxLength: 240, minLength: 1, type: "string" },
+            notes: { type: ["string", "null"] },
+            targetDate: { format: "date", type: ["string", "null"] },
+            why: { type: ["string", "null"] },
+          },
+          type: "object",
+        },
+        TaskCreateInput: {
+          additionalProperties: false,
+          properties: {
+            dueAt: { format: "date-time", type: ["string", "null"] },
+            estimateMinutes: { maximum: 1440, minimum: 5, type: ["integer", "null"] },
+            idempotencyKey: { format: "uuid", type: "string" },
+            lifecycle: { enum: ["open", "completed", "cancelled"], type: "string" },
+            listId: { format: "uuid", type: "string" },
+            notes: { type: ["string", "null"] },
+            priority: { enum: ["low", "medium", "high"], type: "string" },
+            projectId: { format: "uuid", type: "string" },
+            scheduledAt: { format: "date-time", type: ["string", "null"] },
+            tags: { items: { type: "string" }, maxItems: 20, type: "array" },
+            timezone: { type: ["string", "null"] },
+            title: { maxLength: 240, minLength: 1, type: "string" },
+            why: { type: ["string", "null"] },
+          },
+          required: ["title"],
+          type: "object",
+        },
+        TaskMoveInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            destinationProjectId: { format: "uuid", type: ["string", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+            previewToken: { maxLength: 512, minLength: 1, type: "string" },
+          },
+          required: ["destinationListId", "previewToken"],
+          type: "object",
+        },
+        TaskMovePreviewInput: {
+          additionalProperties: false,
+          properties: {
+            destinationListId: { format: "uuid", type: "string" },
+            destinationProjectId: { format: "uuid", type: ["string", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+          },
+          required: ["destinationListId"],
+          type: "object",
+        },
+        TaskRevisionInput: {
+          additionalProperties: false,
+          properties: { expectedRevision: { minimum: 1, type: "integer" } },
+          type: "object",
+        },
+        TaskUpdateInput: {
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            dueAt: { format: "date-time", type: ["string", "null"] },
+            estimateMinutes: { maximum: 1440, minimum: 5, type: ["integer", "null"] },
+            expectedRevision: { minimum: 1, type: "integer" },
+            notes: { type: ["string", "null"] },
+            priority: { enum: ["low", "medium", "high"], type: "string" },
+            scheduledAt: { format: "date-time", type: ["string", "null"] },
+            tags: { items: { type: "string" }, maxItems: 20, type: "array" },
+            timezone: { type: ["string", "null"] },
+            title: { maxLength: 240, minLength: 1, type: "string" },
+            why: { type: ["string", "null"] },
+          },
+          type: "object",
+        },
+      },
       securitySchemes: {
         bearerAuth: { bearerFormat: "PersonalAccessToken", scheme: "bearer", type: "http" },
         cookieAuth: { in: "cookie", name: "personal_os_session", type: "apiKey" },
@@ -15,8 +257,8 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     info: {
       description:
-        "The shared reminders, calendar, and read-only mail data plane for people and agents.",
-      title: "ilo API",
+        "The shared reminders, calendar, mail, finance, and assistant data plane for people and agents.",
+      title: "nohmi API",
       version: "0.1.0",
     },
     openapi: "3.1.0",
@@ -24,6 +266,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/health/live": { get: { responses: { 200: { description: "Process is alive" } } } },
       "/health/ready": { get: { responses: { 200: { description: "Dependencies are ready" } } } },
       "/v1/auth/register": { post: { responses: { 201: { description: "Account created" } } } },
+      "/v1/auth/invitations/validate": {
+        post: { responses: { 200: { description: "Invitation validity checked" } } },
+      },
       "/v1/auth/login": { post: { responses: { 200: { description: "Session created" } } } },
       "/v1/auth/recovery": {
         post: { responses: { 204: { description: "Password recovery requested" } } },
@@ -44,6 +289,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Current user" } } },
         patch: { security, responses: { 200: { description: "Current user updated" } } },
       },
+      "/v1/setup": {
+        patch: { security, responses: { 200: { description: "Account setup progress saved" } } },
+      },
       "/v1/invitations": {
         get: { security, responses: { 200: { description: "Workspace invitations" } } },
         post: { security, responses: { 201: { description: "Invitation created" } } },
@@ -60,6 +308,26 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/access-tokens/{id}": {
         delete: { security, responses: { 204: { description: "Agent token revoked" } } },
+      },
+      "/v1/desktop/activity": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          description:
+            "Human-only mail arrival feed. Omit cursor to establish a baseline without notifying for imported history. Persist returned cursor per user and server.",
+          parameters: [
+            { name: "cursor", in: "query", schema: { type: "string", pattern: "^[0-9]{1,19}$" } },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            },
+          ],
+          responses: {
+            200: { description: "Mail arrivals, durable cursor, and hasMore" },
+            401: { description: "Sign-in required" },
+            403: { description: "Human session required" },
+          },
+        },
       },
       "/v1/daily-brief": {
         get: { security, responses: { 200: { description: "Time-aware daily brief" } } },
@@ -83,27 +351,227 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         delete: { security, responses: { 204: { description: "Motive deleted" } } },
         patch: { security, responses: { 200: { description: "Motive updated" } } },
       },
-      "/v1/automations": {
-        get: { security, responses: { 200: { description: "Installed automation routines" } } },
-        post: { security, responses: { 201: { description: "Automation routine installed" } } },
+      "/v1/finances/status": {
+        get: {
+          parameters: [
+            {
+              in: "query",
+              name: "start",
+              required: false,
+              schema: { format: "date", type: "string" },
+            },
+            {
+              in: "query",
+              name: "end",
+              required: false,
+              schema: { format: "date", type: "string" },
+            },
+            { in: "query", name: "entityType", required: false, schema: { type: "string" } },
+            {
+              in: "query",
+              name: "targetId",
+              required: false,
+              schema: { format: "uuid", type: "string" },
+            },
+          ],
+          security,
+          responses: { 200: { description: "Authoritative Finance status" } },
+        },
       },
-      "/v1/automations/runs": {
-        get: { security, responses: { 200: { description: "Automation run history" } } },
+      "/v1/finances/maintenance": {
+        get: {
+          parameters: [
+            queryParameter("cursor", { format: "uuid", type: "string" }),
+            queryParameter("limit", { default: 20, maximum: 100, minimum: 1, type: "integer" }),
+            queryParameter("status", {
+              enum: maintenanceRunStatusSchema.options,
+              type: "string",
+            }),
+          ],
+          responses: {
+            200: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceMaintenanceHistoryPage" },
+                },
+              },
+              description: "Owned Finance maintenance history",
+            },
+            403: { description: "The caller lacks finances:read" },
+            404: { description: "Finance maintenance history cursor not found for this user" },
+          },
+          security,
+        },
+        post: {
+          requestBody: {
+            content: {
+              "application/json": {
+                examples: {
+                  allOutstanding: {
+                    value: { operation: "start", scope: { type: "all_outstanding" } },
+                  },
+                  resume: {
+                    value: {
+                      operation: "resume",
+                      runId: "11111111-1111-4111-8111-111111111111",
+                    },
+                  },
+                  target: {
+                    value: {
+                      operation: "start",
+                      scope: {
+                        entityType: "finance_transaction",
+                        id: "11111111-1111-4111-8111-111111111111",
+                        type: "target",
+                      },
+                    },
+                  },
+                  window: {
+                    value: {
+                      operation: "start",
+                      scope: { end: "2026-08-15", start: "2026-08-01", type: "window" },
+                    },
+                  },
+                },
+                schema: { $ref: "#/components/schemas/FinanceMaintenanceInput" },
+              },
+            },
+            required: true,
+          },
+          responses: {
+            200: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceMaintenanceResult" },
+                },
+              },
+              description: "Finance maintenance result with current durable run state",
+            },
+            403: { description: "The caller lacks finances:maintain" },
+            404: { description: "Finance maintenance run not found for this user" },
+            409: { description: "A conflicting Finance maintenance run or rulebook is active" },
+          },
+          security,
+        },
       },
-      "/v1/automations/{id}": {
-        patch: { security, responses: { 200: { description: "Automation routine updated" } } },
+      "/v1/finances/maintenance/{id}": {
+        get: {
+          parameters: [
+            { in: "path", name: "id", required: true, schema: { format: "uuid", type: "string" } },
+          ],
+          responses: {
+            200: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceMaintenancePayload" },
+                },
+              },
+              description: "Owned Finance maintenance payload",
+            },
+            403: { description: "The caller lacks finances:read" },
+            404: { description: "Finance maintenance run not found for this user" },
+          },
+          security,
+        },
       },
-      "/v1/automations/{id}/runs": {
-        post: { security, responses: { 201: { description: "Automation routine run" } } },
+      "/v1/mail/status": {
+        get: {
+          security,
+          responses: { 200: { description: "Authoritative Mail stewardship status" } },
+        },
+      },
+      "/v1/mail/maintenance": {
+        post: {
+          security,
+          responses: {
+            200: { description: "Durable Mail maintenance result with honest settlement" },
+            403: { description: "The caller lacks mail:write" },
+            409: { description: "A conflicting Mail maintenance run is active" },
+          },
+        },
+      },
+      "/v1/mail/maintenance/{id}": {
+        get: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Owned Mail maintenance run" } },
+        },
+      },
+      "/v1/mail/reviews/{id}": {
+        get: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Immutable Mail review artifact" } },
+        },
+      },
+      "/v1/mail/threads/{id}/stewardship": {
+        get: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Exact-thread stewardship ledger" } },
+        },
+      },
+      "/v1/mail/threads/{id}/disposition": {
+        put: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Revision-checked disposition" } },
+        },
+      },
+      "/v1/mail/threads/{id}/obligations": {
+        post: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 201: { description: "Revision-bound Mail obligation" } },
+        },
+      },
+      "/v1/mail/threads/{id}/response-brief/preview": {
+        post: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Private non-transmittable response checklist" } },
+        },
+      },
+      "/v1/mail/obligations/{id}": {
+        patch: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Version-checked obligation" } },
+        },
+      },
+      "/v1/mail/questions/{id}/answer": {
+        post: {
+          parameters: [taskIdParameter],
+          security,
+          responses: { 200: { description: "Version-checked Mail answer" } },
+        },
+      },
+      "/v1/mail/feedback": {
+        post: {
+          security,
+          responses: { 201: { description: "Immutable Mail stewardship feedback" } },
+        },
       },
       "/v1/reminders": {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },
       },
+      "/v1/reminders/overdue-deferral-preview": {
+        get: {
+          security,
+          responses: { 200: { description: "Exact read-only overdue deferral preview" } },
+        },
+      },
       "/v1/reminders/{id}": {
-        delete: { security, responses: { 204: { description: "Reminder deleted" } } },
+        delete: { security, responses: { 204: { description: "Reminder moved to trash" } } },
         get: { security, responses: { 200: { description: "Reminder" } } },
         patch: { security, responses: { 200: { description: "Reminder updated" } } },
+      },
+      "/v1/reminders/{id}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Guarded recoverable Reminder trash revision" } },
+        },
       },
       "/v1/reminders/{id}/complete": {
         post: { security, responses: { 200: { description: "Reminder completed or reopened" } } },
@@ -111,24 +579,247 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/reminders/{id}/restore": {
         post: { security, responses: { 200: { description: "Reminder restored" } } },
       },
+      "/v1/reminders/{id}/attention": {
+        put: {
+          security,
+          responses: {
+            200: { description: "Reminder attention item created or refreshed" },
+          },
+        },
+      },
+      "/v1/task-lists": {
+        get: { ...taskRead("Task Lists"), parameters: paginationParameters },
+        post: taskWrite("Task List created", "TaskListCreateInput", 201),
+      },
+      "/v1/task-lists/{id}": {
+        get: { ...taskRead("Task List"), parameters: [taskIdParameter] },
+        patch: {
+          ...taskWrite("Task List updated", "TaskListUpdateInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-lists/{id}/archive": {
+        post: {
+          ...taskWrite("Task List archived", "TaskListArchiveInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects": {
+        get: { ...taskRead("Task Projects"), parameters: paginationParameters },
+        post: taskWrite("Task Project created", "TaskProjectCreateInput", 201),
+      },
+      "/v1/task-projects/{id}": {
+        get: { ...taskRead("Task Project"), parameters: [taskIdParameter] },
+        patch: {
+          ...taskWrite("Task Project updated", "TaskProjectUpdateInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/complete": {
+        post: {
+          ...taskWrite("Task Project completed", "TaskProjectCompleteInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/cancel": {
+        post: {
+          ...taskWrite("Task Project cancelled", "TaskProjectCancelInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/archive": {
+        post: {
+          ...taskWrite("Task Project archived", "TaskProjectArchiveInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-projects/{id}/move/preview": {
+        post: {
+          ...taskRead("Exact read-only Task Project move preview"),
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("TaskProjectMovePreviewInput"),
+        },
+      },
+      "/v1/task-projects/{id}/move": {
+        post: {
+          ...taskWrite("Task Project and its Tasks moved", "TaskProjectMoveInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/task-workspace": {
+        get: {
+          security,
+          description:
+            "Read a globally filtered, grouped and sorted mixed Tasks/Reminders page. Both read scopes are required by default. kind=task requires only tasks:read; kind=reminder requires only reminders:read. Omitted status means open for All/Today/Upcoming and all for History/Trash. History includes terminal records or unavailable containers. readOnly marks unavailable containers outside Trash; Trash permits guarded restoration including Inbox fallback. deletedAt is independent. Today uses the user's planning timezone; Upcoming starts after today. Exact due/scheduled bounds are inclusive. Date groupKey is YYYY-MM-DD in that timezone; container keys are IDs; missing or ungrouped keys are none. Cursor is signed and bound to user, timezone and filters; it freezes the clock, not concurrent record changes. total is the matching count before cursor pagination.",
+          "x-required-scopes": ["tasks:read", "reminders:read"],
+          "x-required-scopes-by-kind": { task: ["tasks:read"], reminder: ["reminders:read"] },
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", {
+              type: "string",
+              enum: ["all", "task", "reminder"],
+              default: "all",
+            }),
+            queryParameter("view", {
+              type: "string",
+              enum: ["all", "today", "upcoming", "history", "trash"],
+              default: "all",
+            }),
+            queryParameter("status", {
+              type: "string",
+              enum: ["all", "open", "completed", "cancelled", "archived"],
+            }),
+            queryParameter("listId", { format: "uuid", type: "string" }),
+            queryParameter("projectId", { format: "uuid", type: "string" }),
+            queryParameter("query", { minLength: 1, maxLength: 200, type: "string" }),
+            queryParameter("priority", { type: "string", enum: ["low", "medium", "high"] }),
+            queryParameter("tag", { minLength: 1, maxLength: 60, type: "string" }),
+            queryParameter("due", {
+              type: "string",
+              enum: ["any", "overdue", "none", "dated"],
+              default: "any",
+            }),
+            queryParameter("reserved", {
+              type: "string",
+              enum: ["any", "none", "scheduled"],
+              default: "any",
+            }),
+            ...["dueAfter", "dueBefore", "scheduledAfter", "scheduledBefore"].map((name) =>
+              queryParameter(name, { format: "date-time", type: "string" }),
+            ),
+            queryParameter("sort", {
+              type: "string",
+              enum: [
+                "default",
+                "date",
+                "reserved",
+                "priority",
+                "newest",
+                "oldest",
+                "title",
+                "estimate",
+              ],
+              default: "default",
+            }),
+            queryParameter("group", {
+              type: "string",
+              enum: ["none", "date", "list", "project"],
+              default: "none",
+            }),
+          ],
+          responses: {
+            200: {
+              description: "Task workspace page",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/TaskWorkspacePage" } },
+              },
+            },
+            400: { description: "Invalid query, date bounds, or mismatched cursor" },
+            403: { description: "Required task/reminder read scope missing" },
+          },
+        },
+      },
       "/v1/tasks": {
-        get: { security, responses: { 200: { description: "Task page" } } },
-        post: { security, responses: { 201: { description: "Task created" } } },
+        get: {
+          ...taskRead("Task page"),
+          parameters: [
+            ...paginationParameters,
+            queryParameter("lifecycle", {
+              enum: ["open", "completed", "cancelled"],
+              type: "string",
+            }),
+            queryParameter("listId", { format: "uuid", type: "string" }),
+            queryParameter("projectId", { format: "uuid", type: "string" }),
+            queryParameter("view", {
+              enum: ["today", "upcoming", "scheduled", "completed", "cancelled", "trash"],
+              type: "string",
+            }),
+            queryParameter("query", { maxLength: 200, minLength: 1, type: "string" }),
+            queryParameter("dueAfter", { format: "date-time", type: "string" }),
+            queryParameter("dueBefore", { format: "date-time", type: "string" }),
+            queryParameter("scheduledAfter", { format: "date-time", type: "string" }),
+            queryParameter("scheduledBefore", { format: "date-time", type: "string" }),
+          ],
+        },
+        post: taskWrite("Task created", "TaskCreateInput", 201),
       },
       "/v1/tasks/{id}": {
-        delete: { security, responses: { 204: { description: "Task deleted" } } },
-        get: { security, responses: { 200: { description: "Task" } } },
-        patch: { security, responses: { 200: { description: "Task updated" } } },
+        delete: {
+          ...taskWrite("Task moved to Trash", "TaskRevisionInput", 204),
+          deprecated: true,
+          description:
+            "Deprecated compatibility alias that moves the Task to recoverable Trash. Use the focused trash operation instead.",
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("TaskRevisionInput", false),
+          "x-successor-operation": "POST /v1/tasks/{id}/trash",
+        },
+        get: { ...taskRead("Task"), parameters: [taskIdParameter] },
+        patch: {
+          ...taskWrite("Task updated", "TaskUpdateInput"),
+          parameters: [taskIdParameter],
+        },
       },
       "/v1/tasks/{id}/complete": {
-        post: { security, responses: { 200: { description: "Task completed or reopened" } } },
+        post: {
+          ...taskWrite("Task completed", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/cancel": {
+        post: {
+          ...taskWrite("Task cancelled", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/reopen": {
+        post: {
+          ...taskWrite("Task reopened", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/trash": {
+        post: {
+          ...taskWrite("Task moved to recoverable Trash", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
       },
       "/v1/tasks/{id}/restore": {
-        post: { security, responses: { 200: { description: "Task restored" } } },
+        post: {
+          ...taskWrite("Task restored", "TaskRevisionInput"),
+          parameters: [taskIdParameter],
+        },
+      },
+      "/v1/tasks/{id}/move/preview": {
+        post: {
+          ...taskRead("Exact read-only Task move preview"),
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("TaskMovePreviewInput"),
+        },
+      },
+      "/v1/tasks/{id}/move": {
+        post: {
+          ...taskWrite("Task moved", "TaskMoveInput"),
+          parameters: [taskIdParameter],
+        },
       },
       "/v1/calendars": {
         get: { security, responses: { 200: { description: "Calendars" } } },
         post: { security, responses: { 201: { description: "Local calendar created" } } },
+      },
+      "/v1/calendars/commitments/preview": {
+        post: {
+          security,
+          responses: { 200: { description: "Calendar commitment proposal preview" } },
+        },
+      },
+      "/v1/calendars/reviews": {
+        post: {
+          security,
+          responses: { 201: { description: "Immutable Calendar review created" } },
+        },
+      },
+      "/v1/calendars/status": {
+        get: { security, responses: { 200: { description: "Calendar stewardship status" } } },
       },
       "/v1/calendars/{id}": {
         delete: { security, responses: { 204: { description: "Local calendar deleted" } } },
@@ -156,8 +847,26 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           responses: { 200: { description: "Linked calendar block privacy changed" } },
         },
       },
+      "/v1/events/{id}/blocks/{blockId}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Linked calendar block removed with revision guards" } },
+        },
+      },
+      "/v1/events/{id}/attention": {
+        put: {
+          security,
+          responses: { 200: { description: "Calendar event attention item created or refreshed" } },
+        },
+      },
       "/v1/events/{id}/restore": {
         post: { security, responses: { 200: { description: "Event restored" } } },
+      },
+      "/v1/events/{id}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Event trashed with restorable revisions" } },
+        },
       },
       "/v1/connectors": {
         get: { security, responses: { 200: { description: "Calendar connections" } } },
@@ -166,7 +875,33 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 200: { description: "Google authorization URL" } } },
       },
       "/v1/connectors/google/callback": {
-        get: { responses: { 302: { description: "Google authorization completed" } } },
+        get: { responses: { 303: { description: "Safe Google authorization outcome redirect" } } },
+      },
+      "/v1/connectors/google/gmail/notifications": {
+        post: {
+          responses: {
+            204: { description: "Authenticated Gmail change signal durably accepted" },
+            401: { description: "Pub/Sub identity rejected" },
+            404: { description: "Notification route or subscription unavailable" },
+            503: { description: "Durable acknowledgement unavailable; provider should retry" },
+          },
+        },
+      },
+      "/v1/connectors/google/calendar/notifications": {
+        post: {
+          responses: {
+            204: { description: "Verified Calendar change signal durably accepted" },
+            400: { description: "Malformed notification headers" },
+            404: { description: "Notification route or channel unavailable" },
+            503: { description: "Durable acknowledgement unavailable; provider should retry" },
+          },
+        },
+      },
+      "/v1/connectors/authorization-attempts/{id}": {
+        get: {
+          security,
+          responses: { 200: { description: "Safe connector authorization outcome" } },
+        },
       },
       "/v1/connectors/icloud": {
         post: { security, responses: { 201: { description: "iCloud connected" } } },
@@ -181,7 +916,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 200: { description: "X authorization URL" } } },
       },
       "/v1/x-bookmarks/callback": {
-        get: { responses: { 302: { description: "X authorization completed" } } },
+        get: { responses: { 303: { description: "Safe X authorization outcome redirect" } } },
       },
       "/v1/x-bookmarks/account": {
         delete: { security, responses: { 204: { description: "X connection removed" } } },
@@ -202,11 +937,175 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/mailboxes": {
         get: { security, responses: { 200: { description: "Connected mailboxes" } } },
       },
+      "/v1/mail/setup-context": {
+        get: { security, responses: { 200: { description: "Source-aware Mail setup context" } } },
+      },
+      "/v1/mail/drafts": {
+        get: { security, responses: { 200: { description: "Owned Mail drafts and send state" } } },
+        post: {
+          security,
+          responses: { 201: { description: "Durable Mail draft created" } },
+        },
+      },
+      "/v1/mail/drafts/{id}": {
+        delete: { security, responses: { 204: { description: "Editable Mail draft deleted" } } },
+        patch: { security, responses: { 200: { description: "Mail draft updated" } } },
+      },
+      "/v1/mail/drafts/{id}/reconcile": {
+        post: {
+          security,
+          responses: { 200: { description: "Uncertain Mail delivery reconciled by a human" } },
+        },
+      },
+      "/v1/mail/send": {
+        post: {
+          security,
+          responses: { 204: { description: "Exact confirmed draft submitted once" } },
+        },
+      },
       "/v1/mail/threads": {
         get: { security, responses: { 200: { description: "Unified mail conversations" } } },
       },
+      "/v1/mail/threads/bulk": {
+        post: { security, responses: { 200: { description: "Bounded Mail batch result" } } },
+      },
       "/v1/mail/threads/{id}": {
         get: { security, responses: { 200: { description: "Mail conversation" } } },
+        patch: { security, responses: { 200: { description: "Mail conversation updated" } } },
+      },
+      "/v1/mail/threads/{id}/attention": {
+        put: {
+          security,
+          responses: { 200: { description: "Source-derived Mail attention item saved" } },
+        },
+      },
+      "/v1/mail/threads/{id}/messages": {
+        get: { security, responses: { 200: { description: "Mail conversation messages" } } },
+      },
+      "/v1/mail/threads/{id}/snooze": {
+        post: { security, responses: { 204: { description: "Mail conversation snoozed" } } },
+      },
+      "/v1/mail/rules": {
+        get: { security, responses: { 200: { description: "Mail rules" } } },
+        post: { security, responses: { 201: { description: "Mail rule created" } } },
+      },
+      "/v1/mail/rules/preview": {
+        post: { security, responses: { 200: { description: "Mail rule preview" } } },
+      },
+      "/v1/mail/rules/{id}": {
+        patch: { security, responses: { 200: { description: "Mail rule updated" } } },
+      },
+      "/v1/mail/rules/{id}/preview": {
+        get: { security, responses: { 200: { description: "Saved Mail rule reviewed" } } },
+      },
+      "/v1/mail/rules/{id}/activate": {
+        post: { security, responses: { 200: { description: "Reviewed Mail rule activated" } } },
+      },
+      "/v1/assistant/setup-status": {
+        get: { security, responses: { 200: { description: "Agent setup status" } } },
+      },
+      "/v1/assistant/context": {
+        get: {
+          security,
+          responses: { 200: { description: "Authenticated nohmi agent context" } },
+        },
+      },
+      "/v1/assistant/setup-plan": {
+        get: {
+          security,
+          responses: { 200: { description: "Current server-owned agent setup plan" } },
+        },
+      },
+      "/v1/assistant/connection-guide": {
+        get: { security, responses: { 200: { description: "Agent connection guide" } } },
+      },
+      "/v1/assistant/profiles/{domain}": {
+        get: { security, responses: { 200: { description: "Domain preference profile" } } },
+        put: { security, responses: { 200: { description: "Domain preference profile saved" } } },
+      },
+      "/v1/assistant/attention": {
+        get: { security, responses: { 200: { description: "Domain attention items" } } },
+        post: { security, responses: { 201: { description: "Attention item created" } } },
+      },
+      "/v1/assistant/attention/{domain}/{id}": {
+        patch: { security, responses: { 200: { description: "Attention item updated" } } },
+      },
+      "/v1/rituals": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Ritual definitions" } },
+        },
+      },
+      "/v1/rituals/current": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Current reconciled ritual" } },
+        },
+      },
+      "/v1/rituals/history": {
+        get: {
+          security,
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
+            queryParameter("dateFrom", { type: "string", format: "date" }),
+            queryParameter("dateTo", { type: "string", format: "date" }),
+          ],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Paginated ritual history" } },
+        },
+      },
+      "/v1/rituals/export": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Private ritual export; interactive user only" } },
+        },
+      },
+      "/v1/rituals/{kind}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualDefinitionInput"),
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Revision-bound ritual configuration" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/responses/{stepId}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualResponseInput"),
+          parameters: [
+            { in: "path", name: "id", required: true, schema: { type: "string" } },
+            { in: "path", name: "stepId", required: true, schema: { type: "string" } },
+          ],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Save draft or submitted ritual response" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/actions": {
+        post: {
+          security,
+          requestBody: jsonRequest("RitualActionInput"),
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Record snooze/skip press, confirm or cancel" } },
+        },
+      },
+      "/v1/rituals/{kind}/data": {
+        delete: {
+          security,
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: {
+            204: { description: "Delete ritual and its history; interactive user only" },
+          },
+        },
       },
       "/v1/audit": { get: { security, responses: { 200: { description: "Activity history" } } } },
     },

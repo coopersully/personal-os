@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "@/components/icons";
 import {
   DayPicker,
   getDefaultClassNames,
@@ -61,11 +61,15 @@ function Calendar({
           defaultClassNames.dropdowns,
         ),
         dropdown_root: cn(
-          "relative rounded-(--cell-radius)",
+          buttonVariants({ size: "sm", variant: "outline" }),
+          "relative cursor-pointer gap-1 px-2.5 font-medium [&>svg]:text-muted-foreground",
           defaultClassNames.dropdown_root,
         ),
-        dropdown: cn("absolute inset-0 bg-popover opacity-0", defaultClassNames.dropdown),
-        caption_label: cn("font-medium select-none", defaultClassNames.caption_label),
+        dropdown: cn(
+          "absolute inset-0 cursor-pointer bg-popover opacity-0",
+          defaultClassNames.dropdown,
+        ),
+        caption_label: cn("font-medium leading-none select-none", defaultClassNames.caption_label),
         month_grid: cn("w-full border-collapse", defaultClassNames.month_grid),
         weekdays: cn("flex", defaultClassNames.weekdays),
         weekday: cn(
@@ -98,12 +102,13 @@ function Calendar({
           />
         ),
         Chevron: ({ className: chevronClassName, orientation, ...chevronProps }) => {
+          if (orientation === "down") return <span aria-hidden="true" className="hidden" />;
           const Icon =
             orientation === "left"
-              ? ChevronLeft
+              ? ChevronLeftIcon
               : orientation === "right"
-                ? ChevronRight
-                : ChevronDown;
+                ? ChevronRightIcon
+                : ChevronDownIcon;
           return <Icon aria-hidden="true" className={cn("size-4", chevronClassName)} {...chevronProps} />;
         },
         DayButton: ({ ...dayButtonProps }) => (
@@ -119,7 +124,7 @@ function Calendar({
         ...components,
       }}
       formatters={{
-        formatMonthDropdown: (date) => date.toLocaleString(locale?.code, { month: "short" }),
+        formatMonthDropdown: (date) => date.toLocaleString(locale?.code, { month: "long" }),
         ...formatters,
       }}
       locale={locale}
@@ -146,7 +151,7 @@ function CalendarDayButton({
   return (
     <Button
       className={cn(
-        "relative isolate z-10 flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 border-0 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:ring-3 group-data-[focused=true]/day:ring-ring/50 data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground [&>span]:text-xs [&>span]:opacity-70",
+        "relative isolate z-10 flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 border-0 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:bg-selection data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground [&>span]:text-xs [&>span]:opacity-70",
         defaultClassNames.day,
         className,
       )}

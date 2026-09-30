@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Work Context"
+  short_description: "Inspect legacy nohmi GitHub issue context."
+  default_prompt: "Use $github-work-context before inspecting or migrating legacy nohmi GitHub issue evidence."

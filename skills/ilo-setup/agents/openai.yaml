@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ilo Guided Setup"
+  short_description: "Set up Ilo preferences and safe automations"
+  default_prompt: "Use $ilo-setup to inspect my connected Ilo domains and run the shortest useful setup interview."

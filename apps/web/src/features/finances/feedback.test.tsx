@@ -122,13 +122,12 @@ const queryCases = [
     method: "listFinanceTransactions",
     route: "transactions",
     title: "Couldn’t load transactions.",
-    key: ["finance-transactions", null, { sortBy: "date", sortDirection: "desc" }],
-  },
-  {
-    method: "getFinanceProfile",
-    route: "profile",
-    title: "Couldn’t load financial profile.",
-    key: ["finance-profile"],
+    key: [
+      "finance-transactions",
+      null,
+      { sortBy: "date", sortDirection: "desc" },
+      { review: "all" },
+    ],
   },
   {
     method: "listFinanceIncomeStreams",
@@ -176,7 +175,7 @@ const queryCases = [
     method: "getFinanceReviewQueue",
     route: "review",
     title: "Couldn’t load transaction review queue.",
-    key: ["finance-review-queue"],
+    key: ["finance-review-queue", undefined],
   },
   {
     method: "getFinanceWealthSummary",
@@ -235,8 +234,6 @@ describe("Finance query recovery", () => {
     await userEvent.click(within(status as HTMLElement).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
     expect(request).toHaveBeenCalledTimes(2);
-    if (method === "getFinanceProfile")
-      expect(screen.getByLabelText("Employer")).toHaveValue("Saved employer");
   });
 
   it.each(
@@ -259,8 +256,7 @@ describe("Finance query recovery", () => {
       within(status as HTMLElement).getByText(/Showing the last available update/),
     ).toBeInTheDocument();
     expect(client.getQueryData(key)).toEqual(data);
-    if (method === "getFinanceProfile")
-      expect(screen.getByLabelText("Employer")).toHaveValue("Saved employer");
+
     await userEvent.click(within(status as HTMLElement).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
     expect(request).toHaveBeenCalledTimes(2);

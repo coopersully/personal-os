@@ -1,0 +1,163 @@
+# ADR 0004: Workspace stewardship
+
+- Status: Accepted
+- Date: 2026-08-15
+
+## Context
+
+An MCP client can invoke tools, but it cannot be the source of nohmi's domain expertise, workflow
+ordering, rules, durable progress, or truth about whether a workspace is maintained. Encoding that
+behavior in host prompts would make outcomes vary by client, lose learning between sessions, and
+turn retries into duplicate or unobservable work.
+
+Each workspace also needs more than generic cleanup. It needs a domain ledger, a researched expert
+playbook, exact operations, a bounded authority model, a learning loop, analysis, and a review that
+explains the resulting state. Those concepts must remain domain-owned while sharing reliable run
+infrastructure.
+
+The product doctrine is defined in
+[`workspace-stewardship.md`](../product/workspace-stewardship.md).
+
+## Decision
+
+Implement each workspace steward as these layered, domain-owned contracts:
+
+1. **Ledger:** canonical material, provider projections, provenance, annotations, questions, rules,
+   decisions, and review artifacts.
+2. **Playbook:** versioned professional knowledge, calculations, health rubric, recommendation
+   boundaries, and research provenance.
+3. **Rulebook:** active preferences, approved rules, exceptions, confidence policy, source scope,
+   and action authority.
+4. **Guided setup:** a resumable, domain-owned interview that translates the person's goals,
+   source meanings, constraints, and desired workflow into explicit proposed configuration and
+   any number of inactive rules. Rules require a dedicated, version-bound preview before the
+   owning domain's activation policy can approve them.
+5. **Surgical operations:** small idempotent or revision-guarded domain operations with audit and
+   recovery behavior.
+6. **Maintenance coordinator:** a durable run composed of named steps that can claim, resume,
+   retry, settle, and report work over `all`, a time window, or an exact target.
+7. **Knowledge contract:** required, optional, and prohibited User Knowledge plus the purpose,
+   sensitivity, freshness, and missing-context behavior for every workflow.
+8. **Work-node model:** typed, evidence-linked questions, approvals, reviews, recovery steps,
+   follow-ups, and completed-work summaries with durable lifecycle and resolution history. A
+   resolution can settle one case, propose knowledge, reinforce an existing belief, or propose a
+   reusable rule subject to its action policy.
+9. **Status and review model:** readiness, freshness, backlog, health, recommendations, terminal
+   run state, and a durable period narrative.
+
+The generic maintenance substrate may own run/step identifiers, leases, fencing, idempotency,
+terminal settlement, retry history, and common result envelopes. It must not encode what counts as
+a duplicate transaction, an urgent conversation, a scheduling conflict, a healthy budget, or any
+other domain judgment.
+
+A rule preview records each proposal's immutable version or fingerprint, condition, scope, source
+selection, representative matches and non-matches, action, consequences, conflicts/precedence,
+authority requirement, and disable/rollback behavior. Large proposal sets may be grouped and
+paginated, but every rule remains individually inspectable and deselectable. Any proposal or sample
+drift invalidates the preview; setup completion and global review bypass cannot activate an action
+rule.
+
+## Package responsibilities
+
+- `packages/domain` owns workspace schemas, invariants, playbook/rule contracts, maintenance
+  commands, status, questions, advice, and review shapes.
+- `packages/database` owns durable ledgers, rules, maintenance runs/steps, review artifacts, and
+  repositories.
+- `packages/connectors` supplies provider evidence and capabilities; it does not decide the
+  workspace's maintained state.
+- `apps/api` owns domain orchestration, authorization, synchronization, durable execution, audit,
+  and recovery.
+- `packages/api-client` exposes typed status, maintenance, and surgical operations.
+- `apps/web` presents source health, ledger state, questions, approvals, advice, and reviews.
+- `apps/mcp` remains a stateless adapter. It exposes intent and surgical tools but owns no playbook,
+  sequencing, learning, or completion decision.
+
+The web surface gives each workspace-owned setting one canonical editor inside that workspace.
+Centralized Settings owns global policy, channels, connected-agent credentials/scopes, User
+Knowledge controls, and unified Reviews, plus a read-only cross-workspace overview that deep-links
+to exact domain controls. It must not persist or render a second editable copy of workspace-owned
+configuration.
+
+Shared User Knowledge, context assembly, and promotion policy follow
+[`ADR 0005`](0005-user-knowledge.md). Workspaces declare the context they need but do not duplicate
+global knowledge in domain profiles.
+
+Repository agent skills are engineering instructions only. They help coding agents implement this
+architecture; they are not runtime expertise, user memory, an approval source, or a prerequisite
+for an MCP host.
+
+## MCP shape
+
+Prefer a small, predictable high-level surface per mature workspace:
+
+- `setup_<workspace>` or the shared setup plan runs or resumes guided setup when the workspace
+  requires a nontrivial interview and configuration flow.
+- `get_<workspace>_status` returns readiness, source freshness, maintenance backlog, open questions,
+  latest review, and safe next intent.
+- `maintain_<workspace>` starts, resumes, or verifies a domain-owned maintenance turn for a bounded
+  scope and returns a durable handle or terminal result.
+
+Retain granular tools for surgical inspection, previews, and exact authorized actions. Do not make
+the high-level operation a synchronous loop of client-authored calls. Consequential authority stays
+at each underlying operation, and a maintenance request cannot widen the caller's scopes or policy.
+
+External platforms are the sole scheduling authority for recurring maintenance. nohmi may persist
+the declared host and expected cadence plus last-observed and overdue/unknown check-in state, but
+that metadata cannot enqueue a run or modify the external schedule. Internal queues, leases,
+retries, delayed authorized effects, and recovery timers may continue an accepted invocation; they
+must not originate a new recurring maintenance turn.
+
+Scheduling authority is scoped to each schedule rather than one exclusive owner per workspace.
+Multiple hosts and overlapping schedules may invoke the same intent. Every declaration receives an
+immutable nohmi-owned local schedule identity, and a declared schedule must pass it through the
+typed maintenance API/MCP input. The API validates it against the authenticated connection and
+propagates it through run, health, revocation, idempotency, and coalescing records; host-declared
+automation identity remains optional evidence, while manual and otherwise unscheduled invocations
+carry no schedule identity. Compatible runs coalesce or resume, and incompatible scopes remain
+separate without duplicating completed external effects.
+
+Workspace stewards may publish typed notification intents that reference their run, work nodes,
+safe summary, sensitivity, and first-party destination. The shared Texting coordinator owns channel
+policy, rendering, delivery, and reply routing; it cannot own or reinterpret the workspace's
+domain operation. General-inbox dispatch follows [`ADR 0006`](0006-texting-inbox.md).
+
+Finance adds a deliberate agent-challenge boundary between preparation and
+settlement. `maintain_finances` owns the durable run and prepares the candidate;
+`get_finance_ledger_challenge` pages its complete public evidence;
+`submit_finance_ledger_challenge` records versioned rubric coverage and
+structured findings. The API—not the MCP host—then applies the app-only review
+setting, verifies the committed result, and publishes the period review.
+
+## Reliability and observation
+
+A maintenance run records its owner, invoking actor and connection, optional validated local
+schedule identity, requested scope, purpose, evidence cutoff, playbook/rulebook and User Knowledge
+revisions, steps, claims, effects, policy decisions, approvals, idempotency and recovery state, work
+nodes, failures, review artifact, and terminal status. External effects follow the connector
+reliability contract. Process loss resumes from durable state; concurrent requests coalesce or
+fence; ambiguous effects reconcile before replay. Status and review surfaces must distinguish
+queued, active, maintained, maintained-with-questions, blocked, and failed work.
+
+## Parallel development
+
+Start each workspace from the
+[`workspace steward charter template`](../product/workspace-charter-template.md). Domain branches
+own their ledger semantics, playbook, operations, coordinator, and review contract. Shared run
+infrastructure and composition roots remain Integration-owned and should land through thin,
+explicit registration seams.
+
+## Consequences
+
+- A simple client instruction can produce consistent behavior across MCP hosts because nohmi owns the
+  workflow.
+- User answers and approved rules persist independently of a conversation or model vendor.
+- Reviews explain partial completion and advice instead of reducing a run to success/failure.
+- Cross-workspace coordination preserves verified child successes and reports sibling failures,
+  blocks, and uncertainty truthfully instead of hiding partial completion or manufacturing
+  all-or-nothing behavior through compensating mutations.
+- Shared infrastructure can improve reliability without flattening domain expertise into a generic
+  workflow engine.
+- Each workspace can be developed in parallel against an explicit charter and stable integration
+  seams.
+- The architecture is incremental: existing tools remain valid while status, maintenance, learning,
+  and review capabilities are delivered workspace by workspace.

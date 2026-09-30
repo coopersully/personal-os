@@ -2,6 +2,19 @@
 
 Settings is a control surface for a person’s persistent preferences, access, and connected capabilities. Keep each screen calm: show the decision that matters now, explain a constraint where it occurs, and keep rare tuning out of the initial scan.
 
+## Ownership and placement
+
+- Give every setting one canonical editing surface.
+- Edit account-wide identity, security, privacy ceilings, review bypass, shared notification policy,
+  channel connections/defaults, connected-agent credentials/scopes, User Knowledge controls, and
+  unified Reviews in centralized Settings.
+- Edit sources, source meanings, maintenance behavior, notification overrides, rules, learning,
+  recovery, data controls, and domain access posture inside the owning workspace.
+- Let centralized Settings summarize cross-workspace health, readiness, effective policy, override
+  presence, and outstanding review counts, then deep-link to the exact workspace control.
+- Never render a second editable copy of workspace-owned configuration. A summary may refresh after
+  returning from the workspace, but it does not maintain parallel form state.
+
 ## Feedback
 
 | Situation | Pattern | Behavior |
@@ -27,6 +40,37 @@ An inline message needs a specific title and a next step. Never use a static ale
 - Put infrequent tuning, verbose scope checklists, and historical records in a labelled `Collapsible`.
 - Do not render an action that cannot work on the current platform. Show an informational capability callout only when the user can still complete useful preparatory work.
 - Do not render restricted navigation or settings to users without the corresponding capability. Redirect a deep link to a safe, available settings section.
+- Setup sequences use labelled disclosures with a persistent status summary.
+  Derive completion from durable or externally observed product state; never
+  use a manual checkbox for a step that the product can verify. State the
+  evidence boundary when the product can observe a successful check-in but
+  cannot inspect a third-party host directly.
+- After an agent has authenticated, the server-owned setup plan determines the
+  current, blocked, and complete step. Ask the person only for unavoidable
+  connection, unresolved preferences, and consequential approval. Skill
+  installation instructions and procedural prompts are optional compatibility
+  details, not required steps or a second source of setup state.
+
+## Connected-account health
+
+- Browser authorization returns render one allowlisted outcome alert from an authenticated attempt
+  lookup. Remove only `connection_attempt` and `connection_result` from the URL after lookup, keep
+  the active Settings section, and offer at most one recovery action. Cancellation, expiry,
+  incomplete permission, provider failure, and unknown state never render provider text or a JSON
+  response.
+- Render only the structured account health state: **Ready**, **Syncing**, **Retrying
+  automatically**, **Reconnect required**, or **nohmi is resolving this**. Never render a raw
+  provider exception or response.
+- A manual sync result is a toast; the durable account row remains the persistent truth. Always
+  refresh account and material queries after the attempt, including failure.
+- Show a reconnect action only for the `reconnect` state. Google restarts OAuth for that account;
+  iCloud opens the app-specific-password form with the account email already selected.
+- Retry and service-attention states explain ownership and timing without blaming credentials.
+  Mail and Calendar use a warning callout only when a person must reconnect.
+- Refresh health every 30 seconds while a relevant view is mounted and visible. Browsers never
+  initiate provider sync on a polling interval.
+- X follows the same rule: persisted and displayed synchronization failures use nohmi-authored copy,
+  never an exception message from the provider or SDK.
 
 ## Security & agent access
 

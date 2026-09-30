@@ -74,6 +74,7 @@ These rules are **always enforced**. Each links to a file with Incorrect/Correct
 - **Icons in `Button` use `data-icon`.** `data-icon="inline-start"` or `data-icon="inline-end"` on the icon.
 - **No sizing classes on icons inside components.** Components handle icon sizing via CSS. No `size-4` or `w-4 h-4`.
 - **Pass icons as objects, not string keys.** `icon={CheckIcon}`, not a string lookup.
+- **This repo uses reicon.** Import every glyph from `@/components/icons`; `lucide-react` and every other icon package fail `pnpm lint`.
 
 ### Chat & Messaging → [chat.md](./rules/chat.md)
 

@@ -1,17 +1,25 @@
 import {
+  createCalendarReviewInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
   createLocalCalendarInputSchema,
+  deleteEventBlockInputSchema,
+  deleteEventInputSchema,
   eventListQuerySchema,
+  previewCalendarCommitmentInputSchema,
+  restoreEventInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
   updateLocalCalendarInputSchema,
+  upsertCalendarAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
-import { z } from "zod";
+import { type ZodType, z } from "zod";
 import type { createCalendarService } from "../calendar-service.js";
+import type { createCalendarStewardshipService } from "../calendar-stewardship-service.js";
+import { AppError } from "../errors.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess } from "./support.js";
+import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -19,15 +27,30 @@ type CalendarRouteOptions = {
   app: Hono<AppEnv>;
   calendar: ReturnType<typeof createCalendarService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
+  stewardship: ReturnType<typeof createCalendarStewardshipService>;
 };
 
 /** Register the Calendar-owned HTTP surface without constructing shared services. */
-export function registerCalendarRoutes({ app, calendar, mutationContext }: CalendarRouteOptions) {
-  const requireCalendarScope = requireFeatureAccess("calendar");
-  app.use("/v1/calendars", requireCalendarScope);
-  app.use("/v1/calendars/*", requireCalendarScope);
-  app.use("/v1/events", requireCalendarScope);
-  app.use("/v1/events/*", requireCalendarScope);
+export function registerCalendarRoutes({
+  app,
+  calendar,
+  mutationContext,
+  stewardship,
+}: CalendarRouteOptions) {
+  const calendarFeatureAccess = requireFeatureAccess("calendar");
+  const calendarReadAccess = requireScope("calendar:read");
+  const calendarReadOnlyPostPaths = new Set([
+    "/v1/calendars/commitments/preview",
+    "/v1/calendars/reviews",
+  ]);
+  app.use("/v1/calendars", calendarFeatureAccess);
+  app.use("/v1/calendars/*", (context, next) =>
+    context.req.method === "POST" && calendarReadOnlyPostPaths.has(context.req.path)
+      ? calendarReadAccess(context, next)
+      : calendarFeatureAccess(context, next),
+  );
+  app.use("/v1/events", calendarFeatureAccess);
+  app.use("/v1/events/*", calendarFeatureAccess);
 
   app.get("/v1/calendars", async (context) =>
     context.json({ calendars: await calendar.list(context.get("principal").userId) }),
@@ -38,6 +61,28 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
         calendar: await calendar.createLocalCalendar(
           await parseBody(context, createLocalCalendarInputSchema),
           mutationContext(context),
+        ),
+      },
+      201,
+    ),
+  );
+  app.post("/v1/calendars/commitments/preview", async (context) =>
+    context.json({
+      proposal: await calendar.previewCommitment(
+        context.get("principal").userId,
+        await parseBody(context, previewCalendarCommitmentInputSchema),
+      ),
+    }),
+  );
+  app.get("/v1/calendars/status", async (context) =>
+    context.json({ status: await stewardship.getStatus(context.get("principal").userId) }),
+  );
+  app.post("/v1/calendars/reviews", async (context) =>
+    context.json(
+      {
+        review: await stewardship.createReview(
+          context.get("principal").userId,
+          await parseOptionalBody(context, createCalendarReviewInputSchema),
         ),
       },
       201,
@@ -113,6 +158,18 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
         context.req.param("id"),
         context.req.param("blockId"),
         mutationContext(context),
+        {},
+      ),
+    }),
+  );
+  // Revision-bearing destructive requests use POST so intermediaries cannot drop their CAS body.
+  app.post("/v1/events/:id/blocks/:blockId/trash", async (context) =>
+    context.json({
+      event: await calendar.deleteEventBlock(
+        context.req.param("id"),
+        context.req.param("blockId"),
+        mutationContext(context),
+        await parseBody(context, deleteEventBlockInputSchema),
       ),
     }),
   );
@@ -131,14 +188,49 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
     }),
   );
   app.delete("/v1/events/:id", async (context) => {
-    await calendar.deleteEvent(context.req.param("id"), mutationContext(context));
+    await calendar.deleteEvent(context.req.param("id"), mutationContext(context), {});
     return context.body(null, 204);
   });
+  // The legacy DELETE path is bodyless; this is the reliable revision-bearing transport.
+  app.post("/v1/events/:id/trash", async (context) =>
+    context.json({
+      revision: await calendar.deleteEvent(
+        context.req.param("id"),
+        mutationContext(context),
+        await parseBody(context, deleteEventInputSchema),
+      ),
+    }),
+  );
   app.post("/v1/events/:id/restore", async (context) =>
     context.json({
-      event: await calendar.restoreEvent(context.req.param("id"), mutationContext(context)),
+      event: await calendar.restoreEvent(
+        context.req.param("id"),
+        mutationContext(context),
+        await parseOptionalBody(context, restoreEventInputSchema),
+      ),
+    }),
+  );
+  app.put("/v1/events/:id/attention", async (context) =>
+    context.json({
+      item: await calendar.upsertAttentionItem(
+        context.req.param("id"),
+        await parseBody(context, upsertCalendarAttentionItemInputSchema),
+        mutationContext(context),
+      ),
     }),
   );
 }
 
 const createSelectedInputSchema = z.object({ selected: z.boolean() });
+
+async function parseOptionalBody<T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> {
+  const raw = await context.req.text();
+  if (!raw.trim()) return schema.parse({});
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new AppError("invalid_request", "The request body must be valid JSON.");
+  }
+  return schema.parse(value);
+}

@@ -106,3 +106,157 @@ describe("useFeedbackMutation", () => {
     );
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((accept, decline) => {
+    resolve = accept;
+    reject = decline;
+  });
+  return { promise, resolve, reject };
+}
+
+it("keeps a newer failure visible when an older save completes", async () => {
+  vi.clearAllMocks();
+  const older = deferred<string>();
+  const newer = deferred<string>();
+  const onSuccess = vi.fn();
+  const onError = vi.fn();
+  const onSettled = vi.fn();
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn: (name: string) => (name === "older" ? older.promise : newer.promise),
+        onMutate: (name: string) => ({ previous: name }),
+        onSuccess,
+        onError,
+        onSettled,
+        feedback: { action: "save wallpaper settings", safeToRetry: true },
+        retry: false,
+      }),
+    { wrapper },
+  );
+  act(() => result.current.mutate("older"));
+  act(() => result.current.mutate("newer"));
+  const failure = new Error("newer request failed");
+  await act(async () => newer.reject(failure));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledOnce());
+  const failureId = vi.mocked(toast.error).mock.calls[0]?.[1]?.id;
+  await act(async () => older.resolve("saved"));
+  await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+  expect(toast.dismiss).not.toHaveBeenCalledWith(failureId);
+  expect(onError).toHaveBeenCalledWith(failure, "newer", { previous: "newer" }, expect.anything());
+  expect(onSuccess).toHaveBeenCalledWith(
+    "saved",
+    "older",
+    { previous: "older" },
+    expect.anything(),
+  );
+  expect(onSettled).toHaveBeenCalledWith(
+    "saved",
+    null,
+    "older",
+    { previous: "older" },
+    expect.anything(),
+  );
+  expect(onSettled).toHaveBeenCalledWith(
+    undefined,
+    failure,
+    "newer",
+    { previous: "newer" },
+    expect.anything(),
+  );
+  expect(result.current.context).toEqual({ previous: "newer" });
+});
+
+it("does not publish an obsolete failure after a newer success", async () => {
+  vi.clearAllMocks();
+  const older = deferred<string>();
+  const onError = vi.fn();
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn: (name: string) => (name === "older" ? older.promise : Promise.resolve("saved")),
+        onError,
+        feedback: { action: "save settings", safeToRetry: true, success: "Settings saved." },
+        retry: false,
+      }),
+    { wrapper },
+  );
+  act(() => result.current.mutate("older"));
+  act(() => result.current.mutate("newer"));
+  await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
+  await act(async () => older.reject(new Error("old failure")));
+  await waitFor(() => expect(onError).toHaveBeenCalledOnce());
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(result.current.isSuccess).toBe(true);
+});
+
+it("preserves per-call callbacks and context for mutateAsync", async () => {
+  const onSuccess = vi.fn();
+  const onSettled = vi.fn();
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn: async (name: string) => name.toUpperCase(),
+        onMutate: (name: string) => ({ previous: name }),
+        feedback: { action: "save settings" },
+      }),
+    { wrapper },
+  );
+  await act(async () => {
+    expect(await result.current.mutateAsync("saved", { onSuccess, onSettled })).toBe("SAVED");
+  });
+  expect(onSuccess).toHaveBeenCalledWith(
+    "SAVED",
+    "saved",
+    { previous: "saved" },
+    expect.anything(),
+  );
+  expect(onSettled).toHaveBeenCalledWith(
+    "SAVED",
+    null,
+    "saved",
+    { previous: "saved" },
+    expect.anything(),
+  );
+});
+
+it("retains the original preparation error without executing or claiming an uncertain write", async () => {
+  vi.clearAllMocks();
+  const failure = new Error("optimistic preparation failed");
+  const mutationFn = vi.fn();
+  const onError = vi.fn();
+  const onSettled = vi.fn();
+  const callError = vi.fn();
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn,
+        onMutate: async () => {
+          throw failure;
+        },
+        onError,
+        onSettled,
+        feedback: { action: "create event", form: true },
+      }),
+    { wrapper },
+  );
+  act(() => result.current.mutate(undefined, { onError: callError }));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(mutationFn).not.toHaveBeenCalled();
+  expect(result.current.error).toBe(failure);
+  expect(result.current.context).toBeUndefined();
+  expect(result.current.feedback?.kind).toBe("unsaved");
+  expect(onError).toHaveBeenCalledWith(failure, undefined, undefined, expect.anything());
+  expect(callError).toHaveBeenCalledWith(failure, undefined, undefined, expect.anything());
+  expect(onSettled).toHaveBeenCalledWith(
+    undefined,
+    failure,
+    undefined,
+    undefined,
+    expect.anything(),
+  );
+  expect(toast.error).not.toHaveBeenCalled();
+});

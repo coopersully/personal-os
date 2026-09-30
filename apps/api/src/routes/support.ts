@@ -22,6 +22,18 @@ export async function parseBody<T>(context: Context, schema: z.ZodType<T>): Prom
   return schema.parse(value);
 }
 
+export async function parseOptionalBody<T>(context: Context, schema: z.ZodType<T>): Promise<T> {
+  const raw = await context.req.text();
+  if (!raw.trim()) return schema.parse({});
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new AppError("invalid_request", "The request body must be valid JSON.");
+  }
+  return schema.parse(value);
+}
+
 export function requestMetadata(context: Context, trustProxy = false): ClientMetadata {
   return {
     ipAddress: requestIp(context, trustProxy),

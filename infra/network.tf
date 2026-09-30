@@ -37,47 +37,6 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  depends_on = [aws_internet_gateway.main]
-}
-
-resource "aws_nat_gateway" "application" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-
-  depends_on = [aws_internet_gateway.main]
-
-  tags = { Name = "${local.name}-application" }
-}
-
-resource "aws_subnet" "application" {
-  count = 2
-
-  vpc_id            = aws_vpc.main.id
-  availability_zone = data.aws_availability_zones.available.names[count.index]
-  cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 4, count.index + 4)
-
-  tags = { Name = "${local.name}-application-${count.index + 1}" }
-}
-
-resource "aws_route_table" "application" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.application.id
-  }
-}
-
-resource "aws_route_table_association" "application" {
-  count = length(aws_subnet.application)
-
-  subnet_id      = aws_subnet.application[count.index].id
-  route_table_id = aws_route_table.application.id
-}
-
 resource "aws_subnet" "database" {
   count = 2
 
@@ -160,6 +119,22 @@ resource "aws_security_group" "application" {
     description = "Provider APIs and transactional email over TLS"
     from_port   = 443
     to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "iCloud Mail IMAP over TLS"
+    from_port   = 993
+    to_port     = 993
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "iCloud Mail SMTP submission"
+    from_port   = 587
+    to_port     = 587
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

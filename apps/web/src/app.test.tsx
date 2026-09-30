@@ -1717,9 +1717,21 @@ describe("ilo web app", () => {
       "UTC",
     );
     expect(layouts.map(({ column, columns }) => ({ column, columns }))).toEqual([
+      { column: 0, columns: 1 },
+      { column: 0, columns: 1 },
+      { column: 0, columns: 1 },
+    ]);
+    const simultaneous = positionTimelineEvents(
+      overlappingEvents.map((event, index) =>
+        index === 1 ? { ...event, startsAt: "2026-07-13T09:00:00.000Z" } : event,
+      ),
+      { day: 13, month: 7, year: 2026 },
+      "UTC",
+    );
+    expect(simultaneous.map(({ column, columns }) => ({ column, columns }))).toEqual([
       { column: 0, columns: 2 },
       { column: 1, columns: 2 },
-      { column: 0, columns: 2 },
+      { column: 0, columns: 1 },
     ]);
 
     const [fallbackHour] = positionTimelineEvents(
@@ -6659,21 +6671,21 @@ describe("ilo web app", () => {
     });
     expect(firstEvent).toHaveStyle({
       "--calendar-event-left": "calc(0% + 2px)",
-      "--calendar-event-width": "calc(50% - 4px)",
+      "--calendar-event-width": "calc(100% - 4px)",
       "--overlap-orbit-rotation": "-4deg",
       "--overlap-orbit-width": "clamp(88px, calc(100% - 110px), 160px)",
       "--overlap-orbit-x": "-52px",
       "--overlap-orbit-y": "0px",
     });
     expect(secondEvent).toHaveStyle({
-      "--calendar-event-left": "calc(50% + 2px)",
-      "--calendar-event-width": "calc(50% - 4px)",
+      "--calendar-event-left": "calc(0% + 6px)",
+      "--calendar-event-width": "calc(100% - 8px)",
       "--overlap-orbit-rotation": "4deg",
       "--overlap-orbit-width": "clamp(88px, calc(100% - 110px), 160px)",
       "--overlap-orbit-x": "52px",
       "--overlap-orbit-y": "0px",
     });
-    expect(within(spread).getByText("2")).toHaveClass("calendar-overlap-cluster__pin-head");
+    expect(spread).toHaveTextContent("2");
 
     fireEvent.pointerEnter(cluster as HTMLElement, { pointerType: "mouse" });
     expect(cluster).toHaveClass("is-hovered");
@@ -6700,11 +6712,12 @@ describe("ilo web app", () => {
     ]
       .map((match) => match[1])
       .find((rule) => rule?.includes("var(--overlap-orbit-rotation)"));
+    expect(expandedRule).not.toContain("border-color:");
     expect(expandedRule).toContain("border-radius: 7px;");
     expect(expandedRule).toContain("height: var(--calendar-event-height);");
     expect(expandedRule).toContain("width: var(--overlap-orbit-width);");
-    expect(stylesheet).toMatch(/\.calendar-overlap-cluster__toggle::before\s*\{/u);
-    expect(stylesheet).toMatch(/\.calendar-overlap-cluster__toggle::after\s*\{/u);
+    expect(stylesheet).not.toContain(".calendar-overlap-cluster__toggle::before");
+    expect(stylesheet).not.toContain(".calendar-overlap-cluster__toggle::after");
     expect(stylesheet).toContain(
       "transform: translate(-50%, -50%) rotate(var(--overlap-orbit-rotation));",
     );
@@ -7107,7 +7120,7 @@ describe("ilo web app", () => {
     await browser.keyboard("{Escape}");
 
     await browser.click(screen.getByRole("radio", { name: "Month" }));
-    const allDay = await screen.findByRole("button", { name: "All day Quiet day" });
+    const allDay = await screen.findByRole("button", { name: /All day Quiet day/ });
     const targetDay = screen
       .getByRole("button", { name: "View Tuesday, July 14, 2026" })
       .closest("section") as HTMLElement;
@@ -7320,7 +7333,7 @@ describe("ilo web app", () => {
       }),
     );
     await browser.click(screen.getByRole("button", { name: "Close" }));
-    await browser.click(screen.getByRole("button", { name: "All day Quiet day" }));
+    await browser.click(screen.getByRole("button", { name: /All day Quiet day/ }));
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "View Monday, July 13, 2026" }));
     expect(await screen.findByRole("radio", { name: "Day", checked: true })).toBeInTheDocument();

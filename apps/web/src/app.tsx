@@ -3486,10 +3486,26 @@ function DayCalendarView({
       <WorkspaceSecondaryAppBar
         aria-label="Calendar day navigation"
         placement="inline"
+        data-calendar-axis="top"
         className="calendar-secondary-app-bar calendar-secondary-app-bar--day"
       >
         <WorkspaceSecondaryAppBarContent>
-          <AllDayEvents calendarsById={calendarsById} events={allDayEvents} setEditor={setEditor} />
+          <div className="calendar-all-day-grid">
+            <span className="week-time-corner" data-calendar-axis="corner">
+              All day
+            </span>
+            <CalendarAllDayEvents
+              calendarsById={calendarsById}
+              days={[day]}
+              highlightToday={false}
+              layouts={positionCalendarAllDayEvents(
+                [day],
+                new Map([[localDateKey(day), allDayEvents]]),
+              )}
+              setEditor={setEditor}
+              today={today}
+            />
+          </div>
         </WorkspaceSecondaryAppBarContent>
       </WorkspaceSecondaryAppBar>
       <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
@@ -3627,7 +3643,7 @@ function WeekCalendarView({
     [eventsByDay],
   );
   const allDayLayouts = useMemo(
-    () => positionWeekAllDayEvents(days, eventsByDay),
+    () => positionCalendarAllDayEvents(days, eventsByDay),
     [days, eventsByDay],
   );
   const scrollContainer = useRef<HTMLDivElement>(null);
@@ -3684,7 +3700,7 @@ function WeekCalendarView({
       <div
         className="week-calendar-grid"
         style={{
-          gridTemplateColumns: `56px repeat(${days.length}, minmax(140px, 1fr))`,
+          gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(140px, 1fr))`,
           minWidth: 56 + days.length * 140,
         }}
       >
@@ -3696,15 +3712,18 @@ function WeekCalendarView({
           <WorkspaceSecondaryAppBarContent
             className="calendar-secondary-app-bar__week-grid"
             style={{
-              gridTemplateColumns: `56px repeat(${days.length}, minmax(140px, 1fr))`,
+              gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(140px, 1fr))`,
             }}
           >
-            <div className="week-time-corner">All day</div>
-            <div aria-hidden="true" className="week-all-day-corner" />
+            <div data-calendar-axis="corner" className="week-time-corner">
+              All day
+            </div>
+            <div aria-hidden="true" data-calendar-axis="corner" className="week-all-day-corner" />
             {days.map((day) => {
               const isToday = sameLocalDate(day, today);
               return (
                 <header
+                  data-calendar-axis="top"
                   className={`week-day-header${isToday ? " is-today" : ""}`}
                   key={`header-${localDateKey(day)}`}
                 >
@@ -3728,7 +3747,7 @@ function WeekCalendarView({
                 </header>
               );
             })}
-            <WeekAllDayEvents
+            <CalendarAllDayEvents
               calendarsById={calendarsById}
               days={days}
               layouts={allDayLayouts}
@@ -3849,6 +3868,7 @@ function TimeAxis() {
   return (
     <ol
       aria-hidden="true"
+      data-calendar-axis="left"
       className="calendar-time-axis"
       style={{ height: calendarTimelineHeight }}
     >
@@ -3904,7 +3924,7 @@ function TimelineNow({
         right: spanColumns ? "auto" : undefined,
         top: minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute),
         width: spanColumns
-          ? `calc(56px + ${spanColumns * 100}% + ${Math.max(0, spanColumns - 1)}px)`
+          ? `calc(var(--calendar-time-gutter-width) + ${spanColumns * 100}% + ${Math.max(0, spanColumns - 1)}px)`
           : undefined,
       }}
     >
@@ -4310,6 +4330,28 @@ function TimelineOverlapCluster({
   const toggle = useRef<HTMLButtonElement>(null);
   const clusterId = useId();
   const count = cluster.layouts.length;
+  // Keep the hover envelope fixed while cards animate between their resting and
+  // spread positions. Include rotated card bounds and the toggle, not just gaps.
+  const hoverBounds = cluster.layouts.map((layout, index) => {
+    const point = overlapOrbitPoint(index, count, compact, {
+      clusterEndMinute: cluster.endMinute,
+      clusterStartMinute: cluster.startMinute,
+      eventEndMinute: layout.endMinute,
+      eventStartMinute: layout.startMinute,
+      ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
+    });
+    const angle = (Math.abs(point.rotation) * Math.PI) / 180;
+    const height = Math.max(minuteToTimelinePixels(layout.endMinute - layout.startMinute), 18);
+    const width = compact ? 160 : 320;
+    const halfWidth = (width * Math.cos(angle) + height * Math.sin(angle)) / 2 + 12;
+    const halfHeight = (height * Math.cos(angle) + width * Math.sin(angle)) / 2 + 12;
+    return {
+      left: point.x - halfWidth,
+      right: point.x + halfWidth,
+      top: point.y - halfHeight,
+      bottom: point.y + halfHeight,
+    };
+  });
   useEffect(
     () => () => {
       if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
@@ -4336,6 +4378,7 @@ function TimelineOverlapCluster({
       }}
       onPointerLeave={(event) => {
         if (event.pointerType === "touch") return;
+        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
         hoverLeaveTimer.current = window.setTimeout(() => {
           setHovered(false);
           hoverLeaveTimer.current = null;
@@ -4345,7 +4388,13 @@ function TimelineOverlapCluster({
         {
           height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
           top: minuteToTimelinePixels(cluster.startMinute),
+          "--overlap-hit-left": `${Math.min(...hoverBounds.map((bounds) => bounds.left))}px`,
+          "--overlap-hit-right": `${-Math.max(...hoverBounds.map((bounds) => bounds.right))}px`,
+          "--overlap-hit-top": `${Math.min(...hoverBounds.map((bounds) => bounds.top))}px`,
+          "--overlap-hit-bottom": `${-Math.max(...hoverBounds.map((bounds) => bounds.bottom))}px`,
           "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
+          "--overlap-front-layer": count + 3,
+          "--overlap-control-layer": count + 4,
         } as CSSProperties
       }
     >
@@ -4361,7 +4410,8 @@ function TimelineOverlapCluster({
         ref={toggle}
         type="button"
       >
-        <span className="calendar-overlap-cluster__pin-head">{count}</span>
+        <LayersIcon aria-hidden="true" />
+        <span>{count}</span>
       </button>
       {cluster.layouts.map((layout, index) => (
         <TimelineEventItem
@@ -4438,6 +4488,7 @@ function TimelineEvent({
       })
     : null;
   const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
+  const stackInset = orbit && laneCount === 1 ? Math.min(orbit.index * 4, 16) : 0;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
     window.clearTimeout(blockedHoldTimer.current);
@@ -4504,11 +4555,11 @@ function TimelineEvent({
             ...calendarEventColorStyle(calendar?.color),
             "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
             "--calendar-event-left": orbit
-              ? `calc(${(column / laneCount) * 100}% + 2px)`
+              ? `calc(${(column / laneCount) * 100}% + ${2 + stackInset}px)`
               : `${3 + column * 12}px`,
             "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
             "--calendar-event-width": orbit
-              ? `calc(${100 / laneCount}% - 4px)`
+              ? `calc(${100 / laneCount}% - ${4 + stackInset}px)`
               : `calc(100% - ${6 + column * 12}px)`,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
             "--overlap-orbit-width": compact
@@ -4516,7 +4567,7 @@ function TimelineEvent({
               : `min(320px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px))`,
             "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
             "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
-            zIndex: 2 + column,
+            zIndex: 2 + (orbit?.index ?? column),
           } as CSSProperties
         }
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
@@ -4718,53 +4769,18 @@ function CalendarEventContextMenu({
   );
 }
 
-function AllDayEvents({
-  calendarsById,
-  compact = false,
-  events,
-  setEditor,
-}: {
-  calendarsById: CalendarMap;
-  compact?: boolean;
-  events: CalendarEvent[];
-  setEditor: (editor: Editor) => void;
-}) {
-  if (events.length === 0) return null;
-  return (
-    <div className={`calendar-all-day${compact ? " calendar-all-day--compact" : ""}`}>
-      {compact ? null : <span>All day</span>}
-      <div>
-        {events.map((event) => (
-          <button
-            aria-label={`All day ${event.title}`}
-            key={event.id}
-            onClick={() => setEditor({ event, kind: "event" })}
-            style={calendarEventColorStyle(calendarsById.get(event.calendarId)?.color)}
-            type="button"
-          >
-            {event.title}
-            {event.blocks.length > 0 ? (
-              <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
-            ) : null}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type WeekAllDayEventLayout = {
+type CalendarAllDayEventLayout = {
   endColumn: number;
   event: CalendarEvent;
   row: number;
   startColumn: number;
 };
 
-function positionWeekAllDayEvents(
+function positionCalendarAllDayEvents(
   days: LocalDate[],
   eventsByDay: Map<string, CalendarEvent[]>,
-): WeekAllDayEventLayout[] {
-  const spans = new Map<string, Omit<WeekAllDayEventLayout, "row">>();
+): CalendarAllDayEventLayout[] {
+  const spans = new Map<string, Omit<CalendarAllDayEventLayout, "row">>();
   days.forEach((day, dayIndex) => {
     for (const event of eventsByDay.get(localDateKey(day)) ?? []) {
       if (!event.allDay) continue;
@@ -4793,23 +4809,25 @@ function positionWeekAllDayEvents(
 
 function weekDaySurface(dayIndex: number, isToday: boolean) {
   if (isToday) {
-    return "color-mix(in srgb, var(--timeline-now) 14%, var(--surface-raised))";
+    return "var(--calendar-today-background)";
   }
   return dayIndex % 2 === 0
     ? "color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised))"
     : "color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised))";
 }
 
-function WeekAllDayEvents({
+function CalendarAllDayEvents({
   calendarsById,
   days,
   layouts,
+  highlightToday = true,
   setEditor,
   today,
 }: {
   calendarsById: CalendarMap;
   days: LocalDate[];
-  layouts: WeekAllDayEventLayout[];
+  layouts: CalendarAllDayEventLayout[];
+  highlightToday?: boolean;
   setEditor: (editor: Editor) => void;
   today: LocalDate;
 }) {
@@ -4827,11 +4845,13 @@ function WeekAllDayEvents({
       {days.map((day, dayIndex) => (
         <div
           aria-hidden="true"
-          className={`week-all-day-day${sameLocalDate(day, today) ? " is-today" : ""}`}
+          className={`week-all-day-day${highlightToday && sameLocalDate(day, today) ? " is-today" : ""}`}
           key={`all-day-surface-${localDateKey(day)}`}
           style={
             {
-              "--week-day-surface": weekDaySurface(dayIndex, sameLocalDate(day, today)),
+              "--week-day-surface": highlightToday
+                ? weekDaySurface(dayIndex, sameLocalDate(day, today))
+                : "var(--surface-raised)",
               gridColumn: dayIndex + 1,
               gridRow: `1 / span ${Math.max(rowCount, 1)}`,
             } as CSSProperties
@@ -4868,14 +4888,6 @@ function WeekAllDayEvents({
             style={
               {
                 ...eventStyle,
-                "--week-all-day-end-surface": weekDaySurface(
-                  endIndex,
-                  sameLocalDate(days[endIndex] as LocalDate, today),
-                ),
-                "--week-all-day-start-surface": weekDaySurface(
-                  startIndex,
-                  sameLocalDate(days[startIndex] as LocalDate, today),
-                ),
                 gridColumn: `${layout.startColumn} / ${layout.endColumn}`,
                 gridRow: layout.row,
               } as CSSProperties
@@ -4950,6 +4962,7 @@ function MonthCalendarView({
       <WorkspaceSecondaryAppBar
         aria-label="Calendar month navigation"
         placement="inline"
+        data-calendar-axis="top"
         className="calendar-secondary-app-bar calendar-secondary-app-bar--month"
       >
         <WorkspaceSecondaryAppBarContent className="month-weekdays" aria-hidden="true">
@@ -9588,34 +9601,19 @@ export function positionTimelineEvents<T extends TimelinePositionable>(
         left.endMinute - right.endMinute ||
         left.event.id.localeCompare(right.event.id),
     );
-  const layouts: TimelineEventLayout<T>[] = [];
-  let cluster: typeof intervals = [];
-  let clusterEnd = -Infinity;
-  const layoutCluster = () => {
-    const columnEnds: number[] = [];
-    for (const interval of cluster) {
-      const column = columnEnds.findIndex((endMinute) => endMinute <= interval.startMinute);
-      const resolvedColumn = column === -1 ? columnEnds.length : column;
-      columnEnds[resolvedColumn] = interval.endMinute;
-      layouts.push({ ...interval, column: resolvedColumn, columns: 0 });
-    }
-    const columns = columnEnds.length;
-    for (let index = layouts.length - cluster.length; index < layouts.length; index += 1) {
-      const layout = layouts[index];
-      if (layout) layouts[index] = { ...layout, columns };
-    }
-  };
+  // Only simultaneous starts share horizontal lanes. Later starts paint above
+  // earlier events while retaining their actual time and duration geometry.
+  const simultaneous = new Map<number, typeof intervals>();
   for (const interval of intervals) {
-    if (cluster.length > 0 && interval.startMinute >= clusterEnd) {
-      layoutCluster();
-      cluster = [];
-      clusterEnd = -Infinity;
-    }
-    cluster.push(interval);
-    clusterEnd = Math.max(clusterEnd, interval.endMinute);
+    const start = new Date(interval.event.startsAt).getTime();
+    const group = simultaneous.get(start) ?? [];
+    group.push(interval);
+    simultaneous.set(start, group);
   }
-  if (cluster.length > 0) layoutCluster();
-  return layouts;
+  return intervals.map((interval) => {
+    const group = simultaneous.get(new Date(interval.event.startsAt).getTime()) as typeof intervals;
+    return { ...interval, column: group.indexOf(interval), columns: group.length };
+  });
 }
 
 function formatHour(hour: number): string {

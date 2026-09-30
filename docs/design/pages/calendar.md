@@ -5,6 +5,35 @@
 See when commitments occur across the selected calendars, then open or place an
 event without losing the shape of the day.
 
+## Axis layout contract
+
+Calendar has two wayfinding axes: the top date/all-day rail and the leading time rail.
+All axis surfaces use `--calendar-axis-background`, currently mapped to `--sidebar`,
+in every view and theme. Mark axis elements with `data-calendar-axis="top"`,
+`"left"`, or `"corner"`; the shared CSS rule owns their background. Do not apply
+weekday alternation, gradients, or event colors to these surfaces. The current-day
+Week header is the explicit exception: it shares `--calendar-today-background`
+with its timeline column. Month uses that same tint for today’s date cell; Day
+remains neutral, including its all-day lane.
+Today's date button can still indicate the current date.
+
+| View | Top rail | Leading rail | Alignment |
+| --- | --- | --- | --- |
+| Day | Inline all-day bar | `TimeAxis` | Both use `--calendar-time-gutter-width` |
+| Week | Weekday/date cells and All Day corner | `TimeAxis` | Header and timeline share the gutter token and day-column template |
+| Month | Inline weekday bar | None: month has no time scale | Seven equal columns align with the date grid |
+
+Keep spatial secondary bars inline with their view, not in the shell's secondary
+outlet. Week's header stays vertically pinned, and the time gutter plus both corner
+cells stay pinned to the leading edge during horizontal scrolling. Its all-day event
+lanes belong to the day columns: their fades remain below the date rail and never
+paint the time gutter. This separation preserves grid context without coloring the axes.
+
+Implementation: `DayCalendarView`, `WeekCalendarView`, `MonthCalendarView`, and `TimeAxis` in
+`apps/web/src/app.tsx`; shared axis tokens and `[data-calendar-axis]` rules in
+`apps/web/src/styles.css`. When adding a view, identify its axes, apply these markers,
+and verify matching computed backgrounds and column alignment in both themes.
+
 ## Composition
 
 - Calendar is the one full-screen workspace and does not render the contextual
@@ -17,7 +46,7 @@ event without losing the shape of the day.
   layout outlet, preserving horizontal alignment with the spatial grid.
 - The week secondary bar expands only for real all-day material and meets the
   timeline without a decorative divider.
-- All-day events use compact rounded notched bars. A multi-day event is one
+- All-day events use compact rounded event bars. A multi-day event is one
   continuous bar spanning its occupied day columns, while overlapping events
   stack into separate all-day lanes. Each all-day control retains at least a
   24 px target with spacing between adjacent lanes. Provider date-only events
@@ -59,22 +88,14 @@ event without losing the shape of the day.
   standard border token, with half- and quarter-hour marks progressively more
   subdued. Rules remain behind events, drag previews, and the current-time
   marker.
-- Overlapping timed events remain in their time geometry at rest and divide the
-  available day width into equal side-by-side lanes. A quiet numbered push-pin
-  control appears to pierce the grouped cards; its visual head is smaller than
-  its accessible hit target, and the pin is drawn from the control surface
-  itself rather than using an icon. Hover,
-  event focus, or that control
-  spreads the existing event cards around the cluster centre on a circular
-  path, beginning from the left and right sides. A restrained fan rotation
-  reinforces the circular arrangement. Cards retain their normal
-  shape, content, and independent click target; a short pointer-exit grace
-  period bridges the animated gap without placing an intercepting hit area over
-  neighbouring events. Orbit geometry remains inside the start and end of the
-  day, and the pinned navigation stays above spread cards.
-  The control also supports touch, and Escape collapses the chooser.
+- Overlapping timed events with different start instants stack at full column width,
+  with later starts above earlier ones and a 4px horizontal step capped at 16px. Only events sharing the same start instant
+  divide into equal side-by-side lanes. Time and duration geometry stays intact.
+  A quiet layers icon and count button identifies each overlap group and reveals the existing
+  spread interaction. Hover, keyboard focus, click/touch, and Escape remain available;
+  the control has no decorative push-pin anatomy.
 - Vertical day separation remains visible. Horizontal rules communicate time,
-  not card boundaries. Week headers and timelines alternate between two subtle
+  not card boundaries. Week timelines alternate between two subtle
   neutral row-style surfaces so adjacent days read as distinct tiles. Today
   overrides that alternation with a restrained tint from the current-time
   accent.
@@ -214,3 +235,22 @@ integration supplies current evidence.
   server-verified source ownership/revision and idempotency in a later integration.
 - Important and upcoming state uses linked shared attention items after a person confirms the
   commitment, rather than duplicating event records from an unverified preview.
+
+Day and Week both compose `CalendarAllDayEvents` with the same span layout algorithm,
+plain rounded event buttons, accessible date labels, and linked-calendar indicators. Day
+passes a single date; Week passes seven. Keep differences in column geometry, not
+in duplicate event renderers. Month uses its date-cell event list because all-day
+and timed events share that cell.
+
+Every Calendar view consumes the available viewport below the app bar, including
+narrow layouts. Floating controls overlay the calendar rather than reserving mobile
+dock padding. Month rows stretch equally to fill tall viewports, retain a minimum
+readable height, and scroll when that minimum exceeds the available height.
+
+Hovering any event brings it above every sibling, whether the overlap stack is pinned
+or transiently expanded. The hover and control layers derive from the group size,
+so large stacks cannot cover the hovered event or their toggle. The stack toggle has no tooltip and appears at the center only while the stack is
+open (hovered, pinned, or keyboard-focused). Its resting state is visually hidden. Opening a stack changes card positions only; it
+does not apply hover styling to every card. A stationary padded hover envelope covers
+the resting and spread cards, including their gaps, to prevent hover flicker during
+movement. Opening a stack adds no background gradient.

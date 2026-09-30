@@ -7,12 +7,61 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 
-  await page.goto("/calendar");
+  await page.goto("/calendar?follow=0");
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
   const overlapPin = page.getByRole("button", { name: "Spread 5 overlapping events" });
-  await expect(overlapPin).toBeVisible();
-  await overlapPin.click();
-  await expect(page.getByRole("button", { name: "Collapse 5 overlapping events" })).toBeVisible();
+  await expect(overlapPin).toHaveCSS("opacity", "0");
+  const overlappingCards = page
+    .getByRole("group", { name: "5 overlapping events", exact: true })
+    .locator(".calendar-timeline-event");
+  if (!test.info().project.use.isMobile) {
+    await page.locator(".week-calendar").evaluate((calendar) => {
+      calendar.scrollTop = 300;
+    });
+    const restingCard = await overlappingCards.last().boundingBox();
+    if (!restingCard) throw new Error("Missing resting event bounds");
+    await page.mouse.move(
+      restingCard.x + restingCard.width / 2,
+      restingCard.y + restingCard.height / 2,
+    );
+    await expect(overlapPin).toHaveCSS("opacity", "1");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    const stack = page.getByRole("group", { name: "5 overlapping events", exact: true });
+    await expect(stack).toHaveClass(/is-hovered/);
+    await expect
+      .poll(() => stack.evaluate((element) => getComputedStyle(element, "::after").backgroundImage))
+      .toBe("none");
+    const stackBounds = await stack.boundingBox();
+    if (!stackBounds) throw new Error("Missing stack bounds");
+    // Move through the original card area after the cards have fanned out.
+    await page.mouse.move(
+      stackBounds.x + stackBounds.width / 2,
+      stackBounds.y + stackBounds.height / 2,
+    );
+    await page.waitForTimeout(220);
+    await expect(stack).toHaveClass(/is-hovered/);
+    await overlappingCards.first().hover({ position: { x: 10, y: 10 } });
+    await expect(overlappingCards.first()).toHaveCSS("z-index", "8");
+  }
+
+  if (!test.info().project.use.isMobile) {
+    await overlapPin.click();
+    await expect(page.getByRole("button", { name: "Collapse 5 overlapping events" })).toBeVisible();
+    await overlappingCards.first().hover({ position: { x: 10, y: 10 } });
+    await expect(overlappingCards.first()).toHaveCSS("z-index", "8");
+    const pinBounds = await page
+      .getByRole("button", { name: "Collapse 5 overlapping events" })
+      .boundingBox();
+    const groupBounds = await overlappingCards.first().locator("..").boundingBox();
+    if (!pinBounds || !groupBounds) throw new Error("Missing stack geometry");
+    expect(
+      Math.abs(pinBounds.x + pinBounds.width / 2 - groupBounds.x - groupBounds.width / 2),
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(pinBounds.y + pinBounds.height / 2 - groupBounds.y - groupBounds.height / 2),
+    ).toBeLessThan(1);
+  }
+
   await page.goto("/tasks");
   if (test.info().project.name === "mobile-chromium") {
     await page.getByRole("button", { name: "Workspace actions" }).click();
@@ -95,6 +144,72 @@ test("desktop navigation fills the viewport while long content scrolls independe
   await switcher.click();
   await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
   await expect(page.locator(".workspace-app-bar")).toHaveCSS("padding-left", "48px");
+  for (const view of ["Day", "Week", "Month"]) {
+    await page.getByRole("radio", { name: view, exact: true }).click();
+    const axes = page.locator("[data-calendar-axis]:not(.is-today)");
+    await expect(axes.first()).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          new Set(
+            await axes.evaluateAll((elements) =>
+              elements.map((element) => getComputedStyle(element).backgroundColor),
+            ),
+          ).size,
+      )
+      .toBe(1);
+    await expect(page.locator('[data-calendar-axis="left"]')).toHaveCount(view === "Month" ? 0 : 1);
+    if (view === "Day") {
+      await expect(page.locator(".calendar-day-view .week-all-day-day.is-today")).toHaveCount(0);
+    }
+    if (view === "Month") {
+      const todayColor = await page
+        .locator(".month-day.is-today")
+        .evaluate((element) => getComputedStyle(element).backgroundColor);
+      const otherColor = await page
+        .locator(".month-day:not(.is-today):not(.is-outside)")
+        .first()
+        .evaluate((element) => getComputedStyle(element).backgroundColor);
+      expect(todayColor).not.toBe(otherColor);
+    }
+    if (view === "Week") {
+      const columnColor = await page
+        .locator(".week-day-timeline.is-today")
+        .evaluate((element) => getComputedStyle(element).backgroundColor);
+      await expect(page.locator(".week-day-header.is-today")).toHaveCSS(
+        "background-color",
+        columnColor,
+      );
+
+      await expect(page.locator(".week-all-day-corner")).toHaveCSS("background-image", "none");
+    }
+  }
+
+  for (const size of [
+    { width: 1280, height: 1100 },
+    { width: 900, height: 700 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const view of ["Day", "Week", "Month"]) {
+      await page.getByRole("radio", { name: view, exact: true }).click();
+      await expect(
+        page.getByRole("navigation", {
+          name: `Calendar ${view.toLowerCase()} navigation`,
+          exact: true,
+        }),
+      ).toBeVisible();
+      const bounds = await page.locator(".calendar-page").boundingBox();
+      expect(Math.abs((bounds?.y ?? 0) + (bounds?.height ?? 0) - size.height)).toBeLessThanOrEqual(
+        1,
+      );
+      if (view === "Month") {
+        const grid = await page.locator(".month-grid").boundingBox();
+        expect((grid?.y ?? 0) + (grid?.height ?? 0)).toBeGreaterThanOrEqual(size.height - 1);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 480 });
   await page.reload();
   await expect(switcher).toBeVisible();
   await switcher.click();

@@ -1,3 +1,4 @@
+export * from "./desktop-release.js";
 export * from "./failures.js";
 export * from "./google.js";
 export * from "./http.js";

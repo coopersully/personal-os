@@ -142,7 +142,7 @@ it("withholds forecast amounts when account scope cannot be loaded", async () =>
   });
   api.listFinanceAccounts.mockRejectedValue(new Error("Account scope is offline"));
   renderPage();
-  expect(await screen.findByText("Account scope is offline")).toBeVisible();
+  expect(await screen.findByText("Forecast account scope unavailable")).toBeVisible();
   expect(screen.queryByText("$79,000.00")).not.toBeInTheDocument();
 });
 it.each([
@@ -152,7 +152,7 @@ it.each([
 ])("does not claim recurring activity is empty when its source fails in %s", async (view) => {
   api.listFinanceRecurringItems.mockRejectedValue(new Error("Recurring source is offline"));
   renderPage(`/finances/cashflow?view=${view}`);
-  expect(await screen.findByText("Recurring source is offline")).toBeVisible();
+  expect(await screen.findByText("Recurring activity unavailable")).toBeVisible();
   expect(screen.queryByText("No confirmed upcoming activity")).not.toBeInTheDocument();
   expect(screen.queryByText("No income patterns yet")).not.toBeInTheDocument();
   expect(screen.queryByText("No bills or subscriptions yet")).not.toBeInTheDocument();
@@ -180,7 +180,9 @@ it("marks a subscription inactive only inside the forecast, with pending and fai
   renderPage("/finances/subscriptions");
   expect(await screen.findByText("Music")).toBeVisible();
   await userEvent.setup().click(screen.getByRole("button", { name: "Pause Music" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Could not save");
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this recurring payment/),
+  ).toBeVisible();
   expect(api.manageFinanceRecurringItem).toHaveBeenCalledWith(
     expect.objectContaining({
       itemId: "subscription-1",
@@ -250,8 +252,7 @@ it("keeps independent outlook failures and empty pattern views explicit", async 
   api.getFinanceSnapshot.mockRejectedValue(new Error("Snapshot unavailable"));
   api.getFinanceForecast.mockRejectedValue(new Error("Forecast unavailable"));
   const { unmount } = renderPage();
-  expect(await screen.findByText("Snapshot unavailable")).toBeVisible();
-  expect(screen.getByText("Forecast unavailable")).toBeVisible();
+  expect(await screen.findAllByText("Couldn’t load this material.")).toHaveLength(2);
   unmount();
   api.getFinanceSnapshot.mockResolvedValue({
     data: { ledger: { trustworthy: true } },

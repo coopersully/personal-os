@@ -4,7 +4,7 @@ import type {
   FinanceAccountOwnershipType,
   UpdateFinanceAccountInput,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -27,7 +27,9 @@ import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
 } from "@/components/workspace-secondary-app-bar";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -138,6 +140,7 @@ function AccountKindField({
     <Field>
       <FieldLabel htmlFor="account-kind">Account kind</FieldLabel>
       <NativeSelect
+        name="kind"
         id="account-kind"
         onChange={(event) => onChange(event.target.value as FinanceAccountKind)}
         value={value}
@@ -190,7 +193,8 @@ function AccountEditor({
       : {}),
   };
   const hasChanges = Object.keys(changes).length > 1;
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this account", safeToRetry: false, form: true },
     mutationFn: async () => {
       const payload = JSON.stringify(changes);
       if (lastAttempt.current?.payload !== payload)
@@ -210,7 +214,8 @@ function AccountEditor({
       onClose();
     },
   });
-  const disconnect = useMutation({
+  const disconnect = useFeedbackMutation({
+    feedback: { action: "disconnect this account", safeToRetry: false, form: false },
     mutationFn: async () => {
       disconnectKey.current ??= crypto.randomUUID();
       return requireFinanceMutationResult(
@@ -252,7 +257,8 @@ function AccountEditor({
             Correct how {account.name} contributes to your financial position.
           </DialogDescription>
         </DialogHeader>
-        <form
+        <FeedbackForm
+          feedback={save.feedback}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
@@ -264,6 +270,7 @@ function AccountEditor({
               <Field>
                 <FieldLabel htmlFor="account-name">Account name</FieldLabel>
                 <Input
+                  name="name"
                   id="account-name"
                   maxLength={160}
                   onChange={(event) => setName(event.target.value)}
@@ -274,6 +281,7 @@ function AccountEditor({
               <Field>
                 <FieldLabel htmlFor="account-institution">Institution</FieldLabel>
                 <Input
+                  name="institution"
                   id="account-institution"
                   maxLength={160}
                   onChange={(event) => setInstitution(event.target.value)}
@@ -285,6 +293,7 @@ function AccountEditor({
               <Field>
                 <FieldLabel htmlFor="account-ownership">Ownership</FieldLabel>
                 <NativeSelect
+                  name="ownershipType"
                   id="account-ownership"
                   onChange={(event) =>
                     setOwnership(event.target.value as FinanceAccountOwnershipType)
@@ -297,10 +306,10 @@ function AccountEditor({
                 </NativeSelect>
               </Field>
               {ownership === "joint" ? (
-                <Field data-invalid={!validShare}>
+                <Field>
                   <FieldLabel htmlFor="account-share">Your ownership share (%)</FieldLabel>
                   <Input
-                    aria-invalid={!validShare}
+                    name="ownershipShare"
                     id="account-share"
                     min="0.01"
                     max="100"
@@ -327,6 +336,7 @@ function AccountEditor({
                 <Field>
                   <FieldLabel htmlFor="account-balance">Balance</FieldLabel>
                   <Input
+                    name="balance"
                     id="account-balance"
                     type="number"
                     step="0.01"
@@ -338,16 +348,11 @@ function AccountEditor({
               ) : null}
             </FieldGroup>
           </FieldSet>
-          {save.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Account was not saved</AlertTitle>
-              <AlertDescription>
-                <p>{errorMessage(save.error)}</p>
-                <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
-                  Reload account
-                </Button>
-              </AlertDescription>
-            </Alert>
+
+          {save.feedback?.kind === "conflict" ? (
+            <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
+              Reload account
+            </Button>
           ) : null}
           <DialogFooter>
             {canDisconnect ? (
@@ -368,16 +373,11 @@ function AccountEditor({
             >
               Cancel
             </Button>
-            <Button
-              disabled={
-                save.isPending || !hasChanges || !validShare || !name.trim() || !institution.trim()
-              }
-              type="submit"
-            >
+            <Button disabled={save.isPending || !hasChanges} type="submit">
               {save.isPending ? "Saving account…" : "Save account"}
             </Button>
           </DialogFooter>
-        </form>
+        </FeedbackForm>
         <Dialog
           open={confirmingDisconnect}
           onOpenChange={(open) => {
@@ -397,7 +397,7 @@ function AccountEditor({
             {disconnect.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>Account is still tracked</AlertTitle>
-                <AlertDescription>{errorMessage(disconnect.error)}</AlertDescription>
+                <AlertDescription>{disconnect.feedback?.message}</AlertDescription>
               </Alert>
             ) : null}
             <DialogFooter>
@@ -431,7 +431,8 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
   const [institution, setInstitution] = useState("");
   const [kind, setKind] = useState<FinanceAccountKind>("cash");
   const [balance, setBalance] = useState("");
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create this account", safeToRetry: false, form: true },
     mutationFn: () =>
       api.createFinanceAccount({
         balance: balance.trim() === "" ? null : Number(balance),
@@ -457,7 +458,8 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
           <DialogTitle>Track account manually</DialogTitle>
           <DialogDescription>Record a balance you maintain yourself.</DialogDescription>
         </DialogHeader>
-        <form
+        <FeedbackForm
+          feedback={create.feedback}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
@@ -469,6 +471,7 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
               <Field>
                 <FieldLabel htmlFor="new-account-name">Account name</FieldLabel>
                 <Input
+                  name="name"
                   id="new-account-name"
                   maxLength={160}
                   onChange={(event) => setName(event.target.value)}
@@ -479,6 +482,7 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
               <Field>
                 <FieldLabel htmlFor="new-account-institution">Institution</FieldLabel>
                 <Input
+                  name="institution"
                   id="new-account-institution"
                   maxLength={160}
                   onChange={(event) => setInstitution(event.target.value)}
@@ -490,6 +494,7 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
               <Field>
                 <FieldLabel htmlFor="new-account-balance">Balance</FieldLabel>
                 <Input
+                  name="balance"
                   id="new-account-balance"
                   type="number"
                   step="0.01"
@@ -500,24 +505,16 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
               </Field>
             </FieldGroup>
           </FieldSet>
-          {create.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Account was not added</AlertTitle>
-              <AlertDescription>{errorMessage(create.error)}</AlertDescription>
-            </Alert>
-          ) : null}
+
           <DialogFooter>
             <Button disabled={create.isPending} onClick={onClose} type="button" variant="outline">
               Cancel
             </Button>
-            <Button
-              disabled={create.isPending || !name.trim() || !institution.trim()}
-              type="submit"
-            >
+            <Button disabled={create.isPending} type="submit">
               {create.isPending ? "Adding account…" : "Add account"}
             </Button>
           </DialogFooter>
-        </form>
+        </FeedbackForm>
       </DialogContent>
     </Dialog>
   );

@@ -8,7 +8,14 @@
     "core:window:allow-set-always-on-top",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://accounts.google.com/**" }]
+      "allow": [
+        {
+          "url": "https://accounts.google.com/**"
+        },
+        {
+          "url": "https://github.com/coopersully/personal-os/releases/**"
+        }
+      ]
     }
   ]
 }

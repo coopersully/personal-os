@@ -142,7 +142,9 @@ it("preserves failed answers and reuses the mutation key for an unchanged retry"
   mount();
   await user.type(await screen.findByLabelText("Your answer"), "Bought a gift");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText("Connection interrupted")).toBeInTheDocument();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this review/),
+  ).toBeInTheDocument();
   expect(screen.getByLabelText("Your answer")).toHaveValue("Bought a gift");
   const input = api.answerFinanceReview.mock.calls[0]?.[1];
   expect(input.resolution).toEqual({ type: "clarify", clarification: "Bought a gift" });
@@ -310,14 +312,14 @@ it("uses source references, proposal defaults, and paged related evidence conser
     });
   mount();
   expect(await screen.findByText("Proposed category: Dining")).toBeVisible();
-  expect(await screen.findByText("Primary evidence offline")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   expect(screen.getByText(/currency unavailable.*Pending.*Other/)).toBeVisible();
   await user.selectOptions(screen.getByLabelText("Resolution"), "link_transactions");
   expect(
     await screen.findByRole("option", { name: /Older item.*currency unavailable/ }),
   ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Earlier transactions" }));
-  expect(await screen.findByText("Older evidence unavailable")).toBeVisible();
+  expect(await screen.findAllByText("Couldn’t load this material.")).toHaveLength(2);
   await user.click(screen.getByRole("button", { name: "Latest transactions" }));
   expect(await screen.findByRole("option", { name: /Older item/ })).toBeVisible();
 });
@@ -330,13 +332,15 @@ it("reloads failed inbox and category sources and renews a confirmed failed answ
     .mockRejectedValueOnce(new Error("previously failed; use a new idempotency key"))
     .mockResolvedValueOnce(response([]));
   mount();
-  expect(await screen.findByText("Inbox unavailable")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Reload review" }));
   expect(await screen.findByLabelText("Your answer")).toBeVisible();
-  expect(await screen.findByText("Categories unavailable")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   await user.type(screen.getByLabelText("Your answer"), "Confirmed purchase");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText(/previously failed/)).toBeVisible();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this review/),
+  ).toBeVisible();
   const first = api.answerFinanceReview.mock.calls[0]?.[1].idempotencyKey;
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(api.answerFinanceReview.mock.calls[1]?.[1].idempotencyKey).not.toBe(first);

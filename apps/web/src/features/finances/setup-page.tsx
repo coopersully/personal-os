@@ -7,7 +7,7 @@ import type {
 } from "@personal-os/domain";
 import { financeMaintenanceInputSchema } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
 import { SetupAnswerFields } from "./setup-answer-fields.js";
@@ -53,7 +55,8 @@ export function FinanceSetupPage() {
   const question = session?.question;
   const answerKey = session && question ? `${session.sessionId}:${question.id}` : "";
   const answer = answers[answerKey] ?? "";
-  const setup = useMutation({
+  const setup = useFeedbackMutation({
+    feedback: { action: "update financial setup", safeToRetry: false, form: true },
     mutationFn: (input: FinanceSetupInput) => api.setupFinances(input),
     onError: (error) => {
       if (errorMessage(error).includes("previously failed; use a new idempotency key")) {
@@ -165,7 +168,7 @@ export function FinanceSetupPage() {
             <Alert variant="destructive">
               <AlertTitle>Setup change not saved</AlertTitle>
               <AlertDescription>
-                {errorMessage(setup.error)} Your input is preserved. Resume saved progress if the
+                {setup.feedback?.message} Your input is preserved. Resume saved progress if the
                 session has changed.
               </AlertDescription>
             </Alert>
@@ -254,8 +257,20 @@ export function FinanceSetupPage() {
           {session?.budgetVersionId ? (
             <>
               {budget.isPending ? <Spinner label="Loading proposed budget" /> : null}
-              {budget.error ? <InlineError error={budget.error} /> : null}
-              {categories.error ? <InlineError error={categories.error} /> : null}
+              {budget.error ? (
+                <InlineError
+                  error={budget.error}
+                  retry={() => budget.refetch()}
+                  stale={budget.data !== undefined}
+                />
+              ) : null}
+              {categories.error ? (
+                <InlineError
+                  error={categories.error}
+                  retry={() => categories.refetch()}
+                  stale={categories.data !== undefined}
+                />
+              ) : null}
               {exactPlan ? (
                 <SetupBudget
                   plan={exactPlan}
@@ -440,7 +455,8 @@ function SetupMaintenance({
     : instructedInput?.success
       ? instructedInput.data
       : null;
-  const maintenance = useMutation({
+  const maintenance = useFeedbackMutation({
+    feedback: { action: "run financial maintenance", safeToRetry: false, form: false },
     mutationFn: async () => {
       if (!input) throw new Error("Refresh setup progress to load the next maintenance action.");
       return requireFinanceResult(await api.maintainFinances(input));
@@ -480,7 +496,7 @@ function SetupMaintenance({
           <AlertDescription>{disclosure.message}</AlertDescription>
         </Alert>
       ))}
-      {maintenance.error ? <InlineError error={maintenance.error} /> : null}
+      {maintenance.error ? <MutationFeedback feedback={maintenance.feedback} /> : null}
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={maintenance.isPending || !input}

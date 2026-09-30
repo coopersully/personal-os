@@ -194,8 +194,8 @@ it("filters inactive sidebar containers and recovers each navigation dependency"
   mocks.listTaskLists.mockRejectedValueOnce(new Error("Lists offline"));
   mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects offline"));
   const user = setupSidebar();
-  expect(await screen.findByText("Lists offline")).toBeVisible();
-  expect(screen.getByText("Projects offline")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load lists.")).toBeVisible();
+  expect(screen.getByText("Couldn’t load projects.")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Retry Lists" }));
   await user.click(screen.getByRole("button", { name: "Retry Projects" }));
   expect(mocks.listTaskLists).toHaveBeenCalledTimes(3);
@@ -215,7 +215,7 @@ it("shows exact partial batch failures and never labels them all successful", as
     }),
   );
   expect(await screen.findByText("1 updated, 1 not changed.")).toBeInTheDocument();
-  expect(screen.getByText("Call Sam: Changed elsewhere")).toBeInTheDocument();
+  expect(screen.getByText(/Call Sam: Couldn’t confirm/)).toBeInTheDocument();
 });
 
 it("keeps global items available when navigation dependencies fail", async () => {
@@ -232,7 +232,7 @@ it("keeps loaded rows and retries a failed next page", async () => {
     .mockResolvedValueOnce({ items: [reminder], nextCursor: null, total: 2 });
   const { browser } = setup();
   await browser.click(await screen.findByRole("button", { name: "Load more items" }));
-  expect(await screen.findByText("Page unavailable")).toBeInTheDocument();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Open Plan trip" })).toBeInTheDocument();
   await browser.click(screen.getByRole("button", { name: "Retry loading more items" }));
   expect(await screen.findByRole("button", { name: "Open Call Sam" })).toBeInTheDocument();
@@ -269,7 +269,7 @@ it("offers a retry when off-page inspection cannot verify its container", async 
   mocks.getTask.mockResolvedValue(task.record);
   mocks.listTaskProjects.mockRejectedValueOnce(new Error("Project lookup failed"));
   const { browser, onEdit } = setup("/tasks?view=all&task=t");
-  expect(await screen.findByText("Project lookup failed")).toBeInTheDocument();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
   expect(onEdit).not.toHaveBeenCalled();
   await browser.click(screen.getByRole("button", { name: "Retry task details" }));
   await vi.waitFor(() => expect(onEdit).toHaveBeenCalledWith(task.record));
@@ -519,7 +519,7 @@ it("retries retained task pagination without dropping the first page", async () 
     });
   const { browser } = setupLegacy("/tasks");
   await browser.click(await screen.findByRole("button", { name: "Load more Tasks" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("More tasks unavailable");
+  expect((await screen.findAllByText("Couldn’t load this material.")).length).toBeGreaterThan(0);
   expect(screen.getByRole("button", { name: "Open Plan trip" })).toBeVisible();
   await browser.click(screen.getByRole("button", { name: "Retry loading more Tasks" }));
   expect(await screen.findByRole("button", { name: "Open Later task" })).toBeVisible();
@@ -555,7 +555,7 @@ it("formats every concise task metadata combination", () => {
 it("keeps each legacy dependency and empty scope state explicit", async () => {
   mocks.listTasks.mockRejectedValueOnce(new Error("Tasks failed"));
   const failed = setupLegacy("/tasks");
-  expect(await screen.findByRole("alert")).toHaveTextContent("Tasks failed");
+  expect((await screen.findAllByText("Couldn’t load this material.")).length).toBeGreaterThan(0);
   await failed.browser.click(screen.getByRole("button", { name: "Retry Tasks" }));
   expect(await screen.findByText("Nothing here yet")).toBeVisible();
   cleanup();
@@ -643,11 +643,11 @@ it("surfaces direct task and reminder inspection failures", async () => {
   mocks.listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: null, total: 0 });
   mocks.getTask.mockRejectedValueOnce(new Error("Task unavailable"));
   setup("/tasks?view=all&task=missing");
-  expect(await screen.findByRole("alert")).toHaveTextContent("Task unavailable");
+  expect((await screen.findAllByText("Couldn’t load this material.")).length).toBeGreaterThan(0);
   cleanup();
   mocks.getReminder.mockRejectedValueOnce(new Error("Reminder unavailable"));
   setup("/tasks?view=all&reminder=missing");
-  expect(await screen.findByRole("alert")).toHaveTextContent("Reminder unavailable");
+  expect((await screen.findAllByText("Couldn’t load this material.")).length).toBeGreaterThan(0);
 });
 
 it("keeps task scope headings concise across lists, projects, and counts", () => {

@@ -32,10 +32,11 @@ import {
   sameLocalDate,
 } from "@personal-os/domain";
 import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
-import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   type CSSProperties,
+  createContext,
   type FormEvent,
   lazy,
   type DragEvent as ReactDragEvent,
@@ -45,6 +46,7 @@ import {
   type UIEvent as ReactUIEvent,
   Suspense,
   useCallback,
+  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -273,10 +275,13 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
-import { api, errorMessage, isUnauthorized } from "./api.js";
+import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
-import { InlineError, PageLoading } from "./components/async-state.js";
+import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
+import { useConfirmAction } from "./components/confirm-action.js";
+import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
+import { MutationFeedback } from "./components/mutation-feedback.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
@@ -298,6 +303,7 @@ import {
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./features/connections/health.js";
+import { DesktopDownloads } from "./features/desktop/downloads.js";
 import { useDesktopActions } from "./features/desktop/events.js";
 import { resetDesktopSession } from "./features/desktop/session.js";
 import { DesktopSettingsPanel } from "./features/desktop/settings.js";
@@ -338,9 +344,9 @@ import { TextingSettings } from "./features/texting/page.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
 import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
-import { notifyError, useErrorNotification } from "./lib/error-notification.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
+import { useFeedbackMutation } from "./lib/use-feedback-mutation.js";
 import { cn } from "./lib/utils.js";
 import {
   navigationOwnerForLocation,
@@ -470,6 +476,14 @@ export function selectTodayTasks(
 }
 export function App() {
   const location = useLocation();
+  if (location.pathname === "/downloads") {
+    return (
+      <>
+        <DesktopDownloads standalone />
+        <Toaster position="bottom-right" theme="system" />
+      </>
+    );
+  }
   if (ErrorPagePreview && location.pathname === "/dev/errors") {
     return (
       <Suspense
@@ -488,6 +502,17 @@ export function App() {
 
 function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
+  return (
+    <>
+      <AppContent me={me} />
+      <Toaster
+        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
+      />
+    </>
+  );
+}
+
+function AppContent({ me }: { me: UseQueryResult<User> }) {
   if (me.isPending) {
     return (
       <main className="center-screen">
@@ -496,7 +521,7 @@ function SessionApp() {
     );
   }
   if (me.isError && isUnauthorized(me.error)) return <AuthScreen />;
-  if (me.isError)
+  if (me.isError && !me.data)
     return (
       <>
         <FatalState error={me.error} />
@@ -505,7 +530,8 @@ function SessionApp() {
     );
   return (
     <TooltipProvider>
-      <AuthenticatedExperience user={me.data} />
+      <QueryFeedback query={me} title="Couldn’t refresh your account." staleOnly />
+      <AuthenticatedExperience user={me.data as User} />
     </TooltipProvider>
   );
 }
@@ -619,10 +645,20 @@ function CredentialsScreen() {
     inviteCode: "",
     password: "",
   });
-  const invitationValidation = useMutation({
+  const invitationValidation = useFeedbackMutation({
+    feedback: { action: "check this invitation", form: true },
     mutationFn: (inviteCode: string) => api.validateInvitation({ inviteCode }),
   });
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: {
+      action:
+        mode === "login"
+          ? "sign in"
+          : mode === "register"
+            ? "create your account"
+            : "send a password reset link",
+      form: true,
+    },
     mutationFn: async () => {
       if (mode === "login") {
         return api.login({ email: credentials.email, password: credentials.password });
@@ -659,7 +695,7 @@ function CredentialsScreen() {
     : credentials.inviteCode.length !== 8
       ? "Enter all eight characters from your invitation."
       : invitationResultIsCurrent && invitationValidation.isError
-        ? errorMessage(invitationValidation.error)
+        ? "Couldn’t check this invitation. Try again."
         : invitationResultIsCurrent &&
             invitationValidation.isSuccess &&
             invitationValidation.data === false
@@ -671,6 +707,18 @@ function CredentialsScreen() {
       : invitationValid
         ? "valid"
         : "idle";
+  const registrationFeedback = useMemo(
+    () =>
+      invitationError && mode === "register"
+        ? {
+            kind: "validation" as const,
+            message: invitationError,
+            persistent: true,
+            fields: { inviteCode: invitationError },
+          }
+        : mutation.feedback,
+    [invitationError, mode, mutation.feedback],
+  );
   const canSubmit =
     mode === "login"
       ? emailValid && credentials.password.length > 0
@@ -700,7 +748,24 @@ function CredentialsScreen() {
   };
   return (
     <AuthLayout>
-      <form className="auth-form" onSubmit={submit}>
+      <FeedbackForm
+        feedback={registrationFeedback}
+        className="auth-form"
+        onSubmit={submit}
+        validate={() => {
+          const errors: Record<string, string> = {};
+          if (!emailValid) errors.email = "Enter an email address in the format name@example.com.";
+          if (mode === "register") {
+            if (!credentials.displayName.trim()) errors.displayName = "Enter your name.";
+            if (!invitationValid && invitationStatus !== "checking")
+              errors.inviteCode =
+                invitationError ?? "Enter a valid invitation and wait for it to be checked.";
+            if (!passwordValid) errors.password = "Meet each password requirement shown below.";
+            if (!passwordsMatch) errors.confirmPassword = "Passwords must match.";
+          }
+          return errors;
+        }}
+      >
         <div className="auth-form__heading">
           <h2>
             {mode === "login"
@@ -720,11 +785,11 @@ function CredentialsScreen() {
         {mode === "register" && (
           <>
             <InviteCodeField
-              error={invitationError}
               onBlur={() => {
                 setInviteBlurred(true);
                 if (credentials.inviteCode.length === 8) {
-                  invitationValidation.mutate(credentials.inviteCode);
+                  if (!invitationResultIsCurrent || invitationValidation.isError)
+                    invitationValidation.mutate(credentials.inviteCode);
                 } else {
                   invitationValidation.reset();
                 }
@@ -763,11 +828,6 @@ function CredentialsScreen() {
           <PasswordFields
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             confirmValue={mode === "register" ? credentials.confirmPassword : undefined}
-            error={
-              mode === "register" && credentials.confirmPassword.length > 0 && !passwordsMatch
-                ? "Passwords must match."
-                : undefined
-            }
             labelAction={
               mode === "login" ? (
                 <button
@@ -787,21 +847,13 @@ function CredentialsScreen() {
             value={credentials.password}
           />
         ) : null}
-        {mutation.isError && (
-          <p className="form-error" role="alert">
-            {errorMessage(mutation.error)}
-          </p>
-        )}
+
         {mutation.isSuccess && mode === "recovery" ? (
           <p className="form-success" role="status">
             If an account exists for that email, a password-reset link is on its way.
           </p>
         ) : null}
-        <ShadcnButton
-          className="button--wide"
-          disabled={mutation.isPending || !canSubmit}
-          type="submit"
-        >
+        <ShadcnButton className="button--wide" disabled={mutation.isPending} type="submit">
           {mutation.isPending ? (
             <Spinner label="Signing in" />
           ) : mode === "login" ? (
@@ -826,7 +878,7 @@ function CredentialsScreen() {
             {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
           </button>
         )}
-      </form>
+      </FeedbackForm>
       {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
     </AuthLayout>
   );
@@ -834,7 +886,8 @@ function CredentialsScreen() {
 
 function EmailVerificationScreen({ token }: { token: string }) {
   const queryClient = useQueryClient();
-  const verification = useMutation({
+  const verification = useFeedbackMutation({
+    feedback: { action: "confirm your email", form: true },
     mutationFn: () => api.confirmEmailVerification({ token }),
     onSuccess: (user) => queryClient.setQueryData(["me"], user),
   });
@@ -843,9 +896,6 @@ function EmailVerificationScreen({ token }: { token: string }) {
       description="Confirm the email address for this nohmi account."
       title="Confirm your email"
     >
-      {verification.isError ? (
-        <p className="form-error">{errorMessage(verification.error)}</p>
-      ) : null}
       {verification.isSuccess ? (
         <p className="form-success" role="status">
           Your email is confirmed. You can close this page or continue using nohmi.
@@ -859,6 +909,7 @@ function EmailVerificationScreen({ token }: { token: string }) {
           {verification.isPending ? <Spinner label="Confirming email" /> : "Confirm email"}
         </Button>
       )}
+      <MutationFeedback feedback={verification.feedback} />
     </AuthActionShell>
   );
 }
@@ -867,7 +918,8 @@ function PasswordResetScreen({ token }: { token: string }) {
   const [complete, setComplete] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const reset = useMutation({
+  const reset = useFeedbackMutation({
+    feedback: { action: "reset your password", form: true },
     mutationFn: () => api.resetPassword({ password, token }),
     onSuccess: () => setComplete(true),
   });
@@ -879,7 +931,15 @@ function PasswordResetScreen({ token }: { token: string }) {
           Your password has been reset. Return to the app to sign in.
         </p>
       ) : (
-        <form
+        <FeedbackForm
+          feedback={reset.feedback}
+          validate={() => {
+            const errors: Record<string, string> = {};
+            if (!isValidPassword(password))
+              errors.password = "Meet each password requirement shown below.";
+            if (!passwordsMatch) errors.confirmPassword = "Passwords must match.";
+            return errors;
+          }}
           className="auth-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -889,24 +949,17 @@ function PasswordResetScreen({ token }: { token: string }) {
           <PasswordFields
             autoComplete="new-password"
             confirmValue={confirmPassword}
-            error={
-              confirmPassword.length > 0 && !passwordsMatch ? "Passwords must match." : undefined
-            }
             label="New password"
             onConfirmValueChange={setConfirmPassword}
             onValueChange={setPassword}
             showRequirements
             value={password}
           />
-          {reset.isError ? <p className="form-error">{errorMessage(reset.error)}</p> : null}
-          <Button
-            disabled={reset.isPending || !isValidPassword(password) || !passwordsMatch}
-            tone="accent"
-            type="submit"
-          >
+
+          <Button disabled={reset.isPending} tone="accent" type="submit">
             {reset.isPending ? <Spinner label="Resetting password" /> : "Reset password"}
           </Button>
-        </form>
+        </FeedbackForm>
       )}
     </AuthActionShell>
   );
@@ -933,9 +986,6 @@ function AuthLayout({ children }: { children: ReactNode }) {
           </ShadcnCardContent>
         </ShadcnCard>
       </main>
-      {typeof window.matchMedia === "function" ? (
-        <Toaster position="bottom-right" theme="system" />
-      ) : null}
     </>
   );
 }
@@ -1200,17 +1250,23 @@ function AuthenticatedApp({ user }: { user: User }) {
   const mobileDockLogout = () => {
     void api
       .logout()
-      .catch((error) => toast.error(errorMessage(error)))
-      .finally(() => {
+      .then(() => {
         if (isTauri()) void resetDesktopSession(queryClient);
         else window.location.assign("/");
-      });
+      })
+      .catch(() =>
+        toast.error("Couldn’t log out. Try again.", { duration: Number.POSITIVE_INFINITY }),
+      );
   };
   const mobileDockPasswordReset = () => {
     void api
       .requestPasswordReset({ email: user.email })
       .then(() => toast.success(`Password reset link sent to ${user.email}.`))
-      .catch((error) => toast.error(errorMessage(error)));
+      .catch(() =>
+        toast.error("Couldn’t send a password reset link. Try again.", {
+          duration: Number.POSITIVE_INFINITY,
+        }),
+      );
   };
 
   return (
@@ -1433,9 +1489,6 @@ function AuthenticatedApp({ user }: { user: User }) {
           <CalendarDialog close={() => setEditor(null)} user={user} />
         )}
       </div>
-      {typeof window.matchMedia === "function" ? (
-        <Toaster position="bottom-right" theme={user.theme} />
-      ) : null}
     </>
   );
 }
@@ -1453,7 +1506,10 @@ function WorkspaceRoutes({
   calendars: Calendar[];
   deviceWeatherLocation: DeviceWeatherLocation;
   setEditor: (editor: Editor) => void;
-  todayBrief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending">;
+  todayBrief: Pick<
+    UseQueryResult<DailyBrief>,
+    "data" | "error" | "isError" | "isPending" | "refetch"
+  >;
   user: User;
   weather: {
     data: WeatherSnapshot | undefined;
@@ -2066,7 +2122,7 @@ function TodayPage({
   user,
   weather,
 }: {
-  brief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending">;
+  brief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending" | "refetch">;
   calendars: Calendar[];
   deviceWeatherLocation: DeviceWeatherLocation;
   setEditor: (editor: Editor) => void;
@@ -2081,8 +2137,10 @@ function TodayPage({
     queryFn: () => api.listReminders({ completed: true, limit: 100 }),
     queryKey: ["reminders", "completed"],
   });
-  if (brief.isError) return <InlineError error={brief.error} />;
-  if (completedReminders.isError) return <InlineError error={completedReminders.error} />;
+  if (brief.isError && !brief.data)
+    return <InlineError error={brief.error} retry={brief.refetch} />;
+  if (completedReminders.isError && !completedReminders.data)
+    return <InlineError error={completedReminders.error} retry={completedReminders.refetch} />;
   if (brief.isPending || completedReminders.isPending || !brief.data) {
     return <PageLoading workspace="today" />;
   }
@@ -2178,6 +2236,12 @@ function TodayPage({
   const openDayQuote = emptyDayQuote(today, remainingCount === 0);
   return (
     <div className="today-layout" data-page="today">
+      <QueryFeedback query={brief} title="Couldn’t refresh today’s plan." staleOnly />
+      <QueryFeedback
+        query={completedReminders}
+        title="Couldn’t refresh completed reminders."
+        staleOnly
+      />
       <section className="day-column">
         <section aria-label="Today's calendar" className="today-schedule">
           <div className="section-heading today-section-heading">
@@ -2752,6 +2816,13 @@ function TodayWeatherPopover({
   );
 }
 
+const CalendarFeedbackRegion = createContext<HTMLElement | null>(null);
+
+function CalendarContextFeedback({ children }: { children: ReactNode }) {
+  const region = useContext(CalendarFeedbackRegion);
+  return region ? createPortal(children, region) : null;
+}
+
 function CalendarPage({
   setEditor,
   todaySnap,
@@ -2761,6 +2832,7 @@ function CalendarPage({
   todaySnap: number;
   user: User;
 }) {
+  const [feedbackRegion, setFeedbackRegion] = useState<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2822,18 +2894,18 @@ function CalendarPage({
     () => new Map((calendars.data ?? []).map((calendar) => [calendar.id, calendar])),
     [calendars.data],
   );
-  const moveEvent = useMutation({
+  const moveEvent = useFeedbackMutation({
+    feedback: { action: "move this event", safeToRetry: true },
     mutationFn: async (input: CalendarEventMove) => {
       const times = movedEventTimes(input.event, input.day, input.minute, user.planningTimezone);
       return api.updateEvent(input.event.id, times);
     },
-    onError: (error, _input, context) => {
+    onError: (_error, _input, context) => {
       if (context) {
         for (const [key, data] of context.snapshots) {
           queryClient.setQueryData(key, data);
         }
       }
-      toast.error("Event couldn’t be moved", { description: errorMessage(error) });
     },
     onMutate: async (input: CalendarEventMove) => {
       await queryClient.cancelQueries({ queryKey: ["events"] });
@@ -2944,100 +3016,111 @@ function CalendarPage({
   };
 
   return (
-    <div className="calendar-page">
-      {events.isPending ? (
-        <PageLoading workspace="calendar" />
-      ) : events.isError ? (
-        <InlineError error={events.error} />
-      ) : view === "day" ? (
-        <DayCalendarView
-          currentTime={currentTime}
-          day={days[0] as LocalDate}
-          events={eventsByDay.get(localDateKey(days[0] as LocalDate)) as CalendarEvent[]}
-          calendarsById={calendarsById}
-          clearDrag={clearDrag}
-          dragPreview={dragPreview}
-          draggedEventId={draggedEventId}
-          moveEvent={dropEvent}
-          onCreateRange={setFloatingDraft}
-          setEditor={setCalendarEditor}
-          setDraggedEventId={setDraggedEventId}
-          setDragPreview={setDragPreview}
-          followToday={followToday}
-          key={localDateKey(days[0] as LocalDate)}
-          onExitFollow={disableFollowToday}
-          timeZone={user.planningTimezone}
-          today={today}
-          todaySnap={todaySnap}
-        />
-      ) : view === "week" ? (
-        <WeekCalendarView
-          currentTime={currentTime}
-          days={days}
-          eventsByDay={eventsByDay}
-          calendarsById={calendarsById}
-          clearDrag={clearDrag}
-          dragPreview={dragPreview}
-          draggedEventId={draggedEventId}
-          moveEvent={dropEvent}
-          onCreateRange={setFloatingDraft}
-          setEditor={setCalendarEditor}
-          setDraggedEventId={setDraggedEventId}
-          setDragPreview={setDragPreview}
-          selectedDate={anchor}
-          showDay={showDay}
-          followToday={followToday}
-          key={localDateKey(days[0] as LocalDate)}
-          onExitFollow={disableFollowToday}
-          timeZone={user.planningTimezone}
-          today={today}
-          todaySnap={todaySnap}
-        />
-      ) : (
-        <MonthCalendarView
+    <CalendarFeedbackRegion value={feedbackRegion}>
+      <div className="calendar-page">
+        <div ref={setFeedbackRegion} data-calendar-feedback />
+        <QueryFeedback query={events} title="Couldn’t refresh calendar events." staleOnly />
+        <QueryFeedback query={calendars} title="Couldn’t load calendars." />
+        <QueryFeedback query={connectorAccounts} title="Couldn’t load calendar accounts." />
+        <MutationFeedback feedback={moveEvent.feedback} />
+        {events.isPending ? (
+          <PageLoading workspace="calendar" />
+        ) : events.isError && !events.data ? (
+          <InlineError
+            error={events.error}
+            title="Couldn’t load calendar events."
+            retry={events.refetch}
+          />
+        ) : view === "day" ? (
+          <DayCalendarView
+            currentTime={currentTime}
+            day={days[0] as LocalDate}
+            events={eventsByDay.get(localDateKey(days[0] as LocalDate)) as CalendarEvent[]}
+            calendarsById={calendarsById}
+            clearDrag={clearDrag}
+            dragPreview={dragPreview}
+            draggedEventId={draggedEventId}
+            moveEvent={dropEvent}
+            onCreateRange={setFloatingDraft}
+            setEditor={setCalendarEditor}
+            setDraggedEventId={setDraggedEventId}
+            setDragPreview={setDragPreview}
+            followToday={followToday}
+            key={localDateKey(days[0] as LocalDate)}
+            onExitFollow={disableFollowToday}
+            timeZone={user.planningTimezone}
+            today={today}
+            todaySnap={todaySnap}
+          />
+        ) : view === "week" ? (
+          <WeekCalendarView
+            currentTime={currentTime}
+            days={days}
+            eventsByDay={eventsByDay}
+            calendarsById={calendarsById}
+            clearDrag={clearDrag}
+            dragPreview={dragPreview}
+            draggedEventId={draggedEventId}
+            moveEvent={dropEvent}
+            onCreateRange={setFloatingDraft}
+            setEditor={setCalendarEditor}
+            setDraggedEventId={setDraggedEventId}
+            setDragPreview={setDragPreview}
+            selectedDate={anchor}
+            showDay={showDay}
+            followToday={followToday}
+            key={localDateKey(days[0] as LocalDate)}
+            onExitFollow={disableFollowToday}
+            timeZone={user.planningTimezone}
+            today={today}
+            todaySnap={todaySnap}
+          />
+        ) : (
+          <MonthCalendarView
+            anchor={anchor}
+            days={days}
+            eventsByDay={eventsByDay}
+            calendarsById={calendarsById}
+            clearDrag={clearDrag}
+            draggedEventId={draggedEventId}
+            moveEvent={dropEvent}
+            setEditor={setCalendarEditor}
+            setDraggedEventId={setDraggedEventId}
+            showDay={showDay}
+            key={localDateKey(anchor)}
+            timeZone={user.planningTimezone}
+            today={today}
+            todaySnap={todaySnap}
+          />
+        )}
+        <CalendarFloatingNav
           anchor={anchor}
-          days={days}
-          eventsByDay={eventsByDay}
-          calendarsById={calendarsById}
-          clearDrag={clearDrag}
-          draggedEventId={draggedEventId}
-          moveEvent={dropEvent}
-          setEditor={setCalendarEditor}
-          setDraggedEventId={setDraggedEventId}
-          showDay={showDay}
-          key={localDateKey(anchor)}
+          calendars={calendars.data ?? []}
+          events={events.data ?? []}
+          {...(floatingDraft ? { draft: floatingDraft } : {})}
+          eventDetails={
+            inspectedEvent ? (
+              <EventInspector
+                calendars={calendars.data ?? []}
+                close={() => setInspectedEvent(null)}
+                edit={() => {
+                  setInspectedEvent(null);
+                  setEditor({ event: inspectedEvent, kind: "event", mode: "edit" });
+                }}
+                event={inspectedEvent}
+                key={inspectedEvent.id}
+                presentation="floating"
+                user={user}
+              />
+            ) : undefined
+          }
+          onNavigate={jumpToDate}
+          onDraftDismiss={() => setFloatingDraft(null)}
           timeZone={user.planningTimezone}
-          today={today}
-          todaySnap={todaySnap}
+          user={user}
         />
-      )}
-      <CalendarFloatingNav
-        anchor={anchor}
-        calendars={calendars.data ?? []}
-        events={events.data ?? []}
-        {...(floatingDraft ? { draft: floatingDraft } : {})}
-        eventDetails={
-          inspectedEvent ? (
-            <EventInspector
-              calendars={calendars.data ?? []}
-              close={() => setInspectedEvent(null)}
-              edit={() => {
-                setInspectedEvent(null);
-                setEditor({ event: inspectedEvent, kind: "event", mode: "edit" });
-              }}
-              event={inspectedEvent}
-              key={inspectedEvent.id}
-              presentation="floating"
-              user={user}
-            />
-          ) : undefined
-        }
-        onNavigate={jumpToDate}
-        onDraftDismiss={() => setFloatingDraft(null)}
-        timeZone={user.planningTimezone}
-        user={user}
-      />
-    </div>
+      </div>
+    </CalendarFeedbackRegion>
   );
 }
 
@@ -3291,11 +3374,11 @@ function CalendarAccountsControl() {
 
 function CalendarVisibilitySwitch({ calendar }: { calendar: Calendar }) {
   const queryClient = useQueryClient();
-  const mutation = useMutation<Calendar, Error, boolean, { previous: Calendar[] }>({
+  const mutation = useFeedbackMutation<Calendar, Error, boolean, { previous: Calendar[] }>({
+    feedback: { action: "change calendar visibility", safeToRetry: true },
     mutationFn: (selected) => api.setCalendarSelected(calendar.id, selected),
-    onError: (error, _selected, context) => {
+    onError: (_error, _selected, context) => {
       if (context) queryClient.setQueryData(calendarQueryKeys.calendars, context.previous);
-      toast.error(errorMessage(error));
     },
     onMutate: async (selected) => {
       await queryClient.cancelQueries({ queryKey: calendarQueryKeys.calendars });
@@ -3310,23 +3393,26 @@ function CalendarVisibilitySwitch({ calendar }: { calendar: Calendar }) {
     onSettled: () => invalidateMaterial(queryClient),
   });
   return (
-    <ShadcnField orientation="horizontal">
-      <ShadcnFieldLabel htmlFor={`calendar-popover-${calendar.id}`}>
-        <i
-          aria-hidden="true"
-          className="calendar-accounts-popover__color"
-          style={{ background: calendar.color ?? "var(--muted)" }}
+    <>
+      <ShadcnField orientation="horizontal">
+        <ShadcnFieldLabel htmlFor={`calendar-popover-${calendar.id}`}>
+          <i
+            aria-hidden="true"
+            className="calendar-accounts-popover__color"
+            style={{ background: calendar.color ?? "var(--muted)" }}
+          />
+          <span className="truncate">{calendar.name}</span>
+        </ShadcnFieldLabel>
+        <ShadcnSwitch
+          checked={calendar.isSelected}
+          disabled={mutation.isPending}
+          id={`calendar-popover-${calendar.id}`}
+          onCheckedChange={(selected) => mutation.mutate(selected)}
+          size="sm"
         />
-        <span className="truncate">{calendar.name}</span>
-      </ShadcnFieldLabel>
-      <ShadcnSwitch
-        checked={calendar.isSelected}
-        disabled={mutation.isPending}
-        id={`calendar-popover-${calendar.id}`}
-        onCheckedChange={(selected) => mutation.mutate(selected)}
-        size="sm"
-      />
-    </ShadcnField>
+      </ShadcnField>
+      <MutationFeedback feedback={mutation.feedback} />
+    </>
   );
 }
 
@@ -4616,10 +4702,28 @@ function CalendarBlankContextMenu({
     Math.min(minute + 60, calendarMinutesPerDay - 1),
     timeZone,
   ).toISOString();
-  const paste = useMutation({
+  const paste = useFeedbackMutation({
+    feedback: { action: "paste this event" },
     mutationFn: async () => {
-      const event = parseClipboardCalendarEvent(await navigator.clipboard.readText());
-      if (!event) throw new Error("Copy an event from nohmi before pasting it here.");
+      let event: CalendarEvent | undefined;
+      try {
+        event = parseClipboardCalendarEvent(await navigator.clipboard.readText());
+      } catch {
+        toast.error("Couldn’t read the clipboard. Check clipboard access and try again.", {
+          duration: Number.POSITIVE_INFINITY,
+        });
+        return;
+      }
+      if (
+        !event ||
+        !Number.isFinite(Date.parse(event.startsAt)) ||
+        !Number.isFinite(Date.parse(event.endsAt))
+      ) {
+        toast.error("Copy an event from nohmi before pasting it here.", {
+          duration: Number.POSITIVE_INFINITY,
+        });
+        return;
+      }
       const times = movedEventTimes(event, day, minute, timeZone);
       return api.createEvent({
         allDay: event.allDay,
@@ -4635,16 +4739,21 @@ function CalendarBlankContextMenu({
     onSuccess: () => invalidateMaterial(queryClient),
   });
   return (
-    <ContextMenuContent>
-      <ContextMenuLabel>{formatHour(Math.floor(minute / 60))}</ContextMenuLabel>
-      <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => onCreateRange({ endsAt, startsAt })}>
-        <CalendarPlusIcon aria-hidden="true" /> New event here
-      </ContextMenuItem>
-      <ContextMenuItem disabled={!canPaste || paste.isPending} onSelect={() => paste.mutate()}>
-        <PlusIcon aria-hidden="true" /> Paste event
-      </ContextMenuItem>
-    </ContextMenuContent>
+    <>
+      <ContextMenuContent>
+        <ContextMenuLabel>{formatHour(Math.floor(minute / 60))}</ContextMenuLabel>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => onCreateRange({ endsAt, startsAt })}>
+          <CalendarPlusIcon aria-hidden="true" /> New event here
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!canPaste || paste.isPending} onSelect={() => paste.mutate()}>
+          <PlusIcon aria-hidden="true" /> Paste event
+        </ContextMenuItem>
+      </ContextMenuContent>
+      <CalendarContextFeedback>
+        <MutationFeedback feedback={paste.feedback} />
+      </CalendarContextFeedback>
+    </>
   );
 }
 
@@ -4678,6 +4787,8 @@ function CalendarEventContextMenu({
   event: CalendarEvent;
   timeZone: string;
 }) {
+  const { confirm, confirmation } = useConfirmAction();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const queryClient = useQueryClient();
   const canCopy = typeof navigator.clipboard?.writeText === "function";
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
@@ -4688,11 +4799,13 @@ function CalendarEventContextMenu({
       !event.blocks.some((eventBlock) => eventBlock.calendarId === candidate.id) &&
       candidate.isWritable,
   );
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "delete this event", safeToRetry: false },
     mutationFn: () => api.deleteEvent(event.id),
     onSuccess: () => invalidateMaterial(queryClient),
   });
-  const duplicate = useMutation({
+  const duplicate = useFeedbackMutation({
+    feedback: { action: "duplicate this event" },
     mutationFn: () =>
       api.createEvent({
         allDay: event.allDay,
@@ -4706,66 +4819,103 @@ function CalendarEventContextMenu({
       }),
     onSuccess: () => invalidateMaterial(queryClient),
   });
-  const block = useMutation({
+  const block = useFeedbackMutation({
+    feedback: { action: "block this time" },
     mutationFn: (calendarId: string) =>
       api.createEventBlock(event.id, { calendarId, mode: "busy" }),
     onSuccess: () => invalidateMaterial(queryClient),
   });
-  const copy = async () => navigator.clipboard?.writeText(JSON.stringify(event));
-  const cut = async () => {
-    await copy();
-    remove.mutate();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(event));
+      toast.success("Event copied.");
+      return true;
+    } catch {
+      toast.error("Couldn’t copy this event. Check clipboard access and try again.", {
+        duration: Number.POSITIVE_INFINITY,
+      });
+      return false;
+    }
   };
-  const trigger = <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>;
+  const cut = async () => {
+    if (await copy())
+      confirm({
+        title: "Cut event?",
+        returnFocus: triggerRef.current,
+        description: "The event is copied. Cutting deletes the original from its calendar.",
+        actionLabel: "Cut event",
+        onConfirm: () => remove.mutate(),
+      });
+  };
+  const trigger = (
+    <ContextMenuTrigger ref={triggerRef} asChild>
+      {children}
+    </ContextMenuTrigger>
+  );
   return (
-    <ContextMenu>
-      {blockedMessage ? (
-        <Tooltip open={blockedOpen}>
-          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent className="calendar-move-blocked-tooltip" side="top">
-            {blockedMessage}
-          </TooltipContent>
-        </Tooltip>
-      ) : (
-        trigger
-      )}
-      <ContextMenuContent>
-        <ContextMenuLabel>{event.title}</ContextMenuLabel>
-        <ContextMenuSeparator />
-        <ContextMenuItem disabled={!canCopy} onSelect={copy}>
-          <CopyIcon aria-hidden="true" /> Copy event
-        </ContextMenuItem>
-        <ContextMenuItem disabled={!canCopy || !writable || remove.isPending} onSelect={cut}>
-          <ScissorsIcon aria-hidden="true" /> Cut event
-        </ContextMenuItem>
-        <ContextMenuItem
-          disabled={!writable || duplicate.isPending}
-          onSelect={() => duplicate.mutate()}
-        >
-          <CopyPlusIcon aria-hidden="true" /> Duplicate event
-        </ContextMenuItem>
-        <ContextMenuSub>
-          <ContextMenuSubTrigger disabled={destinations.length === 0 || block.isPending}>
-            <LockIcon aria-hidden="true" /> Block on calendar
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            {destinations.map((destination) => (
-              <ContextMenuItem key={destination.id} onSelect={() => block.mutate(destination.id)}>
-                {destination.name}
-              </ContextMenuItem>
-            ))}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          disabled={!writable || remove.isPending}
-          onSelect={() => remove.mutate()}
-          variant="destructive"
-        >
-          <TrashIcon aria-hidden="true" /> Delete event
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <ContextMenu>
+        {blockedMessage ? (
+          <Tooltip open={blockedOpen}>
+            <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+            <TooltipContent className="calendar-move-blocked-tooltip" side="top">
+              {blockedMessage}
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          trigger
+        )}
+        <ContextMenuContent>
+          <ContextMenuLabel>{event.title}</ContextMenuLabel>
+          <ContextMenuSeparator />
+          <ContextMenuItem disabled={!canCopy} onSelect={copy}>
+            <CopyIcon aria-hidden="true" /> Copy event
+          </ContextMenuItem>
+          <ContextMenuItem disabled={!canCopy || !writable || remove.isPending} onSelect={cut}>
+            <ScissorsIcon aria-hidden="true" /> Cut event
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!writable || duplicate.isPending}
+            onSelect={() => duplicate.mutate()}
+          >
+            <CopyPlusIcon aria-hidden="true" /> Duplicate event
+          </ContextMenuItem>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger disabled={destinations.length === 0 || block.isPending}>
+              <LockIcon aria-hidden="true" /> Block on calendar
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              {destinations.map((destination) => (
+                <ContextMenuItem key={destination.id} onSelect={() => block.mutate(destination.id)}>
+                  {destination.name}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!writable || remove.isPending}
+            onSelect={() =>
+              confirm({
+                title: "Delete event?",
+                description: "This permanently deletes the event from its calendar.",
+                actionLabel: "Delete event",
+                onConfirm: () => remove.mutate(),
+              })
+            }
+            variant="destructive"
+          >
+            <TrashIcon aria-hidden="true" /> Delete event
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      <CalendarContextFeedback>
+        <MutationFeedback feedback={remove.feedback} />
+        <MutationFeedback feedback={duplicate.feedback} />
+        <MutationFeedback feedback={block.feedback} />
+      </CalendarContextFeedback>
+      {confirmation}
+    </>
   );
 }
 
@@ -5051,13 +5201,15 @@ function MonthCalendarView({
 }
 
 function GoalsPage() {
+  const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const goals = useQuery({ queryFn: api.listGoals, queryKey: ["goals"] });
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [targetDate, setTargetDate] = useState("");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["goals"] });
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create this goal", form: true },
     mutationFn: () =>
       api.createGoal({
         description: description.trim() || null,
@@ -5072,19 +5224,23 @@ function GoalsPage() {
       return refresh();
     },
   });
-  const update = useMutation({
+  const update = useFeedbackMutation({
+    feedback: { action: "update this goal", safeToRetry: true },
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof api.updateGoal>[1] }) =>
       api.updateGoal(id, input),
     onSuccess: refresh,
   });
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "delete this goal", safeToRetry: false },
     mutationFn: (id: string) => api.deleteGoal(id),
     onSuccess: refresh,
   });
   if (goals.isPending) return <PageLoading />;
-  if (goals.isError) return <InlineError error={goals.error} />;
+  if (goals.isError && !goals.data)
+    return <InlineError error={goals.error} retry={goals.refetch} />;
   return (
     <div className="wide-page flex flex-col gap-6 pb-8">
+      <QueryFeedback query={goals} title="Couldn’t refresh goals." staleOnly />
       <h1 className="sr-only">Goals</h1>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ShadcnCard>
@@ -5105,7 +5261,14 @@ function GoalsPage() {
                   <GoalItem
                     goal={goal}
                     key={goal.id}
-                    onDelete={() => remove.mutate(goal.id)}
+                    onDelete={() =>
+                      confirm({
+                        title: "Delete goal?",
+                        description: "This permanently deletes the goal.",
+                        actionLabel: "Delete goal",
+                        onConfirm: () => remove.mutate(goal.id),
+                      })
+                    }
                     onUpdate={(input) => update.mutate({ id: goal.id, input })}
                     pending={update.isPending || remove.isPending}
                   />
@@ -5122,48 +5285,61 @@ function GoalsPage() {
             </ShadcnCardDescription>
           </ShadcnCardHeader>
           <ShadcnCardContent>
-            <ShadcnFieldGroup>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="goal-title">Outcome</ShadcnFieldLabel>
-                <ShadcnInput
-                  id="goal-title"
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Ship a calmer weekly rhythm"
-                  value={title}
-                />
-              </ShadcnField>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="goal-description">
-                  What does success look like?
-                </ShadcnFieldLabel>
-                <ShadcnTextarea
-                  id="goal-description"
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="Optional context for you and authorized agents"
-                  value={description}
-                />
-              </ShadcnField>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="goal-target-date">Target date</ShadcnFieldLabel>
-                <ShadcnInput
-                  id="goal-target-date"
-                  onChange={(event) => setTargetDate(event.target.value)}
-                  type="date"
-                  value={targetDate}
-                />
-              </ShadcnField>
-              <ShadcnButton
-                disabled={create.isPending || !title.trim()}
-                onClick={() => create.mutate()}
-              >
-                <TargetIcon data-icon="inline-start" />
-                Create goal
-              </ShadcnButton>
-            </ShadcnFieldGroup>
-            {create.isError ? <InlineError error={create.error} /> : null}
+            <FeedbackForm
+              feedback={create.feedback}
+              validate={() => (title.trim() ? {} : { title: "Enter a goal." })}
+              onSubmit={(event) => {
+                event.preventDefault();
+                create.mutate();
+              }}
+            >
+              <ShadcnFieldGroup>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="goal-title">Outcome</ShadcnFieldLabel>
+                  <ShadcnInput
+                    id="goal-title"
+                    name="title"
+                    required
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="Ship a calmer weekly rhythm"
+                    value={title}
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="goal-description">
+                    What does success look like?
+                  </ShadcnFieldLabel>
+                  <ShadcnTextarea
+                    id="goal-description"
+                    name="description"
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="Optional context for you and authorized agents"
+                    value={description}
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="goal-target-date">Target date</ShadcnFieldLabel>
+                  <ShadcnInput
+                    id="goal-target-date"
+                    name="targetDate"
+                    onChange={(event) => setTargetDate(event.target.value)}
+                    type="date"
+                    value={targetDate}
+                  />
+                </ShadcnField>
+                <ShadcnButton disabled={create.isPending} type="submit">
+                  <TargetIcon data-icon="inline-start" />
+                  Create goal
+                </ShadcnButton>
+              </ShadcnFieldGroup>
+            </FeedbackForm>
           </ShadcnCardContent>
         </ShadcnCard>
       </section>
+
+      <MutationFeedback feedback={update.feedback} />
+      <MutationFeedback feedback={remove.feedback} />
+      {confirmation}
     </div>
   );
 }
@@ -5230,12 +5406,14 @@ function GoalItem({
 }
 
 function MotivesPage() {
+  const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const motives = useQuery({ queryFn: api.listMotives, queryKey: ["motives"] });
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["motives"] });
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create this motive", form: true },
     mutationFn: () => api.createMotive({ detail: detail.trim() || null, title: title.trim() }),
     onSuccess: () => {
       setTitle("");
@@ -5243,19 +5421,23 @@ function MotivesPage() {
       return refresh();
     },
   });
-  const update = useMutation({
+  const update = useFeedbackMutation({
+    feedback: { action: "update this motive", safeToRetry: true },
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof api.updateMotive>[1] }) =>
       api.updateMotive(id, input),
     onSuccess: refresh,
   });
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "delete this motive", safeToRetry: false },
     mutationFn: (id: string) => api.deleteMotive(id),
     onSuccess: refresh,
   });
   if (motives.isPending) return <PageLoading />;
-  if (motives.isError) return <InlineError error={motives.error} />;
+  if (motives.isError && !motives.data)
+    return <InlineError error={motives.error} retry={motives.refetch} />;
   return (
     <div className="wide-page flex flex-col gap-6 pb-8">
+      <QueryFeedback query={motives} title="Couldn’t refresh motives." staleOnly />
       <h1 className="sr-only">Motives</h1>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ShadcnCard>
@@ -5287,7 +5469,10 @@ function MotivesPage() {
                       <ShadcnButton
                         disabled={update.isPending}
                         onClick={() =>
-                          update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
+                          update.mutate({
+                            id: motive.id,
+                            input: { isActive: !motive.isActive },
+                          })
                         }
                         size="sm"
                         variant="outline"
@@ -5297,7 +5482,14 @@ function MotivesPage() {
                       <ShadcnButton
                         aria-label={`Remove ${motive.title}`}
                         disabled={remove.isPending}
-                        onClick={() => remove.mutate(motive.id)}
+                        onClick={() =>
+                          confirm({
+                            title: "Delete motive?",
+                            description: "This permanently deletes the motive.",
+                            actionLabel: "Delete motive",
+                            onConfirm: () => remove.mutate(motive.id),
+                          })
+                        }
                         size="icon-sm"
                         variant="ghost"
                       >
@@ -5318,37 +5510,49 @@ function MotivesPage() {
             </ShadcnCardDescription>
           </ShadcnCardHeader>
           <ShadcnCardContent>
-            <ShadcnFieldGroup>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="motive-title">Motive</ShadcnFieldLabel>
-                <ShadcnInput
-                  id="motive-title"
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Protect focused time"
-                  value={title}
-                />
-              </ShadcnField>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="motive-detail">Context</ShadcnFieldLabel>
-                <ShadcnTextarea
-                  id="motive-detail"
-                  onChange={(event) => setDetail(event.target.value)}
-                  placeholder="Optional explanation for future decisions"
-                  value={detail}
-                />
-              </ShadcnField>
-              <ShadcnButton
-                disabled={create.isPending || !title.trim()}
-                onClick={() => create.mutate()}
-              >
-                <CompassIcon data-icon="inline-start" />
-                Create motive
-              </ShadcnButton>
-            </ShadcnFieldGroup>
-            {create.isError ? <InlineError error={create.error} /> : null}
+            <FeedbackForm
+              feedback={create.feedback}
+              validate={() => (title.trim() ? {} : { title: "Enter a motive." })}
+              onSubmit={(event) => {
+                event.preventDefault();
+                create.mutate();
+              }}
+            >
+              <ShadcnFieldGroup>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="motive-title">Motive</ShadcnFieldLabel>
+                  <ShadcnInput
+                    id="motive-title"
+                    name="title"
+                    required
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="Protect focused time"
+                    value={title}
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="motive-detail">Context</ShadcnFieldLabel>
+                  <ShadcnTextarea
+                    id="motive-detail"
+                    name="detail"
+                    onChange={(event) => setDetail(event.target.value)}
+                    placeholder="Optional explanation for future decisions"
+                    value={detail}
+                  />
+                </ShadcnField>
+                <ShadcnButton disabled={create.isPending} type="submit">
+                  <CompassIcon data-icon="inline-start" />
+                  Create motive
+                </ShadcnButton>
+              </ShadcnFieldGroup>
+            </FeedbackForm>
           </ShadcnCardContent>
         </ShadcnCard>
       </section>
+
+      <MutationFeedback feedback={update.feedback} />
+      <MutationFeedback feedback={remove.feedback} />
+      {confirmation}
     </div>
   );
 }
@@ -5552,11 +5756,40 @@ function MailSyncButton({
     : nextSyncAt
       ? `Next ${formatRelative(nextSyncAt)}`
       : "Next sync not scheduled";
-  const sync = useMutation({
-    mutationFn: () => Promise.all(enabledAccounts.map((account) => api.syncConnector(account.id))),
-    onError: notifyError,
-    onSuccess: () =>
-      Promise.all([
+  const [failedAccountIds, setFailedAccountIds] = useState<string[]>([]);
+  const [partialOutcome, setPartialOutcome] = useState<{ completed: number; total: number } | null>(
+    null,
+  );
+  const sync = useFeedbackMutation({
+    feedback: { action: "sync mail accounts", safeToRetry: true },
+    mutationFn: async () => {
+      const targets = failedAccountIds.length
+        ? enabledAccounts.filter((account) => failedAccountIds.includes(account.id))
+        : enabledAccounts;
+      const results = await Promise.allSettled(
+        targets.map((account) => api.syncConnector(account.id)),
+      );
+      const failures = results.flatMap((result, index) => {
+        const account = targets[index];
+        return result.status === "rejected" && account
+          ? [{ id: account.id, error: result.reason as unknown }]
+          : [];
+      });
+      setFailedAccountIds(failures.map((failure) => failure.id));
+      setPartialOutcome(
+        failures.length
+          ? { completed: targets.length - failures.length, total: targets.length }
+          : null,
+      );
+      if (failures.length) {
+        const authenticationFailure = failures.find(
+          ({ error }) => error instanceof ApiClientError && error.status === 401,
+        );
+        throw authenticationFailure?.error ?? failures[0]?.error;
+      }
+    },
+    onSettled: () =>
+      Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
         queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
         queryClient.invalidateQueries({ queryKey: ["mail-threads"] }),
@@ -5564,27 +5797,46 @@ function MailSyncButton({
   });
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <ShadcnButton
-          aria-label="Sync all mail accounts"
-          disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
-          onClick={() => {
-            onSelect?.();
-            sync.mutate();
-          }}
-          size="sm"
-          variant={variant}
-        >
-          <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-          <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
-        </ShadcnButton>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p>{lastSyncLabel}</p>
-        <p>{nextSyncLabel}</p>
-      </TooltipContent>
-    </Tooltip>
+    <div className="mail-sync-control">
+      <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
+      <MutationFeedback feedback={sync.feedback} />
+      {partialOutcome ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
+          {failedAccountIds.length}{" "}
+          {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
+        </p>
+      ) : null}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ShadcnButton
+            aria-label={
+              failedAccountIds.length ? "Retry failed mail accounts" : "Sync all mail accounts"
+            }
+            disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
+            onClick={() => {
+              onSelect?.();
+              sync.mutate();
+            }}
+            size="sm"
+            variant={variant}
+          >
+            <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
+            <span>
+              {sync.isPending
+                ? "Syncing…"
+                : failedAccountIds.length
+                  ? "Retry failed mail accounts"
+                  : "Sync"}
+            </span>
+          </ShadcnButton>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{lastSyncLabel}</p>
+          <p>{nextSyncLabel}</p>
+        </TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -5711,7 +5963,7 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
         (item) =>
           (item.id !== "invitations" || canManageInvitations) &&
           (item.id !== "wallpaper" || isTauri()) &&
-          (isTauri() || !["desktop", "pet", "notifications"].includes(item.id)),
+          (isTauri() || !["pet", "notifications"].includes(item.id)),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -5819,7 +6071,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
   }
   return (
     <div className="narrow-page settings-page">
-      <section aria-live="polite" className="settings-panel" key={section}>
+      <section className="settings-panel" key={section}>
         {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
         {section === "finances" ? (
           <div className="flex flex-col gap-6">
@@ -5847,6 +6099,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         {section === "invitations" ? <InvitationsSettings /> : null}
         {section === "sessions" ? <SessionsSettings /> : null}
         {section === "texting" ? <TextingSettings /> : null}
+        {section === "desktop" ? <DesktopDownloads /> : null}
         {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
         {isTauri() &&
         (section === "desktop" || section === "pet" || section === "notifications") ? (
@@ -5858,19 +6111,25 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
 }
 
 function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void }) {
+  const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const query = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
   const accounts = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
-  const selected = useMutation({
+  const selected = useFeedbackMutation({
+    feedback: { action: "change calendar visibility", safeToRetry: true },
     mutationFn: ({ id, value }: { id: string; value: boolean }) =>
       api.setCalendarSelected(id, value),
     onSuccess: () => invalidateMaterial(queryClient),
   });
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "delete this calendar", safeToRetry: false },
     mutationFn: api.deleteCalendar,
     onSuccess: () => invalidateMaterial(queryClient),
   });
   const calendarGroups = groupCalendarsByAccount(accounts.data ?? [], query.data ?? []);
+  if (query.isPending) return <PageLoading />;
+  if (query.isError && !query.data)
+    return <InlineError error={query.error} retry={query.refetch} />;
   return (
     <SettingsSection
       action={
@@ -5881,6 +6140,8 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
       description="Choose what appears in your unified view."
       title="Calendar sources"
     >
+      <QueryFeedback query={query} title="Couldn’t load calendars." />
+      <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
       {calendarGroups.length ? (
         <ShadcnItemGroup className="calendar-settings__groups">
           {calendarGroups.map((group) => (
@@ -5955,7 +6216,15 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                         <ShadcnButton
                           aria-label={`Delete ${calendar.name}`}
                           disabled={remove.isPending}
-                          onClick={() => remove.mutate(calendar.id)}
+                          onClick={() =>
+                            confirm({
+                              title: "Delete calendar?",
+                              description:
+                                "This permanently deletes this local calendar and its events.",
+                              actionLabel: "Delete calendar",
+                              onConfirm: () => remove.mutate(calendar.id),
+                            })
+                          }
                           size="icon"
                           type="button"
                           variant="ghost"
@@ -5973,11 +6242,16 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
       ) : (
         <p className="settings-empty">No calendars are available.</p>
       )}
+
+      <MutationFeedback feedback={selected.feedback} />
+      <MutationFeedback feedback={remove.feedback} />
+      {confirmation}
     </SettingsSection>
   );
 }
 
 function ConnectorsSettings() {
+  const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const query = useQuery({
     queryFn: api.listConnectors,
@@ -5998,7 +6272,8 @@ function ConnectorsSettings() {
   const [icloudReconnectAccount, setICloudReconnectAccount] = useState<CalendarAccount | null>(
     null,
   );
-  const googleConnect = useMutation({
+  const googleConnect = useFeedbackMutation({
+    feedback: { action: "connect Google", safeToRetry: true },
     mutationFn: async ({ accountId }: { accountId?: string }) => {
       const url = await api.getGoogleAuthorizationUrl({
         ...(accountId ? { accountId } : {}),
@@ -6011,7 +6286,8 @@ function ConnectorsSettings() {
       window.location.assign(url);
     },
   });
-  const xConnect = useMutation({
+  const xConnect = useFeedbackMutation({
+    feedback: { action: "connect X bookmarks", safeToRetry: true },
     mutationFn: async () => {
       const url = await api.getXBookmarkAuthorizationUrl();
       if (isTauri()) {
@@ -6027,19 +6303,23 @@ function ConnectorsSettings() {
       queryClient.invalidateQueries({ queryKey: ["x-bookmarks", "account"] }),
       queryClient.invalidateQueries({ queryKey: ["x-bookmarks", "folders"] }),
     ]);
-  const selectXFolder = useMutation({
+  const selectXFolder = useFeedbackMutation({
+    feedback: { action: "select this bookmark folder", safeToRetry: true },
     mutationFn: api.selectXBookmarkFolder,
     onSuccess: refreshXBookmarks,
   });
-  const syncXBookmarks = useMutation({
+  const syncXBookmarks = useFeedbackMutation({
+    feedback: { action: "sync your bookmarks", safeToRetry: true },
     mutationFn: api.syncXBookmarks,
     onSuccess: refreshXBookmarks,
   });
-  const disconnectXBookmarks = useMutation({
+  const disconnectXBookmarks = useFeedbackMutation({
+    feedback: { action: "disconnect X bookmarks", safeToRetry: false },
     mutationFn: api.deleteXBookmarkAccount,
     onSuccess: refreshXBookmarks,
   });
-  const icloudConnect = useMutation({
+  const icloudConnect = useFeedbackMutation({
+    feedback: { action: "connect iCloud", form: true },
     mutationFn: (form: FormData) =>
       api.connectICloud({
         appSpecificPassword: String(form.get("appSpecificPassword")),
@@ -6058,9 +6338,9 @@ function ConnectorsSettings() {
       ]);
     },
   });
-  const sync = useMutation({
+  const sync = useFeedbackMutation({
+    feedback: { action: "sync this account", safeToRetry: true },
     mutationFn: api.syncConnector,
-    onError: (error) => toast.error(errorMessage(error)),
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
@@ -6068,7 +6348,8 @@ function ConnectorsSettings() {
       ]),
     onSuccess: () => toast.success("Connection synced."),
   });
-  const disconnect = useMutation({
+  const disconnect = useFeedbackMutation({
+    feedback: { action: "disconnect this account", safeToRetry: false },
     mutationFn: api.deleteConnector,
     onSuccess: () =>
       Promise.all([
@@ -6076,6 +6357,9 @@ function ConnectorsSettings() {
         invalidateMaterial(queryClient),
       ]),
   });
+  if (query.isPending) return <PageLoading />;
+  if (query.isError && !query.data)
+    return <InlineError error={query.error} retry={query.refetch} />;
   return (
     <SettingsSection
       action={
@@ -6132,15 +6416,12 @@ function ConnectorsSettings() {
           else setConnectMenuOpen(true);
         }}
       />
-      {googleConnect.error && <SettingsError error={googleConnect.error} />}
-      {xConnect.error && <SettingsError error={xConnect.error} />}
-      {selectXFolder.error && <SettingsError error={selectXFolder.error} />}
-      {syncXBookmarks.error && <SettingsError error={syncXBookmarks.error} />}
-      {disconnectXBookmarks.error && <SettingsError error={disconnectXBookmarks.error} />}
-      {icloudConnect.error && <SettingsError error={icloudConnect.error} />}
-      {disconnect.error && <SettingsError error={disconnect.error} />}
+      <QueryFeedback query={query} title="Couldn’t load connected accounts." />
+      <QueryFeedback query={xAccount} title="Couldn’t load X bookmarks account." />
+      <QueryFeedback query={xFolders} title="Couldn’t load bookmark folders." />
       {showICloud ? (
-        <form
+        <FeedbackForm
+          feedback={icloudConnect.feedback}
           className="icloud-connect-panel"
           onSubmit={(event) => {
             event.preventDefault();
@@ -6225,12 +6506,19 @@ function ConnectorsSettings() {
               </ShadcnButton>
             </div>
           </div>
-        </form>
+        </FeedbackForm>
       ) : null}
       {xAccount.data ? (
         <XBookmarksConnectorRow
           account={xAccount.data}
-          disconnect={() => disconnectXBookmarks.mutate()}
+          disconnect={() =>
+            confirm({
+              title: "Disconnect X bookmarks?",
+              description: "This stops syncing your X bookmarks.",
+              actionLabel: "Disconnect X bookmarks",
+              onConfirm: () => disconnectXBookmarks.mutate(),
+            })
+          }
           folders={xFolders.data ?? []}
           selectFolder={(folderId) => selectXFolder.mutate(folderId)}
           sync={() => syncXBookmarks.mutate()}
@@ -6242,7 +6530,14 @@ function ConnectorsSettings() {
           {query.data.map((account) => (
             <ConnectorRow
               account={account}
-              disconnect={() => disconnect.mutate(account.id)}
+              disconnect={() =>
+                confirm({
+                  title: "Disconnect account?",
+                  description: "This stops syncing this account with nohmi.",
+                  actionLabel: "Disconnect account",
+                  onConfirm: () => disconnect.mutate(account.id),
+                })
+              }
               {...(account.provider === "google" && !account.mailEnabled
                 ? { enableMail: () => googleConnect.mutate({ accountId: account.id }) }
                 : {})}
@@ -6269,6 +6564,15 @@ function ConnectorsSettings() {
           No external calendars connected. Your local calendar already works.
         </p>
       )}
+
+      <MutationFeedback feedback={googleConnect.feedback} />
+      <MutationFeedback feedback={xConnect.feedback} />
+      <MutationFeedback feedback={selectXFolder.feedback} />
+      <MutationFeedback feedback={syncXBookmarks.feedback} />
+      <MutationFeedback feedback={disconnectXBookmarks.feedback} />
+      <MutationFeedback feedback={sync.feedback} />
+      <MutationFeedback feedback={disconnect.feedback} />
+      {confirmation}
     </SettingsSection>
   );
 }
@@ -6455,6 +6759,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
     retry: false,
   });
   const [boardUrl, setBoardUrl] = useState("");
+  const boardEdited = useRef(false);
   const [appliedImages, setAppliedImages] = useState<string[]>([]);
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
   const [cornerRadius, setCornerRadius] = useState(0);
@@ -6468,7 +6773,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
   const [showDesktopOverlay, setShowDesktopOverlay] = useState(true);
   const [tileSize, setTileSize] = useState(64);
   useEffect(() => {
-    setBoardUrl(settings.data?.boardUrl ?? "");
+    if (!boardEdited.current) setBoardUrl(settings.data?.boardUrl ?? "");
     setBackgroundColor(settings.data?.backgroundColor ?? "#ffffff");
     setCornerRadius(settings.data?.cornerRadius ?? 0);
     setFrameSpacing(settings.data?.frameSpacing ?? 16);
@@ -6486,7 +6791,17 @@ function PinterestWallpaperDesktopSettingsPanel() {
       queryClient.invalidateQueries({ queryKey: ["pinterest-wallpaper-preview"] }),
     ]);
   };
-  const update = useMutation({
+  const saveBoard = useFeedbackMutation({
+    feedback: { action: "save this board URL", form: true, safeToRetry: true },
+    mutationFn: api.updatePinterestWallpaperSettings,
+    onSuccess: async (next) => {
+      boardEdited.current = false;
+      queryClient.setQueryData(["pinterest-wallpaper"], next);
+      await invalidate();
+    },
+  });
+  const update = useFeedbackMutation({
+    feedback: { action: "save wallpaper settings", safeToRetry: true },
     mutationFn: api.updatePinterestWallpaperSettings,
     onMutate: (input) => {
       const previous = queryClient.getQueryData<PinterestWallpaperSettings>([
@@ -6527,7 +6842,12 @@ function PinterestWallpaperDesktopSettingsPanel() {
     setPaddingTop(values.paddingTop);
     update.mutate(values);
   };
-  const apply = useMutation({
+  const apply = useFeedbackMutation({
+    feedback: {
+      action: "refresh the wallpaper",
+      safeToRetry: true,
+      success: "Wallpaper refreshed.",
+    },
     mutationFn: () => {
       if (!settings.data) throw new Error("Wallpaper settings are still loading.");
       return applyPinterestWallpaper(settings.data);
@@ -6535,9 +6855,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
     onSuccess: async (images) => {
       setAppliedImages(images);
       await invalidate();
-      toast.success("Wallpaper refreshed.");
     },
-    onError: (error) => toast.error(errorMessage(error)),
   });
   const value = settings.data;
   const dailyBackdropTimestamp = value?.lastAppliedAt
@@ -6577,26 +6895,46 @@ function PinterestWallpaperDesktopSettingsPanel() {
       description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
       title="Pinterest wallpaper"
     >
-      {settings.error ? <SettingsError error={settings.error} /> : null}
-      {update.error ? <SettingsError error={update.error} /> : null}
-      {preview.error ? <SettingsError error={preview.error} /> : null}
+      <QueryFeedback query={settings} title="Couldn’t load wallpaper settings." />
+      <QueryFeedback query={preview} title="Couldn’t load wallpaper preview." />
+      <QueryFeedback query={desktopEnvironment} title="Couldn’t load desktop settings." />
+
       <ShadcnFieldGroup className="pinterest-wallpaper__controls">
-        <ShadcnField>
-          <ShadcnFieldLabel htmlFor="pinterest-board-url">Public board URL</ShadcnFieldLabel>
-          <ShadcnInput
-            autoComplete="url"
-            id="pinterest-board-url"
-            onBlur={() => update.mutate({ boardUrl: boardUrl.trim() || null })}
-            onChange={(event) => setBoardUrl(event.target.value)}
-            placeholder="https://www.pinterest.com/name/board-name/"
-            type="url"
-            value={boardUrl}
-          />
-          <ShadcnFieldDescription>
-            The board must be public. If Pinterest only exposes a few Pins, nohmi repeats them to
-            complete the collage.
-          </ShadcnFieldDescription>
-        </ShadcnField>
+        <FeedbackForm
+          feedback={saveBoard.feedback}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!saveBoard.isPending) saveBoard.mutate({ boardUrl: boardUrl.trim() || null });
+          }}
+        >
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="pinterest-board-url">Public board URL</ShadcnFieldLabel>
+            <ShadcnInput
+              autoComplete="url"
+              id="pinterest-board-url"
+              name="boardUrl"
+              disabled={saveBoard.isPending}
+              onBlur={(event) => {
+                if (boardEdited.current && event.currentTarget.checkValidity())
+                  event.currentTarget.form?.requestSubmit();
+              }}
+              onChange={(event) => {
+                boardEdited.current = true;
+                setBoardUrl(event.target.value);
+              }}
+              placeholder="https://www.pinterest.com/name/board-name/"
+              type="url"
+              value={boardUrl}
+            />
+            <ShadcnFieldDescription>
+              The board must be public. If Pinterest only exposes a few Pins, nohmi repeats them to
+              complete the collage.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+          <ShadcnButton type="submit" disabled={saveBoard.isPending}>
+            {saveBoard.isPending ? "Saving board…" : "Save board"}
+          </ShadcnButton>
+        </FeedbackForm>
         <ShadcnField orientation="horizontal">
           <ShadcnCheckbox
             checked={value?.enabled ?? false}
@@ -6913,7 +7251,11 @@ function PinterestWallpaperDesktopSettingsPanel() {
           mosaicFit={value.mosaicFit}
           pins={
             preview.data ??
-            appliedImages.map((imageUrl, index) => ({ id: String(index), imageUrl, title: null }))
+            appliedImages.map((imageUrl, index) => ({
+              id: String(index),
+              imageUrl,
+              title: null,
+            }))
           }
           frameSpacing={frameSpacing}
           paddingBottom={paddingBottom}
@@ -6925,10 +7267,13 @@ function PinterestWallpaperDesktopSettingsPanel() {
             ? { desktopEnvironment: desktopEnvironment.data }
             : {})}
           dailyBackdropTimestamp={dailyBackdropTimestamp}
-          previewError={preview.error ? errorMessage(preview.error) : null}
+          previewError={preview.error ? "Couldn’t load the wallpaper preview. Try again." : null}
           tileSize={tileSize}
         />
       ) : null}
+
+      <MutationFeedback feedback={update.feedback} />
+      <MutationFeedback feedback={apply.feedback} />
     </SettingsSection>
   );
 }
@@ -7314,7 +7659,8 @@ function ProfileSettings({ user }: { user: User }) {
   const [homeLocation, setHomeLocation] = useState<HomeLocation | null>(user.homeLocation);
   const [homeLocationValid, setHomeLocationValid] = useState(true);
   const [planningTimezone, setPlanningTimezone] = useState(user.planningTimezone);
-  const update = useMutation({
+  const update = useFeedbackMutation({
+    feedback: { action: "save your profile", form: true, success: "Profile saved." },
     mutationFn: (input: {
       displayName: string;
       email: string;
@@ -7325,21 +7671,24 @@ function ProfileSettings({ user }: { user: User }) {
     }) => api.updateUser(input),
     onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
-      toast.success("Profile saved.");
     },
   });
-  const resendVerification = useMutation({
+  const resendVerification = useFeedbackMutation({
+    feedback: {
+      action: "send a confirmation email",
+      safeToRetry: true,
+      success: "Confirmation email sent.",
+    },
     mutationFn: api.resendEmailVerification,
-    onSuccess: () => toast.success("Confirmation email sent."),
   });
-  const passwordReset = useMutation({
+  const passwordReset = useFeedbackMutation({
+    feedback: { action: "send a password reset link", safeToRetry: true },
     mutationFn: () => api.requestPasswordReset({ email: user.email }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => toast.success(`Password reset link sent to ${user.email}.`),
   });
-  const logout = useMutation({
+  const logout = useFeedbackMutation({
+    feedback: { action: "log out", safeToRetry: true },
     mutationFn: api.logout,
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
       if (isTauri()) {
         void resetDesktopSession(queryClient);
@@ -7368,7 +7717,22 @@ function ProfileSettings({ user }: { user: User }) {
       title="Account"
     >
       <div className="flex flex-col gap-6">
-        <form
+        <FeedbackForm
+          feedback={update.feedback}
+          fieldNames={{
+            displayName: "firstName",
+            workdayStartMinute: "workdayStart",
+            workdayEndMinute: "workdayEnd",
+          }}
+          validate={(form) => {
+            const values = new FormData(form);
+            const errors: Record<string, string> = {};
+            if (String(values.get("workdayEnd")) <= String(values.get("workdayStart")))
+              errors.workdayEnd = "Planning day must end after it starts.";
+            if (!homeLocationValid)
+              errors.homeLocation = "Choose a place from the results, or clear this field.";
+            return errors;
+          }}
           className="profile-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -7460,7 +7824,6 @@ function ProfileSettings({ user }: { user: User }) {
               />
             </ShadcnField>
             <HomeLocationField
-              key={user.updatedAt}
               savedLocation={user.homeLocation}
               onChange={(location) => {
                 setHomeLocation(location);
@@ -7488,12 +7851,12 @@ function ProfileSettings({ user }: { user: User }) {
               </ShadcnFieldDescription>
             </ShadcnField>
           </ShadcnFieldGroup>
-          {update.isError ? <SettingsError error={update.error} /> : null}
-          {resendVerification.isError ? <SettingsError error={resendVerification.error} /> : null}
-          <ShadcnButton disabled={update.isPending || !homeLocationValid} type="submit">
+
+          <MutationFeedback feedback={resendVerification.feedback} />
+          <ShadcnButton disabled={update.isPending} type="submit">
             {update.isPending ? "Saving profile…" : "Save profile"}
           </ShadcnButton>
-        </form>
+        </FeedbackForm>
         <ShadcnItemGroup aria-label="Account actions">
           <ShadcnItem size="sm">
             <ShadcnItemMedia variant="icon">
@@ -7539,6 +7902,8 @@ function ProfileSettings({ user }: { user: User }) {
           </ShadcnItem>
         </ShadcnItemGroup>
       </div>
+      <MutationFeedback feedback={passwordReset.feedback} />
+      <MutationFeedback feedback={logout.feedback} />
     </SettingsSection>
   );
 }
@@ -7583,10 +7948,8 @@ function HomeLocationField({
     return [selectedLocation, ...results];
   }, [locations.data, selectedLocation]);
   const query = searchValue.trim();
-  const fieldInvalid =
-    query.length > 0 && selectedLocation === null && savedLocation?.label !== query;
   return (
-    <ShadcnField data-invalid={fieldInvalid || undefined}>
+    <ShadcnField>
       <ShadcnFieldLabel htmlFor="profile-home-location">Home Location</ShadcnFieldLabel>
       <Combobox
         autoHighlight
@@ -7641,7 +8004,7 @@ function HomeLocationField({
       >
         <ComboboxInput
           aria-describedby="profile-home-location-description"
-          aria-invalid={fieldInvalid || undefined}
+          name="homeLocation"
           autoComplete="off"
           id="profile-home-location"
           placeholder="Search by city, ZIP, or region"
@@ -7655,9 +8018,11 @@ function HomeLocationField({
             <p className="px-2 py-2 text-sm text-muted-foreground">Searching places…</p>
           ) : null}
           {locations.isError ? (
-            <p className="px-2 py-2 text-sm text-destructive" role="alert">
-              {errorMessage(locations.error)}
-            </p>
+            <InlineError
+              error={locations.error}
+              title="Couldn’t search for places."
+              retry={locations.refetch}
+            />
           ) : null}
           <ComboboxEmpty>
             {query.length >= 2 && !locations.isFetching && !locations.isError
@@ -7684,7 +8049,8 @@ function InvitationsSettings() {
   const queryClient = useQueryClient();
   const invitations = useQuery({ queryFn: api.listInvitations, queryKey: ["invitations"] });
   const [latestCode, setLatestCode] = useState<string | null>(null);
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create this invitation", form: true },
     mutationFn: (form: FormData) =>
       api.createInvitation({
         ...(String(form.get("email")).trim() ? { email: String(form.get("email")).trim() } : {}),
@@ -7697,18 +8063,31 @@ function InvitationsSettings() {
   });
   const copyLatestCode = async () => {
     if (!latestCode || !navigator.clipboard) return;
-    await navigator.clipboard.writeText(latestCode);
+    try {
+      await navigator.clipboard.writeText(latestCode);
+      toast.success("Invitation copied.");
+    } catch {
+      toast.error("Couldn’t copy the invitation. Select and copy the code instead.", {
+        duration: Number.POSITIVE_INFINITY,
+      });
+    }
   };
   return (
     <SettingsSection
       description="Issue single-use invitation codes for the private beta. The code is shown only once, so copy it before you leave this page."
       title="Invitations"
     >
-      {invitations.isError ? (
-        <SettingsError error={invitations.error} />
+      <QueryFeedback query={invitations} title="Couldn’t load invitations." staleOnly />
+      {invitations.isError && !invitations.data ? (
+        <InlineError
+          error={invitations.error}
+          retry={invitations.refetch}
+          title="Couldn’t load invitations."
+        />
       ) : (
         <>
-          <form
+          <FeedbackForm
+            feedback={create.feedback}
             className="profile-form"
             onSubmit={(event) => {
               event.preventDefault();
@@ -7726,11 +8105,11 @@ function InvitationsSettings() {
                 </ShadcnNativeSelect>
               </ShadcnField>
             </ShadcnFieldGroup>
-            {create.isError ? <SettingsError error={create.error} /> : null}
+
             <ShadcnButton disabled={create.isPending} type="submit">
               {create.isPending ? "Creating invitation…" : "Create invitation"}
             </ShadcnButton>
-          </form>
+          </FeedbackForm>
           {latestCode ? (
             <ShadcnAlert>
               <CircleCheckIcon />
@@ -7778,22 +8157,42 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
 }
 
 function SessionsSettings() {
+  const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const sessions = useQuery({ queryFn: api.listSessions, queryKey: ["sessions"] });
-  const revoke = useMutation({
+  const revoke = useFeedbackMutation({
+    feedback: { action: "revoke this session", safeToRetry: false },
     mutationFn: api.revokeSession,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sessions"] }),
   });
+  if (sessions.isPending) return <PageLoading />;
+  if (sessions.isError && !sessions.data)
+    return <InlineError error={sessions.error} retry={sessions.refetch} />;
   return (
     <SettingsSection
       description="Devices with an active sign-in to your nohmi account. Revoke access you no longer recognize."
       title="Sessions"
     >
+      <QueryFeedback query={sessions} title="Couldn’t load sessions." />
       <ShadcnItemGroup>
         {sessions.data?.map((session) => (
-          <SessionRow key={session.id} revoke={() => revoke.mutate(session.id)} session={session} />
+          <SessionRow
+            key={session.id}
+            revoke={() =>
+              confirm({
+                title: "Revoke session?",
+                description: "This device will need to sign in again.",
+                actionLabel: "Revoke session",
+                onConfirm: () => revoke.mutate(session.id),
+              })
+            }
+            session={session}
+          />
         ))}
       </ShadcnItemGroup>
+
+      <MutationFeedback feedback={revoke.feedback} />
+      {confirmation}
     </SettingsSection>
   );
 }
@@ -7822,7 +8221,8 @@ const appearanceThemes: Array<{
 
 function ThemeSettings({ user }: { user: User }) {
   const queryClient = useQueryClient();
-  const updateTheme = useMutation({
+  const updateTheme = useFeedbackMutation({
+    feedback: { action: "save your appearance", safeToRetry: true },
     mutationFn: (input: { theme: Theme }) => api.updateUser(input),
     onSuccess: (nextUser) => queryClient.setQueryData(["me"], nextUser),
   });
@@ -7844,7 +8244,8 @@ function ThemeSettings({ user }: { user: User }) {
           value={user.theme}
         />
       </ShadcnFieldSet>
-      {updateTheme.isError ? <SettingsError error={updateTheme.error} /> : null}
+
+      <MutationFeedback feedback={updateTheme.feedback} />
     </SettingsSection>
   );
 }
@@ -7940,17 +8341,6 @@ function SettingsSection({
       </ShadcnCardHeader>
       <ShadcnCardContent className="settings-section__body">{children}</ShadcnCardContent>
     </ShadcnCard>
-  );
-}
-
-function SettingsError({ error }: { error: unknown }) {
-  useErrorNotification(error);
-  return (
-    <ShadcnAlert variant="destructive">
-      <XIcon />
-      <ShadcnAlertTitle>Something needs attention</ShadcnAlertTitle>
-      <ShadcnAlertDescription>{errorMessage(error)}</ShadcnAlertDescription>
-    </ShadcnAlert>
   );
 }
 
@@ -8410,7 +8800,8 @@ function ReminderDialog({
   user: User;
 }) {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "save this reminder", form: true },
     mutationFn: (input: {
       dueAt: string | null;
       notes: string | null;
@@ -8444,7 +8835,7 @@ function ReminderDialog({
       eyebrow="Reminder"
       title={reminder ? "Refine reminder" : "Hold onto something"}
     >
-      <form className="editor-form" onSubmit={submit}>
+      <FeedbackForm feedback={mutation.feedback} className="editor-form" onSubmit={submit}>
         <Field
           autoFocus
           defaultValue={reminder?.title}
@@ -8474,11 +8865,10 @@ function ReminderDialog({
         </label>
         <FormActions
           close={close}
-          error={mutation.error}
           pending={mutation.isPending}
           submitLabel={reminder ? "Save changes" : "Create reminder"}
         />
-      </form>
+      </FeedbackForm>
     </Modal>
   );
 }
@@ -8530,7 +8920,8 @@ function EventInspector({
   const blockDestinations = calendars.filter(
     (record) => !sourceCalendarIds.has(record.id) && record.isWritable,
   );
-  const remove = useMutation({
+  const remove = useFeedbackMutation({
+    feedback: { action: "delete this event", safeToRetry: false },
     mutationFn: () => api.deleteEvent(event.id),
     onSuccess: async () => {
       await invalidateMaterial(queryClient);
@@ -8543,7 +8934,8 @@ function EventInspector({
       ...updatedBlocks,
     ]);
   };
-  const changeBlock = useMutation({
+  const changeBlock = useFeedbackMutation({
+    feedback: { action: "change this event’s availability", safeToRetry: true },
     mutationFn: async (input: {
       blocks: CalendarEvent["blocks"];
       calendarId: string;
@@ -8731,11 +9123,7 @@ function EventInspector({
             </div>
           ) : null}
         </dl>
-        {changeBlock.isError ? (
-          <p className="form-error" role="alert">
-            {errorMessage(changeBlock.error)}
-          </p>
-        ) : null}
+        <MutationFeedback feedback={changeBlock.feedback} />
         <section className="event-sheet__notes" aria-labelledby="event-notes-title">
           <h3 id="event-notes-title">
             <FileTextIcon aria-hidden="true" className="size-4" /> Notes
@@ -8756,11 +9144,7 @@ function EventInspector({
               : "This event is stored in nohmi and available to authorized agents."}
           </span>
         </div>
-        {remove.isError ? (
-          <p className="form-error" role="alert">
-            {errorMessage(remove.error)}
-          </p>
-        ) : null}
+        <MutationFeedback feedback={remove.feedback} />
       </div>
       <footer className="event-sheet__actions">
         {confirmDelete ? (
@@ -8941,7 +9325,8 @@ function EventDialog({
 }) {
   const queryClient = useQueryClient();
   const writable = calendars.filter((calendar) => calendar.isWritable);
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "save this event", form: true },
     mutationFn: (input: {
       allDay: boolean;
       calendarId: string;
@@ -8977,7 +9362,17 @@ function EventDialog({
       eyebrow="Calendar"
       title={event ? "Refine event" : "Shape a block of time"}
     >
-      <form className="editor-form" onSubmit={submit}>
+      <FeedbackForm
+        feedback={mutation.feedback}
+        validate={(form) => {
+          const values = new FormData(form);
+          return String(values.get("endsAt")) <= String(values.get("startsAt"))
+            ? { endsAt: "End time must be after start time." }
+            : {};
+        }}
+        className="editor-form"
+        onSubmit={submit}
+      >
         <Field autoFocus defaultValue={event?.title} label="Event" name="title" required />
         <label className="field">
           <span>Calendar</span>
@@ -9034,18 +9429,18 @@ function EventDialog({
         </label>
         <FormActions
           close={close}
-          error={mutation.error}
           pending={mutation.isPending}
           submitLabel={event ? "Save changes" : "Create event"}
         />
-      </form>
+      </FeedbackForm>
     </Modal>
   );
 }
 
 function CalendarDialog({ close, user }: { close: () => void; user: User }) {
   const queryClient = useQueryClient();
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "create this calendar", form: true },
     mutationFn: (form: FormData) =>
       api.createCalendar({
         color: String(form.get("color")),
@@ -9059,7 +9454,8 @@ function CalendarDialog({ close, user }: { close: () => void; user: User }) {
   });
   return (
     <Modal close={close} eyebrow="Local calendar" title="Create a new material">
-      <form
+      <FeedbackForm
+        feedback={mutation.feedback}
         className="editor-form"
         onSubmit={(event) => {
           event.preventDefault();
@@ -9068,13 +9464,8 @@ function CalendarDialog({ close, user }: { close: () => void; user: User }) {
       >
         <Field autoFocus label="Calendar name" name="name" required />
         <Field defaultValue="#7c8cff" label="Color" name="color" type="color" required />
-        <FormActions
-          close={close}
-          error={mutation.error}
-          pending={mutation.isPending}
-          submitLabel="Create calendar"
-        />
-      </form>
+        <FormActions close={close} pending={mutation.isPending} submitLabel="Create calendar" />
+      </FeedbackForm>
     </Modal>
   );
 }
@@ -9136,30 +9527,20 @@ function useDialogFocus(container: { current: HTMLElement | null }) {
 
 function FormActions({
   close,
-  error,
   pending,
   submitLabel,
 }: {
   close: () => void;
-  error: unknown;
   pending: boolean;
   submitLabel: string;
 }) {
-  useErrorNotification(error);
   return (
-    <>
-      {error && (
-        <p className="form-error" role="alert">
-          {errorMessage(error)}
-        </p>
-      )}
-      <div className="form-actions">
-        <Button onClick={close}>Cancel</Button>
-        <Button disabled={pending} tone="accent" type="submit">
-          {pending ? <Spinner label="Saving" /> : submitLabel}
-        </Button>
-      </div>
-    </>
+    <div className="form-actions">
+      <Button onClick={close}>Cancel</Button>
+      <Button disabled={pending} tone="accent" type="submit">
+        {pending ? <Spinner label="Saving" /> : submitLabel}
+      </Button>
+    </div>
   );
 }
 
@@ -9178,16 +9559,13 @@ function Field({
 }
 
 export function FatalState({ error }: { error: unknown }) {
-  if (error instanceof TypeError) {
-    return <OfflineState />;
-  }
-  const status = error instanceof ApiClientError ? error.status : 500;
-  return (
-    <ErrorPage
-      kind={status === 403 ? "403" : status === 404 ? "404" : status === 503 ? "503" : "500"}
-    />
-  );
+  if (error instanceof TypeError) return <OfflineState development={false} />;
+  if (error instanceof ApiClientError && error.status === 403) return <ErrorPage kind="403" />;
+  if (error instanceof ApiClientError && error.status === 404) return <ErrorPage kind="404" />;
+  if (error instanceof ApiClientError && error.status === 503) return <ErrorPage kind="503" />;
+  return <ErrorPage kind="500" />;
 }
+
 export function initials(name: string) {
   return name
     .split(/\s+/)

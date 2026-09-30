@@ -13,18 +13,26 @@ export function FinancePeriodReviewPage({ id }: { id: string }) {
     queryFn: () => api.getFinancePeriodReview(id),
   });
   if (result.isPending) return <p role="status">Loading financial review…</p>;
-  if (result.isError)
+  if (result.isError && !result.data)
     return (
       <div>
-        <InlineError error={result.error} />
+        <InlineError
+          error={result.error}
+          retry={() => result.refetch()}
+          stale={result.data !== undefined}
+        />
         <Button variant="outline" onClick={() => void result.refetch()}>
           Retry
         </Button>
       </div>
     );
+  if (!result.data) return null;
   const review = result.data;
   return (
     <div className="flex flex-col gap-6">
+      {result.isError ? (
+        <InlineError error={result.error} retry={() => result.refetch()} stale />
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle>

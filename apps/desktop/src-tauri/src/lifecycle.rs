@@ -65,6 +65,7 @@ pub fn deep_link(app: &tauri::AppHandle, url: url::Url) {
         }
         _ => return,
     };
+    crate::updates::external_intent(app, value["action"].as_str().unwrap_or(""));
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         action(app, value).await;
@@ -72,6 +73,8 @@ pub fn deep_link(app: &tauri::AppHandle, url: url::Url) {
 }
 pub async fn action(app: tauri::AppHandle, value: Value) {
     let action = value["action"].as_str().unwrap_or("");
+    crate::updates::external_intent(&app, action);
+    crate::updates::wait_for_startup(&app).await;
     if matches!(action, "complete" | "join") {
         let state = app.state::<DesktopState>();
         let settings = state.settings.lock().await;
@@ -174,6 +177,9 @@ pub async fn resume_deferred(app: &tauri::AppHandle) {
         }
     }
 }
+fn menu_starts_interaction(id: &str) -> bool {
+    matches!(id, "open" | "settings" | "ritual" | "quick")
+}
 pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::{
         menu::{Menu, MenuItem},
@@ -189,9 +195,15 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .tooltip("nohmi")
         .on_menu_event(|app, event| {
+            if menu_starts_interaction(event.id.as_ref()) {
+                crate::updates::external_intent(app, "open");
+            }
             let app = app.clone();
             match event.id.as_ref() {
-                "open" => show(&app),
+                "open" => {
+                    crate::updates::schedule(&app);
+                    show(&app);
+                }
                 "quit" => app.exit(0),
                 "settings" => {
                     show(&app);
@@ -257,6 +269,7 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        crate::updates::wait_for_startup(&app).await;
         let settings = app.state::<DesktopState>().settings.lock().await.clone();
         if let Err(error) =
             crate::native::call(&app, json!({"op":"configure","settings":settings})).await
@@ -270,6 +283,14 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn interactive_menu_actions_revoke_startup_install_authority() {
+        for id in ["open", "settings", "ritual", "quick"] {
+            assert!(menu_starts_interaction(id));
+        }
+        assert!(!menu_starts_interaction("quit"));
+        assert!(!menu_starts_interaction("unknown"));
+    }
     #[test]
     fn route_validation() {
         assert!(safe_route("/calendar?day=2026-09-08"));

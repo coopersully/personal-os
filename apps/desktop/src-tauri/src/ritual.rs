@@ -626,6 +626,9 @@ pub async fn ritual_preferences(app: tauri::AppHandle, enabled: bool) -> Result<
 }
 #[tauri::command]
 pub async fn ritual_open(app: tauri::AppHandle) -> Result<(), String> {
+    if crate::updates::startup_blocking(&app) {
+        return Err("Open nohmi before starting a ritual".into());
+    }
     let runtime = app.state::<RitualRuntime>();
     let _lock = runtime.lock.lock().await;
     let (server, account, generation) = identity(&app).await?;

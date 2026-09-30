@@ -1,5 +1,5 @@
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatMoney } from "./format.js";
 
 type Row = {
@@ -75,7 +76,8 @@ export function TransactionBreakdownDialog({
     activeRows.length > 0 &&
     activeRows.every((row) => row.categoryId) &&
     !duplicate;
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "save this transaction breakdown", safeToRetry: false, form: true },
     mutationFn: async () => {
       if (!transaction) throw new Error("Choose a transaction to split.");
       return api.setFinanceTransactionBreakdown(transaction.id, {
@@ -241,7 +243,7 @@ export function TransactionBreakdownDialog({
               onCheckedChange={setFutureRule}
             />
           </label>
-          {mutation.error ? <InlineError error={mutation.error} /> : null}
+          {mutation.error ? <MutationFeedback feedback={mutation.feedback} /> : null}
         </div>
         <DialogFooter>
           <Button onClick={() => onOpenChange(false)} type="button" variant="outline">

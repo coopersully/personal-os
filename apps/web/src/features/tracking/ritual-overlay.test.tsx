@@ -119,7 +119,7 @@ it("keeps unsaved text after failure and enables explicit completion only after 
   fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
     target: { value: "Keep this answer" },
   });
-  expect(await screen.findByRole("alert")).toHaveTextContent("Save unavailable");
+  expect(await screen.findByRole("alert")).toHaveTextContent("save your ritual answers");
   expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Keep this answer");
   fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
     target: { value: "Keep this answer too" },
@@ -227,7 +227,7 @@ it("does not retry a failed draft at the same revision, but resumes after a newe
   const response = vi.fn().mockRejectedValue(new Error("Revision conflict"));
   const view = render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
   fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "Unsaved answer" } });
-  expect(await screen.findByRole("alert")).toHaveTextContent("Revision conflict");
+  expect(await screen.findByRole("alert")).toHaveTextContent("save your ritual answers");
   view.rerender(
     <RitualChecklist state={structuredClone(state)} saveResponse={response} act={vi.fn()} />,
   );
@@ -269,11 +269,13 @@ it("retries readiness while preserving its visible error across successful state
     return 1;
   });
   const view = render(<RitualOverlay />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Unable to present ritual");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn’t prepare this ritual. Try again.",
+  );
   expect(screen.getByRole("alert").closest("main")).toBeNull();
   await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 });
   await waitFor(() => expect(ready).toHaveBeenCalledTimes(2), { timeout: 2000 });
-  expect(screen.getByRole("alert")).toHaveTextContent("Unable to present ritual");
+  expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t prepare this ritual. Try again.");
   finish();
   await waitFor(() => expect(screen.getByRole("main")).toHaveAttribute("data-ready", "true"));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -283,4 +285,22 @@ it("retries readiness while preserving its visible error across successful state
   read.mockRestore();
   ready.mockRestore();
   frame.mockRestore();
+});
+
+it("reports state-read failures as retryable without claiming an uncertain write", async () => {
+  const read = vi
+    .spyOn(ritualBridge, "readRitualState")
+    .mockRejectedValueOnce(new Error("private state failure"))
+    .mockResolvedValue({ ...state, current: null });
+  const view = render(<RitualOverlay />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn’t load this ritual. Try again.",
+  );
+  expect(screen.queryByText(/making the change twice/)).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument(), {
+    timeout: 2000,
+  });
+  expect(read).toHaveBeenCalledTimes(2);
+  view.unmount();
+  read.mockRestore();
 });

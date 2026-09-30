@@ -711,3 +711,68 @@ test("a person and an agent share one reminder and calendar surface", async ({
   }
   await expect(page).toHaveURL(/\/today$/);
 });
+
+test("feedback keeps corrections in context and action failures in toasts", async ({
+  page,
+}, testInfo) => {
+  const email = `feedback+${testInfo.project.name}-${Date.now()}@example.com`;
+  await page.goto("/");
+  await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
+  await page.getByLabel("Name").fill("Feedback Person");
+  await page.getByLabel("Invite code").fill("E2E12345");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill("LocalTestOnly123!");
+  await page.getByLabel("Confirm password").fill("LocalTestOnly123!");
+  await expect(page.getByText("Invitation accepted.")).toBeVisible();
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/setup$/);
+  await page.getByRole("button", { name: "Exit setup" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/settings?section=profile");
+  const end = page.getByLabel("Planning day ends");
+  await page.getByLabel("Planning day starts").fill("09:00");
+  await end.fill("08:00");
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(end).toHaveAttribute("aria-invalid", "true");
+  await expect(end).toBeFocused();
+  await expect(page.getByText("Planning day must end after it starts.")).toBeVisible();
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("feedback-validation.png") });
+  await end.fill("17:00");
+  await expect(end).not.toHaveAttribute("aria-invalid", "true");
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "Profile saved." }),
+  ).toBeVisible();
+
+  await page.goto("/settings?section=appearance");
+  await page.route("**/v1/me", async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unavailable", message: "internal provider exception" },
+      }),
+    });
+  });
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  const failure = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "Couldn’t save your appearance. Try again." });
+  await expect(failure).toBeVisible();
+  await expect(failure).toHaveAttribute("data-mounted", "true");
+  await expect(failure).toBeInViewport();
+  await page.screenshot({
+    path: testInfo.outputPath("feedback-toast.png"),
+    animations: "disabled",
+  });
+  await expect(page.getByText("internal provider exception")).toHaveCount(0);
+  const dismiss = failure.getByRole("button", { name: "Close toast" });
+  await dismiss.focus();
+  await page.keyboard.press("Enter");
+  await expect(failure).toHaveCount(0);
+  await page.unroute("**/v1/me");
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "Dark", exact: true })).toBeChecked();
+});

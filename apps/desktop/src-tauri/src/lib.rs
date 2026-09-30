@@ -5,6 +5,7 @@ mod native;
 mod preferences;
 mod ritual;
 mod transport;
+mod updates;
 mod wallpaper;
 mod wallpaper_schedule;
 use tauri::Manager;
@@ -13,20 +14,26 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            updates::schedule(app);
             lifecycle::show(app)
         }))
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.manage(desktop::DesktopState::load(app.handle()).map_err(std::io::Error::other)?);
             app.manage(ritual::RitualRuntime::default());
+            updates::setup(app.handle());
             #[cfg(target_os = "macos")]
             {
                 let ritual_app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
+                    updates::wait_for_startup(&ritual_app).await;
                     ritual::run(ritual_app).await;
                 });
             }
             lifecycle::setup(app.handle())?;
+            // Capture cold-start URLs before update installation can claim startup.
+            updates::schedule(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -44,6 +51,10 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            updates::desktop_update_status,
+            updates::desktop_update_open,
+            updates::desktop_update_check,
+            updates::desktop_update_restart,
             ritual::ritual_state,
             ritual::ritual_ready,
             ritual::ritual_preferences,
@@ -65,6 +76,7 @@ pub fn run() {
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
+                updates::schedule(app);
                 lifecycle::show(app);
             }
             #[cfg(not(target_os = "macos"))]

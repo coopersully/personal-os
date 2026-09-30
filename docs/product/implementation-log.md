@@ -651,3 +651,15 @@ This log records delivered vertical slices against the master plan. It does not 
 - This source slice does not register HTTP/MCP/SMS operations or ship matching, work answers,
   disputes, reopening, connector evidence intake or production activation. See the
   [capture contract](../engineering/finance-context-capture.md) for exact authority and transaction rules.
+
+## Desktop distribution and updates — source implementation (2026-09-30)
+
+The desktop distribution branch adds a launch-time update gate, background
+checks on reopen, explicit restart confirmation, and a shared Downloads surface
+using validated GitHub release metadata. Release tooling creates separate signed
+Mac architecture artifacts and a stable updater feed only from final notarized
+bundles. The production API default and account identities remain unchanged.
+See [release operations](../releasing.md) and the
+[specification](../superpowers/specs/2026-09-30-desktop-updates-design.md).
+This source implementation is not evidence of a published installer: signing
+credentials and an installed old-to-new upgrade smoke remain required.

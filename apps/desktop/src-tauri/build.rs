@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=NOHMI_UPDATER_PUBLIC_KEY");
     #[cfg(target_os = "macos")]
     {
         swift_rs::SwiftLinker::new("14.0")

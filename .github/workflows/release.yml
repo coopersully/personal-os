@@ -1,18 +1,69 @@
 name: Release desktop installers
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
 
 permissions:
-  contents: write
+  contents: read
+
+# Serialize version reservation, packaging and publication for verified main.
+concurrency:
+  group: desktop-stable-release
+  cancel-in-progress: false
 
 jobs:
-  macos:
-    name: macOS DMG
-    runs-on: macos-14
+  prepare:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      build: ${{ steps.auto.outputs.build }}
+      tag: ${{ steps.auto.outputs.tag }}
+      ref: ${{ steps.auto.outputs.ref }}
+      source: ${{ steps.auto.outputs.source }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Reserve a release for desktop changes on verified main
+        id: auto
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: node apps/desktop/scripts/automatic-release.mjs
+  macos:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    timeout-minutes: 60
+    environment: desktop-signing
+    name: macOS DMG
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
       - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
@@ -21,6 +72,12 @@ jobs:
           cache: pnpm
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
+      - name: Validate source versions
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          release_tag="$RELEASE_TAG"
+          node apps/desktop/scripts/release-metadata.mjs "$release_tag"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @personal-os/web build
         env:
@@ -54,73 +111,53 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
           ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
           ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
+          NOHMI_UPDATER_PUBLIC_KEY: ${{ vars.NOHMI_UPDATER_PUBLIC_KEY }}
           ILO_KEYCHAIN_ACCESS_GROUP: ${{ vars.ILO_KEYCHAIN_ACCESS_GROUP }}
         run: bash macos/scripts/release.sh
       - uses: actions/upload-artifact@v7
         with:
-          name: macos-installer
-          path: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
-
-  windows:
-    name: Windows installer
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.1.2
-      - uses: actions/setup-node@v7
-        with:
-          cache: pnpm
-          node-version: 22
-      - uses: dtolnay/rust-toolchain@stable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @personal-os/web build
-        env:
-          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-      - name: Require signing and production API configuration
-        shell: pwsh
-        env:
-          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          if (-not $env:VITE_API_BASE_URL) { throw "PERSONAL_OS_API_BASE_URL is required." }
-          if (-not $env:WINDOWS_CERTIFICATE) { throw "WINDOWS_CERTIFICATE is required." }
-          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw "WINDOWS_CERTIFICATE_PASSWORD is required." }
-      - name: Build NSIS installer
-        working-directory: apps/desktop
-        env:
-          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-        run: pnpm exec tauri build --bundles nsis --ci
-      - name: Sign installer
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          $certificatePath = Join-Path $env:RUNNER_TEMP "personal-os-signing.pfx"
-          [System.IO.File]::WriteAllBytes($certificatePath, [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $signTool) { throw "signtool.exe was not found." }
-          Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object {
-            & $signTool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($_.Name)." }
-          }
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer
-          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          name: macos-installer-${{ matrix.arch }}
+          path: apps/desktop/src-tauri/target/release/bundle/dmg/*
 
   publish:
-    needs: [macos, windows]
+    if: startsWith(needs.prepare.outputs.tag, 'v')
+    permissions:
+      contents: write
+    needs: [prepare, macos]
+    timeout-minutes: 280
     runs-on: ubuntu-latest
+    environment: desktop-updater-signing
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
-      - name: Create draft release
+          pattern: macos-installer-*
+          merge-multiple: true
+      - name: Prepare the pinned signer without application dependencies
+        run: npm install --prefix "$RUNNER_TEMP/nohmi-signer" --ignore-scripts --no-audit --no-fund @tauri-apps/cli@2.12.0
+      - name: Sign only the final notarized updater archives
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          for arch in aarch64 x86_64; do
+            archive="$GITHUB_WORKSPACE/release-assets/nohmi_${RELEASE_TAG#v}_${arch}.app.tar.gz"
+            test -f "$archive"
+            "$RUNNER_TEMP/nohmi-signer/node_modules/.bin/tauri" signer sign --app-version "${RELEASE_TAG#v}" "$archive"
+          done
+      - name: Assemble and publish the complete release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes release-assets/macos-installer/* release-assets/windows-installer/*
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source }}
+          AUTO_PUBLISH_ENABLED: ${{ vars.NOHMI_DESKTOP_AUTO_PUBLISH }}
+          AUTOMATIC: ${{ github.event_name == 'workflow_run' }}
+        run: node apps/desktop/scripts/publish-release.mjs

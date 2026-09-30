@@ -1,25 +1,42 @@
 import type { Calendar } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { InlineError, PageLoading } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { calendarQueryKeys } from "./page.js";
 
 /** Calendar-owned visibility controls for the shell's contextual sidebar outlet. */
 export function CalendarSidebar() {
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: calendarQueryKeys.calendars });
-  return <CalendarVisibilitySidebar calendars={calendars.data ?? []} />;
+  if (calendars.isPending) return <PageLoading />;
+  return (
+    <>
+      {calendars.isError ? (
+        <InlineError
+          error={calendars.error}
+          title="Couldn’t load your calendars."
+          retry={() => calendars.refetch()}
+          stale={Boolean(calendars.data)}
+        />
+      ) : null}
+      {calendars.data ? <CalendarVisibilitySidebar calendars={calendars.data} /> : null}
+    </>
+  );
 }
 
 function CalendarVisibilitySidebar({ calendars }: { calendars: Calendar[] }) {
   const queryClient = useQueryClient();
-  const mutation = useMutation<
+  const mutation = useFeedbackMutation<
     Calendar,
     Error,
     { id: string; selected: boolean },
     { previous: Calendar[] }
   >({
+    feedback: { action: "change calendar visibility", safeToRetry: true },
     mutationFn: ({ id, selected }) => api.setCalendarSelected(id, selected),
     onError: (_error, _variables, context) => {
       if (context) queryClient.setQueryData(calendarQueryKeys.calendars, context.previous);
@@ -75,11 +92,7 @@ function CalendarVisibilitySidebar({ calendars }: { calendars: Calendar[] }) {
           </FieldGroup>
         </ScrollArea>
       )}
-      {mutation.isError ? (
-        <p className="context-sidebar__error" role="alert">
-          {errorMessage(mutation.error)}
-        </p>
-      ) : null}
+      <MutationFeedback feedback={mutation.feedback} />
     </section>
   );
 }

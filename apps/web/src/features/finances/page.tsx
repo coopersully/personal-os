@@ -12,7 +12,7 @@ import type {
 } from "@personal-os/domain";
 import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import {
   ArrowDown,
@@ -88,6 +88,9 @@ import {
 } from "@/components/ui/table";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
@@ -261,7 +264,13 @@ export function FinancesPage() {
       }),
     queryKey: ["finance-transactions", transactionCursor, transactionSort],
   });
-  const addAccount = useMutation({
+  const syncAccount = useFeedbackMutation({
+    feedback: { action: "sync this bank account", safeToRetry: true },
+    mutationFn: api.syncFinanceAccount,
+    onSuccess: refresh,
+  });
+  const addAccount = useFeedbackMutation({
+    feedback: { action: "add this account", form: true, safeToRetry: false },
     mutationFn: () =>
       api.createFinanceAccount({
         balance: balance ? Number(balance) : null,
@@ -280,7 +289,9 @@ export function FinancesPage() {
       return refresh();
     },
   });
-  const saveProfile = useMutation({
+  const [profileDirty, setProfileDirty] = useState(false);
+  const saveProfile = useFeedbackMutation({
+    feedback: { action: "save your financial profile", form: true, safeToRetry: true },
     mutationFn: () =>
       api.updateFinanceProfile({
         effectiveDate: profileForm.effectiveDate,
@@ -295,29 +306,36 @@ export function FinancesPage() {
         payFrequency: profileForm.payFrequency || null,
         role: profileForm.role.trim() || null,
       }),
-    onSuccess: refresh,
+    onSuccess: () => {
+      setProfileDirty(false);
+      return refresh();
+    },
   });
-  const updateRecurring = useMutation({
+  const updateRecurring = useFeedbackMutation({
+    feedback: { action: "update this recurring payment", form: false, safeToRetry: true },
     mutationFn: ({ id, status }: { id: string; status: "active" | "cancelled" | "paused" }) =>
       api.updateFinanceRecurringObligation(id, { status }),
     onSuccess: refresh,
   });
-  const updateIncomeStream = useMutation({
+  const updateIncomeStream = useFeedbackMutation({
+    feedback: { action: "update this income stream", form: false, safeToRetry: true },
     mutationFn: ({ id, status }: { id: string; status: "active" | "paused" }) =>
       api.updateFinanceIncomeStream(id, { status }),
     onSuccess: refresh,
   });
-  const resolveAlert = useMutation({
+  const resolveAlert = useFeedbackMutation({
+    feedback: { action: "update this financial alert", form: false, safeToRetry: true },
     mutationFn: ({ id, action }: { action: "dismiss" | "resolve"; id: string }) =>
       api.resolveFinanceAlert(id, { action, rationale: null }),
     onSuccess: refresh,
   });
-  const refreshInsights = useMutation({
+  const refreshInsights = useFeedbackMutation({
+    feedback: { action: "refresh financial insights", form: false, safeToRetry: true },
     mutationFn: api.refreshFinanceInsights,
     onSuccess: refresh,
   });
   useEffect(() => {
-    if (!profile.data) return;
+    if (!profile.data || profileDirty) return;
     setProfileForm({
       effectiveDate: profile.data.effectiveDate,
       employer: profile.data.employer ?? "",
@@ -329,8 +347,9 @@ export function FinancesPage() {
       payFrequency: profile.data.payFrequency ?? "",
       role: profile.data.role ?? "",
     });
-  }, [profile.data]);
-  const addTransaction = useMutation({
+  }, [profile.data, profileDirty]);
+  const addTransaction = useFeedbackMutation({
+    feedback: { action: "add this transaction", form: true, safeToRetry: false },
     mutationFn: () =>
       api.createFinanceTransaction({
         accountId,
@@ -350,7 +369,8 @@ export function FinancesPage() {
       return refresh();
     },
   });
-  const addBudget = useMutation({
+  const addBudget = useFeedbackMutation({
+    feedback: { action: "save this budget", form: true, safeToRetry: false },
     mutationFn: () =>
       api.createFinanceBudget({
         category: budgetCategory.trim(),
@@ -364,7 +384,8 @@ export function FinancesPage() {
       return refresh();
     },
   });
-  const importHistory = useMutation({
+  const importHistory = useFeedbackMutation({
+    feedback: { action: "import this history", form: true, safeToRetry: false },
     mutationFn: () =>
       api.importFinanceCsv({
         accountId: importAccountId,
@@ -377,12 +398,14 @@ export function FinancesPage() {
       await refresh();
     },
   });
-  const categorize = useMutation({
+  const categorize = useFeedbackMutation({
+    feedback: { action: "save this category", form: true, safeToRetry: true },
     mutationFn: ({ id, value }: { id: string; value: string }) =>
       api.updateFinanceTransaction(id, { category: value }),
     onSuccess: refresh,
   });
-  const resolveReview = useMutation({
+  const resolveReview = useFeedbackMutation({
+    feedback: { action: "save this transaction review", form: true, safeToRetry: true },
     mutationFn: ({
       action,
       categoryId,
@@ -432,7 +455,15 @@ export function FinancesPage() {
     setTransactionCursor(previousCursor);
   }, [transactionCursorHistory]);
   if (overview.isPending) return <FinancePageSkeleton />;
-  if (overview.isError) return <InlineError error={overview.error} />;
+  if (overview.isError && !overview.data)
+    return (
+      <InlineError
+        error={overview.error}
+        title="Couldn’t load your finances."
+        retry={() => overview.refetch()}
+      />
+    );
+  if (!overview.data) return <FinancePageSkeleton />;
   const finance = overview.data;
   const budgetHasPlan = finance.budgets.length > 0;
   const selectedAccounts = (scope: "spend" | "cash" | "investments") => {
@@ -455,17 +486,124 @@ export function FinancesPage() {
       : reviewOnly
         ? finance.transactions.filter((item) => item.needsReview)
         : finance.transactions;
-  const formError =
-    addAccount.error ??
-    addTransaction.error ??
-    addBudget.error ??
-    categorize.error ??
-    importHistory.error ??
-    resolveReview.error;
   return (
     <div
       className={`wide-page flex w-full max-w-6xl flex-col gap-5 pb-8${section === "budgets" ? " wide-page--compact" : ""}`}
     >
+      {overview.isError ? (
+        <InlineError
+          error={overview.error}
+          title="Couldn’t refresh your finances."
+          stale
+          retry={() => overview.refetch()}
+        />
+      ) : null}
+      {profile.isError && ["profile", "cashflow", "overview"].includes(section) ? (
+        <InlineError
+          error={profile.error}
+          title="Couldn’t load financial profile."
+          stale={Boolean(profile.data)}
+          retry={() => profile.refetch()}
+        />
+      ) : null}
+      {incomeStreams.isError && ["cashflow", "profile", "overview"].includes(section) ? (
+        <InlineError
+          error={incomeStreams.error}
+          title="Couldn’t load income streams."
+          stale={Boolean(incomeStreams.data)}
+          retry={() => incomeStreams.refetch()}
+        />
+      ) : null}
+      {recurring.isError && ["cashflow", "subscriptions", "overview"].includes(section) ? (
+        <InlineError
+          error={recurring.error}
+          title="Couldn’t load recurring payments."
+          stale={Boolean(recurring.data)}
+          retry={() => recurring.refetch()}
+        />
+      ) : null}
+      {alerts.isError && ["cashflow", "overview"].includes(section) ? (
+        <InlineError
+          error={alerts.error}
+          title="Couldn’t load financial alerts."
+          stale={Boolean(alerts.data)}
+          retry={() => alerts.refetch()}
+        />
+      ) : null}
+      {forecast.isError && ["cashflow", "overview"].includes(section) ? (
+        <InlineError
+          error={forecast.error}
+          title="Couldn’t load cash-flow forecast."
+          stale={Boolean(forecast.data)}
+          retry={() => forecast.refetch()}
+        />
+      ) : null}
+      {budgetStatus.isError && section === "budgets" ? (
+        <InlineError
+          error={budgetStatus.error}
+          title="Couldn’t load budget status."
+          stale={Boolean(budgetStatus.data)}
+          retry={() => budgetStatus.refetch()}
+        />
+      ) : null}
+      {budgetPace.isError && ["overview"].includes(section) ? (
+        <InlineError
+          error={budgetPace.error}
+          title="Couldn’t load budget pace."
+          stale={Boolean(budgetPace.data)}
+          retry={() => budgetPace.refetch()}
+        />
+      ) : null}
+      {categories.isError ? (
+        <InlineError
+          error={categories.error}
+          title="Couldn’t load categories."
+          stale={Boolean(categories.data)}
+          retry={() => categories.refetch()}
+        />
+      ) : null}
+      {reviewQueue.isError && section === "review" ? (
+        <InlineError
+          error={reviewQueue.error}
+          title="Couldn’t load transaction review queue."
+          stale={Boolean(reviewQueue.data)}
+          retry={() => reviewQueue.refetch()}
+        />
+      ) : null}
+      {transactionList.isError && section === "transactions" ? (
+        <InlineError
+          error={transactionList.error}
+          title="Couldn’t load transactions."
+          stale={Boolean(transactionList.data)}
+          retry={() => transactionList.refetch()}
+        />
+      ) : null}
+      {wealth.isError && ["overview", "budgets"].includes(section) ? (
+        <InlineError
+          error={wealth.error}
+          title="Couldn’t load wealth summary."
+          stale={Boolean(wealth.data)}
+          retry={() => wealth.refetch()}
+        />
+      ) : null}
+      {scopedSpending.isError && section === "overview" ? (
+        <InlineError
+          error={scopedSpending.error}
+          title="Couldn’t load account spending."
+          stale={Boolean(scopedSpending.data)}
+          retry={() => scopedSpending.refetch()}
+        />
+      ) : null}
+      {section === "accounts" ? <MutationFeedback feedback={syncAccount.feedback} /> : null}
+      {section === "cashflow" || section === "subscriptions" ? (
+        <MutationFeedback feedback={updateRecurring.feedback} />
+      ) : null}
+      {section === "cashflow" ? <MutationFeedback feedback={updateIncomeStream.feedback} /> : null}
+      {section === "cashflow" ? <MutationFeedback feedback={resolveAlert.feedback} /> : null}
+      {section === "cashflow" ? <MutationFeedback feedback={refreshInsights.feedback} /> : null}
+      {section === "review" && !categorizing ? (
+        <MutationFeedback feedback={resolveReview.feedback} />
+      ) : null}
       {section === "budgets" ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FinanceMonthNavigator
@@ -485,16 +623,32 @@ export function FinancesPage() {
           </div>
         </div>
       ) : null}
-      {section === "profile" ? (
-        <FinancialProfilePanel
-          accounts={overview.data?.accounts ?? []}
-          form={profileForm}
-          onChange={setProfileForm}
-          onSave={() => saveProfile.mutate()}
-          saving={saveProfile.isPending}
-        />
+      {section === "profile" && !(profile.isError && !profile.data) ? (
+        <FeedbackForm
+          feedback={saveProfile.feedback}
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveProfile.mutate();
+          }}
+        >
+          <FinancialProfilePanel
+            accounts={overview.data?.accounts ?? []}
+            form={profileForm}
+            onChange={(value) => {
+              setProfileDirty(true);
+              setProfileForm(value);
+            }}
+            saving={saveProfile.isPending}
+          />
+        </FeedbackForm>
       ) : null}
-      {section === "cashflow" ? (
+      {section === "cashflow" &&
+      !(
+        (alerts.isError && !alerts.data) ||
+        (forecast.isError && !forecast.data) ||
+        (recurring.isError && !recurring.data) ||
+        (incomeStreams.isError && !incomeStreams.data)
+      ) ? (
         <CashflowPanel
           alerts={alerts.data ?? []}
           forecast={forecast.data}
@@ -506,7 +660,7 @@ export function FinancesPage() {
           recurring={recurring.data ?? []}
         />
       ) : null}
-      {section === "subscriptions" ? (
+      {section === "subscriptions" && !(recurring.isError && !recurring.data) ? (
         <SubscriptionsPanel
           items={(recurring.data ?? []).filter((item) => item.kind === "subscription")}
           onUpdate={(id, status) => updateRecurring.mutate({ id, status })}
@@ -537,6 +691,14 @@ export function FinancesPage() {
         />
       ) : null}
       {section === "overview" ? <FinanceOverviewLinks reviewCount={finance.reviewCount} /> : null}
+      {section === "overview" && ledgerHealth.isError ? (
+        <InlineError
+          error={ledgerHealth.error}
+          title="Couldn’t load account health."
+          stale={Boolean(ledgerHealth.data)}
+          retry={() => ledgerHealth.refetch()}
+        />
+      ) : null}
       {section === "overview" && ledgerHealth.data ? (
         <FinanceLedgerHealthCard health={ledgerHealth.data} />
       ) : null}
@@ -562,7 +724,14 @@ export function FinancesPage() {
             </ShadcnCardHeader>
             <ShadcnCardContent>
               {ledgerHealth.isPending ? <Spinner label="Loading ledger health" /> : null}
-              {ledgerHealth.isError ? <InlineError error={ledgerHealth.error} /> : null}
+              {ledgerHealth.isError ? (
+                <InlineError
+                  error={ledgerHealth.error}
+                  title="Couldn’t load account health."
+                  stale={Boolean(ledgerHealth.data)}
+                  retry={() => ledgerHealth.refetch()}
+                />
+              ) : null}
               {ledgerHealth.data ? <FinanceLedgerHealthCard health={ledgerHealth.data} /> : null}
             </ShadcnCardContent>
           </ShadcnCard>
@@ -596,7 +765,10 @@ export function FinancesPage() {
               </ShadcnCardAction>
             </ShadcnCardHeader>
             <ShadcnCardContent className={section === "transactions" ? "min-w-0" : undefined}>
-              {section === "transactions" ? (
+              {(section === "transactions" && transactionList.isError && !transactionList.data) ||
+              (section === "review" &&
+                reviewQueue.isError &&
+                !reviewQueue.data) ? null : section === "transactions" ? (
                 <FinanceTransactionsTable
                   hasPreviousPage={transactionCursorHistory.length > 0}
                   isCategorizing={categorize.isPending}
@@ -790,6 +962,12 @@ export function FinancesPage() {
                 >
                   {importHistory.isPending ? "Importing" : "Import CSV"}
                 </ShadcnButton>
+                <MutationFeedback feedback={importHistory.feedback} />
+                {!importAccountId || !importCsv ? (
+                  <p className="text-sm text-muted-foreground">
+                    Choose an account and a CSV file to import.
+                  </p>
+                ) : null}
                 {importHistory.data ? (
                   <ShadcnFieldDescription>
                     Imported {importHistory.data.imported}; skipped {importHistory.data.skipped}{" "}
@@ -841,7 +1019,8 @@ export function FinancesPage() {
                         {item.balance === null ? "—" : formatMoney(item.balance)}
                         {item.provider === "plaid" ? (
                           <ShadcnButton
-                            onClick={() => api.syncFinanceAccount(item.id).then(refresh)}
+                            disabled={syncAccount.isPending}
+                            onClick={() => syncAccount.mutate(item.id)}
                             size="sm"
                             variant="outline"
                           >
@@ -863,65 +1042,74 @@ export function FinancesPage() {
               </ShadcnCardDescription>
             </ShadcnCardHeader>
             <ShadcnCardContent>
-              <ShadcnFieldGroup>
-                <FinanceTextField
-                  id="finance-institution"
-                  label="Institution"
-                  onChange={setInstitution}
-                  value={institution}
-                />
-                <FinanceTextField
-                  id="finance-account"
-                  label="Account name"
-                  onChange={setAccountName}
-                  value={accountName}
-                />
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-provider">Source</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="finance-provider"
-                    onChange={(event) =>
-                      setAccountProvider(
-                        event.target.value as "manual" | "paypal" | "venmo" | "zelle",
-                      )
-                    }
-                    value={accountProvider}
-                  >
-                    <NativeSelectOption value="manual">Manual or cash</NativeSelectOption>
-                    <NativeSelectOption value="paypal">PayPal manual</NativeSelectOption>
-                    <NativeSelectOption value="venmo">Venmo manual</NativeSelectOption>
-                    <NativeSelectOption value="zelle">Zelle manual</NativeSelectOption>
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-account-kind">Account type</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="finance-account-kind"
-                    onChange={(event) =>
-                      setAccountKind(event.target.value as "cash" | "investment" | "debt" | "other")
-                    }
-                    value={accountKind}
-                  >
-                    <NativeSelectOption value="cash">Cash or checking</NativeSelectOption>
-                    <NativeSelectOption value="investment">Investment</NativeSelectOption>
-                    <NativeSelectOption value="debt">Debt or credit</NativeSelectOption>
-                    <NativeSelectOption value="other">Other asset</NativeSelectOption>
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-                <FinanceTextField
-                  id="finance-balance"
-                  inputMode="decimal"
-                  label="Current balance"
-                  onChange={setBalance}
-                  value={balance}
-                />
-                <ShadcnButton
-                  disabled={addAccount.isPending || !institution.trim() || !accountName.trim()}
-                  onClick={() => addAccount.mutate()}
-                >
-                  Add account
-                </ShadcnButton>
-              </ShadcnFieldGroup>
+              <FeedbackForm
+                feedback={addAccount.feedback}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addAccount.mutate();
+                }}
+              >
+                <ShadcnFieldGroup>
+                  <FinanceTextField
+                    id="finance-institution"
+                    label="Institution"
+                    onChange={setInstitution}
+                    value={institution}
+                  />
+                  <FinanceTextField
+                    id="finance-account"
+                    label="Account name"
+                    onChange={setAccountName}
+                    value={accountName}
+                  />
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-provider">Source</ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="finance-provider"
+                      name="provider"
+                      onChange={(event) =>
+                        setAccountProvider(
+                          event.target.value as "manual" | "paypal" | "venmo" | "zelle",
+                        )
+                      }
+                      value={accountProvider}
+                    >
+                      <NativeSelectOption value="manual">Manual or cash</NativeSelectOption>
+                      <NativeSelectOption value="paypal">PayPal manual</NativeSelectOption>
+                      <NativeSelectOption value="venmo">Venmo manual</NativeSelectOption>
+                      <NativeSelectOption value="zelle">Zelle manual</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-account-kind">Account type</ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="finance-account-kind"
+                      name="kind"
+                      onChange={(event) =>
+                        setAccountKind(
+                          event.target.value as "cash" | "investment" | "debt" | "other",
+                        )
+                      }
+                      value={accountKind}
+                    >
+                      <NativeSelectOption value="cash">Cash or checking</NativeSelectOption>
+                      <NativeSelectOption value="investment">Investment</NativeSelectOption>
+                      <NativeSelectOption value="debt">Debt or credit</NativeSelectOption>
+                      <NativeSelectOption value="other">Other asset</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                  <FinanceTextField
+                    id="finance-balance"
+                    inputMode="decimal"
+                    label="Current balance"
+                    onChange={setBalance}
+                    value={balance}
+                  />
+                  <ShadcnButton disabled={addAccount.isPending} type="submit">
+                    Add account
+                  </ShadcnButton>
+                </ShadcnFieldGroup>
+              </FeedbackForm>
             </ShadcnCardContent>
           </ShadcnCard>
           <ShadcnCard hidden={section !== "transactions" || !showTransactionForm}>
@@ -929,50 +1117,55 @@ export function FinancesPage() {
               <ShadcnCardTitle>Add a transaction</ShadcnCardTitle>
             </ShadcnCardHeader>
             <ShadcnCardContent>
-              <ShadcnFieldGroup>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-account-select">Account</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="finance-account-select"
-                    onChange={(event) => setAccountId(event.target.value)}
-                    value={accountId}
-                  >
-                    <NativeSelectOption value="">Select account</NativeSelectOption>
-                    {finance.accounts.map((item) => (
-                      <NativeSelectOption key={item.id} value={item.id}>
-                        {item.name}
-                      </NativeSelectOption>
-                    ))}
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-                <FinanceTextField
-                  id="finance-merchant"
-                  label="Merchant"
-                  onChange={setMerchant}
-                  value={merchant}
-                />
-                <FinanceTextField
-                  id="finance-amount"
-                  inputMode="decimal"
-                  label="Amount"
-                  onChange={setAmount}
-                  value={amount}
-                />
-                <FinanceTextField
-                  id="finance-category"
-                  label="Category (optional)"
-                  onChange={setCategory}
-                  value={category}
-                />
-                <ShadcnButton
-                  disabled={
-                    addTransaction.isPending || !accountId || !merchant.trim() || !Number(amount)
-                  }
-                  onClick={() => addTransaction.mutate()}
-                >
-                  Add transaction
-                </ShadcnButton>
-              </ShadcnFieldGroup>
+              <FeedbackForm
+                feedback={addTransaction.feedback}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addTransaction.mutate();
+                }}
+              >
+                <ShadcnFieldGroup>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-account-select">Account</ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="finance-account-select"
+                      name="accountId"
+                      required
+                      onChange={(event) => setAccountId(event.target.value)}
+                      value={accountId}
+                    >
+                      <NativeSelectOption value="">Select account</NativeSelectOption>
+                      {finance.accounts.map((item) => (
+                        <NativeSelectOption key={item.id} value={item.id}>
+                          {item.name}
+                        </NativeSelectOption>
+                      ))}
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                  <FinanceTextField
+                    id="finance-merchant"
+                    label="Merchant"
+                    onChange={setMerchant}
+                    value={merchant}
+                  />
+                  <FinanceTextField
+                    id="finance-amount"
+                    inputMode="decimal"
+                    label="Amount"
+                    onChange={setAmount}
+                    value={amount}
+                  />
+                  <FinanceTextField
+                    id="finance-category"
+                    label="Category (optional)"
+                    onChange={setCategory}
+                    value={category}
+                  />
+                  <ShadcnButton disabled={addTransaction.isPending} type="submit">
+                    Add transaction
+                  </ShadcnButton>
+                </ShadcnFieldGroup>
+              </FeedbackForm>
             </ShadcnCardContent>
           </ShadcnCard>
           <ShadcnCard hidden={section !== "budgets" || !showBudgetForm}>
@@ -980,27 +1173,32 @@ export function FinancesPage() {
               <ShadcnCardTitle>Set a budget</ShadcnCardTitle>
             </ShadcnCardHeader>
             <ShadcnCardContent>
-              <ShadcnFieldGroup>
-                <FinanceTextField
-                  id="finance-budget-category"
-                  label="Category"
-                  onChange={setBudgetCategory}
-                  value={budgetCategory}
-                />
-                <FinanceTextField
-                  id="finance-budget-limit"
-                  inputMode="decimal"
-                  label="Monthly limit"
-                  onChange={setBudgetLimit}
-                  value={budgetLimit}
-                />
-                <ShadcnButton
-                  disabled={addBudget.isPending || !budgetCategory.trim() || !Number(budgetLimit)}
-                  onClick={() => addBudget.mutate()}
-                >
-                  Save budget
-                </ShadcnButton>
-              </ShadcnFieldGroup>
+              <FeedbackForm
+                feedback={addBudget.feedback}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addBudget.mutate();
+                }}
+              >
+                <ShadcnFieldGroup>
+                  <FinanceTextField
+                    id="finance-budget-category"
+                    label="Category"
+                    onChange={setBudgetCategory}
+                    value={budgetCategory}
+                  />
+                  <FinanceTextField
+                    id="finance-budget-limit"
+                    inputMode="decimal"
+                    label="Monthly limit"
+                    onChange={setBudgetLimit}
+                    value={budgetLimit}
+                  />
+                  <ShadcnButton disabled={addBudget.isPending} type="submit">
+                    Save budget
+                  </ShadcnButton>
+                </ShadcnFieldGroup>
+              </FeedbackForm>
             </ShadcnCardContent>
           </ShadcnCard>
         </div>
@@ -1052,6 +1250,19 @@ export function FinancesPage() {
               ) : null}
             </ShadcnFieldGroup>
           ) : null}
+          {!categorizing?.category.trim() ? (
+            <p className="text-sm text-muted-foreground">Enter a category before saving.</p>
+          ) : categorizing.reviewId &&
+            !categories.data?.some(
+              (item) => item.name.toLowerCase() === categorizing.category.trim().toLowerCase(),
+            ) ? (
+            <p className="text-sm text-muted-foreground">
+              Choose an existing category before saving this review.
+            </p>
+          ) : null}
+          <MutationFeedback
+            feedback={categorizing?.reviewId ? resolveReview.feedback : categorize.feedback}
+          />
           <ShadcnDialogFooter>
             <ShadcnButton onClick={() => setCategorizing(null)} variant="outline">
               Cancel
@@ -1124,7 +1335,6 @@ export function FinancesPage() {
         statuses={budgetStatus.data}
         transactions={finance.transactions}
       />
-      {formError ? <InlineError error={formError} /> : null}
     </div>
   );
 }
@@ -1824,7 +2034,6 @@ function FinancialProfilePanel({
   accounts,
   form,
   onChange,
-  onSave,
   saving,
 }: {
   accounts: FinanceAccount[];
@@ -1840,7 +2049,6 @@ function FinancialProfilePanel({
     role: string;
   };
   onChange: React.Dispatch<React.SetStateAction<typeof form>>;
-  onSave: () => void;
   saving: boolean;
 }) {
   return (
@@ -1852,7 +2060,7 @@ function FinancialProfilePanel({
           change without your confirmation.
         </ShadcnCardDescription>
         <ShadcnCardAction>
-          <ShadcnButton disabled={saving} onClick={onSave}>
+          <ShadcnButton disabled={saving} type="submit">
             {saving ? "Saving…" : "Save profile"}
           </ShadcnButton>
         </ShadcnCardAction>
@@ -1863,6 +2071,7 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-employer">Employer</ShadcnFieldLabel>
             <ShadcnInput
               id="finance-employer"
+              name="employer"
               onChange={(event) =>
                 onChange((value) => ({ ...value, employer: event.target.value }))
               }
@@ -1873,6 +2082,7 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-role">Role</ShadcnFieldLabel>
             <ShadcnInput
               id="finance-role"
+              name="role"
               onChange={(event) => onChange((value) => ({ ...value, role: event.target.value }))}
               value={form.role}
             />
@@ -1881,6 +2091,7 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-employment-type">Employment type</ShadcnFieldLabel>
             <ShadcnNativeSelect
               id="finance-employment-type"
+              name="employmentType"
               onChange={(event) =>
                 onChange((value) => ({
                   ...value,
@@ -1901,6 +2112,8 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-effective-date">Effective date</ShadcnFieldLabel>
             <ShadcnInput
               id="finance-effective-date"
+              name="effectiveDate"
+              required
               onChange={(event) =>
                 onChange((value) => ({ ...value, effectiveDate: event.target.value }))
               }
@@ -1912,6 +2125,10 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-gross-income">Gross annual income</ShadcnFieldLabel>
             <ShadcnInput
               id="finance-gross-income"
+              name="grossAnnualIncome"
+              type="number"
+              min="0"
+              step="any"
               inputMode="decimal"
               onChange={(event) =>
                 onChange((value) => ({ ...value, grossAnnualIncome: event.target.value }))
@@ -1924,6 +2141,10 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-net-pay">Expected net paycheck</ShadcnFieldLabel>
             <ShadcnInput
               id="finance-net-pay"
+              name="expectedNetPay"
+              type="number"
+              min="0"
+              step="any"
               inputMode="decimal"
               onChange={(event) =>
                 onChange((value) => ({ ...value, expectedNetPay: event.target.value }))
@@ -1936,6 +2157,7 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-pay-frequency">Pay frequency</ShadcnFieldLabel>
             <ShadcnNativeSelect
               id="finance-pay-frequency"
+              name="payFrequency"
               onChange={(event) =>
                 onChange((value) => ({
                   ...value,
@@ -1956,6 +2178,7 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-next-payday">Next payday</ShadcnFieldLabel>
             <ShadcnInput
               id="finance-next-payday"
+              name="nextPayday"
               onChange={(event) =>
                 onChange((value) => ({ ...value, nextPayday: event.target.value }))
               }
@@ -1967,6 +2190,7 @@ function FinancialProfilePanel({
             <ShadcnFieldLabel htmlFor="finance-pay-account">Pay account</ShadcnFieldLabel>
             <ShadcnNativeSelect
               id="finance-pay-account"
+              name="payAccountId"
               onChange={(event) =>
                 onChange((value) => ({ ...value, payAccountId: event.target.value }))
               }
@@ -2757,6 +2981,29 @@ function FinanceTextField({
       <ShadcnFieldLabel htmlFor={id}>{label}</ShadcnFieldLabel>
       <ShadcnInput
         id={id}
+        name={
+          {
+            "finance-institution": "institution",
+            "finance-account": "name",
+            "finance-balance": "balance",
+            "finance-merchant": "merchant",
+            "finance-amount": "amount",
+            "finance-category": "category",
+            "finance-budget-category": "category",
+            "finance-budget-limit": "limit",
+          }[id] ?? id
+        }
+        required={[
+          "finance-institution",
+          "finance-account",
+          "finance-merchant",
+          "finance-amount",
+          "finance-budget-category",
+          "finance-budget-limit",
+        ].includes(id)}
+        type={inputMode === "decimal" ? "number" : "text"}
+        step={inputMode === "decimal" ? "any" : undefined}
+        min={["finance-amount", "finance-budget-limit"].includes(id) ? "0.01" : undefined}
         inputMode={inputMode}
         onChange={(event) => onChange(event.target.value)}
         value={value}
@@ -2768,9 +3015,15 @@ function FinanceTextField({
 function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) {
   const [token, setToken] = useState<string | null>(null);
   const status = useQuery({ queryFn: api.getPlaidStatus, queryKey: ["plaid-status"] });
-  const exchange = useMutation({
+  const exchange = useFeedbackMutation({
+    feedback: { action: "connect this bank", form: false, safeToRetry: false },
     mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
     onSuccess: onConnected,
+  });
+  const linkToken = useFeedbackMutation({
+    feedback: { action: "open bank connection", safeToRetry: true },
+    mutationFn: api.getPlaidLinkToken,
+    onSuccess: setToken,
   });
   const { open, ready } = usePlaidLink({
     onSuccess: (publicToken) => exchange.mutate(publicToken),
@@ -2786,7 +3039,15 @@ function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) 
       </ShadcnButton>
     );
   }
-  if (status.isError || !status.data.available) {
+  if (status.isError)
+    return (
+      <InlineError
+        error={status.error}
+        title="Couldn’t check bank connection availability."
+        retry={() => status.refetch()}
+      />
+    );
+  if (!status.data.available) {
     return (
       <ShadcnButton disabled size="sm" variant="outline">
         Plaid needs keys
@@ -2794,13 +3055,17 @@ function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) 
     );
   }
   return (
-    <ShadcnButton
-      disabled={exchange.isPending}
-      onClick={() => api.getPlaidLinkToken().then(setToken)}
-      size="sm"
-    >
-      Connect bank
-    </ShadcnButton>
+    <>
+      <MutationFeedback feedback={exchange.feedback} />
+      <MutationFeedback feedback={linkToken.feedback} />
+      <ShadcnButton
+        disabled={exchange.isPending || linkToken.isPending}
+        onClick={() => linkToken.mutate()}
+        size="sm"
+      >
+        {exchange.isPending ? "Connecting…" : linkToken.isPending ? "Opening…" : "Connect bank"}
+      </ShadcnButton>
+    </>
   );
 }
 function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) {

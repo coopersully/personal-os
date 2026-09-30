@@ -1,7 +1,7 @@
 import type { CalendarAccount } from "@personal-os/api-client";
 import type { Mailbox, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ChevronDown,
@@ -18,11 +18,14 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
 const googleMailboxNames: Record<string, string> = {
@@ -164,11 +167,17 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
       <p className="sidebar__mode-label">Mail</p>
       <nav aria-label="Mailboxes" className="sidebar-group context-sidebar__mailboxes">
         <p className="sidebar-group__label">Mailboxes</p>
+        {accounts.isError || mailboxes.isError ? (
+          <InlineError
+            error={accounts.error ?? mailboxes.error}
+            title="Couldn’t refresh mailboxes."
+            stale={Boolean(accounts.data && mailboxes.data)}
+            retry={() => Promise.all([accounts.refetch(), mailboxes.refetch()])}
+          />
+        ) : null}
         {accounts.isPending || mailboxes.isPending ? (
           <p className="context-sidebar__empty">Loading mailboxes…</p>
-        ) : accounts.isError || mailboxes.isError ? (
-          <InlineError error={accounts.isError ? accounts.error : mailboxes.error} />
-        ) : enabled.length === 0 ? (
+        ) : !accounts.data || !mailboxes.data ? null : enabled.length === 0 ? (
           <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
         ) : (
           <div className="context-sidebar__mailbox-list">
@@ -232,7 +241,6 @@ export function MailPage({ user }: { user: User }) {
   const [draft, setDraft] = useState(search);
   const [composing, setComposing] = useState(false);
   const [composeThread, setComposeThread] = useState<MailThread | null>(null);
-  const composeFormRef = useRef<HTMLFormElement>(null);
   useEffect(() => setDraft(search), [search]);
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
@@ -268,7 +276,8 @@ export function MailPage({ user }: { user: User }) {
     queryFn: () => api.listMailMessages(selected?.id as string),
     queryKey: ["mail-messages", selected?.id],
   });
-  const sync = useMutation({
+  const sync = useFeedbackMutation({
+    feedback: { action: "sync your mail", safeToRetry: true, success: "Mail sync completed." },
     mutationFn: () => Promise.all(enabled.map((account) => api.syncConnector(account.id))),
     onSuccess: () =>
       Promise.all([
@@ -277,7 +286,8 @@ export function MailPage({ user }: { user: User }) {
         client.invalidateQueries({ queryKey: ["mail-threads"] }),
       ]),
   });
-  const updateThread = useMutation({
+  const updateThread = useFeedbackMutation({
+    feedback: { action: "update this conversation", safeToRetry: true },
     mutationFn: ({
       id,
       ...input
@@ -289,12 +299,14 @@ export function MailPage({ user }: { user: User }) {
     }) => api.updateMailThread(id, input),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
-  const snoozeThread = useMutation({
+  const snoozeThread = useFeedbackMutation({
+    feedback: { action: "snooze this conversation", safeToRetry: true },
     mutationFn: (id: string) =>
       api.snoozeMailThread(id, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
-  const send = useMutation({
+  const send = useFeedbackMutation({
+    feedback: { action: "send this email", form: true, safeToRetry: false, success: "Email sent." },
     mutationFn: (form: FormData) => {
       const threadId = String(form.get("threadId") ?? "");
       return api.sendMail({
@@ -316,7 +328,13 @@ export function MailPage({ user }: { user: User }) {
       return client.invalidateQueries({ queryKey: ["mail-threads"] });
     },
   });
-  const saveDraft = useMutation({
+  const saveDraft = useFeedbackMutation({
+    feedback: {
+      action: "save this draft",
+      form: true,
+      safeToRetry: false,
+      success: "Draft saved.",
+    },
     mutationFn: (form: FormData) => {
       const threadId = String(form.get("threadId") ?? "");
       return api.createMailDraft({
@@ -339,8 +357,22 @@ export function MailPage({ user }: { user: User }) {
     },
   });
   if (accounts.isPending || mailboxes.isPending) return <PageLoading />;
-  if (accounts.isError) return <InlineError error={accounts.error} />;
-  if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
+  if (accounts.isError && !accounts.data)
+    return (
+      <InlineError
+        error={accounts.error}
+        title="Couldn’t load your mail accounts."
+        retry={() => accounts.refetch()}
+      />
+    );
+  if (mailboxes.isError && !mailboxes.data)
+    return (
+      <InlineError
+        error={mailboxes.error}
+        title="Couldn’t load your mailboxes."
+        retry={() => mailboxes.refetch()}
+      />
+    );
   if (!enabled.length)
     return (
       <div className="narrow-page">
@@ -352,7 +384,7 @@ export function MailPage({ user }: { user: User }) {
       </div>
     );
   const selectedMailbox = mailboxId
-    ? mailboxes.data.find((mailbox) => mailbox.id === mailboxId)
+    ? (mailboxes.data ?? []).find((mailbox) => mailbox.id === mailboxId)
     : undefined;
   const active = enabled.find(
     (account) => account.id === (selectedMailbox?.accountId ?? accountId),
@@ -404,6 +436,8 @@ export function MailPage({ user }: { user: User }) {
           </Button>
           <Button
             onClick={() => {
+              send.reset();
+              saveDraft.reset();
               setComposeThread(null);
               setComposing(true);
             }}
@@ -413,15 +447,33 @@ export function MailPage({ user }: { user: User }) {
           </Button>
         </div>
       </header>
-      {sync.isError ? <InlineError error={sync.error} /> : null}
+      <MutationFeedback feedback={sync.feedback} />
+      {accounts.isError ? (
+        <InlineError
+          error={accounts.error}
+          title="Couldn’t refresh mail accounts."
+          stale
+          retry={() => accounts.refetch()}
+        />
+      ) : null}
+      {mailboxes.isError ? (
+        <InlineError
+          error={mailboxes.error}
+          title="Couldn’t refresh mailboxes."
+          stale
+          retry={() => mailboxes.refetch()}
+        />
+      ) : null}
       {composing ? (
-        <form
+        <FeedbackForm
+          feedback={send.feedback ?? saveDraft.feedback}
+          fieldNames={{ to: "to" }}
           className="mail-compose"
           onSubmit={(event) => {
             event.preventDefault();
+            saveDraft.reset();
             send.mutate(new FormData(event.currentTarget));
           }}
-          ref={composeFormRef}
         >
           <input name="accountId" type="hidden" value={enabled[0]?.id ?? ""} />
           <input name="threadId" type="hidden" value={composeThread?.id ?? ""} />
@@ -431,6 +483,7 @@ export function MailPage({ user }: { user: User }) {
               aria-label="To"
               defaultValue={composeThread?.from.address ?? ""}
               name="to"
+              multiple
               required
               type="email"
             />
@@ -453,8 +506,6 @@ export function MailPage({ user }: { user: User }) {
             Message
             <textarea aria-label="Message" name="body" required />
           </label>
-          {send.isError ? <InlineError error={send.error} /> : null}
-          {saveDraft.isError ? <InlineError error={saveDraft.error} /> : null}
           <div>
             <Button
               onClick={() => {
@@ -467,33 +518,37 @@ export function MailPage({ user }: { user: User }) {
               Discard
             </Button>
             <Button
-              disabled={saveDraft.isPending}
-              onClick={() => {
-                if (composeFormRef.current) saveDraft.mutate(new FormData(composeFormRef.current));
+              disabled={saveDraft.isPending || send.isPending}
+              onClick={(event) => {
+                if (event.currentTarget.form) {
+                  send.reset();
+                  saveDraft.mutate(new FormData(event.currentTarget.form));
+                }
               }}
               tone="ghost"
               type="button"
             >
               {saveDraft.isPending ? "Saving…" : "Save draft"}
             </Button>
-            <Button disabled={send.isPending} type="submit">
+            <Button disabled={send.isPending || saveDraft.isPending} type="submit">
               {send.isPending ? "Sending…" : "Send"}
             </Button>
           </div>
-        </form>
-      ) : null}
-      {sync.isSuccess ? (
-        <p className="mail-sync-status" role="status">
-          Mail is up to date.
-        </p>
+        </FeedbackForm>
       ) : null}
       <div className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}>
         <section aria-label="Conversations" className="mail-thread-list">
+          {threads.isError ? (
+            <InlineError
+              error={threads.error}
+              title="Couldn’t load conversations."
+              stale={Boolean(threads.data)}
+              retry={() => threads.refetch()}
+            />
+          ) : null}
           {threads.isPending ? (
             <PageLoading />
-          ) : threads.isError ? (
-            <InlineError error={threads.error} />
-          ) : threads.data.length === 0 ? (
+          ) : !threads.data ? null : threads.data.length === 0 ? (
             <EmptyState icon={<Mail />} title="Nothing here">
               Try another mailbox or a broader search.
             </EmptyState>
@@ -515,13 +570,32 @@ export function MailPage({ user }: { user: User }) {
           )}
         </section>
         <section aria-label="Message reader" className="mail-reader">
+          <MutationFeedback feedback={updateThread.feedback} />
+          <MutationFeedback feedback={snoozeThread.feedback} />
+          {loaded.isError ? (
+            <InlineError
+              error={loaded.error}
+              title="Couldn’t load this conversation."
+              stale={Boolean(selected)}
+              retry={() => loaded.refetch()}
+            />
+          ) : null}
+          {messages.isError ? (
+            <InlineError
+              error={messages.error}
+              title="Couldn’t load messages."
+              stale={Boolean(messages.data)}
+              retry={() => messages.refetch()}
+            />
+          ) : null}
           {selected ? (
             <Reader
               archive={() =>
                 updateThread.mutate({
                   id: selected.id,
                   mailboxIds: selected.mailboxIds.filter(
-                    (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
+                    (id) =>
+                      (mailboxes.data ?? []).find((mailbox) => mailbox.id === id)?.role !== "inbox",
                   ),
                 })
               }
@@ -542,13 +616,13 @@ export function MailPage({ user }: { user: User }) {
                 updateThread.mutate({ id: selected.id, unread: !selected.unread })
               }
               trash={() => {
-                const trash = mailboxes.data.find(
+                const trash = (mailboxes.data ?? []).find(
                   (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
                 );
                 if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
               }}
             />
-          ) : selectedId && loaded.isPending ? (
+          ) : loaded.isError ? null : selectedId && loaded.isPending ? (
             <PageLoading />
           ) : (
             <EmptyState icon={<Mail />} title="Select a conversation">

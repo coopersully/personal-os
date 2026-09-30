@@ -68,6 +68,17 @@ For provider-backed material, expose freshness and failure instead of silently
 presenting a projection as current. Make destructive actions deliberate and
 surface API policy or permission failures clearly.
 
+## Apply feedback consistently
+
+Follow `docs/design/feedback.md`. Use `useFeedbackMutation` with an explicit
+user-facing action and safe-retry classification. Render `MutationFeedback` for
+persistent failures; edit forms use `FeedbackForm`, named inputs, and field-name
+mapping instead of a second error banner. Prefer Sonner for transient action
+results. Preserve drafts, one-time secrets, and cached data after failed refresh;
+keep query recovery and stale status beside the affected work. Validate on
+submit/meaningful blur, never on the first keystroke. Confirm irreversible actions
+with `useConfirmAction`; keep feedback and focus reachable after menus close.
+
 ## Verify interaction behavior
 
 Add focused Testing Library coverage for feature behavior. Use Playwright when

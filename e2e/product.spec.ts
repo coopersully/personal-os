@@ -10,7 +10,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.goto("/calendar?follow=0");
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
   const overlapPin = page.getByRole("button", { name: "Spread 5 overlapping events" });
-  await expect(overlapPin).toHaveCSS("opacity", "0");
+  await expect(overlapPin).toHaveCSS("opacity", test.info().project.use.isMobile ? "1" : "0");
   const overlappingCards = page
     .getByRole("group", { name: "5 overlapping events", exact: true })
     .locator(".calendar-timeline-event");
@@ -60,6 +60,13 @@ test("the repository QA fixture login exposes representative workspace data", as
     expect(
       Math.abs(pinBounds.y + pinBounds.height / 2 - groupBounds.y - groupBounds.height / 2),
     ).toBeLessThan(1);
+  }
+  if (test.info().project.use.isMobile) {
+    await overlapPin.tap();
+    const collapse = page.getByRole("button", { name: "Collapse 5 overlapping events" });
+    await expect(collapse).toBeVisible();
+    await collapse.tap();
+    await expect(overlapPin).toBeVisible();
   }
 
   await page.goto("/tasks");

@@ -11,7 +11,7 @@ mistaking temporary content for a committed destination.
 | --- | --- | --- |
 | Desktop workspace rail | Navigation | Exposes all five workspace icons before contextual navigation; the active link has a selected surface. |
 | Narrow workspace trigger | Orientation | Names the active workspace and opens the selector. |
-| Workspace menu | Choice | Lists every destination in manifest order using its framed identity icon and label. |
+| Workspace menu | Choice | Lists every destination in manifest order using its unframed identity icon and label. |
 | Destination surface | Primary material | Appears only after the person selects a workspace and navigation commits. |
 
 On desktop above 900 px, a 64 px rail precedes the contextual sidebar (or the
@@ -61,7 +61,7 @@ For the narrow selector:
 1. Opening the selector performs no route data prefetch and does not change the
    visible workspace.
 2. Each menu item contains one workspace identity icon and one label. The
-   current item also exposes `aria-current="page"` and a check glyph.
+   current item also exposes `aria-current="page"`, a filled glyph, and a selected surface.
 3. Pointer hover and keyboard focus use the standard menu highlight only. They
    never mount, animate, or navigate a destination.
 4. Selecting an item navigates immediately to that workspace's default route.
@@ -84,7 +84,7 @@ For the narrow selector:
 - Hovering and focusing every item leaves the current workspace unchanged.
 - Opening the selector issues no destination-specific preview requests.
 - Selecting each item navigates once and preserves normal route loading states.
-- The current destination is announced and visibly selected (checked in the menu).
+- The current destination is announced and visibly selected.
 - Escape closes the selector without changing the route.
 - Desktop, 320 px layout, high contrast, and reduced motion remain usable.
 

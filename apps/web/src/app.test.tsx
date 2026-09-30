@@ -5246,12 +5246,16 @@ describe("ilo web app", () => {
       ["/finances/cashflow", "Cash flow"],
       ["/finances/wealth", "Wealth"],
       ["/finances/accounts", "Accounts"],
-      ["/finances/health", "Ledger health"],
-      ["/finances/subscriptions", "Subscriptions"],
+      ["/finances/health", "Accounts"],
+      ["/finances/subscriptions", "Cash flow"],
     ] as const) {
       const view = setup(path);
-      const appBar = await screen.findByRole("navigation", { name: "Top navigation" });
-      expect(within(appBar).getByText(title)).toBeInTheDocument();
+      const sidebar = await screen.findByRole("complementary", { name: "Finances Sidebar" });
+      expect(within(sidebar).getByText("Finances")).toBeInTheDocument();
+      expect(within(sidebar).getByRole("link", { name: title, exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
       if (path === "/finances/wealth")
         expect(
           await screen.findByRole("region", { name: "Ownership-qualified wealth" }),

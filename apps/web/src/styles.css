@@ -3365,6 +3365,13 @@ p {
   white-space: nowrap;
   z-index: var(--overlap-control-layer, 10);
 }
+/* Touch users need a discoverable control because they cannot hover a stack. */
+@media (hover: none), (pointer: coarse) {
+  .calendar-overlap-cluster__toggle {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
 .calendar-overlap-cluster__toggle:is(:hover, :focus-visible) {
   background: var(--surface-strong);
   color: var(--content-primary);
@@ -3834,6 +3841,12 @@ p {
   width: 100%;
 }
 .mail-app-bar__identity-cluster,
+.mail-sync-control {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
 .mail-app-bar__controls {
   align-items: center;
   display: flex;

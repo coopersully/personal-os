@@ -5252,7 +5252,7 @@ describe("ilo web app", () => {
       const view = setup(path);
       const sidebar = await screen.findByRole("complementary", { name: "Finances Sidebar" });
       expect(within(sidebar).getByText("Finances")).toBeInTheDocument();
-      expect(within(sidebar).getByRole("link", { name: title, exact: true })).toHaveAttribute(
+      expect(within(sidebar).getByRole("link", { name: title })).toHaveAttribute(
         "aria-current",
         "page",
       );

@@ -109,3 +109,12 @@ architectures. Remove the test feed override from production artifacts. Apple
 credential presence and green unit tests do not prove these installed-app checks.
 The first public release requires an explicit operator publication after this
 acceptance. Subsequent updates are delivered by publishing the next complete draft.
+
+### Signed candidate builds
+
+Push a unique `desktop-candidate/<description>` tag to exercise the same Mac
+signing and notarization pipeline before merging or publishing a stable release.
+Candidate runs validate agreement between source versions and upload both Mac
+architecture artifacts to Actions. They skip GitHub release creation and never
+change the public update feed. Download the candidate artifacts from that run
+for installed-app acceptance. Never move or reuse a candidate tag.

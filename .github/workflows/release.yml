@@ -2,7 +2,7 @@ name: Release desktop installers
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "desktop-candidate/*"]
 
 permissions:
   contents: read
@@ -29,7 +29,13 @@ jobs:
           cache: pnpm
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
-      - run: node apps/desktop/scripts/release-metadata.mjs "${GITHUB_REF_NAME}"
+      - name: Validate source versions
+        run: |
+          release_tag="$GITHUB_REF_NAME"
+          if [[ "$release_tag" == desktop-candidate/* ]]; then
+            release_tag="v$(node -p "require('./apps/desktop/package.json').version")"
+          fi
+          node apps/desktop/scripts/release-metadata.mjs "$release_tag"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @personal-os/web build
         env:
@@ -74,6 +80,7 @@ jobs:
           path: apps/desktop/src-tauri/target/release/bundle/dmg/*
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     needs: [macos]

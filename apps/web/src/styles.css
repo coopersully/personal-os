@@ -3840,13 +3840,13 @@ p {
   min-width: 0;
   width: 100%;
 }
-.mail-app-bar__identity-cluster,
 .mail-sync-control {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
   gap: 0.5rem;
 }
+.mail-app-bar__identity-cluster,
 .mail-app-bar__controls {
   align-items: center;
   display: flex;

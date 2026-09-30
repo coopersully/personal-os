@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
-import { errorMessage } from "../../api.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean } = {}) {
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +28,13 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
       setConfirm(false);
       await local.refetch();
     } catch (e) {
-      setError(errorMessage(e));
+      setError(
+        classifyMutationError(e, {
+          action: "update automatic rituals",
+          form: true,
+          safeToRetry: false,
+        }).message,
+      );
     }
   }
   function exportPending() {

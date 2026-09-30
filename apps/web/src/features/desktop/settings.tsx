@@ -1,7 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
@@ -29,6 +32,7 @@ import {
   ItemTitle,
 } from "../../components/ui/item.js";
 import { Switch } from "../../components/ui/switch.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { RitualLocal } from "../tracking/ritual-local.js";
 import {
   type DesktopSettings,
@@ -84,7 +88,8 @@ export function DesktopSettingsPanel({
   useEffect(() => {
     if (query.data && query.data.settings.serverUrl !== hostedServer) setAdvancedServerOpen(true);
   }, [query.data]);
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save desktop preferences", safeToRetry: true, form: true },
     mutationFn: saveDesktopSettings,
     onSuccess: async (value) => {
       const switched = query.data?.settings.serverUrl !== value.settings.serverUrl;
@@ -99,11 +104,13 @@ export function DesktopSettingsPanel({
       toast.success("Desktop preferences saved");
     },
   });
-  const test = useMutation({
+  const test = useFeedbackMutation({
+    feedback: { action: "test the desktop connection", safeToRetry: true, form: false },
     mutationFn: testDesktopServer,
     onSuccess: (_, server) => setTested(server),
   });
-  const action = useMutation({
+  const action = useFeedbackMutation({
+    feedback: { action: "complete the desktop action", safeToRetry: false, form: false },
     mutationFn: nativeAction,
     onSuccess: async () => {
       await cache.invalidateQueries({ queryKey: ["desktop-settings"] });
@@ -126,12 +133,12 @@ export function DesktopSettingsPanel({
   });
   if (!isDesktop()) return null;
   if (query.isPending) return <p role="status">Loading desktop preferences…</p>;
-  if (query.error)
+  if (query.error && !query.data)
     return (
       <Alert variant="destructive">
         <AlertTitle>Desktop preferences unavailable</AlertTitle>
         <AlertDescription>
-          {errorMessage(query.error)}
+          Couldn’t load desktop preferences. Try again.
           <Button variant="outline" onClick={() => void query.refetch()}>
             Retry
           </Button>
@@ -143,7 +150,7 @@ export function DesktopSettingsPanel({
   const usesHostedServer = draft.serverUrl === hostedServer;
   const notification = (value: Partial<DesktopSettings["notifications"]>) =>
     update({ notifications: { ...draft.notifications, ...value } });
-  const failure = save.error ?? test.error ?? action.error;
+
   return (
     <section
       className="flex flex-col gap-5"
@@ -171,18 +178,16 @@ export function DesktopSettingsPanel({
       {query.data?.native.error ? (
         <Alert variant="destructive">
           <AlertTitle>macOS needs attention</AlertTitle>
-          <AlertDescription>{query.data.native.error}</AlertDescription>
-        </Alert>
-      ) : null}
-      {failure ? (
-        <Alert variant="destructive">
-          <AlertTitle>Could not update desktop preferences</AlertTitle>
           <AlertDescription>
-            {typeof failure === "string" ? failure : errorMessage(failure)}
+            Check macOS permissions and reconnect the desktop app.
           </AlertDescription>
         </Alert>
       ) : null}
-      <form
+      <MutationFeedback feedback={test.feedback} />
+      <MutationFeedback feedback={action.feedback} />
+      <QueryFeedback query={query} title="Couldn’t refresh desktop preferences." staleOnly />
+      <FeedbackForm
+        feedback={save.feedback}
         className="flex flex-col gap-5"
         onSubmit={(event) => {
           event.preventDefault();
@@ -275,7 +280,7 @@ export function DesktopSettingsPanel({
                 />
                 {query.data?.wallpaperError ? (
                   <p role="alert">
-                    Wallpaper: {query.data.wallpaperError}. nohmi will retry while it is running.
+                    Wallpaper could not refresh. nohmi will retry while it is running.
                   </p>
                 ) : null}
                 <FieldDescription>
@@ -479,18 +484,19 @@ export function DesktopSettingsPanel({
                   </Field>
                 ),
               )}
-              {mailboxes.error ? <p role="alert">Mail accounts could not be loaded.</p> : null}
+              <QueryFeedback query={mailboxes} title="Couldn’t load mail accounts." />
+              <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
+              <QueryFeedback query={calendars} title="Couldn’t load calendars." />
               {query.data?.mailError ? (
                 <p role="alert">
-                  Mail notifications could not refresh: {query.data.mailError}. nohmi will retry
-                  while running.
+                  Mail notifications could not refresh. nohmi will retry while running.
                 </p>
               ) : null}
               {accounts.data
                 ?.filter((account) => account.syncError)
                 .map((account) => (
                   <p role="status" key={account.id}>
-                    {account.email}: {account.syncError}. Check Connections to reconnect.
+                    {account.email}: Sync needs attention. Check Connections to reconnect.
                   </p>
                 ))}
             </FieldSet>
@@ -534,7 +540,7 @@ export function DesktopSettingsPanel({
         <Button type="submit" disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save preferences"}
         </Button>
-      </form>
+      </FeedbackForm>
     </section>
   );
 }

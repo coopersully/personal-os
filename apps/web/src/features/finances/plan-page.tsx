@@ -7,7 +7,7 @@ import type {
   FinanceCategory,
   FinanceGoal,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -43,8 +43,9 @@ import {
   WorkspaceSecondaryAppBarActions,
   WorkspaceSecondaryAppBarLeading,
 } from "@/components/workspace-secondary-app-bar";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { formatMoney } from "./format.js";
 import { isConfirmedFinanceMutationFailure } from "./mutation-retry.js";
@@ -254,7 +255,8 @@ export function FinancePlanPage() {
       predicate: (query) =>
         typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("finance-"),
     });
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this financial plan", safeToRetry: false, form: true },
     mutationFn: async (input: CreateFinanceBudgetVersionInput) => {
       const result = editing?.plan
         ? await api.reviseFinanceBudget({
@@ -271,7 +273,8 @@ export function FinancePlanPage() {
       await refresh();
     },
   });
-  const approve = useMutation({
+  const approve = useFeedbackMutation({
+    feedback: { action: "approve this financial change", safeToRetry: false, form: false },
     mutationFn: async (displayed: FinanceBudgetVersion) => {
       const identity = `${displayed.id}:${displayed.version}`;
       let key = approvalKeys.current.get(identity);
@@ -337,7 +340,11 @@ export function FinancePlanPage() {
                 </DialogDescription>
               </DialogHeader>
               {categoryQuery.isError ? (
-                <InlineError error={categoryQuery.error} />
+                <InlineError
+                  error={categoryQuery.error}
+                  retry={() => categoryQuery.refetch()}
+                  stale={categoryQuery.data !== undefined}
+                />
               ) : (
                 <FinanceBudgetBucketManager categories={relations.categories} month={month} />
               )}
@@ -364,7 +371,7 @@ export function FinancePlanPage() {
           <Alert variant="destructive">
             <AlertTitle>{plan ? "Saved plan may be out of date" : "Plan unavailable"}</AlertTitle>
             <AlertDescription>
-              {errorMessage(planQuery.error)}
+              {"Couldn’t refresh this information. Try again."}
               <Button variant="outline" onClick={reload}>
                 Try again
               </Button>
@@ -457,7 +464,7 @@ export function FinancePlanPage() {
                         : "Approval did not complete"}
                     </AlertTitle>
                     <AlertDescription>
-                      {errorMessage(approve.error)}
+                      {approve.feedback?.message}
                       {isFinancePlanConflict(approve.error) ? (
                         <Button variant="outline" onClick={reload}>
                           Reload latest plan
@@ -478,7 +485,9 @@ export function FinancePlanPage() {
             ) : statusQuery.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>Active plan status unavailable</AlertTitle>
-                <AlertDescription>{errorMessage(statusQuery.error)}</AlertDescription>
+                <AlertDescription>
+                  {"Couldn’t refresh this information. Try again."}
+                </AlertDescription>
               </Alert>
             ) : !active ? (
               <p className="text-sm text-muted-foreground">No approved plan is active yet.</p>

@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import type { MailDraft, MailSetupAccount } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { toast } from "sonner";
@@ -236,8 +236,10 @@ describe("FloatingMailComposer", () => {
     expect(screen.getByRole("button", { name: "Reconnect account" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Reconnect account" }));
-    expect(screen.getByLabelText("Current route")).toHaveTextContent(
-      "/settings?section=connections",
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current route")).toHaveTextContent(
+        "/settings?section=connections",
+      ),
     );
   });
 
@@ -291,7 +293,6 @@ describe("FloatingMailComposer", () => {
   });
 
   it("stays in Mail when a draft cannot be saved before opening Connections", async () => {
-    const errorToast = vi.spyOn(toast, "error");
     vi.spyOn(api, "createMailDraft").mockRejectedValue(new Error("Draft storage unavailable"));
     const view = renderComposer();
     await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
@@ -308,9 +309,7 @@ describe("FloatingMailComposer", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Reconnect account" }));
 
     await waitFor(() =>
-      expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
-        description: "Draft storage unavailable",
-      }),
+      expect(screen.getByText(/Couldn’t confirm whether we could save the draft/)).toBeVisible(),
     );
     expect(screen.getByLabelText("Current route")).toHaveTextContent("/mail");
   });
@@ -375,7 +374,7 @@ describe("FloatingMailComposer", () => {
     expect(await screen.findByLabelText("From")).toHaveTextContent("Personalme@example.com");
   });
 
-  it("continues a later queued autosave after an earlier save fails", async () => {
+  it("pauses queued autosaves after an uncertain create and requires a checked retry", async () => {
     let rejectFirst: (reason: Error) => void = () => undefined;
     const firstSave = new Promise<MailDraft>((_resolve, reject) => {
       rejectFirst = reject;
@@ -384,7 +383,6 @@ describe("FloatingMailComposer", () => {
       .spyOn(api, "createMailDraft")
       .mockReturnValueOnce(firstSave)
       .mockResolvedValueOnce({ ...draft, subject: "First updated" });
-    const errorToast = vi.spyOn(toast, "error");
     renderComposer();
 
     await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
@@ -394,11 +392,23 @@ describe("FloatingMailComposer", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 750));
     rejectFirst(new Error("Temporary draft failure"));
 
+    expect(await screen.findByText(/Automatic saving is paused/)).toBeVisible();
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+    expect(create).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Subject")).toHaveValue("First updated");
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Check Drafts in a new tab" })).toHaveAttribute(
+      "href",
+      "/mail?view=drafts",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving after checking" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     expect(create.mock.calls[1]?.[0]).toMatchObject({ subject: "First updated" });
-    expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
-      description: "Temporary draft failure",
-    });
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Couldn’t confirm whether we could save the draft/),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("prefills and saves a new reply or forward intent", async () => {
@@ -438,7 +448,9 @@ describe("FloatingMailComposer", () => {
     const first = renderComposer({ intent: {} });
     expect(await screen.findByRole("dialog", { name: "New message" })).toBeVisible();
     expect(screen.getByLabelText("From")).toHaveTextContent("Personalme@example.com");
-    expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    expect(screen.getByLabelText("To")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("To")).toHaveFocus();
     first.unmount();
 
     const reconnectAccount = { ...account, sendCapability: "reconnect" as const };
@@ -455,7 +467,6 @@ describe("FloatingMailComposer", () => {
   });
 
   it("keeps the composer open when saving on close fails", async () => {
-    const errorToast = vi.spyOn(toast, "error");
     vi.spyOn(api, "createMailDraft").mockRejectedValue(new Error("Draft storage unavailable"));
     renderComposer();
 
@@ -464,15 +475,12 @@ describe("FloatingMailComposer", () => {
     await userEvent.keyboard("{Escape}");
 
     await waitFor(() =>
-      expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
-        description: "Draft storage unavailable",
-      }),
+      expect(screen.getByText(/Couldn’t confirm whether we could save the draft/)).toBeVisible(),
     );
     expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
   });
 
   it("returns a failed send to the editable durable draft", async () => {
-    const errorToast = vi.spyOn(toast, "error");
     const updated = { ...draft, updatedAt: "2026-08-28T12:00:04.000Z" };
     const released = { ...updated, updatedAt: "2026-08-28T12:00:05.000Z" };
     const edited = {
@@ -507,11 +515,7 @@ describe("FloatingMailComposer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
     await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(errorToast).toHaveBeenCalledWith("Message couldn’t be sent", {
-        description: "Provider rejected delivery",
-      }),
-    );
+    await waitFor(() => expect(screen.getByText(/Couldn’t send the message/)).toBeVisible());
     expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
 
@@ -542,10 +546,11 @@ describe("FloatingMailComposer", () => {
     );
     expect(update).toHaveBeenCalledOnce();
     expect(list).not.toHaveBeenCalled();
+    expect(screen.getByText(/Check Sent mail/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
   });
 
   it("keeps retry-safe drafts blocked when durable authority cannot be recovered", async () => {
-    const errorToast = vi.spyOn(toast, "error");
     const update = vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
     vi.spyOn(api, "listMailDrafts").mockResolvedValue([]);
     vi.spyOn(api, "sendMailDraft").mockRejectedValue(
@@ -561,20 +566,274 @@ describe("FloatingMailComposer", () => {
     await screen.findByRole("dialog", { name: "New message" });
     await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
     await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
-    await waitFor(() =>
-      expect(errorToast).toHaveBeenCalledWith("Message couldn’t be sent", {
-        description: "Provider rejected delivery",
-      }),
-    );
+    await waitFor(() => expect(screen.getByText(/Couldn’t send the message/)).toBeVisible());
 
     await userEvent.type(screen.getByLabelText("Message"), " again");
     await waitFor(
       () =>
-        expect(errorToast).toHaveBeenCalledWith("Draft couldn’t be saved", {
-          description: "The latest saved draft could not be recovered. Try again.",
-        }),
+        expect(screen.getByText(/Couldn’t confirm whether we could save the draft/)).toBeVisible(),
       { timeout: 2_000 },
     );
     expect(update).toHaveBeenCalledOnce();
+  });
+  it("keeps a reopened reconciliation draft editable without allowing another save or send", async () => {
+    const create = vi.spyOn(api, "createMailDraft");
+    const update = vi.spyOn(api, "updateMailDraft");
+    const send = vi.spyOn(api, "sendMailDraft");
+    renderComposer({ intent: { draft: { ...draft, sendStatus: "reconcile" } } });
+    expect(await screen.findByText(/Check Sent mail/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Keep this correction" },
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
+    expect(screen.getByLabelText("Message")).toHaveValue("Keep this correction");
+    await userEvent.keyboard("{Escape}");
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("validates recipient and Cc corrections while preserving the selected sender", async () => {
+    const second = {
+      ...account,
+      accountId: "55555555-5555-4555-8555-555555555555",
+      label: "Work",
+      email: null,
+    };
+    const create = vi
+      .spyOn(api, "createMailDraft")
+      .mockResolvedValue({ ...draft, accountId: second.accountId });
+    vi.spyOn(api, "updateMailDraft").mockResolvedValue({ ...draft, accountId: second.accountId });
+    renderComposer({ accounts: [account, second] });
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.click(screen.getByRole("button", { name: "From" }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Work" }));
+    expect(screen.getByRole("button", { name: "From" })).toHaveTextContent("Work");
+    await userEvent.click(screen.getByRole("button", { name: "Cc" }));
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "invalid" } });
+    fireEvent.change(screen.getByLabelText("Cc"), { target: { value: "also-invalid" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    expect(screen.getByLabelText("To")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Cc")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
+    fireEvent.input(screen.getByLabelText("To"), {
+      target: { value: "one@example.com, two@example.com" },
+    });
+    fireEvent.input(screen.getByLabelText("Cc"), { target: { value: "copy@example.com" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    expect(await screen.findByRole("dialog", { name: "Send this message?" })).toBeVisible();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: second.accountId,
+        cc: [{ address: "copy@example.com", name: null }],
+      }),
+    );
+    expect(screen.getByText("(No subject)")).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "New message" })).toBeVisible();
+    expect(screen.getByLabelText("Cc")).toHaveValue("copy@example.com");
+  });
+
+  it("keeps an explicit save permission failure visible until a successful save", async () => {
+    const create = vi
+      .spyOn(api, "createMailDraft")
+      .mockRejectedValueOnce(
+        new ApiClientError({ code: "forbidden", message: "internal policy", status: 403 }),
+      )
+      .mockResolvedValue(draft);
+    renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByText(/You don’t have access to save the draft/)).toBeVisible();
+    expect(screen.queryByText("internal policy")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/You don’t have access/)).not.toBeInTheDocument(),
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Saved")).toBeVisible();
+  });
+
+  it("maps server validation to retained message input before permitting send review", async () => {
+    const create = vi
+      .spyOn(api, "createMailDraft")
+      .mockRejectedValueOnce(
+        new ApiClientError({
+          code: "invalid_request",
+          message: "Rejected",
+          status: 400,
+          details: [{ path: ["body"], code: "too_small", origin: "string", minimum: 10 }],
+        }),
+      )
+      .mockResolvedValue(draft);
+    renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "you@example.com" } });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Short" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Message")).toHaveAttribute("aria-invalid", "true"),
+    );
+    expect(screen.getByLabelText("Message")).toHaveValue("Short");
+    expect(screen.getByLabelText("Message")).toHaveFocus();
+    expect(screen.getByText("Enter at least 10 characters.")).toBeVisible();
+    fireEvent.input(screen.getByLabelText("Message"), { target: { value: "A complete message" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review and send" }));
+    expect(await screen.findByRole("dialog", { name: "Send this message?" })).toBeVisible();
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses again if the checked retry also has an uncertain outcome", async () => {
+    const create = vi.spyOn(api, "createMailDraft").mockRejectedValue(new Error("Lost response"));
+    renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Preserve me" } });
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Retry saving after checking" }),
+    );
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(/Automatic saving is paused/)).toBeVisible();
+    expect(screen.getByLabelText("Message")).toHaveValue("Preserve me");
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
+  });
+
+  it("reports confirmed save and send despite a failed draft-list refresh", async () => {
+    vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
+    const send = vi.spyOn(api, "sendMailDraft").mockResolvedValue();
+    vi.spyOn(QueryClient.prototype, "invalidateQueries").mockRejectedValue(
+      new Error("Read unavailable"),
+    );
+    const errorToast = vi.spyOn(toast, "error");
+    const successToast = vi.spyOn(toast, "success");
+    renderComposer({ intent: { draft } });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and send" }));
+    expect(await screen.findByRole("dialog", { name: "Send this message?" })).toBeVisible();
+    expect(errorToast).toHaveBeenCalledWith(
+      "Draft saved, but the draft list couldn’t refresh. Refresh the page to see it.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(successToast).toHaveBeenCalledWith("Message sent"));
+    expect(errorToast).toHaveBeenCalledWith(
+      "Message sent, but the draft list couldn’t refresh. Refresh the page to see it.",
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "New message" })).not.toBeInTheDocument();
+  });
+
+  it("recovers retry-safe send authority before saving subsequent edits", async () => {
+    const released = { ...draft, updatedAt: "2026-08-28T12:00:05.000Z" };
+    const update = vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
+    vi.spyOn(api, "sendMailDraft").mockRejectedValue(
+      new ApiClientError({
+        code: "service_unavailable",
+        details: { retrySafe: true },
+        message: "Rejected delivery",
+        status: 503,
+      }),
+    );
+    vi.spyOn(api, "listMailDrafts").mockResolvedValue([released]);
+    renderComposer({ intent: { draft } });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and send" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
+    expect(await screen.findByText(/Couldn’t send the message/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Revised" } });
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() =>
+      expect(update).toHaveBeenLastCalledWith(
+        draft.id,
+        expect.objectContaining({ expectedUpdatedAt: released.updatedAt, body: "Revised" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/Couldn’t send the message/)).not.toBeInTheDocument(),
+    );
+  });
+  it("confirms dismissal after uncertain creation without saving again and permits a fresh draft", async () => {
+    const create = vi
+      .spyOn(api, "createMailDraft")
+      .mockRejectedValueOnce(new Error("Create response lost"))
+      .mockResolvedValue(draft);
+    renderComposer();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Keep until checked" } });
+    await waitFor(() => expect(create).toHaveBeenCalledOnce(), { timeout: 2_000 });
+    expect(await screen.findByText(/Automatic saving is paused/)).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    expect(await screen.findByRole("dialog", { name: "Close this local copy?" })).toBeVisible();
+    expect(screen.getByText(/It does not delete a saved draft/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Subject")).toHaveValue("Keep until checked");
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(create).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Close local copy" }));
+    await userEvent.click(screen.getByRole("button", { name: "Discard local copy" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(create).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    expect(screen.getByLabelText("Subject")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Fresh draft" } });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2), { timeout: 2_000 });
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "Fresh draft" }));
+    expect(screen.getByText("Saved")).toBeVisible();
+  });
+  it("requires confirmation before discarding edits after an uncertain send", async () => {
+    const update = vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
+    const send = vi.spyOn(api, "sendMailDraft").mockRejectedValue(new Error("Response lost"));
+    renderComposer({ intent: { draft } });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and send" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
+    expect(await screen.findByText(/Check Sent mail/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Keep these new edits" },
+    });
+    await userEvent.keyboard("{Escape}");
+    expect(await screen.findByRole("dialog", { name: "Close this local copy?" })).toBeVisible();
+    expect(screen.getByText(/Sending may already have succeeded/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Message")).toHaveValue("Keep these new edits");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Discard local copy" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(send).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    "retry",
+    "reconnect",
+    "manage",
+  ] as const)("never submits the compose form through account %s recovery", async (recovery) => {
+    const create = vi.spyOn(api, "createMailDraft").mockResolvedValue(draft);
+    const retry = vi.fn();
+    renderComposer({
+      accounts: recovery === "reconnect" ? [{ ...account, sendCapability: "reconnect" }] : [],
+      accountsState: recovery === "retry" ? "error" : "ready",
+      onRetryAccounts: retry,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.click(
+      screen.getByRole("button", {
+        name:
+          recovery === "retry"
+            ? "Try again"
+            : recovery === "reconnect"
+              ? "Reconnect account"
+              : "Manage accounts",
+      }),
+    );
+    if (recovery === "retry") expect(retry).toHaveBeenCalledOnce();
+    else
+      await waitFor(() =>
+        expect(screen.getByLabelText("Current route")).toHaveTextContent(
+          "/settings?section=connections",
+        ),
+      );
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
   });
 });

@@ -162,7 +162,9 @@ it("keeps interrupted input and resumes a changed session before retrying", asyn
     new Error("Finance setup is at version 8; resume it before continuing."),
   );
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText(/Finance setup is at version 8/)).toBeInTheDocument();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could update financial setup/),
+  ).toBeInTheDocument();
   expect(screen.getByLabelText("Where do you live for tax purposes?")).toHaveValue("California");
   api.setupFinances.mockResolvedValueOnce(setupResponse({ version: 8 }));
   await user.click(screen.getByRole("button", { name: "Resume saved progress" }));
@@ -381,7 +383,9 @@ it("renders every resumable setup state and its conservative fallback evidence",
   );
   await user.type(screen.getByLabelText("What is your monthly income?"), "5000");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText(/previously failed/)).toBeVisible();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could update financial setup/),
+  ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Save answer" }));
 
   expect(await screen.findByText("Setup progress")).toBeVisible();
@@ -396,7 +400,9 @@ it("renders every resumable setup state and its conservative fallback evidence",
   expect(screen.getByRole("link", { name: "Answer in Review" })).toBeVisible();
   expect(screen.getByText("No changes were applied.")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
-  expect(await screen.findByText("Maintenance unavailable")).toBeVisible();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could run financial maintenance/),
+  ).toBeVisible();
 });
 
 it("prefers the canonical setup run and keeps blocked legacy recovery visible", async () => {
@@ -579,8 +585,7 @@ it("keeps setup recoverable when plan and category reads fail", async () => {
   api.getFinanceCategories.mockRejectedValue(new Error("Categories unavailable"));
   mount();
   await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findByText("Plan unavailable")).toBeInTheDocument();
-  expect(await screen.findByText("Categories unavailable")).toBeInTheDocument();
+  expect(await screen.findAllByText("Couldn’t load this material.")).toHaveLength(2);
   expect(screen.getByRole("link", { name: "Continue bookkeeping" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument();
 });

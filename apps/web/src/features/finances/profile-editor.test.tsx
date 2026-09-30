@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -73,6 +74,52 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Canonical Finance profile editor", () => {
+  it.each([
+    "x".repeat(1_001),
+    Array.from({ length: 101 }, (_, index) => `Note ${index}`).join("\n"),
+  ])("validates planning notes locally and saves the corrected draft", async (invalidNotes) => {
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit financial profile" }));
+    const notes = screen.getByLabelText("Planning notes");
+    fireEvent.change(notes, { target: { value: invalidNotes } });
+    fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
+    expect(notes).toHaveAttribute("aria-invalid", "true");
+    expect(notes).toHaveFocus();
+    expect(notes).toHaveAccessibleDescription(/Enter no more than 100 notes/);
+    expect(api.updateFinancialProfile).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Couldn’t confirm whether/)).not.toBeInTheDocument();
+    fireEvent.change(notes, { target: { value: "Corrected planning note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
+    await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledOnce());
+    expect(api.updateFinancialProfile.mock.calls[0]?.[0]).toMatchObject({
+      changes: { preferences: { notes: ["Corrected planning note"] } },
+    });
+  });
+  it("associates a rejected buffer target with the buffer field", async () => {
+    api.updateFinancialProfile.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "invalid_request",
+        message: "Invalid profile",
+        status: 400,
+        details: [
+          {
+            path: ["changes", "preferences", "bufferTarget"],
+            code: "too_big",
+            maximum: 100_000_000,
+            inclusive: true,
+          },
+        ],
+      }),
+    );
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit financial profile" }));
+    const buffer = screen.getByRole("spinbutton", { name: /buffer/i });
+    fireEvent.change(buffer, { target: { value: "300" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
+    await waitFor(() => expect(buffer).toHaveAttribute("aria-invalid", "true"));
+    expect(buffer).toHaveAccessibleDescription(/Enter a value no greater than 100000000/);
+    expect(buffer).toHaveValue(300);
+  });
   it("preserves the exact boundaries and contents of agent-authored multiline notes when other fields change", async () => {
     const notes = [
       "Keep six months of emergency cash.\nReview before withdrawing.",
@@ -112,7 +159,7 @@ describe("Canonical Finance profile editor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit financial profile" }));
     fireEvent.change(screen.getByLabelText("Household size"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
-    await screen.findByText("Financial profile was not saved");
+    await screen.findByText(/Couldn’t confirm whether we could save your financial profile/);
     expect(screen.getByLabelText("Household size")).toHaveValue(3);
     fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
     await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(2));
@@ -153,17 +200,29 @@ describe("Canonical Finance profile editor", () => {
     );
   });
   it("retains the draft and original revision on conflict", async () => {
-    api.updateFinancialProfile.mockRejectedValue(new Error("Profile is at version 5; reload it."));
+    api.updateFinancialProfile.mockRejectedValue(
+      new ApiClientError({
+        code: "conflict",
+        message: "Profile is at version 5; reload it.",
+        status: 409,
+      }),
+    );
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Edit financial profile" }));
     fireEvent.change(screen.getByLabelText("Household size"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
-    expect(await screen.findByText(/Profile is at version 5/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/This item changed or is no longer available/),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Household size")).toHaveValue(3);
     fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
     await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(2));
-    expect(api.updateFinancialProfile.mock.calls[1]?.[0]).toEqual(
-      api.updateFinancialProfile.mock.calls[0]?.[0],
+    expect(api.updateFinancialProfile.mock.calls[1]?.[0]).toMatchObject({
+      changes: { householdSize: 3 },
+      expectedVersion: 4,
+    });
+    expect(api.updateFinancialProfile.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+      api.updateFinancialProfile.mock.calls[0]?.[0].idempotencyKey,
     );
   });
   it("creates the first canonical profile at version zero without filling unknown amounts", async () => {

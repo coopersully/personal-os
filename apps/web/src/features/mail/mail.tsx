@@ -1,5 +1,5 @@
 import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -22,7 +22,9 @@ import {
 } from "@/components/icons";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
-import { InlineError, PageLoading } from "../../components/async-state.js";
+import { PageLoading, QueryFeedback } from "../../components/async-state.js";
+import { useConfirmAction } from "../../components/confirm-action.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { Avatar, AvatarFallback } from "../../components/ui/avatar.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
@@ -61,8 +63,8 @@ import {
   WorkspaceSecondaryAppBarLeading,
 } from "../../components/workspace-secondary-app-bar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
-import { useErrorNotification } from "../../lib/error-notification.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
 
@@ -274,10 +276,15 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
       <SidebarGroupLabel>Mailboxes</SidebarGroupLabel>
       <SidebarGroupContent>
         <nav aria-label="Mailboxes">
+          <QueryFeedback query={accounts} title="Couldn’t refresh mail accounts." staleOnly />
+          <QueryFeedback query={mailboxes} title="Couldn’t refresh mailboxes." staleOnly />
           {accounts.isPending || mailboxes.isPending ? (
             <p className="context-sidebar__empty">Loading mailboxes…</p>
-          ) : accounts.isError || mailboxes.isError ? (
-            <InlineError error={accounts.isError ? accounts.error : mailboxes.error} />
+          ) : (accounts.isError && !accounts.data) || (mailboxes.isError && !mailboxes.data) ? (
+            <QueryFeedback
+              query={accounts.isError ? accounts : mailboxes}
+              title="Couldn’t load mailboxes."
+            />
           ) : enabled.length === 0 ? (
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
           ) : (
@@ -299,6 +306,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
 /* v8 ignore start -- asynchronous view-state variants are covered by browser acceptance tests */
 export function MailPage({ user }: { user: User }) {
   const client = useQueryClient();
+  const { confirm, confirmation } = useConfirmAction();
   const [params, setParams] = useSearchParams();
   const accounts = useQuery({
     queryFn: api.listConnectors,
@@ -345,17 +353,19 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-setup-context"],
     refetchInterval: visibleConnectorRefreshInterval,
   });
-  useErrorNotification(!setup.data && setup.isError ? setup.error : null);
+
   const drafts = useQuery({
     enabled: listScope === "drafts",
     queryFn: api.listMailDrafts,
     queryKey: ["mail-drafts"],
   });
-  const deleteDraft = useMutation({
+  const deleteDraft = useFeedbackMutation({
+    feedback: { action: "discard the draft", safeToRetry: false },
     mutationFn: api.deleteMailDraft,
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
   });
-  const reconcileDraft = useMutation({
+  const reconcileDraft = useFeedbackMutation({
+    feedback: { action: "record the sending outcome", safeToRetry: true },
     mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
       api.reconcileMailDraft(id, { outcome }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
@@ -373,7 +383,8 @@ export function MailPage({ user }: { user: User }) {
     queryFn: () => api.listMailMessages(selected?.id as string),
     queryKey: ["mail-messages", selected?.id],
   });
-  const updateThread = useMutation({
+  const updateThread = useFeedbackMutation({
+    feedback: { action: "update the conversation", safeToRetry: true },
     mutationFn: ({
       id,
       ...input
@@ -385,14 +396,17 @@ export function MailPage({ user }: { user: User }) {
     }) => api.updateMailThread(id, input),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
-  const snoozeThread = useMutation({
+  const snoozeThread = useFeedbackMutation({
+    feedback: { action: "snooze the conversation", safeToRetry: true },
     mutationFn: (id: string) =>
       api.snoozeMailThread(id, new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString()),
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-threads"] }),
   });
   if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
-  if (accounts.isError) return <InlineError error={accounts.error} />;
-  if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
+  if (accounts.isError && !accounts.data)
+    return <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />;
+  if (mailboxes.isError && !mailboxes.data)
+    return <QueryFeedback query={mailboxes} title="Couldn’t load mailboxes." />;
   if (!enabled.length)
     return (
       <div className="mail-page">
@@ -448,7 +462,7 @@ export function MailPage({ user }: { user: User }) {
           });
         }}
         listScope={listScope}
-        pending={updateThread.isPending}
+        pending={updateThread.isPending || snoozeThread.isPending}
         reply={() => {
           if (!selected) return;
           const accountAddress = setup.data?.accounts
@@ -489,6 +503,16 @@ export function MailPage({ user }: { user: User }) {
         }}
       />
       <div className="mail-page">
+        {confirmation}
+        <MutationFeedback feedback={deleteDraft.feedback} />
+        <MutationFeedback feedback={reconcileDraft.feedback} />
+        <MutationFeedback feedback={updateThread.feedback} />
+        <MutationFeedback feedback={snoozeThread.feedback} />
+        <QueryFeedback query={accounts} title="Couldn’t refresh mail accounts." staleOnly />
+        <QueryFeedback query={mailboxes} title="Couldn’t refresh mailboxes." staleOnly />
+        <QueryFeedback query={drafts} title="Couldn’t refresh drafts." staleOnly />
+        <QueryFeedback query={threads} title="Couldn’t refresh conversations." staleOnly />
+        <QueryFeedback query={setup} title="Couldn’t load sending accounts." />
         <ResizablePanelGroup
           className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
           defaultLayout={readerLayout}
@@ -504,18 +528,25 @@ export function MailPage({ user }: { user: User }) {
               {listScope === "drafts" ? (
                 drafts.isPending ? (
                   <PageLoading />
-                ) : drafts.isError ? (
-                  <InlineError error={drafts.error} />
+                ) : drafts.isError && !drafts.data ? (
+                  <QueryFeedback query={drafts} title="Couldn’t load drafts." />
                 ) : (
                   <MailDraftList
                     drafts={(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent")}
                     openDraft={setComposeIntent}
                     reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
-                    remove={(id) => deleteDraft.mutate(id)}
+                    remove={(id) =>
+                      confirm({
+                        title: "Discard this draft?",
+                        description: "The saved draft will be permanently deleted.",
+                        actionLabel: "Discard draft",
+                        onConfirm: () => deleteDraft.mutate(id),
+                      })
+                    }
                   />
                 )
-              ) : threads.isError ? (
-                <InlineError error={threads.error} />
+              ) : threads.isError && !threads.data ? (
+                <QueryFeedback query={threads} title="Couldn’t load conversations." />
               ) : threads.data?.length === 0 ? (
                 <Empty>
                   <EmptyHeader>
@@ -542,13 +573,15 @@ export function MailPage({ user }: { user: User }) {
           <ResizableHandle aria-label="Resize conversation list" withHandle />
           <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
             <section aria-label="Message reader" className="mail-reader">
+              <QueryFeedback query={loaded} title="Couldn’t load the conversation." />
+              <QueryFeedback query={messages} title="Couldn’t load conversation messages." />
               {selected ? (
                 <Reader
                   messages={messages.data ?? []}
                   thread={selected}
                   timeZone={user.planningTimezone}
                 />
-              ) : selectedId && loaded.isPending ? (
+              ) : loaded.isError ? null : selectedId && loaded.isPending ? (
                 <PageLoading />
               ) : (
                 <Empty className="mail-reader__empty">
@@ -717,7 +750,7 @@ function MailSecondaryNavigation({
           <Button
             aria-label="Snooze conversation until tomorrow"
             className="mail-secondary-nav__compact-action"
-            disabled={!selected}
+            disabled={!selected || pending}
             onClick={snooze}
             tabIndex={selected ? undefined : -1}
             variant="ghost"

@@ -7,7 +7,7 @@ import {
   idSchema,
 } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CircleCheckIcon } from "@/components/icons";
@@ -22,6 +22,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceContextualQuestionPage } from "./contextual-question.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
@@ -85,7 +87,13 @@ function TransactionEvidence({ id }: { id: string }) {
           </Link>
         </ItemTitle>
         {transaction.isPending ? <Spinner label="Loading transaction evidence" /> : null}
-        {transaction.error ? <InlineError error={transaction.error} /> : null}
+        {transaction.error ? (
+          <InlineError
+            error={transaction.error}
+            retry={() => transaction.refetch()}
+            stale={transaction.data !== undefined}
+          />
+        ) : null}
         {record ? (
           <ItemDescription>
             {record.date} ·{" "}
@@ -154,7 +162,11 @@ function FinanceInboxReviewPage() {
     <section aria-label="Finance review" className="grid gap-4">
       {inbox.error ? (
         <>
-          <InlineError error={inbox.error} />
+          <InlineError
+            error={inbox.error}
+            retry={() => inbox.refetch()}
+            stale={inbox.data !== undefined}
+          />
           <Button onClick={() => void inbox.refetch()} variant="outline">
             Reload review
           </Button>
@@ -170,6 +182,7 @@ function FinanceInboxReviewPage() {
         <Field>
           <FieldLabel htmlFor="finance-inbox-item">Outstanding items</FieldLabel>
           <NativeSelect
+            name="financeInboxItem"
             id="finance-inbox-item"
             value={review?.id ?? ""}
             onChange={(event) => setSearchParams({ item: event.target.value })}
@@ -276,7 +289,8 @@ export function ReviewQuestion({
     queryFn: () => api.listFinanceTransactions({ limit: 50, cursor }),
     enabled: resolutionType === "link_transactions",
   });
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "save this review", safeToRetry: false, form: true },
     mutationFn: (input: AnswerFinanceReviewInput) => api.answerFinanceReview(review.id, input),
     onError: (error) => {
       if (errorMessage(error).includes("previously failed; use a new idempotency key")) {
@@ -392,8 +406,15 @@ export function ReviewQuestion({
         {proposal?.type === "link_transactions" ? (
           <p className="text-sm">Proposed relationship: {proposal.relationship}</p>
         ) : null}
-        {categories.error ? <InlineError error={categories.error} /> : null}
-        <form
+        {categories.error ? (
+          <InlineError
+            error={categories.error}
+            retry={() => categories.refetch()}
+            stale={categories.data !== undefined}
+          />
+        ) : null}
+        <FeedbackForm
+          feedback={mutation.feedback}
           className="grid gap-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -482,7 +503,13 @@ export function ReviewQuestion({
                       ))}
                   </NativeSelect>
                 </Field>
-                {related.error ? <InlineError error={related.error} /> : null}
+                {related.error ? (
+                  <InlineError
+                    error={related.error}
+                    retry={() => related.refetch()}
+                    stale={related.data !== undefined}
+                  />
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   {cursor ? (
                     <Button type="button" variant="ghost" onClick={() => setCursor(undefined)}>
@@ -509,6 +536,7 @@ export function ReviewQuestion({
             <Field>
               <FieldLabel htmlFor="finance-review-answer">Your answer</FieldLabel>
               <Textarea
+                name="financeReviewAnswer"
                 id="finance-review-answer"
                 value={answer}
                 maxLength={answerLimit}
@@ -532,12 +560,7 @@ export function ReviewQuestion({
               ) : null}
             </Field>
           </FieldGroup>
-          {mutation.error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Answer not saved</AlertTitle>
-              <AlertDescription>{errorMessage(mutation.error)}</AlertDescription>
-            </Alert>
-          ) : null}
+
           {mutation.data?.outcome === "failed" ? (
             <Alert variant="destructive">
               <AlertTitle>Answer not saved</AlertTitle>
@@ -551,7 +574,7 @@ export function ReviewQuestion({
           >
             {mutation.isPending ? "Saving answer…" : "Save answer"}
           </Button>
-        </form>
+        </FeedbackForm>
       </CardContent>
     </Card>
   );
@@ -591,7 +614,13 @@ function NearbyActivity({
           Same account · {from} through {to}. Nearby activity does not establish a relationship.
         </p>
         {nearby.isPending ? <Spinner label="Loading nearby activity" /> : null}
-        {nearby.error ? <InlineError error={nearby.error} /> : null}
+        {nearby.error ? (
+          <InlineError
+            error={nearby.error}
+            retry={() => nearby.refetch()}
+            stale={nearby.data !== undefined}
+          />
+        ) : null}
         <ItemGroup>
           {items?.map((item) => (
             <Item key={item.id}>

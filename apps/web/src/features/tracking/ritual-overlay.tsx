@@ -7,7 +7,6 @@ import {
   ritualAnswerIsValid,
 } from "@personal-os/domain";
 import { useEffect, useRef, useState } from "react";
-import { errorMessage } from "../../api.js";
 import { NohmiBrandMark } from "../../components/brand-marks.js";
 import { AlertTriangleIcon, CheckIcon, ClockIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
@@ -18,6 +17,7 @@ import { Input } from "../../components/ui/input.js";
 import { RadioGroup, RadioGroupItem } from "../../components/ui/radio-group.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import {
   readRitualState,
   ritualContentReady,
@@ -51,7 +51,12 @@ export function RitualOverlay() {
         }
       } catch (e) {
         if (!cancelled) {
-          setReadinessError(errorMessage(e));
+          setReadinessError(
+            classifyMutationError(e, {
+              action: "prepare this ritual",
+              safeToRetry: true,
+            }).message,
+          );
           retry = setTimeout(() => void prepare(), 1000);
         }
       }
@@ -76,7 +81,12 @@ export function RitualOverlay() {
         .catch((e) => {
           if (active) {
             setState(null);
-            setError(errorMessage(e));
+            setError(
+              classifyMutationError(e, {
+                action: "load this ritual",
+                safeToRetry: true,
+              }).message,
+            );
           }
         });
     void refresh();
@@ -180,7 +190,13 @@ export function RitualChecklist({
       }
     } catch (e) {
       failedDrafts.current[stepId] = { value, occurrenceId, revision: attempt.expectedRevision };
-      setError(errorMessage(e));
+      setError(
+        classifyMutationError(e, {
+          action: "save your ritual answers",
+          form: true,
+          safeToRetry: false,
+        }).message,
+      );
     } finally {
       setBusy(false);
     }
@@ -212,7 +228,13 @@ export function RitualChecklist({
         if (result.outcome === "conflict") setError("This ritual changed. Please try again.");
       }
     } catch (e) {
-      setError(errorMessage(e));
+      setError(
+        classifyMutationError(e, {
+          action: "save your ritual answers",
+          form: true,
+          safeToRetry: false,
+        }).message,
+      );
     } finally {
       setBusy(false);
     }
@@ -262,7 +284,7 @@ export function RitualChecklist({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [challenge, busy]);
-  if (!occurrence || occurrence.status !== "pending")
+  if (occurrence?.status !== "pending")
     return (
       <div className="flex flex-col items-center gap-3 py-8">
         <h1>{occurrence?.status === "completed" ? "All done." : "You’re up to date."}</h1>

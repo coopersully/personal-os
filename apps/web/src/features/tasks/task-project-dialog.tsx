@@ -6,7 +6,7 @@ import {
   type TaskProjectMovePreview,
   taskProjectCompletionConflictSchema,
 } from "@personal-os/domain";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -23,9 +23,11 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { ProjectConflictDialog } from "./project-conflict-dialog.js";
 
 export function TaskProjectDialog({
@@ -55,7 +57,8 @@ export function TaskProjectDialog({
     ]);
     close();
   };
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this project", safeToRetry: false, form: true },
     mutationFn: (input: {
       name: string;
       notes: string | null;
@@ -65,10 +68,10 @@ export function TaskProjectDialog({
       project
         ? api.updateTaskProject(project.id, { ...input, expectedRevision: project.revision })
         : api.createTaskProject({ ...input, listId }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => finish(project ? "Project updated." : "Project created."),
   });
-  const lifecycle = useMutation({
+  const lifecycle = useFeedbackMutation({
+    feedback: { action: "update this project", safeToRetry: false, form: false },
     mutationFn: async ({
       destinationListId,
       destinationProjectId,
@@ -102,7 +105,6 @@ export function TaskProjectDialog({
           return;
         }
       }
-      toast.error(errorMessage(error));
     },
     onSuccess: (_result, variables) => {
       if (variables.resolution === "keep_project_open") {
@@ -118,7 +120,8 @@ export function TaskProjectDialog({
       );
     },
   });
-  const previewMove = useMutation({
+  const previewMove = useFeedbackMutation({
+    feedback: { action: "preview this project move", safeToRetry: true, form: false },
     mutationFn: () => {
       if (!project) throw new Error("Create the Project before moving it.");
       return api.previewTaskProjectMove(project.id, {
@@ -126,10 +129,10 @@ export function TaskProjectDialog({
         expectedRevision: project.revision,
       });
     },
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: setMovePreview,
   });
-  const confirmMove = useMutation({
+  const confirmMove = useFeedbackMutation({
+    feedback: { action: "move this project", safeToRetry: false, form: false },
     mutationFn: () => {
       if (!project || !movePreview) throw new Error("The Project move preview expired.");
       return api.moveTaskProject(project.id, {
@@ -138,9 +141,12 @@ export function TaskProjectDialog({
         previewToken: movePreview.previewToken,
       });
     },
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => finish("Project and Tasks moved."),
   });
+  const lifecycleFeedback =
+    lifecycle.variables?.type === "complete" && projectCompletionConflict(lifecycle.error)
+      ? null
+      : lifecycle.feedback;
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -167,7 +173,10 @@ export function TaskProjectDialog({
               Projects group Tasks toward one finite outcome inside a List.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submit}>
+          <MutationFeedback feedback={lifecycleFeedback} />
+          <MutationFeedback feedback={previewMove.feedback} />
+          <MutationFeedback feedback={confirmMove.feedback} />
+          <FeedbackForm feedback={save.feedback} onSubmit={submit}>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="task-project-name">Name</FieldLabel>
@@ -207,7 +216,7 @@ export function TaskProjectDialog({
                 />
               </Field>
             </FieldGroup>
-            {save.isError ? <InlineError error={save.error} /> : null}
+
             <DialogFooter className="mt-5">
               <Button onClick={close} type="button" variant="outline">
                 Cancel
@@ -216,7 +225,7 @@ export function TaskProjectDialog({
                 {save.isPending ? "Saving…" : project ? "Save changes" : "Create Project"}
               </Button>
             </DialogFooter>
-          </form>
+          </FeedbackForm>
           {project ? (
             <FieldGroup>
               {project.lifecycle === "open" ? (
@@ -268,6 +277,7 @@ export function TaskProjectDialog({
 
       {movePreview ? (
         <ProjectConflictDialog
+          feedback={confirmMove.feedback}
           close={() => setMovePreview(null)}
           onConfirmMove={() => confirmMove.mutate()}
           pending={confirmMove.isPending}
@@ -276,6 +286,7 @@ export function TaskProjectDialog({
       ) : null}
       {completionConflict ? (
         <ProjectConflictDialog
+          feedback={lifecycleFeedback}
           close={() => setCompletionConflict(null)}
           conflict={completionConflict}
           lists={lists}

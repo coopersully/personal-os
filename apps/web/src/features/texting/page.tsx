@@ -1,6 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { Alert, AlertDescription } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import {
@@ -20,6 +23,7 @@ import {
 } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export function TextingSettings() {
   const queryClient = useQueryClient();
@@ -32,11 +36,13 @@ export function TextingSettings() {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const start = useMutation({
+  const start = useFeedbackMutation({
+    feedback: { action: "send a verification code", safeToRetry: false, form: true },
     mutationFn: () => api.startTextingVerification({ consentAccepted: true, country, phoneNumber }),
     onSuccess: (challenge) => setChallengeId(challenge.id),
   });
-  const verify = useMutation({
+  const verify = useFeedbackMutation({
+    feedback: { action: "verify this phone number", safeToRetry: false, form: true },
     mutationFn: () => {
       if (!challengeId) throw new Error("Request a verification code first.");
       return api.checkTextingVerification(challengeId, { code });
@@ -47,12 +53,12 @@ export function TextingSettings() {
       await queryClient.invalidateQueries({ queryKey: ["texting-connection"] });
     },
   });
-  const disconnect = useMutation({
+  const disconnect = useFeedbackMutation({
+    feedback: { action: "disconnect this phone number", safeToRetry: false, form: false },
     mutationFn: api.disconnectTexting,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["texting-connection"] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["texting-connection"] }),
   });
   const current = connection.data;
-  const error = connection.error ?? start.error ?? verify.error ?? disconnect.error;
 
   return (
     <Card>
@@ -65,11 +71,8 @@ export function TextingSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
-        {error ? (
-          <Alert variant="destructive">
-            <AlertDescription>{errorMessage(error)}</AlertDescription>
-          </Alert>
-        ) : null}
+        <QueryFeedback query={connection} title="Couldn’t load your texting connection." />
+        <MutationFeedback feedback={disconnect.feedback} />
         {current?.id && current.state !== "disconnected" ? (
           <FieldGroup>
             <p>
@@ -96,7 +99,8 @@ export function TextingSettings() {
             </Field>
           </FieldGroup>
         ) : challengeId ? (
-          <form
+          <FeedbackForm
+            feedback={verify.feedback}
             onSubmit={(event) => {
               event.preventDefault();
               verify.mutate();
@@ -108,20 +112,24 @@ export function TextingSettings() {
                 <Input
                   autoComplete="one-time-code"
                   id="texting-code"
+                  name="code"
+                  required
+                  minLength={4}
                   inputMode="numeric"
                   onChange={(event) => setCode(event.target.value)}
                   value={code}
                 />
               </Field>
               <Field orientation="horizontal">
-                <Button disabled={verify.isPending || code.length < 4} type="submit">
+                <Button disabled={verify.isPending} type="submit">
                   Verify and connect
                 </Button>
               </Field>
             </FieldGroup>
-          </form>
+          </FeedbackForm>
         ) : (
-          <form
+          <FeedbackForm
+            feedback={start.feedback}
             onSubmit={(event) => {
               event.preventDefault();
               if (consentAccepted) start.mutate();
@@ -146,6 +154,8 @@ export function TextingSettings() {
                   <Input
                     autoComplete="tel"
                     id="texting-phone"
+                    name="phoneNumber"
+                    required
                     onChange={(event) => setPhoneNumber(event.target.value)}
                     placeholder="(555) 555-0123"
                     type="tel"
@@ -176,21 +186,20 @@ export function TextingSettings() {
                   </AlertDescription>
                 </Alert>
               ) : null}
+              {!consentAccepted ? (
+                <p id="consent-required">Allow agent text messages before requesting a code.</p>
+              ) : null}
               <Field orientation="horizontal">
                 <Button
-                  disabled={
-                    !consentAccepted ||
-                    !phoneNumber ||
-                    start.isPending ||
-                    current?.providerReady === false
-                  }
+                  aria-describedby={!consentAccepted ? "consent-required" : undefined}
+                  disabled={!consentAccepted || start.isPending || current?.providerReady === false}
                   type="submit"
                 >
                   Send verification code
                 </Button>
               </Field>
             </FieldGroup>
-          </form>
+          </FeedbackForm>
         )}
       </CardContent>
     </Card>

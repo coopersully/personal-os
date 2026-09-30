@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -13,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   assign: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("sonner", () => ({ toast: { success: mocks.success } }));
+vi.mock("sonner", () => ({ toast: { dismiss: vi.fn(), error: vi.fn(), success: mocks.success } }));
 vi.mock("../../api.js", () => ({
   api: {
     listMailboxes: mocks.mailboxes,
@@ -325,7 +326,7 @@ describe("desktop preferences", () => {
     fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
     mocks.invoke.mockRejectedValueOnce("Desktop settings could not be written");
     await userEvent.click(screen.getByRole("button", { name: "Save preferences" }));
-    expect(await screen.findByText("Desktop settings could not be written")).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn’t save desktop preferences/)).toBeInTheDocument();
     expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
     expect(mocks.success).not.toHaveBeenCalled();
     expect(mocks.assign).not.toHaveBeenCalled();
@@ -336,7 +337,7 @@ describe("desktop preferences", () => {
   it("offers retry when loading desktop settings fails", async () => {
     mocks.invoke.mockRejectedValueOnce(new Error("Keychain unavailable"));
     mount();
-    expect(await screen.findByText("Keychain unavailable")).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn’t load desktop preferences/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Recommended")).toBeInTheDocument();
   });
@@ -348,8 +349,8 @@ describe("desktop preferences", () => {
       native: { error: "Login registration needs approval", widgetsAvailable: true },
     };
     mount();
-    expect(await screen.findByText("Login registration needs approval")).toBeInTheDocument();
-    expect(screen.getByText(/Wallpaper: Could not download images/)).toBeInTheDocument();
+    expect(await screen.findByText(/Check macOS permissions/)).toBeInTheDocument();
+    expect(screen.getByText(/Wallpaper could not refresh/)).toBeInTheDocument();
     expect(
       screen.getByText("Native widgets are available through Edit Widgets on your desktop."),
     ).toBeInTheDocument();
@@ -364,7 +365,12 @@ describe("desktop preferences", () => {
     await userEvent.click(screen.getByRole("button", { name: "Test hosted connection" }));
     expect(screen.getByRole("button", { name: "Testing hosted…" })).toBeDisabled();
     await act(async () => test.reject(new Error("This is a website, not a nohmi API")));
-    expect(await screen.findByText("This is a website, not a nohmi API")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn’t test the desktop connection. Try again.",
+        expect.any(Object),
+      ),
+    );
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
     expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
   });
@@ -391,7 +397,7 @@ describe("desktop preferences", () => {
     mocks.calendars.mockRejectedValue(new Error("Offline"));
     mocks.accounts.mockRejectedValue(new Error("Offline"));
     mount({ section: "notifications" });
-    expect(await screen.findByText("Mail accounts could not be loaded.")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load mail accounts.")).toBeInTheDocument();
     expect(screen.getByText("macOS permission: unavailable")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save preferences" })).toBeEnabled();
@@ -410,11 +416,11 @@ describe("desktop preferences", () => {
     mount({ section: "notifications" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Mail notifications could not refresh: Activity feed unavailable. nohmi will retry while running.",
+      "Mail notifications could not refresh. nohmi will retry while running.",
     );
     expect(
       await screen.findByText(
-        "cooper@example.com: Provider authorization expired. Check Connections to reconnect.",
+        "cooper@example.com: Sync needs attention. Check Connections to reconnect.",
       ),
     ).toHaveAttribute("role", "status");
     expect(screen.queryByText(/healthy@example\.com:/)).not.toBeInTheDocument();

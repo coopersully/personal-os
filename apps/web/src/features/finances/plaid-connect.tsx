@@ -1,8 +1,11 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { Button } from "@/components/ui/button";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { InlineError } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export function PlaidConnectButton({
   label = "Connect bank",
@@ -20,7 +23,15 @@ export function PlaidConnectButton({
       </Button>
     );
   }
-  if (status.isError || !status.data.available) {
+  if (status.isError)
+    return (
+      <InlineError
+        error={status.error}
+        title="Couldn’t check bank connection availability."
+        retry={() => status.refetch()}
+      />
+    );
+  if (!status.data.available) {
     return (
       <Button disabled size="sm" variant="outline">
         Plaid needs keys
@@ -39,11 +50,13 @@ function AvailablePlaidConnectButton({
 }) {
   const [token, setToken] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
-  const linkToken = useMutation({
+  const linkToken = useFeedbackMutation({
+    feedback: { action: "open bank connection", safeToRetry: true, form: false },
     mutationFn: api.getPlaidLinkToken,
     onSuccess: setToken,
   });
-  const exchange = useMutation({
+  const exchange = useFeedbackMutation({
+    feedback: { action: "connect this bank", safeToRetry: false, form: false },
     mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
     onSuccess: onConnected,
   });
@@ -79,11 +92,9 @@ function AvailablePlaidConnectButton({
         <p className="form-error" role="alert">
           {linkError}
         </p>
-      ) : linkToken.isError || exchange.isError ? (
-        <p className="form-error" role="alert">
-          {errorMessage(linkToken.error ?? exchange.error)}
-        </p>
       ) : null}
+      <MutationFeedback feedback={linkToken.feedback} />
+      <MutationFeedback feedback={exchange.feedback} />
     </div>
   );
 }

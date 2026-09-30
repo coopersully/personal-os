@@ -18,8 +18,11 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import type { MutationFeedbackState } from "../../lib/feedback.js";
 
 type CompletionProps = {
+  feedback?: MutationFeedbackState | null;
   close: () => void;
   conflict: TaskProjectCompletionConflict;
   lists: TaskList[];
@@ -35,6 +38,7 @@ type CompletionProps = {
 };
 
 type MoveProps = {
+  feedback?: MutationFeedbackState | null;
   close: () => void;
   conflict?: never;
   lists?: never;
@@ -56,6 +60,7 @@ export function ProjectConflictDialog(props: CompletionProps | MoveProps) {
               The Project and its Tasks will move together to the selected List.
             </DialogDescription>
           </DialogHeader>
+          <MutationFeedback feedback={props.feedback ?? null} />
           <Alert>
             <AlertTitle>{props.preview.affectedTaskCount} Tasks will move</AlertTitle>
             <AlertDescription>
@@ -78,6 +83,7 @@ export function ProjectConflictDialog(props: CompletionProps | MoveProps) {
 }
 
 function CompletionConflict({
+  feedback,
   close,
   conflict,
   lists,
@@ -107,6 +113,7 @@ function CompletionConflict({
             outcomes returned by ilo.
           </DialogDescription>
         </DialogHeader>
+        <MutationFeedback feedback={feedback ?? null} />
         <FieldGroup>
           {conflict.resolutions.includes("complete_open_tasks") ? (
             <Button disabled={pending} onClick={() => onResolve("complete_open_tasks")}>

@@ -115,7 +115,7 @@ export function TaskListDialog({
               : "Lists are stable areas for related Tasks and Projects. System View names are reserved."}
           </DialogDescription>
         </DialogHeader>
-        <MutationFeedback feedback={archive.feedback} />
+        <MutationFeedback feedback={taskListConflict(archive.error) ? null : archive.feedback} />
         {conflict ? (
           <ListArchiveConflict
             conflict={conflict}

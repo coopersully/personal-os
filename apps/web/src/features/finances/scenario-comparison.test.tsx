@@ -182,7 +182,7 @@ it("keeps a failed comparison recoverable and blocks duplicate pending requests"
   expect(screen.getByRole("button", { name: "Comparing…" })).toBeDisabled();
   expect(screen.getByLabelText("Baseline monthly income")).toBeDisabled();
   await act(async () => reject(new Error("Comparison service unavailable")));
-  expect(await screen.findByText(/Couldn’t save these scenarios/)).toBeInTheDocument();
+  expect(await screen.findByText(/Couldn’t compare these scenarios/)).toBeInTheDocument();
   expect(screen.getByLabelText("Baseline monthly income")).toHaveValue("2000");
   await userEvent.click(screen.getByRole("button", { name: "Compare scenarios" }));
   expect(await screen.findByText("Hypothetical comparison")).toBeInTheDocument();

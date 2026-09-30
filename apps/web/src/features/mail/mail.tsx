@@ -360,7 +360,7 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-drafts"],
   });
   const deleteDraft = useFeedbackMutation({
-    feedback: { action: "discard the draft", safeToRetry: true },
+    feedback: { action: "discard the draft", safeToRetry: false },
     mutationFn: api.deleteMailDraft,
     onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
   });

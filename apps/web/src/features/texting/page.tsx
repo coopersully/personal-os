@@ -54,9 +54,9 @@ export function TextingSettings() {
     },
   });
   const disconnect = useFeedbackMutation({
-    feedback: { action: "disconnect this phone number", safeToRetry: true, form: false },
+    feedback: { action: "disconnect this phone number", safeToRetry: false, form: false },
     mutationFn: api.disconnectTexting,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["texting-connection"] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["texting-connection"] }),
   });
   const current = connection.data;
 

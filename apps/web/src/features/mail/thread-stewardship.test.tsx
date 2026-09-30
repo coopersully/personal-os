@@ -244,4 +244,22 @@ describe("exact-thread Mail stewardship", () => {
     renderThread();
     expect(await screen.findByText("Couldn’t load thread stewardship.")).toBeVisible();
   });
+  it("explains a missing obligation rationale and focuses the field before creating", async () => {
+    const user = userEvent.setup();
+    renderThread();
+    await user.click(await screen.findByRole("button", { name: "Record obligation" }));
+    const rationale = screen.getByLabelText("Why this is explicit");
+    expect(rationale).toHaveAttribute("aria-invalid", "true");
+    expect(rationale).toHaveFocus();
+    expect(screen.getByText("Enter a value for this field.")).toBeVisible();
+    expect(mocks.createMailObligation).not.toHaveBeenCalled();
+    await user.type(rationale, "A reply was requested.");
+    await user.click(screen.getByRole("button", { name: "Record obligation" }));
+    await waitFor(() =>
+      expect(mocks.createMailObligation).toHaveBeenCalledWith(
+        threadId,
+        expect.objectContaining({ rationale: "A reply was requested." }),
+      ),
+    );
+  });
 });

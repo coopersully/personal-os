@@ -54,8 +54,7 @@ export function RitualOverlay() {
           setReadinessError(
             classifyMutationError(e, {
               action: "prepare this ritual",
-              form: true,
-              safeToRetry: false,
+              safeToRetry: true,
             }).message,
           );
           retry = setTimeout(() => void prepare(), 1000);
@@ -85,8 +84,7 @@ export function RitualOverlay() {
             setError(
               classifyMutationError(e, {
                 action: "load this ritual",
-                form: true,
-                safeToRetry: false,
+                safeToRetry: true,
               }).message,
             );
           }

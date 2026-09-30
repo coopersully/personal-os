@@ -42,7 +42,7 @@ Apply these questions in order:
 | Unsaved or uncertain result: work remains unsaved, or the operation may have succeeded despite a timeout | Persistent unsaved/checking state and recovery; optional single toast to announce failure | “Couldn’t confirm the change. Check the event before retrying.” |
 | Conflict: another change prevents safely applying this edit | Persistent form/section message with resolution | “This event changed. Reload it before saving.” Preserve the draft |
 | Load failure: initial data cannot be displayed | Error state in the affected region, with Retry | “Couldn’t load your calendar.” Never show an empty-success state |
-| Stale/background failure: refresh fails but previous data exists | Retain data with freshness/status; Alert if materially blocking | “Showing the last update. Reconnect Google Calendar.” Avoid polling toasts |
+| Stale/background failure: refresh fails but previous data exists | Retain data for transport/server failures with freshness/status; never retain data denied by 401/403 | “Showing the last update. Reconnect Google Calendar.” Avoid polling toasts |
 | Capability/access/authentication: permissions, verification, or connection blocks work | Persistent contextual Alert or sign-in state | “Confirm your email to connect accounts.” |
 | Temporary service limit: a rate limit or outage blocks repeated attempts | Toast for an isolated failure; persistent status if blocking continues | State a retry time only when known; do not encourage immediate retry loops |
 | Destructive decision: an irreversible operation needs explicit consent | AlertDialog or equivalent deliberate confirmation | “Delete this event everywhere?” followed by a named delete action |
@@ -50,6 +50,15 @@ Apply these questions in order:
 Classify by what the user can do next, not solely by HTTP status or by whether
 React Query calls it a query or mutation. For example, a failed mutation can
 require field correction, reconnecting, conflict resolution, or a safe retry.
+
+A 403 query response removes that query’s cached data. A 401 clears cached
+session data, cancels pending reads, and returns the main app to sign-in. Do not
+allow a late response from the expired session to repopulate that cache or a
+late mutation denial to clear a newly authenticated session.
+
+For batches of independent actions, wait for every result, refresh successful
+changes, explain partial completion, and retry only failed items. After an
+uncertain disconnect, refresh its state before offering another action.
 
 ## Validation timing and recovery
 
@@ -92,7 +101,9 @@ require field correction, reconnecting, conflict resolution, or a safe retry.
   or claims such as “Nothing changed” without evidence.
 - Offer Retry only when safe; offer Undo only when it really reverses the
   operation. Essential recovery must remain available after toast dismissal.
-  Do not automatically retry an uncertain, non-idempotent write.
+  Do not automatically retry an uncertain, non-idempotent write. Deletes and
+  revocations that return “not found” on a repeat also require uncertainty
+  guidance; the HTTP verb alone does not establish a safe retry.
 
 ## Review rubric
 
@@ -164,6 +175,7 @@ standard or proof of WCAG conformance.
   support remote paths that differ from input names.
 - `components/mutation-feedback.tsx` owns persistent mutation status;
   `components/async-state.tsx` owns query errors, stale status, and retry.
+  `lib/query-client.ts` removes cached data after authoritative access denial.
 - `components/confirm-action.tsx` owns consequential confirmation and focus
   return, including commands originating in menus.
 - The root Sonner host covers authenticated and authentication flows, with

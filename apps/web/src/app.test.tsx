@@ -2100,6 +2100,34 @@ describe("ilo web app", () => {
     );
   });
 
+  it("waits for invitation validation without prematurely reporting a field error", async () => {
+    mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
+    let finish: ((valid: boolean) => void) | undefined;
+    mocks.validateInvitation.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setup();
+    const browser = userEvent.setup();
+    await browser.click(
+      await screen.findByRole("button", { name: "Have an invite? Create an account" }),
+    );
+    const inviteCode = screen.getByLabelText("Invite code");
+    await browser.type(inviteCode, "ABCD2345");
+    await browser.click(screen.getByLabelText("Name"));
+    expect(await screen.findByText("Checking invitation…")).toBeInTheDocument();
+    expect(inviteCode).not.toHaveAttribute("aria-invalid", "true");
+    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    expect(inviteCode).not.toHaveAttribute("aria-invalid", "true");
+    expect(mocks.register).not.toHaveBeenCalled();
+    finish?.(false);
+    expect(await screen.findByText("This invitation is invalid or expired.")).toBeInTheDocument();
+    expect(screen.getAllByText("This invitation is invalid or expired.")).toHaveLength(1);
+    expect(inviteCode).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("rejects an invalid invitation on blur before account creation can proceed", async () => {
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     mocks.validateInvitation.mockResolvedValueOnce(false);
@@ -2114,9 +2142,8 @@ describe("ilo web app", () => {
     expect(mocks.validateInvitation).not.toHaveBeenCalled();
     await browser.click(screen.getByLabelText("Name"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This invitation is invalid or expired.",
-    );
+    expect(await screen.findByText("This invitation is invalid or expired.")).toBeInTheDocument();
+    expect(screen.getAllByText("This invitation is invalid or expired.")).toHaveLength(1);
     expect(mocks.validateInvitation).toHaveBeenCalledWith({ inviteCode: "BAD12345" });
     await browser.click(screen.getByRole("button", { name: "Create account" }));
     expect(screen.getByLabelText("Invite code")).toHaveAttribute("aria-invalid", "true");
@@ -2556,6 +2583,26 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Connecting Apple" })).toBeDisabled();
     rejectApple?.(new Error("Apple unavailable"));
     expect(await screen.findByText(/connect this account/)).toBeInTheDocument();
+    mocks.connectICloud.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "invalid_request",
+        status: 400,
+        message: "Validation failed",
+        details: [{ path: ["email"], code: "invalid_format", format: "email" }],
+      }),
+    );
+    const appleEmail = screen.getByLabelText("Apple Account email");
+    await browser.clear(appleEmail);
+    await browser.type(appleEmail, "user@localhost");
+    await browser.click(screen.getByRole("button", { name: "Connect Apple" }));
+    await waitFor(() => expect(appleEmail).toHaveAttribute("aria-invalid", "true"));
+    expect(appleEmail).toHaveFocus();
+    expect(appleEmail).toHaveAccessibleDescription(
+      "Enter an email address in the format name@example.com.",
+    );
+    expect(
+      screen.getAllByText("Enter an email address in the format name@example.com."),
+    ).toHaveLength(1);
     apple.unmount();
 
     mocks.getMe.mockResolvedValue({
@@ -2659,13 +2706,15 @@ describe("ilo web app", () => {
     const inviteCode = screen.getByLabelText("Invite code");
     await browser.type(inviteCode, "SHORT");
     fireEvent.blur(inviteCode);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Enter all eight characters");
+    expect(
+      await screen.findByText("Enter all eight characters from your invitation."),
+    ).toBeInTheDocument();
     await browser.clear(inviteCode);
     await browser.type(inviteCode, "ABCD2345");
     fireEvent.blur(inviteCode);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn’t check this invitation. Try again.",
-    );
+    expect(
+      await screen.findByText("Couldn’t check this invitation. Try again."),
+    ).toBeInTheDocument();
     const registrationForm = inviteCode.closest("form");
     if (!registrationForm) throw new Error("Registration form was not rendered.");
     fireEvent.submit(registrationForm);
@@ -6452,6 +6501,8 @@ describe("ilo web app", () => {
   });
 
   it("renders rich event notes safely and confirms write-through deletion", async () => {
+    // Preload the lazy Markdown module so cold Vite transforms do not consume the DOM wait budget.
+    await import("./rich-event-notes.js");
     const richEvent = {
       ...event,
       notes:
@@ -6492,7 +6543,10 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Delete" }));
     mocks.deleteEvent.mockRejectedValueOnce(new Error("Delete failed"));
     await browser.click(screen.getByRole("button", { name: "Delete Event" }));
-    expect(await screen.findByText(/Couldn’t delete this event/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could delete this event/),
+    ).toBeInTheDocument();
+    expect(mocks.deleteEvent).toHaveBeenCalledTimes(1);
 
     let resolveDelete: () => void = () => undefined;
     mocks.deleteEvent.mockReturnValueOnce(
@@ -7383,6 +7437,7 @@ describe("ilo web app", () => {
       ).toBeGreaterThan(0);
       expect(mocks.createEvent).not.toHaveBeenCalled();
     }
+    mocks.createEvent.mockRejectedValueOnce(new Error("Network lost"));
     read.mockResolvedValueOnce(JSON.stringify(event));
     fireEvent.contextMenu(timeline, { clientY: 128 });
     await browser.click(await screen.findByRole("menuitem", { name: "Paste event" }));
@@ -7391,9 +7446,20 @@ describe("ilo web app", () => {
         expect.objectContaining({ title: event.title }),
       ),
     );
+    const pasteFailure = await screen.findByText(
+      /Couldn’t confirm whether we could paste this event/,
+    );
+    expect(pasteFailure.closest("[data-calendar-feedback]")).not.toBeNull();
+    expect(timeline).not.toContainElement(pasteFailure);
+    mocks.createEvent.mockRejectedValueOnce(new Error("Network lost"));
     const item = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
     fireEvent.contextMenu(item);
     await browser.click(await screen.findByRole("menuitem", { name: "Duplicate event" }));
+    const duplicateFailure = await screen.findByText(
+      /Couldn’t confirm whether we could duplicate this event/,
+    );
+    expect(duplicateFailure.closest("[data-calendar-feedback]")).not.toBeNull();
+    expect(timeline).not.toContainElement(duplicateFailure);
     await waitFor(() =>
       expect(mocks.createEvent).toHaveBeenCalledWith(
         expect.objectContaining({ title: "Focus block copy" }),
@@ -8325,6 +8391,64 @@ describe("ilo web app", () => {
     setupErrorView.unmount();
   });
 
+  it("refreshes partial mail sync results and retries only the failed account", async () => {
+    mocks.listConnectors.mockResolvedValue(
+      [secondId, thirdId].map((accountId) => ({
+        id: accountId,
+        calendarEnabled: false,
+        mailEnabled: true,
+        provider: "google",
+        label: accountId === secondId ? "Personal mail" : "Work mail",
+        email: accountId === secondId ? "personal@example.com" : "work@example.com",
+        syncStatus: "idle",
+        syncError: null,
+        lastSyncedAt: null,
+      })),
+    );
+    let rejectFailedAccount: (error: Error) => void = () => undefined;
+    mocks.syncConnector.mockImplementation((accountId: string) =>
+      accountId === thirdId
+        ? new Promise((_resolve, reject) => {
+            rejectFailedAccount = reject;
+          })
+        : Promise.resolve(undefined),
+    );
+    setup("/mail");
+    const browser = userEvent.setup();
+    await waitFor(() => expect(mocks.listMailThreads).toHaveBeenCalled());
+    const accountLoads = mocks.listConnectors.mock.calls.length;
+    const mailboxLoads = mocks.listMailboxes.mock.calls.length;
+    const threadLoads = mocks.listMailThreads.mock.calls.length;
+    await browser.click(await screen.findByRole("button", { name: "Sync all mail accounts" }));
+    await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Sync all mail accounts" })).toBeDisabled();
+    await act(async () => {
+      rejectFailedAccount(new Error("private sync failure"));
+    });
+    expect(
+      await screen.findByText("1 of 2 mail accounts synced. 1 account needs another attempt."),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mocks.listConnectors.mock.calls.length).toBeGreaterThan(accountLoads);
+      expect(mocks.listMailboxes.mock.calls.length).toBeGreaterThan(mailboxLoads);
+      expect(mocks.listMailThreads.mock.calls.length).toBeGreaterThan(threadLoads);
+      expect(screen.getByRole("button", { name: "Retry failed mail accounts" })).toBeEnabled();
+    });
+    expect(screen.queryByText("private sync failure")).not.toBeInTheDocument();
+    mocks.syncConnector.mockResolvedValue(undefined);
+    await browser.click(screen.getByRole("button", { name: "Retry failed mail accounts" }));
+    await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledTimes(3));
+    expect(mocks.syncConnector.mock.calls.map(([accountId]) => accountId)).toEqual([
+      secondId,
+      thirdId,
+      thirdId,
+    ]);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Sync all mail accounts" })).toBeEnabled();
+      expect(screen.queryByText(/mail accounts synced\./)).not.toBeInTheDocument();
+    });
+  });
+
   it("renders iCloud mail and calendar states while connector work is pending or fails", async () => {
     const icloudAccount = {
       calendarEnabled: false,
@@ -8571,7 +8695,9 @@ describe("ilo web app", () => {
       within(await screen.findByRole("dialog")).getByRole("button", { name: "Disconnect account" }),
     );
     expect(
-      await screen.findAllByText("Couldn’t disconnect this account. Try again."),
+      await screen.findAllByText(
+        "Couldn’t confirm whether we could disconnect this account. Check the latest state before trying again to avoid making the change twice.",
+      ),
     ).not.toHaveLength(0);
     await browser.click(screen.getByRole("button", { name: "Connect" }));
     await browser.click(screen.getByRole("menuitem", { name: "iCloud" }));
@@ -8723,6 +8849,11 @@ describe("ilo web app", () => {
     expect(await screen.findByText("Protect focus")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "20%" }));
     await waitFor(() => expect(mocks.updateGoal).toHaveBeenCalledWith(id, { progress: 30 }));
+    await browser.type(screen.getByLabelText("Outcome"), "   ");
+    await browser.click(screen.getByRole("button", { name: "Create goal" }));
+    expect(await screen.findByText("Enter a goal.")).toBeInTheDocument();
+    expect(mocks.createGoal).not.toHaveBeenCalled();
+    await browser.clear(screen.getByLabelText("Outcome"));
     await browser.type(screen.getByLabelText("Outcome"), "Build a calmer week");
     await browser.type(
       screen.getByLabelText("What does success look like?"),
@@ -8749,6 +8880,11 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateMotive).toHaveBeenCalledWith(secondId, { isActive: false }),
     );
+    await browser.type(screen.getByLabelText("Motive"), "   ");
+    await browser.click(screen.getByRole("button", { name: "Create motive" }));
+    expect(await screen.findByText("Enter a motive.")).toBeInTheDocument();
+    expect(mocks.createMotive).not.toHaveBeenCalled();
+    await browser.clear(screen.getByLabelText("Motive"));
     await browser.type(screen.getByLabelText("Motive"), "Keep learning");
     await browser.type(screen.getByLabelText("Context"), "Favor experiments over certainty.");
     await browser.click(screen.getByRole("button", { name: "Create motive" }));
@@ -9036,7 +9172,9 @@ describe("ilo web app", () => {
       }),
     );
     expect(
-      await screen.findAllByText("Couldn’t disconnect X bookmarks. Try again."),
+      await screen.findAllByText(
+        "Couldn’t confirm whether we could disconnect X bookmarks. Check the latest state before trying again to avoid making the change twice.",
+      ),
     ).not.toHaveLength(0);
     connected.unmount();
 
@@ -9321,6 +9459,15 @@ describe("ilo web app", () => {
     const view = setup("/settings?section=wallpaper");
 
     const boardUrl = await screen.findByLabelText("Public board URL");
+    fireEvent.blur(boardUrl);
+    expect(mocks.updatePinterestWallpaperSettings).not.toHaveBeenCalled();
+    fireEvent.change(boardUrl, { target: { value: "not a URL" } });
+    fireEvent.blur(boardUrl);
+    expect(boardUrl).not.toHaveAttribute("aria-invalid", "true");
+    expect(mocks.updatePinterestWallpaperSettings).not.toHaveBeenCalled();
+    await browser.click(screen.getByRole("button", { name: "Save board" }));
+    expect(boardUrl).toHaveAttribute("aria-invalid", "true");
+    expect(mocks.updatePinterestWallpaperSettings).not.toHaveBeenCalled();
     fireEvent.change(boardUrl, {
       target: { value: "https://www.pinterest.com/example/new-board/" },
     });

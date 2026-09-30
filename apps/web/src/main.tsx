@@ -1,5 +1,5 @@
 import { registerSW } from "virtual:pwa-register";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -8,6 +8,7 @@ import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
 import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
+import { createAppQueryClient } from "./lib/query-client.js";
 import "./styles.css";
 
 const desktop = "__TAURI_INTERNALS__" in window;
@@ -34,13 +35,11 @@ async function clearDevelopmentPwaState() {
   }
 }
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: queryWindowFocusPolicy(desktop, window.location.hash),
-      retry: false,
-      staleTime: 15_000,
-    },
+const queryClient = createAppQueryClient({
+  queries: {
+    refetchOnWindowFocus: queryWindowFocusPolicy(desktop, window.location.hash),
+    retry: false,
+    staleTime: 15_000,
   },
 });
 

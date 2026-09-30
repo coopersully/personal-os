@@ -1217,7 +1217,7 @@ function TokenAccess({
     },
   });
   const remove = useFeedbackMutation({
-    feedback: { action: "revoke this agent token", safeToRetry: true, form: false },
+    feedback: { action: "revoke this agent token", safeToRetry: false, form: false },
     mutationFn: api.deleteAccessToken,
     onSuccess: () => {
       toast.success("Agent token revoked.");

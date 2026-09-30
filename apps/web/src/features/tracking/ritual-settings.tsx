@@ -236,8 +236,7 @@ function RitualForm({
       setError("");
     } catch (e) {
       setError(
-        classifyMutationError(e, { action: "save ritual settings", form: true, safeToRetry: false })
-          .message,
+        classifyMutationError(e, { action: "refresh ritual settings", safeToRetry: true }).message,
       );
     } finally {
       setBusy(false);

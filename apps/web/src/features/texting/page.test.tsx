@@ -17,9 +17,12 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
 
-function renderSettings() {
+function renderSettings(mutationRetry: false | number = false) {
   const queryClient = new QueryClient({
-    defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
+    defaultOptions: {
+      mutations: { retry: mutationRetry, retryDelay: 0 },
+      queries: { retry: false, gcTime: 0 },
+    },
   });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -110,6 +113,33 @@ describe("Texting settings", () => {
       await screen.findByText("Texting is not available on this nohmi deployment yet."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send verification code" })).toBeDisabled();
+  });
+
+  it("reconciles a lost disconnect response without repeating the audit write", async () => {
+    const user = userEvent.setup();
+    let state = "active";
+    mocks.getTextingConnection.mockImplementation(async () => ({
+      id: "connection-1",
+      maskedPhoneNumber: "+1 ***-***-0123",
+      providerReady: true,
+      senderPhoneNumber: "+1 ***-***-0456",
+      state,
+    }));
+    mocks.disconnectTexting.mockImplementation(async () => {
+      state = "disconnected";
+      throw new TypeError("Response lost after disconnect was recorded");
+    });
+    // A global retry policy must not replay a write whose result is uncertain.
+    renderSettings(2);
+    await user.click(await screen.findByRole("button", { name: "Disconnect number" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /Couldn’t confirm.*disconnect this phone number/,
+    );
+    expect(await screen.findByLabelText("Mobile number")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disconnect number" })).not.toBeInTheDocument();
+    expect(mocks.getTextingConnection).toHaveBeenCalledTimes(2);
+    expect(mocks.disconnectTexting).toHaveBeenCalledOnce();
   });
 
   it.each([

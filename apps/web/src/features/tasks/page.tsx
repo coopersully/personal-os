@@ -68,6 +68,7 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatMaterialDateTime, formatRelativeMaterialDateTime } from "../../lib/date-format.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { type DatePreset, datePresets, identifyPreset, presetBounds } from "./task-filter-presets";
@@ -567,12 +568,31 @@ export function TaskRow({
   });
   const isCompleted = task.lifecycle === "completed";
   const isTrashed = task.deletedAt !== null;
-  const restore = useFeedbackMutation({
-    feedback: { action: "restore this task", safeToRetry: false },
-    mutationFn: (trashed: Task) =>
-      api.restoreTask(trashed.id, { expectedRevision: trashed.revision }),
-    onSuccess: () => invalidateMaterial(queryClient),
-  });
+  // The row disappears after trashing; Undo must own feedback outside its lifecycle.
+  const restore = async (trashed: Task) => {
+    try {
+      await api.restoreTask(trashed.id, { expectedRevision: trashed.revision });
+    } catch (error) {
+      const failure = classifyMutationError(error, {
+        action: "restore this task",
+        safeToRetry: false,
+      });
+      toast.error(`${failure.message} Open Trash to check the task and restore it.`, {
+        duration: Number.POSITIVE_INFINITY,
+      });
+      return;
+    }
+    try {
+      await invalidateMaterial(queryClient);
+    } catch {
+      toast.error(
+        "The task was restored, but the view couldn’t refresh. Refresh the page to see it.",
+        {
+          duration: Number.POSITIVE_INFINITY,
+        },
+      );
+    }
+  };
   const remove = useFeedbackMutation({
     feedback: { action: "move this task to Trash", safeToRetry: false, form: false },
     mutationFn: () => api.trashTask(task.id, { expectedRevision: task.revision }),
@@ -580,7 +600,9 @@ export function TaskRow({
       toast.success("Task moved to Trash.", {
         action: {
           label: "Undo",
-          onClick: () => restore.mutate(trashed),
+          onClick: () => {
+            void restore(trashed);
+          },
         },
       });
       await invalidateMaterial(queryClient);
@@ -712,7 +734,6 @@ export function TaskRow({
       ) : null}
       <MutationFeedback feedback={transition.feedback} />
       <MutationFeedback feedback={remove.feedback} />
-      <MutationFeedback feedback={restore.feedback} />
     </TaskItem>
   );
 }

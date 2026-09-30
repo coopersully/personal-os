@@ -143,6 +143,10 @@ export function TaskProjectDialog({
     },
     onSuccess: () => finish("Project and Tasks moved."),
   });
+  const lifecycleFeedback =
+    lifecycle.variables?.type === "complete" && projectCompletionConflict(lifecycle.error)
+      ? null
+      : lifecycle.feedback;
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -169,7 +173,7 @@ export function TaskProjectDialog({
               Projects group Tasks toward one finite outcome inside a List.
             </DialogDescription>
           </DialogHeader>
-          <MutationFeedback feedback={lifecycle.feedback} />
+          <MutationFeedback feedback={lifecycleFeedback} />
           <MutationFeedback feedback={previewMove.feedback} />
           <MutationFeedback feedback={confirmMove.feedback} />
           <FeedbackForm feedback={save.feedback} onSubmit={submit}>
@@ -282,7 +286,7 @@ export function TaskProjectDialog({
       ) : null}
       {completionConflict ? (
         <ProjectConflictDialog
-          feedback={lifecycle.feedback}
+          feedback={lifecycleFeedback}
           close={() => setCompletionConflict(null)}
           conflict={completionConflict}
           lists={lists}

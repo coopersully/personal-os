@@ -269,11 +269,13 @@ it("retries readiness while preserving its visible error across successful state
     return 1;
   });
   const view = render(<RitualOverlay />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("prepare this ritual");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn’t prepare this ritual. Try again.",
+  );
   expect(screen.getByRole("alert").closest("main")).toBeNull();
   await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(1), { timeout: 2000 });
   await waitFor(() => expect(ready).toHaveBeenCalledTimes(2), { timeout: 2000 });
-  expect(screen.getByRole("alert")).toHaveTextContent("prepare this ritual");
+  expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t prepare this ritual. Try again.");
   finish();
   await waitFor(() => expect(screen.getByRole("main")).toHaveAttribute("data-ready", "true"));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -283,4 +285,22 @@ it("retries readiness while preserving its visible error across successful state
   read.mockRestore();
   ready.mockRestore();
   frame.mockRestore();
+});
+
+it("reports state-read failures as retryable without claiming an uncertain write", async () => {
+  const read = vi
+    .spyOn(ritualBridge, "readRitualState")
+    .mockRejectedValueOnce(new Error("private state failure"))
+    .mockResolvedValue({ ...state, current: null });
+  const view = render(<RitualOverlay />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn’t load this ritual. Try again.",
+  );
+  expect(screen.queryByText(/making the change twice/)).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument(), {
+    timeout: 2000,
+  });
+  expect(read).toHaveBeenCalledTimes(2);
+  view.unmount();
+  read.mockRestore();
 });

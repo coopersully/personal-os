@@ -36,6 +36,7 @@ import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-q
 import { isTauri } from "@tauri-apps/api/core";
 import {
   type CSSProperties,
+  createContext,
   type FormEvent,
   lazy,
   type DragEvent as ReactDragEvent,
@@ -45,6 +46,7 @@ import {
   type UIEvent as ReactUIEvent,
   Suspense,
   useCallback,
+  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -695,6 +697,18 @@ function CredentialsScreen() {
       : invitationValid
         ? "valid"
         : "idle";
+  const registrationFeedback = useMemo(
+    () =>
+      invitationError && mode === "register"
+        ? {
+            kind: "validation" as const,
+            message: invitationError,
+            persistent: true,
+            fields: { inviteCode: invitationError },
+          }
+        : mutation.feedback,
+    [invitationError, mode, mutation.feedback],
+  );
   const canSubmit =
     mode === "login"
       ? emailValid && credentials.password.length > 0
@@ -725,7 +739,7 @@ function CredentialsScreen() {
   return (
     <AuthLayout>
       <FeedbackForm
-        feedback={mutation.feedback}
+        feedback={registrationFeedback}
         className="auth-form"
         onSubmit={submit}
         validate={() => {
@@ -733,7 +747,7 @@ function CredentialsScreen() {
           if (!emailValid) errors.email = "Enter an email address in the format name@example.com.";
           if (mode === "register") {
             if (!credentials.displayName.trim()) errors.displayName = "Enter your name.";
-            if (!invitationValid)
+            if (!invitationValid && invitationStatus !== "checking")
               errors.inviteCode =
                 invitationError ?? "Enter a valid invitation and wait for it to be checked.";
             if (!passwordValid) errors.password = "Meet each password requirement shown below.";
@@ -761,11 +775,11 @@ function CredentialsScreen() {
         {mode === "register" && (
           <>
             <InviteCodeField
-              error={invitationError}
               onBlur={() => {
                 setInviteBlurred(true);
                 if (credentials.inviteCode.length === 8) {
-                  invitationValidation.mutate(credentials.inviteCode);
+                  if (!invitationResultIsCurrent || invitationValidation.isError)
+                    invitationValidation.mutate(credentials.inviteCode);
                 } else {
                   invitationValidation.reset();
                 }
@@ -2648,6 +2662,13 @@ function TodayWeatherPopover({
   );
 }
 
+const CalendarFeedbackRegion = createContext<HTMLElement | null>(null);
+
+function CalendarContextFeedback({ children }: { children: ReactNode }) {
+  const region = useContext(CalendarFeedbackRegion);
+  return region ? createPortal(children, region) : null;
+}
+
 function CalendarPage({
   setEditor,
   todaySnap,
@@ -2657,6 +2678,7 @@ function CalendarPage({
   todaySnap: number;
   user: User;
 }) {
+  const [feedbackRegion, setFeedbackRegion] = useState<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2840,108 +2862,111 @@ function CalendarPage({
   };
 
   return (
-    <div className="calendar-page">
-      <QueryFeedback query={events} title="Couldn’t refresh calendar events." staleOnly />
-      <QueryFeedback query={calendars} title="Couldn’t load calendars." />
-      <QueryFeedback query={connectorAccounts} title="Couldn’t load calendar accounts." />
-      <MutationFeedback feedback={moveEvent.feedback} />
-      {events.isPending ? (
-        <PageLoading workspace="calendar" />
-      ) : events.isError && !events.data ? (
-        <InlineError
-          error={events.error}
-          title="Couldn’t load calendar events."
-          retry={events.refetch}
-        />
-      ) : view === "day" ? (
-        <DayCalendarView
-          currentTime={currentTime}
-          day={days[0] as LocalDate}
-          events={eventsByDay.get(localDateKey(days[0] as LocalDate)) as CalendarEvent[]}
-          calendarsById={calendarsById}
-          clearDrag={clearDrag}
-          dragPreview={dragPreview}
-          draggedEventId={draggedEventId}
-          moveEvent={dropEvent}
-          onCreateRange={setFloatingDraft}
-          setEditor={setCalendarEditor}
-          setDraggedEventId={setDraggedEventId}
-          setDragPreview={setDragPreview}
-          followToday={followToday}
-          key={localDateKey(days[0] as LocalDate)}
-          onExitFollow={disableFollowToday}
-          timeZone={user.planningTimezone}
-          today={today}
-          todaySnap={todaySnap}
-        />
-      ) : view === "week" ? (
-        <WeekCalendarView
-          currentTime={currentTime}
-          days={days}
-          eventsByDay={eventsByDay}
-          calendarsById={calendarsById}
-          clearDrag={clearDrag}
-          dragPreview={dragPreview}
-          draggedEventId={draggedEventId}
-          moveEvent={dropEvent}
-          onCreateRange={setFloatingDraft}
-          setEditor={setCalendarEditor}
-          setDraggedEventId={setDraggedEventId}
-          setDragPreview={setDragPreview}
-          selectedDate={anchor}
-          showDay={showDay}
-          followToday={followToday}
-          key={localDateKey(days[0] as LocalDate)}
-          onExitFollow={disableFollowToday}
-          timeZone={user.planningTimezone}
-          today={today}
-          todaySnap={todaySnap}
-        />
-      ) : (
-        <MonthCalendarView
+    <CalendarFeedbackRegion value={feedbackRegion}>
+      <div className="calendar-page">
+        <div ref={setFeedbackRegion} data-calendar-feedback />
+        <QueryFeedback query={events} title="Couldn’t refresh calendar events." staleOnly />
+        <QueryFeedback query={calendars} title="Couldn’t load calendars." />
+        <QueryFeedback query={connectorAccounts} title="Couldn’t load calendar accounts." />
+        <MutationFeedback feedback={moveEvent.feedback} />
+        {events.isPending ? (
+          <PageLoading workspace="calendar" />
+        ) : events.isError && !events.data ? (
+          <InlineError
+            error={events.error}
+            title="Couldn’t load calendar events."
+            retry={events.refetch}
+          />
+        ) : view === "day" ? (
+          <DayCalendarView
+            currentTime={currentTime}
+            day={days[0] as LocalDate}
+            events={eventsByDay.get(localDateKey(days[0] as LocalDate)) as CalendarEvent[]}
+            calendarsById={calendarsById}
+            clearDrag={clearDrag}
+            dragPreview={dragPreview}
+            draggedEventId={draggedEventId}
+            moveEvent={dropEvent}
+            onCreateRange={setFloatingDraft}
+            setEditor={setCalendarEditor}
+            setDraggedEventId={setDraggedEventId}
+            setDragPreview={setDragPreview}
+            followToday={followToday}
+            key={localDateKey(days[0] as LocalDate)}
+            onExitFollow={disableFollowToday}
+            timeZone={user.planningTimezone}
+            today={today}
+            todaySnap={todaySnap}
+          />
+        ) : view === "week" ? (
+          <WeekCalendarView
+            currentTime={currentTime}
+            days={days}
+            eventsByDay={eventsByDay}
+            calendarsById={calendarsById}
+            clearDrag={clearDrag}
+            dragPreview={dragPreview}
+            draggedEventId={draggedEventId}
+            moveEvent={dropEvent}
+            onCreateRange={setFloatingDraft}
+            setEditor={setCalendarEditor}
+            setDraggedEventId={setDraggedEventId}
+            setDragPreview={setDragPreview}
+            selectedDate={anchor}
+            showDay={showDay}
+            followToday={followToday}
+            key={localDateKey(days[0] as LocalDate)}
+            onExitFollow={disableFollowToday}
+            timeZone={user.planningTimezone}
+            today={today}
+            todaySnap={todaySnap}
+          />
+        ) : (
+          <MonthCalendarView
+            anchor={anchor}
+            days={days}
+            eventsByDay={eventsByDay}
+            calendarsById={calendarsById}
+            clearDrag={clearDrag}
+            draggedEventId={draggedEventId}
+            moveEvent={dropEvent}
+            setEditor={setCalendarEditor}
+            setDraggedEventId={setDraggedEventId}
+            showDay={showDay}
+            key={localDateKey(anchor)}
+            timeZone={user.planningTimezone}
+            today={today}
+            todaySnap={todaySnap}
+          />
+        )}
+        <CalendarFloatingNav
           anchor={anchor}
-          days={days}
-          eventsByDay={eventsByDay}
-          calendarsById={calendarsById}
-          clearDrag={clearDrag}
-          draggedEventId={draggedEventId}
-          moveEvent={dropEvent}
-          setEditor={setCalendarEditor}
-          setDraggedEventId={setDraggedEventId}
-          showDay={showDay}
-          key={localDateKey(anchor)}
+          calendars={calendars.data ?? []}
+          events={events.data ?? []}
+          {...(floatingDraft ? { draft: floatingDraft } : {})}
+          eventDetails={
+            inspectedEvent ? (
+              <EventInspector
+                calendars={calendars.data ?? []}
+                close={() => setInspectedEvent(null)}
+                edit={() => {
+                  setInspectedEvent(null);
+                  setEditor({ event: inspectedEvent, kind: "event", mode: "edit" });
+                }}
+                event={inspectedEvent}
+                key={inspectedEvent.id}
+                presentation="floating"
+                user={user}
+              />
+            ) : undefined
+          }
+          onNavigate={jumpToDate}
+          onDraftDismiss={() => setFloatingDraft(null)}
           timeZone={user.planningTimezone}
-          today={today}
-          todaySnap={todaySnap}
+          user={user}
         />
-      )}
-      <CalendarFloatingNav
-        anchor={anchor}
-        calendars={calendars.data ?? []}
-        events={events.data ?? []}
-        {...(floatingDraft ? { draft: floatingDraft } : {})}
-        eventDetails={
-          inspectedEvent ? (
-            <EventInspector
-              calendars={calendars.data ?? []}
-              close={() => setInspectedEvent(null)}
-              edit={() => {
-                setInspectedEvent(null);
-                setEditor({ event: inspectedEvent, kind: "event", mode: "edit" });
-              }}
-              event={inspectedEvent}
-              key={inspectedEvent.id}
-              presentation="floating"
-              user={user}
-            />
-          ) : undefined
-        }
-        onNavigate={jumpToDate}
-        onDraftDismiss={() => setFloatingDraft(null)}
-        timeZone={user.planningTimezone}
-        user={user}
-      />
-    </div>
+      </div>
+    </CalendarFeedbackRegion>
   );
 }
 
@@ -4518,7 +4543,9 @@ function CalendarBlankContextMenu({
           <PlusIcon aria-hidden="true" /> Paste event
         </ContextMenuItem>
       </ContextMenuContent>
-      <MutationFeedback feedback={paste.feedback} />
+      <CalendarContextFeedback>
+        <MutationFeedback feedback={paste.feedback} />
+      </CalendarContextFeedback>
     </>
   );
 }
@@ -4566,7 +4593,7 @@ function CalendarEventContextMenu({
       candidate.isWritable,
   );
   const remove = useFeedbackMutation({
-    feedback: { action: "delete this event", safeToRetry: true },
+    feedback: { action: "delete this event", safeToRetry: false },
     mutationFn: () => api.deleteEvent(event.id),
     onSuccess: () => invalidateMaterial(queryClient),
   });
@@ -4620,7 +4647,6 @@ function CalendarEventContextMenu({
   );
   return (
     <>
-      {" "}
       <ContextMenu>
         {blockedMessage ? (
           <Tooltip open={blockedOpen}>
@@ -4676,9 +4702,11 @@ function CalendarEventContextMenu({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      <MutationFeedback feedback={remove.feedback} />
-      <MutationFeedback feedback={duplicate.feedback} />
-      <MutationFeedback feedback={block.feedback} />
+      <CalendarContextFeedback>
+        <MutationFeedback feedback={remove.feedback} />
+        <MutationFeedback feedback={duplicate.feedback} />
+        <MutationFeedback feedback={block.feedback} />
+      </CalendarContextFeedback>
       {confirmation}
     </>
   );
@@ -5034,7 +5062,7 @@ function GoalsPage() {
     onSuccess: refresh,
   });
   const remove = useFeedbackMutation({
-    feedback: { action: "delete this goal", safeToRetry: true },
+    feedback: { action: "delete this goal", safeToRetry: false },
     mutationFn: (id: string) => api.deleteGoal(id),
     onSuccess: refresh,
   });
@@ -5090,6 +5118,7 @@ function GoalsPage() {
           <ShadcnCardContent>
             <FeedbackForm
               feedback={create.feedback}
+              validate={() => (title.trim() ? {} : { title: "Enter a goal." })}
               onSubmit={(event) => {
                 event.preventDefault();
                 create.mutate();
@@ -5230,7 +5259,7 @@ function MotivesPage() {
     onSuccess: refresh,
   });
   const remove = useFeedbackMutation({
-    feedback: { action: "delete this motive", safeToRetry: true },
+    feedback: { action: "delete this motive", safeToRetry: false },
     mutationFn: (id: string) => api.deleteMotive(id),
     onSuccess: refresh,
   });
@@ -5314,6 +5343,7 @@ function MotivesPage() {
           <ShadcnCardContent>
             <FeedbackForm
               feedback={create.feedback}
+              validate={() => (title.trim() ? {} : { title: "Enter a motive." })}
               onSubmit={(event) => {
                 event.preventDefault();
                 create.mutate();
@@ -5557,11 +5587,40 @@ function MailSyncButton({
     : nextSyncAt
       ? `Next ${formatRelative(nextSyncAt)}`
       : "Next sync not scheduled";
+  const [failedAccountIds, setFailedAccountIds] = useState<string[]>([]);
+  const [partialOutcome, setPartialOutcome] = useState<{ completed: number; total: number } | null>(
+    null,
+  );
   const sync = useFeedbackMutation({
     feedback: { action: "sync mail accounts", safeToRetry: true },
-    mutationFn: () => Promise.all(enabledAccounts.map((account) => api.syncConnector(account.id))),
-    onSuccess: () =>
-      Promise.all([
+    mutationFn: async () => {
+      const targets = failedAccountIds.length
+        ? enabledAccounts.filter((account) => failedAccountIds.includes(account.id))
+        : enabledAccounts;
+      const results = await Promise.allSettled(
+        targets.map((account) => api.syncConnector(account.id)),
+      );
+      const failures = results.flatMap((result, index) => {
+        const account = targets[index];
+        return result.status === "rejected" && account
+          ? [{ id: account.id, error: result.reason as unknown }]
+          : [];
+      });
+      setFailedAccountIds(failures.map((failure) => failure.id));
+      setPartialOutcome(
+        failures.length
+          ? { completed: targets.length - failures.length, total: targets.length }
+          : null,
+      );
+      if (failures.length) {
+        const authenticationFailure = failures.find(
+          ({ error }) => error instanceof ApiClientError && error.status === 401,
+        );
+        throw authenticationFailure?.error ?? failures[0]?.error;
+      }
+    },
+    onSettled: () =>
+      Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
         queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
         queryClient.invalidateQueries({ queryKey: ["mail-threads"] }),
@@ -5572,6 +5631,13 @@ function MailSyncButton({
     <div className="mail-sync-control">
       <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
       <MutationFeedback feedback={sync.feedback} />
+      {partialOutcome ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
+          {failedAccountIds.length}{" "}
+          {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
+        </p>
+      ) : null}
       {accounts.isPending || enabledAccounts.length === 0 ? null : (
         <small className="mail-sync-control__timing">
           <span>{lastSyncLabel}</span>
@@ -5579,7 +5645,9 @@ function MailSyncButton({
         </small>
       )}
       <ShadcnButton
-        aria-label="Sync all mail accounts"
+        aria-label={
+          failedAccountIds.length ? "Retry failed mail accounts" : "Sync all mail accounts"
+        }
         disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
         onClick={() => {
           onSelect?.();
@@ -5589,7 +5657,13 @@ function MailSyncButton({
         variant={variant}
       >
         <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-        <span>{sync.isPending ? "Syncing…" : "Sync"}</span>
+        <span>
+          {sync.isPending
+            ? "Syncing…"
+            : failedAccountIds.length
+              ? "Retry failed mail accounts"
+              : "Sync"}
+        </span>
       </ShadcnButton>
     </div>
   );
@@ -5876,7 +5950,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
     onSuccess: () => invalidateMaterial(queryClient),
   });
   const remove = useFeedbackMutation({
-    feedback: { action: "delete this calendar", safeToRetry: true },
+    feedback: { action: "delete this calendar", safeToRetry: false },
     mutationFn: api.deleteCalendar,
     onSuccess: () => invalidateMaterial(queryClient),
   });
@@ -6068,7 +6142,7 @@ function ConnectorsSettings() {
     onSuccess: refreshXBookmarks,
   });
   const disconnectXBookmarks = useFeedbackMutation({
-    feedback: { action: "disconnect X bookmarks", safeToRetry: true },
+    feedback: { action: "disconnect X bookmarks", safeToRetry: false },
     mutationFn: api.deleteXBookmarkAccount,
     onSuccess: refreshXBookmarks,
   });
@@ -6103,7 +6177,7 @@ function ConnectorsSettings() {
     onSuccess: () => toast.success("Connection synced."),
   });
   const disconnect = useFeedbackMutation({
-    feedback: { action: "disconnect this account", safeToRetry: true },
+    feedback: { action: "disconnect this account", safeToRetry: false },
     mutationFn: api.deleteConnector,
     onSuccess: () =>
       Promise.all([
@@ -6287,7 +6361,7 @@ function ConnectorsSettings() {
               disconnect={() =>
                 confirm({
                   title: "Disconnect account?",
-                  description: "This stops syncing this account with ilo.",
+                  description: "This stops syncing this account with nohmi.",
                   actionLabel: "Disconnect account",
                   onConfirm: () => disconnect.mutate(account.id),
                 })
@@ -6669,7 +6743,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
               name="boardUrl"
               disabled={saveBoard.isPending}
               onBlur={(event) => {
-                if (boardEdited.current) event.currentTarget.form?.requestSubmit();
+                if (boardEdited.current && event.currentTarget.checkValidity())
+                  event.currentTarget.form?.requestSubmit();
               }}
               onChange={(event) => {
                 boardEdited.current = true;
@@ -7914,7 +7989,7 @@ function SessionsSettings() {
   const queryClient = useQueryClient();
   const sessions = useQuery({ queryFn: api.listSessions, queryKey: ["sessions"] });
   const revoke = useFeedbackMutation({
-    feedback: { action: "revoke this session", safeToRetry: true },
+    feedback: { action: "revoke this session", safeToRetry: false },
     mutationFn: api.revokeSession,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sessions"] }),
   });
@@ -8674,7 +8749,7 @@ function EventInspector({
     (record) => !sourceCalendarIds.has(record.id) && record.isWritable,
   );
   const remove = useFeedbackMutation({
-    feedback: { action: "delete this event", safeToRetry: true },
+    feedback: { action: "delete this event", safeToRetry: false },
     mutationFn: () => api.deleteEvent(event.id),
     onSuccess: async () => {
       await invalidateMaterial(queryClient);

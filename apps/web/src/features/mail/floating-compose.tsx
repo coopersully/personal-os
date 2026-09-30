@@ -153,11 +153,12 @@ export function FloatingMailComposer({
       window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
-    if (!skipSave && uncertainCreateRef.current) {
+    if (!skipSave && (uncertainCreateRef.current || (dirty && sendUncertain))) {
       confirmDiscard({
         title: "Close this local copy?",
-        description:
-          "A saved draft may already exist. Check Drafts first. Closing discards the message held in this composer, including any edits made after the failed save. It does not delete a saved draft.",
+        description: sendUncertain
+          ? "Sending may already have succeeded. Check Sent mail and reconcile Drafts first. Closing discards the edits held only in this composer. It does not delete a saved draft or send another message."
+          : "A saved draft may already exist. Check Drafts first. Closing discards the message held in this composer, including any edits made after the failed save. It does not delete a saved draft.",
         actionLabel: "Discard local copy",
         returnFocus: triggerRef.current,
         onConfirm: () => {
@@ -423,7 +424,7 @@ export function FloatingMailComposer({
                   </AlertDescription>
                   {onRetryAccounts ? (
                     <AlertAction>
-                      <Button onClick={onRetryAccounts} size="sm">
+                      <Button type="button" onClick={onRetryAccounts} size="sm">
                         Try again
                       </Button>
                     </AlertAction>
@@ -443,7 +444,7 @@ export function FloatingMailComposer({
                       : "Add or update a mail account in Connections before composing a message."}
                   </AlertDescription>
                   <AlertAction>
-                    <Button onClick={() => void openConnections()} size="sm">
+                    <Button type="button" onClick={() => void openConnections()} size="sm">
                       {reconnectable.length === 1
                         ? "Reconnect account"
                         : reconnectable.length > 1

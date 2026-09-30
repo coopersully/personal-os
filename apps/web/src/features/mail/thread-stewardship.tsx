@@ -357,6 +357,7 @@ function ObligationControl({
               <Input
                 id="mail-obligation-rationale"
                 name="rationale"
+                required
                 onChange={(event) => setRationale(event.currentTarget.value)}
                 value={rationale}
               />

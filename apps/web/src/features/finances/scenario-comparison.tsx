@@ -404,7 +404,7 @@ export function FinanceScenarioComparison() {
     queryFn: () => api.getFinanceCategories(),
   });
   const mutation = useFeedbackMutation({
-    feedback: { action: "save these scenarios", safeToRetry: true, form: true },
+    feedback: { action: "compare these scenarios", safeToRetry: true, form: true },
     mutationFn: (input: FinanceScenarioInput) => api.compareFinanceScenarios(input),
   });
   const signature = JSON.stringify({ drafts, asOf, horizon });

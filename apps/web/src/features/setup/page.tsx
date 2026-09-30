@@ -588,7 +588,12 @@ function ICloudStep({
               </ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
             <ResponsiveDialogBody>
-              <FeedbackForm feedback={connect.feedback} id="setup-icloud-form" onSubmit={submit}>
+              <FeedbackForm
+                fieldNames={{ email: "appleAccountEmail" }}
+                feedback={connect.feedback}
+                id="setup-icloud-form"
+                onSubmit={submit}
+              >
                 <FieldGroup>
                   <Field>
                     <FieldLabel htmlFor="setup-icloud-email">Apple Account email</FieldLabel>

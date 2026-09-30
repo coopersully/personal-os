@@ -171,7 +171,7 @@ export function ReminderRow({
     onSuccess: () => invalidateMaterial(queryClient),
   });
   const remove = useFeedbackMutation({
-    feedback: { action: "delete this reminder", safeToRetry: true, form: false },
+    feedback: { action: "delete this reminder", safeToRetry: false, form: false },
     mutationFn: () => api.deleteReminder(reminder.id),
     onSuccess: () => invalidateMaterial(queryClient),
   });

@@ -1,4 +1,8 @@
-import { type FinanceProfileVersion, updateFinancialProfileInputSchema } from "@personal-os/domain";
+import {
+  type FinanceProfileVersion,
+  financialProfileChangesSchema,
+  type UpdateFinancialProfileInput,
+} from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -274,6 +278,19 @@ export function FinanceProfileEditor() {
   );
 }
 
+const profileFieldNames = {
+  "changes.jurisdiction": "jurisdiction",
+  "changes.incomeStability": "incomeStability",
+  "changes.householdSize": "householdSize",
+  "changes.dependents": "dependents",
+  "changes.expectedMonthlyTakeHome": "expectedMonthlyTakeHome",
+  "changes.liquidReserves": "liquidReserves",
+  "changes.preferences.emergencyReserveMonths": "reserveMonths",
+  "changes.preferences.bufferTarget": "buffer",
+  "changes.preferences.debtPriority": "debtPriority",
+  "changes.preferences.notes": "notes",
+};
+
 function ProfileDialog({
   profile,
   onClose,
@@ -287,18 +304,17 @@ function ProfileDialog({
   const changes = changedProfileFields(form, profile);
   const save = useFeedbackMutation({
     feedback: { action: "save your financial profile", safeToRetry: false, form: true },
-    mutationFn: async () => {
-      const payload = JSON.stringify(changes);
+    mutationFn: async (validatedChanges: UpdateFinancialProfileInput["changes"]) => {
+      const payload = JSON.stringify(validatedChanges);
       if (lastAttempt.current?.payload !== payload)
         lastAttempt.current = { payload, key: crypto.randomUUID() };
-      const parsed = updateFinancialProfileInputSchema.safeParse({
-        changes,
-        expectedVersion: profile?.version ?? 0,
-        idempotencyKey: lastAttempt.current.key,
-      });
-      if (!parsed.success)
-        throw new Error(parsed.error.issues[0]?.message ?? "Check the financial profile fields.");
-      return requireFinanceMutationResult(await api.updateFinancialProfile(parsed.data));
+      return requireFinanceMutationResult(
+        await api.updateFinancialProfile({
+          changes: validatedChanges,
+          expectedVersion: profile?.version ?? 0,
+          idempotencyKey: lastAttempt.current.key,
+        }),
+      );
     },
     onError: (error) => {
       if (isConfirmedFinanceMutationFailure(error)) lastAttempt.current = null;
@@ -330,23 +346,32 @@ function ProfileDialog({
           </DialogDescription>
         </DialogHeader>
         <FeedbackForm
-          fieldNames={{
-            "changes.jurisdiction": "jurisdiction",
-            "changes.incomeStability": "incomeStability",
-            "changes.householdSize": "householdSize",
-            "changes.dependents": "dependents",
-            "changes.expectedMonthlyTakeHome": "expectedMonthlyTakeHome",
-            "changes.liquidReserves": "liquidReserves",
-            "changes.preferences.emergencyReserveMonths": "reserveMonths",
-            "changes.preferences.minimumCashBuffer": "buffer",
-            "changes.preferences.debtPriority": "debtPriority",
-            "changes.preferences.notes": "notes",
+          fieldNames={profileFieldNames}
+          validate={() => {
+            if (!Object.keys(changes).length) return {};
+            const parsed = financialProfileChangesSchema.safeParse(changes);
+            const errors: Record<string, string> = {};
+            if (!parsed.success) {
+              for (const issue of parsed.error.issues) {
+                const path = `changes.${issue.path.join(".")}`;
+                const field = Object.entries(profileFieldNames).find(
+                  ([key]) => path === key || path.startsWith(`${key}.`),
+                )?.[1];
+                if (field)
+                  errors[field] =
+                    field === "notes"
+                      ? "Enter no more than 100 notes, with up to 1,000 characters each."
+                      : "Check this value and enter a valid value.";
+              }
+            }
+            return errors;
           }}
           feedback={save.feedback}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
-            if (Object.keys(changes).length) save.mutate();
+            const parsed = financialProfileChangesSchema.safeParse(changes);
+            if (parsed.success) save.mutate(parsed.data);
           }}
         >
           <FieldSet disabled={save.isPending}>

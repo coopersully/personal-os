@@ -144,6 +144,10 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
       ],
     }),
   );
+  mocks.list.mockRejectedValueOnce(new Error("private refresh failure"));
+  fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+  expect(await screen.findByText("Couldn’t refresh ritual settings. Try again.")).toBeVisible();
+  expect(screen.queryByText(/making the change twice/)).not.toBeInTheDocument();
   mocks.save.mockImplementation(async (input) => ({ ...input, id: input.kind, revision: 1 }));
   fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
   await waitFor(() => expect(screen.queryByText("Changes not saved")).not.toBeInTheDocument());

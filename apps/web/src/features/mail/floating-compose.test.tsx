@@ -236,8 +236,10 @@ describe("FloatingMailComposer", () => {
     expect(screen.getByRole("button", { name: "Reconnect account" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Review and send" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Reconnect account" }));
-    expect(screen.getByLabelText("Current route")).toHaveTextContent(
-      "/settings?section=connections",
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current route")).toHaveTextContent(
+        "/settings?section=connections",
+      ),
     );
   });
 
@@ -778,5 +780,60 @@ describe("FloatingMailComposer", () => {
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2), { timeout: 2_000 });
     expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "Fresh draft" }));
     expect(screen.getByText("Saved")).toBeVisible();
+  });
+  it("requires confirmation before discarding edits after an uncertain send", async () => {
+    const update = vi.spyOn(api, "updateMailDraft").mockResolvedValue(draft);
+    const send = vi.spyOn(api, "sendMailDraft").mockRejectedValue(new Error("Response lost"));
+    renderComposer({ intent: { draft } });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and send" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send message" }));
+    expect(await screen.findByText(/Check Sent mail/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "Keep these new edits" },
+    });
+    await userEvent.keyboard("{Escape}");
+    expect(await screen.findByRole("dialog", { name: "Close this local copy?" })).toBeVisible();
+    expect(screen.getByText(/Sending may already have succeeded/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Message")).toHaveValue("Keep these new edits");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Discard local copy" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(send).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    "retry",
+    "reconnect",
+    "manage",
+  ] as const)("never submits the compose form through account %s recovery", async (recovery) => {
+    const create = vi.spyOn(api, "createMailDraft").mockResolvedValue(draft);
+    const retry = vi.fn();
+    renderComposer({
+      accounts: recovery === "reconnect" ? [{ ...account, sendCapability: "reconnect" }] : [],
+      accountsState: recovery === "retry" ? "error" : "ready",
+      onRetryAccounts: retry,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Compose a message" }));
+    await userEvent.click(
+      screen.getByRole("button", {
+        name:
+          recovery === "retry"
+            ? "Try again"
+            : recovery === "reconnect"
+              ? "Reconnect account"
+              : "Manage accounts",
+      }),
+    );
+    if (recovery === "retry") expect(retry).toHaveBeenCalledOnce();
+    else
+      await waitFor(() =>
+        expect(screen.getByLabelText("Current route")).toHaveTextContent(
+          "/settings?section=connections",
+        ),
+      );
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Send this message?" })).not.toBeInTheDocument();
   });
 });

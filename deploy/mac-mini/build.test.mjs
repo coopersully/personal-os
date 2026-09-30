@@ -13,8 +13,24 @@ test("builder archives the explicit commit and routes every Docker call to the d
   mkdirSync(source);
   mkdirSync(bin);
   writeFileSync(join(source, "Dockerfile"), "FROM scratch\n");
+  mkdirSync(join(source, "apps/api/src"), { recursive: true });
+  writeFileSync(
+    join(source, ".gitattributes"),
+    readFileSync(new URL("../../.gitattributes", import.meta.url)),
+  );
+  writeFileSync(
+    join(source, "apps/api/src/release-revision.ts"),
+    readFileSync(new URL("../../apps/api/src/release-revision.ts", import.meta.url)),
+  );
   await run("git", ["init", source]);
-  await run("git", ["-C", source, "add", "Dockerfile"]);
+  await run("git", [
+    "-C",
+    source,
+    "add",
+    "Dockerfile",
+    ".gitattributes",
+    "apps/api/src/release-revision.ts",
+  ]);
   await run("git", [
     "-C",
     source,
@@ -39,6 +55,7 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 if (args[0] !== '--host' || args[1] !== ${JSON.stringify(socket)} || process.env.DOCKER_CONTEXT) process.exit(4);
 if (args[2] === 'build' && fs.existsSync(path.join(args.at(-1), '.env'))) process.exit(5);
+if (args[2] === 'build' && !fs.readFileSync(path.join(args.at(-1), 'apps/api/src/release-revision.ts'), 'utf8').includes(${JSON.stringify(`const archivedRevision = "${revision}";`)})) process.exit(6);
 fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args)+'\\n');
 if (args[2] === 'image') console.log('sha256:'+'d'.repeat(64));
 `,

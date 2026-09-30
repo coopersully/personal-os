@@ -11,6 +11,6 @@
     "test:native": "cargo test --manifest-path src-tauri/Cargo.toml && swift test --package-path macos"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
+    "@tauri-apps/cli": "^2.12.0"
   }
 }

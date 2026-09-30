@@ -244,3 +244,12 @@ limited to exact reversible Finance operations; it cannot grant scopes, activate
 stronger approvals, or authorize another domain. The complete shared per-workspace structure,
 canonical workspace editors, centralized read-only overview, maintenance guidance model, and SMS
 controls above are target behavior and must not be presented as shipped.
+
+### Desktop distribution
+
+Settings → Desktop app is available in the browser for official installer
+information. Installed desktop builds additionally show their installed version,
+automatic update status, a manual check and confirmed restart action. The public
+`/downloads` destination shares the same stable release metadata and distinguishes
+unpublished releases, unavailable metadata and self-hosted configuration. It never
+substitutes a guessed installer or stale success for a failed release read.

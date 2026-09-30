@@ -202,7 +202,9 @@ jobs:
         run: pnpm exec tauri build --debug --no-bundle
       - name: Test native desktop contracts
         working-directory: apps/desktop
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml
+          cargo test --manifest-path src-tauri/Cargo.toml -p tauri-plugin-updater --lib
       - name: Test macOS companion and compile WidgetKit extension
         if: runner.os == 'macOS'
         working-directory: apps/desktop

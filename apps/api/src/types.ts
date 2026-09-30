@@ -70,6 +70,7 @@ export type RequestLog = {
     | "connector_sync_recovered"
     | "connector_trigger_dispatched"
     | "connector_recovery_failed"
+    | "desktop_release_unavailable"
     | "finance_sync_health_initialized"
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"

@@ -50,7 +50,9 @@ Files: packages/domain/src/desktop-release.ts; packages/connectors/src/desktop-r
 - [x] Self-review against each spec requirement and boundary failure case; fix gaps.
 - [x] Complete pnpm verify; focused native/release/web checks passed.
 - [x] Reconcile final evidence in current docs and Linear for the existing draft PR.
-- [ ] Configure Apple signing/provisioning and updater keys, build both signed architectures, and record installed old-to-new upgrade acceptance before publishing the first stable release.
+- [x] Configure Apple signing/provisioning and updater keys; build and notarize both architectures.
+- [x] Install the signed Apple Silicon candidate and confirm existing account access.
+- [ ] Record installed old-to-new upgrade acceptance and enable stable automatic publication.
 
 ## Implementation evidence (2026-09-30)
 
@@ -62,7 +64,18 @@ repository checks, lint/typechecks, and 32 desktop/mobile browser tests. Coverag
 was 96.76% statements/lines, 95.67% functions and 94.02% branches. Native
 `cargo test` passed all 50 tests. The draft PR records the published source head.
 
-No GitHub signing secrets or local code-signing identities are configured. The
-first signed installer and installed-app upgrade acceptance remain external
-release prerequisites. No release has been published and no installed app has
-been replaced. Keep the PR draft until those prerequisites are resolved.
+Apple signing/provisioning and updater credentials are configured. Candidate run
+36738710224 successfully signed and notarized both architectures. The Apple Silicon
+app passed Gatekeeper and staple verification and was installed with the prior bundle
+backed up; existing account access was retained. Installed old-to-new upgrade acceptance
+and first stable publication remain outstanding. Automatic publication is gated off
+until that acceptance completes.
+
+
+## Automatic release delivery extension
+
+1. Add version reservation and release-scope reconciliation with real temporary Git integration tests.
+2. Extend the existing signed pipeline to consume the reserved source and publish only after production success.
+3. Cover retries, immutable public assets, stale sources, partial artifacts, rollout switch and failures.
+4. Update release documentation and Linear, run repository verification and independent PR review.
+5. Merge, build the first complete draft, prove the installed upgrade, then enable automatic publication.

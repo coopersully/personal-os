@@ -33,9 +33,20 @@ Settings shows installed version, available version, check/download/install stat
 
 ## Acceptance and self-review
 
-Exercise no update, newer update, older version, offline, malformed feed, invalid signature, concurrent checks, escape during download, ritual-active restart, manual retry, missing key, unsupported platform, and release version/architecture mismatch. Never mount interactive forms before startup installation settles. A download alone is not installation success. The public page must not show guessed download URLs. Review revised the design to use a startup gate instead of guessing whether mounted forms have unsaved changes. First publishing remains blocked until real signing credentials are supplied and the signed upgrade smoke passes.
+Exercise no update, newer update, older version, offline, malformed feed, invalid signature, concurrent checks, escape during download, ritual-active restart, manual retry, missing key, unsupported platform, and release version/architecture mismatch. Never mount interactive forms before startup installation settles. A download alone is not installation success. The public page must not show guessed download URLs. Review revised the design to use a startup gate instead of guessing whether mounted forms have unsaved changes. The first complete signed release is published by an operator as a controlled rollout; verify the installed old-to-new upgrade before enabling unattended publication.
 
 ## Technical references
 
 - [Tauri updater](https://v2.tauri.app/plugin/updater/)
 - [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+
+
+## Approved automatic release extension — 2026-09-30
+
+A successful main push CI run reconciles desktop changes against the last public release, reserves
+an immutable increasing version, and packages both signed architectures. Default increment is
+patch; standalone merged-commit `Desktop-Release: minor` or `major` trailers select larger bumps.
+Release-only version commits preserve main's protected PR history and record their verified source.
+Publication requires a complete artifact set, the current main source's successful production
+status, and the rollout switch. Initial installed-upgrade acceptance precedes enabling the switch.
+See `docs/releasing.md` for exact scope, deadlines, recovery and operator actions.

@@ -4,25 +4,67 @@ Releases are immutable, semantically versioned Git tags. The stable desktop chan
 releases until installed-app acceptance is complete; drafts are not offered to
 automatic update clients.
 
-## Release checklist
+## Automatic desktop releases
 
-1. Merge a reviewed pull request into `main` after `pnpm verify` passes.
-2. Confirm that a staging deployment has applied the same migrations and that
-   its backup/restore path has been exercised.
-3. Update public documentation and write release notes with **Added**,
-   **Changed**, **Fixed**, **Security**, **Self-hosting**, and **Known limits**
-   sections as applicable.
-4. Create and push an annotated `vX.Y.Z` tag. The release workflow builds the
-   Mac installers and updater packages and attaches them to a GitHub draft release.
-5. Verify both downloaded macOS architecture artifacts on clean machines before
-   publishing the draft. Do not publish an unsigned desktop installer.
-6. Build and deploy the API, MCP, and web images from the same release commit;
-   keep exactly one API replica during migration-capable rollouts.
-7. For every changed external boundary, reconcile the
-   [boundary record](engineering/external-boundary-reliability.md) against the deployed environment,
-   then run its least-privileged, non-destructive smoke from the real runtime. Record configured,
-   authorized, reachable, and verified as separate results; process health alone is insufficient.
-8. Publish the GitHub release, deployment notes, and any security advisory.
+After each successful **push CI run on main**, the desktop workflow compares that exact source
+with the source of the highest public stable desktop release. Bundled web/native changes, shared
+packages, patches, lockfiles and build configuration require packaging. Markdown, JavaScript/
+TypeScript test files, and changes confined to API/MCP applications or infrastructure do not.
+Shared-package changes conservatively trigger a release even when only a server uses that package.
+The first successful main run creates the initial candidate.
+
+Versions default to a patch above the highest reserved stable tag or checked-in desktop version,
+whichever is greater. A merged commit message may contain the exact standalone trailer
+`Desktop-Release: minor` or `Desktop-Release: major`; the highest requested bump since the last
+public release wins. For squash merges, put the trailer in the squash commit body. A trailer in a
+PR description alone does not affect versioning. Reserved but failed versions are never reused
+for a different source; gaps are allowed.
+
+The workflow creates a release-only commit parented to the CI-verified main SHA, updating only
+`apps/desktop/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and its lockfile.
+Its annotated `vX.Y.Z` tag records `Nohmi-Source: <SHA>`. It never pushes a version commit to main
+or bypasses branch protection. Main's checked-in version is a development floor; published tags
+and Settings identify installed release versions. Packaging is called directly in the same workflow,
+so it does not depend on a bot-pushed tag triggering a second workflow.
+
+Both architectures must build, sign, notarize, and upload before the complete draft is assembled.
+Automatic publication requires Actions variable `NOHMI_DESKTOP_AUTO_PUBLISH=true`, the same source
+still being current main, and successful `production/ilo` deployment status for that source.
+The publication wait is bounded to 30 minutes; each GitHub command is bounded to 60 seconds.
+Mac packaging has a 60-minute job limit. Manual tag pushes always create drafts.
+
+The first rollout keeps automatic publication disabled until installed-app acceptance is complete.
+After enabling it, the normal operator action is simply merging an approved PR. Release notes,
+installers, signatures, checksums and the updater manifest are published together. Installed apps
+then discover the newer version on launch; Downloads and Settings show that same GitHub release.
+
+### Recovery and delivery guarantees
+
+- One repository-wide desktop release concurrency group serializes reservation through publication.
+  Pending runs may be superseded by GitHub; the next successful current-main run compares all changes
+  since the last public release, so it includes changes from skipped runs.
+- Rerun **all jobs** of a failed release while its source is current main. It reuses the reserved
+  tag and can repair draft uploads. Public assets are never overwritten. If the source has moved,
+  rerun CI on current main instead; it reserves a newer version and includes unpublished changes.
+- A failed or missing deployment status, incomplete artifact set, API failure, or superseded source
+  leaves the release unpublished. Inspect the Actions run and draft. Never publish a partial draft.
+- To pause new public updates, clear `NOHMI_DESKTOP_AUTO_PUBLISH`; packaging continues into drafts.
+  To recover from an already published defect, merge a fix and ship a higher version.
+- Authority: the workflow's repository-scoped token can create tags, manage releases, and read
+  deployment statuses. Apple and updater signing use existing Actions secrets. HTTPS to GitHub and
+  Apple is required. The durable reservation is the tag; public release publication is the client
+  delivery commit point. GitHub/Apple outages and revoked credentials can still prevent delivery
+  despite passing source tests. Actions logs, draft state, tag/source association, and release assets
+  provide recovery evidence without printing secrets.
+
+## Manual release checklist
+
+1. Merge reviewed source into main after verification. Ensure production deployed successfully.
+2. For an explicitly versioned manual release, update all desktop version files in a reviewed PR,
+   then create and push the matching annotated `vX.Y.Z` tag.
+3. Wait for both signed/notarized architectures and the complete draft release.
+4. Complete installed-app acceptance, inspect release notes and artifacts, and publish the draft.
+5. Verify Downloads, Settings and the installed update path against the published version.
 
 ## Signing requirements
 
@@ -106,15 +148,17 @@ uses GitHub's `/releases/latest/download/latest.json` endpoint and default newer
 comparison. To recover from a bad published app, ship a higher signed patch
 version; do not replace immutable assets or silently downgrade clients.
 
-Before publishing the first stable release, install a signed old build into
-Applications, publish a newer signed candidate to a controlled update feed, and
-exercise check, signature rejection, escape during download, automatic replacement,
-relaunch, existing account login, ritual recovery, Keychain and widget access.
-Also test Finder/Dock reopen, offline launch, read-only install location and both
-architectures. Remove the test feed override from production artifacts. Apple
-credential presence and green unit tests do not prove these installed-app checks.
-The first public release requires an explicit operator publication after this
-acceptance. Subsequent updates are delivered by publishing the next complete draft.
+For the first rollout, keep automatic publication disabled. Validate the downloaded signed
+candidate, Gatekeeper acceptance, account continuity and complete two-architecture draft. An
+operator then publishes the first complete release and immediately exercises the installed
+old-to-new check/download/replacement/relaunch path before enabling unattended publication.
+This is a controlled first public rollout, not proof of an upgrade before a feed exists.
+Also exercise signature rejection, escape during download, ritual recovery, Keychain/widget
+access, Finder/Dock reopen, offline launch and a read-only install location at the appropriate
+native or installed integration layer; record any architecture-specific evidence gaps explicitly.
+If first-upgrade acceptance fails, leave automation disabled, preserve the installed app, and
+repair with a higher signed version. Apple credential presence and green unit tests alone do not
+prove installed replacement. Subsequent releases use the automatic publication gates above.
 
 ### Signed candidate builds
 

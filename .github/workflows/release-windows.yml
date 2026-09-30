@@ -1,0 +1,56 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @personal-os/web build
+        env:
+          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
+      - name: Require signing and production API configuration
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:VITE_API_BASE_URL) { throw "PERSONAL_OS_API_BASE_URL is required." }
+          if (-not $env:WINDOWS_CERTIFICATE) { throw "WINDOWS_CERTIFICATE is required." }
+          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw "WINDOWS_CERTIFICATE_PASSWORD is required." }
+      - name: Build NSIS installer
+        working-directory: apps/desktop
+        env:
+          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
+        run: pnpm exec tauri build --bundles nsis --ci
+      - name: Sign installer
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "personal-os-signing.pfx"
+          [System.IO.File]::WriteAllBytes($certificatePath, [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signTool) { throw "signtool.exe was not found." }
+          Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object {
+            & $signTool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($_.Name)." }
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe

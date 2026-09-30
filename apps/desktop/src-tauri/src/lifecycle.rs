@@ -71,6 +71,7 @@ pub fn deep_link(app: &tauri::AppHandle, url: url::Url) {
     });
 }
 pub async fn action(app: tauri::AppHandle, value: Value) {
+    crate::updates::wait_for_startup(&app).await;
     let action = value["action"].as_str().unwrap_or("");
     if matches!(action, "complete" | "join") {
         let state = app.state::<DesktopState>();
@@ -191,7 +192,10 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| {
             let app = app.clone();
             match event.id.as_ref() {
-                "open" => show(&app),
+                "open" => {
+                    crate::updates::schedule(&app);
+                    show(&app);
+                }
                 "quit" => app.exit(0),
                 "settings" => {
                     show(&app);
@@ -257,6 +261,7 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        crate::updates::wait_for_startup(&app).await;
         let settings = app.state::<DesktopState>().settings.lock().await.clone();
         if let Err(error) =
             crate::native::call(&app, json!({"op":"configure","settings":settings})).await

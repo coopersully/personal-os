@@ -263,6 +263,18 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/desktop-release": {
+        get: {
+          summary: "Published official desktop installers and release notes",
+          security: [],
+          responses: {
+            200: {
+              description:
+                "Available, not_published, unavailable or disabled for self-hosted deployments; only available includes release metadata",
+            },
+          },
+        },
+      },
       "/health/live": { get: { responses: { 200: { description: "Process is alive" } } } },
       "/health/ready": { get: { responses: { 200: { description: "Dependencies are ready" } } } },
       "/v1/auth/register": { post: { responses: { 201: { description: "Account created" } } } },

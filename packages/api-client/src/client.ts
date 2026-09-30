@@ -32,6 +32,7 @@ import {
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
+import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
@@ -204,6 +205,7 @@ export function createApiClient(options: ClientOptions) {
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createRitualsApiClient(request),
+    ...createDesktopReleaseApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createMailStewardshipApiClient(request),
     ...createReminderApiClient(request, toQuery),

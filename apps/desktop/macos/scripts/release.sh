@@ -10,6 +10,10 @@ set -euo pipefail
 : "${ILO_HOST_PROFILE_BASE64:?Provisioned host profile required}"
 : "${ILO_WIDGET_PROFILE_BASE64:?Provisioned widget profile required}"
 : "${ILO_KEYCHAIN_ACCESS_GROUP:?Provisioned shared Keychain group required}"
+: "${NOHMI_UPDATER_PUBLIC_KEY:?Updater public key required}"
+: "${VITE_API_BASE_URL:?Production API required}"
+[[ "$VITE_API_BASE_URL" == "https://nohmi-api.coopersully.me" ]] || { echo "Official installers require the production nohmi API" >&2; exit 1; }
+: "${TAURI_SIGNING_PRIVATE_KEY:?Updater signing key required}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 desktop="$(cd "$root/.." && pwd)"
 workspace="$(mktemp -d)"
@@ -48,9 +52,16 @@ mkdir -p "$workspace/image" "$desktop/src-tauri/target/release/bundle/dmg"
 ditto "$app" "$workspace/image/nohmi.app"
 ln -s /Applications "$workspace/image/Applications"
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
-image="$desktop/src-tauri/target/release/bundle/dmg/nohmi_${version}_$(uname -m).dmg"
+update_arch="$(uname -m)"
+if [[ "$update_arch" == "arm64" ]]; then update_arch="aarch64"; fi
+image="$desktop/src-tauri/target/release/bundle/dmg/nohmi_${version}_${update_arch}.dmg"
 hdiutil create -volname nohmi -srcfolder "$workspace/image" -ov -format UDZO "$image"
 codesign --force --timestamp --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$image"
 xcrun notarytool submit "$image" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
 xcrun stapler staple "$image"
 xcrun stapler validate "$image"
+
+# Archive only the final widget-embedded, signed and stapled bundle.
+archive="$desktop/src-tauri/target/release/bundle/dmg/nohmi_${version}_${update_arch}.app.tar.gz"
+COPYFILE_DISABLE=1 tar -czf "$archive" -C "$(dirname "$app")" "$(basename "$app")"
+pnpm exec tauri signer sign --app-version "$version" "$archive"

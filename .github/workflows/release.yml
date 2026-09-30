@@ -5,12 +5,20 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   macos:
     name: macOS DMG
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -21,6 +29,7 @@ jobs:
           cache: pnpm
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
+      - run: node apps/desktop/scripts/release-metadata.mjs "${GITHUB_REF_NAME}"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @personal-os/web build
         env:
@@ -54,73 +63,35 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
           ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
           ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
+          NOHMI_UPDATER_PUBLIC_KEY: ${{ vars.NOHMI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           ILO_KEYCHAIN_ACCESS_GROUP: ${{ vars.ILO_KEYCHAIN_ACCESS_GROUP }}
         run: bash macos/scripts/release.sh
       - uses: actions/upload-artifact@v7
         with:
-          name: macos-installer
-          path: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
-
-  windows:
-    name: Windows installer
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.1.2
-      - uses: actions/setup-node@v7
-        with:
-          cache: pnpm
-          node-version: 22
-      - uses: dtolnay/rust-toolchain@stable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @personal-os/web build
-        env:
-          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-      - name: Require signing and production API configuration
-        shell: pwsh
-        env:
-          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          if (-not $env:VITE_API_BASE_URL) { throw "PERSONAL_OS_API_BASE_URL is required." }
-          if (-not $env:WINDOWS_CERTIFICATE) { throw "WINDOWS_CERTIFICATE is required." }
-          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw "WINDOWS_CERTIFICATE_PASSWORD is required." }
-      - name: Build NSIS installer
-        working-directory: apps/desktop
-        env:
-          VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-        run: pnpm exec tauri build --bundles nsis --ci
-      - name: Sign installer
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          $certificatePath = Join-Path $env:RUNNER_TEMP "personal-os-signing.pfx"
-          [System.IO.File]::WriteAllBytes($certificatePath, [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $signTool) { throw "signtool.exe was not found." }
-          Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object {
-            & $signTool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($_.Name)." }
-          }
-      - uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer
-          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          name: macos-installer-${{ matrix.arch }}
+          path: apps/desktop/src-tauri/target/release/bundle/dmg/*
 
   publish:
-    needs: [macos, windows]
+    permissions:
+      contents: write
+    needs: [macos]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v8
         with:
           path: release-assets
+          pattern: macos-installer-*
+          merge-multiple: true
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes release-assets/macos-installer/* release-assets/windows-installer/*
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="${GITHUB_REF_NAME}" --jq .body > release-notes.md
+          node apps/desktop/scripts/release-metadata.mjs "${GITHUB_REF_NAME}" release-assets release-notes.md
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --draft --title "nohmi ${GITHUB_REF_NAME}" --notes-file release-notes.md release-assets/*

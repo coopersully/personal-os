@@ -41,6 +41,7 @@ import {
   testDesktopServer,
 } from "./bridge.js";
 import { resetDesktopSession } from "./session.js";
+import { DesktopUpdates } from "./updates.js";
 
 function Toggle({
   label,
@@ -165,6 +166,7 @@ export function DesktopSettingsPanel({
               ? "Notifications"
               : "Desktop"}
       </h2>
+      {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
       {connectionOnly ? <RitualLocal recoveryOnly /> : null}
       {query.data?.native.error ? (
         <Alert variant="destructive">

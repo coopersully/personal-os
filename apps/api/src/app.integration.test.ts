@@ -54,6 +54,12 @@ type RequestOptions = {
 };
 
 describe.sequential("ilo API", () => {
+  it("serves public desktop distribution status without requiring a session", async () => {
+    const response = await app.request("/v1/desktop-release");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "disabled", release: null });
+  });
+
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
   let app: PersonalOsApp;

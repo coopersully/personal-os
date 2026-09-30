@@ -46,6 +46,7 @@ import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
 import { createDesktopActivityService } from "./desktop-activity-service.js";
+import { createDesktopReleaseService } from "./desktop-release-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
@@ -721,6 +722,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/auth/recovery", rateLimitAuth);
   app.use("/v1/auth/password-reset", rateLimitAuth);
   app.use("/v1/auth/email-verification/confirm", rateLimitAuth);
+
+  const desktopRelease = createDesktopReleaseService(dependencies.config.apiBaseUrl);
+  app.get("/v1/desktop-release", async (context) => context.json(await desktopRelease()));
 
   app.get("/health/live", (context) => context.json({ status: "ok" }));
   app.get("/health/ready", async (context) => {

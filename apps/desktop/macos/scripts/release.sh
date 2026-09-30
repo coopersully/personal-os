@@ -19,7 +19,17 @@ desktop="$(cd "$root/.." && pwd)"
 workspace="$(mktemp -d)"
 keychain="$workspace/signing.keychain-db"
 keychain_password="$(uuidgen)"
-cleanup() { security delete-keychain "$keychain" >/dev/null 2>&1 || true; rm -rf "$workspace"; }
+original_keychains=()
+while IFS= read -r original_keychain; do
+  original_keychain="${original_keychain#*\"}"
+  original_keychain="${original_keychain%\"*}"
+  [[ -n "$original_keychain" ]] && original_keychains+=("$original_keychain")
+done < <(security list-keychains -d user)
+cleanup() {
+  security list-keychains -d user -s "${original_keychains[@]}" >/dev/null 2>&1 || true
+  security delete-keychain "$keychain" >/dev/null 2>&1 || true
+  rm -rf "$workspace"
+}
 trap cleanup EXIT
 python3 - "$workspace" <<'PY'
 import os, base64, pathlib, sys
@@ -32,6 +42,7 @@ PY
 security create-keychain -p "$keychain_password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
+security list-keychains -d user -s "$keychain" "${original_keychains[@]}"
 security import "$workspace/certificate.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
 # Fresh runners may not have Apple's Developer ID G2 intermediate installed.

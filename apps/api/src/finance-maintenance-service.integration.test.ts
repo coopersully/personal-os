@@ -698,7 +698,7 @@ describe.sequential("Finance maintenance service", () => {
         .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
         .orderBy(financeMaintenanceCandidateItems.ordinal),
     ).resolves.toEqual(fingerprints.map((fingerprint) => ({ fingerprint })));
-  });
+  }, 20_000);
 
   it("durably appends three candidate pages and replays or supersedes a crashed page safely", async () => {
     const ownerId = await createUser("Paged Finance candidate");

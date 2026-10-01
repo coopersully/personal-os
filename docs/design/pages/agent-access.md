@@ -7,7 +7,7 @@ Agent work has three distinct user questions. nohmi gives each one a dedicated d
 `/settings?section=reviews` answers **What needs my judgment now?** It is an account utility and
 appears in Settings navigation on desktop and in the Settings action sheet on narrow screens.
 
-- The shared Settings app bar owns the visible page title. The feature body begins with filters and
+- The shared Settings page heading owns the visible page title; Settings has no app bar. The feature body begins with filters and
   queue material rather than repeating a title, eyebrow, or description.
 - It contains only `review` and `attention` work. Setup state is never queue work.
 - Kind and workspace filters are stored in the URL as `kind` and `workspace`.

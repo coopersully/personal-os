@@ -63,7 +63,7 @@ export function TextingSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle aria-level={1} role="heading">
+        <CardTitle aria-level={2} role="heading">
           Agent texting
         </CardTitle>
         <CardDescription>

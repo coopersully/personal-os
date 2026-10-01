@@ -37,7 +37,6 @@ export function ActivityPage() {
   const entries = filterActivityEvents(activity.data, search);
   return (
     <div className="narrow-page">
-      <h1 className="sr-only">Activity</h1>
       <QueryFeedback query={activity} title="Couldn’t refresh activity." staleOnly />
       {activity.data.length === 0 ? (
         <EmptyState icon={<ActivityIcon />} title="No activity yet">

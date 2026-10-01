@@ -1,13 +1,30 @@
 import { expect, test } from "@playwright/test";
 
-test("ritual settings persist ordered steps and expose account history", async ({ page }) => {
+test("settings support field search, ritual history, and resumable setup replay", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/settings?section=rituals");
-  await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveText("Rituals");
+  await expect(page.getByRole("heading", { name: "Rituals", level: 1 })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Search settings", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search all settings" }).fill("time zone");
+  const results = page.getByRole("navigation", { name: "Settings search results" });
+  await expect(results.getByRole("link", { name: /^Planning time zone Account/ })).toBeVisible();
+  await expect(results.getByRole("link", { name: /Appearance/ })).toHaveCount(0);
+  await results.getByRole("link", { name: /^Planning time zone Account/ }).click();
+  await expect(page.locator("#profile-timezone")).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Planning defaults" })).toBeVisible();
+  await page.getByRole("button", { name: "Search settings", exact: true }).click();
+  await page.getByRole("searchbox", { name: "Search all settings" }).fill("rituals");
+  await page
+    .getByRole("navigation", { name: "Settings search results" })
+    .getByRole("link", { name: /^Rituals Shape/ })
+    .click();
   await expect(page.getByRole("radio", { name: "Morning", exact: true })).toBeVisible();
   await expect(page.getByLabel("Available from").first()).toHaveValue("06:00");
   await page.getByRole("radio", { name: "Evening", exact: true }).click();
@@ -38,4 +55,21 @@ test("ritual settings persist ordered steps and expose account history", async (
   expect((await deleted).ok()).toBe(true);
   await page.reload();
   await expect(page.getByRole("checkbox", { name: "Enable morning ritual" })).not.toBeChecked();
+  await page.goto("/settings?section=setup");
+  await expect(page.getByRole("heading", { name: "Setup", level: 1 })).toBeVisible();
+  const setupSaved = page.waitForResponse(
+    (response) => response.url().endsWith("/v1/setup") && response.request().method() === "PATCH",
+  );
+  await page.getByRole("button", { name: "Save setup preferences" }).click();
+  expect((await setupSaved).ok()).toBe(true);
+  await page.getByRole("link", { name: "View setup experience" }).click();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /What should nohmi help with/ })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: /What should nohmi help with/ })).toBeVisible();
+  await page.getByRole("button", { name: "Exit Setup" }).click();
+  await expect(page.getByRole("heading", { name: "Setup", level: 1 })).toBeVisible();
+  await page.goto("/today");
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 });

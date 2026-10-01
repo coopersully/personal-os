@@ -98,7 +98,9 @@ The shell owns one responsive inline page inset. Standard app-bar content and
 ordinary route bodies use that same inset so their leading and trailing edges
 align across navigation and material. Spatial workspaces that intentionally run
 edge to edge, such as Calendar and Mail, may opt out at their workspace frame;
-individual pages must not recreate the shell inset with local padding.
+individual pages must not recreate the shell inset with local padding. Settings
+uses a centered reading surface with its own page introduction, without a workspace
+app bar; see the [Settings layout contract](pages/settings.md).
 
 `WorkspaceLayout` owns an optional secondary-navigation slot directly below
 the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its

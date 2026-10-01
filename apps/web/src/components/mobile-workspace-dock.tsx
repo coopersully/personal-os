@@ -251,7 +251,7 @@ export function MobileWorkspaceDock({
                     icon={SparklesIcon}
                     label="Setup"
                     onNavigate={() => setOpen(false)}
-                    path="/setup"
+                    path="/settings?section=setup"
                   />
                   <DockAccountMenuItem
                     icon={SettingsIcon}

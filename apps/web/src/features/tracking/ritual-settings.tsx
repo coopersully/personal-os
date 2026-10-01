@@ -33,6 +33,7 @@ import {
   ritualDeviceId,
   showRitualPreview,
 } from "../desktop/ritual-bridge.js";
+import { SettingsBento } from "../settings/settings-layout.js";
 import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
 import { makeRitualPreview, RitualPreview } from "./ritual-preview.js";
@@ -290,7 +291,7 @@ function RitualForm({
     }
   }
   return (
-    <div className="grid items-start gap-4 lg:grid-cols-3">
+    <SettingsBento>
       <div className="flex flex-col gap-4">
         <Card>
           <CardHeader>
@@ -386,7 +387,7 @@ function RitualForm({
           </CardContent>
         </Card>
       </div>
-      <Card className="lg:col-span-2">
+      <Card className="settings-bento__main">
         <CardHeader>
           <CardTitle>Checklist</CardTitle>
           <CardDescription>Add the things you want to do or track, in order</CardDescription>
@@ -484,7 +485,7 @@ function RitualForm({
         </CardContent>
       </Card>
       {preview ? <RitualPreview state={preview} onClose={() => setPreview(null)} /> : null}
-    </div>
+    </SettingsBento>
   );
 }
 

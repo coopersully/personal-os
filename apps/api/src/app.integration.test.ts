@@ -5490,6 +5490,32 @@ describe.sequential("ilo API", () => {
       dismissedAt: "2026-07-13T12:00:00.000Z",
       status: "dismissed",
     });
+    const dismissedSetup = (await payload(await request("/v1/me"))).user.setup;
+    const preferences = await payload(
+      await request("/v1/setup", {
+        method: "PATCH",
+        body: { action: "preferences", selectedWorkspaces: ["tasks"] },
+      }),
+    );
+    expect(preferences.user.setup).toEqual({ ...dismissedSetup, selectedWorkspaces: ["tasks"] });
+    const completedSetup = (
+      await payload(
+        await request("/v1/setup", {
+          method: "PATCH",
+          body: { action: "complete" },
+        }),
+      )
+    ).user.setup;
+    const configured = await payload(
+      await request("/v1/setup", {
+        method: "PATCH",
+        body: { action: "preferences", selectedWorkspaces: ["calendar", "mail"] },
+      }),
+    );
+    expect(configured.user.setup).toEqual({
+      ...completedSetup,
+      selectedWorkspaces: ["calendar", "mail"],
+    });
     expect((await request("/v1/weather")).status).toBe(400);
     weatherFetch.mockResolvedValueOnce(
       Response.json({

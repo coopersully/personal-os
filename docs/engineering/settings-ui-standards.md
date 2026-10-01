@@ -82,3 +82,15 @@ An inline message needs a specific title and a next step. Never use a static ale
 ## Sources
 
 These choices follow the W3C guidance to reserve alerts for important, non-interrupting status changes and to avoid automatically dismissing critical content, plus progressive disclosure guidance for hiding advanced controls until needed. See the [WAI-ARIA alert pattern](https://www.w3.org/WAI/ARIA/apg/patterns/alert/), [WCAG status messages](https://www.w3.org/WAI/WCAG21/Understanding/status-messages.html), [NN/g progressive disclosure](https://www.nngroup.com/articles/progressive-disclosure/), and [shadcn’s Alert and Sonner documentation](https://ui.shadcn.com/docs/components/radix/alert).
+
+## Shared page composition
+
+Use the [Settings page contract](../design/pages/settings.md) for layout and search.
+`features/settings/settings-layout.tsx` owns the page introduction, section card,
+and responsive bento layout. The shell mounts no workspace app bar on `/settings`.
+Search lives in the sidebar header (page heading on narrow layouts), covers all
+available sections and individual fields, and shares navigation visibility rules.
+Add field labels, aliases, and stable destinations to `settings-fields.ts` with each
+new preference. Search may reveal UI and focus controls, never mutate their values.
+Domain modules retain
+ownership of their fields and save behavior.

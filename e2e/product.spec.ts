@@ -284,7 +284,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/reviews");
-  await expect(page.getByRole("heading", { name: "Reviews", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reviews", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Review" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Attention" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Setup" })).toHaveCount(0);
@@ -304,7 +304,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
 
   await page.goto("/settings?section=workspace-access&workspace=mail");
-  await expect(page.getByRole("heading", { name: "Workspace access" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workspace access", level: 1 })).toBeVisible();
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
   await expect(page.getByText("Needs your approval", { exact: true })).toBeVisible();
   await expect(page.getByText("Not allowed", { exact: true })).toBeVisible();
@@ -673,9 +673,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     }
     await settingsSidebar.getByRole("link", { name }).click();
   };
-  await expect(
-    page.getByRole("navigation", { name: "Top navigation" }).getByText("Account"),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
   if (mobile) {
     await expect(settingsSidebar).toBeHidden();
     await expect(
@@ -699,7 +697,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByText("Reminder · created").first()).toBeVisible();
   await expect(page.getByText("Calendar event · created").first()).toBeVisible();
   await openSettingsSection("Appearance");
-  await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
   const darkAppearance = page.getByRole("radio", { name: "Dark" });
   await darkAppearance.click();
   await expect(darkAppearance).toBeChecked();
@@ -707,10 +705,12 @@ test("a person and an agent share one reminder and calendar surface", async ({
     .poll(() => page.locator("html").evaluate((element) => element.classList.contains("dark")))
     .toBe(true);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   await openSettingsSection("Connected agents");
-  await expect(page.getByRole("heading", { name: "Connected agents", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Connected agents", exact: true, level: 1 }),
+  ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "nohmi MCP URL" })).toHaveValue(/\/mcp$/);
   await openSettingsSection("Workspace access");
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
@@ -737,6 +737,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Create local token" }).click();
+  expect(
+    await page.locator("html").evaluate((element) => element.scrollWidth <= innerWidth + 1),
+  ).toBe(true);
   await expect(page.getByText(/^pos_/)).toBeVisible();
 
   const layout = await page.evaluate(() => ({

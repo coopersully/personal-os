@@ -171,7 +171,6 @@ import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   Card as ShadcnCard,
-  CardAction as ShadcnCardAction,
   CardContent as ShadcnCardContent,
   CardDescription as ShadcnCardDescription,
   CardHeader as ShadcnCardHeader,
@@ -331,6 +330,13 @@ import {
   WorkspaceSettings,
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
+import {
+  SettingsBento,
+  SettingsPageLayout,
+  SettingsSection,
+} from "./features/settings/settings-layout.js";
+import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
+import { SetupSettings } from "./features/settings/setup-settings.js";
 import {
   TaskRow,
   TasksCreateButton,
@@ -1378,6 +1384,11 @@ function AuthenticatedApp({ user }: { user: User }) {
               <span className="truncate text-sm font-semibold">
                 {sidebarMode === "settings" ? "Settings" : activeWorkspace?.label}
               </span>
+              {sidebarMode === "settings" ? (
+                <SettingsSearch
+                  groups={visibleSettingsNavigation(user.canManageInvitations === true)}
+                />
+              ) : null}
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
@@ -1439,31 +1450,32 @@ function AuthenticatedApp({ user }: { user: User }) {
             )
           }
           primaryNavigation={
-            <WorkspaceAppBarForRoute
-              activeSettingsSection={activeSettingsSection}
-              sidebarOwnsTitle={
-                !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
-              }
-              workspaceSwitcher={
-                isCalendarWorkspace && isMobileWorkspaceDock ? (
-                  <WorkspaceSwitcher
-                    onNavigate={closeMobileMenu}
-                    pathname={location.pathname}
-                    user={user}
-                    weather={weather.data}
-                  />
-                ) : null
-              }
-              onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
-              pageTitle={pageTitle}
-              pathname={shellPathname}
-              pinned={pinned}
-              setEditor={setEditor}
-              todayBrief={todayBrief.data}
-              togglePin={togglePin}
-              user={user}
-              weather={weather.data}
-            />
+            shellPathname === "/settings" ? null : (
+              <WorkspaceAppBarForRoute
+                sidebarOwnsTitle={
+                  !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
+                }
+                workspaceSwitcher={
+                  isCalendarWorkspace && isMobileWorkspaceDock ? (
+                    <WorkspaceSwitcher
+                      onNavigate={closeMobileMenu}
+                      pathname={location.pathname}
+                      user={user}
+                      weather={weather.data}
+                    />
+                  ) : null
+                }
+                onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
+                pageTitle={pageTitle}
+                pathname={shellPathname}
+                pinned={pinned}
+                setEditor={setEditor}
+                todayBrief={todayBrief.data}
+                togglePin={togglePin}
+                user={user}
+                weather={weather.data}
+              />
+            )
           }
         >
           <main
@@ -1712,7 +1724,6 @@ function NavigationIcon({
 }
 
 function WorkspaceAppBarForRoute({
-  activeSettingsSection,
   sidebarOwnsTitle,
   onCalendarToday,
   pageTitle,
@@ -1725,7 +1736,6 @@ function WorkspaceAppBarForRoute({
   weather,
   workspaceSwitcher,
 }: {
-  activeSettingsSection: SettingsSectionId;
   sidebarOwnsTitle: boolean;
   onCalendarToday: () => void;
   pageTitle: string | null;
@@ -1771,8 +1781,7 @@ function WorkspaceAppBarForRoute({
     <CalendarAppBarControls onToday={onCalendarToday} user={user} />
   ) : pathname === "/today" ? (
     <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
-  ) : pathname === "/activity" ||
-    (pathname === "/settings" && activeSettingsSection === "activity") ? (
+  ) : pathname === "/activity" ? (
     <ActivityTopbarControls />
   ) : pathname === "/reminders" ? (
     <RemindersTopbarControls />
@@ -5281,7 +5290,6 @@ function GoalsPage() {
   return (
     <div className="wide-page flex flex-col gap-6 pb-8">
       <QueryFeedback query={goals} title="Couldn’t refresh goals." staleOnly />
-      <h1 className="sr-only">Goals</h1>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ShadcnCard>
           <ShadcnCardHeader>
@@ -5478,7 +5486,6 @@ function MotivesPage() {
   return (
     <div className="wide-page flex flex-col gap-6 pb-8">
       <QueryFeedback query={motives} title="Couldn’t refresh motives." staleOnly />
-      <h1 className="sr-only">Motives</h1>
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ShadcnCard>
           <ShadcnCardHeader>
@@ -5898,6 +5905,7 @@ function MailSyncButton({
 }
 
 type SettingsSectionId =
+  | "setup"
   | "activity"
   | "agent-connections"
   | "appearance"
@@ -5926,7 +5934,10 @@ const settingsNavigation: Array<{
 }> = [
   {
     label: "Account",
-    items: [{ icon: UserIcon, id: "profile", label: "Account" }],
+    items: [
+      { icon: UserIcon, id: "profile", label: "Account" },
+      { icon: SparklesIcon, id: "setup", label: "Setup" },
+    ],
   },
   {
     label: "Personal",
@@ -6087,16 +6098,6 @@ function SettingsSidebarNavigation({
                     />
                   );
                 })}
-                {group.label === "Account" ? (
-                  <ShadcnSidebarMenuItem>
-                    <ShadcnSidebarMenuButton asChild>
-                      <Link onClick={onNavigate} to="/setup">
-                        <SparklesIcon aria-hidden="true" />
-                        <span>Setup</span>
-                      </Link>
-                    </ShadcnSidebarMenuButton>
-                  </ShadcnSidebarMenuItem>
-                ) : null}
               </ShadcnSidebarMenu>
             </nav>
           </ShadcnSidebarGroupContent>
@@ -6127,43 +6128,55 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     return <Navigate replace to="/settings?section=profile" />;
   }
   return (
-    <div className="narrow-page settings-page">
-      <section className="settings-panel" key={section}>
-        {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
-        {section === "finances" ? (
-          <div className="flex flex-col gap-6">
-            <WorkspaceSettings domain="finances" />
-            <FinanceSettings />
+    <SettingsPageLayout
+      key={section}
+      title={settingsSectionLabel(section)}
+      description={settingsDescriptions[section]}
+      search={
+        <SettingsSearch groups={visibleSettingsNavigation(user.canManageInvitations === true)} />
+      }
+    >
+      {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
+      {section === "finances" ? (
+        <div className="flex flex-col gap-6">
+          <WorkspaceSettings domain="finances" />
+          <FinanceSettings />
+        </div>
+      ) : null}
+      {section === "calendar" ? (
+        <div className="flex flex-col gap-6">
+          <WorkspaceSettings domain="calendar" />
+          <CalendarsSettings setEditor={setEditor} />
+        </div>
+      ) : null}
+      {section === "tasks" ? <WorkspaceSettings domain="tasks" /> : null}
+      {section === "connections" ? <ConnectorsSettings /> : null}
+      {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
+      {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
+      {section === "activity" ? (
+        <>
+          <div className="settings-page__tools">
+            <ActivityTopbarControls />
           </div>
-        ) : null}
-        {section === "calendar" ? (
-          <div className="flex flex-col gap-6">
-            <WorkspaceSettings domain="calendar" />
-            <CalendarsSettings setEditor={setEditor} />
-          </div>
-        ) : null}
-        {section === "tasks" ? <WorkspaceSettings domain="tasks" /> : null}
-        {section === "connections" ? <ConnectorsSettings /> : null}
-        {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
-        {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
-        {section === "activity" ? <ActivityPage /> : null}
-        {section === "appearance" ? <ThemeSettings user={user} /> : null}
-        {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
-        {section === "goals" ? <GoalsPage /> : null}
-        {section === "motives" ? <MotivesPage /> : null}
-        {section === "profile" ? <ProfileSettings user={user} /> : null}
-        {section === "reviews" ? <ReviewsPage /> : null}
-        {section === "invitations" ? <InvitationsSettings /> : null}
-        {section === "sessions" ? <SessionsSettings /> : null}
-        {section === "texting" ? <TextingSettings /> : null}
-        {section === "desktop" ? <DesktopDownloads /> : null}
-        {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
-        {isTauri() &&
-        (section === "desktop" || section === "pet" || section === "notifications") ? (
-          <DesktopSettingsPanel section={section} />
-        ) : null}
-      </section>
-    </div>
+          <ActivityPage />
+        </>
+      ) : null}
+      {section === "appearance" ? <ThemeSettings user={user} /> : null}
+      {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
+      {section === "goals" ? <GoalsPage /> : null}
+      {section === "motives" ? <MotivesPage /> : null}
+      {section === "profile" ? <ProfileSettings user={user} /> : null}
+      {section === "setup" ? <SetupSettings user={user} /> : null}
+      {section === "reviews" ? <ReviewsPage /> : null}
+      {section === "invitations" ? <InvitationsSettings /> : null}
+      {section === "sessions" ? <SessionsSettings /> : null}
+      {section === "texting" ? <TextingSettings /> : null}
+      {section === "desktop" ? <DesktopDownloads /> : null}
+      {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
+      {isTauri() && (section === "desktop" || section === "pet" || section === "notifications") ? (
+        <DesktopSettingsPanel section={section} />
+      ) : null}
+    </SettingsPageLayout>
   );
 }
 
@@ -7769,10 +7782,7 @@ function ProfileSettings({ user }: { user: User }) {
   );
   const [firstName, lastName] = splitProfileName(user.displayName);
   return (
-    <SettingsSection
-      description="Your identity and local time are used to personalize the workspace and schedule material correctly."
-      title="Account"
-    >
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-6">
         <FeedbackForm
           feedback={update.feedback}
@@ -7827,141 +7837,158 @@ function ProfileSettings({ user }: { user: User }) {
               </ShadcnAlertAction>
             </ShadcnAlert>
           ) : null}
-          <ShadcnFieldGroup className="form-grid">
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="given-name"
-                defaultValue={firstName}
-                id="profile-first-name"
-                name="firstName"
-                required
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="family-name"
-                defaultValue={lastName}
-                id="profile-last-name"
-                name="lastName"
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="email"
-                defaultValue={user.email}
-                id="profile-email"
-                name="email"
-                required
-                type="email"
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="profile-workday-start">
-                Planning day starts
-              </ShadcnFieldLabel>
-              <ShadcnInput
-                defaultValue={minuteToTime(user.workdayStartMinute)}
-                id="profile-workday-start"
-                name="workdayStart"
-                required
-                type="time"
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="profile-workday-end">Planning day ends</ShadcnFieldLabel>
-              <ShadcnInput
-                defaultValue={minuteToTime(user.workdayEndMinute)}
-                id="profile-workday-end"
-                name="workdayEnd"
-                required
-                type="time"
-              />
-            </ShadcnField>
-            <HomeLocationField
-              savedLocation={user.homeLocation}
-              onChange={(location) => {
-                setHomeLocation(location);
-                if (location?.timezone) setPlanningTimezone(location.timezone);
-              }}
-              onValidityChange={setHomeLocationValid}
-            />
-            <ShadcnField className="profile-form__full-row">
-              <ShadcnFieldLabel htmlFor="profile-timezone">Planning time zone</ShadcnFieldLabel>
-              <ShadcnNativeSelect
-                id="profile-timezone"
-                name="planningTimezone"
-                onChange={(event) => setPlanningTimezone(event.target.value)}
-                value={planningTimezone}
-              >
-                {timeZones.map((timeZone) => (
-                  <NativeSelectOption key={timeZone} value={timeZone}>
-                    {timeZone.replace("_", " ")}
-                  </NativeSelectOption>
-                ))}
-              </ShadcnNativeSelect>
-              <ShadcnFieldDescription>
-                Home Location supplies this default. Choose a different zone when your planning day
-                should stay anchored elsewhere.
-              </ShadcnFieldDescription>
-            </ShadcnField>
-          </ShadcnFieldGroup>
-
+          <SettingsBento>
+            <SettingsSection
+              title="Personal details"
+              description="How you appear in nohmi and where we contact you."
+            >
+              <ShadcnFieldGroup>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="given-name"
+                    defaultValue={firstName}
+                    id="profile-first-name"
+                    name="firstName"
+                    required
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="family-name"
+                    defaultValue={lastName}
+                    id="profile-last-name"
+                    name="lastName"
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="email"
+                    defaultValue={user.email}
+                    id="profile-email"
+                    name="email"
+                    required
+                    type="email"
+                  />
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </SettingsSection>
+            <SettingsSection
+              title="Planning defaults"
+              description="Anchor your schedule to your local day."
+            >
+              <ShadcnFieldGroup className="form-grid">
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="profile-workday-start">
+                    Planning day starts
+                  </ShadcnFieldLabel>
+                  <ShadcnInput
+                    defaultValue={minuteToTime(user.workdayStartMinute)}
+                    id="profile-workday-start"
+                    name="workdayStart"
+                    required
+                    type="time"
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="profile-workday-end">
+                    Planning day ends
+                  </ShadcnFieldLabel>
+                  <ShadcnInput
+                    defaultValue={minuteToTime(user.workdayEndMinute)}
+                    id="profile-workday-end"
+                    name="workdayEnd"
+                    required
+                    type="time"
+                  />
+                </ShadcnField>
+                <HomeLocationField
+                  savedLocation={user.homeLocation}
+                  onChange={(location) => {
+                    setHomeLocation(location);
+                    if (location?.timezone) setPlanningTimezone(location.timezone);
+                  }}
+                  onValidityChange={setHomeLocationValid}
+                />
+                <ShadcnField className="profile-form__full-row">
+                  <ShadcnFieldLabel htmlFor="profile-timezone">Planning time zone</ShadcnFieldLabel>
+                  <ShadcnNativeSelect
+                    id="profile-timezone"
+                    name="planningTimezone"
+                    onChange={(event) => setPlanningTimezone(event.target.value)}
+                    value={planningTimezone}
+                  >
+                    {timeZones.map((timeZone) => (
+                      <NativeSelectOption key={timeZone} value={timeZone}>
+                        {timeZone.replace("_", " ")}
+                      </NativeSelectOption>
+                    ))}
+                  </ShadcnNativeSelect>
+                  <ShadcnFieldDescription>
+                    Home Location supplies this default. Choose a different zone when your planning
+                    day should stay anchored elsewhere.
+                  </ShadcnFieldDescription>
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </SettingsSection>
+          </SettingsBento>
           <MutationFeedback feedback={resendVerification.feedback} />
           <ShadcnButton disabled={update.isPending} type="submit">
             {update.isPending ? "Saving profile…" : "Save profile"}
           </ShadcnButton>
         </FeedbackForm>
-        <ShadcnItemGroup aria-label="Account actions">
-          <ShadcnItem size="sm">
-            <ShadcnItemMedia variant="icon">
-              <KeyIcon aria-hidden="true" />
-            </ShadcnItemMedia>
-            <ShadcnItemContent>
-              <ShadcnItemTitle>Change password</ShadcnItemTitle>
-              <ShadcnItemDescription>
-                We’ll email you a secure link to choose a new password.
-              </ShadcnItemDescription>
-            </ShadcnItemContent>
-            <ShadcnItemActions>
-              <ShadcnButton
-                disabled={passwordReset.isPending}
-                onClick={() => passwordReset.mutate()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                {passwordReset.isPending ? "Sending…" : "Send link"}
-              </ShadcnButton>
-            </ShadcnItemActions>
-          </ShadcnItem>
-          <ShadcnItem size="sm">
-            <ShadcnItemMedia variant="icon">
-              <LogOutIcon aria-hidden="true" />
-            </ShadcnItemMedia>
-            <ShadcnItemContent>
-              <ShadcnItemTitle>Log out</ShadcnItemTitle>
-              <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
-            </ShadcnItemContent>
-            <ShadcnItemActions>
-              <ShadcnButton
-                disabled={logout.isPending}
-                onClick={() => logout.mutate()}
-                size="sm"
-                type="button"
-                variant="destructive"
-              >
-                {logout.isPending ? "Logging out…" : "Log out"}
-              </ShadcnButton>
-            </ShadcnItemActions>
-          </ShadcnItem>
-        </ShadcnItemGroup>
+        <SettingsSection title="Security" description="Manage your password and this session.">
+          <ShadcnItemGroup aria-label="Account actions">
+            <ShadcnItem size="sm">
+              <ShadcnItemMedia variant="icon">
+                <KeyIcon aria-hidden="true" />
+              </ShadcnItemMedia>
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Change password</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  We’ll email you a secure link to choose a new password.
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+              <ShadcnItemActions>
+                <ShadcnButton
+                  disabled={passwordReset.isPending}
+                  onClick={() => passwordReset.mutate()}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {passwordReset.isPending ? "Sending…" : "Send link"}
+                </ShadcnButton>
+              </ShadcnItemActions>
+            </ShadcnItem>
+            <ShadcnItem size="sm">
+              <ShadcnItemMedia variant="icon">
+                <LogOutIcon aria-hidden="true" />
+              </ShadcnItemMedia>
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Log out</ShadcnItemTitle>
+                <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
+              </ShadcnItemContent>
+              <ShadcnItemActions>
+                <ShadcnButton
+                  disabled={logout.isPending}
+                  onClick={() => logout.mutate()}
+                  size="sm"
+                  type="button"
+                  variant="destructive"
+                >
+                  {logout.isPending ? "Logging out…" : "Log out"}
+                </ShadcnButton>
+              </ShadcnItemActions>
+            </ShadcnItem>
+          </ShadcnItemGroup>
+        </SettingsSection>
       </div>
       <MutationFeedback feedback={passwordReset.feedback} />
       <MutationFeedback feedback={logout.feedback} />
-    </SettingsSection>
+    </div>
   );
 }
 
@@ -8373,31 +8400,6 @@ function SessionRow({ revoke, session }: { revoke: () => void; session: Session 
         </ShadcnButton>
       </ShadcnItemActions>
     </ShadcnItem>
-  );
-}
-
-function SettingsSection({
-  action,
-  children,
-  description,
-  title,
-}: {
-  action?: ReactNode;
-  children: ReactNode;
-  description?: string;
-  title: string;
-}) {
-  return (
-    <ShadcnCard className="settings-section">
-      <ShadcnCardHeader>
-        <ShadcnCardTitle>
-          <h2>{title}</h2>
-        </ShadcnCardTitle>
-        {description ? <ShadcnCardDescription>{description}</ShadcnCardDescription> : null}
-        {action ? <ShadcnCardAction>{action}</ShadcnCardAction> : null}
-      </ShadcnCardHeader>
-      <ShadcnCardContent className="settings-section__body">{children}</ShadcnCardContent>
-    </ShadcnCard>
   );
 }
 

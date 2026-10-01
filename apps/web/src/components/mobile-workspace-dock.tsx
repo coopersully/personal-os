@@ -11,7 +11,7 @@ import {
   SettingsIcon,
   SparklesIcon,
 } from "@/components/icons";
-import { Badge } from "@/components/ui/badge";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -219,11 +219,14 @@ export function MobileWorkspaceDock({
                       <ItemContent>
                         <ItemTitle>{page.label}</ItemTitle>
                       </ItemContent>
-                      {page.badge ? (
+                      {page.badge || page.count !== undefined ? (
                         <ItemActions>
-                          <Badge aria-hidden="true" variant="destructive">
-                            {page.badge}
-                          </Badge>
+                          <SidebarItemMeta
+                            inline
+                            attention={Boolean(page.badge)}
+                            count={page.count}
+                            label={page.label}
+                          />
                         </ItemActions>
                       ) : null}
                     </Link>

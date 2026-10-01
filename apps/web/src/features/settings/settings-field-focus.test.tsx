@@ -22,13 +22,32 @@ function mount(field: string, children: React.ReactNode, section = "profile") {
   );
 }
 describe("Settings field destinations", () => {
+  it.each([
+    ["goals", "goals:target-date", "Add goal", "goal-target-date"],
+    ["motives", "motives:context", "Add motive", "motive-detail"],
+  ])("reveals the %s creation form before focusing its searched field", async (section, field, action, target) => {
+    function CreationForm() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" aria-label={action} onClick={() => setOpen(true)}>
+            +
+          </button>
+          {open ? <input id={target} aria-label="Requested field" /> : null}
+        </>
+      );
+    }
+    mount(field, <CreationForm />, section);
+    await waitFor(() => expect(screen.getByLabelText("Requested field")).toHaveFocus());
+  });
+
   it("focuses the matching field without changing its value", async () => {
     mount(
-      "profile:planning-time-zone",
-      <input id="profile-timezone" aria-label="Planning time zone" defaultValue="UTC" />,
+      "profile:time-zone",
+      <input id="profile-timezone" aria-label="Time zone" defaultValue="UTC" />,
     );
-    await waitFor(() => expect(screen.getByLabelText("Planning time zone")).toHaveFocus());
-    expect(screen.getByLabelText("Planning time zone")).toHaveValue("UTC");
+    await waitFor(() => expect(screen.getByLabelText("Time zone")).toHaveFocus());
+    expect(screen.getByLabelText("Time zone")).toHaveValue("UTC");
   });
   it("opens a settings editor and waits for the target to mount", async () => {
     function Editor() {
@@ -92,7 +111,7 @@ describe("Settings field destinations", () => {
     expect(settingMatchScore("quiet hours", "Quiet hours start", "Notifications")).toBeGreaterThan(
       settingMatchScore("quiet hours", "From", "quiet hours"),
     );
-    expect(settingMatchScore("TIME-ZONE", "Planning time zone")).toBeGreaterThan(0);
+    expect(settingMatchScore("TIME-ZONE", "Time zone")).toBeGreaterThan(0);
     expect(settingMatchScore("salary", "Gross annual income", "salary earnings")).toBeGreaterThan(
       0,
     );

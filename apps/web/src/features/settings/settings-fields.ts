@@ -50,15 +50,23 @@ export const settingsFields: SettingsField[] = [
     aliases: `${scope} permission scope`,
     reveal: ["Set up a local token", "Fine-tune permissions"],
   })),
-  ...fields("goals", [
-    ["Outcome", "goal-title", "goal title"],
-    ["Description", "goal-description", "goal context"],
-    ["Target date", "goal-target-date", "deadline"],
-  ]),
-  ...fields("motives", [
-    ["Motive", "motive-title", "values purpose"],
-    ["Context", "motive-detail", "motivation details"],
-  ]),
+  ...fields(
+    "goals",
+    [
+      ["Outcome", "goal-title", "goal title"],
+      ["Description", "goal-description", "goal context"],
+      ["Target date", "goal-target-date", "deadline"],
+    ],
+    { reveal: ["Add goal"] },
+  ),
+  ...fields(
+    "motives",
+    [
+      ["Motive", "motive-title", "values purpose"],
+      ["Context", "motive-detail", "motivation details"],
+    ],
+    { reveal: ["Add motive"] },
+  ),
   ...fields("calendar", [
     ["Calendar visibility", "Calendar sources", "selected visible calendars"],
     ["Local calendar", "Local calendar", "create calendar"],
@@ -75,12 +83,20 @@ export const settingsFields: SettingsField[] = [
     ["First name", "profile-first-name", "given name identity"],
     ["Last name", "profile-last-name", "surname family name"],
     ["Email", "profile-email", "email address login"],
-    ["Planning day starts", "profile-workday-start", "working hours workday start time"],
-    ["Planning day ends", "profile-workday-end", "working hours workday end time"],
+    ["Day start", "profile-workday-start", "working hours workday start time"],
+    ["Day end", "profile-workday-end", "working hours workday end time"],
     ["Home Location", "profile-home-location", "city weather address"],
-    ["Planning time zone", "profile-timezone", "timezone local time"],
+    ["Time zone", "profile-timezone", "timezone local time"],
     ["Change password", "Send link", "reset password security"],
   ]),
+  ...fields(
+    "profile",
+    [
+      ["Phone number", "texting-phone", "mobile verified texting contact"],
+      ["Phone country", "texting-country", "country code"],
+    ],
+    { reveal: ["Add phone number", "Change number"] },
+  ),
   ...fields("setup", [
     ["Calendar workspace", "setup-calendar"],
     ["Tasks workspace", "setup-tasks"],

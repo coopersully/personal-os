@@ -13,6 +13,12 @@ appears in Settings navigation on desktop and in the Settings action sheet on na
 - Kind and workspace filters are stored in the URL as `kind` and `workspace`.
 - Results use cursor pagination with Previous and Next controls and an honest displayed range.
 - Each row names its workspace, work type, title, explanation, and one direct action.
+- Preview the decision before opening it: rule matching conditions and proposed actions, Finance
+  transaction/reason/rationale, or the actual question and choices. Use labeled, wrapping display
+  fields from owner-scoped records; never serialize arbitrary evidence JSON. These richer previews
+  belong to signed-in people; agent feed redaction remains unchanged. Missing evidence stays absent.
+- Attention summaries must describe the concrete situation and required judgment, not merely say
+  “needs attention.” Fixture data follows the same standard.
 - Partial source failure stays visible; nohmi never converts unavailable work into a successful zero.
 - An empty state says the available work is clear when some workspaces could not be checked.
 

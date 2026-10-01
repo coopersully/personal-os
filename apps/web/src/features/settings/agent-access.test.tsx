@@ -602,7 +602,9 @@ describe("agent access settings", () => {
       "/settings?section=workspace-access&workspace=tasks",
     );
     await browser.click(screen.getByRole("link", { name: "Connected agents" }));
-    expect(await screen.findByRole("heading", { name: "Connected agents" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Connect an agent host" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("nohmi MCP URL")).toHaveValue("https://mcp.example.com/mcp");
   });
 

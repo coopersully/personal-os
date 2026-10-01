@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ReviewsPage } from "./page.js";
 
 const now = "2026-08-12T12:00:00.000Z";
@@ -27,7 +28,9 @@ function renderPage(path = "/reviews") {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
-        <ReviewsPage />
+        <TooltipProvider>
+          <ReviewsPage />
+        </TooltipProvider>
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -52,6 +55,10 @@ describe("Reviews", () => {
           priority: "person_review",
           source: null,
           summary: "Review a bounded rule preview.",
+          preview: [
+            { label: "When", value: "Sender contains news" },
+            { label: "Proposed action", value: "Mark read immediately" },
+          ],
           title: "Review newsletters",
           updatedAt: now,
         },
@@ -336,5 +343,12 @@ describe("Reviews", () => {
     });
     renderPage();
     expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
+  });
+
+  it("shows the rule conditions and proposed action before opening a review", async () => {
+    renderPage();
+    expect(await screen.findByText("Sender contains news")).toBeInTheDocument();
+    expect(screen.getByText("Mark read immediately")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review rule" })).toBeInTheDocument();
   });
 });

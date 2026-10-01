@@ -263,3 +263,7 @@ cell dividers, and the alternating `--calendar-tile-background` provide spatial
 structure. The same tile token drives Week columns and their all-day fades;
 Month uses it for dates outside the current month. Today remains a red tint over
 the page background in Week and Month.
+
+Floating action sizing, colors, and labels use the shared
+[floating workspace actions contract](../system.md#floating-workspace-actions).
+Workspace placement and opened-workflow behavior remain owned by this page.

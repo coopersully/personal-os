@@ -21,6 +21,7 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -103,6 +104,7 @@ import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/age
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
 import { scopeLabels, selectableScopes } from "./access-scopes.js";
 import { ExecutionPolicySettingsCard } from "./execution-policy.js";
+import { connectedAgentCount as countConnectedAgents } from "./sidebar-counts.js";
 
 const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
 
@@ -290,8 +292,11 @@ function AgentAccessSettings({
       token.revokedAt === null &&
       (token.expiresAt === null || new Date(token.expiresAt).getTime() > currentTime),
   );
-  const usedActiveTokens = activeTokens.filter((token) => token.lastUsedAt !== null);
-  const connectedAgentCount = usedActiveTokens.length + (oauthClients.data?.length ?? 0);
+  const connectedAgentCount = countConnectedAgents(
+    tokens.data ?? [],
+    oauthClients.data ?? [],
+    currentTime,
+  );
   const connectionCountUnavailable = tokens.isError || oauthClients.isError;
   const connectionCountLoading = tokens.isPending || oauthClients.isPending;
   const mailSources = mailSetup.data?.accounts ?? [];
@@ -537,31 +542,25 @@ function AgentAccessSettings({
 
       {view === "connections" ? (
         <>
-          <header className="agent-access__page-heading">
-            <div>
-              <h2>Connected agents</h2>
-              <p>
-                See every host and local credential that can act in nohmi, then revoke access in one
-                place.
-              </p>
-            </div>
-            <Badge
-              variant={
-                !connectionCountLoading && !connectionCountUnavailable && connectedAgentCount > 0
-                  ? "default"
-                  : "secondary"
-              }
-            >
-              {connectionCountLoading
-                ? "Checking connections"
-                : connectionCountUnavailable
-                  ? "Connections unavailable"
-                  : `${connectedAgentCount} connected`}
-            </Badge>
-          </header>
-
           <Card className="settings-section" size="sm">
             <CardHeader>
+              <CardAction>
+                <Badge
+                  variant={
+                    !connectionCountLoading &&
+                    !connectionCountUnavailable &&
+                    connectedAgentCount > 0
+                      ? "default"
+                      : "secondary"
+                  }
+                >
+                  {connectionCountLoading
+                    ? "Checking connections"
+                    : connectionCountUnavailable
+                      ? "Connections unavailable"
+                      : `${connectedAgentCount} connected`}
+                </Badge>
+              </CardAction>
               <CardTitle>
                 <h3>Connect an agent host</h3>
               </CardTitle>
@@ -579,15 +578,10 @@ function AgentAccessSettings({
           </Card>
 
           <section
-            aria-labelledby="access-management-heading"
+            aria-label="Access management"
             className="agent-access__access"
             id="access-management"
           >
-            <div className="agent-access__section-heading">
-              <h2 id="access-management-heading">Access management</h2>
-              <p>Review connected hosts and least-privilege local credentials.</p>
-            </div>
-
             {(oauthClients.data?.length ?? 0) > 0 ? (
               <Card className="settings-section" size="sm">
                 <CardHeader>
@@ -601,7 +595,7 @@ function AgentAccessSettings({
                 <CardContent>
                   <ItemGroup>
                     {oauthClients.data?.map((client) => (
-                      <Item key={client.id} variant="outline">
+                      <Item key={client.id} variant="secondary">
                         <ItemMedia variant="icon">
                           {/* OAuth client names are self-asserted, not verified provider identities. */}
                           <PlugIcon />
@@ -771,7 +765,7 @@ function MailRuleReviewDialog({
             {reviewed.candidates.length > 0 ? (
               <ItemGroup aria-label="Exact Mail rule matches">
                 {reviewed.candidates.map((candidate) => (
-                  <Item key={candidate.id} size="xs" variant="muted">
+                  <Item key={candidate.id} size="xs" variant="secondary">
                     <ItemContent>
                       <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
                       <ItemDescription>
@@ -1063,7 +1057,7 @@ function SetupProtocolDetails({
           value={guide?.skill.setupPrompt ?? ""}
         />
         {guide ? (
-          <Item size="xs" variant="muted">
+          <Item size="xs" variant="secondary">
             <ItemMedia variant="icon">
               <ShieldCheckIcon />
             </ItemMedia>
@@ -1259,27 +1253,24 @@ function TokenAccess({
                 </Field>
                 <FieldSet>
                   <FieldLegend variant="label">Permission preset</FieldLegend>
-                  <ToggleGroup
+                  <SegmentedControl
                     aria-label="Permission preset"
-                    className="agent-access__presets"
                     onValueChange={(presetName) => {
                       const preset = tokenPresets.find((item) => item.name === presetName);
                       if (preset) setScopes(preset.scopes);
                     }}
-                    type="single"
                     value={selectedPreset}
-                    variant="outline"
                   >
                     {tokenPresets.map((preset) => (
-                      <ToggleGroupItem
+                      <SegmentedControlItem
                         aria-label={`${preset.name}: ${preset.description}`}
                         key={preset.name}
                         value={preset.name}
                       >
                         {preset.name}
-                      </ToggleGroupItem>
+                      </SegmentedControlItem>
                     ))}
-                  </ToggleGroup>
+                  </SegmentedControl>
                 </FieldSet>
                 <Collapsible onOpenChange={setPermissionsOpen} open={permissionsOpen}>
                   <CollapsibleTrigger asChild>
@@ -1351,7 +1342,7 @@ function TokenAccess({
         {!loading && activeTokens.length > 0 ? (
           <ItemGroup className="agent-access__credentials">
             {activeTokens.map((token) => (
-              <Item key={token.id} variant="outline">
+              <Item key={token.id} variant="secondary">
                 <ItemMedia variant="icon">
                   <KeyIcon />
                 </ItemMedia>
@@ -1391,7 +1382,7 @@ function TokenAccess({
             <CollapsibleContent>
               <ItemGroup>
                 {inactiveTokens.map((token) => (
-                  <Item key={token.id} size="xs" variant="muted">
+                  <Item key={token.id} size="xs" variant="secondary">
                     <ItemContent>
                       <ItemTitle>{token.name}</ItemTitle>
                       <ItemDescription>

@@ -33,6 +33,7 @@ import {
 } from "../../components/ui/item.js";
 import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { SettingsSection } from "../settings/settings-layout.js";
 import { RitualLocal } from "../tracking/ritual-local.js";
 import {
   type DesktopSettings,
@@ -152,27 +153,17 @@ export function DesktopSettingsPanel({
     update({ notifications: { ...draft.notifications, ...value } });
 
   return (
-    <section
-      className="flex flex-col gap-5"
-      aria-label={
+    <SettingsSection
+      title={
         connectionOnly
-          ? "Desktop server"
-          : section === "pet"
-            ? "Desktop pet"
-            : section === "notifications"
-              ? "Notifications"
-              : "Desktop"
-      }
-    >
-      <h2>
-        {connectionOnly
           ? "Server"
           : section === "pet"
             ? "Desktop pet"
             : section === "notifications"
               ? "Notifications"
-              : "Desktop"}
-      </h2>
+              : "Desktop preferences"
+      }
+    >
       {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
       {connectionOnly ? <RitualLocal recoveryOnly /> : null}
       {query.data?.native.error ? (
@@ -197,7 +188,7 @@ export function DesktopSettingsPanel({
         {section === "desktop" ? (
           <FieldGroup>
             <ItemGroup>
-              <Item variant="muted">
+              <Item variant="secondary">
                 <ItemContent>
                   <ItemTitle>
                     Hosted nohmi <Badge variant="secondary">Recommended</Badge>
@@ -541,6 +532,6 @@ export function DesktopSettingsPanel({
           {save.isPending ? "Saving…" : "Save preferences"}
         </Button>
       </FeedbackForm>
-    </section>
+    </SettingsSection>
   );
 }

@@ -298,10 +298,14 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - Connection management uses the shared `ConnectionCard` slots for identity, status, health
   summary, capabilities, and actions. Keep account identity separate from operational status; state
   the user impact and whether action is required in the summary; keep capabilities grouped; and use
-  explicit text labels for sync, reconnect, and removal actions instead of unexplained icon buttons.
+  title-aligned icon actions with accessible labels and hover/focus tooltips for sync, reconnect,
+  and removal. ConnectionCard composes the same SettingsRecordContent anatomy as other Settings records.
 - Device-local density controls change presentation only. Keep the comfortable view as the
   information-rich default, preserve essential identity and time in compact views, and do not let a
   density choice change query scope or stored domain data.
+- Settings uses task-sized Card tiles in the shared `SettingsBento` or `settings-stack`
+  layout. Records inside those cards use `Item variant="secondary"` with paired
+  secondary surface/text tokens. See [Settings](pages/settings.md) for the full layout contract.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
   and description; availability and errors use shared alerts.
@@ -492,3 +496,79 @@ overlays follow the same achromatic scale. Never use pure white or pure black
 for app-owned theme surfaces, text, or controls. The theme contract validator
 rejects those endpoints. Provider artwork and user-authored material are content,
 not sources for theme tokens.
+
+### Floating workspace actions
+
+Calendar's bottom-center action group and Mail's bottom-right compose action share
+`FloatingActions` and `FloatingActionButton` (`components/floating-actions.tsx`).
+The feature owns positioning, safe-area/mobile-dock clearance, and the opened
+workflow; the shared block owns appearance and targets. Do not move either action
+location merely to standardize its styling.
+
+- Use a 44px square button target, 16px glyph, 4px surface padding, and 2px group
+  gap. Both closed surfaces are 52px tall. A single action is circular; multiple
+  actions form a capsule. Expanded content uses the shared panel radius token.
+- Closed actions use the `primary` / `primary-foreground` pair in both themes,
+  without workspace-specific hues or resting borders. Hover and keyboard focus
+  use the same foreground-tinted fill; focus also has an inset outline.
+- Every icon has an action-oriented accessible name and a delayed tooltip shown
+  above the control. Tooltips supplement labels; they are not required to operate
+  the action. Preserve normal Tab order, Escape dismissal, and return focus.
+- Group styling does not imply ARIA `toolbar`: that role requires the toolbar
+  keyboard contract, including arrow navigation. These small action groups retain
+  their existing labeled navigation and ordinary button tab stops.
+- Calendar retains its date/create/search surfaces; Mail retains its responsive
+  compose dialog and draft-preservation behavior. Shared chrome must not absorb
+  domain data, submission, validation, or dismissal logic.
+
+The 44px target adopts [WCAG's enhanced target-size recommendation](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html)
+(a deliberate usability target, not a claim of whole-app AAA conformance).
+Semantics follow the [WAI toolbar pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/),
+and tooltips compose the installed [shadcn Tooltip](https://ui.shadcn.com/docs/components/radix/tooltip).
+Verify target geometry, surface/foreground pairing, focus return, and constrained
+viewport clearance in both features when changing this block.
+
+### Segmented selection controls
+
+Use `SegmentedControl` / `SegmentedControlItem` from `components/segmented-control.tsx`
+for compact, mutually exclusive view/filter/setting choices. This is one shared
+composition of the installed shadcn Radix ToggleGroup, not a custom radio implementation.
+It owns small control sizing, a quiet secondary track, selection/foreground pairing,
+radius, spacing, horizontal layout, and rejection of empty deselection. Feature code
+supplies a controlled value, accessible group label, options, and change handler.
+Keep options in one row; allow horizontal scrolling when constrained rather than
+turning the group into a grid or wrapping it into ambiguous rows. Do not restyle
+individual instances or add parallel segmented-button CSS.
+
+Current consumers: Today commitment filters; Calendar Day/Week/Month; Reviews work
+type; Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
+image-fit and backdrop; agent permission presets. Calendar may hide visible labels
+at narrow widths while keeping accessible names and tooltips.
+
+Distinct semantics remain distinct: Cash Flow uses shadcn Tabs for associated
+panels; ordinary form questions use RadioGroup; menu choices use DropdownMenuRadioGroup;
+agent workspace cards retain their richer ToggleGroup composition; bucket and calendar
+pickers select domain records rather than fixed view modes. Do not replace these solely
+because they also allow one selection.
+
+References: [shadcn Toggle Group](https://ui.shadcn.com/docs/components/radix/toggle-group),
+[Radix single selection and keyboard contract](https://www.radix-ui.com/primitives/docs/components/toggle-group),
+and [WAI Tabs semantics](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/).
+
+### Sidebar attention and counts
+
+Compose `SidebarItemMeta` beside the standard shadcn SidebarMenuButton and reserve
+its trailing space with `sidebar-item-with-meta`. Use its inline mode in the mobile
+section sheet. Attention and count are independent: a semantic attention dot,
+plus optional muted, normal-weight tabular count. Keep destination labels readable
+and truncate them before metadata. Display compact counts from 1,000 upward (1.2k,
+1.2m); retain the full comma-grouped value in the accessible description. Show no
+count for unknown data, and do not infer urgency from an unread count. Mail,
+Finances, and Settings share this composition. This follows the
+[shadcn Sidebar badge slot](https://ui.shadcn.com/docs/components/radix/sidebar).
+
+Shared form compositions live in `components/date-input.tsx` and
+`components/currency-input.tsx`; Settings owns their value/formatting contract in
+[its page specification](pages/settings.md). The date popover follows
+[shadcn Date Picker](https://ui.shadcn.com/docs/components/radix/date-picker), and
+currency uses [Input Group](https://ui.shadcn.com/docs/components/radix/input-group).

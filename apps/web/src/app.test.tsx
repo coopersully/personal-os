@@ -2279,7 +2279,7 @@ describe("ilo web app", () => {
     expect(
       await screen.findByRole(
         "heading",
-        { name: "Connected agents", level: 2 },
+        { name: "Connected agents", level: 1 },
         { timeout: 3_000 },
       ),
     ).toBeInTheDocument();
@@ -5852,16 +5852,17 @@ describe("ilo web app", () => {
     mixed.unmount();
   });
 
-  it("shows profile saving and failure feedback", async () => {
+  it("autosaves profile edits, exposes failures, and serializes newer drafts", async () => {
     const browser = userEvent.setup();
-    const view = setup("/settings?section=profile");
-    await screen.findByRole("heading", { name: "Account" });
+    setup("/settings?section=profile");
+    const name = await screen.findByLabelText("First name");
+    expect(mocks.updateUser).not.toHaveBeenCalled();
     mocks.updateUser.mockRejectedValueOnce(new Error("Profile update unavailable"));
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.clear(name);
+    await browser.type(name, "Changed");
     expect(
       await screen.findByText(/Couldn’t confirm whether we could save your profile/),
     ).toBeInTheDocument();
-
     let resolveUpdate: ((value: typeof user) => void) | undefined;
     mocks.updateUser.mockImplementationOnce(
       () =>
@@ -5869,13 +5870,20 @@ describe("ilo web app", () => {
           resolveUpdate = resolve;
         }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
-    expect(screen.getByRole("button", { name: "Saving profile…" })).toBeDisabled();
+    await browser.click(screen.getByRole("button", { name: "Retry saving" }));
+    expect(await screen.findByText("Saving changes…")).toBeInTheDocument();
+    await browser.clear(name);
+    await browser.type(name, "Newest");
+    expect(mocks.updateUser).toHaveBeenCalledTimes(2);
     resolveUpdate?.(user);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save profile" })).not.toBeDisabled(),
+      expect(mocks.updateUser).toHaveBeenLastCalledWith(
+        expect.objectContaining({ displayName: expect.stringContaining("Newest") }),
+      ),
     );
-    view.unmount();
+    await waitFor(() => expect(screen.queryByText("Saving changes…")).not.toBeInTheDocument());
+    expect(screen.queryByText("All changes saved")).not.toBeInTheDocument();
+    expect(name).toHaveValue("Newest");
   });
 
   it("maps a server profile rejection to its field and preserves the entered value", async () => {
@@ -5892,7 +5900,7 @@ describe("ilo web app", () => {
         details: [{ path: ["email"], format: "email", code: "invalid_format" }],
       }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     expect(
       await screen.findByText("Enter an email address in the format name@example.com."),
     ).toBeInTheDocument();
@@ -5960,15 +5968,15 @@ describe("ilo web app", () => {
     await browser.click(
       await screen.findByRole("option", { name: "New York, New York, United States" }),
     );
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Clear selection" }));
     await browser.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
     await browser.type(location, "New York");
     await browser.click(
       await screen.findByRole("option", { name: "New York, New York, United States" }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     await waitFor(() =>
       expect(mocks.updateUser).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -6003,7 +6011,7 @@ describe("ilo web app", () => {
     await browser.type(location, savedLocation.label);
 
     await browser.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
     view.unmount();
   });
 
@@ -6029,7 +6037,7 @@ describe("ilo web app", () => {
     await browser.click(
       await screen.findByRole("option", { name: "New York, New York, United States" }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     await waitFor(() => expect(mocks.updateUser).toHaveBeenCalled());
     expect(location).not.toHaveAttribute("aria-invalid", "true");
   });
@@ -6037,17 +6045,16 @@ describe("ilo web app", () => {
   it("explains a planning-day relationship error and clears it when corrected", async () => {
     const browser = userEvent.setup();
     setup("/settings?section=profile");
-    const end = await screen.findByLabelText("Planning day ends");
+    const end = await screen.findByLabelText("Day end");
     expect(end).not.toHaveAttribute("aria-invalid", "true");
     fireEvent.change(end, { target: { value: "08:00" } });
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.blur(end);
     expect(mocks.updateUser).not.toHaveBeenCalled();
-    expect(await screen.findByText("Planning day must end after it starts.")).toBeInTheDocument();
+    expect(await screen.findByText("Day end must be after day start.")).toBeInTheDocument();
     expect(end).toHaveAttribute("aria-invalid", "true");
-    expect(end).toHaveFocus();
     fireEvent.input(end, { target: { value: "18:00" } });
     await waitFor(() => expect(end).not.toHaveAttribute("aria-invalid", "true"));
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     await waitFor(() =>
       expect(mocks.updateUser).toHaveBeenCalledWith(
         expect.objectContaining({ workdayEndMinute: 1080 }),
@@ -7815,8 +7822,8 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("First name"), "Updated");
     await browser.clear(screen.getByLabelText("Last name"));
     await browser.type(screen.getByLabelText("Last name"), "profile");
-    await browser.selectOptions(screen.getByLabelText("Planning time zone"), "America/Chicago");
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.selectOptions(screen.getByLabelText("Time zone"), "America/Chicago");
+    await browser.tab();
     await waitFor(() =>
       expect(mocks.updateUser).toHaveBeenCalledWith({
         displayName: "Updated profile",
@@ -8976,6 +8983,8 @@ describe("ilo web app", () => {
     expect(await screen.findByText("Protect focus")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "20%" }));
     await waitFor(() => expect(mocks.updateGoal).toHaveBeenCalledWith(id, { progress: 30 }));
+    expect(screen.queryByLabelText("Outcome")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add goal" }));
     await browser.type(screen.getByLabelText("Outcome"), "   ");
     await browser.click(screen.getByRole("button", { name: "Create goal" }));
     expect(await screen.findByText("Enter a goal.")).toBeInTheDocument();
@@ -9007,6 +9016,8 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateMotive).toHaveBeenCalledWith(secondId, { isActive: false }),
     );
+    expect(screen.queryByLabelText("Motive")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add motive" }));
     await browser.type(screen.getByLabelText("Motive"), "   ");
     await browser.click(screen.getByRole("button", { name: "Create motive" }));
     expect(await screen.findByText("Enter a motive.")).toBeInTheDocument();
@@ -9074,6 +9085,8 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateGoal).toHaveBeenCalledWith(secondId, { status: "active" }),
     );
+    expect(screen.queryByLabelText("Outcome")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add goal" }));
     await browser.type(screen.getByLabelText("Outcome"), "Rejected goal");
     await browser.type(screen.getByLabelText("Target date"), "2026-09-01");
     await browser.click(screen.getByRole("button", { name: "Create goal" }));
@@ -9083,9 +9096,11 @@ describe("ilo web app", () => {
     goals.unmount();
     const motives = setup("/motives");
     expect(await screen.findByText("No additional context.")).toBeInTheDocument();
-    expect(screen.getByText("paused")).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(mocks.updateMotive).toHaveBeenCalledWith(id, { isActive: true }));
+    expect(screen.queryByLabelText("Motive")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add motive" }));
     await browser.type(screen.getByLabelText("Motive"), "Rejected motive");
     await browser.click(screen.getByRole("button", { name: "Create motive" }));
     expect(

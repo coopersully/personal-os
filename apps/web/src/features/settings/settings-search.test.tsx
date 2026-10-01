@@ -54,16 +54,11 @@ describe("Settings search", () => {
     const user = setup();
     await user.click(screen.getByRole("button", { name: "Search settings" }));
     await user.type(screen.getByRole("searchbox"), "working hours");
-    const start = screen.getByRole("link", { name: "Planning day starts Account" });
-    expect(start).toHaveAttribute(
-      "href",
-      "/settings?section=profile&field=profile%3Aplanning-day-starts",
-    );
-    expect(screen.getByRole("link", { name: "Planning day ends Account" })).toBeInTheDocument();
+    const start = screen.getByRole("link", { name: "Day start Account" });
+    expect(start).toHaveAttribute("href", "/settings?section=profile&field=profile%3Aday-start");
+    expect(screen.getByRole("link", { name: "Day end Account" })).toBeInTheDocument();
     await user.click(start);
-    expect(screen.getByLabelText("Location")).toHaveTextContent(
-      "field=profile%3Aplanning-day-starts",
-    );
+    expect(screen.getByLabelText("Location")).toHaveTextContent("field=profile%3Aday-start");
   });
   it("keeps unavailable sections out and supports no results and keyboard dismissal", async () => {
     const user = setup();

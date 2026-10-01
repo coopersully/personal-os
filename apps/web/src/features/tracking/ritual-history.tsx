@@ -1,11 +1,12 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { DateInput } from "@/components/date-input";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { useConfirmAction } from "../../components/confirm-action.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { Button } from "../../components/ui/button.js";
-import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 export function RitualHistory() {
@@ -63,9 +64,9 @@ export function RitualHistory() {
     });
   return (
     <section className="flex flex-col gap-4" aria-label="Ritual history">
-      <div className="flex flex-wrap gap-3">
-        <label htmlFor="ritual-history-kind">
-          Ritual
+      <FieldGroup className="grid gap-3 sm:grid-cols-3">
+        <Field>
+          <FieldLabel htmlFor="ritual-history-kind">Ritual</FieldLabel>
           <NativeSelect
             id="ritual-history-kind"
             value={kind}
@@ -75,26 +76,16 @@ export function RitualHistory() {
             <NativeSelectOption value="morning">Morning</NativeSelectOption>
             <NativeSelectOption value="night">Evening</NativeSelectOption>
           </NativeSelect>
-        </label>
-        <label htmlFor="ritual-history-from">
-          From
-          <Input
-            id="ritual-history-from"
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-          />
-        </label>
-        <label htmlFor="ritual-history-through">
-          Through
-          <Input
-            id="ritual-history-through"
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-          />
-        </label>
-      </div>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="ritual-history-from">From</FieldLabel>
+          <DateInput id="ritual-history-from" value={dateFrom} onValueChange={setDateFrom} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="ritual-history-through">Through</FieldLabel>
+          <DateInput id="ritual-history-through" value={dateTo} onValueChange={setDateTo} />
+        </Field>
+      </FieldGroup>
       {history.isPending ? <p>Loading history…</p> : null}
       <QueryFeedback query={history} title="Couldn’t load ritual history." />
       {history.data?.pages

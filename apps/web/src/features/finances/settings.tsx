@@ -6,6 +6,8 @@ import type {
 import { Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
+import { DateInput } from "@/components/date-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -265,7 +267,7 @@ function FinanceAgentGuidancePanel({
         {error ? <InlineError error={error} /> : null}
         {setup ? (
           <ItemGroup>
-            <Item size="sm" variant="muted">
+            <Item size="sm" variant="secondary">
               <ItemContent>
                 <ItemTitle>Sources ready</ItemTitle>
                 <ItemDescription>
@@ -275,13 +277,13 @@ function FinanceAgentGuidancePanel({
                 </ItemDescription>
               </ItemContent>
             </Item>
-            <Item size="sm" variant="muted">
+            <Item size="sm" variant="secondary">
               <ItemContent>
                 <ItemTitle>Suggested workflows</ItemTitle>
                 <ItemDescription>{availableWorkflows} available now.</ItemDescription>
               </ItemContent>
             </Item>
-            <Item size="sm" variant="muted">
+            <Item size="sm" variant="secondary">
               <ItemContent>
                 <ItemTitle>Portal controls</ItemTitle>
                 <ItemDescription>
@@ -292,7 +294,7 @@ function FinanceAgentGuidancePanel({
               </ItemContent>
             </Item>
             {monthlyReviewGuidance ? (
-              <Item size="sm" variant="muted">
+              <Item size="sm" variant="secondary">
                 <ItemContent>
                   <ItemTitle>Monthly review guidance</ItemTitle>
                   <ItemDescription>
@@ -302,7 +304,7 @@ function FinanceAgentGuidancePanel({
               </Item>
             ) : null}
             {approvedProfile ? (
-              <Item size="sm" variant="muted">
+              <Item size="sm" variant="secondary">
                 <ItemContent>
                   <ItemTitle>Active approved guidance</ItemTitle>
                   <ItemDescription>
@@ -317,7 +319,7 @@ function FinanceAgentGuidancePanel({
               </Item>
             ) : null}
             {draftProposal || profileStatus === "draft" ? (
-              <Item size="sm" variant="muted">
+              <Item size="sm" variant="secondary">
                 <ItemContent>
                   <ItemTitle>Draft activation</ItemTitle>
                   <ItemDescription>
@@ -502,12 +504,14 @@ function FinancialProfilePanel({
             value={form.effectiveDate}
           />
           <ProfileTextField
+            type="currency"
             id="finance-gross-income"
             label="Gross annual income"
             onChange={(grossAnnualIncome) => onChange((value) => ({ ...value, grossAnnualIncome }))}
             value={form.grossAnnualIncome}
           />
           <ProfileTextField
+            type="currency"
             id="finance-net-pay"
             label="Expected net paycheck"
             onChange={(expectedNetPay) => onChange((value) => ({ ...value, expectedNetPay }))}
@@ -575,29 +579,32 @@ function ProfileTextField({
   id: string;
   label: string;
   onChange: (value: string) => void;
-  type?: "date" | "text";
+  type?: "date" | "text" | "currency";
   value: string;
 }) {
+  const Control = type === "currency" ? CurrencyInput : DateInput;
+  const name =
+    {
+      "finance-employer": "employer",
+      "finance-role": "role",
+      "finance-effective-date": "effectiveDate",
+      "finance-gross-income": "grossAnnualIncome",
+      "finance-net-pay": "expectedNetPay",
+      "finance-next-payday": "nextPayday",
+    }[id] ?? id;
   return (
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        name={
-          {
-            "finance-employer": "employer",
-            "finance-role": "role",
-            "finance-effective-date": "effectiveDate",
-            "finance-gross-income": "grossAnnualIncome",
-            "finance-net-pay": "expectedNetPay",
-            "finance-next-payday": "nextPayday",
-          }[id] ?? id
-        }
-        inputMode={type === "text" ? "text" : undefined}
-        onChange={(event) => onChange(event.target.value)}
-        type={type}
-        value={value}
-      />
+      {type === "text" ? (
+        <Input
+          id={id}
+          name={name}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <Control id={id} name={name} value={value} onValueChange={onChange} />
+      )}
     </Field>
   );
 }

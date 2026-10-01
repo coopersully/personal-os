@@ -20,6 +20,7 @@ import {
   StarIcon,
   TrashIcon,
 } from "@/components/icons";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
 import { PageLoading, QueryFeedback } from "../../components/async-state.js";
@@ -885,7 +886,12 @@ function UnifiedMailDestinations({
         const suffix = query.size ? `?${query.toString()}` : "";
         return (
           <SidebarMenuItem key={value}>
-            <SidebarMenuButton asChild isActive={listScope === value} tooltip={label}>
+            <SidebarMenuButton
+              className={value === "all" && unreadCount > 0 ? "sidebar-item-with-meta" : undefined}
+              asChild
+              isActive={listScope === value}
+              tooltip={label}
+            >
               <Link
                 aria-label={value === "all" && unreadCount > 0 ? `${label} ${unreadCount}` : label}
                 onClick={onNavigate}
@@ -893,9 +899,11 @@ function UnifiedMailDestinations({
               >
                 <Icon aria-hidden="true" weight={listScope === value ? "Filled" : "Outline"} />
                 <span>{label}</span>
-                {value === "all" && unreadCount > 0 ? <b>{unreadCount}</b> : null}
               </Link>
             </SidebarMenuButton>
+            {value === "all" && unreadCount > 0 ? (
+              <SidebarItemMeta count={unreadCount} label="Unread inbox messages" />
+            ) : null}
           </SidebarMenuItem>
         );
       })}

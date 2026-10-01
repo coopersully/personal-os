@@ -67,6 +67,16 @@ export function SettingsSection({
 }
 
 /** Adapt to the content width, including a collapsed/expanded application sidebar. */
-export function SettingsBento({ children }: { children: ReactNode }) {
-  return <div className="settings-bento">{children}</div>;
+export function SettingsBento({
+  children,
+  primaryFirst = false,
+}: {
+  children: ReactNode;
+  primaryFirst?: boolean;
+}) {
+  return (
+    <div className="settings-bento" data-primary-first={primaryFirst}>
+      {children}
+    </div>
+  );
 }

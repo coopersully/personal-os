@@ -14,7 +14,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByRole("button", { name: "Search settings", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search all settings" }).fill("time zone");
   const results = page.getByRole("navigation", { name: "Settings search results" });
-  await expect(results.getByRole("link", { name: /^Planning time zone Account/ })).toBeVisible();
+  await expect(results.getByRole("link", { name: /^Time zone Account/ })).toBeVisible();
   await expect(results.getByRole("link", { name: /Appearance/ })).toHaveCount(0);
   // Exercise real result focus in both themes; a text-only unit test cannot catch
   // foreground/background collisions from the shared CSS cascade.
@@ -84,9 +84,9 @@ test("settings support field search, ritual history, and resumable setup replay"
   }
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
 
-  await results.getByRole("link", { name: /^Planning time zone Account/ }).click();
+  await results.getByRole("link", { name: /^Time zone Account/ }).click();
   await expect(page.locator("#profile-timezone")).toBeFocused();
-  await expect(page.getByRole("heading", { name: "Planning defaults" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily defaults" })).toBeVisible();
   await page.getByRole("button", { name: "Search settings", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search all settings" }).fill("rituals");
   await page

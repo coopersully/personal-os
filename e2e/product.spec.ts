@@ -538,6 +538,14 @@ test("a person and an agent share one reminder and calendar surface", async ({
   });
   expect(floatingPillColors.background).toBe(floatingPillColors.primaryBackground);
   expect(floatingPillColors.foreground).toBe(floatingPillColors.primaryForeground);
+  for (const action of await page
+    .getByRole("navigation", { name: "Calendar actions" })
+    .getByRole("button")
+    .all()) {
+    const bounds = await action.boundingBox();
+    expect(bounds?.width).toBe(44);
+    expect(bounds?.height).toBe(44);
+  }
   await page.locator(".week-calendar").evaluate((calendar) => {
     calendar.scrollTop = 0;
   });
@@ -704,11 +712,16 @@ test("a person and an agent share one reminder and calendar surface", async ({
     ).toHaveAttribute("aria-current", "page");
   }
   await expect(page.getByRole("tablist", { name: "Settings sections" })).toHaveCount(0);
-  await page.getByLabel("Planning day starts").fill("10:00");
-  await page.getByLabel("Planning day ends").fill("18:00");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(page.getByLabel("Planning day starts")).toHaveValue("10:00");
-  await expect(page.getByLabel("Planning day ends")).toHaveValue("18:00");
+  const profileSaved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/v1/me") && response.request().method() === "PATCH" && response.ok(),
+  );
+  await page.getByLabel("Day start").fill("10:00");
+  await page.getByLabel("Day end").fill("18:00");
+  await page.getByLabel("Day end").blur();
+  await expect(page.getByLabel("Day start")).toHaveValue("10:00");
+  await expect(page.getByLabel("Day end")).toHaveValue("18:00");
+  await profileSaved;
   await openSettingsSection("Activity");
   await expect(page.getByText("Reminder · created").first()).toBeVisible();
   await expect(page.getByText("Calendar event · created").first()).toBeVisible();
@@ -789,21 +802,23 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await page.getByRole("button", { name: "Exit setup" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/settings?section=profile");
-  const end = page.getByLabel("Planning day ends");
-  await page.getByLabel("Planning day starts").fill("09:00");
+  const end = page.getByLabel("Day end");
+  await page.getByLabel("Day start").fill("09:00");
   await end.fill("08:00");
-  await page.getByRole("button", { name: "Save profile" }).click();
+  await page.getByLabel("Day end").blur();
   await expect(end).toHaveAttribute("aria-invalid", "true");
-  await expect(end).toBeFocused();
-  await expect(page.getByText("Planning day must end after it starts.")).toBeVisible();
+  await expect(page.getByText("Day end must be after day start.")).toBeVisible();
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("feedback-validation.png") });
+  const profileSaved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/v1/me") && response.request().method() === "PATCH" && response.ok(),
+  );
   await end.fill("17:00");
   await expect(end).not.toHaveAttribute("aria-invalid", "true");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(
-    page.locator("[data-sonner-toast]").filter({ hasText: "Profile saved." }),
-  ).toBeVisible();
+  await page.getByLabel("Day end").blur();
+  await profileSaved;
+  await expect(page.getByText("All changes saved", { exact: true })).toHaveCount(0);
 
   await page.goto("/settings?section=appearance");
   await page.route("**/v1/me", async (route) => {
@@ -866,6 +881,11 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
     );
   });
   await page.goto("/mail");
+  const composeAction = page.getByRole("button", { name: "Compose a message" });
+  await expect(composeAction).toBeVisible();
+  const composeBounds = await composeAction.boundingBox();
+  expect(composeBounds?.width).toBe(44);
+  expect(composeBounds?.height).toBe(44);
   await page.getByRole("button", { name: "Sync all mail accounts" }).click();
   await expect(
     page.getByText("1 of 2 mail accounts synced. 1 account needs another attempt."),

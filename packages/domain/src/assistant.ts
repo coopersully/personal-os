@@ -162,6 +162,15 @@ export const agentAccessWorkItemQuerySchema = z.object({
 export type AgentAccessWorkItemQuery = z.infer<typeof agentAccessWorkItemQuerySchema>;
 
 export const agentAccessWorkItemSchema = z.object({
+  preview: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(80),
+        value: z.string().trim().min(1).max(600),
+      }),
+    )
+    .max(4)
+    .optional(),
   action: z
     .object({
       label: z.string().trim().min(1).max(120),

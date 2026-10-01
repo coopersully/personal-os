@@ -83,6 +83,7 @@ import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/component
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { ConnectionCard } from "@/components/connection-card";
+import { DateInput } from "@/components/date-input";
 import { ErrorPage } from "@/components/error-page";
 import {
   EventCard,
@@ -132,7 +133,9 @@ import {
   MonitorIcon,
   MoonIcon,
   PaintBrushIcon,
+  PauseIcon,
   PinIcon,
+  PlayIcon,
   PlugIcon,
   PlusIcon,
   PulseIcon,
@@ -154,6 +157,8 @@ import { LogoMark } from "@/components/logo-mark";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
 import { QuoteCard } from "@/components/quote-card";
+import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
 import {
   Alert as ShadcnAlert,
@@ -171,6 +176,7 @@ import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   Card as ShadcnCard,
+  CardAction as ShadcnCardAction,
   CardContent as ShadcnCardContent,
   CardDescription as ShadcnCardDescription,
   CardHeader as ShadcnCardHeader,
@@ -201,6 +207,14 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -258,7 +272,6 @@ import {
   SidebarGroupLabel as ShadcnSidebarGroupLabel,
   SidebarHeader as ShadcnSidebarHeader,
   SidebarMenu as ShadcnSidebarMenu,
-  SidebarMenuBadge as ShadcnSidebarMenuBadge,
   SidebarMenuButton as ShadcnSidebarMenuButton,
   SidebarMenuItem as ShadcnSidebarMenuItem,
   SidebarProvider as ShadcnSidebarProvider,
@@ -267,10 +280,6 @@ import { Slider as ShadcnSlider } from "@/components/ui/slider";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch as ShadcnSwitch } from "@/components/ui/switch";
 import { Textarea as ShadcnTextarea } from "@/components/ui/textarea";
-import {
-  ToggleGroup as ShadcnToggleGroup,
-  ToggleGroupItem as ShadcnToggleGroupItem,
-} from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
@@ -281,6 +290,7 @@ import { useConfirmAction } from "./components/confirm-action.js";
 import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
+import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
@@ -323,6 +333,7 @@ import {
   RemindersTopbarControls,
 } from "./features/reminders/page.js";
 import { ReviewsPage } from "./features/reviews/page.js";
+import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
 import {
   ConnectedAgentsSettings,
   useWorkspaceSettingsActions,
@@ -337,6 +348,7 @@ import {
 } from "./features/settings/settings-layout.js";
 import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
 import { SetupSettings } from "./features/settings/setup-settings.js";
+import { useSettingsSidebarCounts } from "./features/settings/sidebar-counts.js";
 import {
   TaskRow,
   TasksCreateButton,
@@ -349,7 +361,11 @@ import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
 import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
-import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
+import {
+  formatCalendarDate,
+  formatMaterialDateTime,
+  formatOrdinalDate,
+} from "./lib/date-format.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { useFeedbackMutation } from "./lib/use-feedback-mutation.js";
@@ -429,6 +445,7 @@ const calendarDragMetrics = new Map<
 
 type NavigationItemDefinition = {
   badge?: number | string;
+  count?: number | undefined;
   icon: Icon;
   items?: NavigationItemDefinition[];
   label: string;
@@ -1233,6 +1250,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         ? null
         : navigationOwner.workspace;
   const workspaceSettingsActions = useWorkspaceSettingsActions(sidebarMode === "settings");
+  const settingsCounts = useSettingsSidebarCounts(sidebarMode === "settings");
   const activeSettingsSection = settingsSectionFromSearch(location.search);
   const pageTitle = workspaceTitleForLocation(shellPathname, location.search);
   const activeFinanceSection = financeSectionFromPath(location.pathname);
@@ -1400,6 +1418,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   onNavigate={closeMobileMenu}
                   section={activeSettingsSection}
                   workspaceActions={workspaceSettingsActions}
+                  counts={settingsCounts}
                 />
               ) : sidebarMode === "finances" ? (
                 <FinanceSidebarNavigation
@@ -1424,6 +1443,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             accountSections={settingsSectionPages(
               user.canManageInvitations === true,
               workspaceSettingsActions,
+              settingsCounts,
             )}
             onLogout={mobileDockLogout}
             onRequestPasswordReset={mobileDockPasswordReset}
@@ -1640,6 +1660,7 @@ function LegacySettingsRedirect({ section }: { section: SettingsSectionId }) {
 
 function SidebarNavigationItem({
   badge,
+  count,
   icon: Icon,
   isActive: explicitIsActive,
   label,
@@ -1652,7 +1673,7 @@ function SidebarNavigationItem({
   return (
     <ShadcnSidebarMenuItem>
       <ShadcnSidebarMenuButton
-        className={badge ? "pr-24" : undefined}
+        className={badge || count !== undefined ? "sidebar-item-with-meta" : undefined}
         asChild
         isActive={isActive}
         tooltip={label}
@@ -1666,11 +1687,7 @@ function SidebarNavigationItem({
           <span>{label}</span>
         </NavLink>
       </ShadcnSidebarMenuButton>
-      {badge ? (
-        <ShadcnSidebarMenuBadge aria-label={`${label}: ${badge}`} role="status">
-          <ShadcnBadge variant="destructive">{badge}</ShadcnBadge>
-        </ShadcnSidebarMenuBadge>
-      ) : null}
+      <SidebarItemMeta attention={Boolean(badge)} count={count} label={label} />
     </ShadcnSidebarMenuItem>
   );
 }
@@ -2459,20 +2476,12 @@ function TodayCommitmentList({
 
   return (
     <div className="today-commitments">
-      <ShadcnToggleGroup
-        aria-label="Commitment filters"
-        className="today-commitments__filters"
-        onValueChange={selectFilter}
-        size="sm"
-        type="single"
-        value={filter}
-        variant="outline"
-      >
-        <ShadcnToggleGroupItem value="all">All</ShadcnToggleGroupItem>
-        <ShadcnToggleGroupItem value="overdue">Overdue</ShadcnToggleGroupItem>
-        <ShadcnToggleGroupItem value="tasks">Tasks</ShadcnToggleGroupItem>
-        <ShadcnToggleGroupItem value="reminders">Reminders</ShadcnToggleGroupItem>
-      </ShadcnToggleGroup>
+      <SegmentedControl aria-label="Commitment filters" onValueChange={selectFilter} value={filter}>
+        <SegmentedControlItem value="all">All</SegmentedControlItem>
+        <SegmentedControlItem value="overdue">Overdue</SegmentedControlItem>
+        <SegmentedControlItem value="tasks">Tasks</SegmentedControlItem>
+        <SegmentedControlItem value="reminders">Reminders</SegmentedControlItem>
+      </SegmentedControl>
       {visibleCommitments.length > 0 ? (
         <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
           <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
@@ -3268,7 +3277,7 @@ function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: 
     <fieldset className="calendar-app-bar__controls">
       <legend className="sr-only">Calendar controls</legend>
       <div className="calendar-app-bar__control-set">
-        <ShadcnToggleGroup
+        <SegmentedControl
           aria-label="Calendar view: choose day, week, or month"
           className="calendar-app-bar__view-switch"
           data-view={view}
@@ -3277,25 +3286,21 @@ function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: 
               updateCalendarState({ view: value === defaultView ? null : value });
             }
           }}
-          type="single"
           value={view}
-          size="sm"
-          variant="outline"
-          spacing={0}
         >
           {calendarViews.map((option) => {
             const Icon = option.icon;
             return (
               <Tooltip key={option.value}>
                 <TooltipTrigger asChild>
-                  <ShadcnToggleGroupItem
+                  <SegmentedControlItem
                     aria-label={option.label}
                     className="calendar-app-bar__view-option"
                     value={option.value}
                   >
                     <Icon aria-hidden="true" data-icon="inline-start" />
                     <span className="calendar-app-bar__view-label">{option.label}</span>
-                  </ShadcnToggleGroupItem>
+                  </SegmentedControlItem>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
                   Show {option.label.toLowerCase()} view
@@ -3303,7 +3308,7 @@ function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: 
               </Tooltip>
             );
           })}
-        </ShadcnToggleGroup>
+        </SegmentedControl>
         <ShadcnButton
           aria-label="Today"
           className="calendar-app-bar__today"
@@ -5010,9 +5015,7 @@ function weekDaySurface(dayIndex: number, isToday: boolean) {
   if (isToday) {
     return "var(--calendar-today-background)";
   }
-  return dayIndex % 2 === 0
-    ? "var(--background)"
-    : "var(--calendar-tile-background)";
+  return dayIndex % 2 === 0 ? "var(--background)" : "var(--calendar-tile-background)";
 }
 
 function CalendarAllDayEvents({
@@ -5253,6 +5256,7 @@ function GoalsPage() {
   const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const goals = useQuery({ queryFn: api.listGoals, queryKey: ["goals"] });
+  const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [targetDate, setTargetDate] = useState("");
@@ -5267,6 +5271,7 @@ function GoalsPage() {
         title: title.trim(),
       }),
     onSuccess: () => {
+      setCreating(false);
       setTitle("");
       setDescription("");
       setTargetDate("");
@@ -5288,12 +5293,19 @@ function GoalsPage() {
   if (goals.isError && !goals.data)
     return <InlineError error={goals.error} retry={goals.refetch} />;
   return (
-    <div className="wide-page flex flex-col gap-6 pb-8">
+    <div className="settings-stack">
       <QueryFeedback query={goals} title="Couldn’t refresh goals." staleOnly />
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <Dialog open={creating} onOpenChange={setCreating}>
         <ShadcnCard>
           <ShadcnCardHeader>
             <ShadcnCardTitle>Active outcomes</ShadcnCardTitle>
+            <ShadcnCardAction>
+              <DialogTrigger asChild>
+                <SettingsRecordAction label="Add goal">
+                  <PlusIcon />
+                </SettingsRecordAction>
+              </DialogTrigger>
+            </ShadcnCardAction>
             <ShadcnCardDescription>
               Keep the list short enough to make tradeoffs clear.
             </ShadcnCardDescription>
@@ -5325,65 +5337,60 @@ function GoalsPage() {
             )}
           </ShadcnCardContent>
         </ShadcnCard>
-        <ShadcnCard>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>New goal</ShadcnCardTitle>
-            <ShadcnCardDescription>
-              Describe the outcome, not a long task list.
-            </ShadcnCardDescription>
-          </ShadcnCardHeader>
-          <ShadcnCardContent>
-            <FeedbackForm
-              feedback={create.feedback}
-              validate={() => (title.trim() ? {} : { title: "Enter a goal." })}
-              onSubmit={(event) => {
-                event.preventDefault();
-                create.mutate();
-              }}
-            >
-              <ShadcnFieldGroup>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="goal-title">Outcome</ShadcnFieldLabel>
-                  <ShadcnInput
-                    id="goal-title"
-                    name="title"
-                    required
-                    onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Ship a calmer weekly rhythm"
-                    value={title}
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="goal-description">
-                    What does success look like?
-                  </ShadcnFieldLabel>
-                  <ShadcnTextarea
-                    id="goal-description"
-                    name="description"
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder="Optional context for you and authorized agents"
-                    value={description}
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="goal-target-date">Target date</ShadcnFieldLabel>
-                  <ShadcnInput
-                    id="goal-target-date"
-                    name="targetDate"
-                    onChange={(event) => setTargetDate(event.target.value)}
-                    type="date"
-                    value={targetDate}
-                  />
-                </ShadcnField>
-                <ShadcnButton disabled={create.isPending} type="submit">
-                  <TargetIcon data-icon="inline-start" />
-                  Create goal
-                </ShadcnButton>
-              </ShadcnFieldGroup>
-            </FeedbackForm>
-          </ShadcnCardContent>
-        </ShadcnCard>
-      </section>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New goal</DialogTitle>
+            <DialogDescription>Describe the outcome, not a long task list.</DialogDescription>
+          </DialogHeader>
+          <FeedbackForm
+            feedback={create.feedback}
+            validate={() => (title.trim() ? {} : { title: "Enter a goal." })}
+            onSubmit={(event) => {
+              event.preventDefault();
+              create.mutate();
+            }}
+          >
+            <ShadcnFieldGroup>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="goal-title">Outcome</ShadcnFieldLabel>
+                <ShadcnInput
+                  id="goal-title"
+                  name="title"
+                  required
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Ship a calmer weekly rhythm"
+                  value={title}
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="goal-description">
+                  What does success look like?
+                </ShadcnFieldLabel>
+                <ShadcnTextarea
+                  id="goal-description"
+                  name="description"
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Optional context for you and authorized agents"
+                  value={description}
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="goal-target-date">Target date</ShadcnFieldLabel>
+                <DateInput
+                  id="goal-target-date"
+                  name="targetDate"
+                  onValueChange={setTargetDate}
+                  value={targetDate}
+                />
+              </ShadcnField>
+              <ShadcnButton disabled={create.isPending} type="submit">
+                <TargetIcon data-icon="inline-start" />
+                Create goal
+              </ShadcnButton>
+            </ShadcnFieldGroup>
+          </FeedbackForm>
+        </DialogContent>
+      </Dialog>
 
       <MutationFeedback feedback={update.feedback} />
       <MutationFeedback feedback={remove.feedback} />
@@ -5404,52 +5411,55 @@ function GoalItem({
   pending: boolean;
 }) {
   return (
-    <ShadcnItem variant="outline">
-      <ShadcnItemContent>
-        <ShadcnItemTitle>{goal.title}</ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {goal.description ?? "No supporting context yet."}
-          {goal.targetDate ? ` · Target ${goal.targetDate}` : ""}
-        </ShadcnItemDescription>
-        <div className="flex items-center gap-2">
-          <ShadcnBadge variant={goal.status === "completed" ? "secondary" : "outline"}>
-            {goal.status}
-          </ShadcnBadge>
-          <ShadcnButton
+    <SettingsRecord
+      title={goal.title}
+      description={goal.description ?? "No supporting context yet."}
+      actions={
+        <>
+          <SettingsRecordAction
+            label={goal.status === "paused" ? "Resume" : "Pause"}
             disabled={pending}
-            onClick={() =>
-              onUpdate({
-                progress: Math.min(100, goal.progress + 10),
-                ...(goal.progress >= 90 ? { status: "completed" } : {}),
-              })
-            }
-            size="sm"
-            variant="outline"
+            onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
           >
-            {goal.progress}%
-          </ShadcnButton>
-        </div>
-      </ShadcnItemContent>
-      <ShadcnItemActions>
-        <ShadcnButton
-          disabled={pending}
-          onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
-          size="sm"
-          variant="outline"
-        >
-          {goal.status === "paused" ? "Resume" : "Pause"}
-        </ShadcnButton>
-        <ShadcnButton
-          aria-label={`Remove ${goal.title}`}
-          disabled={pending}
-          onClick={onDelete}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <TrashIcon />
-        </ShadcnButton>
-      </ShadcnItemActions>
-    </ShadcnItem>
+            {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
+          </SettingsRecordAction>
+          <SettingsRecordAction
+            label={`Remove ${goal.title}`}
+            disabled={pending}
+            onClick={onDelete}
+          >
+            <TrashIcon />
+          </SettingsRecordAction>
+        </>
+      }
+      metadata={
+        <>
+          <ShadcnBadge variant="secondary">
+            {goal.status.charAt(0).toUpperCase() + goal.status.slice(1)}
+          </ShadcnBadge>
+          <ShadcnBadge asChild variant="secondary">
+            <button
+              type="button"
+              title="Advance progress by 10%"
+              disabled={pending}
+              onClick={() =>
+                onUpdate({
+                  progress: Math.min(100, goal.progress + 10),
+                  ...(goal.progress >= 90 ? { status: "completed" } : {}),
+                })
+              }
+            >
+              {goal.progress}%
+            </button>
+          </ShadcnBadge>
+          {goal.targetDate ? (
+            <span>
+              Target <time dateTime={goal.targetDate}>{formatCalendarDate(goal.targetDate)}</time>
+            </span>
+          ) : null}
+        </>
+      }
+    />
   );
 }
 
@@ -5457,6 +5467,7 @@ function MotivesPage() {
   const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const motives = useQuery({ queryFn: api.listMotives, queryKey: ["motives"] });
+  const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["motives"] });
@@ -5464,6 +5475,7 @@ function MotivesPage() {
     feedback: { action: "create this motive", form: true },
     mutationFn: () => api.createMotive({ detail: detail.trim() || null, title: title.trim() }),
     onSuccess: () => {
+      setCreating(false);
       setTitle("");
       setDetail("");
       return refresh();
@@ -5484,12 +5496,19 @@ function MotivesPage() {
   if (motives.isError && !motives.data)
     return <InlineError error={motives.error} retry={motives.refetch} />;
   return (
-    <div className="wide-page flex flex-col gap-6 pb-8">
+    <div className="settings-stack">
       <QueryFeedback query={motives} title="Couldn’t refresh motives." staleOnly />
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <Dialog open={creating} onOpenChange={setCreating}>
         <ShadcnCard>
           <ShadcnCardHeader>
             <ShadcnCardTitle>Decision context</ShadcnCardTitle>
+            <ShadcnCardAction>
+              <DialogTrigger asChild>
+                <SettingsRecordAction label="Add motive">
+                  <PlusIcon />
+                </SettingsRecordAction>
+              </DialogTrigger>
+            </ShadcnCardAction>
             <ShadcnCardDescription>
               Keep only the principles you want surfaced during planning.
             </ShadcnCardDescription>
@@ -5502,100 +5521,91 @@ function MotivesPage() {
             ) : (
               <ShadcnItemGroup>
                 {motives.data.map((motive) => (
-                  <ShadcnItem key={motive.id} variant="outline">
-                    <ShadcnItemContent>
-                      <ShadcnItemTitle>{motive.title}</ShadcnItemTitle>
-                      <ShadcnItemDescription>
-                        {motive.detail ?? "No additional context."}
-                      </ShadcnItemDescription>
-                    </ShadcnItemContent>
-                    <ShadcnItemActions>
-                      <ShadcnBadge variant={motive.isActive ? "secondary" : "outline"}>
-                        {motive.isActive ? "active" : "paused"}
+                  <SettingsRecord
+                    key={motive.id}
+                    title={motive.title}
+                    description={motive.detail ?? "No additional context."}
+                    metadata={
+                      <ShadcnBadge variant="secondary">
+                        {motive.isActive ? "Active" : "Paused"}
                       </ShadcnBadge>
-                      <ShadcnButton
-                        disabled={update.isPending}
-                        onClick={() =>
-                          update.mutate({
-                            id: motive.id,
-                            input: { isActive: !motive.isActive },
-                          })
-                        }
-                        size="sm"
-                        variant="outline"
-                      >
-                        {motive.isActive ? "Pause" : "Resume"}
-                      </ShadcnButton>
-                      <ShadcnButton
-                        aria-label={`Remove ${motive.title}`}
-                        disabled={remove.isPending}
-                        onClick={() =>
-                          confirm({
-                            title: "Delete motive?",
-                            description: "This permanently deletes the motive.",
-                            actionLabel: "Delete motive",
-                            onConfirm: () => remove.mutate(motive.id),
-                          })
-                        }
-                        size="icon-sm"
-                        variant="ghost"
-                      >
-                        <TrashIcon />
-                      </ShadcnButton>
-                    </ShadcnItemActions>
-                  </ShadcnItem>
+                    }
+                    actions={
+                      <>
+                        <SettingsRecordAction
+                          label={motive.isActive ? "Pause" : "Resume"}
+                          disabled={update.isPending}
+                          onClick={() =>
+                            update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
+                          }
+                        >
+                          {motive.isActive ? <PauseIcon /> : <PlayIcon />}
+                        </SettingsRecordAction>
+                        <SettingsRecordAction
+                          label={`Remove ${motive.title}`}
+                          disabled={remove.isPending}
+                          onClick={() =>
+                            confirm({
+                              title: "Delete motive?",
+                              description: "This permanently deletes the motive.",
+                              actionLabel: "Delete motive",
+                              onConfirm: () => remove.mutate(motive.id),
+                            })
+                          }
+                        >
+                          <TrashIcon />
+                        </SettingsRecordAction>
+                      </>
+                    }
+                  />
                 ))}
               </ShadcnItemGroup>
             )}
           </ShadcnCardContent>
         </ShadcnCard>
-        <ShadcnCard>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>New motive</ShadcnCardTitle>
-            <ShadcnCardDescription>
-              Use a value, identity, or reason—not a task.
-            </ShadcnCardDescription>
-          </ShadcnCardHeader>
-          <ShadcnCardContent>
-            <FeedbackForm
-              feedback={create.feedback}
-              validate={() => (title.trim() ? {} : { title: "Enter a motive." })}
-              onSubmit={(event) => {
-                event.preventDefault();
-                create.mutate();
-              }}
-            >
-              <ShadcnFieldGroup>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="motive-title">Motive</ShadcnFieldLabel>
-                  <ShadcnInput
-                    id="motive-title"
-                    name="title"
-                    required
-                    onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Protect focused time"
-                    value={title}
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="motive-detail">Context</ShadcnFieldLabel>
-                  <ShadcnTextarea
-                    id="motive-detail"
-                    name="detail"
-                    onChange={(event) => setDetail(event.target.value)}
-                    placeholder="Optional explanation for future decisions"
-                    value={detail}
-                  />
-                </ShadcnField>
-                <ShadcnButton disabled={create.isPending} type="submit">
-                  <CompassIcon data-icon="inline-start" />
-                  Create motive
-                </ShadcnButton>
-              </ShadcnFieldGroup>
-            </FeedbackForm>
-          </ShadcnCardContent>
-        </ShadcnCard>
-      </section>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New motive</DialogTitle>
+            <DialogDescription>Use a value, identity, or reason—not a task.</DialogDescription>
+          </DialogHeader>
+          <FeedbackForm
+            feedback={create.feedback}
+            validate={() => (title.trim() ? {} : { title: "Enter a motive." })}
+            onSubmit={(event) => {
+              event.preventDefault();
+              create.mutate();
+            }}
+          >
+            <ShadcnFieldGroup>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="motive-title">Motive</ShadcnFieldLabel>
+                <ShadcnInput
+                  id="motive-title"
+                  name="title"
+                  required
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Protect focused time"
+                  value={title}
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="motive-detail">Context</ShadcnFieldLabel>
+                <ShadcnTextarea
+                  id="motive-detail"
+                  name="detail"
+                  onChange={(event) => setDetail(event.target.value)}
+                  placeholder="Optional explanation for future decisions"
+                  value={detail}
+                />
+              </ShadcnField>
+              <ShadcnButton disabled={create.isPending} type="submit">
+                <CompassIcon data-icon="inline-start" />
+                Create motive
+              </ShadcnButton>
+            </ShadcnFieldGroup>
+          </FeedbackForm>
+        </DialogContent>
+      </Dialog>
 
       <MutationFeedback feedback={update.feedback} />
       <MutationFeedback feedback={remove.feedback} />
@@ -6041,12 +6051,14 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
 function settingsSectionPages(
   canManageInvitations: boolean,
   workspaceActions: WorkspaceSettingsActions,
+  counts: ReturnType<typeof useSettingsSidebarCounts>,
 ): MobileWorkspacePage[] {
   return visibleSettingsNavigation(canManageInvitations).flatMap((group) =>
     group.items.map(({ icon, id, label }) => {
       const badge = workspaceActionBadge(id, workspaceActions);
       return {
         ...(badge ? { badge } : {}),
+        count: id === "connections" || id === "agent-connections" ? counts[id] : undefined,
         icon,
         label,
         path: settingsSectionPath(id),
@@ -6070,11 +6082,13 @@ function SettingsSidebarNavigation({
   onNavigate,
   section,
   workspaceActions,
+  counts,
 }: {
   canManageInvitations: boolean;
   onNavigate: () => void;
   section: SettingsSectionId;
   workspaceActions: WorkspaceSettingsActions;
+  counts: ReturnType<typeof useSettingsSidebarCounts>;
 }) {
   return (
     <>
@@ -6089,6 +6103,9 @@ function SettingsSidebarNavigation({
                   return (
                     <SidebarNavigationItem
                       {...(badge ? { badge } : {})}
+                      count={
+                        id === "connections" || id === "agent-connections" ? counts[id] : undefined
+                      }
                       icon={icon}
                       isActive={section === id}
                       key={id}
@@ -6138,13 +6155,13 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     >
       {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
       {section === "finances" ? (
-        <div className="flex flex-col gap-6">
+        <div className="settings-stack">
           <WorkspaceSettings domain="finances" />
           <FinanceSettings />
         </div>
       ) : null}
       {section === "calendar" ? (
-        <div className="flex flex-col gap-6">
+        <div className="settings-stack">
           <WorkspaceSettings domain="calendar" />
           <CalendarsSettings setEditor={setEditor} />
         </div>
@@ -6154,12 +6171,15 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
       {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
       {section === "activity" ? (
-        <>
-          <div className="settings-page__tools">
+        <SettingsSection
+          title="Activity history"
+          description="Search changes made by you, agents, and connected services."
+        >
+          <div>
             <ActivityTopbarControls />
           </div>
           <ActivityPage />
-        </>
+        </SettingsSection>
       ) : null}
       {section === "appearance" ? <ThemeSettings user={user} /> : null}
       {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
@@ -6242,7 +6262,12 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
               </ShadcnItem>
               <ShadcnItemGroup className="calendar-settings__calendars">
                 {group.calendars.map((calendar) => (
-                  <ShadcnItem className="calendar-settings__calendar" key={calendar.id} size="sm">
+                  <ShadcnItem
+                    variant="secondary"
+                    className="calendar-settings__calendar"
+                    key={calendar.id}
+                    size="sm"
+                  >
                     <ShadcnItemMedia variant="default">
                       <ShadcnCheckbox
                         aria-label={
@@ -6663,7 +6688,7 @@ function XBookmarksConnectorRow({
   syncing: boolean;
 }) {
   return (
-    <ShadcnItem variant="outline">
+    <ShadcnItem variant="secondary">
       <ShadcnItemMedia className="provider-icon" variant="icon">
         𝕏
       </ShadcnItemMedia>
@@ -6678,21 +6703,21 @@ function XBookmarksConnectorRow({
         </ShadcnItemDescription>
         <div className="capability-badges">
           <ShadcnBadge variant="secondary">Read-only bookmarks</ShadcnBadge>
-          <select
+          <ShadcnNativeSelect
             aria-label="X bookmark folder"
             disabled={syncing || !folders.length}
             onChange={(event) => selectFolder(event.target.value)}
             value={account.selectedFolderId ?? ""}
           >
-            <option disabled value="">
+            <NativeSelectOption disabled value="">
               Choose a folder
-            </option>
+            </NativeSelectOption>
             {folders.map((folder) => (
-              <option key={folder.id} value={folder.remoteFolderId}>
+              <NativeSelectOption key={folder.id} value={folder.remoteFolderId}>
                 {folder.name}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </ShadcnNativeSelect>
         </div>
       </ShadcnItemContent>
       <ShadcnItemActions>
@@ -7022,23 +7047,20 @@ function PinterestWallpaperDesktopSettingsPanel() {
         </ShadcnField>
         <ShadcnField>
           <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
-          <ShadcnToggleGroup
+          <SegmentedControl
             aria-label="Wallpaper layout"
             onValueChange={(next) => {
               if (next === "grid" || next === "stack") update.mutate({ layout: next });
             }}
-            size="sm"
-            type="single"
             value={value?.layout ?? "grid"}
-            variant="outline"
           >
-            <ShadcnToggleGroupItem aria-label="Tiled grid" value="grid">
+            <SegmentedControlItem aria-label="Tiled grid" value="grid">
               <GridIcon data-icon="inline-start" className="size-[15px]" /> Grid
-            </ShadcnToggleGroupItem>
-            <ShadcnToggleGroupItem aria-label="Overlapping stack" value="stack">
+            </SegmentedControlItem>
+            <SegmentedControlItem aria-label="Overlapping stack" value="stack">
               <LayersIcon data-icon="inline-start" className="size-[15px]" /> Stack
-            </ShadcnToggleGroupItem>
-          </ShadcnToggleGroup>
+            </SegmentedControlItem>
+          </SegmentedControl>
           <ShadcnFieldDescription>
             Grid keeps every image tidy. Stack layers them like pinned photos.
           </ShadcnFieldDescription>
@@ -7052,23 +7074,20 @@ function PinterestWallpaperDesktopSettingsPanel() {
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
           <ShadcnField>
             <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
-            <ShadcnToggleGroup
+            <SegmentedControl
               aria-label="Mosaic fit"
               onValueChange={(next) => {
                 if (next === "preserve" || next === "fill") update.mutate({ mosaicFit: next });
               }}
-              size="sm"
-              type="single"
               value={value?.mosaicFit ?? "preserve"}
-              variant="outline"
             >
-              <ShadcnToggleGroupItem aria-label="Preserve image shapes" value="preserve">
+              <SegmentedControlItem aria-label="Preserve image shapes" value="preserve">
                 Preserve images
-              </ShadcnToggleGroupItem>
-              <ShadcnToggleGroupItem aria-label="Fill the rectangular frame" value="fill">
+              </SegmentedControlItem>
+              <SegmentedControlItem aria-label="Fill the rectangular frame" value="fill">
                 Fill frame
-              </ShadcnToggleGroupItem>
-            </ShadcnToggleGroup>
+              </SegmentedControlItem>
+            </SegmentedControl>
             <ShadcnFieldDescription>
               Preserve keeps every image uncropped and centers the clean mosaic. Fill makes an exact
               rectangle with equal edges by allowing a small, centered crop.
@@ -7076,7 +7095,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           </ShadcnField>
           <ShadcnField>
             <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
-            <ShadcnToggleGroup
+            <SegmentedControl
               aria-label="Wallpaper backdrop"
               onValueChange={(next) => {
                 if (
@@ -7088,24 +7107,21 @@ function PinterestWallpaperDesktopSettingsPanel() {
                   update.mutate({ backgroundMode: next });
                 }
               }}
-              size="sm"
-              type="single"
               value={value?.backgroundMode ?? "white"}
-              variant="outline"
             >
-              <ShadcnToggleGroupItem aria-label="White backdrop" value="white">
+              <SegmentedControlItem aria-label="White backdrop" value="white">
                 White
-              </ShadcnToggleGroupItem>
-              <ShadcnToggleGroupItem aria-label="Custom backdrop" value="custom">
+              </SegmentedControlItem>
+              <SegmentedControlItem aria-label="Custom backdrop" value="custom">
                 Custom
-              </ShadcnToggleGroupItem>
-              <ShadcnToggleGroupItem aria-label="Color-matched backdrop" value="matched">
+              </SegmentedControlItem>
+              <SegmentedControlItem aria-label="Color-matched backdrop" value="matched">
                 Matched
-              </ShadcnToggleGroupItem>
-              <ShadcnToggleGroupItem aria-label="Daily random backdrop" value="random">
+              </SegmentedControlItem>
+              <SegmentedControlItem aria-label="Daily random backdrop" value="random">
                 Daily
-              </ShadcnToggleGroupItem>
-            </ShadcnToggleGroup>
+              </SegmentedControlItem>
+            </SegmentedControl>
             {value?.backgroundMode === "custom" ? (
               <ShadcnInput
                 aria-label="Custom backdrop color"
@@ -7597,31 +7613,16 @@ function ConnectorRow({
       actions={
         <>
           {reconnect ? (
-            <ShadcnButton onClick={reconnect} size="sm" type="button">
-              Reconnect
-            </ShadcnButton>
+            <SettingsRecordAction label="Reconnect" onClick={reconnect}>
+              <RefreshIcon />
+            </SettingsRecordAction>
           ) : null}
-          <ShadcnButton
-            aria-label={`Sync ${account.label}`}
-            disabled={syncing}
-            onClick={sync}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
+          <SettingsRecordAction label={`Sync ${account.label}`} disabled={syncing} onClick={sync}>
             <RefreshIcon aria-hidden="true" className={syncing ? "spin" : ""} />
-            {syncing ? "Syncing" : "Sync now"}
-          </ShadcnButton>
-          <ShadcnButton
-            aria-label={`Disconnect ${account.label}`}
-            onClick={disconnect}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
+          </SettingsRecordAction>
+          <SettingsRecordAction label={`Disconnect ${account.label}`} onClick={disconnect}>
             <TrashIcon aria-hidden="true" />
-            Remove
-          </ShadcnButton>
+          </SettingsRecordAction>
         </>
       }
       capabilities={
@@ -7675,7 +7676,7 @@ function connectionHealthTitle(state: ReturnType<typeof connectionHealth>["state
 function connectionHealthGuidance(state: ReturnType<typeof connectionHealth>["state"]) {
   if (state === "syncing") return "New information will appear when this sync finishes.";
   if (state === "retrying") return "No action is needed while automatic retries continue.";
-  if (state === "reconnect") return "Use Reconnect below to restore access.";
+  if (state === "reconnect") return "Use Reconnect to restore access.";
   if (state === "service_attention") return "No action is needed. We’ll keep retrying.";
   return "You can sync now whenever you want to check for new information.";
 }
@@ -7725,12 +7726,17 @@ function ConnectorCapabilityBadge({
 }
 
 function ProfileSettings({ user }: { user: User }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [editRevision, setEditRevision] = useState(0);
+  const attempted = useRef("");
+  const saving = useRef(false);
+  const revisionRef = useRef(0);
   const queryClient = useQueryClient();
   const [homeLocation, setHomeLocation] = useState<HomeLocation | null>(user.homeLocation);
   const [homeLocationValid, setHomeLocationValid] = useState(true);
   const [planningTimezone, setPlanningTimezone] = useState(user.planningTimezone);
   const update = useFeedbackMutation({
-    feedback: { action: "save your profile", form: true, success: "Profile saved." },
+    feedback: { action: "save your profile", form: true },
     mutationFn: (input: {
       displayName: string;
       email: string;
@@ -7741,6 +7747,9 @@ function ProfileSettings({ user }: { user: User }) {
     }) => api.updateUser(input),
     onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
+    },
+    onSettled: () => {
+      saving.current = false;
     },
   });
   const resendVerification = useFeedbackMutation({
@@ -7780,11 +7789,43 @@ function ProfileSettings({ user }: { user: User }) {
       "UTC",
     ]),
   );
+
+  // Keep requests serialized. When one completes, the effect reads the latest
+  // form values rather than replaying an obsolete draft.
+  useEffect(() => {
+    if (!editRevision || update.isPending || !homeLocationValid) return;
+    const timer = window.setTimeout(() => {
+      const form = formRef.current;
+      if (!form || saving.current) return;
+      const values = new FormData(form);
+      if (
+        !form.checkValidity() ||
+        String(values.get("workdayEnd")) <= String(values.get("workdayStart"))
+      )
+        return;
+      const signature = JSON.stringify([
+        Array.from(values.entries()),
+        homeLocation,
+        planningTimezone,
+      ]);
+      if (attempted.current === signature) return;
+      form.requestSubmit();
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [editRevision, update.isPending, homeLocationValid, homeLocation, planningTimezone]);
+  const edited = () => {
+    revisionRef.current += 1;
+    setEditRevision(revisionRef.current);
+  };
   const [firstName, lastName] = splitProfileName(user.displayName);
   return (
     <div className="flex flex-col gap-4">
+      <AccountIdentity user={user} />
+      <AccountOverview />
       <div className="flex flex-col gap-6">
         <FeedbackForm
+          ref={formRef}
+          onChange={edited}
           feedback={update.feedback}
           fieldNames={{
             displayName: "firstName",
@@ -7795,7 +7836,7 @@ function ProfileSettings({ user }: { user: User }) {
             const values = new FormData(form);
             const errors: Record<string, string> = {};
             if (String(values.get("workdayEnd")) <= String(values.get("workdayStart")))
-              errors.workdayEnd = "Planning day must end after it starts.";
+              errors.workdayEnd = "Day end must be after day start.";
             if (!homeLocationValid)
               errors.homeLocation = "Choose a place from the results, or clear this field.";
             return errors;
@@ -7803,7 +7844,14 @@ function ProfileSettings({ user }: { user: User }) {
           className="profile-form"
           onSubmit={(event) => {
             event.preventDefault();
+            if (saving.current) return;
             const form = new FormData(event.currentTarget);
+            attempted.current = JSON.stringify([
+              Array.from(form.entries()),
+              homeLocation,
+              planningTimezone,
+            ]);
+            saving.current = true;
             update.mutate({
               displayName: [form.get("firstName"), form.get("lastName")]
                 .map((value) => String(value).trim())
@@ -7876,14 +7924,12 @@ function ProfileSettings({ user }: { user: User }) {
               </ShadcnFieldGroup>
             </SettingsSection>
             <SettingsSection
-              title="Planning defaults"
+              title="Daily defaults"
               description="Anchor your schedule to your local day."
             >
               <ShadcnFieldGroup className="form-grid">
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-workday-start">
-                    Planning day starts
-                  </ShadcnFieldLabel>
+                  <ShadcnFieldLabel htmlFor="profile-workday-start">Day start</ShadcnFieldLabel>
                   <ShadcnInput
                     defaultValue={minuteToTime(user.workdayStartMinute)}
                     id="profile-workday-start"
@@ -7893,9 +7939,7 @@ function ProfileSettings({ user }: { user: User }) {
                   />
                 </ShadcnField>
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-workday-end">
-                    Planning day ends
-                  </ShadcnFieldLabel>
+                  <ShadcnFieldLabel htmlFor="profile-workday-end">Day end</ShadcnFieldLabel>
                   <ShadcnInput
                     defaultValue={minuteToTime(user.workdayEndMinute)}
                     id="profile-workday-end"
@@ -7907,13 +7951,14 @@ function ProfileSettings({ user }: { user: User }) {
                 <HomeLocationField
                   savedLocation={user.homeLocation}
                   onChange={(location) => {
+                    edited();
                     setHomeLocation(location);
                     if (location?.timezone) setPlanningTimezone(location.timezone);
                   }}
                   onValidityChange={setHomeLocationValid}
                 />
                 <ShadcnField className="profile-form__full-row">
-                  <ShadcnFieldLabel htmlFor="profile-timezone">Planning time zone</ShadcnFieldLabel>
+                  <ShadcnFieldLabel htmlFor="profile-timezone">Time zone</ShadcnFieldLabel>
                   <ShadcnNativeSelect
                     id="profile-timezone"
                     name="planningTimezone"
@@ -7927,21 +7972,29 @@ function ProfileSettings({ user }: { user: User }) {
                     ))}
                   </ShadcnNativeSelect>
                   <ShadcnFieldDescription>
-                    Home Location supplies this default. Choose a different zone when your planning
-                    day should stay anchored elsewhere.
+                    Home Location supplies this default. Choose a different zone when your day
+                    should stay anchored elsewhere.
                   </ShadcnFieldDescription>
                 </ShadcnField>
               </ShadcnFieldGroup>
             </SettingsSection>
           </SettingsBento>
           <MutationFeedback feedback={resendVerification.feedback} />
-          <ShadcnButton disabled={update.isPending} type="submit">
-            {update.isPending ? "Saving profile…" : "Save profile"}
-          </ShadcnButton>
+          {update.isPending ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              Saving changes…
+            </p>
+          ) : null}
+          {update.isError ? (
+            <ShadcnButton type="submit" variant="secondary">
+              Retry saving
+            </ShadcnButton>
+          ) : null}
         </FeedbackForm>
+        <TextingSettings profile />
         <SettingsSection title="Security" description="Manage your password and this session.">
           <ShadcnItemGroup aria-label="Account actions">
-            <ShadcnItem size="sm">
+            <ShadcnItem size="sm" variant="secondary">
               <ShadcnItemMedia variant="icon">
                 <KeyIcon aria-hidden="true" />
               </ShadcnItemMedia>
@@ -7963,7 +8016,7 @@ function ProfileSettings({ user }: { user: User }) {
                 </ShadcnButton>
               </ShadcnItemActions>
             </ShadcnItem>
-            <ShadcnItem size="sm">
+            <ShadcnItem size="sm" variant="secondary">
               <ShadcnItemMedia variant="icon">
                 <LogOutIcon aria-hidden="true" />
               </ShadcnItemMedia>
@@ -8210,11 +8263,11 @@ function InvitationsSettings() {
           ) : null}
           {invitations.isLoading ? <Spinner label="Loading invitations" /> : null}
           {invitations.data?.length ? (
-            <div className="settings-list">
+            <ShadcnItemGroup>
               {invitations.data.map((invitation) => (
                 <InvitationRow invitation={invitation} key={invitation.id} />
               ))}
-            </div>
+            </ShadcnItemGroup>
           ) : null}
         </>
       )}
@@ -8225,7 +8278,7 @@ function InvitationsSettings() {
 function InvitationRow({ invitation }: { invitation: Invitation }) {
   const expired = new Date(invitation.expiresAt).getTime() <= Date.now();
   return (
-    <ShadcnItem>
+    <ShadcnItem variant="secondary">
       <ShadcnItemContent>
         <ShadcnItemTitle>{invitation.email ?? "Unassigned invitation"}</ShadcnItemTitle>
         <ShadcnItemDescription>
@@ -8376,30 +8429,29 @@ function useDocumentTheme(theme: Theme) {
 
 function SessionRow({ revoke, session }: { revoke: () => void; session: Session }) {
   return (
-    <ShadcnItem variant="outline">
-      <ShadcnItemMedia className="provider-icon" variant="icon">
-        <UserIcon className="size-4" />
-      </ShadcnItemMedia>
-      <ShadcnItemContent>
-        <ShadcnItemTitle>
-          {session.userAgent?.split(" ").slice(0, 3).join(" ") ?? "Unknown device"}
-        </ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {session.ipAddress ?? "Local"} · Active {formatRelative(session.lastSeenAt)}
-        </ShadcnItemDescription>
-      </ShadcnItemContent>
-      <ShadcnItemActions>
-        <ShadcnButton
-          aria-label="Revoke session"
-          onClick={revoke}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
+    <SettingsRecord
+      title={session.userAgent?.split(" ").slice(0, 3).join(" ") ?? "Unknown device"}
+      leading={<UserIcon className="size-4" />}
+      metadata={
+        <>
+          <ShadcnBadge variant="secondary">{session.ipAddress ?? "Local"}</ShadcnBadge>
+          <span>
+            Active{" "}
+            <time
+              dateTime={session.lastSeenAt}
+              title={new Date(session.lastSeenAt).toLocaleString()}
+            >
+              {formatRelative(session.lastSeenAt)}
+            </time>
+          </span>
+        </>
+      }
+      actions={
+        <SettingsRecordAction label="Revoke session" onClick={revoke}>
           <TrashIcon />
-        </ShadcnButton>
-      </ShadcnItemActions>
-    </ShadcnItem>
+        </SettingsRecordAction>
+      }
+    />
   );
 }
 

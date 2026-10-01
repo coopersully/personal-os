@@ -11,12 +11,12 @@ import {
   TargetIcon,
   WalletIcon,
 } from "@/components/icons";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -104,6 +104,9 @@ export function FinanceSidebarNavigation({
               {group.items.map(({ icon: Icon, id, label }) => (
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton
+                    className={
+                      id === "review" && reviewCount > 0 ? "sidebar-item-with-meta" : undefined
+                    }
                     asChild
                     isActive={financeNavigationActive(section, id)}
                     tooltip={label}
@@ -124,7 +127,7 @@ export function FinanceSidebarNavigation({
                     </Link>
                   </SidebarMenuButton>
                   {id === "review" && reviewCount > 0 ? (
-                    <SidebarMenuBadge aria-hidden="true">{reviewCount}</SidebarMenuBadge>
+                    <SidebarItemMeta label="Reviews" count={reviewCount} />
                   ) : null}
                 </SidebarMenuItem>
               ))}

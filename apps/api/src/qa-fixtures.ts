@@ -1183,7 +1183,8 @@ function addLoadedWorkspace(
       value: "news",
     },
     createdAt: ago(12),
-    description: "A safe review fixture for the Agent Access action queue.",
+    description:
+      "Mark newsletters as read when the sender contains “news”. Review the matching sample before enabling this rule.",
     enabled: false,
     id: fixtureId(account, 334),
     name: "Fixture newsletters",
@@ -1204,12 +1205,40 @@ function addLoadedWorkspace(
   });
 
   const attentionDomains = ["mail", "calendar", "tasks", "finances"] as const;
-  const attentionLabels = {
-    calendar: "Calendar",
-    finances: "Finances",
-    mail: "Mail",
-    tasks: "Tasks",
-  } as const;
+  const attentionPreviews = [
+    [
+      "Decide how to handle the board packet",
+      "Maya Chen sent the board packet for Friday. Decide whether to keep it active for a reply or file it as reference.",
+    ],
+    [
+      "Confirm time for quarterly planning",
+      "Quarterly planning is an all-day commitment. Decide whether it also needs a reserved focus block on your calendar.",
+    ],
+    [
+      "Choose the next focus block",
+      "Protect two uninterrupted blocks each weekday. Choose which unfinished task should get the next block.",
+    ],
+    [
+      "Review an uncategorized purchase",
+      "A posted purchase has no confirmed category. Check the merchant and choose where it belongs before updating the spending plan.",
+    ],
+    [
+      "Review the travel approval request",
+      "Travel Desk is waiting for fare approval. Review the itinerary and decide whether to reply with approval or request a change.",
+    ],
+    [
+      "Protect time around the dentist appointment",
+      "The dentist appointment is scheduled for Thursday. Decide whether travel time should be reserved before or after it.",
+    ],
+    [
+      "Revisit the monthly finance task",
+      "The monthly finance review is still open. Decide whether to schedule time for it or defer it to a specific date.",
+    ],
+    [
+      "Confirm account ownership",
+      "Some accounts have unresolved ownership. Confirm your share before including their full balances in net worth.",
+    ],
+  ] as const;
   const attentionImportance = ["critical", "high", "normal", "low"] as const;
   for (let index = 0; index < 8; index += 1) {
     const domain = attentionDomains[
@@ -1225,8 +1254,8 @@ function addLoadedWorkspace(
       kind: index % 2 === 0 ? "important" : "follow_up",
       occursAt: ago(8 - index),
       status: "open",
-      summary: `Resolve deterministic ${domain} fixture work before the agent continues.`,
-      title: `${attentionLabels[domain]} fixture attention ${index + 1}`,
+      summary: attentionPreviews[index]?.[1] ?? "Review the outstanding workspace decision.",
+      title: attentionPreviews[index]?.[0] ?? "Review workspace decision",
       updatedAt: ago(8 - index),
       userId: account.id,
     });

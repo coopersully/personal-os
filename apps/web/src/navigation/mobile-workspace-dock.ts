@@ -19,6 +19,7 @@ import type { WorkspaceId } from "./manifest.js";
 
 export type MobileWorkspacePage = {
   badge?: string;
+  count?: number | undefined;
   icon: Icon;
   label: string;
   path: string;

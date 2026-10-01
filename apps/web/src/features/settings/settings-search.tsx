@@ -17,7 +17,7 @@ import { settingMatchScore, settingsFieldId, settingsFields } from "./settings-f
 
 export const settingsDescriptions = {
   setup: "Choose your setup preferences or revisit the guided experience.",
-  profile: "Your name, email, home location, and planning hours.",
+  profile: "Your profile, connected accounts, and workspace attention.",
   rituals: "Shape your morning and evening routines.",
   goals: "Choose the outcomes you want to work toward.",
   motives: "Keep what matters to you close to your plans.",

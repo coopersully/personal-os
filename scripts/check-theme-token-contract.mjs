@@ -85,6 +85,34 @@ const violations = [];
 
 const pairs = [
   {
+    background: "--accent",
+    foreground: "--accent-foreground",
+    maxDelta: 5,
+    min: 4.5,
+    name: "quiet interaction",
+  },
+  {
+    background: "--canvas",
+    foreground: "--surface",
+    maxDelta: 0.15,
+    min: 1.16,
+    name: "canvas/card separation",
+  },
+  ...["--canvas", "--surface", "--sidebar"].map((background) => ({
+    background,
+    foreground: "--popover",
+    maxDelta: 0.75,
+    min: 1.1,
+    name: `overlay separation from ${background}`,
+  })),
+  ...["--popover", "--selection"].map((background) => ({
+    background,
+    foreground: "--content-secondary",
+    maxDelta: 4,
+    min: 4.5,
+    name: `supporting content on ${background}`,
+  })),
+  {
     background: "--canvas",
     foreground: "--content-primary",
     maxDelta: 2,

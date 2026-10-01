@@ -248,8 +248,10 @@ geometry so focus, invalid, increased-contrast, or functional data boundaries
 can become visible without layout shift. A legacy `outline` variant names an
 interaction hierarchy, not a requirement to draw an outline.
 
-Raised overlays and bounded floating work use `surface-raised`, never the
-surface directly behind them. Contextual app-bar controls retain a quiet opaque
+Portalled overlays (menus, popovers, hover cards, comboboxes, and dialogs) use
+`popover` / `popover-foreground`, backed by the dedicated opaque `surface-overlay`
+tone. Do not override these with canvas, card, sidebar, or a feature-local border.
+`surface-raised` is an in-flow supporting tone, not the overlay token. Contextual app-bar controls retain a quiet opaque
 resting fill, and interactive highlights use `control-hover-background` so an
 open or hovered control cannot collapse into its parent surface. Avatar
 fallbacks use nested neutral tones so the identity boundary remains legible on
@@ -441,3 +443,30 @@ state. Treat implementation as a prototype: inspect it, identify a concrete
 friction, make the smallest change that expresses the intended rule, and verify
 the changed state plus its empty/error counterpart. This keeps design close to
 the material while preventing local fixes from becoming undocumented patterns.
+
+### Neutral surface and shape contract
+
+The shared theme owns these invariants in both light and dark mode. Canvas/card
+separation has a measured contrast floor of 1.16:1; this is a visual hierarchy
+budget, not a WCAG text threshold. Overlay/card, overlay/canvas, and overlay/sidebar
+separation must each reach 1.10:1. Rail/sidebar tones can stay close. Foreground
+text must still meet 4.5:1 on its actual surface, including highlighted results.
+Opaque overlay tone, rather than a local border or shadow, provides separation.
+Modal dialogs, drawers, and sheets use the shared inverse `overlay` scrim; it
+dims the page in both themes instead of becoming a white wash in dark mode.
+
+Primary actions pair `primary` with `primary-foreground`. Quiet hover, focus, and
+selection pair `selection` with `selection-foreground`; Tailwind's `accent` pair
+maps to this same quiet treatment, including raw CSS `--accent`. Legacy primary
+action consumers use `primary` explicitly. Browser text selection also uses the
+quiet pair.
+
+Radius is a length in rem, not a percentage of an element. With the 0.75rem base,
+small details use 4px (`sm`), compact controls/menu items 6px (`md`), regular
+controls 8px (`lg`), floating menus 12px (base), and cards/dialogs 16px (`xl`).
+All scale from the same base; intentionally circular avatars, radio controls,
+switches, and floating dock shapes remain round. A small button should not become
+a capsule merely because it shares a panel's radius.
+
+The frontend theme owns this contract. Verify Settings search hover/keyboard
+focus, cards, and Mail/Calendar account popovers in both themes when changing it.

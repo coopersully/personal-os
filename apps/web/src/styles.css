@@ -14,19 +14,20 @@
   --app-font-mono: "Geist Variable", ui-monospace, monospace;
   --app-font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   /* Flat neutral chrome; color is reserved for workspace identity, user material, and state. */
-  --canvas: #fbfbfa;
+  --canvas: #e9eaee;
   --surface: #ffffff;
-  --surface-subtle: #f2f2f0;
-  --surface-strong: #e9e9e6;
+  --surface-subtle: #e1e3e8;
+  --surface-strong: #c9cdd6;
   --surface-raised: var(--surface-subtle);
+  --surface-overlay: #d3d7e0;
   --surface-muted: var(--surface-subtle);
   --border-subtle: #dededb;
   --border-strong: #a1a19c;
   --content-primary: #18181b;
   --ritual-morning-content: #18181b;
   --ritual-evening-content: #ffffff;
-  --content-secondary: #5f5f67;
-  --content-tertiary: #85858d;
+  --content-secondary: #51515b;
+  --content-tertiary: #666671;
   --inverse-surface: #151514;
   --inverse-content: #f3f3f1;
   --ink: var(--content-primary);
@@ -36,15 +37,15 @@
   --paper: var(--surface);
   --paper-deep: var(--canvas);
   --night: var(--inverse-surface);
-  --accent: var(--content-primary);
-  --accent-foreground: var(--inverse-content);
+  --accent: var(--selection);
+  --accent-foreground: var(--selection-foreground);
   --accent-border: var(--border-strong);
   --accent-strong: var(--content-primary);
   --accent-soft: var(--surface-strong);
   --selection: var(--surface-strong);
   --selection-foreground: var(--content-primary);
-  --acid: var(--accent);
-  --acid-ink: var(--accent-foreground);
+  --acid: var(--primary);
+  --acid-ink: var(--primary-foreground);
   --danger: #b44333;
   --status-info: #376b92;
   --status-success: #26764a;
@@ -68,7 +69,7 @@
   --inverse-content-tertiary: #858580;
   --app-shell-background: var(--canvas);
   --desktop-sidebar-background: var(--surface-subtle);
-  --workspace-rail-background: var(--surface);
+  --workspace-rail-background: #eff0f3;
   --control-hover-background: var(--surface-strong);
   --overlay-subtle: color-mix(in srgb, var(--inverse-surface) 18%, transparent);
   --overlay: color-mix(in srgb, var(--inverse-surface) 58%, transparent);
@@ -125,10 +126,10 @@
   --foreground: var(--ink);
   --card: var(--paper);
   --card-foreground: var(--ink);
-  --popover: var(--paper);
+  --popover: var(--surface-overlay);
   --popover-foreground: var(--ink);
-  --primary: var(--accent);
-  --primary-foreground: var(--accent-foreground);
+  --primary: var(--content-primary);
+  --primary-foreground: var(--inverse-content);
   --secondary: var(--paper-deep);
   --secondary-foreground: var(--ink);
   --ui-muted: var(--paper-deep);
@@ -139,21 +140,27 @@
   --input-surface: color-mix(in oklab, var(--input) 60%, var(--background));
   --input-surface-hover: color-mix(in oklab, var(--input) 80%, var(--background));
   --input-placeholder: #66666e;
-  --ring: var(--accent);
+  --ring: var(--primary);
   --chart-1: var(--content-primary);
   --chart-2: var(--content-secondary);
   --chart-3: var(--border-strong);
   --chart-4: var(--content-tertiary);
   --chart-5: var(--ink);
   --sidebar: var(--surface-subtle);
-  --sidebar-foreground: #5f5f67;
-  --sidebar-muted: #85858d;
-  --sidebar-primary: var(--accent);
-  --sidebar-primary-foreground: var(--accent-foreground);
+  --sidebar-foreground: var(--content-secondary);
+  --sidebar-muted: var(--content-tertiary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: var(--surface-strong);
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--sidebar);
-  --sidebar-ring: var(--accent);
+  --sidebar-ring: var(--primary);
+}
+
+/* Text selection is a paired state, distinct from primary action emphasis. */
+::selection {
+  background: var(--selection);
+  color: var(--selection-foreground);
 }
 
 * {
@@ -269,7 +276,7 @@ p {
   color: var(--acid-ink);
 }
 .button--accent:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--primary);
   border-color: transparent;
   filter: brightness(0.96);
 }
@@ -531,7 +538,7 @@ p {
   padding-top: 25px;
 }
 .check-field input {
-  accent-color: var(--accent);
+  accent-color: var(--primary);
   height: 17px;
   width: 17px;
 }
@@ -552,10 +559,10 @@ p {
 }
 
 .app-shell {
-  --accent-border: color-mix(in srgb, var(--accent) 52%, var(--paper));
-  --accent-strong: color-mix(in srgb, var(--accent) 62%, var(--ink));
-  --accent-soft: color-mix(in srgb, var(--accent) 17%, var(--paper));
-  --acid: var(--accent);
+  --accent-border: color-mix(in srgb, var(--primary) 52%, var(--paper));
+  --accent-strong: color-mix(in srgb, var(--primary) 62%, var(--ink));
+  --accent-soft: color-mix(in srgb, var(--primary) 17%, var(--paper));
+  --acid: var(--primary);
   --chrome-height: 3.25rem;
   --sidebar-expanded-width: 16rem;
   --workspace-rail-width: 4rem;
@@ -1002,7 +1009,7 @@ p {
 }
 .nav-item__badge {
   align-items: center;
-  background: var(--accent);
+  background: var(--primary);
   border-radius: 999px;
   color: var(--sidebar-primary-foreground);
   display: inline-flex;
@@ -3891,8 +3898,6 @@ p {
   width: 0.75rem;
 }
 .mail-accounts-popover {
-  background: var(--surface-subtle);
-  border-color: var(--border-subtle);
   max-width: calc(100vw - 1rem);
   padding: 0.75rem;
   width: 22rem;
@@ -4283,7 +4288,6 @@ p {
   border-radius: 999px;
 }
 .mail-compose-dialog {
-  background: var(--surface-raised);
   gap: 0;
   max-height: min(42rem, calc(100dvh - 6rem));
   overflow: hidden;
@@ -6248,10 +6252,10 @@ p {
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-sm: calc(var(--radius) / 3);
+  --radius-md: calc(var(--radius) / 2);
+  --radius-lg: calc(var(--radius) * 2 / 3);
+  --radius-xl: calc(var(--radius) * 4 / 3);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
@@ -6260,15 +6264,16 @@ p {
 .dark {
   color-scheme: dark;
   --canvas: #242529;
-  --surface: #2d2e33;
+  --surface: #303137;
   --surface-subtle: #37383e;
   --surface-strong: #42434a;
   --surface-raised: var(--surface-subtle);
+  --surface-overlay: #454750;
   --surface-muted: var(--surface-subtle);
   --border-subtle: #505158;
   --border-strong: #797a83;
   --content-primary: #ffffff;
-  --content-secondary: #b9b9c0;
+  --content-secondary: #c0c0c7;
   --content-tertiary: #9898a1;
   --inverse-surface: #20201e;
   --inverse-content: #f3f3f1;
@@ -6279,10 +6284,11 @@ p {
   --paper: var(--surface);
   --paper-deep: var(--canvas);
   --night: var(--inverse-surface);
-  --accent: var(--content-primary);
-  --accent-foreground: #242529;
+  --accent: var(--selection);
+  --accent-foreground: var(--selection-foreground);
+  --selection: #292b32;
   --selection-foreground: var(--content-primary);
-  --acid-ink: var(--accent-foreground);
+  --acid-ink: var(--primary-foreground);
   --danger: #e08d7b;
   --status-info: #83b9e1;
   --status-success: #7ed39f;
@@ -6335,10 +6341,10 @@ p {
   --foreground: var(--ink);
   --card: var(--paper);
   --card-foreground: var(--ink);
-  --popover: var(--surface-raised);
+  --popover: var(--surface-overlay);
   --popover-foreground: var(--ink);
-  --primary: var(--accent);
-  --primary-foreground: var(--accent-foreground);
+  --primary: var(--content-primary);
+  --primary-foreground: var(--canvas);
   --secondary: var(--paper);
   --secondary-foreground: var(--ink);
   --ui-muted: var(--surface-muted);
@@ -6349,7 +6355,7 @@ p {
   --input-surface: color-mix(in oklab, var(--input) 60%, var(--background));
   --input-surface-hover: color-mix(in oklab, var(--input) 80%, var(--background));
   --input-placeholder: #afafb7;
-  --ring: var(--accent);
+  --ring: var(--primary);
   --chart-1: var(--content-primary);
   --chart-2: var(--content-secondary);
   --chart-3: var(--border-strong);
@@ -6358,12 +6364,12 @@ p {
   --sidebar: var(--surface-subtle);
   --sidebar-foreground: var(--content-secondary);
   --sidebar-muted: var(--content-tertiary);
-  --sidebar-primary: var(--accent);
-  --sidebar-primary-foreground: var(--accent-foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: var(--surface-strong);
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--sidebar);
-  --sidebar-ring: var(--accent);
+  --sidebar-ring: var(--primary);
 }
 
 @layer base {
@@ -7518,7 +7524,10 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   gap: 0.75rem;
   padding: 0.75rem;
 }
-.settings-search-result:hover, .settings-search-result:focus-visible { background: var(--accent); }
+.settings-search-result:hover, .settings-search-result:focus-visible {
+  background: var(--selection);
+  color: var(--selection-foreground);
+}
 @media (max-width: 900px) {
   .settings-page__mobile-search { display: block; }
   .settings-page { padding: 1rem 0.5rem; }

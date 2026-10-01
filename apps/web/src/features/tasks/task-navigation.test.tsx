@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { getTaskListIcon } from "./task-list-icons";
 import {
   archiveScopeFromParams,
@@ -23,9 +24,11 @@ it("exposes every destination and nested project without opening menus", () => {
   const projects = [{ id: "launch", listId: "work", name: "Launch" }] as TaskProject[];
   render(
     <MemoryRouter initialEntries={["/tasks?view=today"]}>
-      <SidebarProvider>
-        <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
-      </SidebarProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
+        </SidebarProvider>
+      </TooltipProvider>
     </MemoryRouter>,
   );
   for (const name of ["Inbox", "Today", "Upcoming", "All", "Work", "Launch", "History", "Trash"]) {
@@ -72,9 +75,11 @@ it("opens the contextual list and project management surfaces", async () => {
   const { unmount } = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <SidebarProvider>
-          <TaskContainerActions list={list} lists={[list]} projects={[project]} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskContainerActions list={list} lists={[list]} projects={[project]} />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -86,9 +91,16 @@ it("opens the contextual list and project management surfaces", async () => {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <SidebarProvider>
-          <TaskContainerActions list={list} project={project} lists={[list]} projects={[project]} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskContainerActions
+              list={list}
+              project={project}
+              lists={[list]}
+              projects={[project]}
+            />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -115,9 +127,11 @@ it("normalizes reminder, history, scheduled, archive, and project destinations",
   for (const [entry, selected] of cases) {
     const { unmount } = render(
       <MemoryRouter initialEntries={[entry]}>
-        <SidebarProvider>
-          <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>,
     );
     expect(screen.getByRole("link", { name: selected })).toHaveAttribute("aria-current", "page");
@@ -130,14 +144,16 @@ it("opens the create-list surface from the sidebar action", async () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/tasks"]}>
-        <SidebarProvider>
-          <TaskNavigation
-            lists={[]}
-            projects={[]}
-            status={<span>Loading lists</span>}
-            onNavigate={() => {}}
-          />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskNavigation
+              lists={[]}
+              projects={[]}
+              status={<span>Loading lists</span>}
+              onNavigate={() => {}}
+            />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );

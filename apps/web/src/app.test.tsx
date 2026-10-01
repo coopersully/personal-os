@@ -8455,6 +8455,31 @@ describe("ilo web app", () => {
     setupErrorView.unmount();
   });
 
+  it("keeps background mail account failures from reopening sync details", async () => {
+    mocks.listConnectors.mockRejectedValue(new Error("accounts unavailable"));
+    const { queryClient } = setup("/mail");
+    const browser = userEvent.setup();
+    const details = await screen.findByRole("button", { name: "Mail sync details" });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    await browser.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
+    mocks.listConnectors.mockResolvedValue([]);
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["connectors"] });
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Mail sync details" })).not.toBeInTheDocument(),
+    );
+    mocks.listConnectors.mockRejectedValue(new Error("accounts unavailable again"));
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["connectors"] });
+    });
+    expect(await screen.findByRole("button", { name: "Mail sync details" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
   it("refreshes partial mail sync results and retries only the failed account", async () => {
     mocks.listConnectors.mockResolvedValue(
       [secondId, thirdId].map((accountId) => ({

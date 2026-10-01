@@ -108,3 +108,5 @@ navigation chrome; the compact Sync/Retry action remains reachable at narrow wid
 The shortcut only changes the preference while a desktop contextual sidebar is present.
 Collapsing while focus is inside that sidebar transfers focus to its persistent handle;
 every surviving icon destination supplies its label to the Shadcn tooltip primitive.
+Mail sync details open automatically only after a user-started sync fails. Background
+account-query errors expose the details control without opening it or stealing focus.

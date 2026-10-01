@@ -5796,12 +5796,15 @@ function MailSyncButton({
     : nextSyncAt
       ? `Next ${formatRelative(nextSyncAt)}`
       : "Next sync not scheduled";
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [failedAccountIds, setFailedAccountIds] = useState<string[]>([]);
   const [partialOutcome, setPartialOutcome] = useState<{ completed: number; total: number } | null>(
     null,
   );
   const sync = useFeedbackMutation({
     feedback: { action: "sync mail accounts", safeToRetry: true },
+    onMutate: () => setDetailsOpen(false),
+    onError: () => setDetailsOpen(true),
     mutationFn: async () => {
       const targets = failedAccountIds.length
         ? enabledAccounts.filter((account) => failedAccountIds.includes(account.id))
@@ -5836,10 +5839,15 @@ function MailSyncButton({
       ]),
   });
 
+  const hasSyncDetails = Boolean(accounts.isError || sync.feedback?.persistent || partialOutcome);
+  useEffect(() => {
+    if (!hasSyncDetails) setDetailsOpen(false);
+  }, [hasSyncDetails]);
+
   return (
     <div className="mail-sync-control">
-      {accounts.isError || sync.feedback?.persistent || partialOutcome ? (
-        <ShadcnPopover defaultOpen>
+      {hasSyncDetails ? (
+        <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
           <ShadcnPopoverTrigger asChild>
             <ShadcnButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
               <AlertTriangleIcon aria-hidden="true" />

@@ -12,10 +12,6 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-} from "@/components/workspace-secondary-app-bar";
 import { api } from "../../api.js";
 import { FinanceInboxList } from "./inbox-list.js";
 import {
@@ -64,13 +60,6 @@ export function FinanceOverviewPage() {
     playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
   return (
     <div className="flex flex-col gap-6">
-      <WorkspaceSecondaryAppBar aria-label="Finance overview controls">
-        <WorkspaceSecondaryAppBarActions>
-          <Button asChild size="sm" variant="outline">
-            <Link to="/finances/setup">Financial setup</Link>
-          </Button>
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
       <FinanceSourceState label="Financial position" query={snapshot} />
       {snapshot.data ? <FinancePositionMaterial result={snapshot.data} /> : null}
       <FinanceSourceState label="Review inbox" query={inbox} />

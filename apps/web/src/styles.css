@@ -231,7 +231,7 @@ p {
 }
 .skip-link {
   background: var(--night);
-  border-radius: 0 0 10px 0;
+  border-radius: 0 0 var(--radius-lg) 0;
   color: var(--acid);
   left: 0;
   padding: 11px 15px;
@@ -249,7 +249,7 @@ p {
   align-items: center;
   background: var(--secondary);
   border: 1px solid transparent;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   cursor: pointer;
   display: inline-flex;
   font-size: 0.875rem;
@@ -307,7 +307,7 @@ p {
 .badge {
   align-items: center;
   background: var(--ui-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   display: inline-flex;
   font-family: "DM Mono", monospace;
@@ -350,7 +350,7 @@ p {
 .logo-mark {
   align-items: center;
   background: var(--surface-raised);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   border: 2px solid currentColor;
   color: var(--content-primary);
   display: inline-flex;
@@ -364,7 +364,7 @@ p {
   width: 100%;
 }
 .logo-mark--compact {
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border-width: 1px;
   height: 1rem;
   padding: 3px;
@@ -489,7 +489,7 @@ p {
 .select {
   background: var(--surface-muted);
   border: 1px solid transparent;
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   color: var(--ink);
   font: inherit;
   min-height: 40px;
@@ -514,7 +514,7 @@ p {
 .field textarea {
   background: var(--surface-muted);
   border: 1px solid transparent;
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   color: var(--ink);
   min-height: 44px;
   padding: 10px 12px;
@@ -545,7 +545,7 @@ p {
 }
 .form-error {
   background: color-mix(in srgb, var(--danger) 18%, var(--paper));
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   color: var(--danger);
   font-size: 12px;
   line-height: 1.5;
@@ -826,7 +826,7 @@ p {
   align-items: center;
   background: color-mix(in oklab, var(--workspace-icon-accent) 18%, var(--surface-raised));
   border: 1px solid color-mix(in oklab, var(--workspace-icon-accent) 50%, var(--border-subtle));
-  border-radius: calc(var(--radius) * 0.72);
+  border-radius: var(--radius-lg);
   color: var(--workspace-icon-accent);
   display: inline-flex;
   flex: 0 0 auto;
@@ -853,7 +853,7 @@ p {
   --workspace-icon-accent: var(--workspace-finances-accent);
 }
 .workspace-icon[data-size="sm"] {
-  border-radius: calc(var(--radius) * 0.56);
+  border-radius: var(--radius-md);
   height: 1.5rem;
   width: 1.5rem;
 }
@@ -879,7 +879,7 @@ p {
 }
 .sidebar__back {
   align-items: center;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   color: var(--sidebar-muted);
   display: flex;
   font-size: 0.875rem;
@@ -978,7 +978,7 @@ p {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   color: inherit;
   cursor: pointer;
   display: flex;
@@ -1011,7 +1011,7 @@ p {
 .nav-item__badge {
   align-items: center;
   background: var(--primary);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--sidebar-primary-foreground);
   display: inline-flex;
   font-family: var(--app-font-mono);
@@ -1083,7 +1083,7 @@ p {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
@@ -1291,7 +1291,7 @@ p {
 .weather-popover__stats div {
   background: var(--weather-sky-stat);
   border: 1px solid color-mix(in srgb, var(--weather-sky-foreground) 18%, transparent);
-  border-radius: calc(var(--radius) - 0.125rem);
+  border-radius: var(--radius-lg);
   min-width: 0;
   padding: 0.375rem 0.5rem;
 }
@@ -1359,7 +1359,7 @@ p {
   margin: 0.5rem;
   overflow: hidden;
   position: relative;
-  border-radius: calc(var(--radius) - 0.125rem);
+  border-radius: var(--radius-lg);
 }
 .weather-location-popover__map iframe {
   border: 0;
@@ -1381,7 +1381,7 @@ p {
 .weather-location-popover__map a span {
   align-items: center;
   background: var(--popover);
-  border-radius: calc(var(--radius) - 0.125rem);
+  border-radius: var(--radius-lg);
   color: var(--foreground);
   display: inline-flex;
   gap: 0.375rem;
@@ -1964,7 +1964,7 @@ p {
   line-height: 1.25;
 }
 .today-timeline__event[data-density="compact"] {
-  border-radius: 0.375rem;
+  border-radius: var(--radius-md);
 }
 .today-timeline__event[data-density="compact"] .today-timeline__event-action {
   padding: 0.25rem;
@@ -2117,7 +2117,7 @@ p {
   background: color-mix(in srgb, var(--surface) 82%, var(--surface-strong));
 }
 .today-commitments__list [data-slot="reminder-item"] [data-slot="checkbox"] {
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
 }
 .today-commitments__list [data-slot="task-item"] [data-slot="task-item-title"] {
   font-weight: 600;
@@ -2219,7 +2219,7 @@ p {
   align-items: center;
   background: var(--surface-raised);
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   font-size: 0.625rem;
   font-weight: 600;
@@ -2284,12 +2284,12 @@ p {
 }
 .reminder-group h3 span {
   background: var(--ui-muted);
-  border-radius: 20px;
+  border-radius: var(--radius-sm);
   padding: 3px 6px;
 }
 .agent-note {
   background: var(--accent-soft);
-  border-radius: 12px;
+  border-radius: var(--radius);
   color: var(--accent-strong);
   margin-top: 30px;
   padding: 5px;
@@ -2458,7 +2458,7 @@ p {
 }
 .pinterest-wallpaper-preview__safe-area--macos.pinterest-wallpaper-preview__safe-area--notch .pinterest-wallpaper-preview__safe-area-top::after {
   background: var(--foreground);
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--radius) var(--radius);
   content: "";
   height: 100%;
   left: 50%;
@@ -2510,7 +2510,7 @@ p {
 .pinterest-wallpaper-placeholder p {
   align-items: center;
   background: color-mix(in srgb, var(--wallpaper-background) 76%, var(--canvas));
-  border-radius: 999px;
+  border-radius: var(--radius-md);
   bottom: 10px;
   color: color-mix(in srgb, var(--wallpaper-background) 15%, var(--ink));
   display: flex;
@@ -2855,7 +2855,7 @@ p {
   align-items: flex-start;
   background: transparent;
   border: 0;
-  border-radius: calc(var(--radius) - 0.125rem);
+  border-radius: var(--radius-lg);
   color: var(--foreground);
   cursor: pointer;
   display: flex;
@@ -3119,7 +3119,7 @@ p {
 .calendar-create-selection {
   background: color-mix(in srgb, var(--primary) 24%, var(--surface-raised));
   border: 1px solid color-mix(in srgb, var(--primary) 70%, transparent);
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   color: var(--foreground);
   inset-inline: 3px;
   overflow: hidden;
@@ -3138,7 +3138,7 @@ p {
 .calendar-drop-preview {
   background: color-mix(in srgb, var(--calendar-color) 24%, transparent);
   border: 1px solid color-mix(in srgb, var(--calendar-color) 68%, transparent);
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   min-height: 2rem;
   overflow: hidden;
   pointer-events: none;
@@ -3154,7 +3154,7 @@ p {
   align-items: flex-start;
   background: color-mix(in srgb, var(--calendar-color) 72%, var(--surface-raised));
   border: 1px solid transparent;
-  border-radius: calc(var(--radius) - 2px);
+  border-radius: var(--radius-lg);
   color: var(--calendar-event-foreground);
   display: flex;
   flex-direction: column;
@@ -3210,7 +3210,7 @@ p {
 .calendar-timeline-event {
   background: color-mix(in srgb, var(--calendar-color) 38%, var(--surface-raised));
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   color: var(--calendar-event-foreground);
   cursor: pointer;
   display: flex;
@@ -3388,7 +3388,7 @@ p {
 .calendar-overlap-cluster__toggle > svg { width: 12px; height: 12px; }
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-timeline-event,
 .calendar-overlap-cluster:has(.calendar-timeline-event:focus-visible) .calendar-timeline-event {
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   height: var(--calendar-event-height);
   left: calc(50% + var(--overlap-orbit-x));
   overflow: hidden;
@@ -3404,7 +3404,7 @@ p {
   pointer-events: auto;
 }
 .calendar-overlap-cluster:is(.is-hovered, .is-expanded) .calendar-timeline-event.is-dragging {
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   height: var(--calendar-event-height);
   left: var(--calendar-event-left);
   top: var(--calendar-event-top);
@@ -3535,7 +3535,7 @@ p {
   align-self: center;
   background: color-mix(in srgb, var(--calendar-color) 38%, var(--surface-raised));
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--calendar-event-foreground);
   cursor: pointer;
   display: flex;
@@ -3681,7 +3681,7 @@ p {
   align-items: center;
   background: color-mix(in srgb, var(--calendar-color) 38%, var(--surface-raised));
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--calendar-event-foreground);
   cursor: pointer;
   display: grid;
@@ -3746,13 +3746,13 @@ p {
 }
 .placeholder-surface {
   background: var(--surface-raised);
-  border-radius: 22px;
+  border-radius: var(--radius-xl);
   padding: clamp(24px, 5vw, 48px);
 }
 .placeholder-surface__mark {
   align-items: center;
   background: var(--night);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   color: var(--acid);
   display: flex;
   height: 48px;
@@ -4440,7 +4440,7 @@ p {
 }
 .segmented {
   background: var(--ui-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-lg);
   display: inline-flex;
   margin: -10px 0 25px;
   padding: 3px;
@@ -4448,7 +4448,7 @@ p {
 .segmented button {
   background: transparent;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 11px;
   padding: 7px 14px;
@@ -4504,7 +4504,7 @@ p {
 }
 .activity-batch__entries {
   background: var(--surface-raised);
-  border-radius: 12px;
+  border-radius: var(--radius);
   margin: 0 0 12px 48px;
   padding: 0 12px;
 }
@@ -4550,7 +4550,7 @@ p {
 .inline-error {
   background: color-mix(in srgb, var(--danger) 18%, var(--paper));
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius);
   color: var(--danger);
   display: flex;
   flex-direction: column;
@@ -4730,7 +4730,7 @@ p {
 }
 .appearance-preview {
   border: 1px solid transparent;
-  border-radius: calc(var(--radius) * 0.7);
+  border-radius: var(--radius-lg);
   display: flex;
   height: 100%;
   overflow: hidden;
@@ -4784,7 +4784,7 @@ p {
 .provider-icon {
   align-items: center;
   background: var(--ui-muted);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   display: flex;
   font-size: 13px;
   font-weight: 700;
@@ -5170,7 +5170,7 @@ p {
 .reviews-page__workspace-filter select {
   background: var(--input);
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   color: var(--foreground);
   min-height: 32px;
   padding: 0 28px 0 10px;
@@ -5426,7 +5426,7 @@ p {
 .event-sheet__blocking {
   background: var(--accent-soft);
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius);
   margin: 0 0 25px;
   overflow: hidden;
 }
@@ -5499,7 +5499,7 @@ p {
 .event-block-row select {
   background: var(--input);
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   color: var(--ink);
   font-size: 8px;
   min-height: 30px;
@@ -5562,14 +5562,14 @@ p {
 }
 .rich-event-notes code {
   background: var(--ui-muted);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: "DM Mono", monospace;
   font-size: 9px;
   padding: 2px 4px;
 }
 .rich-event-notes pre {
   background: var(--night);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   color: var(--inverse-content);
   overflow-x: auto;
   padding: 11px;
@@ -5593,7 +5593,7 @@ p {
 .event-sheet__sync-note {
   align-items: flex-start;
   background: var(--accent-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   color: var(--accent-strong);
   display: flex;
   font-size: 9px;
@@ -5647,7 +5647,7 @@ p {
   animation: modal-in 0.2s ease-out;
   background: var(--paper);
   border: 1px solid transparent;
-  border-radius: 20px;
+  border-radius: var(--radius-xl);
   max-height: calc(100vh - 40px);
   max-width: 590px;
   overflow: auto;
@@ -5832,7 +5832,7 @@ p {
     align-items: center;
     background: var(--secondary);
     border: 1px solid transparent;
-    border-radius: calc(var(--radius) * 0.72);
+    border-radius: var(--radius-lg);
     color: var(--foreground);
     display: inline-flex;
     height: 28px;
@@ -5878,7 +5878,7 @@ p {
     width: 48px;
   }
   .workspace-dock-sheet {
-    border-radius: 24px 24px 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     max-height: min(76dvh, 680px);
     overflow-y: auto;
     padding: 12px 0 calc(22px + env(safe-area-inset-bottom));
@@ -6160,7 +6160,7 @@ p {
     padding: 0;
   }
   .modal {
-    border-radius: 20px 20px 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     max-height: 92vh;
     padding: 22px 19px max(22px, env(safe-area-inset-bottom));
   }
@@ -6169,7 +6169,7 @@ p {
   }
   .event-sheet {
     border-left: 0;
-    border-radius: 20px 20px 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     height: min(88vh, 760px);
     max-width: none;
     width: 100%;
@@ -6500,7 +6500,7 @@ p {
   align-items: center;
   background: var(--surface);
   border: 1px solid transparent;
-  border-radius: calc(var(--radius) + 0.25rem);
+  border-radius: var(--radius-xl);
   bottom: calc(1rem + env(safe-area-inset-bottom));
   display: flex;
   gap: 0.75rem;
@@ -6639,7 +6639,7 @@ p {
 .brand-mark {
   align-items: center;
   background: var(--surface-strong);
-  border-radius: calc(var(--radius) - 0.25rem);
+  border-radius: var(--radius-lg);
   color: var(--content-primary);
   display: inline-flex;
   font-size: 0.75rem;
@@ -6667,7 +6667,7 @@ p {
 .auth-brand-graphic__frame {
   align-items: center;
   background: var(--surface);
-  border-radius: 0.875rem;
+  border-radius: var(--radius-xl);
   display: flex;
   justify-content: center;
   height: 2.75rem;
@@ -7129,7 +7129,7 @@ p {
   align-items: flex-start;
   background: color-mix(in srgb, var(--workspace-card-accent) 8%, var(--surface-muted));
   border: 0;
-  border-radius: calc(var(--radius) + 0.25rem);
+  border-radius: var(--radius-xl);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;

@@ -275,6 +275,18 @@ for (const match of stylesheet.matchAll(/#[\da-f]{3,8}\b|rgba\(/gi)) {
   }
 }
 
+// Page overrides must share the primitive radius scale, rather than bypass it.
+for (const match of stylesheet.matchAll(/border-radius:\s*([^;]+);/g)) {
+  const value = match[1];
+  if (
+    /(?<![\w-])(?:\d*\.)?\d+(?:px|rem|em)/.test(value) &&
+    value !== "999px" &&
+    value !== "min(var(--radius-sm), 0.3em)"
+  ) {
+    violations.push(`Use a shared radius token instead of border-radius: ${value}.`);
+  }
+}
+
 if (violations.length > 0) {
   console.error(`Theme token contract violations:\n${violations.join("\n")}`);
   process.exit(1);

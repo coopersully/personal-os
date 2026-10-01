@@ -469,7 +469,10 @@ small details use 4px (`sm`), compact controls/menu items 6px (`md`), regular
 controls 8px (`lg`), floating menus 12px (base), and cards/dialogs 16px (`xl`).
 All scale from the same base; intentionally circular avatars, radio controls,
 switches, and floating dock shapes remain round. A small button should not become
-a capsule merely because it shares a panel's radius.
+a capsule merely because it shares a panel's radius. Page CSS must use these same
+named radius tokens for legacy inputs, badges, segmented controls, events, panels,
+and sheets. Do not add fixed pixel corners or local radius arithmetic; `999px`
+and `50%` are reserved for intentional circular marks, progress tracks, and docks.
 
 The frontend theme owns this contract. Verify Settings search hover/keyboard
 focus, cards, and Mail/Calendar account popovers in both themes when changing it.

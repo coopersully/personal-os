@@ -208,9 +208,9 @@ function TaskListBranch({
         <SidebarMenuButton
           asChild
           isActive={selected}
+          tooltip={list.name}
           className="min-w-0 max-md:h-10"
           data-user-created={list.kind === "standard" ? "true" : undefined}
-          variant={list.kind === "standard" ? "outline" : "default"}
         >
           <Link
             aria-current={selected ? "page" : undefined}
@@ -228,13 +228,13 @@ function TaskListBranch({
         <TaskContainerActions list={list} lists={lists} projects={projects} sidebar />
       </div>
       {children.length > 0 ? (
-        <SidebarMenuSub className="mr-0 bg-transparent">
+        <SidebarMenuSub>
           {children.map((project) => (
             <SidebarMenuSubItem key={project.id} className="group/menu-item">
               <SidebarMenuSubButton
                 asChild
                 isActive={selectedProjectId === project.id}
-                className="h-8 pr-8 max-md:h-10"
+                className="pr-8 max-md:h-10"
               >
                 <Link
                   aria-current={selectedProjectId === project.id ? "page" : undefined}
@@ -322,6 +322,7 @@ export function TaskNavigation({
           asChild
           isActive={selectedView === value || (archive && value === "history")}
           className="max-md:h-10"
+          tooltip={view.label}
         >
           <Link
             aria-current={
@@ -352,6 +353,7 @@ export function TaskNavigation({
   return (
     <>
       <SidebarGroup>
+        <SidebarGroupLabel>Views</SidebarGroupLabel>
         <SidebarGroupContent>
           <nav aria-label="Task views">
             <SidebarMenu>
@@ -382,6 +384,7 @@ export function TaskNavigation({
         </SidebarGroupContent>
       </SidebarGroup>
       <SidebarGroup>
+        <SidebarGroupLabel>History</SidebarGroupLabel>
         <SidebarGroupContent>
           <nav aria-label="Task history">
             <SidebarMenu>

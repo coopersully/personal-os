@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { FinanceSidebarNavigation, financeSectionFromPath } from "./navigation.js";
 
 it("maps Finance paths and marks the active navigation item", async () => {
@@ -16,9 +17,11 @@ it("maps Finance paths and marks the active navigation item", async () => {
   const onNavigate = vi.fn();
   render(
     <MemoryRouter>
-      <SidebarProvider>
-        <FinanceSidebarNavigation onNavigate={onNavigate} reviewCount={3} section="review" />
-      </SidebarProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <FinanceSidebarNavigation onNavigate={onNavigate} reviewCount={3} section="review" />
+        </SidebarProvider>
+      </TooltipProvider>
     </MemoryRouter>,
   );
   expect(screen.getByRole("link", { name: "Review 3" })).toHaveAttribute("aria-current", "page");
@@ -42,9 +45,11 @@ it("maps Finance paths and marks the active navigation item", async () => {
 it("hides an empty review count", () => {
   render(
     <MemoryRouter>
-      <SidebarProvider>
-        <FinanceSidebarNavigation onNavigate={vi.fn()} reviewCount={0} section="overview" />
-      </SidebarProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <FinanceSidebarNavigation onNavigate={vi.fn()} reviewCount={0} section="overview" />
+        </SidebarProvider>
+      </TooltipProvider>
     </MemoryRouter>,
   );
   expect(screen.getByRole("link", { name: "Review" })).not.toHaveTextContent("0");

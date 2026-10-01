@@ -252,6 +252,7 @@ import {
 } from "@/components/ui/popover";
 import { ScrollArea as ShadcnScrollArea } from "@/components/ui/scroll-area";
 import {
+  Sidebar as ShadcnSidebar,
   SidebarContent as ShadcnSidebarContent,
   SidebarGroup as ShadcnSidebarGroup,
   SidebarGroupContent as ShadcnSidebarGroupContent,
@@ -559,11 +560,7 @@ function AuthenticatedExperience({ user }: { user: User }) {
   if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
     return <Navigate replace to="/setup" />;
   }
-  return (
-    <ShadcnSidebarProvider className="contents">
-      <AuthenticatedApp user={user} />
-    </ShadcnSidebarProvider>
-  );
+  return <AuthenticatedApp user={user} />;
 }
 
 type DeviceWeatherLocation = {
@@ -1011,64 +1008,63 @@ function AuthActionShell({
   );
 }
 
-const mailSidebarWidthStorageKey = "ilo.mail.sidebar-width.v1";
-const collapsedMailSidebarWidth = 48;
-const defaultMailSidebarWidth = 256;
-const minimumMailSidebarWidth = 208;
-const maximumMailSidebarWidth = 360;
-
-function clampExpandedMailSidebarWidth(width: number) {
-  return Math.min(maximumMailSidebarWidth, Math.max(minimumMailSidebarWidth, width));
+const sidebarWidthStorageKey = "nohmi.sidebar-width.v1";
+const collapsedSidebarWidth = 48;
+const defaultSidebarWidth = 256;
+function normalizeSidebarWidth(width: number) {
+  return width < (collapsedSidebarWidth + defaultSidebarWidth) / 2
+    ? collapsedSidebarWidth
+    : defaultSidebarWidth;
 }
 
-function normalizeMailSidebarWidth(width: number) {
-  return width <= collapsedMailSidebarWidth
-    ? collapsedMailSidebarWidth
-    : clampExpandedMailSidebarWidth(width);
-}
-
-function storedMailSidebarWidth() {
+function storedSidebarWidth() {
   try {
-    if (typeof window === "undefined") return defaultMailSidebarWidth;
-    const stored = Number(window.localStorage.getItem(mailSidebarWidthStorageKey));
+    if (typeof window === "undefined") return defaultSidebarWidth;
+    const stored = Number(window.localStorage.getItem(sidebarWidthStorageKey));
     return Number.isFinite(stored) && stored > 0
-      ? normalizeMailSidebarWidth(stored)
-      : defaultMailSidebarWidth;
+      ? normalizeSidebarWidth(stored)
+      : defaultSidebarWidth;
   } catch {
-    return defaultMailSidebarWidth;
+    return defaultSidebarWidth;
   }
 }
 
-function persistMailSidebarWidth(width: number) {
+function persistSidebarWidth(width: number) {
   try {
-    window.localStorage.setItem(mailSidebarWidthStorageKey, String(width));
+    window.localStorage.setItem(sidebarWidthStorageKey, String(width));
   } catch {
     // A browser storage restriction must not prevent layout resizing.
   }
 }
 
-function MailNavigationResizeHandle({
+function SidebarCollapseHandle({
   onResize,
+  collapsedWidth = collapsedSidebarWidth,
+  expandedWidth = defaultSidebarWidth,
+  label = "Collapse or show sidebar",
+  controls = "app-sidebar",
+  className = "",
   width,
 }: {
   onResize: (width: number, persist: boolean) => void;
   width: number;
+  collapsedWidth?: number;
+  expandedWidth?: number;
+  label?: string;
+  controls?: string;
+  className?: string;
 }) {
   const resizeFromKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const next =
-      event.key === "Home"
-        ? collapsedMailSidebarWidth
-        : event.key === "End"
-          ? maximumMailSidebarWidth
-          : event.key === "ArrowLeft"
-            ? width <= minimumMailSidebarWidth
-              ? collapsedMailSidebarWidth
-              : width - 16
-            : event.key === "ArrowRight"
-              ? width === collapsedMailSidebarWidth
-                ? minimumMailSidebarWidth
-                : width + 16
-              : null;
+      event.key === "Home" || event.key === "ArrowLeft"
+        ? collapsedWidth
+        : event.key === "End" || event.key === "ArrowRight"
+          ? expandedWidth
+          : event.key === "Enter" || event.key === " "
+            ? width === collapsedWidth
+              ? expandedWidth
+              : collapsedWidth
+            : null;
     if (next === null) return;
     event.preventDefault();
     onResize(next, true);
@@ -1076,13 +1072,17 @@ function MailNavigationResizeHandle({
 
   return (
     <hr
-      aria-label="Resize mail navigation"
+      aria-label={label}
+      aria-controls={controls}
+      aria-valuetext={width === collapsedWidth ? "Collapsed" : "Expanded"}
       aria-orientation="vertical"
-      aria-valuemax={maximumMailSidebarWidth}
-      aria-valuemin={collapsedMailSidebarWidth}
+      aria-valuemax={expandedWidth}
+      aria-valuemin={collapsedWidth}
       aria-valuenow={width}
-      className="mail-sidebar-resize-handle"
-      onDoubleClick={() => onResize(defaultMailSidebarWidth, true)}
+      className={`sidebar-collapse-handle ${className}`}
+      onDoubleClick={() =>
+        onResize(width === collapsedWidth ? expandedWidth : collapsedWidth, true)
+      }
       onKeyDown={resizeFromKeyboard}
       onPointerDown={(event) => {
         event.preventDefault();
@@ -1094,8 +1094,8 @@ function MailNavigationResizeHandle({
         let finished = false;
         const move = (moveEvent: PointerEvent) => {
           finalWidth = Math.min(
-            maximumMailSidebarWidth,
-            Math.max(collapsedMailSidebarWidth, startWidth + moveEvent.clientX - startX),
+            expandedWidth,
+            Math.max(collapsedWidth, startWidth + moveEvent.clientX - startX),
           );
           onResize(finalWidth, false);
         };
@@ -1134,9 +1134,48 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
-  const [mailSidebarWidth, setMailSidebarWidth] = useState(storedMailSidebarWidth);
-  const mailSidebarState =
-    mailSidebarWidth === collapsedMailSidebarWidth ? "collapsed" : "expanded";
+  const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem("nohmi.workspace-rail-collapsed.v1") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const railContainer = useRef<HTMLDivElement>(null);
+  const compactSwitcher = useRef<HTMLDivElement>(null);
+  const pendingRailFocus = useRef(false);
+  const updateRailCollapsed = (collapsed: boolean) => {
+    pendingRailFocus.current =
+      !collapsed || !!railContainer.current?.contains(document.activeElement);
+    setRailCollapsed(collapsed);
+    try {
+      window.localStorage.setItem("nohmi.workspace-rail-collapsed.v1", String(collapsed));
+    } catch {
+      /* Navigation remains usable when storage is unavailable. */
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingRailFocus.current) return;
+    pendingRailFocus.current = false;
+    // Wait for dropdown dismissal focus restoration before focusing the newly
+    // visible navigation. Neither target is allowed to remain in an inert tree.
+    let frame = window.requestAnimationFrame(function focusVisibleNavigation() {
+      const target = railCollapsed
+        ? compactSwitcher.current?.querySelector<HTMLButtonElement>("button")
+        : (railContainer.current?.querySelector<HTMLAnchorElement>('a[aria-current="page"]') ??
+          railContainer.current?.querySelector<HTMLAnchorElement>("a"));
+      if (target && window.getComputedStyle(target).visibility !== "visible") {
+        frame = window.requestAnimationFrame(focusVisibleNavigation);
+        return;
+      }
+      target?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [railCollapsed]);
+
+  const sidebarState = sidebarWidth === collapsedSidebarWidth ? "collapsed" : "expanded";
   const location = useLocation();
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
@@ -1250,22 +1289,80 @@ function AuthenticatedApp({ user }: { user: User }) {
       );
   };
 
+  const updateSidebarWidth = (width: number, persist: boolean) => {
+    if (isMobileWorkspaceDock || !sidebarMode) return;
+    const normalized = normalizeSidebarWidth(width);
+    if (
+      normalized === collapsedSidebarWidth &&
+      document.getElementById("app-sidebar")?.contains(document.activeElement)
+    ) {
+      document.querySelector<HTMLElement>('[aria-controls="app-sidebar"]')?.focus();
+    }
+    setSidebarWidth(normalized);
+    if (persist) persistSidebarWidth(normalized);
+  };
+
   return (
-    <>
+    <ShadcnSidebarProvider
+      className="contents"
+      open={sidebarState === "expanded"}
+      onOpenChange={(open) => {
+        updateSidebarWidth(open ? defaultSidebarWidth : collapsedSidebarWidth, true);
+      }}
+    >
       <div
         className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
-        data-sidebar-state={sidebarMode === "mail" ? mailSidebarState : undefined}
+        data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
+        data-sidebar-state={!isMobileWorkspaceDock && sidebarMode ? sidebarState : undefined}
         style={
-          sidebarMode === "mail"
-            ? ({ "--mail-sidebar-width": `${mailSidebarWidth}px` } as CSSProperties)
-            : undefined
+          sidebarMode ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined
         }
       >
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
+        {!isMobileWorkspaceDock ? (
+          <div
+            ref={railContainer}
+            className="workspace-rail-container"
+            inert={railCollapsed}
+            aria-hidden={railCollapsed}
+          >
+            <WorkspaceRail pathname={shellPathname} user={user} weather={weather.data} />
+            <SidebarCollapseHandle
+              className="workspace-rail-collapse-handle"
+              label="Minimize workspace rail"
+              controls="workspace-rail"
+              collapsedWidth={0}
+              expandedWidth={64}
+              width={64}
+              onResize={(width, persist) => {
+                if (persist) updateRailCollapsed(width < 32);
+              }}
+            />
+          </div>
+        ) : null}
+        {!isMobileWorkspaceDock ? (
+          <div
+            ref={compactSwitcher}
+            className="workspace-switcher-floating"
+            inert={!railCollapsed}
+            aria-hidden={!railCollapsed}
+          >
+            <WorkspaceSwitcher
+              compact
+              onShowRail={() => updateRailCollapsed(false)}
+              onNavigate={closeMobileMenu}
+              pathname={shellPathname}
+              user={user}
+              weather={weather.data}
+            />
+          </div>
+        ) : null}
         {!isMobileWorkspaceDock && !isCalendarWorkspace && !isTodayWorkspace ? (
-          <aside
+          <ShadcnSidebar
+            collapsible="none"
+            role="complementary"
             aria-label={
               navigationOwner.kind !== "workspace"
                 ? "Account utility navigation"
@@ -1274,17 +1371,13 @@ function AuthenticatedApp({ user }: { user: User }) {
                   : "Today Sidebar"
             }
             className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
-            data-state={sidebarMode === "mail" ? mailSidebarState : "expanded"}
+            data-state={sidebarState}
             id="app-sidebar"
           >
-            <ShadcnSidebarHeader className="sidebar__header">
-              <WorkspaceSwitcher
-                compact
-                onNavigate={closeMobileMenu}
-                pathname={location.pathname}
-                user={user}
-                weather={weather.data}
-              />
+            <ShadcnSidebarHeader className="workspace-sidebar__header">
+              <span className="truncate text-sm font-semibold">
+                {sidebarMode === "settings" ? "Settings" : activeWorkspace?.label}
+              </span>
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
@@ -1309,17 +1402,10 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
             </ShadcnSidebarContent>
-          </aside>
+          </ShadcnSidebar>
         ) : null}
-        {!isMobileWorkspaceDock && sidebarMode === "mail" ? (
-          <MailNavigationResizeHandle
-            onResize={(width, persist) => {
-              const normalized = normalizeMailSidebarWidth(width);
-              setMailSidebarWidth(normalized);
-              if (persist) persistMailSidebarWidth(normalized);
-            }}
-            width={mailSidebarWidth}
-          />
+        {!isMobileWorkspaceDock && sidebarMode ? (
+          <SidebarCollapseHandle onResize={updateSidebarWidth} width={sidebarWidth} />
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
@@ -1355,8 +1441,11 @@ function AuthenticatedApp({ user }: { user: User }) {
           primaryNavigation={
             <WorkspaceAppBarForRoute
               activeSettingsSection={activeSettingsSection}
+              sidebarOwnsTitle={
+                !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
+              }
               workspaceSwitcher={
-                isCalendarWorkspace || (isTodayWorkspace && !isMobileWorkspaceDock) ? (
+                isCalendarWorkspace && isMobileWorkspaceDock ? (
                   <WorkspaceSwitcher
                     onNavigate={closeMobileMenu}
                     pathname={location.pathname}
@@ -1434,7 +1523,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           <CalendarDialog close={() => setEditor(null)} user={user} />
         )}
       </div>
-    </>
+    </ShadcnSidebarProvider>
   );
 }
 
@@ -1550,7 +1639,12 @@ function SidebarNavigationItem({
   const workspaceId = workspaceIdForPath(path);
   return (
     <ShadcnSidebarMenuItem>
-      <ShadcnSidebarMenuButton className={badge ? "pr-24" : undefined} asChild isActive={isActive}>
+      <ShadcnSidebarMenuButton
+        className={badge ? "pr-24" : undefined}
+        asChild
+        isActive={isActive}
+        tooltip={label}
+      >
         <NavLink onClick={onNavigate} to={path}>
           {workspaceId ? (
             <WorkspaceIcon size="sm" workspace={workspaceId} />
@@ -1619,6 +1713,7 @@ function NavigationIcon({
 
 function WorkspaceAppBarForRoute({
   activeSettingsSection,
+  sidebarOwnsTitle,
   onCalendarToday,
   pageTitle,
   pathname,
@@ -1631,6 +1726,7 @@ function WorkspaceAppBarForRoute({
   workspaceSwitcher,
 }: {
   activeSettingsSection: SettingsSectionId;
+  sidebarOwnsTitle: boolean;
   onCalendarToday: () => void;
   pageTitle: string | null;
   pathname: string;
@@ -1644,11 +1740,13 @@ function WorkspaceAppBarForRoute({
 }) {
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
-  const identity = isSpatialCalendar ? (
+  const identity = sidebarOwnsTitle ? null : isSpatialCalendar ? (
     <CalendarAppBarIdentity user={user} workspaceSwitcher={workspaceSwitcher} />
   ) : pathname === "/today" ? (
     <div className="calendar-app-bar__identity-cluster">
-      <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      {workspaceSwitcher ? (
+        <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      ) : null}
       {todayBrief ? (
         <TodayNavigationTitle
           generatedAt={todayBrief.generatedAt}
@@ -1727,14 +1825,82 @@ function WorkspaceAppBarForRoute({
   );
 }
 
+function WorkspaceRail({
+  pathname,
+  user,
+  weather,
+}: {
+  pathname: string;
+  user: User;
+  weather: WeatherSnapshot | undefined;
+}) {
+  const owner = navigationOwnerForLocation(pathname);
+  return (
+    <nav aria-label="Workspace navigation" className="workspace-rail" id="workspace-rail">
+      <div className="workspace-rail__destinations">
+        {workspaceDefinitions.map((workspace) => {
+          const active = owner.kind === "workspace" && owner.workspace === workspace.id;
+          const Icon =
+            workspace.id === "today"
+              ? todayWeatherIcon(weather, user.planningTimezone)
+              : workspace.icon;
+          return (
+            <Tooltip key={workspace.id}>
+              <TooltipTrigger asChild>
+                <ShadcnButton
+                  asChild
+                  className="workspace-rail__link"
+                  size="icon"
+                  variant={active ? "secondary" : "ghost"}
+                >
+                  <Link
+                    aria-current={active ? "page" : undefined}
+                    aria-label={workspace.label}
+                    data-workspace={workspace.id}
+                    to={workspace.path}
+                  >
+                    <Icon aria-hidden="true" weight={active ? "Filled" : "Outline"} />
+                  </Link>
+                </ShadcnButton>
+              </TooltipTrigger>
+              <TooltipContent side="right">{workspace.label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ShadcnButton
+            asChild
+            className="workspace-rail__link workspace-rail__settings"
+            size="icon"
+            variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
+          >
+            <Link
+              aria-current={owner.kind === "account-utility" ? "page" : undefined}
+              aria-label="Settings"
+              to="/settings"
+            >
+              <SettingsIcon aria-hidden="true" />
+            </Link>
+          </ShadcnButton>
+        </TooltipTrigger>
+        <TooltipContent side="right">Settings</TooltipContent>
+      </Tooltip>
+    </nav>
+  );
+}
+
 function WorkspaceSwitcher({
   compact = false,
+  onShowRail,
   onNavigate,
   pathname,
   user,
   weather: currentWeather,
 }: {
   compact?: boolean;
+  onShowRail?: () => void;
   onNavigate: () => void;
   pathname: string;
   user: User;
@@ -1744,6 +1910,11 @@ function WorkspaceSwitcher({
   const isSettings = pathname === "/settings";
   const section = isSettings ? "Settings" : (workspace?.label ?? "Home OS");
   const activeWorkspaceId = workspace ? workspaceIdForPath(workspace.path) : undefined;
+  const CurrentWorkspaceIcon = isSettings
+    ? SettingsIcon
+    : workspace?.id === "today"
+      ? todayWeatherIcon(currentWeather, user.planningTimezone)
+      : (workspace?.icon ?? GridIcon);
 
   return (
     <ShadcnSidebarMenu>
@@ -1752,10 +1923,19 @@ function WorkspaceSwitcher({
           <DropdownMenuTrigger asChild>
             <ShadcnButton
               aria-label="Switch workspace"
-              className="sidebar__workspace-trigger w-full justify-start"
+              className={
+                compact
+                  ? "sidebar__workspace-trigger workspace-navigation-item"
+                  : "sidebar__workspace-trigger w-full justify-start"
+              }
+              data-workspace={compact ? workspace?.id : undefined}
+              data-active={compact ? "true" : undefined}
+              size={compact ? "icon" : "default"}
               variant="secondary"
             >
-              {isSettings ? (
+              {compact ? (
+                <CurrentWorkspaceIcon aria-hidden="true" weight="Filled" />
+              ) : isSettings ? (
                 <SettingsIcon aria-hidden="true" />
               ) : activeWorkspaceId ? (
                 <WorkspaceIcon size="sm" workspace={activeWorkspaceId} />
@@ -1764,14 +1944,16 @@ function WorkspaceSwitcher({
               ) : (
                 <LogoMark compact />
               )}
-              <span>{section}</span>
-              <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
+              {!compact ? <span>{section}</span> : null}
+              {!compact ? (
+                <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
+              ) : null}
             </ShadcnButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
             aria-label="Switch workspace"
-            className={compact ? "w-64" : "w-[--radix-popper-anchor-width]"}
+            className={compact ? "w-56" : "w-[--radix-popper-anchor-width]"}
           >
             <DropdownMenuGroup>
               <WorkspaceMenuItem
@@ -1810,6 +1992,12 @@ function WorkspaceSwitcher({
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuGroup>
+            {onShowRail ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onShowRail}>Show workspace rail</DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </ShadcnSidebarMenuItem>
@@ -1830,26 +2018,22 @@ function WorkspaceMenuItem({
   timeZone: string;
   weather: WeatherSnapshot | undefined;
 }) {
-  const { icon: Icon, label, path } = item;
+  const { label, path } = item;
+  const Icon = item.id === "today" ? todayWeatherIcon(weather, timeZone) : item.icon;
   const isActive = workspaceForPath(pathname)?.path === path;
-  const workspaceId = workspaceIdForPath(path);
   return (
     <DropdownMenuItem asChild>
       <Link
         aria-current={isActive ? "page" : undefined}
         aria-label={label}
+        className="workspace-navigation-item"
+        data-workspace={item.id}
+        data-active={isActive ? "true" : undefined}
         onClick={onNavigate}
         to={path}
       >
-        {item.id === "today" ? (
-          <TodayWorkspaceIcon timeZone={timeZone} weather={weather} />
-        ) : workspaceId ? (
-          <WorkspaceIcon size="sm" workspace={workspaceId} />
-        ) : (
-          <Icon aria-hidden="true" />
-        )}
+        <Icon aria-hidden="true" weight={isActive ? "Filled" : "Outline"} />
         <span>{label}</span>
-        {isActive ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
       </Link>
     </DropdownMenuItem>
   );
@@ -3017,7 +3201,9 @@ function CalendarAppBarIdentity({
 
   return (
     <div className="calendar-app-bar__identity-cluster">
-      <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      {workspaceSwitcher ? (
+        <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
+      ) : null}
       <div className="calendar-app-bar__orientation">
         <h2>
           <span className="calendar-app-bar__title-full">{title}</span>
@@ -3425,10 +3611,26 @@ function DayCalendarView({
       <WorkspaceSecondaryAppBar
         aria-label="Calendar day navigation"
         placement="inline"
+        data-calendar-axis="top"
         className="calendar-secondary-app-bar calendar-secondary-app-bar--day"
       >
         <WorkspaceSecondaryAppBarContent>
-          <AllDayEvents calendarsById={calendarsById} events={allDayEvents} setEditor={setEditor} />
+          <div className="calendar-all-day-grid">
+            <span className="week-time-corner" data-calendar-axis="corner">
+              All day
+            </span>
+            <CalendarAllDayEvents
+              calendarsById={calendarsById}
+              days={[day]}
+              highlightToday={false}
+              layouts={positionCalendarAllDayEvents(
+                [day],
+                new Map([[localDateKey(day), allDayEvents]]),
+              )}
+              setEditor={setEditor}
+              today={today}
+            />
+          </div>
         </WorkspaceSecondaryAppBarContent>
       </WorkspaceSecondaryAppBar>
       <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
@@ -3566,7 +3768,7 @@ function WeekCalendarView({
     [eventsByDay],
   );
   const allDayLayouts = useMemo(
-    () => positionWeekAllDayEvents(days, eventsByDay),
+    () => positionCalendarAllDayEvents(days, eventsByDay),
     [days, eventsByDay],
   );
   const scrollContainer = useRef<HTMLDivElement>(null);
@@ -3623,7 +3825,7 @@ function WeekCalendarView({
       <div
         className="week-calendar-grid"
         style={{
-          gridTemplateColumns: `56px repeat(${days.length}, minmax(140px, 1fr))`,
+          gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(140px, 1fr))`,
           minWidth: 56 + days.length * 140,
         }}
       >
@@ -3635,15 +3837,18 @@ function WeekCalendarView({
           <WorkspaceSecondaryAppBarContent
             className="calendar-secondary-app-bar__week-grid"
             style={{
-              gridTemplateColumns: `56px repeat(${days.length}, minmax(140px, 1fr))`,
+              gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(140px, 1fr))`,
             }}
           >
-            <div className="week-time-corner">All day</div>
-            <div aria-hidden="true" className="week-all-day-corner" />
+            <div data-calendar-axis="corner" className="week-time-corner">
+              All day
+            </div>
+            <div aria-hidden="true" data-calendar-axis="corner" className="week-all-day-corner" />
             {days.map((day) => {
               const isToday = sameLocalDate(day, today);
               return (
                 <header
+                  data-calendar-axis="top"
                   className={`week-day-header${isToday ? " is-today" : ""}`}
                   key={`header-${localDateKey(day)}`}
                 >
@@ -3667,7 +3872,7 @@ function WeekCalendarView({
                 </header>
               );
             })}
-            <WeekAllDayEvents
+            <CalendarAllDayEvents
               calendarsById={calendarsById}
               days={days}
               layouts={allDayLayouts}
@@ -3788,6 +3993,7 @@ function TimeAxis() {
   return (
     <ol
       aria-hidden="true"
+      data-calendar-axis="left"
       className="calendar-time-axis"
       style={{ height: calendarTimelineHeight }}
     >
@@ -3843,7 +4049,7 @@ function TimelineNow({
         right: spanColumns ? "auto" : undefined,
         top: minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute),
         width: spanColumns
-          ? `calc(56px + ${spanColumns * 100}% + ${Math.max(0, spanColumns - 1)}px)`
+          ? `calc(var(--calendar-time-gutter-width) + ${spanColumns * 100}% + ${Math.max(0, spanColumns - 1)}px)`
           : undefined,
       }}
     >
@@ -4249,6 +4455,28 @@ function TimelineOverlapCluster({
   const toggle = useRef<HTMLButtonElement>(null);
   const clusterId = useId();
   const count = cluster.layouts.length;
+  // Keep the hover envelope fixed while cards animate between their resting and
+  // spread positions. Include rotated card bounds and the toggle, not just gaps.
+  const hoverBounds = cluster.layouts.map((layout, index) => {
+    const point = overlapOrbitPoint(index, count, compact, {
+      clusterEndMinute: cluster.endMinute,
+      clusterStartMinute: cluster.startMinute,
+      eventEndMinute: layout.endMinute,
+      eventStartMinute: layout.startMinute,
+      ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
+    });
+    const angle = (Math.abs(point.rotation) * Math.PI) / 180;
+    const height = Math.max(minuteToTimelinePixels(layout.endMinute - layout.startMinute), 18);
+    const width = compact ? 160 : 320;
+    const halfWidth = (width * Math.cos(angle) + height * Math.sin(angle)) / 2 + 12;
+    const halfHeight = (height * Math.cos(angle) + width * Math.sin(angle)) / 2 + 12;
+    return {
+      left: point.x - halfWidth,
+      right: point.x + halfWidth,
+      top: point.y - halfHeight,
+      bottom: point.y + halfHeight,
+    };
+  });
   useEffect(
     () => () => {
       if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
@@ -4262,9 +4490,10 @@ function TimelineOverlapCluster({
       id={clusterId}
       onKeyDown={(event) => {
         const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
-        if (event.key !== "Escape" || (!expanded && !focusedEvent)) return;
+        if (event.key !== "Escape" || (!expanded && !hovered && !focusedEvent)) return;
         event.stopPropagation();
         setExpanded(false);
+        setHovered(false);
         toggle.current?.focus();
       }}
       onPointerEnter={(event) => {
@@ -4275,6 +4504,7 @@ function TimelineOverlapCluster({
       }}
       onPointerLeave={(event) => {
         if (event.pointerType === "touch") return;
+        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
         hoverLeaveTimer.current = window.setTimeout(() => {
           setHovered(false);
           hoverLeaveTimer.current = null;
@@ -4284,7 +4514,13 @@ function TimelineOverlapCluster({
         {
           height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
           top: minuteToTimelinePixels(cluster.startMinute),
+          "--overlap-hit-left": `${Math.min(...hoverBounds.map((bounds) => bounds.left))}px`,
+          "--overlap-hit-right": `${-Math.max(...hoverBounds.map((bounds) => bounds.right))}px`,
+          "--overlap-hit-top": `${Math.min(...hoverBounds.map((bounds) => bounds.top))}px`,
+          "--overlap-hit-bottom": `${-Math.max(...hoverBounds.map((bounds) => bounds.bottom))}px`,
           "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
+          "--overlap-front-layer": count + 3,
+          "--overlap-control-layer": count + 4,
         } as CSSProperties
       }
     >
@@ -4300,7 +4536,8 @@ function TimelineOverlapCluster({
         ref={toggle}
         type="button"
       >
-        <span className="calendar-overlap-cluster__pin-head">{count}</span>
+        <LayersIcon aria-hidden="true" />
+        <span>{count}</span>
       </button>
       {cluster.layouts.map((layout, index) => (
         <TimelineEventItem
@@ -4377,6 +4614,7 @@ function TimelineEvent({
       })
     : null;
   const laneCount = orbit ? Math.max(layout.columns, 1) : 1;
+  const stackInset = orbit && laneCount === 1 ? Math.min(orbit.index * 4, 16) : 0;
   const clearBlockedHoldTimer = () => {
     if (blockedHoldTimer.current === null) return;
     window.clearTimeout(blockedHoldTimer.current);
@@ -4443,11 +4681,11 @@ function TimelineEvent({
             ...calendarEventColorStyle(calendar?.color),
             "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
             "--calendar-event-left": orbit
-              ? `calc(${(column / laneCount) * 100}% + 2px)`
+              ? `calc(${(column / laneCount) * 100}% + ${2 + stackInset}px)`
               : `${3 + column * 12}px`,
             "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
             "--calendar-event-width": orbit
-              ? `calc(${100 / laneCount}% - 4px)`
+              ? `calc(${100 / laneCount}% - ${4 + stackInset}px)`
               : `calc(100% - ${6 + column * 12}px)`,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
             "--overlap-orbit-width": compact
@@ -4455,7 +4693,7 @@ function TimelineEvent({
               : `min(320px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px))`,
             "--overlap-orbit-x": `${orbitPoint?.x ?? 0}px`,
             "--overlap-orbit-y": `${orbitPoint?.y ?? 0}px`,
-            zIndex: 2 + column,
+            zIndex: 2 + (orbit?.index ?? column),
           } as CSSProperties
         }
         title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
@@ -4721,53 +4959,18 @@ function CalendarEventContextMenu({
   );
 }
 
-function AllDayEvents({
-  calendarsById,
-  compact = false,
-  events,
-  setEditor,
-}: {
-  calendarsById: CalendarMap;
-  compact?: boolean;
-  events: CalendarEvent[];
-  setEditor: (editor: Editor) => void;
-}) {
-  if (events.length === 0) return null;
-  return (
-    <div className={`calendar-all-day${compact ? " calendar-all-day--compact" : ""}`}>
-      {compact ? null : <span>All day</span>}
-      <div>
-        {events.map((event) => (
-          <button
-            aria-label={`All day ${event.title}`}
-            key={event.id}
-            onClick={() => setEditor({ event, kind: "event" })}
-            style={calendarEventColorStyle(calendarsById.get(event.calendarId)?.color)}
-            type="button"
-          >
-            {event.title}
-            {event.blocks.length > 0 ? (
-              <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
-            ) : null}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type WeekAllDayEventLayout = {
+type CalendarAllDayEventLayout = {
   endColumn: number;
   event: CalendarEvent;
   row: number;
   startColumn: number;
 };
 
-function positionWeekAllDayEvents(
+function positionCalendarAllDayEvents(
   days: LocalDate[],
   eventsByDay: Map<string, CalendarEvent[]>,
-): WeekAllDayEventLayout[] {
-  const spans = new Map<string, Omit<WeekAllDayEventLayout, "row">>();
+): CalendarAllDayEventLayout[] {
+  const spans = new Map<string, Omit<CalendarAllDayEventLayout, "row">>();
   days.forEach((day, dayIndex) => {
     for (const event of eventsByDay.get(localDateKey(day)) ?? []) {
       if (!event.allDay) continue;
@@ -4796,23 +4999,25 @@ function positionWeekAllDayEvents(
 
 function weekDaySurface(dayIndex: number, isToday: boolean) {
   if (isToday) {
-    return "color-mix(in srgb, var(--timeline-now) 14%, var(--surface-raised))";
+    return "var(--calendar-today-background)";
   }
   return dayIndex % 2 === 0
     ? "color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised))"
     : "color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised))";
 }
 
-function WeekAllDayEvents({
+function CalendarAllDayEvents({
   calendarsById,
   days,
   layouts,
+  highlightToday = true,
   setEditor,
   today,
 }: {
   calendarsById: CalendarMap;
   days: LocalDate[];
-  layouts: WeekAllDayEventLayout[];
+  layouts: CalendarAllDayEventLayout[];
+  highlightToday?: boolean;
   setEditor: (editor: Editor) => void;
   today: LocalDate;
 }) {
@@ -4830,11 +5035,13 @@ function WeekAllDayEvents({
       {days.map((day, dayIndex) => (
         <div
           aria-hidden="true"
-          className={`week-all-day-day${sameLocalDate(day, today) ? " is-today" : ""}`}
+          className={`week-all-day-day${highlightToday && sameLocalDate(day, today) ? " is-today" : ""}`}
           key={`all-day-surface-${localDateKey(day)}`}
           style={
             {
-              "--week-day-surface": weekDaySurface(dayIndex, sameLocalDate(day, today)),
+              "--week-day-surface": highlightToday
+                ? weekDaySurface(dayIndex, sameLocalDate(day, today))
+                : "var(--surface-raised)",
               gridColumn: dayIndex + 1,
               gridRow: `1 / span ${Math.max(rowCount, 1)}`,
             } as CSSProperties
@@ -4871,14 +5078,6 @@ function WeekAllDayEvents({
             style={
               {
                 ...eventStyle,
-                "--week-all-day-end-surface": weekDaySurface(
-                  endIndex,
-                  sameLocalDate(days[endIndex] as LocalDate, today),
-                ),
-                "--week-all-day-start-surface": weekDaySurface(
-                  startIndex,
-                  sameLocalDate(days[startIndex] as LocalDate, today),
-                ),
                 gridColumn: `${layout.startColumn} / ${layout.endColumn}`,
                 gridRow: layout.row,
               } as CSSProperties
@@ -4953,6 +5152,7 @@ function MonthCalendarView({
       <WorkspaceSecondaryAppBar
         aria-label="Calendar month navigation"
         placement="inline"
+        data-calendar-axis="top"
         className="calendar-secondary-app-bar calendar-secondary-app-bar--month"
       >
         <WorkspaceSecondaryAppBarContent className="month-weekdays" aria-hidden="true">
@@ -5596,12 +5796,15 @@ function MailSyncButton({
     : nextSyncAt
       ? `Next ${formatRelative(nextSyncAt)}`
       : "Next sync not scheduled";
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [failedAccountIds, setFailedAccountIds] = useState<string[]>([]);
   const [partialOutcome, setPartialOutcome] = useState<{ completed: number; total: number } | null>(
     null,
   );
   const sync = useFeedbackMutation({
     feedback: { action: "sync mail accounts", safeToRetry: true },
+    onMutate: () => setDetailsOpen(false),
+    onError: () => setDetailsOpen(true),
     mutationFn: async () => {
       const targets = failedAccountIds.length
         ? enabledAccounts.filter((account) => failedAccountIds.includes(account.id))
@@ -5636,44 +5839,60 @@ function MailSyncButton({
       ]),
   });
 
+  const hasSyncDetails = Boolean(accounts.isError || sync.feedback?.persistent || partialOutcome);
+  useEffect(() => {
+    if (!hasSyncDetails) setDetailsOpen(false);
+  }, [hasSyncDetails]);
+
   return (
     <div className="mail-sync-control">
-      <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
-      <MutationFeedback feedback={sync.feedback} />
-      {partialOutcome ? (
-        <p className="text-sm text-muted-foreground" role="status">
-          {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
-          {failedAccountIds.length}{" "}
-          {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
-        </p>
+      {hasSyncDetails ? (
+        <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <ShadcnPopoverTrigger asChild>
+            <ShadcnButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
+              <AlertTriangleIcon aria-hidden="true" />
+            </ShadcnButton>
+          </ShadcnPopoverTrigger>
+          <ShadcnPopoverContent className="space-y-3" align="end">
+            <ShadcnPopoverHeader>
+              <ShadcnPopoverTitle>Mail sync needs attention</ShadcnPopoverTitle>
+            </ShadcnPopoverHeader>
+            <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
+            <MutationFeedback feedback={sync.feedback} />
+            {partialOutcome ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
+                {failedAccountIds.length}{" "}
+                {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
+              </p>
+            ) : null}
+          </ShadcnPopoverContent>
+        </ShadcnPopover>
       ) : null}
-      {accounts.isPending || enabledAccounts.length === 0 ? null : (
-        <small className="mail-sync-control__timing">
-          <span>{lastSyncLabel}</span>
-          <span>{nextSyncLabel}</span>
-        </small>
-      )}
-      <ShadcnButton
-        aria-label={
-          failedAccountIds.length ? "Retry failed mail accounts" : "Sync all mail accounts"
-        }
-        disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
-        onClick={() => {
-          onSelect?.();
-          sync.mutate();
-        }}
-        size="sm"
-        variant={variant}
-      >
-        <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-        <span>
-          {sync.isPending
-            ? "Syncing…"
-            : failedAccountIds.length
-              ? "Retry failed mail accounts"
-              : "Sync"}
-        </span>
-      </ShadcnButton>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ShadcnButton
+            className="mail-sync-control__action"
+            aria-label={
+              failedAccountIds.length ? "Retry failed mail accounts" : "Sync all mail accounts"
+            }
+            disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
+            onClick={() => {
+              onSelect?.();
+              sync.mutate();
+            }}
+            size="sm"
+            variant={variant}
+          >
+            <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
+            <span>{sync.isPending ? "Syncing…" : failedAccountIds.length ? "Retry" : "Sync"}</span>
+          </ShadcnButton>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{lastSyncLabel}</p>
+          <p>{nextSyncLabel}</p>
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -9817,34 +10036,19 @@ export function positionTimelineEvents<T extends TimelinePositionable>(
         left.endMinute - right.endMinute ||
         left.event.id.localeCompare(right.event.id),
     );
-  const layouts: TimelineEventLayout<T>[] = [];
-  let cluster: typeof intervals = [];
-  let clusterEnd = -Infinity;
-  const layoutCluster = () => {
-    const columnEnds: number[] = [];
-    for (const interval of cluster) {
-      const column = columnEnds.findIndex((endMinute) => endMinute <= interval.startMinute);
-      const resolvedColumn = column === -1 ? columnEnds.length : column;
-      columnEnds[resolvedColumn] = interval.endMinute;
-      layouts.push({ ...interval, column: resolvedColumn, columns: 0 });
-    }
-    const columns = columnEnds.length;
-    for (let index = layouts.length - cluster.length; index < layouts.length; index += 1) {
-      const layout = layouts[index];
-      if (layout) layouts[index] = { ...layout, columns };
-    }
-  };
+  // Only simultaneous starts share horizontal lanes. Later starts paint above
+  // earlier events while retaining their actual time and duration geometry.
+  const simultaneous = new Map<number, typeof intervals>();
   for (const interval of intervals) {
-    if (cluster.length > 0 && interval.startMinute >= clusterEnd) {
-      layoutCluster();
-      cluster = [];
-      clusterEnd = -Infinity;
-    }
-    cluster.push(interval);
-    clusterEnd = Math.max(clusterEnd, interval.endMinute);
+    const start = new Date(interval.event.startsAt).getTime();
+    const group = simultaneous.get(start) ?? [];
+    group.push(interval);
+    simultaneous.set(start, group);
   }
-  if (cluster.length > 0) layoutCluster();
-  return layouts;
+  return intervals.map((interval) => {
+    const group = simultaneous.get(new Date(interval.event.startsAt).getTime()) as typeof intervals;
+    return { ...interval, column: group.indexOf(interval), columns: group.length };
+  });
 }
 
 function formatHour(hour: number): string {

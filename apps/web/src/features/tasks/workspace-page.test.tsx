@@ -6,6 +6,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   TaskScopeHeader,
   TasksCreateButton,
@@ -118,9 +119,11 @@ function setupSidebar() {
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <MemoryRouter>
-        <SidebarProvider>
-          <TasksSidebar onNavigate={vi.fn()} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TasksSidebar onNavigate={vi.fn()} />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );

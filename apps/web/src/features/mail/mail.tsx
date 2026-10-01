@@ -272,7 +272,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const listScope = mailListScopeFromSearch(params);
   const selectedAccountIds = params.getAll("account");
   return (
-    <SidebarGroup className="context-sidebar__mailboxes">
+    <SidebarGroup>
       <SidebarGroupLabel>Mailboxes</SidebarGroupLabel>
       <SidebarGroupContent>
         <nav aria-label="Mailboxes">
@@ -288,7 +288,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
           ) : enabled.length === 0 ? (
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
           ) : (
-            <SidebarMenu className="mail-sidebar__menu">
+            <SidebarMenu>
               <UnifiedMailDestinations
                 listScope={listScope}
                 onNavigate={onNavigate}

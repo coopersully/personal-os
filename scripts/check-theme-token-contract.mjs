@@ -263,6 +263,11 @@ if (globalButtonRule?.[1] && /\bcolor\s*:\s*inherit\b/.test(globalButtonRule[1])
 }
 
 for (const match of stylesheet.matchAll(/#[\da-f]{3,8}\b|rgba\(/gi)) {
+  if (/^#(?:fff(?:fff)?|000(?:000)?)$/i.test(match[0])) {
+    violations.push(
+      `Pure white/black ${match[0]} is not permitted in the app theme; use a neutral scale tone.`,
+    );
+  }
   const index = match.index ?? -1;
   if (!tokenBlockRanges.some(([start, end]) => index >= start && index < end)) {
     const line = stylesheet.slice(0, index).split("\n").length;

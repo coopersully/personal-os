@@ -14,22 +14,22 @@
   --app-font-mono: "Geist Variable", ui-monospace, monospace;
   --app-font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   /* Flat neutral chrome; color is reserved for workspace identity, user material, and state. */
-  --canvas: #e9eaee;
-  --surface: #ffffff;
-  --surface-subtle: #e1e3e8;
-  --surface-strong: #c9cdd6;
+  --canvas: #e8e8e8;
+  --surface: #f9f9f9;
+  --surface-subtle: #e0e0e0;
+  --surface-strong: #d9d9d9;
   --surface-raised: var(--surface-subtle);
-  --surface-overlay: #d3d7e0;
+  --surface-overlay: #d3d3d3;
   --surface-muted: var(--surface-subtle);
-  --border-subtle: #dededb;
-  --border-strong: #a1a19c;
-  --content-primary: #18181b;
-  --ritual-morning-content: #18181b;
-  --ritual-evening-content: #ffffff;
-  --content-secondary: #51515b;
-  --content-tertiary: #666671;
-  --inverse-surface: #151514;
-  --inverse-content: #f3f3f1;
+  --border-subtle: #d9d9d9;
+  --border-strong: #8d8d8d;
+  --content-primary: #202020;
+  --ritual-morning-content: #202020;
+  --ritual-evening-content: #f9f9f9;
+  --content-secondary: #5b5b5b;
+  --content-tertiary: #646464;
+  --inverse-surface: #202020;
+  --inverse-content: #eeeeee;
   --ink: var(--content-primary);
   --muted: var(--content-secondary);
   --faint: var(--content-tertiary);
@@ -62,14 +62,14 @@
   --status-warning-surface: #f9eddb;
   --status-warning-border: #dfc497;
   --status-warning-foreground: var(--status-warning);
-  --inverse-surface-raised: #20201e;
-  --inverse-border: #3b3b38;
-  --inverse-border-subtle: #333330;
-  --inverse-content-secondary: #aaa9a5;
-  --inverse-content-tertiary: #858580;
+  --inverse-surface-raised: #2a2a2a;
+  --inverse-border: #484848;
+  --inverse-border-subtle: #3a3a3a;
+  --inverse-content-secondary: #b4b4b4;
+  --inverse-content-tertiary: #838383;
   --app-shell-background: var(--canvas);
   --desktop-sidebar-background: var(--surface-subtle);
-  --workspace-rail-background: #eff0f3;
+  --workspace-rail-background: #f0f0f0;
   --control-hover-background: var(--surface-strong);
   --overlay-subtle: color-mix(in srgb, var(--inverse-surface) 18%, transparent);
   --overlay: color-mix(in srgb, var(--inverse-surface) 58%, transparent);
@@ -83,12 +83,12 @@
   --calendar-event-accent: #767672;
   --calendar-event-foreground: #343433;
   --calendar-event-muted: #5d5d59;
-  --preview-light-canvas: #f0f0ef;
-  --preview-light-surface: #fbfbfa;
-  --preview-light-ink: #3b3b39;
-  --preview-dark-canvas: #2d2d2b;
-  --preview-dark-surface: #3c3c39;
-  --preview-dark-ink: #e6e6e2;
+  --preview-light-canvas: #e8e8e8;
+  --preview-light-surface: #f9f9f9;
+  --preview-light-ink: #202020;
+  --preview-dark-canvas: #202020;
+  --preview-dark-surface: #2d2d2d;
+  --preview-dark-ink: #eeeeee;
   --weather-sky-morning-start: var(--surface-strong);
   --weather-sky-morning-end: var(--surface-strong);
   --weather-sky-day-start: var(--surface-strong);
@@ -112,7 +112,7 @@
   --material-blue: #8fc5eb;
   --material-indigo: #a8b4ef;
   --material-violet: #c0a9e8;
-  --material-foreground: #18181b;
+  --material-foreground: #202020;
   --success: var(--status-success);
   --radius: 0.75rem;
   --calendar-axis-background: var(--sidebar);
@@ -139,7 +139,7 @@
   --input: var(--line);
   --input-surface: color-mix(in oklab, var(--input) 60%, var(--background));
   --input-surface-hover: color-mix(in oklab, var(--input) 80%, var(--background));
-  --input-placeholder: #66666e;
+  --input-placeholder: #646464;
   --ring: var(--primary);
   --chart-1: var(--content-primary);
   --chart-2: var(--content-secondary);
@@ -3518,8 +3518,8 @@ p {
     color-mix(in srgb, var(--week-day-surface) 62%, transparent) 46%,
     transparent
   );
-  -webkit-mask-image: linear-gradient(to bottom, black 0%, rgb(0 0 0 / 82%) 55%, transparent 100%);
-  mask-image: linear-gradient(to bottom, black 0%, rgb(0 0 0 / 82%) 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, var(--ink) 0%, color-mix(in srgb, var(--ink) 82%, transparent) 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, var(--ink) 0%, color-mix(in srgb, var(--ink) 82%, transparent) 55%, transparent 100%);
   /* theme-contract-allow-end: functional-calendar-grid */
   content: "";
   inset: 0 0 -40px;
@@ -6263,20 +6263,20 @@ p {
 
 .dark {
   color-scheme: dark;
-  --canvas: #242529;
-  --surface: #303137;
-  --surface-subtle: #37383e;
-  --surface-strong: #42434a;
+  --canvas: #202020;
+  --surface: #2d2d2d;
+  --surface-subtle: #363636;
+  --surface-strong: #3a3a3a;
   --surface-raised: var(--surface-subtle);
-  --surface-overlay: #454750;
+  --surface-overlay: #484848;
   --surface-muted: var(--surface-subtle);
-  --border-subtle: #505158;
-  --border-strong: #797a83;
-  --content-primary: #ffffff;
-  --content-secondary: #c0c0c7;
-  --content-tertiary: #9898a1;
-  --inverse-surface: #20201e;
-  --inverse-content: #f3f3f1;
+  --border-subtle: #606060;
+  --border-strong: #7b7b7b;
+  --content-primary: #eeeeee;
+  --content-secondary: #b8b8b8;
+  --content-tertiary: #999999;
+  --inverse-surface: #202020;
+  --inverse-content: #eeeeee;
   --ink: var(--content-primary);
   --muted: var(--content-secondary);
   --faint: var(--content-tertiary);
@@ -6286,7 +6286,7 @@ p {
   --night: var(--inverse-surface);
   --accent: var(--selection);
   --accent-foreground: var(--selection-foreground);
-  --selection: #292b32;
+  --selection: #2a2a2a;
   --selection-foreground: var(--content-primary);
   --acid-ink: var(--primary-foreground);
   --danger: #e08d7b;
@@ -6319,7 +6319,7 @@ p {
   --calendar-event-border: #717278;
   --calendar-event-border-hover: #898a91;
   --calendar-event-accent: #c4c4c0;
-  --calendar-event-foreground: #ffffff;
+  --calendar-event-foreground: #f9f9f9;
   --calendar-event-muted: #c0c0bc;
   --weather-sky-morning-start: var(--surface-strong);
   --weather-sky-morning-end: var(--surface-strong);
@@ -6354,7 +6354,7 @@ p {
   --input: var(--line);
   --input-surface: color-mix(in oklab, var(--input) 60%, var(--background));
   --input-surface-hover: color-mix(in oklab, var(--input) 80%, var(--background));
-  --input-placeholder: #afafb7;
+  --input-placeholder: #b4b4b4;
   --ring: var(--primary);
   --chart-1: var(--content-primary);
   --chart-2: var(--content-secondary);

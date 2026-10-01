@@ -470,3 +470,19 @@ a capsule merely because it shares a panel's radius.
 
 The frontend theme owns this contract. Verify Settings search hover/keyboard
 focus, cards, and Mail/Calendar account popovers in both themes when changing it.
+
+### Neutral palette direction
+
+Use a neutral grayscale inspired by [Radix Gray](https://www.radix-ui.com/colors/docs/palette-composition/composing-a-palette),
+with semantic roles following its [scale guidance](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale).
+This keeps chrome from competing with the four workspace colors. The selected
+nohmi values are calibrated to our borderless surface and text contrast budgets;
+they are not an unmodified Radix theme or a claim of automatic accessibility.
+
+Light mode uses a soft gray canvas (`#e8e8e8`), off-white cards (`#f9f9f9`),
+and charcoal text (`#202020`). Dark mode uses charcoal canvas (`#202020`),
+neutral raised cards (`#2d2d2d`), and soft light text (`#eeeeee`). Navigation and
+overlays follow the same achromatic scale. Never use pure white or pure black
+for app-owned theme surfaces, text, or controls. The theme contract validator
+rejects those endpoints. Provider artwork and user-authored material are content,
+not sources for theme tokens.

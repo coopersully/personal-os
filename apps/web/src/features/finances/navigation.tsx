@@ -103,7 +103,11 @@ export function FinanceSidebarNavigation({
             <SidebarMenu>
               {group.items.map(({ icon: Icon, id, label }) => (
                 <SidebarMenuItem key={id}>
-                  <SidebarMenuButton asChild isActive={financeNavigationActive(section, id)}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={financeNavigationActive(section, id)}
+                    tooltip={label}
+                  >
                     <Link
                       aria-current={financeNavigationActive(section, id) ? "page" : undefined}
                       aria-label={
@@ -133,7 +137,7 @@ export function FinanceSidebarNavigation({
         <SidebarGroupContent>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={section === "setup"}>
+              <SidebarMenuButton asChild isActive={section === "setup"} tooltip="Financial setup">
                 <Link
                   aria-current={section === "setup" ? "page" : undefined}
                   onClick={onNavigate}
@@ -144,7 +148,7 @@ export function FinanceSidebarNavigation({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
+              <SidebarMenuButton asChild tooltip="Finance settings">
                 <Link onClick={onNavigate} to="/settings?section=finances">
                   <SettingsIcon /> <span>Finance settings</span>
                 </Link>

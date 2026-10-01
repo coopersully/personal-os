@@ -208,6 +208,7 @@ function TaskListBranch({
         <SidebarMenuButton
           asChild
           isActive={selected}
+          tooltip={list.name}
           className="min-w-0 max-md:h-10"
           data-user-created={list.kind === "standard" ? "true" : undefined}
         >
@@ -321,6 +322,7 @@ export function TaskNavigation({
           asChild
           isActive={selectedView === value || (archive && value === "history")}
           className="max-md:h-10"
+          tooltip={view.label}
         >
           <Link
             aria-current={

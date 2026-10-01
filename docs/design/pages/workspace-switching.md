@@ -105,3 +105,6 @@ The contextual sidebar's Shadcn provider is controlled by the same persisted sta
 collapse handle and width. Cmd/Ctrl+B and collapsed-item tooltips therefore follow the
 visible sidebar. Mail sync recovery details open in a portaled popover, outside clipped
 navigation chrome; the compact Sync/Retry action remains reachable at narrow widths.
+The shortcut only changes the preference while a desktop contextual sidebar is present.
+Collapsing while focus is inside that sidebar transfers focus to its persistent handle;
+every surviving icon destination supplies its label to the Shadcn tooltip primitive.

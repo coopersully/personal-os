@@ -132,16 +132,20 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await page.mouse.move(edge.x - 220, edge.y + 100);
     await page.mouse.up();
     await expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    if (workspace === "Mail") {
-      await sidebar.getByRole("link", { name: "Starred", exact: true }).hover();
-      await expect(page.getByRole("tooltip", { name: "Starred", exact: true })).toBeVisible();
-    }
+    const iconLabel = workspace === "Mail" ? "Starred" : workspace === "Tasks" ? "All" : "Overview";
+    await sidebar.getByRole("link", { name: iconLabel, exact: true }).hover();
+    await expect(page.getByRole("tooltip", { name: iconLabel, exact: true })).toBeVisible();
     await page.keyboard.press("Control+b");
     await expect(sidebar).toHaveAttribute("data-state", "expanded");
     await page.keyboard.press("Control+b");
     await expect(sidebar).toHaveAttribute("data-state", "collapsed");
     await handle.press("ArrowRight");
     await expect(sidebar).toHaveAttribute("data-state", "expanded");
+    if (workspace === "Tasks") {
+      await sidebar.getByRole("button", { name: "New List", exact: true }).focus();
+      await page.keyboard.press("Control+b");
+      await expect(handle).toBeFocused();
+    }
     await handle.press("End");
     await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
     const colors = await page
@@ -176,6 +180,11 @@ test("desktop navigation fills the viewport while long content scrolls independe
   await switcher.click();
   await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
   await expect(page.locator(".workspace-app-bar")).toHaveCSS("padding-left", "48px");
+  const storedSidebar = await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"));
+  await page.keyboard.press("Control+b");
+  expect(await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"))).toBe(
+    storedSidebar,
+  );
   for (const view of ["Day", "Week", "Month"]) {
     await page.getByRole("radio", { name: view, exact: true }).click();
     const axes = page.locator("[data-calendar-axis]:not(.is-today)");

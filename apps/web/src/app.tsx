@@ -1289,14 +1289,25 @@ function AuthenticatedApp({ user }: { user: User }) {
       );
   };
 
+  const updateSidebarWidth = (width: number, persist: boolean) => {
+    if (isMobileWorkspaceDock || !sidebarMode) return;
+    const normalized = normalizeSidebarWidth(width);
+    if (
+      normalized === collapsedSidebarWidth &&
+      document.getElementById("app-sidebar")?.contains(document.activeElement)
+    ) {
+      document.querySelector<HTMLElement>('[aria-controls="app-sidebar"]')?.focus();
+    }
+    setSidebarWidth(normalized);
+    if (persist) persistSidebarWidth(normalized);
+  };
+
   return (
     <ShadcnSidebarProvider
       className="contents"
       open={sidebarState === "expanded"}
       onOpenChange={(open) => {
-        const width = open ? defaultSidebarWidth : collapsedSidebarWidth;
-        setSidebarWidth(width);
-        persistSidebarWidth(width);
+        updateSidebarWidth(open ? defaultSidebarWidth : collapsedSidebarWidth, true);
       }}
     >
       <div
@@ -1394,14 +1405,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           </ShadcnSidebar>
         ) : null}
         {!isMobileWorkspaceDock && sidebarMode ? (
-          <SidebarCollapseHandle
-            onResize={(width, persist) => {
-              const normalized = normalizeSidebarWidth(width);
-              setSidebarWidth(normalized);
-              if (persist) persistSidebarWidth(normalized);
-            }}
-            width={sidebarWidth}
-          />
+          <SidebarCollapseHandle onResize={updateSidebarWidth} width={sidebarWidth} />
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
@@ -1635,7 +1639,12 @@ function SidebarNavigationItem({
   const workspaceId = workspaceIdForPath(path);
   return (
     <ShadcnSidebarMenuItem>
-      <ShadcnSidebarMenuButton className={badge ? "pr-24" : undefined} asChild isActive={isActive}>
+      <ShadcnSidebarMenuButton
+        className={badge ? "pr-24" : undefined}
+        asChild
+        isActive={isActive}
+        tooltip={label}
+      >
         <NavLink onClick={onNavigate} to={path}>
           {workspaceId ? (
             <WorkspaceIcon size="sm" workspace={workspaceId} />

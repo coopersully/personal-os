@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   assertProductionAcknowledgement,
   buildPortForwardingSessionArgs,
+  buildStopTunnelInstanceArgs,
+  buildTerminateTunnelSessionArgs,
   createServiceDefinitions,
+  parseTunnelSessionId,
   projectProductionEnvironment,
   redactProductionError,
   rewriteDatabaseUrl,
@@ -73,7 +76,7 @@ describe("local production runtime", () => {
     );
   });
 
-  it("rewrites only database transport details and preserves TLS verification", () => {
+  it("routes the database through the local tunnel without weakening RDS hostname verification", () => {
     const rewritten = new URL(
       rewriteDatabaseUrl(
         "postgresql://app:secret@prod.internal:5432/personal_os?sslmode=verify-full&application_name=ilo",
@@ -81,12 +84,12 @@ describe("local production runtime", () => {
         "/tmp/aws-rds-global-bundle.pem",
       ),
     );
-    expect(rewritten.hostname).toBe("127.0.0.1");
+    expect(rewritten.hostname).toBe("prod.internal");
     expect(rewritten.port).toBe("55438");
     expect(rewritten.username).toBe("app");
     expect(rewritten.password).toBe("secret");
     expect(rewritten.pathname).toBe("/personal_os");
-    expect(rewritten.searchParams.get("sslmode")).toBe("verify-ca");
+    expect(rewritten.searchParams.get("sslmode")).toBe("verify-full");
     expect(rewritten.searchParams.get("sslrootcert")).toBe("/tmp/aws-rds-global-bundle.pem");
     expect(rewritten.searchParams.get("application_name")).toBe("ilo");
   });
@@ -157,6 +160,7 @@ describe("local production runtime", () => {
       API_BASE_URL: "http://127.0.0.1:8793",
       APP_BASE_URL: "http://localhost:8086",
       APP_ENCRYPTION_KEY: "encryption-secret",
+      DATABASE_CONNECT_HOST: "127.0.0.1",
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       GOOGLE_GMAIL_PUSH_ENABLED: "false",
@@ -169,7 +173,7 @@ describe("local production runtime", () => {
       TRUST_PROXY: "false",
       X_REDIRECT_URI: "http://127.0.0.1:8793/v1/x-bookmarks/callback",
     });
-    expect(new URL(environment.DATABASE_URL).hostname).toBe("127.0.0.1");
+    expect(new URL(environment.DATABASE_URL).hostname).toBe("prod.internal");
   });
 
   it("fails when a deployed secret has no resolved parameter", () => {
@@ -228,6 +232,38 @@ describe("local production runtime", () => {
       "--parameters",
       '{"host":["prod.internal"],"portNumber":["5432"],"localPortNumber":["55438"]}',
     ]);
+  });
+
+  it("stops only the exact tunnel instance in the configured region", () => {
+    expect(buildStopTunnelInstanceArgs("i-tunnel", "us-east-1")).toEqual([
+      "ec2",
+      "stop-instances",
+      "--region",
+      "us-east-1",
+      "--instance-ids",
+      "i-tunnel",
+      "--output",
+      "json",
+    ]);
+  });
+
+  it("captures and terminates only the owned Session Manager session", () => {
+    const sessionId = parseTunnelSessionId(`
+Starting session with SessionId: ilo-local-personal-os-123-example
+Port 55438 opened for sessionId ilo-local-personal-os-123-example.
+`);
+    expect(sessionId).toBe("ilo-local-personal-os-123-example");
+    expect(buildTerminateTunnelSessionArgs(sessionId, "us-east-1")).toEqual([
+      "ssm",
+      "terminate-session",
+      "--region",
+      "us-east-1",
+      "--session-id",
+      "ilo-local-personal-os-123-example",
+      "--output",
+      "json",
+    ]);
+    expect(parseTunnelSessionId("Waiting for the session to start")).toBeUndefined();
   });
 
   it("keeps secrets in child environments rather than command arguments", () => {

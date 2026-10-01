@@ -11,7 +11,10 @@ import {
 } from "./runtime-lifecycle.js";
 
 const config = loadConfig(process.env);
-const database = createDatabaseClient(config.databaseUrl);
+const database = createDatabaseClient(
+  config.databaseUrl,
+  config.databaseConnectHost ? { connectHost: config.databaseConnectHost } : {},
+);
 const runtimeLifecycle = createRuntimeLifecycle();
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder =

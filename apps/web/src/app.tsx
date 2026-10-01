@@ -5011,8 +5011,8 @@ function weekDaySurface(dayIndex: number, isToday: boolean) {
     return "var(--calendar-today-background)";
   }
   return dayIndex % 2 === 0
-    ? "color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised))"
-    : "color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised))";
+    ? "var(--background)"
+    : "var(--calendar-tile-background)";
 }
 
 function CalendarAllDayEvents({
@@ -5050,7 +5050,7 @@ function CalendarAllDayEvents({
             {
               "--week-day-surface": highlightToday
                 ? weekDaySurface(dayIndex, sameLocalDate(day, today))
-                : "var(--surface-raised)",
+                : "var(--background)",
               gridColumn: dayIndex + 1,
               gridRow: `1 / span ${Math.max(rowCount, 1)}`,
             } as CSSProperties

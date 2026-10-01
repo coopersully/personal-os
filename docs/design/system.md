@@ -102,6 +102,9 @@ individual pages must not recreate the shell inset with local padding. Settings
 uses a centered reading surface with its own page introduction, without a workspace
 app bar; see the [Settings layout contract](pages/settings.md).
 
+Primary and secondary top navigation use `--background`, matching the default
+page canvas in both themes. Sidebars retain their independent sidebar tone.
+
 `WorkspaceLayout` owns an optional secondary-navigation slot directly below
 the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
 `Leading`, `Content`, and `Actions` slots; React context and a portal keep the

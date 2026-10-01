@@ -115,8 +115,9 @@
   --material-foreground: #202020;
   --success: var(--status-success);
   --radius: 0.75rem;
-  --calendar-axis-background: var(--sidebar);
-  --calendar-today-background: color-mix(in srgb, var(--timeline-now) 14%, var(--surface-raised));
+  --calendar-axis-background: var(--background);
+  --calendar-tile-background: color-mix(in srgb, var(--surface-strong) 14%, var(--background));
+  --calendar-today-background: color-mix(in srgb, var(--timeline-now) 14%, var(--background));
   --calendar-time-gutter-width: 56px;
   --motion-duration-fast: 140ms;
   --motion-duration-spatial: 220ms;
@@ -1052,7 +1053,7 @@ p {
 }
 .workspace-app-bar {
   align-items: center;
-  background: var(--sidebar);
+  background: var(--background);
   display: grid;
   gap: 0.5rem;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
@@ -1146,7 +1147,7 @@ p {
 }
 .workspace-secondary-app-bar {
   align-items: stretch;
-  background: var(--sidebar);
+  background: var(--background);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: var(--chrome-height);
@@ -2583,6 +2584,7 @@ p {
 }
 
 .calendar-page {
+  background: var(--background);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -2993,7 +2995,7 @@ p {
   min-height: 0;
 }
 .calendar-day-view {
-  background: var(--surface-raised);
+  background: var(--background);
   border: 0;
   border-radius: 0;
   display: flex;
@@ -3002,7 +3004,7 @@ p {
   overflow: hidden;
 }
 .calendar-day-view.is-today {
-  background: var(--surface-raised);
+  background: var(--background);
 }
 .calendar-day-summary {
   align-items: center;
@@ -3099,7 +3101,7 @@ p {
   --calendar-half-hour-rule: color-mix(in srgb, var(--line) 20%, transparent);
   --calendar-quarter-hour-rule: color-mix(in srgb, var(--line) 10%, transparent);
 
-  background-color: var(--surface-raised);
+  background-color: var(--background);
   /* theme-contract-allow-start: functional-calendar-grid */
   background-image:
     linear-gradient(to bottom, var(--calendar-hour-rule) 0 1px, transparent 1px),
@@ -3444,7 +3446,7 @@ p {
   font-size: 6px;
 }
 .week-calendar {
-  background: color-mix(in srgb, var(--line) 50%, transparent);
+  background: var(--background);
   border: 0;
   border-radius: 0;
   min-height: 0;
@@ -3462,10 +3464,10 @@ p {
   min-height: 33px;
 }
 .week-day-timeline:nth-of-type(odd) {
-  background-color: color-mix(in srgb, var(--surface-strong) 14%, var(--surface-raised));
+  background-color: var(--background);
 }
 .week-day-timeline:nth-of-type(even) {
-  background-color: color-mix(in srgb, var(--surface-strong) 28%, var(--surface-raised));
+  background-color: var(--calendar-tile-background);
 }
 .week-day-timeline.is-today {
   background-color: var(--calendar-today-background);
@@ -3474,7 +3476,7 @@ p {
   grid-column: 1 / -1;
 }
 .calendar-secondary-app-bar--week {
-  background: transparent;
+  background: var(--background);
   grid-column: 1 / -1;
   position: sticky;
   top: 0;
@@ -3501,7 +3503,7 @@ p {
   z-index: 0;
 }
 .week-all-day-corner {
-  --week-day-surface: var(--paper);
+  --week-day-surface: var(--background);
   align-self: stretch;
   background: transparent;
   grid-column: 1;
@@ -3652,13 +3654,13 @@ p {
   overflow: hidden;
 }
 .month-day {
-  background: var(--surface-raised);
+  background: var(--background);
   min-height: 118px;
   min-width: 0;
   padding: 7px;
 }
 .month-day.is-outside {
-  background: var(--ui-muted);
+  background: var(--calendar-tile-background);
   color: var(--muted);
 }
 .month-day.is-drag-target {

@@ -149,7 +149,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await handle.press("End");
     await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
     const colors = await page
-      .locator(".sidebar, .workspace-app-bar, .workspace-secondary-app-bar")
+      .locator("body, .workspace-app-bar, .workspace-secondary-app-bar")
       .evaluateAll((elements) =>
         elements.map((element) => getComputedStyle(element).backgroundColor),
       );
@@ -189,6 +189,20 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await page.getByRole("radio", { name: view, exact: true }).click();
     const axes = page.locator("[data-calendar-axis]:not(.is-today)");
     await expect(axes.first()).toBeVisible();
+    const canvasColor = await page
+      .locator("body")
+      .evaluate((element) => getComputedStyle(element).backgroundColor);
+    await expect(axes.first()).toHaveCSS("background-color", canvasColor);
+    const baseCell = page
+      .locator(
+        view === "Month"
+          ? ".month-day:not(.is-today):not(.is-outside)"
+          : view === "Week"
+            ? ".week-day-timeline:nth-of-type(odd):not(.is-today)"
+            : ".calendar-timeline",
+      )
+      .first();
+    await expect(baseCell).toHaveCSS("background-color", canvasColor);
     await expect
       .poll(
         async () =>
@@ -600,7 +614,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(weekGridLayout.fadeBackdropFilter).toContain("blur(");
   expect(weekGridLayout.fadeBackgroundImage).toContain("linear-gradient");
   expect(weekGridLayout.fadeBackgroundImage).toContain("rgba(");
-  expect(weekGridLayout.navigationBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(weekGridLayout.navigationBackground).toBe(
+    await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor),
+  );
   expect(weekGridLayout.weekHeaderGridBackground).toBe("rgba(0, 0, 0, 0)");
   expect(weekGridLayout.fadeSurfaceBackground).toBe("rgba(0, 0, 0, 0)");
   expect(weekGridLayout.fadeSurfaceTop).toBeGreaterThanOrEqual(weekGridLayout.headerBottom - 1);

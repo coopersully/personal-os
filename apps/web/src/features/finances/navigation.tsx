@@ -4,7 +4,6 @@ import {
   DollarIcon,
   GridIcon,
   type Icon,
-  ListChecksIcon,
   ReceiptIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -31,6 +30,7 @@ export type FinanceSection =
   | "plan"
   | "wealth"
   | "setup"
+  | "decisions"
   | "review"
   | "subscriptions"
   | "transactions";
@@ -42,7 +42,7 @@ const navigation: Array<{
   {
     items: [
       { icon: GridIcon, id: "overview", label: "Overview" },
-      { icon: ListChecksIcon, id: "review", label: "Review" },
+
       { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
       { icon: WalletIcon, id: "plan", label: "Plan" },
       { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
@@ -59,6 +59,7 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   if (section === "reviews") return "overview";
   return (
     [
+      "decisions",
       "accounts",
       "budgets",
       "cashflow",

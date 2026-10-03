@@ -14,11 +14,13 @@ export function SettingsPageLayout({
   title,
   description,
   search,
+  actions,
   children,
 }: {
   title: string;
   description: string;
   search: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -31,7 +33,10 @@ export function SettingsPageLayout({
           </h1>
           <p>{description}</p>
         </div>
-        <div className="settings-page__mobile-search">{search}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {actions}
+          <div className="settings-page__mobile-search">{search}</div>
+        </div>
       </header>
       <section className="settings-panel" aria-labelledby="settings-page-title">
         {children}

@@ -58,7 +58,6 @@ import { createPortal } from "react-dom";
 import {
   Link,
   Navigate,
-  NavLink,
   Route,
   Routes,
   useLocation,
@@ -305,7 +304,6 @@ import {
   calendarQueryKeys,
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
-import { CalendarStewardshipPage } from "./features/calendar/stewardship-page.js";
 import {
   ConnectionHealthBadge,
   ConnectionHealthDescription,
@@ -326,13 +324,14 @@ import {
   MailSidebar as MailFeatureSidebar,
   MailTopbarSearch,
 } from "./features/mail/mail.js";
-import { MailStewardshipPage } from "./features/mail/stewardship-page.js";
 import {
   ReminderRow,
   RemindersCreateButton,
   RemindersTopbarControls,
 } from "./features/reminders/page.js";
-import { ReviewsPage } from "./features/reviews/page.js";
+import { ReviewFlowHost } from "./features/reviews/flow.js";
+import { ReviewNavigation } from "./features/reviews/navigation.js";
+
 import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
 import {
   ConnectedAgentsSettings,
@@ -341,6 +340,7 @@ import {
   WorkspaceSettings,
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
+import { RelatedSettings } from "./features/settings/related-settings.js";
 import {
   SettingsBento,
   SettingsPageLayout,
@@ -1147,7 +1147,6 @@ function SidebarCollapseHandle({
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
-  const queryClient = useQueryClient();
   const [editor, setEditor] = useState<Editor>(null);
   const desktopCapture = useCallback(
     (kind: "task" | "reminder" | "event") => setEditor({ kind }),
@@ -1291,28 +1290,6 @@ function AuthenticatedApp({ user }: { user: User }) {
     setPinned(next);
   };
 
-  const mobileDockLogout = () => {
-    void api
-      .logout()
-      .then(() => {
-        if (isTauri()) void resetDesktopSession(queryClient);
-        else window.location.assign("/");
-      })
-      .catch(() =>
-        toast.error("Couldn’t log out. Try again.", { duration: Number.POSITIVE_INFINITY }),
-      );
-  };
-  const mobileDockPasswordReset = () => {
-    void api
-      .requestPasswordReset({ email: user.email })
-      .then(() => toast.success(`Password reset link sent to ${user.email}.`))
-      .catch(() =>
-        toast.error("Couldn’t send a password reset link. Try again.", {
-          duration: Number.POSITIVE_INFINITY,
-        }),
-      );
-  };
-
   const updateSidebarWidth = (width: number, persist: boolean) => {
     if (isMobileWorkspaceDock || !sidebarMode) return;
     const normalized = normalizeSidebarWidth(width);
@@ -1404,7 +1381,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               </span>
               {sidebarMode === "settings" ? (
                 <SettingsSearch
-                  groups={visibleSettingsNavigation(user.canManageInvitations === true)}
+                  groups={searchableSettingsNavigation(user.canManageInvitations === true)}
                 />
               ) : null}
             </ShadcnSidebarHeader>
@@ -1432,6 +1409,9 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
             </ShadcnSidebarContent>
+            {sidebarMode === "mail" || sidebarMode === "tasks" || sidebarMode === "finances" ? (
+              <ReviewNavigation workspace={sidebarMode} footer />
+            ) : null}
           </ShadcnSidebar>
         ) : null}
         {!isMobileWorkspaceDock && sidebarMode ? (
@@ -1439,14 +1419,12 @@ function AuthenticatedApp({ user }: { user: User }) {
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
-            accountName={workspaceOwnerName(user)}
+            showWorkspaceSwitcher={false}
             accountSections={settingsSectionPages(
               user.canManageInvitations === true,
               workspaceSettingsActions,
               settingsCounts,
             )}
-            onLogout={mobileDockLogout}
-            onRequestPasswordReset={mobileDockPasswordReset}
             pathname={shellPathname}
             {...(sidebarMode === "tasks"
               ? {
@@ -1454,12 +1432,39 @@ function AuthenticatedApp({ user }: { user: User }) {
                     <TasksSidebar onNavigate={onNavigate} />
                   ),
                 }
-              : {})}
+              : sidebarMode === "mail"
+                ? {
+                    renderWorkspaceNavigation: (onNavigate: () => void) => (
+                      <MailFeatureSidebar onNavigate={onNavigate} />
+                    ),
+                  }
+                : sidebarMode === "finances"
+                  ? {
+                      renderWorkspaceNavigation: (onNavigate: () => void) => (
+                        <FinanceSidebarNavigation
+                          onNavigate={onNavigate}
+                          reviewCount={financeInbox.data?.remainingWork.count ?? 0}
+                          section={activeFinanceSection}
+                        />
+                      ),
+                    }
+                  : {})}
             planningTimezone={user.planningTimezone}
             workspaceDefinitions={workspaceDefinitions}
             weather={weather.data}
           />
         ) : null}
+        <ReviewFlowHost
+          workspace={
+            shellPathname === "/settings"
+              ? ["mail", "calendar", "tasks", "finances"].includes(activeSettingsSection)
+                ? (activeSettingsSection as "mail" | "calendar" | "tasks" | "finances")
+                : undefined
+              : activeWorkspace?.id === "today"
+                ? undefined
+                : activeWorkspace?.id
+          }
+        />
         <WorkspaceLayout
           banner={
             !online && (
@@ -1470,14 +1475,30 @@ function AuthenticatedApp({ user }: { user: User }) {
             )
           }
           primaryNavigation={
-            shellPathname === "/settings" ? null : (
+            shellPathname === "/settings" ? (
+              isMobileWorkspaceDock ? (
+                <WorkspaceAppBar
+                  workspace="account"
+                  identity={
+                    <WorkspaceSwitcher
+                      compact
+                      onNavigate={closeMobileMenu}
+                      pathname={location.pathname}
+                      user={user}
+                      weather={weather.data}
+                    />
+                  }
+                />
+              ) : null
+            ) : (
               <WorkspaceAppBarForRoute
                 sidebarOwnsTitle={
                   !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
                 }
                 workspaceSwitcher={
-                  isCalendarWorkspace && isMobileWorkspaceDock ? (
+                  isMobileWorkspaceDock ? (
                     <WorkspaceSwitcher
+                      compact
                       onNavigate={closeMobileMenu}
                       pathname={location.pathname}
                       user={user}
@@ -1499,7 +1520,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         >
           <main
-            className={`content${isSpatialCalendar ? " content--calendar" : sidebarMode === "mail" ? " content--mail" : ""}`}
+            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1559,6 +1580,24 @@ function AuthenticatedApp({ user }: { user: User }) {
   );
 }
 
+function LegacyReviewRedirect({ workspace }: { workspace: "mail" | "calendar" | "finances" }) {
+  const [params] = useSearchParams();
+  const item = params.get("item");
+  const question = params.get("question");
+  const approval = params.get("approval");
+  const contextual = params.get("contextualQuestion");
+  const id = item
+    ? `finance-review:${item}`
+    : contextual
+      ? `finance-contextual:${contextual}`
+      : question
+        ? `${workspace === "mail" ? "mail-question" : "finance-action"}:${question}`
+        : approval
+          ? `finance-action:${approval}`
+          : "open";
+  return <Navigate replace to={`/${workspace}?review=${encodeURIComponent(id)}`} />;
+}
+
 function WorkspaceRoutes({
   calendarTodaySnap,
   calendars,
@@ -1585,6 +1624,13 @@ function WorkspaceRoutes({
 }) {
   return (
     <Routes>
+      {(["calendar", "mail", "tasks", "finances"] as const).map((workspace) => (
+        <Route
+          key={workspace}
+          path={`/${workspace}/decisions`}
+          element={<Navigate replace to={`/${workspace}?review=open`} />}
+        />
+      ))}
       <Route
         path="/today"
         element={
@@ -1602,7 +1648,7 @@ function WorkspaceRoutes({
         path="/calendar"
         element={<CalendarPage setEditor={setEditor} todaySnap={calendarTodaySnap} user={user} />}
       />
-      <Route path="/calendar/review" element={<CalendarStewardshipPage />} />
+      <Route path="/calendar/review" element={<LegacyReviewRedirect workspace="calendar" />} />
       <Route
         path="/reminders"
         element={
@@ -1624,15 +1670,16 @@ function WorkspaceRoutes({
         }
       />
       <Route path="/mail" element={<MailFeaturePage user={user} />} />
-      <Route path="/mail/review" element={<MailStewardshipPage />} />
+      <Route path="/mail/review" element={<LegacyReviewRedirect workspace="mail" />} />
       <Route
         path="/automations"
         element={<Navigate replace to="/settings?section=workspace-access" />}
       />
       <Route path="/activity" element={<LegacySettingsRedirect section="activity" />} />
-      <Route path="/reviews" element={<LegacySettingsRedirect section="reviews" />} />
+      <Route path="/reviews" element={<Navigate replace to="/settings?section=profile" />} />
       <Route path="/goals" element={<LegacySettingsRedirect section="goals" />} />
       <Route path="/motives" element={<LegacySettingsRedirect section="motives" />} />
+      <Route path="/finances/review/*" element={<LegacyReviewRedirect workspace="finances" />} />
       <Route
         path="/finances/profile"
         element={<Navigate replace to="/settings?section=finances#guidance" />}
@@ -1678,14 +1725,14 @@ function SidebarNavigationItem({
         isActive={isActive}
         tooltip={label}
       >
-        <NavLink onClick={onNavigate} to={path}>
+        <Link onClick={onNavigate} to={path} aria-current={isActive ? "page" : undefined}>
           {workspaceId ? (
             <WorkspaceIcon size="sm" workspace={workspaceId} />
           ) : (
             <NavigationIcon active={isActive} fallback={Icon} label={label} />
           )}
           <span>{label}</span>
-        </NavLink>
+        </Link>
       </ShadcnSidebarMenuButton>
       <SidebarItemMeta attention={Boolean(badge)} count={count} label={label} />
     </ShadcnSidebarMenuItem>
@@ -1693,6 +1740,9 @@ function SidebarNavigationItem({
 }
 
 const navigationIcons = {
+  Profile: UserCircleIcon,
+  "Security & access": LockIcon,
+  "Activity log": PulseIcon,
   Account: UserCircleIcon,
   "Connected agents": PlugIcon,
   Appearance: PaintBrushIcon,
@@ -1767,7 +1817,10 @@ function WorkspaceAppBarForRoute({
 }) {
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
-  const identity = sidebarOwnsTitle ? null : isSpatialCalendar ? (
+  const isReviewQueue = pathname.endsWith("/decisions");
+  const identity = isReviewQueue ? (
+    <span className="workspace-app-bar__title">Needs review</span>
+  ) : sidebarOwnsTitle ? null : isSpatialCalendar ? (
     <CalendarAppBarIdentity user={user} workspaceSwitcher={workspaceSwitcher} />
   ) : pathname === "/today" ? (
     <div className="calendar-app-bar__identity-cluster">
@@ -1794,7 +1847,7 @@ function WorkspaceAppBarForRoute({
       {pageTitle ?? workspaceDefinitions.find((item) => item.id === workspace)?.label}
     </span>
   );
-  const context = isSpatialCalendar ? (
+  const context = isReviewQueue ? null : isSpatialCalendar ? (
     <CalendarAppBarControls onToday={onCalendarToday} user={user} />
   ) : pathname === "/today" ? (
     <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
@@ -1828,24 +1881,43 @@ function WorkspaceAppBarForRoute({
               <TooltipContent side="bottom">Keep window on top</TooltipContent>
             </Tooltip>
           )}
-          {pathname === "/reminders" ? (
-            <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
-          ) : workspace === "tasks" ? (
-            <TasksCreateButton
-              onCreate={() => setEditor({ kind: "task" })}
-              onCreateReminder={() => setEditor({ kind: "reminder" })}
-            />
-          ) : workspace === "calendar" ? null : workspace === "mail" ? (
-            <MailAccountsControl />
-          ) : workspace === "finances" ? (
-            <FinanceAddTransactionButton />
-          ) : workspace === "account" ? null : (
-            <CreateMenu setEditor={setEditor} />
-          )}
+          <div
+            className={
+              workspace !== "mail" && workspace !== "calendar" && workspace !== "account"
+                ? "workspace-create-actions"
+                : undefined
+            }
+          >
+            {isReviewQueue ? null : pathname === "/reminders" ? (
+              <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
+            ) : workspace === "tasks" ? (
+              <TasksCreateButton
+                onCreate={() => setEditor({ kind: "task" })}
+                onCreateReminder={() => setEditor({ kind: "reminder" })}
+              />
+            ) : workspace === "calendar" ? null : workspace === "mail" ? (
+              <MailAccountsControl />
+            ) : workspace === "finances" ? (
+              <FinanceAddTransactionButton />
+            ) : workspace === "account" ? null : (
+              <CreateMenu setEditor={setEditor} />
+            )}
+          </div>
         </>
       }
       context={context}
-      identity={identity}
+      identity={
+        <>
+          {workspaceSwitcher && !isSpatialCalendar && pathname !== "/today"
+            ? workspaceSwitcher
+            : null}
+          {identity}
+          {workspaceSwitcher &&
+          (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
+            <ReviewNavigation workspace={workspace} />
+          ) : null}
+        </>
+      }
       workspace={workspace}
     />
   );
@@ -3230,6 +3302,7 @@ function CalendarAppBarIdentity({
           </span>
         </h2>
       </div>
+      <ReviewNavigation workspace="calendar" />
     </div>
   );
 }
@@ -3401,11 +3474,6 @@ function CalendarAccountsControl() {
               </Link>
             </ShadcnButton>
           ) : null
-        }
-        secondaryAction={
-          <ShadcnButton asChild className="w-full justify-start" size="sm" variant="ghost">
-            <Link to="/calendar/review">Schedule health</Link>
-          </ShadcnButton>
         }
         title="Calendars"
       >
@@ -5915,6 +5983,7 @@ function MailSyncButton({
 }
 
 type SettingsSectionId =
+  | "security"
   | "setup"
   | "activity"
   | "agent-connections"
@@ -5938,6 +6007,20 @@ type SettingsSectionId =
   | "rituals"
   | "workspace-access";
 
+const secondarySettings: Array<{
+  icon: Icon;
+  id: SettingsSectionId;
+  label: string;
+  parent: SettingsSectionId;
+}> = [
+  { icon: SparklesIcon, id: "setup", label: "Setup", parent: "profile" },
+  { icon: PlugIcon, id: "agent-connections", label: "Connected agents", parent: "connections" },
+  { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access", parent: "security" },
+  { icon: LockIcon, id: "sessions", label: "Signed-in devices", parent: "security" },
+  { icon: UserIcon, id: "invitations", label: "Invitations", parent: "security" },
+  { icon: ImageIcon, id: "wallpaper", label: "Wallpaper", parent: "appearance" },
+  { icon: SparklesIcon, id: "pet", label: "Desktop pet", parent: "desktop" },
+];
 const settingsNavigation: Array<{
   items: Array<{ icon: Icon; id: SettingsSectionId; label: string }>;
   label: string;
@@ -5945,68 +6028,60 @@ const settingsNavigation: Array<{
   {
     label: "Account",
     items: [
-      { icon: UserIcon, id: "profile", label: "Account" },
-      { icon: SparklesIcon, id: "setup", label: "Setup" },
+      { icon: UserIcon, id: "profile", label: "Profile" },
+      { icon: CloudIcon, id: "connections", label: "Connections" },
+      { icon: LockIcon, id: "security", label: "Security & access" },
+      { icon: ActivityIcon, id: "activity", label: "Activity log" },
     ],
   },
   {
     label: "Personal",
     items: [
-      { icon: SparklesIcon, id: "rituals", label: "Rituals" },
       { icon: TargetIcon, id: "goals", label: "Goals" },
       { icon: CompassIcon, id: "motives", label: "Motives" },
-      { icon: ShieldCheckIcon, id: "reviews", label: "Reviews" },
+      { icon: SparklesIcon, id: "rituals", label: "Rituals" },
     ],
-  },
-  {
-    label: "Experience",
-    items: [
-      { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
-      { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
-    ],
-  },
-  {
-    label: "Desktop",
-    items: [
-      { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
-      { icon: SparklesIcon, id: "pet", label: "Desktop pet" },
-      { icon: PulseIcon, id: "notifications", label: "Notifications" },
-    ],
-  },
-  {
-    label: "History & access",
-    items: [
-      { icon: ActivityIcon, id: "activity", label: "Activity" },
-      { icon: LockIcon, id: "sessions", label: "Sessions" },
-      { icon: UserIcon, id: "invitations", label: "Invitations" },
-    ],
-  },
-  {
-    label: "Sources",
-    items: [{ icon: CloudIcon, id: "connections", label: "Connections" }],
   },
   {
     label: "Workspaces",
     items: [
-      { icon: MailIcon, id: "mail", label: "Mail" },
-      { icon: BankIcon, id: "finances", label: "Finances" },
       { icon: CalendarIcon, id: "calendar", label: "Calendar" },
       { icon: ListChecksIcon, id: "tasks", label: "Tasks" },
+      { icon: MailIcon, id: "mail", label: "Mail" },
+      { icon: BankIcon, id: "finances", label: "Finances" },
     ],
   },
   {
-    label: "Agents",
+    label: "App",
     items: [
-      { icon: PlugIcon, id: "agent-connections", label: "Connected agents" },
-      { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access" },
-      { ...textingSettingsNavigationItem, id: "texting" },
+      { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
+      { icon: PulseIcon, id: "notifications", label: "Notifications" },
+      { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
+      { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
     ],
   },
 ];
-
-const settingsSectionIds = new Set<SettingsSectionId>(
-  settingsNavigation.flatMap((group) => group.items.map((item) => item.id)),
-);
+const settingsSectionIds = new Set<SettingsSectionId>([
+  ...settingsNavigation.flatMap((group) => group.items.map((item) => item.id)),
+  ...secondarySettings.map((item) => item.id),
+  "reviews",
+]);
+function settingsParent(section: SettingsSectionId): SettingsSectionId {
+  return secondarySettings.find((item) => item.id === section)?.parent ?? section;
+}
+function searchableSettingsNavigation(canManageInvitations: boolean) {
+  return [
+    ...visibleSettingsNavigation(canManageInvitations),
+    {
+      label: "More settings",
+      items: secondarySettings.filter(
+        (item) =>
+          (item.id !== "invitations" || canManageInvitations) &&
+          (!["wallpaper", "pet"].includes(item.id) || isTauri()),
+      ),
+    },
+  ];
+}
 
 function settingsSectionFromSearch(search: string): SettingsSectionId {
   const requestedSection = new URLSearchParams(search).get("section");
@@ -6027,8 +6102,9 @@ export function settingsSectionPath(section: SettingsSectionId): string {
 
 function settingsSectionLabel(section: SettingsSectionId): string {
   return (
-    settingsNavigation.flatMap((group) => group.items).find((item) => item.id === section)?.label ??
-    "Settings"
+    [...settingsNavigation.flatMap((group) => group.items), ...secondarySettings].find(
+      (item) => item.id === section,
+    )?.label ?? "Settings"
   );
 }
 
@@ -6107,7 +6183,7 @@ function SettingsSidebarNavigation({
                         id === "connections" || id === "agent-connections" ? counts[id] : undefined
                       }
                       icon={icon}
-                      isActive={section === id}
+                      isActive={settingsParent(section) === id}
                       key={id}
                       label={label}
                       onNavigate={onNavigate}
@@ -6138,8 +6214,24 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     return <Navigate replace to={`/settings?${next.toString()}`} />;
   }
   const section = settingsSectionFromSearch(location.search);
+  const legacyRule = new URLSearchParams(location.search).get("reviewRule");
+  if (section === "mail" && legacyRule)
+    return (
+      <Navigate
+        replace
+        to={`/settings?section=mail&review=${encodeURIComponent(`mail-rule:${legacyRule}`)}`}
+      />
+    );
+  if (section === "reviews") {
+    const next = new URLSearchParams(location.search);
+    next.delete("section");
+    return <Navigate replace to={`/reviews${next.size ? `?${next}` : ""}`} />;
+  }
   if (section === "wallpaper" && !isTauri()) {
     return <Navigate replace to="/settings?section=appearance" />;
+  }
+  if (["pet", "notifications"].includes(section) && !isTauri()) {
+    return <Navigate replace to="/settings?section=desktop" />;
   }
   if (section === "invitations" && user.canManageInvitations !== true) {
     return <Navigate replace to="/settings?section=profile" />;
@@ -6147,27 +6239,85 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
   return (
     <SettingsPageLayout
       key={section}
+      actions={
+        section === "calendar" ||
+        section === "tasks" ||
+        section === "mail" ||
+        section === "finances" ? (
+          <ReviewNavigation workspace={section} />
+        ) : undefined
+      }
       title={settingsSectionLabel(section)}
       description={settingsDescriptions[section]}
       search={
-        <SettingsSearch groups={visibleSettingsNavigation(user.canManageInvitations === true)} />
+        <SettingsSearch groups={searchableSettingsNavigation(user.canManageInvitations === true)} />
       }
     >
+      {settingsParent(section) !== section ? (
+        <ShadcnButton asChild variant="ghost" size="sm">
+          <Link to={settingsSectionPath(settingsParent(section))}>
+            Back to {settingsSectionLabel(settingsParent(section))}
+          </Link>
+        </ShadcnButton>
+      ) : null}
       {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
       {section === "finances" ? (
         <div className="settings-stack">
-          <WorkspaceSettings domain="finances" />
           <FinanceSettings />
+          <WorkspaceSettings domain="finances" />
         </div>
       ) : null}
       {section === "calendar" ? (
         <div className="settings-stack">
-          <WorkspaceSettings domain="calendar" />
           <CalendarsSettings setEditor={setEditor} />
+          <WorkspaceSettings domain="calendar" />
         </div>
       ) : null}
       {section === "tasks" ? <WorkspaceSettings domain="tasks" /> : null}
-      {section === "connections" ? <ConnectorsSettings /> : null}
+      {section === "connections" ? (
+        <div className="settings-stack">
+          <ConnectorsSettings />
+          <RelatedSettings
+            title="Assistants"
+            items={[
+              {
+                label: "Connected agents",
+                description: "Manage assistant connections, credentials, and granted permissions.",
+                section: "agent-connections",
+              },
+            ]}
+          />
+        </div>
+      ) : null}
+      {section === "security" ? (
+        <div className="settings-stack">
+          <ProfileSecurity user={user} />
+          <RelatedSettings
+            title="Access"
+            items={[
+              {
+                label: "Signed-in devices",
+                description: "Review active sessions and revoke devices you no longer use.",
+                section: "sessions",
+              },
+              {
+                label: "Workspace access",
+                description: "Inspect permissions by workspace and manage approval policy.",
+                section: "workspace-access",
+              },
+              ...(user.canManageInvitations
+                ? [
+                    {
+                      label: "Invitations",
+                      description: "Manage invitations to nohmi.",
+                      section: "invitations",
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </div>
+      ) : null}
       {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
       {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
       {section === "activity" ? (
@@ -6181,17 +6331,67 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
           <ActivityPage />
         </SettingsSection>
       ) : null}
-      {section === "appearance" ? <ThemeSettings user={user} /> : null}
+      {section === "appearance" ? (
+        <div className="settings-stack">
+          <ThemeSettings user={user} />
+          {isTauri() ? (
+            <RelatedSettings
+              title="Desktop appearance"
+              items={[
+                {
+                  label: "Wallpaper",
+                  description: "Choose your desktop wallpaper and layout.",
+                  section: "wallpaper",
+                },
+              ]}
+            />
+          ) : null}
+        </div>
+      ) : null}
       {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
       {section === "goals" ? <GoalsPage /> : null}
       {section === "motives" ? <MotivesPage /> : null}
-      {section === "profile" ? <ProfileSettings user={user} /> : null}
+      {section === "profile" ? (
+        <div className="settings-stack">
+          <ProfileSettings user={user} />
+          <RelatedSettings
+            title="Account preferences"
+            items={[
+              {
+                label: "Setup",
+                description: "Change setup preferences or revisit the guided experience.",
+                section: "setup",
+              },
+              {
+                label: "Security & access",
+                description: "Manage your password, devices, and permissions.",
+                section: "security",
+              },
+            ]}
+          />
+        </div>
+      ) : null}
       {section === "setup" ? <SetupSettings user={user} /> : null}
-      {section === "reviews" ? <ReviewsPage /> : null}
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
       {section === "texting" ? <TextingSettings /> : null}
-      {section === "desktop" ? <DesktopDownloads /> : null}
+      {section === "desktop" ? (
+        <div className="settings-stack">
+          <DesktopDownloads />
+          {isTauri() ? (
+            <RelatedSettings
+              title="Desktop companion"
+              items={[
+                {
+                  label: "Desktop pet",
+                  description: "Choose your companion and its shortcuts.",
+                  section: "pet",
+                },
+              ]}
+            />
+          ) : null}
+        </div>
+      ) : null}
       {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
       {isTauri() && (section === "desktop" || section === "pet" || section === "notifications") ? (
         <DesktopSettingsPanel section={section} />
@@ -7760,23 +7960,6 @@ function ProfileSettings({ user }: { user: User }) {
     },
     mutationFn: api.resendEmailVerification,
   });
-  const passwordReset = useFeedbackMutation({
-    feedback: { action: "send a password reset link", safeToRetry: true },
-    mutationFn: () => api.requestPasswordReset({ email: user.email }),
-    onSuccess: () => toast.success(`Password reset link sent to ${user.email}.`),
-  });
-  const logout = useFeedbackMutation({
-    feedback: { action: "log out", safeToRetry: true },
-    mutationFn: api.logout,
-    onSuccess: () => {
-      if (isTauri()) {
-        void resetDesktopSession(queryClient);
-        return;
-      }
-      queryClient.clear();
-      window.location.assign("/");
-    },
-  });
   const timeZones = Array.from(
     new Set([
       planningTimezone,
@@ -7992,53 +8175,78 @@ function ProfileSettings({ user }: { user: User }) {
           ) : null}
         </FeedbackForm>
         <TextingSettings profile />
-        <SettingsSection title="Security" description="Manage your password and this session.">
-          <ShadcnItemGroup aria-label="Account actions">
-            <ShadcnItem size="sm" variant="secondary">
-              <ShadcnItemMedia variant="icon">
-                <KeyIcon aria-hidden="true" />
-              </ShadcnItemMedia>
-              <ShadcnItemContent>
-                <ShadcnItemTitle>Change password</ShadcnItemTitle>
-                <ShadcnItemDescription>
-                  We’ll email you a secure link to choose a new password.
-                </ShadcnItemDescription>
-              </ShadcnItemContent>
-              <ShadcnItemActions>
-                <ShadcnButton
-                  disabled={passwordReset.isPending}
-                  onClick={() => passwordReset.mutate()}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  {passwordReset.isPending ? "Sending…" : "Send link"}
-                </ShadcnButton>
-              </ShadcnItemActions>
-            </ShadcnItem>
-            <ShadcnItem size="sm" variant="secondary">
-              <ShadcnItemMedia variant="icon">
-                <LogOutIcon aria-hidden="true" />
-              </ShadcnItemMedia>
-              <ShadcnItemContent>
-                <ShadcnItemTitle>Log out</ShadcnItemTitle>
-                <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
-              </ShadcnItemContent>
-              <ShadcnItemActions>
-                <ShadcnButton
-                  disabled={logout.isPending}
-                  onClick={() => logout.mutate()}
-                  size="sm"
-                  type="button"
-                  variant="destructive"
-                >
-                  {logout.isPending ? "Logging out…" : "Log out"}
-                </ShadcnButton>
-              </ShadcnItemActions>
-            </ShadcnItem>
-          </ShadcnItemGroup>
-        </SettingsSection>
       </div>
+    </div>
+  );
+}
+
+function ProfileSecurity({ user }: { user: User }) {
+  const queryClient = useQueryClient();
+  const passwordReset = useFeedbackMutation({
+    feedback: { action: "send a password reset link", safeToRetry: true },
+    mutationFn: () => api.requestPasswordReset({ email: user.email }),
+    onSuccess: () => toast.success(`Password reset link sent to ${user.email}.`),
+  });
+  const logout = useFeedbackMutation({
+    feedback: { action: "log out", safeToRetry: true },
+    mutationFn: api.logout,
+    onSuccess: () => {
+      if (isTauri()) {
+        void resetDesktopSession(queryClient);
+        return;
+      }
+      queryClient.clear();
+      window.location.assign("/");
+    },
+  });
+  return (
+    <div className="settings-stack">
+      <SettingsSection title="Security" description="Manage your password and this session.">
+        <ShadcnItemGroup aria-label="Account actions">
+          <ShadcnItem size="sm" variant="secondary">
+            <ShadcnItemMedia variant="icon">
+              <KeyIcon aria-hidden="true" />
+            </ShadcnItemMedia>
+            <ShadcnItemContent>
+              <ShadcnItemTitle>Change password</ShadcnItemTitle>
+              <ShadcnItemDescription>
+                We’ll email you a secure link to choose a new password.
+              </ShadcnItemDescription>
+            </ShadcnItemContent>
+            <ShadcnItemActions>
+              <ShadcnButton
+                disabled={passwordReset.isPending}
+                onClick={() => passwordReset.mutate()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {passwordReset.isPending ? "Sending…" : "Send link"}
+              </ShadcnButton>
+            </ShadcnItemActions>
+          </ShadcnItem>
+          <ShadcnItem size="sm" variant="secondary">
+            <ShadcnItemMedia variant="icon">
+              <LogOutIcon aria-hidden="true" />
+            </ShadcnItemMedia>
+            <ShadcnItemContent>
+              <ShadcnItemTitle>Log out</ShadcnItemTitle>
+              <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
+            </ShadcnItemContent>
+            <ShadcnItemActions>
+              <ShadcnButton
+                disabled={logout.isPending}
+                onClick={() => logout.mutate()}
+                size="sm"
+                type="button"
+                variant="destructive"
+              >
+                {logout.isPending ? "Logging out…" : "Log out"}
+              </ShadcnButton>
+            </ShadcnItemActions>
+          </ShadcnItem>
+        </ShadcnItemGroup>
+      </SettingsSection>
       <MutationFeedback feedback={passwordReset.feedback} />
       <MutationFeedback feedback={logout.feedback} />
     </div>

@@ -117,7 +117,8 @@ it("shows the requested question and exact transaction evidence, then advances o
   expect(api.getFinanceTransaction).toHaveBeenCalledWith(transactionId);
   expect(screen.getAllByLabelText("Your answer")).toHaveLength(1);
   await user.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
-  await user.selectOptions(screen.getByLabelText("Category"), categoryId);
+  await user.type(screen.getByRole("combobox", { name: "Category" }), "Dining");
+  await user.keyboard("{Enter}");
   await user.type(screen.getByLabelText("Your answer"), "Dinner with a friend");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(api.answerFinanceReview).toHaveBeenCalledWith(reviewId, {

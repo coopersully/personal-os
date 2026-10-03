@@ -70,6 +70,7 @@ function ComboboxInput({
 }
 
 function ComboboxContent({
+  portalContainer,
   align = "start",
   alignOffset = 0,
   anchor,
@@ -77,11 +78,12 @@ function ComboboxContent({
   side = "bottom",
   sideOffset = 6,
   ...props
-}: ComboboxPrimitive.Popup.Props &
+}: { portalContainer?: React.RefObject<HTMLElement | null> } & ComboboxPrimitive.Popup.Props &
   Pick<ComboboxPrimitive.Positioner.Props, "align" | "alignOffset" | "anchor" | "side" | "sideOffset">) {
   return (
-    <ComboboxPrimitive.Portal>
+    <ComboboxPrimitive.Portal container={portalContainer}>
       <ComboboxPrimitive.Positioner
+        collisionBoundary={portalContainer?.current ?? undefined}
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
@@ -92,7 +94,7 @@ function ComboboxContent({
         <ComboboxPrimitive.Popup
           data-slot="combobox-content"
           className={cn(
-            "group/combobox-content relative max-h-96 w-(--anchor-width) max-w-(--available-width) min-w-(--anchor-width) origin-(--transform-origin) overflow-hidden rounded-[var(--radius)] bg-popover text-popover-foreground duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "group/combobox-content relative flex flex-col max-h-[min(24rem,var(--available-height))] w-(--anchor-width) max-w-(--available-width) min-w-(--anchor-width) origin-(--transform-origin) overflow-hidden rounded-[var(--radius)] bg-popover text-popover-foreground duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className,
           )}
           {...props}
@@ -106,7 +108,7 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
     <ComboboxPrimitive.List
       data-slot="combobox-list"
-      className={cn("max-h-60 scroll-py-1 overflow-y-auto p-1 data-empty:p-0", className)}
+      className={cn("min-h-0 max-h-60 scroll-py-1 overflow-y-auto p-1 data-empty:p-0", className)}
       {...props}
     />
   )

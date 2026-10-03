@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { settingMatchScore, settingsFieldId, settingsFields } from "./settings-fields.js";
 
 export const settingsDescriptions = {
+  security: "Manage your password, signed-in devices, permissions, and approvals.",
   setup: "Choose your setup preferences or revisit the guided experience.",
   profile: "Your profile, connected accounts, and workspace attention.",
   rituals: "Shape your morning and evening routines.",
@@ -31,16 +32,17 @@ export const settingsDescriptions = {
   sessions: "Manage devices signed in to your account.",
   invitations: "Invite people and manage account invitations.",
   connections: "Connect accounts and check their sync health.",
-  mail: "Manage Mail readiness, rules, and agent access.",
+  mail: "Manage mail accounts, rules, guidance, and permissions.",
   finances: "Manage financial guidance, preferences, and access.",
   calendar: "Choose visible calendars and manage Calendar access.",
-  tasks: "Manage Tasks readiness and agent access.",
+  tasks: "Manage task guidance and permissions.",
   "agent-connections": "Connect assistants and manage their credentials.",
   "workspace-access": "Choose what connected agents can do in each workspace.",
   texting: "Connect a phone number to message your agents.",
 } satisfies Record<string, string>;
 
 const searchTerms: Record<keyof typeof settingsDescriptions, string> = {
+  security: "password security access permissions sessions devices invitations approval policy",
   setup: "onboarding workspaces welcome getting started",
   profile:
     "password security time zone timezone workday first last name email address location logout",

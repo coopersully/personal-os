@@ -832,21 +832,25 @@ p {
   flex: 0 0 auto;
   justify-content: center;
 }
+.account-workspace[data-workspace="calendar"],
 .workspace-icon[data-workspace="calendar"],
 .workspace-rail__link[data-workspace="calendar"],
 .workspace-navigation-item[data-workspace="calendar"] {
   --workspace-icon-accent: var(--workspace-calendar-accent);
 }
+.account-workspace[data-workspace="tasks"],
 .workspace-icon[data-workspace="tasks"],
 .workspace-rail__link[data-workspace="tasks"],
 .workspace-navigation-item[data-workspace="tasks"] {
   --workspace-icon-accent: var(--workspace-tasks-accent);
 }
+.account-workspace[data-workspace="mail"],
 .workspace-icon[data-workspace="mail"],
 .workspace-rail__link[data-workspace="mail"],
 .workspace-navigation-item[data-workspace="mail"] {
   --workspace-icon-accent: var(--workspace-mail-accent);
 }
+.account-workspace[data-workspace="finances"],
 .workspace-icon[data-workspace="finances"],
 .workspace-rail__link[data-workspace="finances"],
 .workspace-navigation-item[data-workspace="finances"] {
@@ -1124,11 +1128,7 @@ p {
 .workspace-dock-sheet__items {
   gap: 0;
 }
-.workspace-dock-sheet__account {
-  display: flex;
-  justify-content: flex-start;
-  padding: 0 20px;
-}
+
 .workspace-app-bar__context {
   align-items: center;
   display: flex;
@@ -5022,6 +5022,10 @@ p {
   gap: 12px;
   justify-content: space-between;
 }
+.reviews-page__workspace-filter:has(input[type="search"]) {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
 .reviews-page__workspace-filter {
   color: var(--muted);
   display: flex;
@@ -5496,7 +5500,7 @@ p {
 }
 .modal {
   animation: modal-in 0.2s ease-out;
-  background: var(--paper);
+  background: var(--background);
   border: 1px solid transparent;
   border-radius: var(--radius-xl);
   max-height: calc(100vh - 40px);
@@ -7428,6 +7432,18 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   isolation: isolate;
   overflow: hidden;
 }
+/* Workspace summaries tint the record, not a framed icon. Actions have distinct destinations. */
+.account-workspace {
+  background: color-mix(in oklab, var(--workspace-icon-accent) 18%, var(--card));
+  border: 0;
+  color: var(--card-foreground);
+}
+.account-workspace__icon {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  color: var(--workspace-icon-accent);
+}
 .account-workspace-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
@@ -7448,4 +7464,55 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 .brand-pattern--profile .brand-pattern__tile {
   font-size: clamp(1rem, 2vw, 1.75rem);
+}
+
+/* Review entry emphasis uses the same semantic attention palette as alerts. */
+.review-navigation[data-attention="true"],
+.review-navigation[data-attention="true"]:hover,
+.review-navigation[data-attention="true"][data-active="true"] {
+  background: var(--status-warning-surface);
+  color: var(--status-warning-foreground);
+}
+.reviews-page__filters > .workspace-topbar__search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.review-navigation__count { display: none; font-variant-numeric: tabular-nums; }
+
+/* Mobile workspace chrome shares desktop switcher identity and one bottom-end action baseline. */
+@media (max-width: 900px) {
+  .review-navigation__label { display: none; }
+  .review-navigation__count { display: inline; }
+  .workspace-dock-sheet__navigation { padding-inline: 1rem; }
+  .workspace-dock-sheet__navigation > [data-slot="sidebar-group"] + [data-slot="sidebar-group"] { margin-block-start: .75rem; }
+  .workspace-dock-sheet [data-slot="sidebar-menu-button"],
+  .workspace-dock-sheet [data-slot="sidebar-menu-sub-button"] { min-height: 2.75rem; height: auto; }
+  .workspace-dock-sheet [data-slot="sidebar-menu-action"] { top: 0; right: 0; width: 2.75rem; height: 2.75rem; }
+  .workspace-dock-sheet [data-slot="sidebar-menu-action"]::after { inset: 0; }
+  .workspace-dock-sheet [data-slot="sidebar-menu-item"]:has(> [data-slot="sidebar-menu-action"]) > [data-slot="sidebar-menu-button"] { padding-inline-end: 2.75rem; }
+  .workspace-dock-sheet [data-slot="sidebar-menu-badge"] { top: .625rem; }
+  .workspace-dock-sheet__items [data-slot="item-actions"] { margin-inline-start: auto; flex-shrink: 0; }
+  .workspace-app-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    height: auto;
+    min-height: var(--chrome-height);
+    padding-block: .5rem;
+  }
+  .workspace-app-bar__identity { grid-column: 1 / -1; min-height: 2rem; display: flex; align-items: center; gap: .5rem; }
+  .workspace-app-bar__context:empty,
+  .workspace-app-bar__actions:has(> div:empty) { display: none; }
+  .workspace-app-bar__actions:has(.workspace-create-actions) { display: contents; }
+  .workspace-app-bar__context { justify-content: flex-start; }
+  .workspace-app-bar__context:has(.calendar-app-bar__controls) { grid-column: 1 / -1; }
+  .workspace-app-bar__identity > [data-slot="sidebar-menu"] { width: auto; flex: none; }
+  .calendar-workspace-switcher .sidebar__workspace-trigger { width: 2rem; }
+  .workspace-app-bar__identity .review-navigation { margin-inline-start: auto; }
+  .calendar-app-bar__identity-cluster { width: 100%; }
+  .workspace-dock { display: flex; left: auto; right: max(1rem, env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); width: auto; transform: none; }
+
+  .workspace-create-actions { position: fixed; right: calc(4.75rem + env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); z-index: 35; display: flex; align-items: flex-end; gap: .125rem; padding: .25rem; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); }
+  .workspace-app-bar__actions .workspace-create-actions [data-slot="button"] { height: 2.75rem; min-width: 2.75rem; padding-inline: .75rem; border-radius: 999px; background: transparent; color: inherit; }
+  .mail-floating-compose[data-state="closed"] { right: calc(4.75rem + env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); width: min(38rem, calc(100vw - 5.75rem)); }
+  .calendar-floating-nav[data-mode="closed"] { left: 50%; right: auto; bottom: max(1rem, env(safe-area-inset-bottom)); width: max-content; max-width: calc(100vw - 2rem); transform: translateX(-50%); justify-content: center; }
 }

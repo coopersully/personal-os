@@ -1,16 +1,8 @@
 import type { WeatherSnapshot } from "@personal-os/domain";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  type Icon,
-  KeyIcon,
-  LayersIcon,
-  LogOutIcon,
-  SettingsIcon,
-  SparklesIcon,
-} from "@/components/icons";
+import { FloatingActionButton, FloatingActions } from "@/components/floating-actions";
+import { CheckIcon, ChevronDownIcon, LayersIcon, SettingsIcon } from "@/components/icons";
 import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +10,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -70,20 +61,16 @@ function DockAccountIcon() {
 }
 
 export function MobileWorkspaceDock({
-  accountName,
+  showWorkspaceSwitcher = true,
   accountSections,
-  onLogout,
   renderWorkspaceNavigation,
-  onRequestPasswordReset,
   pathname,
   planningTimezone,
   weather,
   workspaceDefinitions,
 }: {
-  accountName: string;
+  showWorkspaceSwitcher?: boolean;
   accountSections: MobileWorkspacePage[];
-  onLogout: () => void;
-  onRequestPasswordReset: () => void;
   pathname: string;
   renderWorkspaceNavigation?: (onNavigate: () => void) => ReactNode;
   planningTimezone: string;
@@ -104,87 +91,83 @@ export function MobileWorkspaceDock({
       ? "Today"
       : activeWorkspace.label
     : "Settings";
-  // The shell resolves a non-empty account name before it reaches the dock.
-  const accountFirstName = accountName.trim().split(/\s+/)[0];
 
   return (
     <nav aria-label="Workspace dock" className="workspace-dock">
-      <div className="workspace-dock__pill">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
+      {showWorkspaceSwitcher ? (
+        <div className="workspace-dock__pill">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label="Switch workspace"
+                className="workspace-dock__workspace-trigger"
+                variant="ghost"
+              >
+                {activeWorkspace ? (
+                  <DockWorkspaceIcon
+                    timeZone={planningTimezone}
+                    weather={weather}
+                    workspace={activeWorkspace}
+                  />
+                ) : (
+                  <DockAccountIcon />
+                )}
+                <span>{pillLabel}</span>
+                <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="center"
               aria-label="Switch workspace"
-              className="workspace-dock__workspace-trigger"
-              variant="ghost"
+              className="workspace-dock__workspace-menu"
+              side="top"
             >
-              {activeWorkspace ? (
-                <DockWorkspaceIcon
-                  timeZone={planningTimezone}
-                  weather={weather}
-                  workspace={activeWorkspace}
-                />
-              ) : (
-                <DockAccountIcon />
-              )}
-              <span>{pillLabel}</span>
-              <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="center"
-            aria-label="Switch workspace"
-            className="workspace-dock__workspace-menu"
-            side="top"
-          >
-            <DropdownMenuGroup>
-              {workspaceDefinitions.map((workspace) => {
-                const selected = workspace.id === activeWorkspace?.id;
-                return (
-                  <DropdownMenuItem asChild key={workspace.id}>
-                    <Link
-                      aria-current={selected ? "page" : undefined}
-                      aria-label={workspace.label}
-                      to={workspace.path}
-                    >
-                      <DockWorkspaceIcon
-                        timeZone={planningTimezone}
-                        weather={weather}
-                        workspace={workspace}
-                      />
-                      <span>{workspace.label}</span>
-                      {selected ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
-                    </Link>
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem asChild>
-                <Link
-                  aria-current={activeWorkspace ? undefined : "page"}
-                  aria-label="Settings"
-                  to="/settings"
-                >
-                  <SettingsIcon aria-hidden="true" />
-                  <span>Settings</span>
-                  {activeWorkspace ? null : <CheckIcon aria-hidden="true" className="ml-auto" />}
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+              <DropdownMenuGroup>
+                {workspaceDefinitions.map((workspace) => {
+                  const selected = workspace.id === activeWorkspace?.id;
+                  return (
+                    <DropdownMenuItem asChild key={workspace.id}>
+                      <Link
+                        aria-current={selected ? "page" : undefined}
+                        aria-label={workspace.label}
+                        to={workspace.path}
+                      >
+                        <DockWorkspaceIcon
+                          timeZone={planningTimezone}
+                          weather={weather}
+                          workspace={workspace}
+                        />
+                        <span>{workspace.label}</span>
+                        {selected ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
+                      </Link>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem asChild>
+                  <Link
+                    aria-current={activeWorkspace ? undefined : "page"}
+                    aria-label="Settings"
+                    to="/settings"
+                  >
+                    <SettingsIcon aria-hidden="true" />
+                    <span>Settings</span>
+                    {activeWorkspace ? null : <CheckIcon aria-hidden="true" className="ml-auto" />}
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
       <Sheet open={open} onOpenChange={setOpen}>
-        <Button
-          aria-label="Workspace actions"
-          className="workspace-dock__actions workspace-dock__actions--bubble"
-          onClick={() => setOpen(true)}
-          size="icon"
-          variant="default"
-        >
-          <LayersIcon aria-hidden="true" />
-        </Button>
+        <FloatingActions aria-label="Page navigation">
+          <FloatingActionButton label="Workspace actions" onClick={() => setOpen(true)}>
+            <LayersIcon aria-hidden="true" />
+          </FloatingActionButton>
+        </FloatingActions>
         <SheetContent
           aria-describedby="workspace-dock-sheet-description"
           aria-label={sheetLabel}
@@ -198,7 +181,9 @@ export function MobileWorkspaceDock({
             </SheetDescription>
           </SheetHeader>
           {renderWorkspaceNavigation ? (
-            renderWorkspaceNavigation(() => setOpen(false))
+            <div className="workspace-dock-sheet__navigation">
+              {renderWorkspaceNavigation(() => setOpen(false))}
+            </div>
           ) : (
             <section
               className="workspace-dock-sheet__section"
@@ -207,7 +192,7 @@ export function MobileWorkspaceDock({
               <h2 id="workspace-dock-pages">Pages</h2>
               <ItemGroup className="workspace-dock-sheet__items">
                 {pages.map((page) => (
-                  <Item asChild key={page.path} size="xs">
+                  <Item asChild key={page.path} size="xs" className="min-h-11 flex-nowrap">
                     <Link
                       aria-label={page.badge ? `${page.label}: ${page.badge}` : undefined}
                       onClick={() => setOpen(false)}
@@ -217,7 +202,7 @@ export function MobileWorkspaceDock({
                         <page.icon aria-hidden="true" />
                       </ItemMedia>
                       <ItemContent>
-                        <ItemTitle>{page.label}</ItemTitle>
+                        <ItemTitle className="block truncate">{page.label}</ItemTitle>
                       </ItemContent>
                       {page.badge || page.count !== undefined ? (
                         <ItemActions>
@@ -235,67 +220,8 @@ export function MobileWorkspaceDock({
               </ItemGroup>
             </section>
           )}
-          <div className="workspace-dock-sheet__account">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button aria-label={`${accountFirstName} account`} variant="ghost">
-                  {accountFirstName}
-                  <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                aria-label={`${accountFirstName} account`}
-                side="top"
-              >
-                <DropdownMenuLabel>{accountName}</DropdownMenuLabel>
-                <DropdownMenuGroup>
-                  <DockAccountMenuItem
-                    icon={SparklesIcon}
-                    label="Setup"
-                    onNavigate={() => setOpen(false)}
-                    path="/settings?section=setup"
-                  />
-                  <DockAccountMenuItem
-                    icon={SettingsIcon}
-                    label="Settings"
-                    onNavigate={() => setOpen(false)}
-                    path="/settings"
-                  />
-                  <DropdownMenuItem onSelect={onRequestPasswordReset}>
-                    <KeyIcon aria-hidden="true" /> Change password
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={onLogout} variant="destructive">
-                  <LogOutIcon aria-hidden="true" /> Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
         </SheetContent>
       </Sheet>
     </nav>
-  );
-}
-
-function DockAccountMenuItem({
-  icon: Icon,
-  label,
-  onNavigate,
-  path,
-}: {
-  icon: Icon;
-  label: string;
-  onNavigate: () => void;
-  path: string;
-}) {
-  return (
-    <DropdownMenuItem asChild>
-      <Link onClick={onNavigate} to={path}>
-        <Icon aria-hidden="true" />
-        {label}
-      </Link>
-    </DropdownMenuItem>
   );
 }

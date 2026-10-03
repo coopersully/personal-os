@@ -89,7 +89,7 @@ const guidedSetupFixture = {
 };
 const savedFinanceProfile = {
   effectiveDate: "2026-08-15",
-  employer: "nohmi Labs",
+  employer: "Harbor Arts Center",
   employmentType: "full_time" as const,
   expectedNetPay: 4125,
   grossAnnualIncome: 145000,
@@ -231,7 +231,7 @@ describe("Finance settings", () => {
     ).toBeVisible();
     expect(screen.queryByText("Monthly review guidance")).not.toBeInTheDocument();
 
-    await browser.type(screen.getByRole("textbox", { name: "Employer" }), "nohmi Labs");
+    await browser.type(screen.getByRole("textbox", { name: "Employer" }), "Harbor Arts Center");
     await browser.type(screen.getByRole("textbox", { name: "Role" }), "Product lead");
     await browser.selectOptions(
       screen.getByRole("combobox", { name: "Employment type" }),
@@ -252,7 +252,7 @@ describe("Finance settings", () => {
     await waitFor(() =>
       expect(mocks.updateFinanceProfile).toHaveBeenCalledWith({
         effectiveDate: "2026-08-15",
-        employer: "nohmi Labs",
+        employer: "Harbor Arts Center",
         employmentType: "full_time",
         expectedNetPay: 4125,
         grossAnnualIncome: 145000,

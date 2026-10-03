@@ -37,17 +37,18 @@ beforeEach(() => {
 it("shows live workspace counts and honest empty connections", async () => {
   mount();
   expect(await screen.findByText("2 items need your attention")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Review attention" })).toHaveAttribute(
-    "href",
-    "/settings?section=reviews&workspace=tasks",
-  );
   expect(await screen.findByText("No accounts connected yet.")).toBeInTheDocument();
   for (const workspace of ["Calendar", "Tasks", "Mail", "Finances"]) {
-    expect(screen.getByRole("link", { name: `Open ${workspace} settings` })).toHaveAttribute(
-      "href",
-      `/settings?section=${workspace.toLowerCase()}`,
-    );
+    expect(
+      screen.getByRole("link", { name: `Workspace settings for ${workspace}` }),
+    ).toHaveAttribute("href", `/settings?section=${workspace.toLowerCase()}`);
   }
+  expect(screen.queryByRole("link", { name: / reviews$/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("status", { name: "Tasks: Action required" })).toBeInTheDocument();
+  expect(
+    screen.queryByRole("status", { name: "Calendar: Action required" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Continue setup" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Open Today at a Glance" })).not.toBeInTheDocument();
 });
 it("surfaces setup actions and unavailable domains without claiming all clear", async () => {
@@ -65,6 +66,7 @@ it("surfaces setup actions and unavailable domains without claiming all clear", 
   mocks.listConnectors.mockRejectedValue(new Error("Unavailable"));
   mount();
   expect(await screen.findByText("Setup needs your attention")).toBeInTheDocument();
+  expect(screen.getByRole("status", { name: "Mail: Action required" })).toBeInTheDocument();
   expect(await screen.findByText("Attention status unavailable")).toBeInTheDocument();
   expect(await screen.findByText("Couldn’t check connected accounts.")).toBeInTheDocument();
   expect(screen.queryByText("No accounts connected yet.")).not.toBeInTheDocument();

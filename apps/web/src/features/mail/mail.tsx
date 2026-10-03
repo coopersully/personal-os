@@ -1,7 +1,7 @@
 import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -866,6 +866,7 @@ function UnifiedMailDestinations({
   selectedAccountIds: string[];
   unreadCount: number;
 }) {
+  const isMailbox = useLocation().pathname === "/mail";
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
     { icon: InboxIcon, label: "Inbox", value: "all" },
     { icon: EyeIcon, label: "Unread", value: "unread" },
@@ -889,7 +890,7 @@ function UnifiedMailDestinations({
             <SidebarMenuButton
               className={value === "all" && unreadCount > 0 ? "sidebar-item-with-meta" : undefined}
               asChild
-              isActive={listScope === value}
+              isActive={isMailbox && listScope === value}
               tooltip={label}
             >
               <Link
@@ -897,7 +898,10 @@ function UnifiedMailDestinations({
                 onClick={onNavigate}
                 to={`/mail${suffix}`}
               >
-                <Icon aria-hidden="true" weight={listScope === value ? "Filled" : "Outline"} />
+                <Icon
+                  aria-hidden="true"
+                  weight={isMailbox && listScope === value ? "Filled" : "Outline"}
+                />
                 <span>{label}</span>
               </Link>
             </SidebarMenuButton>

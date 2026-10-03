@@ -42,6 +42,7 @@ import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
+import { demoPlanningStory } from "./qa-planning-story.js";
 import { hashPassword } from "./security.js";
 
 export const QA_PASSWORD = ["Testing", "12345", "!"].join("");
@@ -86,7 +87,7 @@ export const qaFixtureAccounts = [
   {
     description: "Polished, fully populated product demo across every workspace.",
     displayName: "Alex Morgan",
-    email: "demo+full@ilo.test",
+    email: "demo+full@nohmi.test",
     id: "f1000000-0000-4000-8000-000000000001",
     key: "demo-full",
     password: DEMO_QA_PASSWORD,
@@ -95,7 +96,7 @@ export const qaFixtureAccounts = [
   {
     description: "Reusable loaded workspace with broad, realistic personal data.",
     displayName: "Jordan Lee",
-    email: "qa+loaded@ilo.test",
+    email: "qa+loaded@nohmi.test",
     id: "f2000000-0000-4000-8000-000000000001",
     key: "qa-loaded",
     password: QA_PASSWORD,
@@ -104,7 +105,7 @@ export const qaFixtureAccounts = [
   {
     description: "Brand-new, unverified account that opens at the start of onboarding.",
     displayName: "Sam Rivera",
-    email: "qa+onboarding-new@ilo.test",
+    email: "qa+onboarding-new@nohmi.test",
     id: "f3000000-0000-4000-8000-000000000001",
     key: "qa-onboarding-new",
     password: QA_PASSWORD,
@@ -113,7 +114,7 @@ export const qaFixtureAccounts = [
   {
     description: "Partially configured account that resumes on the Google connection step.",
     displayName: "Casey Chen",
-    email: "qa+onboarding-google@ilo.test",
+    email: "qa+onboarding-google@nohmi.test",
     id: "f4000000-0000-4000-8000-000000000001",
     key: "qa-onboarding-google",
     password: QA_PASSWORD,
@@ -122,7 +123,7 @@ export const qaFixtureAccounts = [
   {
     description: "Completed setup with no material, useful for empty-state QA.",
     displayName: "Taylor Reed",
-    email: "qa+empty@ilo.test",
+    email: "qa+empty@nohmi.test",
     id: "f5000000-0000-4000-8000-000000000001",
     key: "qa-empty",
     password: QA_PASSWORD,
@@ -131,7 +132,7 @@ export const qaFixtureAccounts = [
   {
     description: "Populated workspace with connector and financial reauthorization failures.",
     displayName: "Morgan Bell",
-    email: "qa+recovery@ilo.test",
+    email: "qa+recovery@nohmi.test",
     id: "f6000000-0000-4000-8000-000000000001",
     key: "qa-recovery",
     password: QA_PASSWORD,
@@ -140,7 +141,7 @@ export const qaFixtureAccounts = [
   {
     description: "Partially configured account that resumes on the Apple connection step.",
     displayName: "Avery Patel",
-    email: "qa+onboarding-apple@ilo.test",
+    email: "qa+onboarding-apple@nohmi.test",
     id: "f7000000-0000-4000-8000-000000000001",
     key: "qa-onboarding-apple",
     password: QA_PASSWORD,
@@ -149,7 +150,7 @@ export const qaFixtureAccounts = [
   {
     description: "Partially configured account that resumes on the finance connection step.",
     displayName: "Riley Brooks",
-    email: "qa+onboarding-finances@ilo.test",
+    email: "qa+onboarding-finances@nohmi.test",
     id: "f8000000-0000-4000-8000-000000000001",
     key: "qa-onboarding-finances",
     password: QA_PASSWORD,
@@ -158,7 +159,7 @@ export const qaFixtureAccounts = [
   {
     description: "Partially configured account at the final onboarding summary.",
     displayName: "Quinn Davis",
-    email: "qa+onboarding-ready@ilo.test",
+    email: "qa+onboarding-ready@nohmi.test",
     id: "f9000000-0000-4000-8000-000000000001",
     key: "qa-onboarding-ready",
     password: QA_PASSWORD,
@@ -568,7 +569,7 @@ function addLoadedWorkspace(
         },
       ],
       calendarId: workCalendarId,
-      conferenceUrl: "https://meet.google.com/ilo-demo-room",
+      conferenceUrl: "https://meet.google.com/arts-program-room",
       createdAt: ago(48),
       endsAt: at(today, 10 * 60),
       id: fixtureId(account, 101),
@@ -1098,10 +1099,10 @@ function addLoadedWorkspace(
   });
   data.mailDrafts.push({
     accountId: connectedAccountId,
-    body: "Historical unsent Ilo draft retained for export or deletion.",
+    body: "Historical unsent draft retained for export or deletion.",
     createdAt: ago(3),
     id: fixtureId(account, 330),
-    subject: "Historical Ilo draft",
+    subject: "Archived dinner invitation",
     to: [{ address: "research@example.com", name: "Research Team" }],
     updatedAt: ago(2),
     userId: account.id,
@@ -1428,7 +1429,7 @@ function addLoadedWorkspace(
       createdAt: ago(24 * 7),
       direction: "income",
       id: transaction(0),
-      merchant: "NOMI LABS PAYROLL",
+      merchant: "HARBOR ARTS PAYROLL",
       needsReview: false,
       providerTransactionId: `fixture-income-${todayIso}`,
       transactionDate: localDateToIso(addLocalDays(today, -7)),
@@ -1633,7 +1634,7 @@ function addLoadedWorkspace(
   data.financeProfiles.push({
     createdAt: ago(24 * 45),
     effectiveDate: localDateToIso(addLocalDays(today, -45)),
-    employer: "nohmi Labs",
+    employer: "Harbor Arts Center",
     employmentType: "full_time",
     expectedNetPay: 412_500,
     grossAnnualIncome: 14_500_000,
@@ -1641,7 +1642,7 @@ function addLoadedWorkspace(
     nextPayday: localDateToIso(addLocalDays(today, 7)),
     payAccountId: checkingId,
     payFrequency: "biweekly",
-    role: "Product Lead",
+    role: "Operations Director",
     updatedAt: now,
     userId: account.id,
   });
@@ -1651,12 +1652,12 @@ function addLoadedWorkspace(
     cadence: "biweekly",
     confidence: 9_800,
     createdAt: ago(24 * 45),
-    displayName: "nohmi Labs payroll",
+    displayName: "Harbor Arts Center payroll",
     expectedAmount: 412_500,
     id: streamId,
     lastObservedDate: localDateToIso(addLocalDays(today, -7)),
     nextExpectedDate: localDateToIso(addLocalDays(today, 7)),
-    payer: "NOMI LABS PAYROLL",
+    payer: "HARBOR ARTS PAYROLL",
     source: "user",
     status: "active",
     updatedAt: now,
@@ -1720,7 +1721,12 @@ function addLoadedWorkspace(
       action: "task.created",
       actorId: account.id,
       actorType: "user",
-      after: { title: "Draft weekly product update" },
+      after: {
+        title:
+          account.key === "demo-full"
+            ? "Draft weekly program update"
+            : "Draft weekly product update",
+      },
       before: null,
       createdAt: ago(48),
       entityId: fixtureId(account, 201),
@@ -1929,6 +1935,14 @@ export async function loadQaFixtures(
     addBaseAccount(data, account, passwordHash, now);
     if (account.scenario === "complete") addLoadedWorkspace(data, account, now, false);
     if (account.scenario === "degraded") addLoadedWorkspace(data, account, now, true);
+    if (account.key === "demo-full" && account.scenario === "complete") {
+      const story = demoPlanningStory(account.id, taskInboxPlaceholderId(account), now);
+      for (const key of ["goals", "motives", "reminders", "taskProjects"] as const) {
+        // Replace only this persona's planning records; all other fixture domains are unchanged.
+        const rows = data[key].filter((row) => row.userId !== account.id);
+        Object.assign(data, { [key]: [...rows, ...story[key]] });
+      }
+    }
   }
   const emails = accounts.map((account) => account.email);
   const ids = accounts.map((account) => account.id);

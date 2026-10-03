@@ -2,12 +2,15 @@
 
 Settings is a control surface for a person’s persistent preferences, access, and connected capabilities. Keep each screen calm: show the decision that matters now, explain a constraint where it occurs, and keep rare tuning out of the initial scan.
 
+Use the accepted [settings architecture](../design/pages/settings-architecture.md) for navigation
+and parent/secondary-page placement.
+
 ## Ownership and placement
 
 - Give every setting one canonical editing surface.
 - Edit account-wide identity, security, privacy ceilings, review bypass, shared notification policy,
-  channel connections/defaults, connected-agent credentials/scopes, User Knowledge controls, and
-  unified Reviews in centralized Settings.
+  channel connections/defaults, connected-agent credentials/scopes, and User Knowledge controls
+  in centralized Settings. Reviews is operational work owned by Today at `/reviews`.
 - Edit sources, source meanings, maintenance behavior, notification overrides, rules, learning,
   recovery, data controls, and domain access posture inside the owning workspace.
 - Let centralized Settings summarize cross-workspace health, readiness, effective policy, override

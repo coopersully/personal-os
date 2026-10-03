@@ -251,9 +251,11 @@ geometry so focus, invalid, increased-contrast, or functional data boundaries
 can become visible without layout shift. A legacy `outline` variant names an
 interaction hierarchy, not a requirement to draw an outline.
 
-Portalled overlays (menus, popovers, hover cards, comboboxes, and dialogs) use
+Portalled contextual overlays (menus, popovers, hover cards, and comboboxes) use
 `popover` / `popover-foreground`, backed by the dedicated opaque `surface-overlay`
 tone. Do not override these with canvas, card, sidebar, or a feature-local border.
+Modal dialogs, drawers, and sheets instead use `background` / `foreground`, matching the page canvas. Their headers, bodies, and footers share one continuous surface; do not tint header or footer bands. The scrim supplies separation, and internal cards may use the normal card tone.
+
 `surface-raised` is an in-flow supporting tone, not the overlay token. Contextual app-bar controls retain a quiet opaque
 resting fill, and interactive highlights use `control-hover-background` so an
 open or hovered control cannot collapse into its parent surface. Avatar
@@ -279,7 +281,7 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
 - Workspace-switcher triggers show the workspace glyph without its frame,
-  including the mobile dock. Picker items use unframed outline glyphs; the
+  including the compact mobile header trigger. Picker items use unframed outline glyphs; the
   current workspace uses a filled glyph and its colored selected surface.
   in the desktop rail, inactive destinations use neutral outline glyphs and only
   the selected destination uses a filled glyph on its colored control surface, without an icon frame. Preserve the same glyph
@@ -501,6 +503,19 @@ not sources for theme tokens.
 
 Calendar's bottom-center action group and Mail's bottom-right compose action share
 `FloatingActions` and `FloatingActionButton` (`components/floating-actions.tsx`).
+On mobile, Calendar’s closed action group stays bottom-center; other closed action groups
+align to the bottom end, with a shared safe-area
+inset and 52px surface height. Page navigation uses the same floating action
+primitives beside creation actions. The compact workspace switcher always lives
+in the top header, never in the bottom dock. Workspace review alerts also live
+in the mobile header as a glyph and compact count, keeping the full accessible label.
+Unknown counts show an ellipsis and unavailable counts show an exclamation mark, never zero.
+Contextual search and filters can occupy a second row. Mobile page sheets contain
+page navigation only: account, password, and sign-out controls belong in Settings.
+Rows preserve leading icons, truncated labels, and end-aligned metadata with 44px
+touch targets.
+Desktop placement remains workspace-specific.
+
 The feature owns positioning, safe-area/mobile-dock clearance, and the opened
 workflow; the shared block owns appearance and targets. Do not move either action
 location merely to standardize its styling.
@@ -572,3 +587,7 @@ Shared form compositions live in `components/date-input.tsx` and
 [its page specification](pages/settings.md). The date popover follows
 [shadcn Date Picker](https://ui.shadcn.com/docs/components/radix/date-picker), and
 currency uses [Input Group](https://ui.shadcn.com/docs/components/radix/input-group).
+
+### Searchable entity selection
+
+Use `SearchableSelect` for choosing one existing value from a long list, including Finance categories. It composes the shared shadcn Combobox and accepts value/label options; callers own fetching and entity permissions. The control is an inline editable text field, not a button opening a separate search box. Focusing it opens suggestions beneath the field; filtering highlights the first match, arrows change the highlight, and Enter or forward Tab commits it. Tab moves to the next available control; Shift+Tab leaves without committing, Escape cancels, and unmatched text never creates a value. Mount the popup inside its containing modal focus scope. Keep contextual popup colors distinct from the surrounding page-colored dialog.

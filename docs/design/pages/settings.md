@@ -158,11 +158,20 @@ personal details, verified phone and country, live connection health, and worksp
 summaries. Reuse the verified Agent Texting number and its consent/verification
 flow, including a direct Agent Texting link. Never silently activate texting when
 editing other profile fields. Workspace summaries combine setup actions and the
-review queue, with direct workspace/settings/review links. Failed reads are
+review queue, with a Workspace settings destination. Failed reads are
 unavailable, never healthy; do not invent per-workspace session history. Keep
 decoration in the identity header using the shared auth BrandPattern tiles, fading
 from the bottom-right toward the profile text; use theme foregrounds, not status
 colors, and respect reduced motion.
 
-Account workspace summary arrows open the corresponding workspace settings. Workspace navigation
+Account workspace summaries use a borderless workspace-tinted block, a title-sized unframed icon,
+and the shared sidebar attention dot inline with the title when setup or review work needs attention.
+Show a Workspace settings destination. Reviews opens only from the workspace alert or the action
+beside that workspace Settings title. Setup uses the settings
+destination; do not add a duplicate Continue setup action or title arrow. Workspace navigation
 belongs to the rail; the account summary does not add a Today at a Glance launch button.
+
+## Accepted navigation revision
+
+[Settings information architecture](settings-architecture.md) supersedes earlier sidebar grouping
+and the placement of Reviews in Settings. Use its parent/secondary-page and workspace layout rules.

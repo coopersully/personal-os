@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CircleCheckIcon } from "@/components/icons";
+import { SearchableSelect } from "@/components/searchable-select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
 import { savedClarification } from "./review-note.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
+import { TransactionSummary } from "./transaction-summary.js";
 
 const inboxKey = ["finance-inbox"];
 const resolutions = {
@@ -348,7 +350,7 @@ export function ReviewQuestion({
   return (
     <Card>
       <CardHeader>
-        <CardDescription>{headline}</CardDescription>
+        {headline ? <CardDescription>{headline}</CardDescription> : null}
         <CardTitle>
           <h2>{prompt}</h2>
         </CardTitle>
@@ -362,15 +364,12 @@ export function ReviewQuestion({
       </CardHeader>
       <CardContent className="grid gap-4">
         {review.context ? (
-          <p className="text-sm">
-            {review.context.date} · {review.context.institution} {review.context.accountName} ·{" "}
-            {review.context.direction === "income"
-              ? "Money in"
-              : review.context.direction === "transfer"
-                ? "Transfer"
-                : "Money out"}{" "}
-            · {review.context.pending ? "Pending" : "Posted"}
-          </p>
+          <div className="grid gap-2">
+            <TransactionSummary transaction={review.context} />
+            <p className="text-xs text-muted-foreground">
+              {review.context.institution} · {review.context.accountName}
+            </p>
+          </div>
         ) : null}
         {clarification ? (
           <Alert>
@@ -441,20 +440,18 @@ export function ReviewQuestion({
             {resolutionType === "classify_transaction" ? (
               <Field>
                 <FieldLabel htmlFor="finance-review-category">Category</FieldLabel>
-                <NativeSelect
-                  className="w-full min-w-0"
+                <SearchableSelect
                   id="finance-review-category"
+                  label="Category"
                   value={categoryId}
-                  onChange={(event) => setCategoryId(event.target.value)}
-                  disabled={mutation.isPending || categories.isPending}
-                >
-                  <NativeSelectOption value="">Choose category</NativeSelectOption>
-                  {categories.data?.map((category) => (
-                    <NativeSelectOption key={category.id} value={category.id}>
-                      {category.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                  onValueChange={setCategoryId}
+                  options={(categories.data ?? []).map((category) => ({
+                    value: category.id,
+                    label: category.name,
+                  }))}
+                  disabled={mutation.isPending || categories.isPending || categories.isError}
+                  placeholder="Choose category"
+                />
               </Field>
             ) : null}
             {resolutionType === "link_transactions" ? (

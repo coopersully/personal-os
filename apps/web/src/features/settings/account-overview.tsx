@@ -3,11 +3,16 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChevronRightIcon } from "@/components/icons";
-import { SettingsRecord, SettingsRecordAction } from "@/components/settings-record";
+import {
+  SettingsRecord,
+  SettingsRecordAction,
+  SettingsRecordContent,
+} from "@/components/settings-record";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { ItemGroup } from "@/components/ui/item";
-import { WorkspaceIcon, workspaceIdentities, workspaceIds } from "@/components/workspace-identity";
+import { Item, ItemGroup } from "@/components/ui/item";
+import { workspaceIdentities, workspaceIds } from "@/components/workspace-identity";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { ConnectionHealthBadge, connectionHealth } from "../connections/health.js";
@@ -74,45 +79,49 @@ export function AccountOverview() {
             const needsSetup = workspaceSetupNeedsPersonAction(setup[index]?.data);
             const count = work.data?.summary.byDomain[id];
             return (
-              <SettingsRecord
+              <Item
                 key={id}
-                title={identity.label}
-                leading={<WorkspaceIcon workspace={id} />}
-                description={
-                  needsSetup
-                    ? `Setup needs your attention${count ? ` · ${count.toLocaleString()} pending items` : ""}`
-                    : unavailable
+                role="listitem"
+                className="settings-record account-workspace"
+                data-workspace={id}
+              >
+                <SettingsRecordContent
+                  title={
+                    <span className="flex items-center gap-2">
+                      <identity.icon aria-hidden="true" className="account-workspace__icon" />
+                      {identity.label}
+                      <SidebarItemMeta
+                        inline
+                        attention={needsSetup || (!unavailable && Boolean(count))}
+                        label={identity.label}
+                      />
+                    </span>
+                  }
+                  description={
+                    unavailable
                       ? "Attention status unavailable"
-                      : count === undefined || setup[index]?.isPending
-                        ? "Checking workspace…"
-                        : count
-                          ? `${count.toLocaleString()} item${count === 1 ? "" : "s"} need your attention`
-                          : "No pending reviews or attention items"
-                }
-                actions={
-                  <SettingsRecordAction asChild label={`Open ${identity.label} settings`}>
-                    <Link to={`/settings?section=${id}`}>
-                      <ChevronRightIcon />
-                    </Link>
-                  </SettingsRecordAction>
-                }
-                metadata={
-                  <>
-                    {needsSetup ? (
-                      <Button asChild size="sm" variant="secondary">
-                        <Link to={`/settings?section=${id}`}>Continue setup</Link>
-                      </Button>
-                    ) : null}
-                    {count && !unavailable ? (
-                      <Button asChild size="sm" variant="secondary">
-                        <Link to={`/settings?section=reviews&workspace=${id}`}>
-                          Review attention
+                      : needsSetup
+                        ? `Setup needs your attention${count ? ` · ${count.toLocaleString()} pending items` : ""}`
+                        : count === undefined || setup[index]?.isPending
+                          ? "Checking workspace…"
+                          : count
+                            ? `${count.toLocaleString()} item${count === 1 ? " needs" : "s need"} your attention`
+                            : "No pending reviews or attention items"
+                  }
+                  metadata={
+                    <>
+                      <Button asChild size="sm" variant="ghost">
+                        <Link
+                          to={`/settings?section=${id}`}
+                          aria-label={`Workspace settings for ${identity.label}`}
+                        >
+                          Workspace settings
                         </Link>
                       </Button>
-                    ) : null}
-                  </>
-                }
-              />
+                    </>
+                  }
+                />
+              </Item>
             );
           })}
         </ItemGroup>

@@ -49,7 +49,13 @@ export function AddTransactionContext({ transactionId }: { transactionId: string
   );
 }
 
-export function FinanceContextualQuestionPage({ id }: { id: string }) {
+export function FinanceContextualQuestionPage({
+  id,
+  onChanged,
+}: {
+  id: string;
+  onChanged?: (() => Promise<void>) | undefined;
+}) {
   const query = useQuery({
     queryKey: ["finance-contextual-question", id],
     queryFn: () => api.getFinanceContextualQuestion(id),
@@ -75,13 +81,20 @@ export function FinanceContextualQuestionPage({ id }: { id: string }) {
       {query.data?.state === "available" ? (
         <ContextAnswer
           key={`${id}:${query.data.question.work.revision}`}
+          onChanged={onChanged}
           question={query.data.question}
         />
       ) : null}
     </section>
   );
 }
-function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
+function ContextAnswer({
+  question,
+  onChanged,
+}: {
+  question: FinanceContextualQuestion;
+  onChanged?: (() => Promise<void>) | undefined;
+}) {
   const [text, setText] = useState("");
   const command = useRef<FinanceAnswer | null>(null);
   const client = useQueryClient();
@@ -99,6 +112,7 @@ function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
       return api.answerFinanceContextualQuestion(command.current);
     },
     onSuccess: () => {
+      void onChanged?.();
       void client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
     },
   });

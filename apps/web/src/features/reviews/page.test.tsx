@@ -21,7 +21,7 @@ function LocationProbe() {
   return <output aria-label="Current location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderPage(path = "/reviews") {
+function renderPage(path = "/reviews", workspace?: "mail" | "calendar" | "tasks" | "finances") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { gcTime: 0, retry: false } },
   });
@@ -29,7 +29,7 @@ function renderPage(path = "/reviews") {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <TooltipProvider>
-          <ReviewsPage />
+          <ReviewsPage {...(workspace ? { workspace } : {})} />
         </TooltipProvider>
         <LocationProbe />
       </MemoryRouter>
@@ -38,6 +38,40 @@ function renderPage(path = "/reviews") {
 }
 
 describe("Reviews", () => {
+  it("locks workspace queues to their owner even when a conflicting query is supplied", async () => {
+    renderPage("/mail/decisions?workspace=calendar", "mail");
+    await screen.findByText("Review newsletters");
+    expect(mocks.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "mail", limit: 10 });
+    expect(screen.queryByLabelText("Filter by workspace")).not.toBeInTheDocument();
+  });
+
+  it("searches previews across every snapshot page and sorts the matches", async () => {
+    const base = await mocks.listAgentAccessWorkItems();
+    const item = base.items[0];
+    mocks.listAgentAccessWorkItems.mockImplementation(async ({ cursor }) => ({
+      ...base,
+      items: cursor
+        ? [
+            {
+              ...item,
+              id: "older",
+              title: "Older matching decision",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ]
+        : [{ ...item, id: "newer" }],
+      nextCursor: cursor ? null : "next",
+    }));
+    renderPage("/reviews?q=immediately&sort=oldest");
+    expect(await screen.findByText("Older matching decision")).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByRole("listitem")
+        .filter((element) => element.hasAttribute("data-work-item-id"))[0],
+    ).toHaveAttribute("data-work-item-id", "older");
+    expect(mocks.listAgentAccessWorkItems).toHaveBeenCalledWith({ cursor: "next", limit: 10 });
+  });
+
   beforeEach(() => {
     mocks.listAgentAccessWorkItems.mockReset();
     mocks.listAgentAccessWorkItems.mockResolvedValue({

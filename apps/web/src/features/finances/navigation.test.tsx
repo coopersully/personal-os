@@ -24,12 +24,7 @@ it("maps Finance paths and marks the active navigation item", async () => {
       </TooltipProvider>
     </MemoryRouter>,
   );
-  expect(screen.getByRole("link", { name: "Review 3" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", { name: "Review 3" })).toHaveAttribute(
-    "data-slot",
-    "sidebar-menu-button",
-  );
-  expect(screen.getByRole("link", { name: "Review 3" })).toHaveAttribute("data-active", "true");
+  expect(screen.queryByRole("link", { name: /^Review/ })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/finances");
   expect(screen.getByRole("link", { name: "Plan" })).toHaveAttribute("href", "/finances/plan");
   expect(screen.getByRole("link", { name: "Wealth" })).toHaveAttribute("href", "/finances/wealth");
@@ -52,5 +47,5 @@ it("hides an empty review count", () => {
       </TooltipProvider>
     </MemoryRouter>,
   );
-  expect(screen.getByRole("link", { name: "Review" })).not.toHaveTextContent("0");
+  expect(screen.queryByRole("link", { name: "Review" })).not.toBeInTheDocument();
 });

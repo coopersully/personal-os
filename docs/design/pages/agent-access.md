@@ -2,12 +2,12 @@
 
 Agent work has three distinct user questions. nohmi gives each one a dedicated destination.
 
-## Reviews in Settings
+## Reviews from Today
 
-`/settings?section=reviews` answers **What needs my judgment now?** It is an account utility and
-appears in Settings navigation on desktop and in the Settings action sheet on narrow screens.
+`/reviews` answers **What needs my judgment now?** Today links to this cross-workspace queue.
+The old Settings URL redirects here while preserving filters.
 
-- The shared Settings page heading owns the visible page title; Settings has no app bar. The feature body begins with filters and
+- The Reviews page owns its queue title and uses the Today navigation context. The feature body begins with filters and
   queue material rather than repeating a title, eyebrow, or description.
 - It contains only `review` and `attention` work. Setup state is never queue work.
 - Kind and workspace filters are stored in the URL as `kind` and `workspace`.

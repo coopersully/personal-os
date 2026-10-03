@@ -4,7 +4,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   page,
 }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();

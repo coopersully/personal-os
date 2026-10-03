@@ -26,6 +26,12 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...["mail", "tasks"].flatMap((domain) =>
+    fields(domain, [
+      ["Objective", `${domain}-objective`, "preferences guidance"],
+      ["Guidance", `${domain}-instructions`, "instructions preferences"],
+    ]),
+  ),
   ...["tasks", "reminders", "calendar", "finances", "mail", "goals", "motives"].map(
     (workspace) => ({
       section: "desktop",
@@ -87,7 +93,6 @@ export const settingsFields: SettingsField[] = [
     ["Day end", "profile-workday-end", "working hours workday end time"],
     ["Home Location", "profile-home-location", "city weather address"],
     ["Time zone", "profile-timezone", "timezone local time"],
-    ["Change password", "Send link", "reset password security"],
   ]),
   ...fields(
     "profile",
@@ -97,6 +102,7 @@ export const settingsFields: SettingsField[] = [
     ],
     { reveal: ["Add phone number", "Change number"] },
   ),
+  ...fields("security", [["Change password", "Send link", "reset password security"]]),
   ...fields("setup", [
     ["Calendar workspace", "setup-calendar"],
     ["Tasks workspace", "setup-tasks"],

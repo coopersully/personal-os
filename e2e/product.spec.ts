@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("the repository QA fixture login exposes representative workspace data", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -83,7 +83,7 @@ test("the repository QA fixture login exposes representative workspace data", as
     .getByRole("navigation", { name: "Task Lists" })
     .getByRole("link", { name: "Work", exact: true })
     .click();
-  await expect(page.getByText("Draft weekly product update", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft weekly program update", { exact: true })).toBeVisible();
   await page.goto("/mail");
   await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();
   await page.goto("/finances/transactions");
@@ -96,7 +96,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
   test.skip(testInfo.project.name !== "desktop-chromium", "Desktop shell geometry");
   await page.setViewportSize({ width: 1280, height: 480 });
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -293,7 +293,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
 
 test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -857,7 +857,7 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
     await page.setViewportSize({ width: 950, height: 640 });
   }
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();

@@ -343,7 +343,7 @@ describe.sequential("reimbursement lifecycle", () => {
     await service.reconcile(
       {
         allocationId: allocation.id,
-        dueDate: null,
+        dueDate: "2026-08-20",
         evidence: evidence(),
         expectedAmount: 220,
         operation: "create",

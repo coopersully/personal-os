@@ -24,6 +24,7 @@ import {
   workspaceMaintenanceSteps,
 } from "@personal-os/database";
 import type {
+  FinanceBudgetEvaluationCheckpoint,
   FinanceCategorizationProposal,
   FinanceMaintenanceCandidateItemDraft,
   FinancePositionEvidence,
@@ -350,6 +351,19 @@ describe.sequential("Finance maintenance service", () => {
   function requiredServices() {
     return {
       actions: { settleFinanceMaintenanceCandidate: vi.fn(async () => ({ status: "committed" })) },
+      budget: {
+        evaluateMaintenance: vi.fn(
+          async (
+            _userId: string,
+            position: FinancePositionEvidence,
+          ): Promise<FinanceBudgetEvaluationCheckpoint> => ({
+            positionRevision: position.revision,
+            state: "not_applicable",
+            reasonCode: null,
+            evaluations: [],
+          }),
+        ),
+      },
       challenge: {
         prepare: vi.fn(async () => ({ id: crypto.randomUUID() })),
         resolve: vi.fn(async () => ({
@@ -684,7 +698,7 @@ describe.sequential("Finance maintenance service", () => {
         .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
         .orderBy(financeMaintenanceCandidateItems.ordinal),
     ).resolves.toEqual(fingerprints.map((fingerprint) => ({ fingerprint })));
-  });
+  }, 20_000);
 
   it("durably appends three candidate pages and replays or supersedes a crashed page safely", async () => {
     const ownerId = await createUser("Paged Finance candidate");
@@ -1966,7 +1980,15 @@ describe.sequential("Finance maintenance service", () => {
       attemptClaimId: crypto.randomUUID(),
       idempotencyKey: "test:canonical-position",
       runId,
-      safeResult: { position: safePositionCheckpoint() },
+      safeResult: {
+        budget: {
+          positionRevision: safePositionCheckpoint().revision,
+          state: "not_applicable",
+          reasonCode: null,
+          evaluations: [],
+        },
+        position: safePositionCheckpoint(),
+      },
       status: "completed",
       stepName: "budget_and_health_projection",
     });
@@ -2065,6 +2087,42 @@ describe.sequential("Finance maintenance service", () => {
       status: "awaiting_agent_challenge",
     });
     expect(deps.position.readPosition).toHaveBeenCalledTimes(2);
+    expect(deps.challenge.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it("restarts canonical budget evaluation after an unavailable dependency recovers", async () => {
+    const ownerId = await createUser("Unavailable canonical budget evaluation");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    deps.budget.evaluateMaintenance.mockImplementationOnce(async (_userId, position) => ({
+      positionRevision: position.revision,
+      state: "unavailable",
+      reasonCode: "dependency_unavailable",
+      evaluations: [],
+    }));
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations(),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "blocked",
+      settledResult: { code: "finance_budget_evaluation_unavailable" },
+    });
+    const recovered = await service.startOrResume(ownerId, run.scope);
+    expect(recovered).toMatchObject({ status: "queued" });
+    expect(recovered.id).not.toBe(run.id);
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      settledResult: expect.objectContaining({ recovery: "superseded_by_manual_retry" }),
+      status: "failed_terminal",
+    });
+    await expect(service.dispatchRun(recovered.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    expect(deps.budget.evaluateMaintenance).toHaveBeenCalledTimes(2);
     expect(deps.challenge.prepare).toHaveBeenCalledTimes(1);
   });
 
@@ -2194,6 +2252,66 @@ describe.sequential("Finance maintenance service", () => {
     expect(deps.periodReviews.createForRun).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { driftAt: 2, code: "finance_budget_evaluation_changed" },
+    { driftAt: 3, code: "finance_canonical_evidence_changed" },
+  ])("blocks when canonical budget identity changes at revalidation $driftAt", async ({
+    driftAt,
+    code,
+  }) => {
+    const ownerId = await createUser("Changed canonical budget identity");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const deps = requiredServices();
+    deps.challenge.resolve.mockResolvedValue({
+      candidateId: crypto.randomUUID(),
+      candidateRevision: `sha256:${"b".repeat(64)}`,
+      questions: 1,
+    });
+    let evaluations = 0;
+    const proposalId = crypto.randomUUID();
+    const policyId = crypto.randomUUID();
+    const planRevisionId = crypto.randomUUID();
+    deps.budget.evaluateMaintenance.mockImplementation(async (_userId, position) => {
+      evaluations += 1;
+      return {
+        positionRevision: position.revision,
+        state: "evaluated",
+        reasonCode: null,
+        evaluations: [
+          {
+            proposal: { id: proposalId, revision: evaluations >= driftAt ? "2" : "1" },
+            policy: { id: policyId, revision: "1" },
+            plan: { id: planRevisionId, revision: "1" },
+            outcome: "denied",
+            reasons: ["usage_unavailable"],
+            executionAvailable: false,
+            executionUnavailableReasons: ["authority_not_wired", "position_commit_fence_not_wired"],
+          },
+        ],
+      };
+    });
+    const service = createFinanceMaintenanceService({
+      ...deps,
+      finances: operations({
+        projectMaintenanceCandidateQuestionsForUser: async () => ({ created: 1, total: 1 }),
+      }),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      status: "awaiting_agent_challenge",
+    });
+    await resumeAfterChallenge(workspace, run.id);
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({ status: "queued" });
+    await expect(service.dispatchRun(run.id)).resolves.toMatchObject({
+      settledResult: { code },
+      status: "blocked",
+    });
+    expect(deps.periodReviews.createForRun).not.toHaveBeenCalled();
+  });
+
   it("blocks unsupported target position scopes without widening the read", async () => {
     const ownerId = await createUser("Unsupported canonical position scope");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
@@ -2242,6 +2360,7 @@ describe.sequential("Finance maintenance service", () => {
       "refreshCashflowForUser",
       "actions",
       "challenge",
+      "budget",
       "periodReviews",
       "position",
     ] as const) {
@@ -2268,6 +2387,7 @@ describe.sequential("Finance maintenance service", () => {
       };
       if (
         missing === "actions" ||
+        missing === "budget" ||
         missing === "challenge" ||
         missing === "periodReviews" ||
         missing === "position"
@@ -2385,7 +2505,7 @@ describe.sequential("Finance maintenance service", () => {
       run.id,
       projectedPosition,
     );
-    expect(deps.position.readPosition).toHaveBeenCalledTimes(2);
+    expect(deps.position.readPosition).toHaveBeenCalledTimes(3);
     await expect(service.dispatchRun(run.id)).resolves.toBeNull();
     expect(deps.periodReviews.createForRun).toHaveBeenCalledTimes(1);
   });

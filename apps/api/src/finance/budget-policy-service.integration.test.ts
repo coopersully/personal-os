@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createDatabaseClient, type DatabaseClient, migrateDatabase } from "@personal-os/database";
 import * as databaseSchema from "@personal-os/database/schema";
 import {
+  type FinancePositionEvidence,
   financeBudgetPolicyEvaluationInputSchema,
   financeBudgetPolicyEvaluationSchema,
   financeBudgetPolicyPlanSnapshotSchema,
@@ -258,6 +259,114 @@ describe.sequential("human budget policy management", () => {
         )
       ).rows[0],
     ).toEqual({ status: "active", approved_by_actor_id: f.userId });
+  });
+  it("evaluates inactive proposals for maintenance using position evidence without persisting amounts", async () => {
+    const f = await fixture();
+    const { policy, expected } = await f.ready();
+    const proposal = await service.createProposal(f.context, {
+      idempotencyKey: randomUUID(),
+      policyId: policy.id,
+      expected,
+      candidate: f.candidate,
+    });
+    const fact = {
+      cents: 10_000,
+      currency: "USD" as const,
+      quality: "verified" as const,
+      reasons: [],
+      sources: [{ id: randomUUID(), revision: "1" }],
+    };
+    const position: FinancePositionEvidence = {
+      revision: "position-1",
+      asOf: clock.toISOString(),
+      scope: { accountIds: [], from: period.from, through: period.through },
+      cash: fact,
+      postedSpend: fact,
+      pendingExposure: fact,
+      committed: fact,
+      protected: fact,
+      spendable: fact,
+      debt: fact,
+      investments: fact,
+      netWorth: fact,
+    };
+    const checkpoint = await service.evaluateMaintenance(f.userId, position);
+    expect(checkpoint).toMatchObject({
+      positionRevision: position.revision,
+      state: "evaluated",
+      reasonCode: null,
+      evaluations: [
+        {
+          proposal: { id: proposal.id, revision: "1" },
+          policy: { id: policy.latestVersion.id, revision: "1" },
+          plan: f.candidate.revision,
+          outcome: "denied",
+          reasons: expect.arrayContaining(["usage_unavailable"]),
+          executionAvailable: false,
+        },
+      ],
+    });
+    expect(JSON.stringify(checkpoint)).not.toContain("Cents");
+    const unavailableProposalId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO finance_budget_revision_proposals
+        (id,user_id,policy_id,policy_version_id,plan_id,profile_version_id,baseline_budget_version_id,active_budget_version_id,latest_budget_version_id,candidate_snapshot,candidate_hash,state,lifecycle_revision,created_by_actor_id,created_at,updated_at)
+       SELECT $2,user_id,policy_id,policy_version_id,plan_id,profile_version_id,baseline_budget_version_id,active_budget_version_id,latest_budget_version_id,
+         jsonb_set(candidate_snapshot,'{allocations,0,targetId}',to_jsonb($3::text)),candidate_hash,state,lifecycle_revision,created_by_actor_id,created_at,updated_at
+       FROM finance_budget_revision_proposals WHERE id=$1`,
+      [proposal.id, unavailableProposalId, randomUUID()],
+    );
+    await expect(service.evaluateMaintenance(f.userId, position)).resolves.toMatchObject({
+      state: "unavailable",
+      reasonCode: "dependency_unavailable",
+      evaluations: [],
+    });
+    await service.withdrawProposal(f.context, unavailableProposalId, {
+      idempotencyKey: randomUUID(),
+      expectedLifecycleRevision: 1,
+    });
+    const sparseProposalId = randomUUID();
+    await database.pool.query(
+      `INSERT INTO finance_budget_revision_proposals
+        (id,user_id,policy_id,policy_version_id,plan_id,profile_version_id,baseline_budget_version_id,active_budget_version_id,latest_budget_version_id,candidate_snapshot,candidate_hash,state,lifecycle_revision,created_by_actor_id,created_at,updated_at)
+       SELECT $2,user_id,policy_id,policy_version_id,plan_id,NULL,baseline_budget_version_id,NULL,NULL,candidate_snapshot,candidate_hash,state,lifecycle_revision,created_by_actor_id,created_at,updated_at
+       FROM finance_budget_revision_proposals WHERE id=$1`,
+      [proposal.id, sparseProposalId],
+    );
+    const sparseCheckpoint = await service.evaluateMaintenance(f.userId, position);
+    expect(sparseCheckpoint.state).toBe("evaluated");
+    expect(sparseCheckpoint.evaluations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proposal: { id: sparseProposalId, revision: "1" },
+          reasons: expect.arrayContaining(["stale_revision"]),
+        }),
+      ]),
+    );
+    await service.withdrawProposal(f.context, proposal.id, {
+      idempotencyKey: randomUUID(),
+      expectedLifecycleRevision: 1,
+    });
+    await service.withdrawProposal(f.context, sparseProposalId, {
+      idempotencyKey: randomUUID(),
+      expectedLifecycleRevision: 1,
+    });
+    await expect(service.evaluateMaintenance(f.userId, position)).resolves.toMatchObject({
+      state: "not_applicable",
+      evaluations: [],
+    });
+    await database.pool.query(
+      `INSERT INTO finance_budget_revision_proposals
+        (id,user_id,policy_id,policy_version_id,plan_id,profile_version_id,baseline_budget_version_id,active_budget_version_id,latest_budget_version_id,candidate_snapshot,candidate_hash,state,lifecycle_revision,created_by_actor_id,created_at,updated_at)
+       SELECT gen_random_uuid(),user_id,policy_id,policy_version_id,plan_id,profile_version_id,baseline_budget_version_id,active_budget_version_id,latest_budget_version_id,candidate_snapshot,candidate_hash,'inactive',1,created_by_actor_id,created_at,updated_at
+       FROM finance_budget_revision_proposals CROSS JOIN generate_series(1,101) WHERE id=$1`,
+      [proposal.id],
+    );
+    await expect(service.evaluateMaintenance(f.userId, position)).resolves.toMatchObject({
+      state: "unavailable",
+      reasonCode: "proposal_limit_exceeded",
+      evaluations: [],
+    });
   });
   it("rejects agents and foreign owners without allowing bypass to grant management authority", async () => {
     const f = await fixture();

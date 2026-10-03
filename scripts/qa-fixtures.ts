@@ -3,7 +3,7 @@ import { loadQaFixtures, qaFixtureAccounts } from "../apps/api/src/qa-fixtures.j
 import { createDatabaseClient, migrateDatabase } from "../packages/database/src/index.js";
 
 function printAccounts(): void {
-  process.stdout.write("ilo QA fixture logins\n\n");
+  process.stdout.write("nohmi QA fixture logins\n\n");
   for (const account of qaFixtureAccounts) {
     process.stdout.write(`${account.key}\n`);
     process.stdout.write(`  Email:    ${account.email}\n`);

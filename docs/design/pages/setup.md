@@ -21,7 +21,20 @@ an immediate route into Today.
 - Finishing persists `complete` before opening Today.
 - Existing accounts migrate as `dismissed`; setup never interrupts a person who
   already uses nohmi.
-- Setup remains available from the account menu after dismissal or completion.
+- After dismissal or completion, Setup in Settings (`/settings?section=setup`)
+  uses the common Bento layout: guided experience, verification status, workspace
+  preferences, and links to canonical connection/access editors.
+- Saving workspace preferences uses the `preferences` setup action. It changes
+  selected workspaces without changing lifecycle status, current step, or lifecycle
+  timestamps. The authenticated account remains the sole owner of that update.
+- **View setup experience** opens `/setup?replay=1`. Replaying uses the same guided
+  components, with a validated, user-scoped session-storage cursor. The entry flag
+  is removed after initialization so reload and same-tab provider returns resume.
+  This cursor is presentation state, not a second onboarding lifecycle. With storage
+  unavailable, replay still works in memory; reload cannot preserve its position.
+- Replay progress saves workspace preferences only. Exiting or finishing returns
+  to Setup settings (or the chosen agent handoff) without reopening first-time
+  onboarding. First-time users retain the durable server-owned flow above.
 
 ## Information hierarchy
 

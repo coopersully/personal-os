@@ -9,10 +9,13 @@ import { Reorder, useDragControls } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
-import { CheckIcon, MenuIcon } from "../../components/icons.js";
+import { MenuIcon, PlusIcon, TrashIcon } from "../../components/icons.js";
+import { SegmentedControl, SegmentedControlItem } from "../../components/segmented-control.js";
+import { SettingsRecordAction, SettingsRecordContent } from "../../components/settings-record.js";
 import { Button } from "../../components/ui/button.js";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -21,11 +24,10 @@ import {
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
-import { Item, ItemContent, ItemGroup, ItemMedia } from "../../components/ui/item.js";
+import { Item, ItemGroup } from "../../components/ui/item.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
-import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import { isDesktop } from "../desktop/bridge.js";
 import {
@@ -33,6 +35,7 @@ import {
   ritualDeviceId,
   showRitualPreview,
 } from "../desktop/ritual-bridge.js";
+import { SettingsBento, SettingsSection } from "../settings/settings-layout.js";
 import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
 import { makeRitualPreview, RitualPreview } from "./ritual-preview.js";
@@ -60,21 +63,24 @@ export function RitualSettings({ timeZone }: { timeZone: string }) {
       </Card>
     );
   return (
-    <div className="flex flex-col gap-6">
+    <div className="settings-stack">
       <QueryFeedback query={query} title="Couldn’t refresh ritual settings." staleOnly />
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        aria-label="Choose ritual"
-        value={selected}
-        onValueChange={(value) => {
-          if (value === "morning" || value === "night" || value === "history") setSelected(value);
-        }}
+      <SettingsSection
+        title="Ritual view"
+        description="Configure your daily routines or review their history."
       >
-        <ToggleGroupItem value="morning">Morning</ToggleGroupItem>
-        <ToggleGroupItem value="night">Evening</ToggleGroupItem>
-        <ToggleGroupItem value="history">History and data</ToggleGroupItem>
-      </ToggleGroup>
+        <SegmentedControl
+          aria-label="Choose ritual"
+          value={selected}
+          onValueChange={(value) => {
+            if (value === "morning" || value === "night" || value === "history") setSelected(value);
+          }}
+        >
+          <SegmentedControlItem value="morning">Morning</SegmentedControlItem>
+          <SegmentedControlItem value="night">Evening</SegmentedControlItem>
+          <SegmentedControlItem value="history">History and data</SegmentedControlItem>
+        </SegmentedControl>
+      </SettingsSection>
       {kinds.map((kind) => (
         <div key={kind} hidden={selected !== kind}>
           <RitualForm
@@ -290,7 +296,7 @@ function RitualForm({
     }
   }
   return (
-    <div className="grid items-start gap-4 lg:grid-cols-3">
+    <SettingsBento>
       <div className="flex flex-col gap-4">
         <Card>
           <CardHeader>
@@ -362,16 +368,12 @@ function RitualForm({
               </>
             ) : null}
             {message ? <p role="status">{message}</p> : null}
-            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-              {busy || dirty ? <Spinner className="size-3" /> : <CheckIcon className="size-3" />}
-              {error
-                ? "Changes not saved"
-                : dirty && !input.success
-                  ? "Finish the fields to save"
-                  : busy || dirty
-                    ? "Saving"
-                    : "All changes saved"}
-            </p>
+            {busy || dirty ? (
+              <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner className="size-3" />
+                {dirty && !input.success ? "Finish the fields to save" : "Saving"}
+              </p>
+            ) : null}
             {error ? (
               <>
                 <p role="alert">{error}</p>
@@ -386,9 +388,22 @@ function RitualForm({
           </CardContent>
         </Card>
       </div>
-      <Card className="lg:col-span-2">
+      <Card className="settings-bento__main">
         <CardHeader>
           <CardTitle>Checklist</CardTitle>
+          <CardAction>
+            <SettingsRecordAction
+              label="Add step"
+              disabled={draft.steps.length >= 20}
+              onClick={() =>
+                patch({
+                  steps: [...draft.steps, { id: crypto.randomUUID(), label: "", kind: "checkbox" }],
+                })
+              }
+            >
+              <PlusIcon />
+            </SettingsRecordAction>
+          </CardAction>
           <CardDescription>Add the things you want to do or track, in order</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5">
@@ -405,6 +420,7 @@ function RitualForm({
                   step={step}
                   index={index}
                   count={draft.steps.length}
+                  remove={() => patch({ steps: draft.steps.filter((s) => s.id !== step.id) })}
                   move={(offset) => move(index, offset)}
                 >
                   <FieldGroup>
@@ -453,38 +469,15 @@ function RitualForm({
                         </FieldDescription>
                       </Field>
                     ) : null}
-                    <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={draft.steps.length === 1}
-                        onClick={() =>
-                          patch({ steps: draft.steps.filter((s) => s.id !== step.id) })
-                        }
-                      >
-                        Remove step
-                      </Button>
-                    </div>
                   </FieldGroup>
                 </SortableStep>
               ))}
             </ItemGroup>
           </Reorder.Group>
-          <Button
-            variant="outline"
-            disabled={draft.steps.length >= 20}
-            onClick={() =>
-              patch({
-                steps: [...draft.steps, { id: crypto.randomUUID(), label: "", kind: "checkbox" }],
-              })
-            }
-          >
-            Add step
-          </Button>
         </CardContent>
       </Card>
       {preview ? <RitualPreview state={preview} onClose={() => setPreview(null)} /> : null}
-    </div>
+    </SettingsBento>
   );
 }
 
@@ -493,6 +486,7 @@ function SortableStep({
   index,
   count,
   move,
+  remove,
   children,
 }: {
   step: RitualStep;
@@ -500,10 +494,11 @@ function SortableStep({
   count: number;
   move: (offset: number) => void;
   children: ReactNode;
+  remove: () => void;
 }) {
   const controls = useDragControls();
   return (
-    <Item variant="muted" asChild>
+    <Item variant="secondary" className="settings-record" asChild>
       <Reorder.Item
         as="div"
         role="listitem"
@@ -522,26 +517,35 @@ function SortableStep({
           controls.start(event);
         }}
       >
-        <ItemMedia>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="cursor-grab touch-none active:cursor-grabbing"
-            aria-label={`Reorder step ${index + 1}`}
-            aria-description="Drag to reorder or use the up and down arrow keys"
-            onPointerDown={(event) => controls.start(event)}
-            onKeyDown={(event) => {
-              const offset = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
-              if (offset) {
-                event.preventDefault();
-                if (index + offset >= 0 && index + offset < count) move(offset);
-              }
-            }}
-          >
-            <MenuIcon />
-          </Button>
-        </ItemMedia>
-        <ItemContent>{children}</ItemContent>
+        <SettingsRecordContent
+          title={`Step ${index + 1}`}
+          actions={
+            <SettingsRecordAction label="Remove step" disabled={count === 1} onClick={remove}>
+              <TrashIcon />
+            </SettingsRecordAction>
+          }
+          leading={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="cursor-grab touch-none active:cursor-grabbing"
+              aria-label={`Reorder step ${index + 1}`}
+              aria-description="Drag to reorder or use the up and down arrow keys"
+              onPointerDown={(event) => controls.start(event)}
+              onKeyDown={(event) => {
+                const offset = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+                if (offset) {
+                  event.preventDefault();
+                  if (index + offset >= 0 && index + offset < count) move(offset);
+                }
+              }}
+            >
+              <MenuIcon />
+            </Button>
+          }
+        >
+          {children}
+        </SettingsRecordContent>
       </Reorder.Item>
     </Item>
   );

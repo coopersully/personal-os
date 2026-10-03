@@ -4,6 +4,10 @@ This is nohmi's toast-first feedback policy, informed by the sources below and a
 source-code review on 2026-09-30. It defines the intended standard; the audit
 records implementation gaps. The implementation notes below distinguish the original audit from the resulting shared behavior.
 
+Successful background autosaves are silent. Never render a persistent “All changes
+saved” message or idle success checkmark. Temporary saving feedback may disappear
+when complete; validation failures and retry remain visible until resolved.
+
 ## Definitions and selection
 
 **Sonner** is the React component library that renders **toasts**: compact,

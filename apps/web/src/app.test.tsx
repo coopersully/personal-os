@@ -424,6 +424,7 @@ function iloSetupFixture() {
 }
 
 const mocks = vi.hoisted(() => ({
+  listAgentAccessWorkItems: vi.fn(),
   getDesktopRelease: vi.fn(),
   completeReminder: vi.fn(),
   completeTask: vi.fn(),
@@ -1386,22 +1387,24 @@ function defaults() {
   mocks.updateUser.mockResolvedValue(user);
   mocks.updateAccountSetup.mockImplementation(
     async (input: {
-      action: "complete" | "dismiss" | "progress";
+      action: "complete" | "dismiss" | "progress" | "preferences";
       currentStep?: string;
       selectedWorkspaces?: string[];
     }) => ({
       ...user,
       setup: {
         ...user.setup,
-        ...(input.action === "progress"
-          ? {
-              currentStep: input.currentStep,
-              selectedWorkspaces: input.selectedWorkspaces ?? user.setup.selectedWorkspaces,
-              status: "in_progress",
-            }
-          : input.action === "dismiss"
-            ? { status: "dismissed" }
-            : { currentStep: "ready", status: "complete" }),
+        ...(input.action === "preferences"
+          ? { selectedWorkspaces: input.selectedWorkspaces }
+          : input.action === "progress"
+            ? {
+                currentStep: input.currentStep,
+                selectedWorkspaces: input.selectedWorkspaces ?? user.setup.selectedWorkspaces,
+                status: "in_progress",
+              }
+            : input.action === "dismiss"
+              ? { status: "dismissed" }
+              : { currentStep: "ready", status: "complete" }),
       },
     }),
   );
@@ -1659,6 +1662,12 @@ beforeEach(() => {
   // queued one-off implementations, which made later calendar tests render an
   // unrelated prior state instead of their documented defaults.
   vi.resetAllMocks();
+  mocks.listAgentAccessWorkItems.mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    unavailableDomains: [],
+    summary: { byDomain: {} },
+  });
   const NativeDate = Date;
   class TestDate extends NativeDate {
     constructor(value?: string | number | Date) {
@@ -2275,7 +2284,11 @@ describe("ilo web app", () => {
       ),
     );
     expect(
-      await screen.findByRole("heading", { name: "Connected agents" }, { timeout: 3_000 }),
+      await screen.findByRole(
+        "heading",
+        { name: "Connected agents", level: 1 },
+        { timeout: 3_000 },
+      ),
     ).toBeInTheDocument();
   });
 
@@ -2314,6 +2327,7 @@ describe("ilo web app", () => {
     setup("/settings?section=tasks");
     const browser = userEvent.setup();
 
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Review checks" }));
     await browser.click(screen.getByRole("button", { name: /Show \d+ completed checks?/ }));
@@ -2888,6 +2902,46 @@ describe("ilo web app", () => {
     );
   }, 15_000);
 
+  it.each([
+    "calendar",
+    "mail",
+    "tasks",
+    "finances",
+  ])("puts the compact switcher and review alert in the mobile %s header", async (workspace) => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        matches: true,
+        media: "(max-width: 900px)",
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
+    });
+    setup(`/${workspace}`);
+    const header = await screen.findByRole("navigation", { name: "Top navigation" });
+    expect(within(header).getByRole("button", { name: "Switch workspace" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(await within(header).findByRole("button", { name: /review/ })).toBeInTheDocument();
+    const dock = screen.queryByRole("navigation", { name: "Workspace dock" });
+    if (dock) {
+      expect(
+        within(dock).queryByRole("button", { name: "Switch workspace" }),
+      ).not.toBeInTheDocument();
+      await userEvent.click(within(dock).getByRole("button", { name: "Workspace actions" }));
+      const sheet = screen.getByRole("dialog");
+      expect(
+        within(sheet).getByRole("link", {
+          name: workspace === "finances" ? "Overview" : /^Inbox(?: \d+)?$/,
+        }),
+      ).toBeInTheDocument();
+      expect(within(sheet).queryByText("Log out")).not.toBeInTheDocument();
+    }
+  });
+
   it("uses a mobile workspace dock and contextual action sheet", async () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -2906,22 +2960,23 @@ describe("ilo web app", () => {
     await screen.findByRole("heading", { name: "Goals" });
     expect(screen.getByRole("navigation", { name: "Workspace dock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Navigation" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Switch workspace" })).toHaveTextContent("Settings");
+    expect(
+      within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("button", {
+        name: "Switch workspace",
+      }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Calendar" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Workspace actions" })).toHaveClass(
-      "workspace-dock__actions--bubble",
+      "floating-actions__button",
     );
 
     await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New task" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Motives" }).querySelector("svg")).not.toBeNull();
-    await browser.click(screen.getByRole("button", { name: "Test account" }));
-    expect(screen.getByRole("menuitem", { name: "Setup" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Change password" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Log out" })).toBeInTheDocument();
-    await browser.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Test account" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Change password")).not.toBeInTheDocument();
+    expect(screen.queryByText("Log out")).not.toBeInTheDocument();
     await browser.keyboard("{Escape}");
     await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
     expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveAttribute(
@@ -2965,9 +3020,11 @@ describe("ilo web app", () => {
     setup("/settings?section=profile");
 
     const dock = await screen.findByRole("navigation", { name: "Workspace dock" });
-    expect(within(dock).getByRole("button", { name: "Switch workspace" })).toHaveTextContent(
-      "Settings",
-    );
+    expect(
+      within(dock).queryByRole("button", { name: "Switch workspace" }),
+    ).not.toBeInTheDocument();
+    const header = screen.getByRole("navigation", { name: "Top navigation" });
+    expect(within(header).getByRole("button", { name: "Switch workspace" })).toBeInTheDocument();
 
     // The sheet carries the account sections that the sidebar owns on desktop.
     await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
@@ -2983,7 +3040,7 @@ describe("ilo web app", () => {
     await browser.keyboard("{Escape}");
 
     // Settings follows the five workspaces as the selected utility destination.
-    await browser.click(within(dock).getByRole("button", { name: "Switch workspace" }));
+    await browser.click(within(header).getByRole("button", { name: "Switch workspace" }));
     const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
     expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(6);
     expect(
@@ -3039,11 +3096,12 @@ describe("ilo web app", () => {
 
   it("applies the account section permission rule to the sidebar and the dock alike", async () => {
     mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: true });
-    const view = setup("/settings?section=profile");
+    const view = setup("/settings?section=security");
     const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
-    expect(within(sidebar).getByRole("link", { name: "Invitations" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("link", { name: "Invitations" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Invitations" })).toBeInTheDocument();
     view.unmount();
 
     Object.defineProperty(window, "matchMedia", {
@@ -3064,7 +3122,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
     expect(
       within(screen.getByRole("dialog", { name: "Settings" })).getByRole("link", {
-        name: "Invitations",
+        name: "Security & access",
       }),
     ).toBeInTheDocument();
   });
@@ -4955,16 +5013,48 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
+  it("hides the former global Reviews page", async () => {
+    const view = setup("/settings?section=reviews&workspace=mail&kind=attention");
+    await waitFor(() => expect(view.location.value).toBe("/settings?section=profile"));
+    expect(screen.queryByRole("link", { name: "Back to Today" })).not.toBeInTheDocument();
+  });
+
+  it("keeps secondary settings searchable and highlights their parent", async () => {
+    const browser = userEvent.setup();
+    setup("/settings?section=sessions");
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    expect(within(sidebar).getByRole("link", { name: "Security & access" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("link", { name: "Back to Security & access" })).toBeInTheDocument();
+    await browser.click(within(sidebar).getByRole("button", { name: "Search settings" }));
+    await browser.type(
+      screen.getByRole("searchbox", { name: "Search all settings" }),
+      "connected agents",
+    );
+    expect(screen.getByRole("link", { name: /Connected agents Connect/ })).toHaveAttribute(
+      "href",
+      "/settings?section=agent-connections",
+    );
+  });
+
   it("keeps the legacy account settings URL compatible", async () => {
     const browser = userEvent.setup();
     const view = setup("/settings?section=account");
-    expect(await screen.findByRole("heading", { name: "Account" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
     const sidebar = screen.getByRole("complementary", { name: "Account utility navigation" });
-    expect(within(sidebar).getByRole("link", { name: "Setup" })).toHaveAttribute("href", "/setup");
+    expect(screen.getByRole("link", { name: "Open Setup" })).toHaveAttribute(
+      "href",
+      "/settings?section=setup",
+    );
     expect(within(sidebar).queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
     expect(
       within(sidebar).queryByRole("button", { name: "Change password" }),
     ).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("link", { name: "Open Security & access" }));
     const accountActions = screen.getByRole("list", { name: "Account actions" });
     expect(within(accountActions).getByRole("button", { name: "Log out" })).toBeInTheDocument();
     await browser.click(within(accountActions).getByRole("button", { name: "Send link" }));
@@ -4983,15 +5073,44 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
+  it("edits setup preferences without reopening onboarding and can view the guided experience", async () => {
+    const browser = userEvent.setup();
+    sessionStorage.clear();
+    const view = setup("/settings?section=setup");
+    expect(await screen.findByRole("heading", { name: "Setup", level: 1 })).toBeInTheDocument();
+    const tasks = screen.getByRole("checkbox", { name: "Tasks" });
+    await browser.click(tasks);
+    await browser.click(screen.getByRole("button", { name: "Save setup preferences" }));
+    await waitFor(() =>
+      expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "preferences" }),
+      ),
+    );
+    expect(view.location.value).toBe("/settings?section=setup");
+    await browser.click(screen.getByRole("link", { name: "View setup experience" }));
+    expect(await screen.findByRole("heading", { name: "Hi, Test." })).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", { name: /What should nohmi help with/ }),
+    ).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Exit Setup" }));
+    expect(await screen.findByRole("heading", { name: "Setup", level: 1 })).toBeInTheDocument();
+    expect(
+      mocks.updateAccountSetup.mock.calls.every(([input]) => input.action === "preferences"),
+    ).toBe(true);
+    expect(sessionStorage.getItem(`nohmi.setup-replay.${user.id}`)).toBeNull();
+  });
+
   it("presents Settings as a neutral utility destination in the shared shell", async () => {
     const view = setup("/settings?section=appearance");
     const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
 
-    // The account utility is a tenant of the shell: same frame, same app bar.
-    const appBar = screen.getByRole("navigation", { name: "Top navigation" });
-    expect(within(appBar).getByText("Appearance")).toBeInTheDocument();
+    // Settings retains the shell but owns its introduction inside the page.
+    expect(screen.queryByRole("navigation", { name: "Top navigation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Appearance", level: 1 })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "Search settings" })).toBeInTheDocument();
     // Account utilities stay neutral and are selected separately from workspaces.
     expect(
       within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
@@ -5041,10 +5160,7 @@ describe("ilo web app", () => {
     expect(within(outstanding).getByText("Outstanding (1)")).toBeInTheDocument();
     expect(within(outstanding).getByRole("button", { name: "Review item" })).toBeEnabled();
     const sidebar = screen.getByRole("complementary", { name: "Finances Sidebar" });
-    expect(within(sidebar).getByRole("link", { name: "Review 1" })).toHaveAttribute(
-      "href",
-      "/finances/review",
-    );
+    expect(within(sidebar).queryByRole("link", { name: "Review 1" })).not.toBeInTheDocument();
     for (const label of ["Overview", "Transactions", "Plan", "Cash flow", "Wealth", "Accounts"])
       expect(within(sidebar).getByRole("link", { name: label })).toBeInTheDocument();
     expect(mocks.getFinanceBudgetPace).not.toHaveBeenCalled();
@@ -5068,6 +5184,24 @@ describe("ilo web app", () => {
     mocks.answerFinanceReview.mockResolvedValue(
       financeEnvelope([], "Your Finance Inbox is clear."),
     );
+    mocks.listAgentAccessWorkItems.mockImplementation(async () => ({
+      items: mocks.answerFinanceReview.mock.calls.length
+        ? []
+        : [
+            {
+              id: `finance-review:${secondId}`,
+              domain: "finances",
+              title: "Purchase decision",
+              summary: "Review this purchase",
+              preview: [],
+              kind: "review",
+              action: { to: `/finances/review?item=${secondId}` },
+            },
+          ],
+      nextCursor: null,
+      unavailableDomains: [],
+      summary: { byDomain: { finances: 1 } },
+    }));
     const browser = userEvent.setup();
     const view = setup("/finances/review");
     await screen.findByRole("heading", { name: "What did this purchase represent?" });
@@ -5076,7 +5210,8 @@ describe("ilo web app", () => {
       `/finances/transactions?transactionId=${id}`,
     );
     await browser.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
-    await browser.selectOptions(screen.getByLabelText("Category"), id);
+    await browser.type(screen.getByRole("combobox", { name: "Category" }), "Living expenses");
+    await browser.keyboard("{Enter}");
     await browser.type(screen.getByLabelText("Your answer"), "Household supplies");
     await browser.click(screen.getByRole("button", { name: "Save answer" }));
     expect(mocks.answerFinanceReview).toHaveBeenCalledWith(
@@ -5087,7 +5222,8 @@ describe("ilo web app", () => {
         resolution: { categoryId: id, meaning: "Household supplies", type: "classify_transaction" },
       }),
     );
-    expect(await screen.findByText("No open Inbox questions")).toBeInTheDocument();
+    expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Close" }));
     await browser.click(
       within(screen.getByRole("complementary", { name: "Finances Sidebar" })).getByRole("link", {
         name: "Transactions",
@@ -5272,7 +5408,7 @@ describe("ilo web app", () => {
     configureFinanceWorkspace();
     const view = setup("/finances/profile");
     await waitFor(() => expect(view.location.value).toBe("/settings?section=finances#guidance"));
-    expect(await screen.findByRole("heading", { name: "Finances settings" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Finances", level: 1 })).toBeVisible();
     expect(screen.getByText("Agent guidance")).toBeVisible();
     expect(await screen.findByText("Portal controls")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Financial profile" })).not.toBeInTheDocument();
@@ -5395,10 +5531,10 @@ describe("ilo web app", () => {
 
   it("keeps Finance Inbox empty states and source failures explicit", async () => {
     const empty = setup("/finances/review");
-    expect(await screen.findByText("No open Inbox questions")).toBeInTheDocument();
+    expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Older questions and approvals" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Older questions and approvals" }),
+    ).not.toBeInTheDocument();
     empty.unmount();
     mocks.getFinanceSnapshot.mockRejectedValue(new Error("Finance service unavailable"));
     const failed = setup("/finances");
@@ -5407,7 +5543,7 @@ describe("ilo web app", () => {
     failed.unmount();
   });
 
-  it("retains older Finance approval work behind labelled disclosure", async () => {
+  it("opens older Finance approvals in the shared flow", async () => {
     mocks.listFinanceActionReviews.mockResolvedValue([
       {
         id,
@@ -5420,11 +5556,24 @@ describe("ilo web app", () => {
         ],
       },
     ]);
+    mocks.listAgentAccessWorkItems.mockResolvedValue({
+      items: [
+        {
+          id: `finance-action:${id}`,
+          domain: "finances",
+          title: "Approval",
+          summary: "Categorize dinner",
+          preview: [],
+          kind: "review",
+          action: { to: `/finances/review?approval=${id}` },
+        },
+      ],
+      nextCursor: null,
+      unavailableDomains: [],
+      summary: { byDomain: { finances: 1 } },
+    });
     const view = setup("/finances/review");
     const browser = userEvent.setup();
-    await screen.findByText("No open Inbox questions");
-    expect(mocks.listFinanceActionReviews).not.toHaveBeenCalled();
-    await browser.click(screen.getByRole("button", { name: "Older questions and approvals" }));
     expect(await screen.findByText("Review Categorization")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() =>
@@ -5458,54 +5607,17 @@ describe("ilo web app", () => {
     calendar.unmount();
   });
 
-  it("routes Calendar stewardship without replacing the spatial schedule", async () => {
-    const review = setup("/calendar/review");
-
-    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to schedule" })).toHaveAttribute(
-      "href",
-      "/calendar",
-    );
-    expect(
-      screen.getByText("Calendar review", { selector: ".workspace-app-bar__title" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Calendar date picker")).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Calendar actions" })).not.toBeInTheDocument();
-    review.unmount();
-
-    const schedule = setup("/calendar");
+  it.each([
+    "/calendar/review",
+    "/calendar/review/",
+  ])("opens the shared review flow from %s", async (path) => {
+    const view = setup(path);
+    expect(await screen.findByRole("heading", { name: "Calendar reviews" })).toBeInTheDocument();
+    await waitFor(() => expect(view.location.value).toContain("/calendar?review=open"));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole("button", { name: /of \d+ calendars$/ }));
-    expect(screen.getByRole("link", { name: "Schedule health" })).toHaveAttribute(
-      "href",
-      "/calendar/review",
-    );
-    expect(screen.queryByLabelText("Calendar date picker")).not.toBeInTheDocument();
-    schedule.unmount();
-  });
-
-  it("keeps Calendar chrome stable across trailing-slash routes", async () => {
-    const review = setup("/calendar/review/");
-
-    expect(await screen.findByRole("heading", { name: "Schedule health" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Calendar review", { selector: ".workspace-app-bar__title" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Calendar actions" })).not.toBeInTheDocument();
-    review.unmount();
-
-    const schedule = setup("/calendar/");
-    expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Calendar actions" })).toBeInTheDocument();
-    expect(
-      within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("heading", {
-        name: "July 12–18, 2026",
-      }),
-    ).toBeInTheDocument();
-    schedule.unmount();
+    view.unmount();
   });
 
   it("keeps the calendar stable if its current-day marker is temporarily absent", async () => {
@@ -5653,9 +5765,6 @@ describe("ilo web app", () => {
       ["/tasks", "tasks"],
       ["/mail", "mail"],
       ["/finances", "finances"],
-      // The account utility is not a workspace, but it is a tenant of the same
-      // frame and must not invent a second top-bar layout.
-      ["/settings", "account"],
     ] as const;
 
     for (const [route, workspace] of routes) {
@@ -5817,16 +5926,17 @@ describe("ilo web app", () => {
     mixed.unmount();
   });
 
-  it("shows profile saving and failure feedback", async () => {
+  it("autosaves profile edits, exposes failures, and serializes newer drafts", async () => {
     const browser = userEvent.setup();
-    const view = setup("/settings?section=profile");
-    await screen.findByRole("heading", { name: "Account" });
+    setup("/settings?section=profile");
+    const name = await screen.findByLabelText("First name");
+    expect(mocks.updateUser).not.toHaveBeenCalled();
     mocks.updateUser.mockRejectedValueOnce(new Error("Profile update unavailable"));
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.clear(name);
+    await browser.type(name, "Changed");
     expect(
       await screen.findByText(/Couldn’t confirm whether we could save your profile/),
     ).toBeInTheDocument();
-
     let resolveUpdate: ((value: typeof user) => void) | undefined;
     mocks.updateUser.mockImplementationOnce(
       () =>
@@ -5834,13 +5944,20 @@ describe("ilo web app", () => {
           resolveUpdate = resolve;
         }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
-    expect(screen.getByRole("button", { name: "Saving profile…" })).toBeDisabled();
+    await browser.click(screen.getByRole("button", { name: "Retry saving" }));
+    expect(await screen.findByText("Saving changes…")).toBeInTheDocument();
+    await browser.clear(name);
+    await browser.type(name, "Newest");
+    expect(mocks.updateUser).toHaveBeenCalledTimes(2);
     resolveUpdate?.(user);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save profile" })).not.toBeDisabled(),
+      expect(mocks.updateUser).toHaveBeenLastCalledWith(
+        expect.objectContaining({ displayName: expect.stringContaining("Newest") }),
+      ),
     );
-    view.unmount();
+    await waitFor(() => expect(screen.queryByText("Saving changes…")).not.toBeInTheDocument());
+    expect(screen.queryByText("All changes saved")).not.toBeInTheDocument();
+    expect(name).toHaveValue("Newest");
   });
 
   it("maps a server profile rejection to its field and preserves the entered value", async () => {
@@ -5857,7 +5974,7 @@ describe("ilo web app", () => {
         details: [{ path: ["email"], format: "email", code: "invalid_format" }],
       }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     expect(
       await screen.findByText("Enter an email address in the format name@example.com."),
     ).toBeInTheDocument();
@@ -5925,15 +6042,15 @@ describe("ilo web app", () => {
     await browser.click(
       await screen.findByRole("option", { name: "New York, New York, United States" }),
     );
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Clear selection" }));
     await browser.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
     await browser.type(location, "New York");
     await browser.click(
       await screen.findByRole("option", { name: "New York, New York, United States" }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     await waitFor(() =>
       expect(mocks.updateUser).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5968,7 +6085,7 @@ describe("ilo web app", () => {
     await browser.type(location, savedLocation.label);
 
     await browser.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
     view.unmount();
   });
 
@@ -5994,7 +6111,7 @@ describe("ilo web app", () => {
     await browser.click(
       await screen.findByRole("option", { name: "New York, New York, United States" }),
     );
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     await waitFor(() => expect(mocks.updateUser).toHaveBeenCalled());
     expect(location).not.toHaveAttribute("aria-invalid", "true");
   });
@@ -6002,17 +6119,16 @@ describe("ilo web app", () => {
   it("explains a planning-day relationship error and clears it when corrected", async () => {
     const browser = userEvent.setup();
     setup("/settings?section=profile");
-    const end = await screen.findByLabelText("Planning day ends");
+    const end = await screen.findByLabelText("Day end");
     expect(end).not.toHaveAttribute("aria-invalid", "true");
     fireEvent.change(end, { target: { value: "08:00" } });
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    fireEvent.blur(end);
     expect(mocks.updateUser).not.toHaveBeenCalled();
-    expect(await screen.findByText("Planning day must end after it starts.")).toBeInTheDocument();
+    expect(await screen.findByText("Day end must be after day start.")).toBeInTheDocument();
     expect(end).toHaveAttribute("aria-invalid", "true");
-    expect(end).toHaveFocus();
     fireEvent.input(end, { target: { value: "18:00" } });
     await waitFor(() => expect(end).not.toHaveAttribute("aria-invalid", "true"));
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.tab();
     await waitFor(() =>
       expect(mocks.updateUser).toHaveBeenCalledWith(
         expect.objectContaining({ workdayEndMinute: 1080 }),
@@ -7691,7 +7807,7 @@ describe("ilo web app", () => {
     const accountSidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
-    await browser.click(within(accountSidebar).getByRole("link", { name: "Activity" }));
+    await browser.click(within(accountSidebar).getByRole("link", { name: "Activity log" }));
     expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
     expect(screen.getByText(/Agent ·/)).toBeInTheDocument();
     expect(screen.getByText(/Connector ·/)).toBeInTheDocument();
@@ -7709,8 +7825,8 @@ describe("ilo web app", () => {
     expect(await screen.findByText("No matching activity")).toBeInTheDocument();
     await browser.clear(activitySearch);
 
-    await browser.click(within(accountSidebar).getByRole("link", { name: "Account" }));
-    expect(await screen.findByRole("heading", { name: "Account" })).toBeInTheDocument();
+    await browser.click(within(accountSidebar).getByRole("link", { name: "Profile" }));
+    expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
     const settingsSidebar = screen.getByRole("complementary", {
       name: "Account utility navigation",
     });
@@ -7746,7 +7862,7 @@ describe("ilo web app", () => {
       expect(mocks.deleteConnector).toHaveBeenCalledWith(secondId, expect.anything()),
     );
 
-    await browser.click(settingsNavigation.getByRole("link", { name: "Connected agents" }));
+    await browser.click(screen.getByRole("link", { name: "Open Connected agents" }));
     expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.clear(screen.getByLabelText("Token name"));
@@ -7775,13 +7891,13 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.deleteAccessToken).toHaveBeenCalledWith(id, expect.anything()),
     );
-    await browser.click(settingsNavigation.getByRole("link", { name: "Account" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Profile" }));
     await browser.clear(screen.getByLabelText("First name"));
     await browser.type(screen.getByLabelText("First name"), "Updated");
     await browser.clear(screen.getByLabelText("Last name"));
     await browser.type(screen.getByLabelText("Last name"), "profile");
-    await browser.selectOptions(screen.getByLabelText("Planning time zone"), "America/Chicago");
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+    await browser.selectOptions(screen.getByLabelText("Time zone"), "America/Chicago");
+    await browser.tab();
     await waitFor(() =>
       expect(mocks.updateUser).toHaveBeenCalledWith({
         displayName: "Updated profile",
@@ -7799,7 +7915,8 @@ describe("ilo web app", () => {
     mocks.updateUser.mockRejectedValueOnce(new Error("Appearance unavailable"));
     await browser.click(screen.getByRole("radio", { name: "Light" }));
     expect(await screen.findByText(/Couldn’t save your appearance/)).toBeInTheDocument();
-    await browser.click(settingsNavigation.getByRole("link", { name: "Sessions" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Security & access" }));
+    await browser.click(screen.getByRole("link", { name: "Open Signed-in devices" }));
     await browser.click(
       screen.getAllByRole("button", { name: "Revoke session" })[0] as HTMLElement,
     );
@@ -7820,7 +7937,7 @@ describe("ilo web app", () => {
           resolveLogout = resolve;
         }),
     );
-    await browser.click(settingsNavigation.getByRole("link", { name: "Account" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Security & access" }));
     await browser.click(screen.getByRole("button", { name: "Log out" }));
     await waitFor(() => expect(mocks.logout).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: "Logging out…" })).toBeDisabled();
@@ -7871,7 +7988,7 @@ describe("ilo web app", () => {
     };
     vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(media));
     const view = setup("/settings?section=appearance");
-    await screen.findByRole("heading", { name: "Appearance" });
+    await screen.findByRole("heading", { name: "Appearance", level: 2 });
     expect(document.documentElement).not.toHaveClass("dark");
 
     media.matches = true;
@@ -7883,7 +8000,7 @@ describe("ilo web app", () => {
 
     mocks.getMe.mockResolvedValue({ ...user, theme: "dark" });
     const fixedView = setup("/settings?section=appearance");
-    await screen.findByRole("heading", { name: "Appearance" });
+    await screen.findByRole("heading", { name: "Appearance", level: 2 });
     expect(document.documentElement).toHaveClass("dark");
     fixedView.unmount();
   });
@@ -7936,7 +8053,7 @@ describe("ilo web app", () => {
     const settingsSidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
-    await browser.click(within(settingsSidebar).getByRole("link", { name: "Activity" }));
+    await browser.click(within(settingsSidebar).getByRole("link", { name: "Activity log" }));
     expect(await screen.findByText(/Agent · 2 changes/)).toBeInTheDocument();
     expect(screen.getAllByText("Reminder · created")).toHaveLength(3);
     view.unmount();
@@ -8885,7 +9002,7 @@ describe("ilo web app", () => {
   it("returns to sign-in after native logout without detaching the app window", async () => {
     const browser = userEvent.setup();
     mocks.isTauri.mockReturnValue(true);
-    setup("/settings?section=profile");
+    setup("/settings?section=security");
     await screen.findByRole("button", { name: "Log out" });
     mocks.logout.mockImplementationOnce(async () => {
       mocks.getMe.mockRejectedValue(new Error("unauthorized"));
@@ -8941,6 +9058,8 @@ describe("ilo web app", () => {
     expect(await screen.findByText("Protect focus")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "20%" }));
     await waitFor(() => expect(mocks.updateGoal).toHaveBeenCalledWith(id, { progress: 30 }));
+    expect(screen.queryByLabelText("Outcome")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add goal" }));
     await browser.type(screen.getByLabelText("Outcome"), "   ");
     await browser.click(screen.getByRole("button", { name: "Create goal" }));
     expect(await screen.findByText("Enter a goal.")).toBeInTheDocument();
@@ -8972,6 +9091,8 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateMotive).toHaveBeenCalledWith(secondId, { isActive: false }),
     );
+    expect(screen.queryByLabelText("Motive")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add motive" }));
     await browser.type(screen.getByLabelText("Motive"), "   ");
     await browser.click(screen.getByRole("button", { name: "Create motive" }));
     expect(await screen.findByText("Enter a motive.")).toBeInTheDocument();
@@ -9039,6 +9160,8 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.updateGoal).toHaveBeenCalledWith(secondId, { status: "active" }),
     );
+    expect(screen.queryByLabelText("Outcome")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add goal" }));
     await browser.type(screen.getByLabelText("Outcome"), "Rejected goal");
     await browser.type(screen.getByLabelText("Target date"), "2026-09-01");
     await browser.click(screen.getByRole("button", { name: "Create goal" }));
@@ -9048,9 +9171,11 @@ describe("ilo web app", () => {
     goals.unmount();
     const motives = setup("/motives");
     expect(await screen.findByText("No additional context.")).toBeInTheDocument();
-    expect(screen.getByText("paused")).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(mocks.updateMotive).toHaveBeenCalledWith(id, { isActive: true }));
+    expect(screen.queryByLabelText("Motive")).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Add motive" }));
     await browser.type(screen.getByLabelText("Motive"), "Rejected motive");
     await browser.click(screen.getByRole("button", { name: "Create motive" }));
     expect(
@@ -9100,7 +9225,9 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     setup("/settings?section=invitations");
 
-    expect(await screen.findByRole("heading", { name: "Invitations" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Invitations", level: 2 }),
+    ).toBeInTheDocument();
     expect(await screen.findByText("Expired")).toBeInTheDocument();
     expect(screen.getByText(/Redeemed/)).toBeInTheDocument();
     expect(screen.getByText("Expires in 14 days")).toBeInTheDocument();
@@ -9334,7 +9461,9 @@ describe("ilo web app", () => {
 
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
     const webView = setup("/settings?section=wallpaper");
-    expect(await screen.findByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Appearance", level: 2 }),
+    ).toBeInTheDocument();
     expect(
       within(screen.getByRole("complementary", { name: "Account utility navigation" })).queryByRole(
         "link",
@@ -9656,7 +9785,9 @@ describe("ilo web app", () => {
       });
     const browser = userEvent.setup();
     setup("/settings?section=texting");
-    expect(await screen.findByRole("heading", { name: "Agent texting" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Agent texting", level: 2 }),
+    ).toBeInTheDocument();
     await browser.selectOptions(screen.getByLabelText("Country"), "US");
     await browser.type(screen.getByLabelText("Mobile number"), "+1 212 555 0123");
     await browser.click(screen.getByRole("checkbox", { name: "Allow agent text messages" }));

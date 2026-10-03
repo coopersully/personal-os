@@ -30,7 +30,9 @@ function label(kind: string) {
 export function FinanceAgentReviewQueue({
   questionId,
   approvalId,
+  onChanged,
 }: {
+  onChanged?: () => Promise<void>;
   questionId?: string | undefined;
   approvalId?: string | undefined;
 } = {}) {
@@ -47,6 +49,7 @@ export function FinanceAgentReviewQueue({
   });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const refresh = async () => {
+    await onChanged?.();
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["finance-questions"] }),
       queryClient.invalidateQueries({ queryKey: ["finance-action-reviews"] }),
@@ -86,12 +89,6 @@ export function FinanceAgentReviewQueue({
 
   return (
     <section aria-label="Agent review work" className="grid gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">Review</h2>
-        <p className="text-sm text-muted-foreground">
-          Questions need your judgment. Approvals already contain a complete proposed change.
-        </p>
-      </div>
       <QueryFeedback query={questions} title="Couldn’t load finance questions." />
       <QueryFeedback query={reviews} title="Couldn’t load finance approvals." />
       <MutationFeedback feedback={answer.feedback} />

@@ -80,3 +80,15 @@ export function ordinalSuffix(value: number): "st" | "nd" | "rd" | "th" {
       return "th";
   }
 }
+
+/** A calendar date is not an instant: format in UTC to preserve its written day. */
+export function formatCalendarDate(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}

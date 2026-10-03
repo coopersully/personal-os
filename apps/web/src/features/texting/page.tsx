@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -25,7 +26,8 @@ import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
-export function TextingSettings() {
+export function TextingSettings({ profile = false }: { profile?: boolean }) {
+  const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
   const connection = useQuery({
     queryFn: api.getTextingConnection,
@@ -48,6 +50,7 @@ export function TextingSettings() {
       return api.checkTextingVerification(challengeId, { code });
     },
     onSuccess: async () => {
+      setEditing(false);
       setChallengeId(null);
       setCode("");
       await queryClient.invalidateQueries({ queryKey: ["texting-connection"] });
@@ -63,17 +66,58 @@ export function TextingSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle aria-level={1} role="heading">
-          Agent texting
+        <CardTitle aria-level={2} role="heading">
+          {profile ? "Phone number" : "Agent texting"}
         </CardTitle>
         <CardDescription>
-          Let authorized agents text you through nohmi’s shared number.
+          {profile
+            ? "Your verified number for agent text messages."
+            : "Let authorized agents text you through nohmi’s shared number."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <QueryFeedback query={connection} title="Couldn’t load your texting connection." />
         <MutationFeedback feedback={disconnect.feedback} />
-        {current?.id && current.state !== "disconnected" ? (
+        {profile ? (
+          <Button asChild variant="ghost" className="self-start">
+            <Link to="/settings?section=texting">Go to Agent Texting</Link>
+          </Button>
+        ) : null}
+        {editing ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="self-start"
+            onClick={() => {
+              setEditing(false);
+              setChallengeId(null);
+              setCode("");
+            }}
+          >
+            Cancel number change
+          </Button>
+        ) : null}
+
+        {profile && !editing && !(current?.id && current.state !== "disconnected") ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              {connection.isPending
+                ? "Checking your phone number…"
+                : connection.isError
+                  ? "Phone status unavailable"
+                  : "No verified phone number"}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              className="self-start"
+              disabled={!connection.isSuccess}
+              onClick={() => setEditing(true)}
+            >
+              Add phone number
+            </Button>
+          </div>
+        ) : current?.id && current.state !== "disconnected" && !editing ? (
           <FieldGroup>
             <p>
               <strong>{current.maskedPhoneNumber}</strong> ·{" "}
@@ -83,11 +127,29 @@ export function TextingSettings() {
                   ? "Blocked by Twilio opt-out"
                   : current.state}
             </p>
+            <p className="text-sm text-muted-foreground">
+              {current.country === "US"
+                ? "United States"
+                : current.country === "CA"
+                  ? "Canada"
+                  : "Country unavailable"}
+            </p>
             <FieldDescription>
               Messages come from {current.senderPhoneNumber ?? "nohmi’s shared number"}. Reply STOP
               to block texts. Only a later START reply can restore delivery after a Twilio opt-out.
             </FieldDescription>
             <Field orientation="horizontal">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setEditing(true);
+                  setCountry(current.country ?? "US");
+                  setPhoneNumber("");
+                }}
+              >
+                Change number
+              </Button>
               <Button
                 disabled={disconnect.isPending}
                 onClick={() => disconnect.mutate()}

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("the repository QA fixture login exposes representative workspace data", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -83,7 +83,7 @@ test("the repository QA fixture login exposes representative workspace data", as
     .getByRole("navigation", { name: "Task Lists" })
     .getByRole("link", { name: "Work", exact: true })
     .click();
-  await expect(page.getByText("Draft weekly product update", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft weekly program update", { exact: true })).toBeVisible();
   await page.goto("/mail");
   await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();
   await page.goto("/finances/transactions");
@@ -96,7 +96,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
   test.skip(testInfo.project.name !== "desktop-chromium", "Desktop shell geometry");
   await page.setViewportSize({ width: 1280, height: 480 });
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -149,7 +149,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await handle.press("End");
     await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
     const colors = await page
-      .locator(".sidebar, .workspace-app-bar, .workspace-secondary-app-bar")
+      .locator("body, .workspace-app-bar, .workspace-secondary-app-bar")
       .evaluateAll((elements) =>
         elements.map((element) => getComputedStyle(element).backgroundColor),
       );
@@ -189,6 +189,20 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await page.getByRole("radio", { name: view, exact: true }).click();
     const axes = page.locator("[data-calendar-axis]:not(.is-today)");
     await expect(axes.first()).toBeVisible();
+    const canvasColor = await page
+      .locator("body")
+      .evaluate((element) => getComputedStyle(element).backgroundColor);
+    await expect(axes.first()).toHaveCSS("background-color", canvasColor);
+    const baseCell = page
+      .locator(
+        view === "Month"
+          ? ".month-day:not(.is-today):not(.is-outside)"
+          : view === "Week"
+            ? ".week-day-timeline:nth-of-type(odd):not(.is-today)"
+            : ".calendar-timeline",
+      )
+      .first();
+    await expect(baseCell).toHaveCSS("background-color", canvasColor);
     await expect
       .poll(
         async () =>
@@ -279,12 +293,12 @@ test("desktop navigation fills the viewport while long content scrolls independe
 
 test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/reviews");
-  await expect(page.getByRole("heading", { name: "Reviews", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reviews", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Review" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Attention" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Setup" })).toHaveCount(0);
@@ -304,7 +318,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
 
   await page.goto("/settings?section=workspace-access&workspace=mail");
-  await expect(page.getByRole("heading", { name: "Workspace access" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workspace access", level: 1 })).toBeVisible();
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
   await expect(page.getByText("Needs your approval", { exact: true })).toBeVisible();
   await expect(page.getByText("Not allowed", { exact: true })).toBeVisible();
@@ -524,6 +538,14 @@ test("a person and an agent share one reminder and calendar surface", async ({
   });
   expect(floatingPillColors.background).toBe(floatingPillColors.primaryBackground);
   expect(floatingPillColors.foreground).toBe(floatingPillColors.primaryForeground);
+  for (const action of await page
+    .getByRole("navigation", { name: "Calendar actions" })
+    .getByRole("button")
+    .all()) {
+    const bounds = await action.boundingBox();
+    expect(bounds?.width).toBe(44);
+    expect(bounds?.height).toBe(44);
+  }
   await page.locator(".week-calendar").evaluate((calendar) => {
     calendar.scrollTop = 0;
   });
@@ -600,7 +622,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(weekGridLayout.fadeBackdropFilter).toContain("blur(");
   expect(weekGridLayout.fadeBackgroundImage).toContain("linear-gradient");
   expect(weekGridLayout.fadeBackgroundImage).toContain("rgba(");
-  expect(weekGridLayout.navigationBackground).toBe("rgba(0, 0, 0, 0)");
+  expect(weekGridLayout.navigationBackground).toBe(
+    await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor),
+  );
   expect(weekGridLayout.weekHeaderGridBackground).toBe("rgba(0, 0, 0, 0)");
   expect(weekGridLayout.fadeSurfaceBackground).toBe("rgba(0, 0, 0, 0)");
   expect(weekGridLayout.fadeSurfaceTop).toBeGreaterThanOrEqual(weekGridLayout.headerBottom - 1);
@@ -673,9 +697,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     }
     await settingsSidebar.getByRole("link", { name }).click();
   };
-  await expect(
-    page.getByRole("navigation", { name: "Top navigation" }).getByText("Account"),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
   if (mobile) {
     await expect(settingsSidebar).toBeHidden();
     await expect(
@@ -690,16 +712,21 @@ test("a person and an agent share one reminder and calendar surface", async ({
     ).toHaveAttribute("aria-current", "page");
   }
   await expect(page.getByRole("tablist", { name: "Settings sections" })).toHaveCount(0);
-  await page.getByLabel("Planning day starts").fill("10:00");
-  await page.getByLabel("Planning day ends").fill("18:00");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(page.getByLabel("Planning day starts")).toHaveValue("10:00");
-  await expect(page.getByLabel("Planning day ends")).toHaveValue("18:00");
+  const profileSaved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/v1/me") && response.request().method() === "PATCH" && response.ok(),
+  );
+  await page.getByLabel("Day start").fill("10:00");
+  await page.getByLabel("Day end").fill("18:00");
+  await page.getByLabel("Day end").blur();
+  await expect(page.getByLabel("Day start")).toHaveValue("10:00");
+  await expect(page.getByLabel("Day end")).toHaveValue("18:00");
+  await profileSaved;
   await openSettingsSection("Activity");
   await expect(page.getByText("Reminder · created").first()).toBeVisible();
   await expect(page.getByText("Calendar event · created").first()).toBeVisible();
   await openSettingsSection("Appearance");
-  await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
   const darkAppearance = page.getByRole("radio", { name: "Dark" });
   await darkAppearance.click();
   await expect(darkAppearance).toBeChecked();
@@ -707,10 +734,12 @@ test("a person and an agent share one reminder and calendar surface", async ({
     .poll(() => page.locator("html").evaluate((element) => element.classList.contains("dark")))
     .toBe(true);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   await openSettingsSection("Connected agents");
-  await expect(page.getByRole("heading", { name: "Connected agents", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Connected agents", exact: true, level: 1 }),
+  ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "nohmi MCP URL" })).toHaveValue(/\/mcp$/);
   await openSettingsSection("Workspace access");
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
@@ -737,6 +766,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Create local token" }).click();
+  expect(
+    await page.locator("html").evaluate((element) => element.scrollWidth <= innerWidth + 1),
+  ).toBe(true);
   await expect(page.getByText(/^pos_/)).toBeVisible();
 
   const layout = await page.evaluate(() => ({
@@ -770,21 +802,23 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await page.getByRole("button", { name: "Exit setup" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/settings?section=profile");
-  const end = page.getByLabel("Planning day ends");
-  await page.getByLabel("Planning day starts").fill("09:00");
+  const end = page.getByLabel("Day end");
+  await page.getByLabel("Day start").fill("09:00");
   await end.fill("08:00");
-  await page.getByRole("button", { name: "Save profile" }).click();
+  await page.getByLabel("Day end").blur();
   await expect(end).toHaveAttribute("aria-invalid", "true");
-  await expect(end).toBeFocused();
-  await expect(page.getByText("Planning day must end after it starts.")).toBeVisible();
+  await expect(page.getByText("Day end must be after day start.")).toBeVisible();
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("feedback-validation.png") });
+  const profileSaved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/v1/me") && response.request().method() === "PATCH" && response.ok(),
+  );
   await end.fill("17:00");
   await expect(end).not.toHaveAttribute("aria-invalid", "true");
-  await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(
-    page.locator("[data-sonner-toast]").filter({ hasText: "Profile saved." }),
-  ).toBeVisible();
+  await page.getByLabel("Day end").blur();
+  await profileSaved;
+  await expect(page.getByText("All changes saved", { exact: true })).toHaveCount(0);
 
   await page.goto("/settings?section=appearance");
   await page.route("**/v1/me", async (route) => {
@@ -823,7 +857,7 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
     await page.setViewportSize({ width: 950, height: 640 });
   }
   await page.goto("/");
-  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -847,6 +881,11 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
     );
   });
   await page.goto("/mail");
+  const composeAction = page.getByRole("button", { name: "Compose a message" });
+  await expect(composeAction).toBeVisible();
+  const composeBounds = await composeAction.boundingBox();
+  expect(composeBounds?.width).toBe(44);
+  expect(composeBounds?.height).toBe(44);
   await page.getByRole("button", { name: "Sync all mail accounts" }).click();
   await expect(
     page.getByText("1 of 2 mail accounts synced. 1 account needs another attempt."),

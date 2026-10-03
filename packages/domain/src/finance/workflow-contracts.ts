@@ -75,6 +75,28 @@ const financePositionFactCheckpointSchema = financeMoneyFactSchema
   .pick({ quality: true, reasons: true })
   .strict();
 
+const financeBudgetCheckpointReasonSchema = z.enum([
+  "stale_revision",
+  "missing_evidence",
+  "position_unavailable",
+  "position_unqualified",
+  "usage_unavailable",
+  "scope_mismatch",
+  "policy_disabled",
+  "policy_expired",
+  "policy_unknown",
+  "outside_period",
+  "resource_changed",
+  "allocation_identity_changed",
+  "unbalanced_plan",
+  "direction_not_permitted",
+  "protected_release",
+  "protection_floor",
+  "per_change_cap",
+  "monthly_cap",
+  "amount_overflow",
+]);
+
 /** Safe durable identity for the exact canonical position evidence consumed by a workflow. */
 export const financePositionEvidenceCheckpointSchema = z
   .object({
@@ -97,6 +119,44 @@ export const financePositionEvidenceCheckpointSchema = z
   .strict();
 export type FinancePositionEvidenceCheckpoint = z.infer<
   typeof financePositionEvidenceCheckpointSchema
+>;
+
+/** Safe durable identity and decision metadata for maintenance-owned budget evaluation. */
+export const financeBudgetEvaluationCheckpointSchema = z
+  .object({
+    positionRevision: revisionSchema,
+    state: z.enum(["not_applicable", "evaluated", "unavailable"]),
+    reasonCode: z.enum(["dependency_unavailable", "proposal_limit_exceeded"]).nullable(),
+    evaluations: z
+      .array(
+        z
+          .object({
+            proposal: financeRevisionRefSchema,
+            policy: financeRevisionRefSchema,
+            plan: financeRevisionRefSchema,
+            outcome: z.enum(["denied", "hypothetical_preview"]),
+            reasons: z.array(financeBudgetCheckpointReasonSchema).max(20),
+            executionAvailable: z.literal(false),
+            executionUnavailableReasons: z.tuple([
+              z.literal("authority_not_wired"),
+              z.literal("position_commit_fence_not_wired"),
+            ]),
+          })
+          .strict(),
+      )
+      .max(100),
+  })
+  .strict()
+  .superRefine((checkpoint, context) => {
+    if (checkpoint.state === "evaluated" && checkpoint.evaluations.length === 0)
+      context.addIssue({ code: "custom", message: "Evaluated checkpoints require a result." });
+    if (checkpoint.state !== "evaluated" && checkpoint.evaluations.length > 0)
+      context.addIssue({ code: "custom", message: "Only evaluated checkpoints contain results." });
+    if ((checkpoint.state === "unavailable") !== (checkpoint.reasonCode !== null))
+      context.addIssue({ code: "custom", message: "Unavailable checkpoints require one reason." });
+  });
+export type FinanceBudgetEvaluationCheckpoint = z.infer<
+  typeof financeBudgetEvaluationCheckpointSchema
 >;
 
 export const financePositionReadScopeSchema = z

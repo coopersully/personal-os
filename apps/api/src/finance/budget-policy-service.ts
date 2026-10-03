@@ -7,6 +7,7 @@ import {
   financeBudgetPolicyVersions,
   financeBudgetRevisionProposals,
   financeBudgetVersions,
+  financeProfileVersions,
 } from "@personal-os/database";
 import {
   createFinanceBudgetPolicySchema,
@@ -15,6 +16,8 @@ import {
   type FinanceBudgetPolicyPlanSnapshot,
   type FinanceBudgetPolicyRevisionTuple,
   type FinanceBudgetPolicyTerms,
+  type FinancePositionEvidence,
+  financeBudgetEvaluationCheckpointSchema,
   financeBudgetPeriodBaselineRecordSchema,
   financeBudgetPolicyEvaluationSchema,
   financeBudgetPolicyLifecycleSchema,
@@ -26,7 +29,7 @@ import {
   reviseFinanceBudgetPolicySchema,
   saveFinanceBudgetPolicyPreviewSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { evaluateFinanceBudgetPolicy } from "./budget-policy-evaluator.js";
@@ -246,6 +249,8 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     expected: FinanceBudgetPolicyRevisionTuple,
     candidate: FinanceBudgetPolicyPlanSnapshot,
     lockDependencies = false,
+    position: FinancePositionEvidence | null = null,
+    observedVersion: Version = version,
   ) {
     const terms = await policyTerms(tx, version);
     const plan = await policyPlan(tx, userId, policy.planId);
@@ -262,13 +267,13 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     const observed: FinanceBudgetPolicyRevisionTuple = {
       userId,
       planId: policy.planId,
-      policy: { id: version.id, revision: String(version.version) },
+      policy: { id: observedVersion.id, revision: String(observedVersion.version) },
       policyLifecycleRevision: policy.lifecycleRevision,
       profile: policyRef(current.profile),
       baseline: terms.baseline,
       activeBudget: policyRef(current.active),
       latestBudget: policyRef(current.latest),
-      positionRevision: null,
+      positionRevision: position?.revision ?? null,
       usageRevision: null,
     };
     return evaluateFinanceBudgetPolicy({
@@ -280,7 +285,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
       baseline: await policySnapshot(tx, baseline ?? undefined),
       current: await policySnapshot(tx, current.active),
       candidate,
-      position: unavailable,
+      position: position ? { state: "available", userId, evidence: position } : unavailable,
       usage: unavailable,
     });
   }
@@ -354,6 +359,126 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     });
   }
   return {
+    async evaluateMaintenance(userId: string, position: FinancePositionEvidence) {
+      return read(async (tx) => {
+        const proposals = await tx
+          .select()
+          .from(financeBudgetRevisionProposals)
+          .where(
+            and(
+              eq(financeBudgetRevisionProposals.userId, userId),
+              eq(financeBudgetRevisionProposals.state, "inactive"),
+            ),
+          )
+          .orderBy(asc(financeBudgetRevisionProposals.id))
+          .limit(101);
+        if (proposals.length > 100)
+          return financeBudgetEvaluationCheckpointSchema.parse({
+            positionRevision: position.revision,
+            state: "unavailable",
+            reasonCode: "proposal_limit_exceeded",
+            evaluations: [],
+          });
+        if (proposals.length === 0)
+          return financeBudgetEvaluationCheckpointSchema.parse({
+            positionRevision: position.revision,
+            state: "not_applicable",
+            reasonCode: null,
+            evaluations: [],
+          });
+        const evaluations = [];
+        for (const proposal of proposals) {
+          if (!(await policyDependenciesAvailable(tx, userId, proposal.candidateSnapshot)))
+            return financeBudgetEvaluationCheckpointSchema.parse({
+              positionRevision: position.revision,
+              state: "unavailable",
+              reasonCode: "dependency_unavailable",
+              evaluations: [],
+            });
+          const { row: policy, version: latestVersion } = await policyRoot(
+            tx,
+            userId,
+            proposal.policyId,
+          );
+          const exactVersion = await tx.query.financeBudgetPolicyVersions.findFirst({
+            where: and(
+              eq(financeBudgetPolicyVersions.userId, userId),
+              eq(financeBudgetPolicyVersions.id, proposal.policyVersionId),
+            ),
+          });
+          const profile = proposal.profileVersionId
+            ? await tx.query.financeProfileVersions.findFirst({
+                where: and(
+                  eq(financeProfileVersions.userId, userId),
+                  eq(financeProfileVersions.id, proposal.profileVersionId),
+                ),
+              })
+            : undefined;
+          const budgetIds = [
+            proposal.baselineBudgetVersionId,
+            proposal.activeBudgetVersionId,
+            proposal.latestBudgetVersionId,
+          ].filter((id): id is string => id !== null);
+          const budgets = await tx.query.financeBudgetVersions.findMany({
+            where: and(
+              eq(financeBudgetVersions.userId, userId),
+              inArray(financeBudgetVersions.id, budgetIds),
+            ),
+          });
+          const byId = new Map(budgets.map((budget) => [budget.id, budget]));
+          const baseline = byId.get(proposal.baselineBudgetVersionId);
+          if (!exactVersion || !baseline || (proposal.profileVersionId && !profile))
+            return financeBudgetEvaluationCheckpointSchema.parse({
+              positionRevision: position.revision,
+              state: "unavailable",
+              reasonCode: "dependency_unavailable",
+              evaluations: [],
+            });
+          const expected: FinanceBudgetPolicyRevisionTuple = {
+            userId,
+            planId: proposal.planId,
+            policy: { id: exactVersion.id, revision: String(exactVersion.version) },
+            policyLifecycleRevision: policy.lifecycleRevision,
+            profile: policyRef(profile),
+            baseline: { id: baseline.id, revision: String(baseline.version) },
+            activeBudget: policyRef(
+              proposal.activeBudgetVersionId ? byId.get(proposal.activeBudgetVersionId) : undefined,
+            ),
+            latestBudget: policyRef(
+              proposal.latestBudgetVersionId ? byId.get(proposal.latestBudgetVersionId) : undefined,
+            ),
+            positionRevision: position.revision,
+            usageRevision: null,
+          };
+          const result = await evaluation(
+            tx,
+            userId,
+            policy,
+            exactVersion,
+            expected,
+            proposal.candidateSnapshot,
+            false,
+            position,
+            latestVersion,
+          );
+          evaluations.push({
+            proposal: { id: proposal.id, revision: String(proposal.lifecycleRevision) },
+            policy: policyRef(exactVersion),
+            plan: proposal.candidateSnapshot.revision,
+            outcome: result.kind,
+            reasons: [...result.reasons],
+            executionAvailable: false as const,
+            executionUnavailableReasons: [...result.executionUnavailableReasons],
+          });
+        }
+        return financeBudgetEvaluationCheckpointSchema.parse({
+          positionRevision: position.revision,
+          state: "evaluated",
+          reasonCode: null,
+          evaluations,
+        });
+      });
+    },
     async listPolicies(userId: string, value: unknown) {
       const input = financeBudgetPolicyListSchema.parse(value);
       return read(async (tx) => {

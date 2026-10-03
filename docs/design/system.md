@@ -84,6 +84,10 @@ properties inform the finished form. See [Ryo Lu’s Compile 2026 session](https
 
 ### Page frame
 
+See the [workspace layout architecture audit](workspace-layout-architecture.md) for
+the proposed ownership hierarchy and incremental migration. That document distinguishes
+current implementation from the target slot contract.
+
 Every product page has these layers, in order:
 
 | Layer | Question answered | Rule |

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listAgentAccessWorkItems: vi.fn(),
   listAttentionItems: vi.fn(),
   updateAttentionItem: vi.fn(),
+  getMailStatus: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({
   api: mocks,
@@ -20,7 +21,7 @@ const first = {
   domain: "calendar",
   title: "Protect travel time",
   summary: "Decide whether travel time is needed.",
-  preview: [],
+  preview: [] as Array<{ label: string; value: string }>,
   kind: "attention",
   action: null,
 };
@@ -35,7 +36,7 @@ function Location() {
     </output>
   );
 }
-function setup(path = "/calendar?review=open") {
+function setup(path = "/calendar?review=open", workspace: "calendar" | "mail" = "calendar") {
   render(
     <QueryClientProvider
       client={
@@ -45,7 +46,7 @@ function setup(path = "/calendar?review=open") {
       }
     >
       <MemoryRouter initialEntries={[path]}>
-        <ReviewFlowHost workspace="calendar" />
+        <ReviewFlowHost workspace={workspace} />
         <Location />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -119,4 +120,38 @@ it("does not count a submitted action when the source status is unavailable", as
   expect(await screen.findByText(/review status couldn’t be confirmed/)).toBeVisible();
   expect(screen.getByText("Protect travel time")).toBeVisible();
   expect(screen.getByText("0 completed · 2 left · 2 total")).toBeVisible();
+});
+
+it("loads the selected attention item directly and refreshes its revision after a conflict", async () => {
+  let revision = 4;
+  mocks.listAttentionItems.mockImplementation(async (query) =>
+    query.id === "one" ? [{ id: "one", version: revision }] : [],
+  );
+  mocks.updateAttentionItem.mockRejectedValueOnce(new Error("The item changed. Reload it."));
+  setup();
+  await userEvent.click(await screen.findByRole("button", { name: "Mark resolved" }));
+  await waitFor(() => expect(mocks.updateAttentionItem).toHaveBeenCalledOnce());
+  revision = 5;
+  await userEvent.click(screen.getByRole("button", { name: "Check status" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Check status" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("button", { name: "Mark resolved" }));
+  expect(mocks.updateAttentionItem).toHaveBeenLastCalledWith("calendar", "one", {
+    expectedVersion: 5,
+    status: "resolved",
+  });
+});
+
+it("keeps the reason for a Mail maintenance blocker visible without an answerable question", async () => {
+  pending = [
+    {
+      ...first,
+      id: "mail-run:blocked",
+      domain: "mail",
+      title: "Mail maintenance is blocked",
+      preview: [{ label: "What stopped", value: "Reconnect the expired Mail account." }],
+    },
+  ] as typeof pending;
+  mocks.getMailStatus.mockResolvedValue({ details: { openQuestions: [] } });
+  setup("/mail?review=open", "mail");
+  expect(await screen.findByText("Reconnect the expired Mail account.")).toBeVisible();
 });

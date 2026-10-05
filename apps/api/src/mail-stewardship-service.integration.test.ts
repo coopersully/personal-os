@@ -1237,6 +1237,22 @@ describe.sequential("Mail stewardship service", () => {
     });
     const result = await service.getStatus(principal.userId);
     expect(result.details.openQuestions).toHaveLength(100);
+    const all = await database.db.select().from(mailStewardshipQuestions);
+    const omitted = all.find(
+      (row) => !result.details.openQuestions.some((item) => item.id === row.id),
+    );
+    if (!omitted) throw new Error("Expected a question outside the status window.");
+    await expect(service.getQuestion(principal.userId, omitted.id)).resolves.toMatchObject({
+      id: omitted.id,
+      status: "open",
+      version: 1,
+    });
+    await expect(service.getQuestion(crypto.randomUUID(), omitted.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(service.getQuestion(principal.userId, crypto.randomUUID())).rejects.toMatchObject({
+      code: "not_found",
+    });
   });
 
   it("bounds each all-outstanding snapshot", async () => {

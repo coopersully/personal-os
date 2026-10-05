@@ -130,6 +130,7 @@ export const createAttentionItemInputSchema = attentionItemSchema
 export type CreateAttentionItemInput = z.infer<typeof createAttentionItemInputSchema>;
 
 export const attentionItemQuerySchema = z.object({
+  id: idSchema.optional(),
   domain: assistantDomainSchema,
   limit: z.coerce.number().int().min(1).max(100).default(50),
   status: attentionItemStatusSchema.default("open"),

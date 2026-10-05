@@ -56,9 +56,14 @@ export function ReviewActions({ item, onChanged }: ActionsProps) {
 
 function AttentionActions({ item, onChanged }: ActionsProps) {
   const query = useQuery({
-    queryKey: ["review-attention", item.domain],
+    queryKey: ["review-attention", item.domain, item.id],
     queryFn: () =>
-      api.listAttentionItems({ domain: item.domain ?? "mail", status: "open", limit: 100 }),
+      api.listAttentionItems({
+        domain: item.domain ?? "mail",
+        id: item.id.slice("attention:".length),
+        status: "open",
+        limit: 1,
+      }),
   });
   const current = query.data?.find((entry) => `attention:${entry.id}` === item.id);
   const mutation = useFeedbackMutation({
@@ -150,6 +155,28 @@ function MailRuleActions({ id, onChanged }: { id: string; onChanged: ActionsProp
               ? ` Rule scope: ${rule.sourceIds.length ? rule.sourceIds.map((source) => accountNames.get(source) ?? "Unknown account").join(", ") : "no explicit account selected"}.`
               : ""}
           </p>
+          {rule ? (
+            <dl className="grid gap-2 text-sm">
+              <div>
+                <dt className="text-muted-foreground">When</dt>
+                <dd>
+                  {rule.condition.field} {rule.condition.operator.replaceAll("_", " ")} “
+                  {rule.condition.value}”
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Future actions</dt>
+                <dd>
+                  {rule.actions
+                    .map(
+                      (action) =>
+                        `${action.type === "trash" ? "recoverable Trash" : action.type.replaceAll("_", " ")}${action.afterDays ? ` after ${action.afterDays} days` : " immediately"}`,
+                    )
+                    .join("; ")}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
           <ul className="grid gap-2 text-sm">
             {preview.data.candidates.map((candidate) => (
               <li key={candidate.id} className="rounded-lg bg-secondary p-3">
@@ -199,8 +226,12 @@ function MailQuestionActions({
   id: string | undefined;
   onChanged: ActionsProps["onChanged"];
 }) {
-  const query = useQuery({ queryKey: ["review-mail-status"], queryFn: api.getMailStatus });
-  const question = query.data?.details.openQuestions.find((question) => !id || question.id === id);
+  const query = useQuery({
+    queryKey: ["review-mail-question", id],
+    queryFn: async () =>
+      id ? api.getMailQuestion(id) : ((await api.getMailStatus()).details.openQuestions[0] ?? null),
+  });
+  const question = query.data?.status === "open" ? query.data : undefined;
   const [answer, setAnswer] = useState("");
   const mutation = useFeedbackMutation({
     feedback: { action: "answer this Mail question", safeToRetry: false, form: false },

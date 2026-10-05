@@ -297,25 +297,31 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
-  await page.goto("/reviews");
-  await expect(page.getByRole("heading", { name: "Reviews", exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByRole("radio", { name: "Review" })).toBeVisible();
-  await expect(page.getByRole("radio", { name: "Attention" })).toBeVisible();
-  await expect(page.getByRole("radio", { name: "Setup" })).toHaveCount(0);
-  await page.getByRole("radio", { name: "Attention" }).click();
-  await expect(page).toHaveURL(/kind=attention/);
-  await page.getByRole("radio", { name: "All work" }).click();
-  const mailReview = page.getByRole("listitem").filter({ hasText: "Review Fixture newsletters" });
-  await mailReview.getByRole("link", { name: "Review rule" }).click();
-  await expect(page.getByRole("dialog", { name: "Review Fixture newsletters" })).toBeVisible();
-  await expect(page).toHaveURL(/settings\?section=mail&reviewRule=/);
-  await expect(page.getByRole("dialog").getByText(/Rule scope:/)).toBeVisible();
-  await expect(
-    page.getByRole("dialog").getByRole("button", { name: "Activate reviewed rule" }),
-  ).toBeEnabled();
-  await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
+  const rulesResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/v1/mail/rules") && response.request().method() === "GET",
+  );
+  await page.goto("/settings?section=mail");
+  await expect(page.getByRole("heading", { name: "Mail", exact: true, level: 1 })).toBeVisible();
+  const { rules } = (await (await rulesResponse).json()) as {
+    rules: { id: string; name: string }[];
+  };
+  const rule = rules.find((candidate) => candidate.name === "Fixture newsletters");
+  if (!rule) throw new Error("Missing fixture review rule");
+  await page.getByRole("button", { name: /\d+ items? needs? review/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Mail reviews" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Later", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await page.goto(`/settings?section=mail&review=${encodeURIComponent(`mail-rule:${rule.id}`)}`);
+  const activate = dialog.getByRole("button", { name: "Activate reviewed rule" });
+  await expect(activate).toBeEnabled();
+  await expect(dialog.getByText(/Rule scope:/)).toBeVisible();
+  await expect(dialog.getByText("Future actions", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/settings\?section=mail&review=mail-rule/);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page).toHaveURL(/settings\?section=mail$/);
-  await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Mail", exact: true, level: 1 })).toBeVisible();
 
   await page.goto("/settings?section=workspace-access&workspace=mail");
   await expect(page.getByRole("heading", { name: "Workspace access", level: 1 })).toBeVisible();
@@ -350,7 +356,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
       },
     });
   });
-  await page.goto("/reviews");
+  await page.goto("/mail?review=open");
   await expect(page.getByText("You’re caught up")).toBeVisible();
 });
 

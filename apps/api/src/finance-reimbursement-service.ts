@@ -283,6 +283,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
             .insert(financeReimbursements)
             .values({
               allocationId: allocation.id,
+              createdAt: now(),
               dueDate: input.dueDate,
               evidence: input.evidence,
               expectedAmount,

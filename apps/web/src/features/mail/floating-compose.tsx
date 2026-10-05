@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { FloatingActionButton, FloatingActions } from "@/components/floating-actions";
 import { MailIcon, PlugIcon, PlusIcon } from "@/components/icons";
 import {
   ResponsiveDialog,
@@ -348,15 +349,15 @@ export function FloatingMailComposer({
     <>
       <div className="mail-floating-compose" data-state={open ? "open" : "closed"}>
         {!open ? (
-          <Button
-            aria-label="Compose a message"
-            className="mail-floating-compose__trigger"
-            onClick={() => openComposer()}
-            ref={triggerRef}
-            size="icon-lg"
-          >
-            <PlusIcon aria-hidden="true" />
-          </Button>
+          <FloatingActions aria-label="Mail actions">
+            <FloatingActionButton
+              label="Compose a message"
+              onClick={() => openComposer()}
+              ref={triggerRef}
+            >
+              <PlusIcon aria-hidden="true" />
+            </FloatingActionButton>
+          </FloatingActions>
         ) : null}
       </div>
       <ResponsiveDialog

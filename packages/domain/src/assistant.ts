@@ -130,6 +130,7 @@ export const createAttentionItemInputSchema = attentionItemSchema
 export type CreateAttentionItemInput = z.infer<typeof createAttentionItemInputSchema>;
 
 export const attentionItemQuerySchema = z.object({
+  id: idSchema.optional(),
   domain: assistantDomainSchema,
   limit: z.coerce.number().int().min(1).max(100).default(50),
   status: attentionItemStatusSchema.default("open"),
@@ -162,6 +163,15 @@ export const agentAccessWorkItemQuerySchema = z.object({
 export type AgentAccessWorkItemQuery = z.infer<typeof agentAccessWorkItemQuerySchema>;
 
 export const agentAccessWorkItemSchema = z.object({
+  preview: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(80),
+        value: z.string().trim().min(1).max(600),
+      }),
+    )
+    .max(4)
+    .optional(),
   action: z
     .object({
       label: z.string().trim().min(1).max(120),

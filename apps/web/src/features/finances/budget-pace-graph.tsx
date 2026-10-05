@@ -1,6 +1,7 @@
 import type { FinanceBudgetPace, FinanceBudgetPacePeriod } from "@personal-os/domain";
 import { formatDateOnly } from "@personal-os/domain";
 import { Link } from "react-router-dom";
+import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
@@ -18,10 +19,6 @@ import {
   EmptyHeader as ShadcnEmptyHeader,
   EmptyTitle as ShadcnEmptyTitle,
 } from "@/components/ui/empty";
-import {
-  ToggleGroup as ShadcnToggleGroup,
-  ToggleGroupItem as ShadcnToggleGroupItem,
-} from "@/components/ui/toggle-group";
 import {
   Tooltip as ShadcnTooltip,
   TooltipContent as ShadcnTooltipContent,
@@ -155,21 +152,17 @@ export function BudgetPaceGraph({
             : "Set monthly limits to see whether your spending is on pace."}
         </ShadcnCardDescription>
         <ShadcnCardAction>
-          <ShadcnToggleGroup
+          <SegmentedControl
             aria-label="Budget pace period"
             onValueChange={(value) => {
               if (value) onPeriodChange(value as FinanceBudgetPacePeriod);
             }}
-            size="sm"
-            spacing={0}
-            type="single"
             value={period}
-            variant="outline"
           >
-            <ShadcnToggleGroupItem value="week">Week</ShadcnToggleGroupItem>
-            <ShadcnToggleGroupItem value="month">Month</ShadcnToggleGroupItem>
-            <ShadcnToggleGroupItem value="year">Year</ShadcnToggleGroupItem>
-          </ShadcnToggleGroup>
+            <SegmentedControlItem value="week">Week</SegmentedControlItem>
+            <SegmentedControlItem value="month">Month</SegmentedControlItem>
+            <SegmentedControlItem value="year">Year</SegmentedControlItem>
+          </SegmentedControl>
         </ShadcnCardAction>
       </ShadcnCardHeader>
       <ShadcnCardContent className="flex flex-col gap-4">

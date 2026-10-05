@@ -102,6 +102,10 @@ export const updateAccountSetupInputSchema = z.discriminatedUnion("action", [
     currentStep: accountSetupStepSchema,
     selectedWorkspaces: z.array(accountSetupWorkspaceSchema).optional(),
   }),
+  z.object({
+    action: z.literal("preferences"),
+    selectedWorkspaces: z.array(accountSetupWorkspaceSchema),
+  }),
   z.object({ action: z.literal("dismiss") }),
   z.object({ action: z.literal("complete") }),
 ]);

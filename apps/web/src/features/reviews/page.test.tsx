@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ReviewsPage } from "./page.js";
 
 const now = "2026-08-12T12:00:00.000Z";
@@ -20,14 +21,16 @@ function LocationProbe() {
   return <output aria-label="Current location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderPage(path = "/reviews") {
+function renderPage(path = "/reviews", workspace?: "mail" | "calendar" | "tasks" | "finances") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { gcTime: 0, retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
-        <ReviewsPage />
+        <TooltipProvider>
+          <ReviewsPage {...(workspace ? { workspace } : {})} />
+        </TooltipProvider>
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -35,6 +38,40 @@ function renderPage(path = "/reviews") {
 }
 
 describe("Reviews", () => {
+  it("locks workspace queues to their owner even when a conflicting query is supplied", async () => {
+    renderPage("/mail/decisions?workspace=calendar", "mail");
+    await screen.findByText("Review newsletters");
+    expect(mocks.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "mail", limit: 10 });
+    expect(screen.queryByLabelText("Filter by workspace")).not.toBeInTheDocument();
+  });
+
+  it("searches previews across every snapshot page and sorts the matches", async () => {
+    const base = await mocks.listAgentAccessWorkItems();
+    const item = base.items[0];
+    mocks.listAgentAccessWorkItems.mockImplementation(async ({ cursor }) => ({
+      ...base,
+      items: cursor
+        ? [
+            {
+              ...item,
+              id: "older",
+              title: "Older matching decision",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ]
+        : [{ ...item, id: "newer" }],
+      nextCursor: cursor ? null : "next",
+    }));
+    renderPage("/reviews?q=immediately&sort=oldest");
+    expect(await screen.findByText("Older matching decision")).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByRole("listitem")
+        .filter((element) => element.hasAttribute("data-work-item-id"))[0],
+    ).toHaveAttribute("data-work-item-id", "older");
+    expect(mocks.listAgentAccessWorkItems).toHaveBeenCalledWith({ cursor: "next", limit: 10 });
+  });
+
   beforeEach(() => {
     mocks.listAgentAccessWorkItems.mockReset();
     mocks.listAgentAccessWorkItems.mockResolvedValue({
@@ -52,6 +89,10 @@ describe("Reviews", () => {
           priority: "person_review",
           source: null,
           summary: "Review a bounded rule preview.",
+          preview: [
+            { label: "When", value: "Sender contains news" },
+            { label: "Proposed action", value: "Mark read immediately" },
+          ],
           title: "Review newsletters",
           updatedAt: now,
         },
@@ -336,5 +377,12 @@ describe("Reviews", () => {
     });
     renderPage();
     expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
+  });
+
+  it("shows the rule conditions and proposed action before opening a review", async () => {
+    renderPage();
+    expect(await screen.findByText("Sender contains news")).toBeInTheDocument();
+    expect(screen.getByText("Mark read immediately")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review rule" })).toBeInTheDocument();
   });
 });

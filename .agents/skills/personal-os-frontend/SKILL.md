@@ -111,7 +111,8 @@ or chat surface.
   active workspace sidebar: Today has no contextual sidebar; Tasks owns
   Reminders. Goals, Motives, Reviews, and Activity belong to the account utility
   in Settings. Account configuration is a tenant of the shell: it uses the
-  shared frame, sidebar column, and app bar, but must not become a workspace,
+  shared frame and sidebar column, with a Settings page heading instead of an
+  app bar (see `docs/design/pages/settings.md`), but must not become a workspace,
   take a workspace identity, or enter the switcher. Only a standalone flow such
   as setup may replace the shell.
 - Combine only attributes that answer the same user question into one compact

@@ -28,6 +28,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { FloatingActionButton, FloatingActions } from "@/components/floating-actions";
 import {
   CalendarIcon,
   CheckIcon,
@@ -136,35 +137,21 @@ export function CalendarFloatingNav({
   const content = eventDetails ? (
     eventDetails
   ) : mode === "closed" ? (
-    <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
-      <Button
-        aria-label="Choose date"
-        onClick={() => open("date")}
-        ref={dateTrigger}
-        size="icon"
-        variant="ghost"
-      >
+    <FloatingActions aria-label="Calendar actions" className="calendar-floating-nav__pill">
+      <FloatingActionButton label="Choose date" onClick={() => open("date")} ref={dateTrigger}>
         <CalendarIcon aria-hidden="true" />
-      </Button>
-      <Button
-        aria-label="Create event"
-        onClick={() => open("create")}
-        ref={createTrigger}
-        size="icon"
-        variant="ghost"
-      >
+      </FloatingActionButton>
+      <FloatingActionButton label="Create event" onClick={() => open("create")} ref={createTrigger}>
         <PlusIcon aria-hidden="true" />
-      </Button>
-      <Button
-        aria-label="Search calendar"
+      </FloatingActionButton>
+      <FloatingActionButton
+        label="Search calendar"
         onClick={() => open("search")}
         ref={searchTrigger}
-        size="icon"
-        variant="ghost"
       >
         <SearchIcon aria-hidden="true" />
-      </Button>
-    </nav>
+      </FloatingActionButton>
+    </FloatingActions>
   ) : mode === "date" ? (
     <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
   ) : mode === "search" ? (
@@ -188,7 +175,6 @@ export function CalendarFloatingNav({
   return (
     <div className="calendar-floating-nav" data-mode={surfaceState}>
       <m.div
-        animate={{ borderRadius: surfaceState === "closed" ? 999 : 12 }}
         className="calendar-floating-nav__surface"
         data-slot="calendar-floating-surface"
         data-state={surfaceState}
@@ -204,7 +190,6 @@ export function CalendarFloatingNav({
         }}
         style={{ overflow: "hidden", position: "relative" }}
         transition={{
-          borderRadius: { duration: 0.18, ease: [0.22, 1, 0.36, 1] },
           layout: { bounce: 0.12, duration: 0.38, type: "spring" },
         }}
       >

@@ -6,6 +6,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { CurrencyInput } from "@/components/currency-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -33,6 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { SettingsSection } from "../settings/settings-layout.js";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -142,10 +144,10 @@ export function FinanceProfileEditor() {
   const [editing, setEditing] = useState<{ profile: FinanceProfileVersion | null } | null>(null);
   const current = profile.data?.data;
   return (
-    <section aria-label="Financial profile" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-medium">Financial profile</h2>
-        {profile.isSuccess ? (
+    <SettingsSection
+      title="Financial profile"
+      action={
+        profile.isSuccess ? (
           <Button
             onClick={() => setEditing({ profile: current ?? null })}
             size="sm"
@@ -153,8 +155,9 @@ export function FinanceProfileEditor() {
           >
             {current ? "Edit financial profile" : "Create financial profile"}
           </Button>
-        ) : null}
-      </div>
+        ) : null
+      }
+    >
       <FinanceSourceState label="Financial profile" query={profile} />
       {current ? (
         <>
@@ -205,7 +208,7 @@ export function FinanceProfileEditor() {
               <ItemGroup>
                 {current.debts.map((debt, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: Read-only entries in an immutable profile version have no record identifiers.
-                  <Item key={`${debt.name}-${index}`}>
+                  <Item variant="secondary" key={`${debt.name}-${index}`}>
                     <ItemContent>
                       <ItemTitle>{debt.name}</ItemTitle>
                       <ItemDescription>
@@ -228,7 +231,7 @@ export function FinanceProfileEditor() {
                 ))}
                 {current.insurance.map((policy, index) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: Read-only entries in an immutable profile version have no record identifiers.
-                  <Item key={`${policy.name}-${index}`}>
+                  <Item variant="secondary" key={`${policy.name}-${index}`}>
                     <ItemContent>
                       <ItemTitle>{policy.name}</ItemTitle>
                       <ItemDescription>
@@ -238,7 +241,7 @@ export function FinanceProfileEditor() {
                     </ItemContent>
                   </Item>
                 ))}
-                <Item>
+                <Item variant="secondary">
                   <ItemContent>
                     <ItemTitle>Planning preferences</ItemTitle>
                     <ItemDescription>
@@ -274,7 +277,7 @@ export function FinanceProfileEditor() {
       {editing ? (
         <ProfileDialog profile={editing.profile} onClose={() => setEditing(null)} />
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -411,16 +414,27 @@ function ProfileDialog({
               {numericFields.map((field) => (
                 <Field key={field.key}>
                   <FieldLabel htmlFor={`profile-${field.key}`}>{field.label}</FieldLabel>
-                  <Input
-                    name={field.key}
-                    id={`profile-${field.key}`}
-                    type="number"
-                    min={field.min}
-                    max={field.max}
-                    step={field.step}
-                    value={form[field.key]}
-                    onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
-                  />
+                  {field.step === 0.01 ? (
+                    <CurrencyInput
+                      name={field.key}
+                      id={`profile-${field.key}`}
+                      min={field.min}
+                      max={field.max}
+                      value={form[field.key]}
+                      onValueChange={(value) => setForm({ ...form, [field.key]: value })}
+                    />
+                  ) : (
+                    <Input
+                      name={field.key}
+                      id={`profile-${field.key}`}
+                      type="number"
+                      min={field.min}
+                      max={field.max}
+                      step={field.step}
+                      value={form[field.key]}
+                      onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
+                    />
+                  )}
                 </Field>
               ))}
             </FieldGroup>
@@ -445,15 +459,13 @@ function ProfileDialog({
               </Field>
               <Field>
                 <FieldLabel htmlFor="profile-buffer">Buffer target (USD)</FieldLabel>
-                <Input
+                <CurrencyInput
                   name="buffer"
                   id="profile-buffer"
-                  type="number"
-                  min="0"
-                  max="100000000"
-                  step="0.01"
+                  min={0}
+                  max={100000000}
                   value={form.bufferTarget}
-                  onChange={(event) => setForm({ ...form, bufferTarget: event.target.value })}
+                  onValueChange={(value) => setForm({ ...form, bufferTarget: value })}
                 />
               </Field>
               <Field>

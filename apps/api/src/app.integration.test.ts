@@ -5088,17 +5088,21 @@ describe.sequential("ilo API", () => {
       .from(users)
       .where(inArray(users.email, fixtureEmails));
     expect(fixtureUsers).toHaveLength(qaFixtureAccounts.length);
-    const demo = fixtureUsers.find((record) => record.email === "demo+full@ilo.test");
-    const loaded = fixtureUsers.find((record) => record.email === "qa+loaded@ilo.test");
-    const onboarding = fixtureUsers.find((record) => record.email === "qa+onboarding-new@ilo.test");
-    const resumed = fixtureUsers.find((record) => record.email === "qa+onboarding-google@ilo.test");
-    const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@ilo.test");
-    const finances = fixtureUsers.find(
-      (record) => record.email === "qa+onboarding-finances@ilo.test",
+    const demo = fixtureUsers.find((record) => record.email === "demo+full@nohmi.test");
+    const loaded = fixtureUsers.find((record) => record.email === "qa+loaded@nohmi.test");
+    const onboarding = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-new@nohmi.test",
     );
-    const ready = fixtureUsers.find((record) => record.email === "qa+onboarding-ready@ilo.test");
-    const empty = fixtureUsers.find((record) => record.email === "qa+empty@ilo.test");
-    const degraded = fixtureUsers.find((record) => record.email === "qa+recovery@ilo.test");
+    const resumed = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-google@nohmi.test",
+    );
+    const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@nohmi.test");
+    const finances = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-finances@nohmi.test",
+    );
+    const ready = fixtureUsers.find((record) => record.email === "qa+onboarding-ready@nohmi.test");
+    const empty = fixtureUsers.find((record) => record.email === "qa+empty@nohmi.test");
+    const degraded = fixtureUsers.find((record) => record.email === "qa+recovery@nohmi.test");
     expect(demo).toBeDefined();
     expect(onboarding).toMatchObject({ emailVerifiedAt: null, setupStatus: "not_started" });
     expect(resumed).toMatchObject({ setupCurrentStep: "google", setupStatus: "in_progress" });
@@ -5218,7 +5222,7 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({
           deletedAt: null,
           taskLifecycle: "open",
-          title: "Draft weekly product update",
+          title: "Draft weekly program update",
         }),
         expect.objectContaining({
           deletedAt: null,
@@ -5241,7 +5245,7 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({ deletedAt: expect.any(Date), taskLifecycle: "open" }),
       ]),
     );
-    const draftTask = demoTasks.find((task) => task.title === "Draft weekly product update");
+    const draftTask = demoTasks.find((task) => task.title === "Draft weekly program update");
     expect(
       await database.db
         .select({
@@ -5259,7 +5263,7 @@ describe.sequential("ilo API", () => {
       },
     ]);
     const sameListMoveTask = demoTasks.find(
-      (task) => task.title === "Prepare launch follow-through",
+      (task) => task.title === "Prepare opening-weekend checklist",
     );
     const sameListProjects = demoTaskProjects.filter(
       (project) => project.listId === sameListMoveTask?.taskListId,
@@ -5285,7 +5289,7 @@ describe.sequential("ilo API", () => {
         .select()
         .from(taskProjects)
         .where(eq(taskProjects.userId, demo?.id ?? "")),
-    ).toHaveLength(3);
+    ).toHaveLength(7);
   });
 
   it("daily brief uses canonical lifecycle, deletion, and timing", async () => {
@@ -5489,6 +5493,32 @@ describe.sequential("ilo API", () => {
       currentStep: "google",
       dismissedAt: "2026-07-13T12:00:00.000Z",
       status: "dismissed",
+    });
+    const dismissedSetup = (await payload(await request("/v1/me"))).user.setup;
+    const preferences = await payload(
+      await request("/v1/setup", {
+        method: "PATCH",
+        body: { action: "preferences", selectedWorkspaces: ["tasks"] },
+      }),
+    );
+    expect(preferences.user.setup).toEqual({ ...dismissedSetup, selectedWorkspaces: ["tasks"] });
+    const completedSetup = (
+      await payload(
+        await request("/v1/setup", {
+          method: "PATCH",
+          body: { action: "complete" },
+        }),
+      )
+    ).user.setup;
+    const configured = await payload(
+      await request("/v1/setup", {
+        method: "PATCH",
+        body: { action: "preferences", selectedWorkspaces: ["calendar", "mail"] },
+      }),
+    );
+    expect(configured.user.setup).toEqual({
+      ...completedSetup,
+      selectedWorkspaces: ["calendar", "mail"],
     });
     expect((await request("/v1/weather")).status).toBe(400);
     weatherFetch.mockResolvedValueOnce(

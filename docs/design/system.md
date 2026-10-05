@@ -84,6 +84,10 @@ properties inform the finished form. See [Ryo Lu’s Compile 2026 session](https
 
 ### Page frame
 
+See the [workspace layout architecture audit](workspace-layout-architecture.md) for
+the proposed ownership hierarchy and incremental migration. That document distinguishes
+current implementation from the target slot contract.
+
 Every product page has these layers, in order:
 
 | Layer | Question answered | Rule |
@@ -98,7 +102,12 @@ The shell owns one responsive inline page inset. Standard app-bar content and
 ordinary route bodies use that same inset so their leading and trailing edges
 align across navigation and material. Spatial workspaces that intentionally run
 edge to edge, such as Calendar and Mail, may opt out at their workspace frame;
-individual pages must not recreate the shell inset with local padding.
+individual pages must not recreate the shell inset with local padding. Settings
+uses a centered reading surface with its own page introduction, without a workspace
+app bar; see the [Settings layout contract](pages/settings.md).
+
+Primary and secondary top navigation use `--background`, matching the default
+page canvas in both themes. Sidebars retain their independent sidebar tone.
 
 `WorkspaceLayout` owns an optional secondary-navigation slot directly below
 the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
@@ -246,8 +255,12 @@ geometry so focus, invalid, increased-contrast, or functional data boundaries
 can become visible without layout shift. A legacy `outline` variant names an
 interaction hierarchy, not a requirement to draw an outline.
 
-Raised overlays and bounded floating work use `surface-raised`, never the
-surface directly behind them. Contextual app-bar controls retain a quiet opaque
+Portalled contextual overlays (menus, popovers, hover cards, and comboboxes) use
+`popover` / `popover-foreground`, backed by the dedicated opaque `surface-overlay`
+tone. Do not override these with canvas, card, sidebar, or a feature-local border.
+Modal dialogs, drawers, and sheets instead use `background` / `foreground`, matching the page canvas. Their headers, bodies, and footers share one continuous surface; do not tint header or footer bands. The scrim supplies separation, and internal cards may use the normal card tone.
+
+`surface-raised` is an in-flow supporting tone, not the overlay token. Contextual app-bar controls retain a quiet opaque
 resting fill, and interactive highlights use `control-hover-background` so an
 open or hovered control cannot collapse into its parent surface. Avatar
 fallbacks use nested neutral tones so the identity boundary remains legible on
@@ -272,7 +285,7 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
 - Workspace-switcher triggers show the workspace glyph without its frame,
-  including the mobile dock. Picker items use unframed outline glyphs; the
+  including the compact mobile header trigger. Picker items use unframed outline glyphs; the
   current workspace uses a filled glyph and its colored selected surface.
   in the desktop rail, inactive destinations use neutral outline glyphs and only
   the selected destination uses a filled glyph on its colored control surface, without an icon frame. Preserve the same glyph
@@ -291,10 +304,14 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - Connection management uses the shared `ConnectionCard` slots for identity, status, health
   summary, capabilities, and actions. Keep account identity separate from operational status; state
   the user impact and whether action is required in the summary; keep capabilities grouped; and use
-  explicit text labels for sync, reconnect, and removal actions instead of unexplained icon buttons.
+  title-aligned icon actions with accessible labels and hover/focus tooltips for sync, reconnect,
+  and removal. ConnectionCard composes the same SettingsRecordContent anatomy as other Settings records.
 - Device-local density controls change presentation only. Keep the comfortable view as the
   information-rich default, preserve essential identity and time in compact views, and do not let a
   density choice change query scope or stored domain data.
+- Settings uses task-sized Card tiles in the shared `SettingsBento` or `settings-stack`
+  layout. Records inside those cards use `Item variant="secondary"` with paired
+  secondary surface/text tokens. See [Settings](pages/settings.md) for the full layout contract.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
   and description; availability and errors use shared alerts.
@@ -439,3 +456,142 @@ state. Treat implementation as a prototype: inspect it, identify a concrete
 friction, make the smallest change that expresses the intended rule, and verify
 the changed state plus its empty/error counterpart. This keeps design close to
 the material while preventing local fixes from becoming undocumented patterns.
+
+### Neutral surface and shape contract
+
+The shared theme owns these invariants in both light and dark mode. Canvas/card
+separation has a measured contrast floor of 1.16:1; this is a visual hierarchy
+budget, not a WCAG text threshold. Overlay/card, overlay/canvas, and overlay/sidebar
+separation must each reach 1.10:1. Rail/sidebar tones can stay close. Foreground
+text must still meet 4.5:1 on its actual surface, including highlighted results.
+Opaque overlay tone, rather than a local border or shadow, provides separation.
+Modal dialogs, drawers, and sheets use the shared inverse `overlay` scrim; it
+dims the page in both themes instead of becoming a white wash in dark mode.
+
+Primary actions pair `primary` with `primary-foreground`. Quiet hover, focus, and
+selection pair `selection` with `selection-foreground`; Tailwind's `accent` pair
+maps to this same quiet treatment, including raw CSS `--accent`. Legacy primary
+action consumers use `primary` explicitly. Browser text selection also uses the
+quiet pair.
+
+Radius is a length in rem, not a percentage of an element. With the 0.75rem base,
+small details use 4px (`sm`), compact controls/menu items 6px (`md`), regular
+controls 8px (`lg`), floating menus 12px (base), and cards/dialogs 16px (`xl`).
+All scale from the same base; intentionally circular avatars, radio controls,
+switches, and floating dock shapes remain round. A small button should not become
+a capsule merely because it shares a panel's radius. Page CSS must use these same
+named radius tokens for legacy inputs, badges, segmented controls, events, panels,
+and sheets. Do not add fixed pixel corners or local radius arithmetic; `999px`
+and `50%` are reserved for intentional circular marks, progress tracks, and docks.
+
+The frontend theme owns this contract. Verify Settings search hover/keyboard
+focus, cards, and Mail/Calendar account popovers in both themes when changing it.
+
+### Neutral palette direction
+
+Use a neutral grayscale inspired by [Radix Gray](https://www.radix-ui.com/colors/docs/palette-composition/composing-a-palette),
+with semantic roles following its [scale guidance](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale).
+This keeps chrome from competing with the four workspace colors. The selected
+nohmi values are calibrated to our borderless surface and text contrast budgets;
+they are not an unmodified Radix theme or a claim of automatic accessibility.
+
+Light mode uses a soft gray canvas (`#e8e8e8`), off-white cards (`#f9f9f9`),
+and charcoal text (`#202020`). Dark mode uses charcoal canvas (`#202020`),
+neutral raised cards (`#2d2d2d`), and soft light text (`#eeeeee`). Navigation and
+overlays follow the same achromatic scale. Never use pure white or pure black
+for app-owned theme surfaces, text, or controls. The theme contract validator
+rejects those endpoints. Provider artwork and user-authored material are content,
+not sources for theme tokens.
+
+### Floating workspace actions
+
+Calendar's bottom-center action group and Mail's bottom-right compose action share
+`FloatingActions` and `FloatingActionButton` (`components/floating-actions.tsx`).
+On mobile, Calendar’s closed action group stays bottom-center; other closed action groups
+align to the bottom end, with a shared safe-area
+inset and 52px surface height. Page navigation uses the same floating action
+primitives beside creation actions. The compact workspace switcher always lives
+in the top header, never in the bottom dock. Workspace review alerts also live
+in the mobile header as a glyph and compact count, keeping the full accessible label.
+Unknown counts show an ellipsis and unavailable counts show an exclamation mark, never zero.
+Contextual search and filters can occupy a second row. Mobile page sheets contain
+page navigation only: account, password, and sign-out controls belong in Settings.
+Rows preserve leading icons, truncated labels, and end-aligned metadata with 44px
+touch targets.
+Desktop placement remains workspace-specific.
+
+The feature owns positioning, safe-area/mobile-dock clearance, and the opened
+workflow; the shared block owns appearance and targets. Do not move either action
+location merely to standardize its styling.
+
+- Use a 44px square button target, 16px glyph, 4px surface padding, and 2px group
+  gap. Both closed surfaces are 52px tall. A single action is circular; multiple
+  actions form a capsule. Expanded content uses the shared panel radius token.
+- Closed actions use the `primary` / `primary-foreground` pair in both themes,
+  without workspace-specific hues or resting borders. Hover and keyboard focus
+  use the same foreground-tinted fill; focus also has an inset outline.
+- Every icon has an action-oriented accessible name and a delayed tooltip shown
+  above the control. Tooltips supplement labels; they are not required to operate
+  the action. Preserve normal Tab order, Escape dismissal, and return focus.
+- Group styling does not imply ARIA `toolbar`: that role requires the toolbar
+  keyboard contract, including arrow navigation. These small action groups retain
+  their existing labeled navigation and ordinary button tab stops.
+- Calendar retains its date/create/search surfaces; Mail retains its responsive
+  compose dialog and draft-preservation behavior. Shared chrome must not absorb
+  domain data, submission, validation, or dismissal logic.
+
+The 44px target adopts [WCAG's enhanced target-size recommendation](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html)
+(a deliberate usability target, not a claim of whole-app AAA conformance).
+Semantics follow the [WAI toolbar pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/),
+and tooltips compose the installed [shadcn Tooltip](https://ui.shadcn.com/docs/components/radix/tooltip).
+Verify target geometry, surface/foreground pairing, focus return, and constrained
+viewport clearance in both features when changing this block.
+
+### Segmented selection controls
+
+Use `SegmentedControl` / `SegmentedControlItem` from `components/segmented-control.tsx`
+for compact, mutually exclusive view/filter/setting choices. This is one shared
+composition of the installed shadcn Radix ToggleGroup, not a custom radio implementation.
+It owns small control sizing, a quiet secondary track, selection/foreground pairing,
+radius, spacing, horizontal layout, and rejection of empty deselection. Feature code
+supplies a controlled value, accessible group label, options, and change handler.
+Keep options in one row; allow horizontal scrolling when constrained rather than
+turning the group into a grid or wrapping it into ambiguous rows. Do not restyle
+individual instances or add parallel segmented-button CSS.
+
+Current consumers: Today commitment filters; Calendar Day/Week/Month; Reviews work
+type; Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
+image-fit and backdrop; agent permission presets. Calendar may hide visible labels
+at narrow widths while keeping accessible names and tooltips.
+
+Distinct semantics remain distinct: Cash Flow uses shadcn Tabs for associated
+panels; ordinary form questions use RadioGroup; menu choices use DropdownMenuRadioGroup;
+agent workspace cards retain their richer ToggleGroup composition; bucket and calendar
+pickers select domain records rather than fixed view modes. Do not replace these solely
+because they also allow one selection.
+
+References: [shadcn Toggle Group](https://ui.shadcn.com/docs/components/radix/toggle-group),
+[Radix single selection and keyboard contract](https://www.radix-ui.com/primitives/docs/components/toggle-group),
+and [WAI Tabs semantics](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/).
+
+### Sidebar attention and counts
+
+Compose `SidebarItemMeta` beside the standard shadcn SidebarMenuButton and reserve
+its trailing space with `sidebar-item-with-meta`. Use its inline mode in the mobile
+section sheet. Attention and count are independent: a semantic attention dot,
+plus optional muted, normal-weight tabular count. Keep destination labels readable
+and truncate them before metadata. Display compact counts from 1,000 upward (1.2k,
+1.2m); retain the full comma-grouped value in the accessible description. Show no
+count for unknown data, and do not infer urgency from an unread count. Mail,
+Finances, and Settings share this composition. This follows the
+[shadcn Sidebar badge slot](https://ui.shadcn.com/docs/components/radix/sidebar).
+
+Shared form compositions live in `components/date-input.tsx` and
+`components/currency-input.tsx`; Settings owns their value/formatting contract in
+[its page specification](pages/settings.md). The date popover follows
+[shadcn Date Picker](https://ui.shadcn.com/docs/components/radix/date-picker), and
+currency uses [Input Group](https://ui.shadcn.com/docs/components/radix/input-group).
+
+### Searchable entity selection
+
+Use `SearchableSelect` for choosing one existing value from a long list, including Finance categories. It composes the shared shadcn Combobox and accepts value/label options; callers own fetching and entity permissions. The control is an inline editable text field, not a button opening a separate search box. Focusing it opens suggestions beneath the field; filtering highlights the first match, arrows change the highlight, and Enter or forward Tab commits it. Tab moves to the next available control; Shift+Tab leaves without committing, Escape cancels, and unmatched text never creates a value. Mount the popup inside its containing modal focus scope. Keep contextual popup colors distinct from the surrounding page-colored dialog.

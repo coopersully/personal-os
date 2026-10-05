@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderUi, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { RitualSettings } from "./ritual-settings.js";
+
+const render = (ui: ReactElement) => renderUi(<TooltipProvider>{ui}</TooltipProvider>);
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -145,6 +149,7 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
     }),
   );
   mocks.list.mockRejectedValueOnce(new Error("private refresh failure"));
+  expect(screen.queryByText("Saving", { exact: true })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
   expect(await screen.findByText("Couldn’t refresh ritual settings. Try again.")).toBeVisible();
   expect(screen.queryByText(/making the change twice/)).not.toBeInTheDocument();

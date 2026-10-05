@@ -114,6 +114,7 @@ function ResponsiveDialogContent({
       className={cn(
         "max-h-[calc(100dvh-1rem)] border-transparent pb-[env(safe-area-inset-bottom)]",
         className,
+        "w-full max-w-none sm:max-w-none",
       )}
       data-presentation="drawer"
       data-responsive-slot="content"

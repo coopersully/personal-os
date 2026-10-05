@@ -4,19 +4,18 @@ import {
   DollarIcon,
   GridIcon,
   type Icon,
-  ListChecksIcon,
   ReceiptIcon,
   SettingsIcon,
   ShieldCheckIcon,
   TargetIcon,
   WalletIcon,
 } from "@/components/icons";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
@@ -31,6 +30,7 @@ export type FinanceSection =
   | "plan"
   | "wealth"
   | "setup"
+  | "decisions"
   | "review"
   | "subscriptions"
   | "transactions";
@@ -42,7 +42,7 @@ const navigation: Array<{
   {
     items: [
       { icon: GridIcon, id: "overview", label: "Overview" },
-      { icon: ListChecksIcon, id: "review", label: "Review" },
+
       { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
       { icon: WalletIcon, id: "plan", label: "Plan" },
       { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
@@ -59,6 +59,7 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   if (section === "reviews") return "overview";
   return (
     [
+      "decisions",
       "accounts",
       "budgets",
       "cashflow",
@@ -104,6 +105,9 @@ export function FinanceSidebarNavigation({
               {group.items.map(({ icon: Icon, id, label }) => (
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton
+                    className={
+                      id === "review" && reviewCount > 0 ? "sidebar-item-with-meta" : undefined
+                    }
                     asChild
                     isActive={financeNavigationActive(section, id)}
                     tooltip={label}
@@ -124,7 +128,7 @@ export function FinanceSidebarNavigation({
                     </Link>
                   </SidebarMenuButton>
                   {id === "review" && reviewCount > 0 ? (
-                    <SidebarMenuBadge aria-hidden="true">{reviewCount}</SidebarMenuBadge>
+                    <SidebarItemMeta label="Reviews" count={reviewCount} />
                   ) : null}
                 </SidebarMenuItem>
               ))}

@@ -356,20 +356,26 @@ while retaining domain-owned conditions, actions, validation, and execution.
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/settings?section=reviews` is the account-wide action queue for work that explicitly
+**Reviews:** `/reviews`, owned by Today, is the account-wide action queue for work that explicitly
 requires the person: questions, approvals, connector failures, recovery steps, and other Review or
 Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
 action routes to the domain that owns the decision. Informational state, routine success, and work
 nohmi can recover automatically do not enter the queue; setup and access configuration never appear
-as queue work merely because they exist.
+as queue work merely because they exist. Legacy `/settings?section=reviews` links redirect while
+preserving filters.
 
 Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
 review bypass, shared notification policy, channel connections/defaults, connected-agent
 credentials/scopes, and User Knowledge controls. Workspace-owned sources, maintenance behavior,
 notification overrides, rules, learning, recovery, data controls, and domain access posture are
-edited only inside Mail, Tasks, Calendar, or Finances. The centralized cross-workspace overview may
+edited in domain-owned settings, reached through the Settings Workspaces group or workspace links.
+Each setting has one canonical editor. The centralized cross-workspace overview may
 show their effective state, health, override badges, and review counts, but only links to the owning
-workspace for changes.
+workspace settings for changes. The accepted [settings architecture](../design/pages/settings-architecture.md)
+groups Profile, Connections, Security & access, and Activity log under Account, with Personal,
+Workspaces, and App as the other primary groups. Setup, connected agents, signed-in devices, and
+workspace access are searchable secondary destinations beneath their relevant parent. Local
+feature history remains with the feature; Activity log records audited changes.
 
 Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
 an external model host's context are planned but deferred. Credential scopes, purpose-limited API
@@ -566,3 +572,12 @@ Before each high-impact domain release, test 5–8 representative users on the h
 ## 13. Source references
 
 The research basis is recorded in the 2026-07-18 product analysis. Key experience references include [Shortwave automation](https://www.shortwave.com/docs/guides/customize-your-shortwave-settings/), [Spark Smart Inbox](https://sparkmailapp.com/help/manage-your-inbox/customize-your-inbox), [Notion Calendar availability](https://www.notion.com/en-us/help/availability-blocking-and-time-zones?nxtPslug=availability-blocking-and-time-zones), [Fantastical MCP permissions](https://flexibits.com/fantastical/help/fantastical-connector-mcp-for-claude), [Reclaim planning](https://help.reclaim.ai/en/articles/6210740-features-in-reclaim), [Plaid Transactions](https://plaid.com/docs/transactions/), and [n8n execution history](https://docs.n8n.io/workflows/executions/all-executions/).
+
+### Contextual review flow
+
+Reviews open from a workspace attention alert or the actions beside its Settings title. A shared
+responsive dialog/drawer presents one decision at a time, using domain-owned controls and evidence.
+Progress shows completed, remaining, and total items. Advance only after the server confirms a
+resolution; Later never counts as completion. Reconnection and source repair remain explicit source
+operations. The earlier bento queue is retained in code but hidden from navigation. See
+[Reviews](../design/pages/reviews.md) for the interaction and compatibility contract.

@@ -14,7 +14,7 @@ describe("PasswordInput", () => {
 
     expect(group).toHaveClass("rounded-lg", "border", "border-transparent", "bg-input-surface");
     expect(input).toHaveClass("rounded-none", "border-0", "bg-transparent");
-    expect(button).toHaveClass("size-6", "rounded-[min(var(--radius-md),10px)]");
+    expect(button).toHaveClass("size-6", "rounded-md");
   });
 
   it("reveals and hides the password without honoring an external type override", () => {

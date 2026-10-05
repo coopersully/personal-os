@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { TextingSettings } from "./page.js";
 
 const mocks = vi.hoisted(() => ({
@@ -17,7 +18,7 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
 
-function renderSettings(mutationRetry: false | number = false) {
+function renderSettings(mutationRetry: false | number = false, profile = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       mutations: { retry: mutationRetry, retryDelay: 0 },
@@ -26,7 +27,9 @@ function renderSettings(mutationRetry: false | number = false) {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <TextingSettings />
+      <MemoryRouter>
+        <TextingSettings profile={profile} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -157,6 +160,32 @@ describe("Texting settings", () => {
     expect(await screen.findByText(new RegExp(state))).toBeInTheDocument();
   });
 
+  it("edits the profile number through verification without disconnecting the existing number", async () => {
+    const user = userEvent.setup();
+    mocks.getTextingConnection.mockResolvedValue({
+      id: "connected",
+      country: "CA",
+      maskedPhoneNumber: "+1 ***-***-0123",
+      state: "active",
+      providerReady: true,
+    });
+    renderSettings(false, true);
+    expect(await screen.findByText("Canada")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to Agent Texting" })).toHaveAttribute(
+      "href",
+      "/settings?section=texting",
+    );
+    await user.click(screen.getByRole("button", { name: "Change number" }));
+    expect(screen.getByLabelText("Country")).toHaveValue("CA");
+    await user.type(screen.getByLabelText("Mobile number"), "4165550123");
+    expect(mocks.startTextingVerification).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Send verification code" }));
+    expect(await screen.findByLabelText("Verification code")).toBeInTheDocument();
+    expect(mocks.disconnectTexting).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel number change" }));
+    expect(await screen.findByText("+1 ***-***-0123")).toBeInTheDocument();
+  });
   it("renders a verification-check failure", async () => {
     const user = userEvent.setup();
     mocks.checkTextingVerification.mockRejectedValueOnce(new Error("Provider rejected code"));

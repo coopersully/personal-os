@@ -28,7 +28,7 @@ for (const width of [320, 390, 1100]) {
       "All",
       "History",
       "Trash",
-      "Launch follow-through",
+      "Autumn program opening",
     ])
       await expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible();
     await expect(sidebar.getByRole("button", { name: /More views|Expand|Collapse/ })).toHaveCount(

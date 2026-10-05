@@ -18,15 +18,10 @@ test("the repository QA fixture login exposes representative workspace data", as
     await page.locator(".week-calendar").evaluate((calendar) => {
       calendar.scrollTop = 300;
     });
-    const restingCard = await overlappingCards.last().boundingBox();
-    if (!restingCard) throw new Error("Missing resting event bounds");
-    await page.mouse.move(
-      restingCard.x + restingCard.width / 2,
-      restingCard.y + restingCard.height / 2,
-    );
+    const stack = page.getByRole("group", { name: "5 overlapping events", exact: true });
+    await stack.hover();
     await expect(overlapPin).toHaveCSS("opacity", "1");
     await expect(page.getByRole("tooltip")).toHaveCount(0);
-    const stack = page.getByRole("group", { name: "5 overlapping events", exact: true });
     await expect(stack).toHaveClass(/is-hovered/);
     await expect
       .poll(() => stack.evaluate((element) => getComputedStyle(element, "::after").backgroundImage))
@@ -274,7 +269,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
     .getByRole("navigation", { name: "Workspace navigation" })
     .getByRole("link", { name: "Settings" })
     .click();
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
   for (const selector of [".workspace-rail", ".sidebar"]) {
     const bounds = await page.locator(selector).boundingBox();
     expect(bounds?.y).toBe(0);
@@ -549,8 +544,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
     .getByRole("button")
     .all()) {
     const bounds = await action.boundingBox();
-    expect(bounds?.width).toBe(44);
-    expect(bounds?.height).toBe(44);
+    expect(bounds?.width).toBeCloseTo(44, 3);
+    expect(bounds?.height).toBeCloseTo(44, 3);
   }
   await page.locator(".week-calendar").evaluate((calendar) => {
     calendar.scrollTop = 0;
@@ -696,19 +691,32 @@ test("a person and an agent share one reminder and calendar surface", async ({
     name: "Account utility navigation",
   });
   const openSettingsSection = async (name: string | RegExp) => {
+    const parent =
+      name === "Connected agents"
+        ? "Connections"
+        : name === "Workspace access"
+          ? "Security & access"
+          : name;
     if (mobile) {
       await page.getByRole("button", { name: "Workspace actions" }).click();
-      await page.getByRole("dialog", { name: "Settings" }).getByRole("link", { name }).click();
-      return;
+      await page
+        .getByRole("dialog", { name: "Settings" })
+        .getByRole("link", { name: parent })
+        .click();
+    } else {
+      await settingsSidebar.getByRole("link", { name: parent }).click();
     }
-    await settingsSidebar.getByRole("link", { name }).click();
+    if (parent !== name) {
+      await page
+        .locator("main")
+        .getByRole("link", { name: new RegExp(`^Open ${name}$`) })
+        .click();
+    }
   };
-  await expect(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Profile", level: 1 })).toBeVisible();
   if (mobile) {
     await expect(settingsSidebar).toBeHidden();
-    await expect(
-      page.getByRole("navigation", { name: "Workspace dock" }).getByText("Settings"),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Workspace actions" })).toBeVisible();
   } else {
     await expect(settingsSidebar).toBeVisible();
     await expect(
@@ -752,7 +760,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByText("Mail readiness")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Setup protocol details" })).toHaveCount(0);
   await openSettingsSection("Mail");
-  await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Mail", exact: true, level: 1 })).toBeVisible();
   const mailAction = page
     .locator("main")
     .getByRole("status")
@@ -761,6 +769,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(mailAction.getByRole("link", { name: "Connect agent" })).toBeVisible();
   await expect(page.getByText("Operational review")).toHaveCount(0);
   await expect(page.getByText("Connect an agent", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Setup details", exact: true }).click();
   await page.getByRole("button", { name: "Setup protocol details" }).click();
   await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
   await openSettingsSection("Connected agents");

@@ -378,6 +378,7 @@ describe.sequential("reimbursement lifecycle", () => {
     const listed = await service.list(principal.userId);
 
     expect(expense.transactionDate).toBe("2026-08-17");
+    expect(listed.reimbursements[0]?.createdAt).toBe(now.toISOString());
     expect(listed.unmatchedCredits).toEqual(
       expect.arrayContaining([expect.objectContaining({ transactionId: currentCredit.id })]),
     );

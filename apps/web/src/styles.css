@@ -1507,6 +1507,17 @@ p {
   max-width: 1440px;
   padding: 0.5rem var(--workspace-inline-padding);
 }
+/* Calendar owns a bounded viewport even when narrow chrome grows taller. */
+.workspace:has(> .content--calendar) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+}
+.content--calendar {
+  flex: 1;
+  min-height: 0;
+}
 .content--calendar,
 .content--mail {
   height: calc(100dvh - var(--chrome-height));

@@ -5484,13 +5484,15 @@ function GoalItem({
       description={goal.description ?? "No supporting context yet."}
       actions={
         <>
-          <SettingsRecordAction
-            label={goal.status === "paused" ? "Resume" : "Pause"}
-            disabled={pending}
-            onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
-          >
-            {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
-          </SettingsRecordAction>
+          {goal.status === "active" || goal.status === "paused" ? (
+            <SettingsRecordAction
+              label={goal.status === "paused" ? "Resume" : "Pause"}
+              disabled={pending}
+              onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
+            >
+              {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
+            </SettingsRecordAction>
+          ) : null}
           <SettingsRecordAction
             label={`Remove ${goal.title}`}
             disabled={pending}
@@ -7939,7 +7941,7 @@ function ProfileSettings({ user }: { user: User }) {
     feedback: { action: "save your profile", form: true },
     mutationFn: (input: {
       displayName: string;
-      email: string;
+      email?: string;
       planningTimezone: string;
       homeLocation: HomeLocation | null;
       workdayEndMinute: number;
@@ -7979,7 +7981,8 @@ function ProfileSettings({ user }: { user: User }) {
     if (!editRevision || update.isPending || !homeLocationValid) return;
     const timer = window.setTimeout(() => {
       const form = formRef.current;
-      if (!form || saving.current) return;
+      if (!form || saving.current || document.activeElement === form.elements.namedItem("email"))
+        return;
       const values = new FormData(form);
       if (
         !form.checkValidity() ||
@@ -8040,7 +8043,9 @@ function ProfileSettings({ user }: { user: User }) {
                 .map((value) => String(value).trim())
                 .filter(Boolean)
                 .join(" "),
-              email: String(form.get("email")),
+              ...(String(form.get("email")) !== user.email
+                ? { email: String(form.get("email")) }
+                : {}),
               planningTimezone,
               homeLocation,
               workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
@@ -8100,6 +8105,7 @@ function ProfileSettings({ user }: { user: User }) {
                     defaultValue={user.email}
                     id="profile-email"
                     name="email"
+                    onBlur={edited}
                     required
                     type="email"
                   />

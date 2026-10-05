@@ -2,32 +2,22 @@
 
 Agent work has three distinct user questions. nohmi gives each one a dedicated destination.
 
-## Reviews from Today
+## Contextual Reviews
 
-`/reviews` answers **What needs my judgment now?** Today links to this cross-workspace queue.
-The old Settings URL redirects here while preserving filters.
+Reviews answer **What needs my judgment now?** Open the contextual flow from a workspace alert or
+its Settings header action. The flow stays within the selected workspace and renders the owning
+domain's decision material, actions, progress, deferral, and status refresh. See
+[Reviews](reviews.md) for the current contract.
 
-- The Reviews page owns its queue title and uses the Today navigation context. The feature body begins with filters and
-  queue material rather than repeating a title, eyebrow, or description.
-- It contains only `review` and `attention` work. Setup state is never queue work.
-- Kind and workspace filters are stored in the URL as `kind` and `workspace`.
-- Results use cursor pagination with Previous and Next controls and an honest displayed range.
-- Each row names its workspace, work type, title, explanation, and one direct action.
-- Preview the decision before opening it: rule matching conditions and proposed actions, Finance
-  transaction/reason/rationale, or the actual question and choices. Use labeled, wrapping display
-  fields from owner-scoped records; never serialize arbitrary evidence JSON. These richer previews
-  belong to signed-in people; agent feed redaction remains unchanged. Missing evidence stays absent.
-- Attention summaries must describe the concrete situation and required judgment, not merely say
-  “needs attention.” Fixture data follows the same standard.
-- Partial source failure stays visible; nohmi never converts unavailable work into a successful zero.
-- An empty state says the available work is clear when some workspaces could not be checked.
-
-Review actions route to the surface that owns the decision. Finance reviews stay in Finances. Mail
-rule activation opens Mail settings with the exact proposed rule selected.
+Direct navigation to `/reviews` redirects to `/settings?section=profile`; it does not open a
+cross-workspace queue or use Today navigation. Setup state remains separate from review and
+attention work. Owner-scoped previews retain concrete questions, rule conditions and future
+actions, Finance transaction evidence, and reported blockers. Missing evidence stays absent and
+partial source failures stay visible. Agent feed redaction remains unchanged.
 
 ## Connected agents in Settings
 
-Settings → Connected agents answers **Who can act in nohmi?**
+Settings → Connections → Connected agents answers **Who can act in nohmi?**
 
 - Show the current MCP URL once, with a copy action.
 - List OAuth hosts and local/manual credentials separately.
@@ -42,7 +32,7 @@ different host.
 
 ## Workspace access overview in Settings
 
-Settings → Workspace access answers **Where can agents act, and where does configuration need attention?**
+Settings → Security & access → Workspace access answers **Where can agents act, and where does configuration need attention?**
 
 The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances each summarize:
 
@@ -56,7 +46,7 @@ The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances
 This centralized surface is a read-only cross-workspace overview. Every workspace-owned access,
 source, maintenance, override, rule, learning, recovery, and data control is edited inside the
 owning workspace; centralized Settings must not render a duplicate form. Connected-agent
-credentials and scopes remain global and editable in Settings → Connected agents.
+credentials and scopes remain global and editable in Settings → Connections → Connected agents.
 
 Do not imply per-source credential scope when the credential model is workspace-wide. State that
 limitation explicitly. Readiness is evidence, not a progress percentage. Use the stable phases

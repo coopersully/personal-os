@@ -80,9 +80,7 @@ test("Finance outstanding items open with context and retain notes for maintenan
   await page.screenshot({ path: testInfo.outputPath("finance-outstanding.png") });
   await outstanding.getByRole("button", { name: "Review Example transfer" }).click();
   const dialog = page.getByRole("dialog", { name: "Review financial activity" });
-  await expect(
-    dialog.getByText("2026-09-08 · Example Bank Savings · Money out · Posted"),
-  ).toBeVisible();
+  await expect(dialog.getByText(/Sep 8, 2026 · Money out · Posted/)).toBeVisible();
   await dialog.getByLabel("Your answer").fill("Weekly transfer to my investment account");
   await page.screenshot({ path: testInfo.outputPath("finance-note-editor.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(

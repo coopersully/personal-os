@@ -5,6 +5,9 @@
 See when commitments occur across the selected calendars, then open or place an
 event without losing the shape of the day.
 
+Calendar stays bounded to the viewport across all view modes. When narrow app chrome grows taller,
+the calendar takes the remaining height and scrolls its own timeline rather than extending the page.
+
 ## Axis layout contract
 
 Calendar has two wayfinding axes: the top date/all-day rail and the leading time rail.

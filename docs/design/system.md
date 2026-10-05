@@ -84,9 +84,9 @@ properties inform the finished form. See [Ryo Lu’s Compile 2026 session](https
 
 ### Page frame
 
-See the [workspace layout architecture audit](workspace-layout-architecture.md) for
-the proposed ownership hierarchy and incremental migration. That document distinguishes
-current implementation from the target slot contract.
+See the [workspace layout architecture](workspace-layout-architecture.md) for
+the ownership hierarchy, intrinsic frame sizing, responsive slots, and scroll
+contract. Domain content keeps its own spatial or collection layout.
 
 Every product page has these layers, in order:
 
@@ -595,3 +595,110 @@ currency uses [Input Group](https://ui.shadcn.com/docs/components/radix/input-gr
 ### Searchable entity selection
 
 Use `SearchableSelect` for choosing one existing value from a long list, including Finance categories. It composes the shared shadcn Combobox and accepts value/label options; callers own fetching and entity permissions. The control is an inline editable text field, not a button opening a separate search box. Focusing it opens suggestions beneath the field; filtering highlights the first match, arrows change the highlight, and Enter or forward Tab commits it. Tab moves to the next available control; Shift+Tab leaves without committing, Escape cancels, and unmatched text never creates a value. Mount the popup inside its containing modal focus scope. Keep contextual popup colors distinct from the surrounding page-colored dialog.
+
+### Workspace discovery
+
+Every primary workspace header uses `WorkspaceFinder`: `Search Calendar`, `Search Tasks`,
+`Search Mail`, or `Search Finances`. Search spans the workspace, independently of the current
+view's filters, selected mailbox/list, visible calendars, and displayed date range. Desktop
+uses an icon button that opens an anchored popover with an autofocus search field; mobile uses
+the same icon button and the shared responsive drawer
+with inline results. Do not nest a second floating search popup above the mobile drawer.
+
+Group content, dates, settings, navigation, actions, and reviews. Show a useful preview and explicit
+archived/completed/hidden context. Support keyboard selection, result-type filtering, bounded
+pagination, honest loading/errors, and cancellation. Settings matches reuse `settingsFields` and
+focus the field at their destination. Commands only open existing editors or review flows; typing
+or selecting a search action never submits a mutation. Search covers synced records without
+contacting providers. Keep search text separate from page-list filters and out of telemetry.
+
+Workspace preferences live in four account-owned, revisioned tables. They hold UI preferences,
+not duplicate domain records: Calendar default view/weekends and each workspace's archive-search
+preference. Account time zone and day hours remain shared; calendars, mail rules, finance policy,
+and connection settings remain with their owning domains. Add controls and their searchable field
+metadata together. See [workspace search contract](plans/workspace-search.md).
+
+Calendar keeps its view selector collapsed at every width. Calendar and Mail account triggers
+show one avatar, a visible/total count, and an overlaid attention or synced marker. Calendar counts
+calendars; Mail counts accounts. Use a green circular check when every enabled account is connected and ready or syncing;
+use an X when attention is needed or health is unknown. Counts use secondary text. Full identities and recovery actions live in the popover.
+
+Header utility actions align to the inline end with shared icon-button sizing. Calendar keeps Reviews
+with its title; view and accounts precede Today, Previous, and Next at the far end. The view menu
+contains only Day, Week, and Month. Below 600px the period buttons yield to the compact header;
+the existing floating date control provides date navigation.
+
+Calendar week columns flex above an 80px readable minimum, with the time gutter accounted for;
+only narrower viewports scroll horizontally. Week tiles use a very subtle alternating tone; Day keeps the page background and Month
+reserves muted fill for dates outside the current month. Shared grid rules carry day boundaries
+and a solid-hour/dotted-subdivision hierarchy; fills must not overpower those rules or events.
+The current-day highlight remains distinct. ScrollArea and native scroll owners share the scrollbar
+thumb tokens, thin geometry, transparent tracks, and rounded thumbs. Keep native scroll ownership
+where Calendar follow, sticky axes, and drag geometry depend on it; do not wrap those in a second
+scroll viewport merely to change scrollbar appearance.
+
+Calendar headers stay borderless; day boundaries begin in the timed grid. Follow today exposes
+its active state with `aria-pressed` and the Today highlight token. In Day/Week, a user scroll
+that settles near the reachable follow position for 180ms snaps there and resumes Follow when
+Snap back to Follow is enabled. Capture ranges are Precise (6px), Balanced (24px), and Generous
+(96px); release is at least 96px and always at least 48px beyond the capture range. Use clamped targets on both axes, ignore programmatic
+scrolls, and never resume for a displayed period that excludes Today.
+
+Calendar remembers explicit Day/Week/Month selections in account-owned workspace preferences.
+Normal entry uses that view and today; automatic Follow defaults on. When disabled, normal entry
+starts at midnight without following. Explicit date/view/follow links preserve their navigation
+intent. Settings exposes Preferred view, Automatically follow today, Snap back to Follow, and
+Follow snap sensitivity; these fields are also searchable. Defaults preserve existing behavior.
+
+Review navigation entry points (workspace headers, sidebar footers, and settings actions) are omitted when the successfully loaded review count is zero. Unavailable counts retain an honest recovery entry. A one-action overflow should be a directly labeled icon button; use an overflow menu only when there is a choice of actions.
+
+### Tasks menus and retained work
+
+Tasks History, Trash, and Archive share the workspace header and content gutters.
+Archive uses the collection grid, search, status filter, and recent-update sorting;
+scoped retained tasks retain their existing lifecycle actions. History uses a history
+arrow icon, Archive a storage box, and Trash a bin.
+
+### Menus and selection controls (all workspaces)
+
+This is an established frontend standard across workspace headers, sidebars, item
+menus, settings, and responsive layouts. The shared shadcn DropdownMenu primitives
+own layout and selection indicators; features own labels, grouping, and behavior.
+
+| Row intent | Component | Trailing affordance |
+| --- | --- | --- |
+| Perform an action or navigate to a destination | `DropdownMenuItem` | No selection control |
+| Choose exactly one value, such as grouping, sorting, or current view | `DropdownMenuRadioGroup` + `DropdownMenuRadioItem` | Always-visible circular radio; filled dot when selected |
+| Toggle an independent option, such as visible row details | `DropdownMenuCheckboxItem` | Always-visible square checkbox; check when selected, dash for mixed state |
+
+Do not implement selectable options as action rows with a manually appended check
+icon. Both selected and unselected options show their control shape so the choice
+model is understandable before interaction. Use the same semantic control tokens
+as shadcn form radios and checkboxes. The menu row remains the sole focusable control
+with its native `menuitemradio`/`menuitemcheckbox` and `aria-checked` semantics; never
+nest a second interactive input inside it. Independent toggles should keep the menu
+open for repeated adjustments; a single choice can close it after selection.
+
+Menus size to their contents within the viewport, scroll vertically when necessary,
+and reserve a separate, non-shrinking trailing indicator slot. Leading icons, text,
+shortcuts, and selection indicators must not overlap or shift when selected. Long
+labels wrap within the available space. Preserve arrow-key navigation, Space/Enter
+activation, disabled states, Escape dismissal, and focus return to the trigger.
+
+Use semantic icons for actions and entity choices where they improve recognition.
+Separate destructive actions into their own final group with a menu separator and
+the destructive variant; do not rely on color alone. Use concise labels without
+incidental ellipses, such as “Archive list”; confirmation belongs in the ensuing
+dialog. A single action uses a directly labeled icon button with an accessible name
+and tooltip rather than an overflow menu. Keep ordinary actions free of radios and
+checkboxes.
+
+When changing menus, verify selected, unselected, mixed, disabled, long-label, and
+narrow-viewport states, plus keyboard operation. Regression checks belong at shared
+composition boundaries so each workspace inherits the same behavior.
+
+Tasks stores explicit sort, grouping, row-detail visibility, and collection-sort choices in the
+account-owned `tasks_workspace_settings` table. Returning to Tasks restores these defaults;
+explicit URL options take precedence without silently overwriting saved preferences. Save only
+user changes, serialize rapid preference writes, preserve unrelated fields, and expose save
+failures through shared mutation feedback. An empty row-details selection is a persisted choice.

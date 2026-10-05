@@ -41,10 +41,10 @@ Tasks context (sidebar)
 ├── Lists: active user Lists with their nested active, open Projects
 └── History, Trash
 
-Tasks secondary navigation (shared app frame)
-├── Selected View/List/Project and available count/context
-├── Filter, Sort, Display, and removable active-filter chips
-└── Contextual List/Project actions
+Tasks top navigation (shared app frame)
+├── Compact view picker: Inbox, Today, Upcoming, All, active Lists/Projects, History, Trash
+├── Search, Filter, Sort, and Display
+└── Contextual List/Project actions (active-filter chips and counts accompany results)
 
 Shared queue
 ├── Task and Reminder rows retain their own record type and actions
@@ -61,14 +61,12 @@ work across the shared queue. Behavior coverage and responsive inspection valida
 not user comprehension or research outcomes.
 
 - Inbox is visually promoted but remains the protected List. Projects can still belong to Inbox.
-- Every active List and open Project remains visible as a direct link. User-created Lists sit under
-  **My lists** with a quiet tonal button treatment and their chosen semantic icon, distinguishing
-  them from system destinations without changing active-state geometry. Projects are permanently
-  indented under their List with no filled submenu surface or disclosure toggle. Only the selected
-  destination is current. Menus expose actions, never additional destinations.
-- A header plus creates a List. List menus expose New project, Edit list, and Archive list. Inbox
-  only exposes New project. Project menus open the existing management flow, including lifecycle
-  and move previews. The secondary bar exposes the same contextual menu when a container is open.
+- Lists and Projects are collection destinations. Explicitly pinned active lists and open projects
+  appear in a flat **Pinned** group; project pins are independent of list pins. All other containers
+  remain available in their collection grid and the view picker.
+- The primary plus opens the shared creation flow. List menus expose Edit list and Archive list;
+  Inbox needs no management menu. Project menus open the existing management flow, including lifecycle
+  and move previews. The top bar exposes the same contextual menu when a container is open.
   Menu controls are keyboard-accessible and visible on touch. Archive menu selection opens a
   confirmation before any write; active-content conflicts remain server-authored.
 - Today, Upcoming, and All can mix tasks and reminders. All includes undated material. History
@@ -214,3 +212,38 @@ not user comprehension or research outcomes.
     across multiple pages and group with ties/nulls; compare API totals and cursor traversal.
 12. Select a mixed set, test compatible actions and partial conflicts, then confirm Trash recovery
     does not discard source, revision, or container fallback information.
+
+### Compact Tasks header
+
+The top header owns the view picker and end-aligned Search, Filters, Sort, Display, and
+container actions. It uses the same shadcn radio dropdown pattern as Calendar. Selecting a
+view clears the previous container scope while retaining explicit filters and presentation
+choices. List/project names truncate without displacing controls. Item counts and active filter
+chips sit above results, not in a second navigation bar. On mobile, creation stays in the
+shared floating action area and review attention stays in the header. Below 360px the utilities
+wrap to a second row within the primary header so the view name remains readable. Legacy archive recovery
+may retain its contextual secondary bar.
+
+The Tasks picker retains the selected destination’s icon before its name. Its groups mirror
+the sidebar’s views, active lists/projects, and history destinations. The result count sits
+at the start of the list toolbar, opposite Select items; selection reads “3 items • 1 selected.”
+Partially loaded queues append the number shown without replacing the total.
+
+### Creation flow
+
+The workspace creation action is an icon-only plus. It opens a responsive dialog/drawer with
+Task, Reminder, Project, and List choices. Tasks choose a list and optional active project;
+projects choose a list. Default to the current active container, otherwise Inbox. Explicitly
+choosing no project must override any project in the underlying route. Reminders and lists
+skip irrelevant placement questions. Existing domain editors retain validation and save behavior;
+list/project editors use the same responsive modal primitive.
+
+Creation uses a shared progress bar through choice, optional placement, and details. All detail editors use the responsive dialog/drawer pattern and standard form fields. Projects use the registry ProjectIcon (box) in every navigation and creation surface. Container menus manage existing containers; project creation belongs in the primary plus flow. List icon choices are compact icon-only tiles in an adaptive row/grid, with accessible names, hover titles, and a subtle selected state.
+
+### List and project collections
+
+Lists and Projects are first-class Tasks views in the sidebar, view picker, and workspace search catalog. They use responsive card grids and share the workspace header control positions. The filter popover searches names and descriptions (plus project notes and the owning list), and selects lifecycle/archived status. Lists default to active; Projects default to open projects in active lists. Default to most recently updated (the persisted update timestamp, not a page visit). Also sort by name or creation date; Projects also support target date with undated work last. URL parameters retain collection search/filter/sort state, but collection-only filters never leak into task queries. Existing paginated domain APIs and query caches own collection data; no duplicate storage or alternate records. Cards open their contents and offer the existing management actions.
+
+Lists and projects can be explicitly pinned from their cards. Account-backed Tasks preferences store separate list/project IDs with revision checks and owner validation. The sidebar replaces My lists and automatic project nesting with a flat Pinned group containing only explicit, available pins. Pinning a list does not implicitly pin its projects. Pins do not alter the grid sort. Archived or deleted material stays out of active sidebar navigation.
+
+The Tasks view picker contains page destinations only: Inbox, Today, Upcoming, All Lists, Projects, History, Trash, and Archive. Individual containers remain accessible through their grids and explicit sidebar pins. Archive has its own sidebar destination and active state, separate from History. Action collections with one available action render a directly labeled icon button; overflow menus are reserved for multiple actions.

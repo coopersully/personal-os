@@ -4854,3 +4854,85 @@ export const ritualRequests = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+// Account-owned workspace UI preferences. Domain records and execution policies retain their owners.
+const workspacePreferenceColumns = () => ({
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  includeArchivedInSearch: boolean("include_archived_in_search").notNull().default(true),
+  revision: integer("revision").notNull().default(1),
+  ...timestamps,
+});
+export const calendarWorkspaceSettings = pgTable(
+  "calendar_workspace_settings",
+  {
+    ...workspacePreferenceColumns(),
+    calendarView: text("calendar_view")
+      .$type<"auto" | "day" | "week" | "month">()
+      .notNull()
+      .default("auto"),
+    showWeekends: boolean("show_weekends").notNull().default(true),
+    autoFollowToday: boolean("auto_follow_today").notNull().default(true),
+    snapToFollow: boolean("snap_to_follow").notNull().default(true),
+    followSnapSensitivity: text("follow_snap_sensitivity")
+      .$type<"precise" | "balanced" | "generous">()
+      .notNull()
+      .default("balanced"),
+  },
+  (table) => [
+    check(
+      "calendar_workspace_settings_view_check",
+      sql`${table.calendarView} IN ('auto', 'day', 'week', 'month')`,
+    ),
+    check(
+      "calendar_workspace_settings_snap_check",
+      sql`${table.followSnapSensitivity} IN ('precise', 'balanced', 'generous')`,
+    ),
+    check("calendar_workspace_settings_revision_check", sql`${table.revision} > 0`),
+  ],
+);
+export const tasksWorkspaceSettings = pgTable(
+  "tasks_workspace_settings",
+  {
+    ...workspacePreferenceColumns(),
+    taskSort: text("task_sort").notNull().default("default"),
+    taskGroup: text("task_group").notNull().default("none"),
+    taskRowDetails: text("task_row_details")
+      .array()
+      .notNull()
+      .default(sql`ARRAY['estimate']::text[]`),
+    taskContainerSort: text("task_container_sort").notNull().default("updated"),
+    pinnedListIds: uuid("pinned_list_ids").array().notNull().default(sql`ARRAY[]::uuid[]`),
+    pinnedProjectIds: uuid("pinned_project_ids").array().notNull().default(sql`ARRAY[]::uuid[]`),
+  },
+  (table) => [
+    check("tasks_workspace_settings_revision_check", sql`${table.revision} > 0`),
+    check(
+      "tasks_workspace_settings_sort_check",
+      sql`${table.taskSort} IN ('default', 'date', 'reserved', 'priority', 'newest', 'oldest', 'title', 'estimate')`,
+    ),
+    check(
+      "tasks_workspace_settings_group_check",
+      sql`${table.taskGroup} IN ('none', 'date', 'list', 'project')`,
+    ),
+    check(
+      "tasks_workspace_settings_details_check",
+      sql`${table.taskRowDetails} <@ ARRAY['estimate', 'tags', 'notes']::text[] AND cardinality(${table.taskRowDetails}) <= 3`,
+    ),
+    check(
+      "tasks_workspace_settings_container_sort_check",
+      sql`${table.taskContainerSort} IN ('updated', 'name', 'newest', 'target')`,
+    ),
+  ],
+);
+export const mailWorkspaceSettings = pgTable(
+  "mail_workspace_settings",
+  workspacePreferenceColumns(),
+  (table) => [check("mail_workspace_settings_revision_check", sql`${table.revision} > 0`)],
+);
+export const financesWorkspaceSettings = pgTable(
+  "finances_workspace_settings",
+  workspacePreferenceColumns(),
+  (table) => [check("finances_workspace_settings_revision_check", sql`${table.revision} > 0`)],
+);

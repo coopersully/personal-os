@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { LinkOffIcon } from "@/components/icons";
+import { CheckIcon, XIcon } from "@/components/icons";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,7 @@ type AccountSelectionTriggerProps = Omit<
   ariaLabel: string;
   identities: AccountSelectionIdentity[];
   needsAttention?: boolean;
+  allSynced?: boolean;
   selectedCount: number;
   totalCount: number;
 };
@@ -33,6 +34,7 @@ export function AccountSelectionTrigger({
   disabled,
   identities,
   needsAttention = false,
+  allSynced = false,
   selectedCount,
   totalCount,
   ...buttonProps
@@ -41,28 +43,34 @@ export function AccountSelectionTrigger({
     <Button
       {...buttonProps}
       aria-label={ariaLabel}
+      title={`${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`}
       className={cn("account-selection-trigger", className)}
       disabled={disabled}
       size="sm"
       variant="ghost"
     >
-      {needsAttention ? (
-        <LinkOffIcon
-          aria-hidden="true"
-          className="account-selection-trigger__warning"
-          weight="Filled"
-        />
-      ) : null}
-      <AvatarGroup className="account-selection-trigger__avatars">
-        {identities.map((identity) => (
-          <Avatar key={identity.id} size="sm">
-            {identity.avatarUrl ? <AvatarImage alt="" src={identity.avatarUrl} /> : null}
-            <AvatarFallback>{identity.fallback}</AvatarFallback>
-          </Avatar>
-        ))}
-      </AvatarGroup>
+      <span className="account-selection-trigger__identity">
+        <AvatarGroup className="account-selection-trigger__avatars">
+          {identities.slice(0, 1).map((identity) => (
+            <Avatar key={identity.id} size="sm">
+              {identity.avatarUrl ? <AvatarImage alt="" src={identity.avatarUrl} /> : null}
+              <AvatarFallback>{identity.fallback}</AvatarFallback>
+            </Avatar>
+          ))}
+        </AvatarGroup>
+        <span
+          className="account-selection-trigger__status"
+          data-healthy={allSynced && !needsAttention}
+        >
+          {allSynced && !needsAttention ? (
+            <CheckIcon aria-hidden="true" className="size-2" />
+          ) : (
+            <XIcon aria-hidden="true" className="account-selection-trigger__warning size-2" />
+          )}
+        </span>
+      </span>
       <span aria-hidden="true" className="account-selection-trigger__count">
-        {selectedCount}/{totalCount} accounts
+        {selectedCount}/{totalCount}
       </span>
     </Button>
   );

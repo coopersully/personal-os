@@ -2,7 +2,7 @@ import * as React from "react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
-import { CheckIcon, ChevronRightIcon } from "@/components/icons";
+import { CheckIcon, ChevronRightIcon, MinusIcon } from "@/components/icons";
 
 function DropdownMenu({
   ...props
@@ -41,7 +41,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         align={align}
-        className={cn("z-50 max-h-(--radix-dropdown-menu-content-available-height) w-(--radix-dropdown-menu-trigger-width) min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[var(--radius)] bg-popover p-1 text-popover-foreground duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+        className={cn("z-50 max-h-(--radix-dropdown-menu-content-available-height) w-max min-w-48 max-w-[calc(100vw-1rem)] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[var(--radius)] bg-popover p-1 text-popover-foreground duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
@@ -93,22 +93,23 @@ function DropdownMenuCheckboxItem({
       data-slot="dropdown-menu-checkbox-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-selection focus:text-selection-foreground focus:**:text-selection-foreground data-checked:bg-selection data-checked:text-selection-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group/menu-choice relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-selection focus:text-selection-foreground data-checked:bg-selection data-checked:text-selection-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...(checked === undefined ? {} : { checked })}
+      onSelect={(event) => event.preventDefault()}
       {...props}
     >
+      <span className="flex min-w-0 flex-1 items-center gap-2 break-words">{children}</span>
       <span
-        className="pointer-events-none absolute right-2 flex items-center justify-center"
+        aria-hidden="true"
+        className="pointer-events-none ml-auto flex size-4 shrink-0 items-center justify-center border border-foreground/25 bg-input/70 group-data-[state=checked]/menu-choice:border-transparent group-data-[state=checked]/menu-choice:bg-primary group-data-[state=checked]/menu-choice:text-primary-foreground rounded-sm group-data-[state=indeterminate]/menu-choice:border-transparent group-data-[state=indeterminate]/menu-choice:bg-primary group-data-[state=indeterminate]/menu-choice:text-primary-foreground"
         data-slot="dropdown-menu-checkbox-item-indicator"
       >
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon
-          />
+        <DropdownMenuPrimitive.ItemIndicator className="flex items-center justify-center [&>svg]:size-3">
+          {checked === "indeterminate" ? <MinusIcon /> : <CheckIcon />}
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
-      {children}
     </DropdownMenuPrimitive.CheckboxItem>
   )
 }
@@ -137,21 +138,21 @@ function DropdownMenuRadioItem({
       data-slot="dropdown-menu-radio-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-selection focus:text-selection-foreground focus:**:text-selection-foreground data-checked:bg-selection data-checked:text-selection-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group/menu-choice relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-selection focus:text-selection-foreground data-checked:bg-selection data-checked:text-selection-foreground data-inset:pl-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
     >
+      <span className="flex min-w-0 flex-1 items-center gap-2 break-words">{children}</span>
       <span
-        className="pointer-events-none absolute right-2 flex items-center justify-center"
+        aria-hidden="true"
+        className="pointer-events-none ml-auto flex size-4 shrink-0 items-center justify-center border border-foreground/25 bg-input/70 group-data-[state=checked]/menu-choice:border-transparent group-data-[state=checked]/menu-choice:bg-primary group-data-[state=checked]/menu-choice:text-primary-foreground rounded-full"
         data-slot="dropdown-menu-radio-item-indicator"
       >
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon
-          />
+        <DropdownMenuPrimitive.ItemIndicator className="flex items-center justify-center">
+          <span className="size-2 rounded-full bg-primary-foreground" />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
-      {children}
     </DropdownMenuPrimitive.RadioItem>
   )
 }

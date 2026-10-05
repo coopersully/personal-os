@@ -76,13 +76,13 @@ function result<T>(data: T): FinanceToolResult<T> {
     schemaVersion: 1,
   };
 }
-function mount() {
+function mount(route = "/finances/plan") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[route]}>
         <FinancePlanPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -438,4 +438,12 @@ describe("complete finance plan", () => {
     expect(screen.getByRole("dialog", { name: "Organize budget categories" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Needs" })).toBeInTheDocument();
   });
+});
+
+it("opens the specific plan requested by workspace search", async () => {
+  mount(`/finances/plan?planId=${planId}`);
+  await waitFor(() => expect(api.getFinanceBudget).toHaveBeenCalledWith(planId));
+  expect(
+    await screen.findByText("Build a cushion while paying down the card."),
+  ).toBeInTheDocument();
 });

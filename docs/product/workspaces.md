@@ -54,6 +54,17 @@ per-workspace settings. The complete contracts are
 [`texting and SMS`](texting-operations.md) and
 [`per-workspace settings`](workspace-settings.md).
 
+## Workspace search
+
+Each workspace has one first-class search entry in its header. It searches the workspace's
+records, settings fields, navigation, actions, and open reviews, independently of the current
+page filters. Calendar also recognizes dates and days. A result opens its existing record view,
+settings field, editor, or review flow; search never silently executes a write. Results identify
+archived/completed items and hidden calendar sources, exclude deleted/trash content, and describe
+available synced data rather than implying a live provider-wide search. The same interaction,
+result groups, and keyboard behavior apply across all four workspaces, with inline results in
+the shared mobile search drawer. Details live in the [design system](../design/system.md#workspace-discovery).
+
 ## Mail
 
 ### Goal
@@ -248,3 +259,9 @@ separate and report their own honest result.
 This document defines the complete target. The implementation log, current API and MCP contracts,
 database migrations, tests, and production evidence determine what is shipped; documentation and
 interfaces must never present target behavior as available before those sources agree.
+
+Calendar opening preferences are account-owned: remember the selected Day/Week/Month view,
+open today in that view, and automatically follow the current time by default. People may disable
+automatic Follow to start at midnight instead. Explicit links to events, dates, views, or a Follow
+state retain their intent. Snap-to-follow can be disabled independently, with Precise, Balanced,
+and Generous sensitivity when enabled. These preferences belong in Calendar settings and search.

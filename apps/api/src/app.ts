@@ -103,6 +103,7 @@ import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
 import { registerTextingRecoveryRoutes } from "./routes/texting-recovery.js";
+import { registerWorkspaceSearchRoutes } from "./routes/workspace-search.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
@@ -1032,6 +1033,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
   app.use("/v1/task-workspace", authenticate);
+  app.use("/v1/workspaces/*", authenticate);
   app.use("/v1/texting/*", authenticate);
   app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1303,6 +1305,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     });
   });
 
+  registerWorkspaceSearchRoutes({
+    app,
+    db: dependencies.db,
+    mutationContext,
+    workItems: agentAccessWorkItems,
+  });
   registerMailRoutes({ app, mail, mutationContext });
   registerMailStewardshipRoutes({
     app,

@@ -708,6 +708,34 @@
       "when": 1790699000000,
       "tag": "0093_ritual_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1791060000000,
+      "tag": "0094_workspace_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1791220000000,
+      "tag": "0095_calendar_follow_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1791221000000,
+      "tag": "0096_task_container_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1791222000000,
+      "tag": "0097_task_display_preferences",
+      "breakpoints": true
     }
   ]
 }

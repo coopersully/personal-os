@@ -28,22 +28,25 @@ describe("AccountSelectionTrigger", () => {
     const trigger = screen.getByRole("button", {
       name: "2 of 2 accounts, attention required",
     });
-    expect(trigger).toHaveTextContent("2/2 accounts");
-    expect(trigger.querySelectorAll('[data-slot="avatar"]')).toHaveLength(2);
+    expect(trigger).toHaveTextContent("2/2");
+    expect(trigger.querySelectorAll('[data-slot="avatar"]')).toHaveLength(1);
     expect(trigger.querySelector(".account-selection-trigger__warning")).not.toBeNull();
 
     view.rerender(
       <AccountSelectionTrigger
+        allSynced
         ariaLabel="1 of 1 account"
         identities={[{ fallback: "IC", id: "icloud" }]}
         selectedCount={1}
         totalCount={1}
       />,
     );
-    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveTextContent(
-      "1/1 accounts",
-    );
+    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveTextContent("1/1");
     expect(document.querySelector(".account-selection-trigger__warning")).toBeNull();
+    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveAttribute(
+      "title",
+      "1 of 1 account, all accounts connected and syncing",
+    );
   });
 
   it("renders optional popover action slots", () => {

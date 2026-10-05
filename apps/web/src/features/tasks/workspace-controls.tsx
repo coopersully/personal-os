@@ -1,7 +1,20 @@
-import type { TaskList, TaskProject } from "@personal-os/domain";
+import type { TaskList, TaskProject, WorkspacePreferences } from "@personal-os/domain";
 import { type FormEvent, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRightIcon, XIcon } from "@/components/icons";
+import {
+  CalendarIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  EyeIcon,
+  FileTextIcon,
+  LayersIcon,
+  ListTodoIcon,
+  ProjectIcon,
+  SliderHorizontalIcon,
+  SortIcon,
+  TagsIcon,
+  XIcon,
+} from "@/components/icons";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -29,6 +42,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { formatMaterialDateTime } from "../../lib/date-format";
 import { dateTimeLocalToIso, toDateTimeLocal } from "./page";
+import { useSaveTaskPresentation } from "./presentation-preferences";
 import { type DatePreset, datePresets, identifyPreset, presetBounds } from "./task-filter-presets";
 import { withWorkspaceOption, workspaceFilterKeys, workspacePath } from "./workspace-query";
 
@@ -55,16 +69,23 @@ export const detailOptions = [
 ] as const;
 
 export function WorkspaceSort({ params }: { params: URLSearchParams }) {
+  const save = useSaveTaskPresentation();
   const navigate = useNavigate();
   const value = params.get("sort") ?? "default";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost">
-          Sort
-          {value !== "default"
-            ? `: ${sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}`
-            : ""}
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={
+            value !== "default"
+              ? `Sort: ${sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}`
+              : "Sort"
+          }
+          title="Sort tasks"
+        >
+          <SortIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -72,7 +93,10 @@ export function WorkspaceSort({ params }: { params: URLSearchParams }) {
           <DropdownMenuLabel>Sort by</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={value}
-            onValueChange={(next) => navigate(withWorkspaceOption(params, "sort", next, "default"))}
+            onValueChange={(next) => {
+              navigate(withWorkspaceOption(params, "sort", next));
+              save.mutate({ taskSort: next as WorkspacePreferences["taskSort"] });
+            }}
           >
             {sortOptions.map(([key, label]) => (
               <DropdownMenuRadioItem key={key} value={key}>
@@ -87,13 +111,14 @@ export function WorkspaceSort({ params }: { params: URLSearchParams }) {
 }
 
 export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
+  const save = useSaveTaskPresentation();
   const navigate = useNavigate();
   const details = (params.get("details") ?? "estimate").split(",");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost">
-          Display
+        <Button size="icon" variant="ghost" aria-label="Display" title="Display options">
+          <EyeIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -101,10 +126,22 @@ export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
           <DropdownMenuLabel>Group by</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={params.get("group") ?? "none"}
-            onValueChange={(next) => navigate(withWorkspaceOption(params, "group", next, "none"))}
+            onValueChange={(next) => {
+              navigate(withWorkspaceOption(params, "group", next));
+              save.mutate({ taskGroup: next as WorkspacePreferences["taskGroup"] });
+            }}
           >
             {groupOptions.map(([key, label]) => (
               <DropdownMenuRadioItem key={key} value={key}>
+                {key === "project" ? (
+                  <ProjectIcon />
+                ) : key === "list" ? (
+                  <ListTodoIcon />
+                ) : key === "date" ? (
+                  <CalendarIcon />
+                ) : (
+                  <LayersIcon />
+                )}
                 {label}
               </DropdownMenuRadioItem>
             ))}
@@ -120,18 +157,25 @@ export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
               onSelect={(event) => event.preventDefault()}
               onCheckedChange={(checked) => {
                 const next = checked
-                  ? [...details.filter(Boolean), key]
+                  ? [...details.filter((value) => value && value !== "none"), key]
                   : details.filter((value) => value !== key);
+                save.mutate({
+                  taskRowDetails: next.filter((value) => value !== "none") as NonNullable<
+                    WorkspacePreferences["taskRowDetails"]
+                  >,
+                });
                 navigate(
-                  withWorkspaceOption(
-                    params,
-                    "details",
-                    next.length ? next.join(",") : "none",
-                    "estimate",
-                  ),
+                  withWorkspaceOption(params, "details", next.length ? next.join(",") : "none"),
                 );
               }}
             >
+              {key === "estimate" ? (
+                <ClockIcon />
+              ) : key === "tags" ? (
+                <TagsIcon />
+              ) : (
+                <FileTextIcon />
+              )}
               {label}
             </DropdownMenuCheckboxItem>
           ))}
@@ -252,8 +296,13 @@ export function WorkspaceFilters({
       }}
     >
       <ResponsiveDialogTrigger asChild>
-        <Button size="sm" variant="ghost">
-          {count ? `Filters (${count})` : "Filters"}
+        <Button
+          size="icon"
+          variant={count ? "secondary" : "ghost"}
+          aria-label={count ? `Filters (${count})` : "Filters"}
+          title={count ? `Filters (${count})` : "Filters"}
+        >
+          <SliderHorizontalIcon aria-hidden="true" />
         </Button>
       </ResponsiveDialogTrigger>
       <ResponsiveDialogContent>

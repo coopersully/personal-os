@@ -10,15 +10,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -28,6 +28,7 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { TaskCreationProgress } from "./creation-progress";
 import { ProjectConflictDialog } from "./project-conflict-dialog.js";
 
 export function TaskProjectDialog({
@@ -162,17 +163,20 @@ export function TaskProjectDialog({
 
   return (
     <>
-      <Dialog
+      <ResponsiveDialog
         open={!movePreview && !completionConflict}
         onOpenChange={(open) => !open && !movePreview && !completionConflict && close()}
       >
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{project ? `Manage ${project.name}` : "Create a Project"}</DialogTitle>
-            <DialogDescription>
+        <ResponsiveDialogContent className="max-sm:px-4 max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle>
+              {project ? `Manage ${project.name}` : "Create a Project"}
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               Projects group Tasks toward one finite outcome inside a List.
-            </DialogDescription>
-          </DialogHeader>
+            </ResponsiveDialogDescription>
+            {!project ? <TaskCreationProgress step={3} total={3} /> : null}
+          </ResponsiveDialogHeader>
           <MutationFeedback feedback={lifecycleFeedback} />
           <MutationFeedback feedback={previewMove.feedback} />
           <MutationFeedback feedback={confirmMove.feedback} />
@@ -217,14 +221,14 @@ export function TaskProjectDialog({
               </Field>
             </FieldGroup>
 
-            <DialogFooter className="mt-5">
+            <ResponsiveDialogFooter className="mt-5">
               <Button onClick={close} type="button" variant="outline">
                 Cancel
               </Button>
               <Button disabled={pending} type="submit">
                 {save.isPending ? "Saving…" : project ? "Save changes" : "Create Project"}
               </Button>
-            </DialogFooter>
+            </ResponsiveDialogFooter>
           </FeedbackForm>
           {project ? (
             <FieldGroup>
@@ -272,8 +276,8 @@ export function TaskProjectDialog({
               </Button>
             </FieldGroup>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
 
       {movePreview ? (
         <ProjectConflictDialog

@@ -26,6 +26,26 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...["calendar", "tasks", "mail", "finances"].flatMap((workspace) =>
+    fields(workspace, [
+      [
+        "Include completed and archived items in search",
+        `${workspace}-search-archived`,
+        "search scope history",
+      ],
+    ]),
+  ),
+  ...fields("calendar", [
+    ["Preferred view", "calendar-default-view", "default day week month automatic saved"],
+    ["Automatically follow today", "calendar-auto-follow", "target current time midnight opening"],
+    ["Snap back to Follow", "calendar-snap-follow", "target scroll snap enable disable"],
+    [
+      "Follow snap sensitivity",
+      "calendar-snap-sensitivity",
+      "precise balanced generous target scroll",
+    ],
+    ["Show weekends", "calendar-show-weekends", "saturday sunday work week"],
+  ]),
   ...["mail", "tasks"].flatMap((domain) =>
     fields(domain, [
       ["Objective", `${domain}-objective`, "preferences guidance"],

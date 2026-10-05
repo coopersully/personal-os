@@ -12,9 +12,9 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ChevronRightIcon,
+  EyeIcon,
   ListChecksIcon,
   MoreHorizontalIcon,
-  PlusIcon,
   SearchIcon,
   TrashIcon,
   XIcon,
@@ -49,6 +49,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -93,39 +94,10 @@ const taskEmptyCopy: Record<TaskSystemView | "list", string> = {
 
 type TaskPage = { items: Task[]; nextCursor: string | null };
 
-export function TasksCreateButton({
-  onCreate,
-  onCreateReminder,
-}: {
-  onCreate: () => void;
-  onCreateReminder?: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      <Button onClick={onCreate} size="sm">
-        <PlusIcon aria-hidden="true" data-icon="inline-start" />
-        New task
-      </Button>
-      {onCreateReminder ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button aria-label="More create options" size="icon-sm" variant="ghost">
-              <MoreHorizontalIcon aria-hidden="true" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuGroup>
-              <DropdownMenuItem onSelect={onCreateReminder}>New reminder</DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-    </div>
-  );
-}
+export { TasksCreateButton } from "./create-flow";
 
 export function TasksTopbarControls() {
-  return <WorkspaceSearch label="Search tasks and reminders" />;
+  return <WorkspaceSearch label="Search tasks and reminders" placeholder="Search" />;
 }
 
 export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
@@ -363,6 +335,12 @@ export function TasksPage({
         <QueryFeedback query={tasks} title="Couldn’t refresh tasks." staleOnly />
         <QueryFeedback query={lists} title="Couldn’t refresh lists." staleOnly />
         <QueryFeedback query={projects} title="Couldn’t refresh projects." staleOnly />
+        {archiveScope ? (
+          <div className="flex min-h-9 items-center text-xs text-muted-foreground">
+            {taskItems.length.toLocaleString()}
+            {tasks.hasNextPage ? "+" : ""} {taskItems.length === 1 ? "item" : "items"}
+          </div>
+        ) : null}
         {taskItems.length === 0 ? (
           search ||
           Object.keys(taskTimingFiltersFromParams(searchParams)).length > 0 ||
@@ -424,38 +402,40 @@ export function TasksPage({
   };
   return (
     <>
-      <WorkspaceSecondaryAppBar aria-label="Tasks page controls">
-        <WorkspaceSecondaryAppBarContent className="flex-wrap gap-x-3 gap-y-2">
-          <TaskScopeHeader
-            {...(scopeList ? { list: scopeList } : {})}
-            {...(archiveScope === null && tasks.data
-              ? {
-                  taskCount: taskItems.length,
-                  hasMore: tasks.hasNextPage,
-                  ...(!selectedView ? { taskLifecycle: lifecycleFilter ?? "open" } : {}),
-                }
-              : {})}
-            {...(selectedProject ? { project: selectedProject } : {})}
-            scopeName={scopeName}
-          />
-          {archiveScope === null ? (
-            <TaskFilterChips searchParams={searchParams} timeZone={timeZone} />
-          ) : null}
-        </WorkspaceSecondaryAppBarContent>
-        {archiveScope === null ? (
-          <WorkspaceSecondaryAppBarActions>
-            <TaskFilters searchParams={searchParams} timeZone={timeZone} />
-            {!selectedView && scopeList && lists.data && projects.data ? (
-              <TaskContainerActions
-                list={scopeList}
-                {...(selectedProject ? { project: selectedProject } : {})}
-                lists={lists.data.items.filter((list) => list.availability === "active")}
-                projects={projects.data.items}
-              />
+      {!archiveScope ? (
+        <WorkspaceSecondaryAppBar aria-label="Tasks page controls">
+          <WorkspaceSecondaryAppBarContent className="flex-wrap gap-x-3 gap-y-2">
+            <TaskScopeHeader
+              {...(scopeList ? { list: scopeList } : {})}
+              {...(archiveScope === null && tasks.data
+                ? {
+                    taskCount: taskItems.length,
+                    hasMore: tasks.hasNextPage,
+                    ...(!selectedView ? { taskLifecycle: lifecycleFilter ?? "open" } : {}),
+                  }
+                : {})}
+              {...(selectedProject ? { project: selectedProject } : {})}
+              scopeName={scopeName}
+            />
+            {archiveScope === null ? (
+              <TaskFilterChips searchParams={searchParams} timeZone={timeZone} />
             ) : null}
-          </WorkspaceSecondaryAppBarActions>
-        ) : null}
-      </WorkspaceSecondaryAppBar>
+          </WorkspaceSecondaryAppBarContent>
+          {archiveScope === null ? (
+            <WorkspaceSecondaryAppBarActions>
+              <TaskFilters searchParams={searchParams} timeZone={timeZone} />
+              {!selectedView && scopeList && lists.data && projects.data ? (
+                <TaskContainerActions
+                  list={scopeList}
+                  {...(selectedProject ? { project: selectedProject } : {})}
+                  lists={lists.data.items.filter((list) => list.availability === "active")}
+                  projects={projects.data.items}
+                />
+              ) : null}
+            </WorkspaceSecondaryAppBarActions>
+          ) : null}
+        </WorkspaceSecondaryAppBar>
+      ) : null}
       {renderContent()}
     </>
   );
@@ -700,7 +680,11 @@ export function TaskRow({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onSelect={onEdit}>Open task</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={onEdit}>
+                    <EyeIcon />
+                    Open task
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     disabled={remove.isPending}
                     onSelect={() => remove.mutate()}

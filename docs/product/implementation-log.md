@@ -1,5 +1,30 @@
 # nohmi — Implementation Log
 
+## 2026-10-05 — Calendar opening and Follow preferences (branch implementation)
+
+- Calendar remembers an explicitly selected view in account-owned Calendar settings. Normal entry
+  opens today in that view, following the current time by default; disabling automatic Follow
+  opens the day at midnight. Explicit date/view/Follow links retain their navigation intent.
+- Snap back to Follow can be disabled independently, with Precise, Balanced, and Generous capture
+  ranges. Capture waits for scrolling to settle and uses a wider release range to prevent jitter.
+- Migration 0095 adds the Follow preferences. Partial preference updates preserve omitted values;
+  read defaults are not applied to PATCH payloads. This is branch implementation, not deployment evidence.
+
+## 2026-10-03 — Workspace discovery (branch implementation)
+
+- Added a shared Calendar, Tasks, Mail, and Finances header finder for domain records, settings
+  fields, navigation, creation forms, and the existing review flow. Calendar accepts dates and
+  weekdays. Mobile renders inline results inside the shared drawer.
+- Server search scopes every source to its owner, searches beyond the current view, excludes
+  deleted/trash records, and returns bounded previews with pagination. Mail includes older replies;
+  hidden calendars and completed tasks remain discoverable. Review-source outages are disclosed.
+- Added four revisioned workspace preference tables with an additive migration. Existing account
+  timezone/day hours and domain-owned settings remain authoritative. No provider search or new
+  external permissions are introduced.
+- Search currently matches owner-scoped PostgreSQL projections using literal terms and full-text
+  relevance ranking; it does not create a separate persistent search index. Production-scale
+  latency has not been benchmarked. This is branch implementation, not deployment evidence.
+
 ## 2026-10-01 — Settings information architecture (branch implementation)
 
 - Regrouped Settings into Account, Personal, Workspaces, and App. Security & access owns password

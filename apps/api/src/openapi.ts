@@ -263,6 +263,100 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/workspaces/{workspace}/search": {
+        get: {
+          summary: "Search all available synced workspace content, independent of view filters",
+          parameters: [
+            {
+              name: "workspace",
+              in: "path",
+              required: true,
+              schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+            },
+            {
+              name: "q",
+              in: "query",
+              required: true,
+              schema: { type: "string", minLength: 1, maxLength: 200 },
+            },
+            {
+              name: "offset",
+              in: "query",
+              schema: { type: "integer", minimum: 0, maximum: 10000 },
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+            },
+            { name: "includeArchived", in: "query", schema: { type: "boolean", default: true } },
+            {
+              name: "kind",
+              in: "query",
+              schema: { type: "string", enum: ["all", "content", "reviews"], default: "all" },
+            },
+          ],
+          responses: {
+            200: {
+              description:
+                "Ranked items with bounded previews, internal destinations, nextOffset, synced coverage and any unavailable review source",
+            },
+            400: { description: "Invalid search" },
+            401: { description: "Authentication required" },
+            403: { description: "Workspace read scope required" },
+          },
+        },
+      },
+      "/v1/workspaces/{workspace}/settings": {
+        parameters: [
+          {
+            name: "workspace",
+            in: "path",
+            required: true,
+            schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+          },
+        ],
+        get: {
+          summary: "Read account-owned workspace preferences",
+          responses: {
+            200: {
+              description: "Preferences and revision; revision zero denotes untouched defaults",
+            },
+          },
+        },
+        patch: {
+          summary: "Update preferences with optimistic concurrency; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["expectedRevision", "preferences"],
+                  properties: {
+                    expectedRevision: { type: "integer", minimum: 0 },
+                    preferences: {
+                      type: "object",
+                      properties: {
+                        includeArchivedInSearch: { type: "boolean" },
+                        calendarView: { type: "string", enum: ["auto", "day", "week", "month"] },
+                        showWeekends: { type: "boolean" },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Saved preferences and incremented revision" },
+            403: { description: "Interactive workspace write access required" },
+            409: { description: "Preferences changed; reload before retrying" },
+          },
+        },
+      },
       "/v1/desktop-release": {
         get: {
           summary: "Published official desktop installers and release notes",

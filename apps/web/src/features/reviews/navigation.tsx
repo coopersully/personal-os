@@ -27,13 +27,12 @@ export function ReviewNavigation({
   });
   const count = query.data?.summary.byDomain[workspace];
   const unavailable = query.isError || query.data?.unavailableDomains.includes(workspace);
+  if (!unavailable && count === 0) return null;
   const needsAttention = unavailable || (typeof count === "number" && count > 0);
   const label = unavailable
     ? "Check review status"
     : typeof count === "number"
-      ? count === 0
-        ? "No items need review"
-        : `${count.toLocaleString()} ${count === 1 ? "item needs" : "items need"} review`
+      ? `${count.toLocaleString()} ${count === 1 ? "item needs" : "items need"} review`
       : "Checking reviews…";
   const active = params.has("review");
   const open = () =>

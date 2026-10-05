@@ -5,12 +5,17 @@ export const WorkspaceSecondarySlotContext = createContext<HTMLElement | null | 
   undefined,
 );
 
-/** Default workspace frame. Features retain ownership of their secondary controls. */
+/**
+ * Intrinsic chrome plus content. Pane workspaces own their inner scroll regions;
+ * page workspaces use the shell/document scroller. Spatial axes stay inline.
+ */
 export function WorkspaceLayout({
   banner,
   children,
   primaryNavigation,
+  contentMode = "page",
 }: {
+  contentMode?: "page" | "panes";
   banner?: ReactNode;
   children: ReactNode;
   primaryNavigation: ReactNode;
@@ -18,14 +23,16 @@ export function WorkspaceLayout({
   const [secondarySlot, setSecondarySlot] = useState<HTMLDivElement | null>(null);
   return (
     <WorkspaceSecondarySlotContext.Provider value={secondarySlot}>
-      <div className="workspace">
-        {banner}
-        {primaryNavigation}
-        <div
-          className="workspace-secondary-slot"
-          data-slot="workspace-layout-secondary-navigation"
-          ref={setSecondarySlot}
-        />
+      <div className="workspace" data-content-mode={contentMode}>
+        <div className="workspace-chrome">
+          {banner}
+          {primaryNavigation}
+          <div
+            className="workspace-secondary-slot"
+            data-slot="workspace-layout-secondary-navigation"
+            ref={setSecondarySlot}
+          />
+        </div>
         {children}
       </div>
     </WorkspaceSecondarySlotContext.Provider>

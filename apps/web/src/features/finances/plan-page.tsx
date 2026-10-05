@@ -9,7 +9,7 @@ import type {
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -215,12 +215,17 @@ function PlanDetails({ plan, relations }: { plan: FinanceBudgetVersion; relation
 }
 
 export function FinancePlanPage() {
+  const [params] = useSearchParams();
+  const requestedPlanId = params.get("planId");
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ plan: FinanceBudgetVersion | null } | null>(null);
   const approvalKeys = useRef(new Map<string, string>());
   const planQuery = useQuery({
-    queryKey: ["finance-plan"],
-    queryFn: async () => requireFinancePlanResult(await api.getFinanceBudget()),
+    queryKey: ["finance-plan", requestedPlanId],
+    queryFn: async () =>
+      requireFinancePlanResult(
+        await (requestedPlanId ? api.getFinanceBudget(requestedPlanId) : api.getFinanceBudget()),
+      ),
   });
   const statusQuery = useQuery({
     queryKey: ["finance-canonical-budget-status"],

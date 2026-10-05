@@ -251,6 +251,29 @@ export function createAgentAccessWorkItemService({
   };
 
   return {
+    /** Reuse the review projection for workspace search without creating pagination snapshots. */
+    async searchItems(
+      principal: Principal,
+      workspace: AgentAccessDomain,
+    ): Promise<AgentAccessWorkItem[]> {
+      if (!principal.scopes.has(featureAccessPolicies[workspace].readScope)) {
+        throw new AppError("forbidden", "This workspace requires read access.");
+      }
+      const input = { snapshotAt: now(), userId: principal.userId };
+      const entries = (
+        Object.entries(sourceReaders) as Array<[SourceKey, SourceReaders[SourceKey]]>
+      ).filter(([key]) => sourceImpact[key].domains.includes(workspace));
+      const values = await Promise.all(
+        entries.map(async ([key, reader]) => [key, await reader(input)] as const),
+      );
+      const results = Object.fromEntries(values) as Partial<SourceResult>;
+      return projectItems({
+        accessibleDomains: new Set([workspace]),
+        results,
+        includePreview: principal.actorType === "user",
+      }).filter((item) => item.domain === workspace);
+    },
+
     async list(
       principal: Principal,
       query: AgentAccessWorkItemQuery,

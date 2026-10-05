@@ -1436,6 +1436,17 @@ export function createMailStewardshipService({ db, now }: Options) {
       return serializeReview(row);
     },
 
+    async getQuestion(userId: string, id: string): Promise<MailStewardshipQuestion> {
+      const [question] = await db
+        .select()
+        .from(mailStewardshipQuestions)
+        .where(
+          and(eq(mailStewardshipQuestions.id, id), eq(mailStewardshipQuestions.userId, userId)),
+        );
+      if (!question) throw new AppError("not_found", "The Mail question was not found.");
+      return serializeQuestion(question);
+    },
+
     async getReview(userId: string, id: string): Promise<MailReview> {
       const [review] = await db
         .select()

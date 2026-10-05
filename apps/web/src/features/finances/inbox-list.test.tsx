@@ -118,9 +118,8 @@ it("opens a selected item with dated context, saves a note without categorizing,
   const client = mount([item("1"), item("2")]);
   await userEvent.click(screen.getByRole("button", { name: "Review Merchant 2" }));
   const dialog = await screen.findByRole("dialog");
-  expect(
-    within(dialog).getByText(/2026-09-08 · Bank Savings · Money out · Posted/),
-  ).toBeInTheDocument();
+  expect(within(dialog).getByText(/Sep 8, 2026 · Money out · Posted/)).toBeInTheDocument();
+  expect(within(dialog).getByText("Bank · Savings")).toBeVisible();
   await userEvent.click(within(dialog).getByRole("button", { name: "Nearby account activity" }));
   expect(await screen.findByRole("link", { name: "Nearby rent" })).toBeInTheDocument();
   expect(api.listFinanceTransactions).toHaveBeenCalledWith({
@@ -148,7 +147,8 @@ it("supports immediate categorization and preserves input after a failed save", 
   mount([item("1")]);
   await userEvent.click(screen.getByRole("button", { name: "Review Merchant 1" }));
   await userEvent.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
-  await userEvent.selectOptions(screen.getByLabelText("Category"), categoryId);
+  await userEvent.type(screen.getByRole("combobox", { name: "Category" }), "Groceries");
+  await userEvent.keyboard("{Enter}");
   await userEvent.type(screen.getByLabelText("Your answer"), "Groceries delivery");
   await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
   expect(
@@ -174,7 +174,8 @@ it("lets the user categorize immediately without also writing a note", async () 
   mount([item("1")]);
   await userEvent.click(screen.getByRole("button", { name: "Review Merchant 1" }));
   await userEvent.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
-  await userEvent.selectOptions(screen.getByLabelText("Category"), categoryId);
+  await userEvent.type(screen.getByRole("combobox", { name: "Category" }), "Groceries");
+  await userEvent.keyboard("{Enter}");
   expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
   await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
   await waitFor(() =>
@@ -203,7 +204,7 @@ it.each([
   expect(screen.getByText("99 (currency unavailable)")).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Review Merchant 1" }));
   expect(
-    within(screen.getByRole("dialog")).getByText(new RegExp(`Bank Savings · ${label} · Pending`)),
+    within(screen.getByRole("dialog")).getByText(new RegExp(`${label} · Pending`)),
   ).toBeVisible();
   expect(
     screen.getByRole("heading", { name: "What should we know about this item?" }),

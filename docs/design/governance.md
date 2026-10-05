@@ -212,3 +212,13 @@ Morning and evening ritual presentations use explicitly approved sky colors and 
 radial gradients to isolate the checklist from the desktop. Browser previews mirror those two
 backdrops; the theme check permits only their exact selectors and colors. Standard cards remain
 flat and shadow-free. This is a ritual presentation treatment, not a shared component default.
+
+## Research-backed refinement
+
+For design-system reviews and cross-workspace UX refinements, consult current
+primary design/accessibility sources alongside the installed shadcn primitives
+and actual rendered app. Use research to inform a coherent nohmi standard rather
+than copy another system's appearance. Record the accepted rule, rationale,
+source links, component owner, and relevant verification in the nearest canonical
+design document in the same change. Preserve intentional workspace differences
+(such as floating-action placement) while standardizing shared behavior and style.

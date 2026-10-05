@@ -124,6 +124,14 @@ export function registerMailStewardshipRoutes({
       ),
     }),
   );
+  app.get("/v1/mail/questions/:id", async (context) =>
+    context.json({
+      question: await stewardship.getQuestion(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+      ),
+    }),
+  );
   app.post("/v1/mail/questions/:id/answer", async (context) =>
     context.json({
       question: await stewardship.answerQuestion(

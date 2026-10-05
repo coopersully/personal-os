@@ -5,10 +5,13 @@
 See when commitments occur across the selected calendars, then open or place an
 event without losing the shape of the day.
 
+Calendar stays bounded to the viewport across all view modes. When narrow app chrome grows taller,
+the calendar takes the remaining height and scrolls its own timeline rather than extending the page.
+
 ## Axis layout contract
 
 Calendar has two wayfinding axes: the top date/all-day rail and the leading time rail.
-All axis surfaces use `--calendar-axis-background`, currently mapped to `--sidebar`,
+All axis surfaces use `--calendar-axis-background`, mapped to the default page `--background`,
 in every view and theme. Mark axis elements with `data-calendar-axis="top"`,
 `"left"`, or `"corner"`; the shared CSS rule owns their background. Do not apply
 weekday alternation, gradients, or event colors to these surfaces. The current-day
@@ -257,3 +260,13 @@ devices keep the control visible so users can open and close the stack. Opening 
 does not apply hover styling to every card. A stationary padded hover envelope covers
 the resting and spread cards, including their gaps, to prevent hover flicker during
 movement. Opening a stack adds no background gradient.
+
+Calendar uses the default page background across Day, Week, and Month. Hour rules,
+cell dividers, and the alternating `--calendar-tile-background` provide spatial
+structure. The same tile token drives Week columns and their all-day fades;
+Month uses it for dates outside the current month. Today remains a red tint over
+the page background in Week and Month.
+
+Floating action sizing, colors, and labels use the shared
+[floating workspace actions contract](../system.md#floating-workspace-actions).
+Workspace placement and opened-workflow behavior remain owned by this page.

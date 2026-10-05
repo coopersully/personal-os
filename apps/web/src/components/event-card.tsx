@@ -5,7 +5,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 const eventCardVariants = cva(
-  "event-card group/event-card w-full min-w-0 max-w-full gap-0 overflow-hidden py-0 [contain:inline-size]",
+  "event-card group/event-card w-full min-w-0 max-w-full gap-0 overflow-hidden rounded-lg py-0 [contain:inline-size]",
   {
     variants: {
       tone: {

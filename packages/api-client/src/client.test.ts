@@ -2097,7 +2097,8 @@ describe("ilo API client", () => {
         if (path.endsWith("/disposition")) return json({ disposition: { id } });
         if (path.endsWith("/obligations")) return json({ obligation: { id } });
         if (path === `/v1/mail/obligations/${id}`) return json({ obligation: { id } });
-        if (path.endsWith("/answer")) return json({ question: { id } });
+        if (path === `/v1/mail/questions/${id}` || path.endsWith("/answer"))
+          return json({ question: { id } });
         return json({ feedback: { id } });
       },
     });
@@ -2132,6 +2133,7 @@ describe("ilo API client", () => {
       sourceThreadRevision: revision,
     });
     await api.updateMailObligation(id, { expectedVersion: 1, state: "resolved" });
+    await expect(api.getMailQuestion(id)).resolves.toEqual({ id });
     await api.answerMailQuestion(id, {
       answer: "reference",
       expectedVersion: 1,
@@ -2154,6 +2156,7 @@ describe("ilo API client", () => {
       `PUT /v1/mail/threads/${id}/disposition`,
       `POST /v1/mail/threads/${id}/obligations`,
       `PATCH /v1/mail/obligations/${id}`,
+      `GET /v1/mail/questions/${id}`,
       `POST /v1/mail/questions/${id}/answer`,
       "POST /v1/mail/feedback",
     ]);

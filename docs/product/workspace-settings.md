@@ -32,14 +32,14 @@ deep-link directly to one source, rule, override, review, or recovery control.
 
 Centralized Settings owns account-wide identity, security, privacy ceilings, review bypass, shared
 notification policy, channel connections and defaults, connected-agent credentials and scopes,
-User Knowledge controls, and the unified Reviews queue. It also provides a cross-workspace overview
+User Knowledge controls, and links to the unified Today-owned Reviews queue. It also provides a cross-workspace overview
 of source health, maintenance readiness, external check-in health, effective notification state,
 override presence, and outstanding review counts. Workspace-owned values in that overview are
 read-only summaries with links to their canonical workspace editors.
 
 This boundary prevents two forms from drifting over one setting while preserving one place to see
 the whole system. Global values may show which workspaces inherit or override them; changing a
-workspace override still happens in that workspace. Reviews remain centralized because they are a
+workspace override still happens in that workspace. Reviews remain centralized under Today because they are a
 cross-workspace action queue, but every review action routes to the owning workspace when domain
 context or configuration is required.
 
@@ -91,7 +91,7 @@ while presenting domain-specific controls:
   deletion or disconnection consequences.
 
 Every question, approval, connector failure, or recovery step that requires the person also appears
-in the unified Settings-owned Reviews queue. Informational and automatically recoverable states stay
+in the unified Today-owned Reviews queue. Informational and automatically recoverable states stay
 in workspace status or activity rather than creating review noise.
 
 ## Maintenance guidance
@@ -253,3 +253,6 @@ automatic update status, a manual check and confirmed restart action. The public
 `/downloads` destination shares the same stable release metadata and distinguishes
 unpublished releases, unavailable metadata and self-hosted configuration. It never
 substitutes a guessed installer or stale success for a failed release read.
+
+The accepted [Settings information architecture](../design/pages/settings-architecture.md) defines
+configuration navigation, contextual setup, local history, and Today-owned Reviews placement.

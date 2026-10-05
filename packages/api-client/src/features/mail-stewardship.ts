@@ -87,6 +87,12 @@ export function createMailStewardshipApiClient(request: Request) {
       });
       return response.obligation;
     },
+    async getMailQuestion(id: string): Promise<MailStewardshipQuestion> {
+      const response = await request<{ question: MailStewardshipQuestion }>(
+        `/v1/mail/questions/${id}`,
+      );
+      return response.question;
+    },
     async answerMailQuestion(
       id: string,
       input: AnswerMailQuestionInput,

@@ -60,7 +60,9 @@ import MonitorSource from "reicon-react/icons/Monitor";
 import MoonSource from "reicon-react/icons/Moon";
 import MoreHorizontalSource from "reicon-react/icons/MoreH";
 import PaintBrushSource from "reicon-react/icons/Paintbrush";
+import PauseSource from "reicon-react/icons/Pause";
 import PinSource from "reicon-react/icons/PinTack";
+import PlaySource from "reicon-react/icons/Play";
 import PlugSource from "reicon-react/icons/Plug";
 import PlusSource from "reicon-react/icons/Plus";
 import PulseSource from "reicon-react/icons/Pulse";
@@ -210,3 +212,6 @@ export const WalletIcon: Icon = WalletSource;
 export const WifiOffIcon: Icon = WifiOffSource;
 export const XIcon: Icon = XSource;
 export const ErrorIcon: Icon = ErrorSource;
+
+export const PauseIcon: Icon = PauseSource;
+export const PlayIcon: Icon = PlaySource;

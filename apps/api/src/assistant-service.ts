@@ -660,6 +660,7 @@ export function createAssistantService({
             eq(attentionItems.userId, userId),
             eq(attentionItems.domain, query.domain),
             eq(attentionItems.status, query.status),
+            query.id ? eq(attentionItems.id, query.id) : undefined,
           ),
         )
         .orderBy(desc(attentionItems.createdAt))

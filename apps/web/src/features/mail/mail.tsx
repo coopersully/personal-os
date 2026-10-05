@@ -1,7 +1,7 @@
 import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -20,6 +20,7 @@ import {
   StarIcon,
   TrashIcon,
 } from "@/components/icons";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { api } from "../../api.js";
 import { PageLoading, QueryFeedback } from "../../components/async-state.js";
@@ -865,6 +866,7 @@ function UnifiedMailDestinations({
   selectedAccountIds: string[];
   unreadCount: number;
 }) {
+  const isMailbox = useLocation().pathname === "/mail";
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
     { icon: InboxIcon, label: "Inbox", value: "all" },
     { icon: EyeIcon, label: "Unread", value: "unread" },
@@ -885,17 +887,27 @@ function UnifiedMailDestinations({
         const suffix = query.size ? `?${query.toString()}` : "";
         return (
           <SidebarMenuItem key={value}>
-            <SidebarMenuButton asChild isActive={listScope === value} tooltip={label}>
+            <SidebarMenuButton
+              className={value === "all" && unreadCount > 0 ? "sidebar-item-with-meta" : undefined}
+              asChild
+              isActive={isMailbox && listScope === value}
+              tooltip={label}
+            >
               <Link
                 aria-label={value === "all" && unreadCount > 0 ? `${label} ${unreadCount}` : label}
                 onClick={onNavigate}
                 to={`/mail${suffix}`}
               >
-                <Icon aria-hidden="true" weight={listScope === value ? "Filled" : "Outline"} />
+                <Icon
+                  aria-hidden="true"
+                  weight={isMailbox && listScope === value ? "Filled" : "Outline"}
+                />
                 <span>{label}</span>
-                {value === "all" && unreadCount > 0 ? <b>{unreadCount}</b> : null}
               </Link>
             </SidebarMenuButton>
+            {value === "all" && unreadCount > 0 ? (
+              <SidebarItemMeta count={unreadCount} label="Unread inbox messages" />
+            ) : null}
           </SidebarMenuItem>
         );
       })}

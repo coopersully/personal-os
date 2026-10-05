@@ -113,12 +113,12 @@ describe("Canonical Finance profile editor", () => {
     );
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Edit financial profile" }));
-    const buffer = screen.getByRole("spinbutton", { name: /buffer/i });
+    const buffer = screen.getByRole("textbox", { name: /buffer/i });
     fireEvent.change(buffer, { target: { value: "300" } });
     fireEvent.click(screen.getByRole("button", { name: "Save financial profile" }));
     await waitFor(() => expect(buffer).toHaveAttribute("aria-invalid", "true"));
     expect(buffer).toHaveAccessibleDescription(/Enter a value no greater than 100000000/);
-    expect(buffer).toHaveValue(300);
+    expect(buffer).toHaveValue("300");
   });
   it("preserves the exact boundaries and contents of agent-authored multiline notes when other fields change", async () => {
     const notes = [
@@ -171,7 +171,7 @@ describe("Canonical Finance profile editor", () => {
   it("keeps unknown fields blank and only sends the changed field with its exact version", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Edit financial profile" }));
-    expect(screen.getByLabelText("Expected monthly take-home (USD)")).toHaveValue(null);
+    expect(screen.getByLabelText("Expected monthly take-home (USD)")).toHaveValue("");
     expect(screen.getByLabelText("Dependents")).toHaveValue(null);
     fireEvent.change(screen.getByLabelText("Expected monthly take-home (USD)"), {
       target: { value: "3500" },

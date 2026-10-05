@@ -4,7 +4,7 @@ for (const width of [320, 390, 1100]) {
   test(`shared Tasks workspace remains usable at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/");
-    await page.getByLabel("Email").fill("demo+full@ilo.test");
+    await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -28,7 +28,7 @@ for (const width of [320, 390, 1100]) {
       "All",
       "History",
       "Trash",
-      "Launch follow-through",
+      "Autumn program opening",
     ])
       await expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible();
     await expect(sidebar.getByRole("button", { name: /More views|Expand|Collapse/ })).toHaveCount(

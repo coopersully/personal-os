@@ -1,9 +1,4 @@
-import type {
-  AccessScope,
-  AssistantSetupPlan,
-  MailRulePreview,
-  MailSetupAccount,
-} from "@personal-os/domain";
+import type { AccessScope, AssistantSetupPlan } from "@personal-os/domain";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -21,6 +16,7 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -101,37 +97,15 @@ import {
 } from "../finances/agent-access.js";
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
+import { scopeLabels, selectableScopes } from "./access-scopes.js";
 import { ExecutionPolicySettingsCard } from "./execution-policy.js";
-
-const scopeLabels: Record<AccessScope, string> = {
-  "audit:read": "Read activity",
-  "automations:read": "Read daily brief",
-  "automations:write": "Legacy automation access (inactive)",
-  "bookmarks:read": "Read X bookmarks",
-  "calendar:read": "Read calendar",
-  "calendar:write": "Manage calendar",
-  "finances:read": "Read sensitive financial accounts and activity",
-  "finances:write": "Manage financial records, plans, and reviews",
-  "finances:maintain":
-    "Maintain Finances: sync providers, reconcile and categorize under approved rules, create durable runs; questions and approvals stay pending",
-  "goals:read": "Read goals & motives",
-  "goals:write": "Manage goals & motives",
-  "tracking:read": "Read private ritual responses",
-  "tracking:write": "Manage rituals and responses",
-  "mail:read": "Read mail",
-  "mail:write": "Manage mail",
-  "reminders:read": "Read reminders",
-  "reminders:write": "Manage reminders",
-  "tasks:read": "Read tasks",
-  "tasks:write": "Manage tasks",
-  "texting:read": "Read text conversation",
-  "texting:write": "Send text messages",
-};
+import { MailConfiguration } from "./mail-configuration.js";
+import { RelatedSettings } from "./related-settings.js";
+import { connectedAgentCount as countConnectedAgents } from "./sidebar-counts.js";
+import { WorkspaceGuidance } from "./workspace-guidance.js";
 
 const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
-const selectableScopes = (Object.keys(scopeLabels) as AccessScope[]).filter(
-  (scope) => scope !== "automations:write" && scope !== "tracking:write",
-);
+
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
     description: "Learn your inbox preferences, preview rules, and run approved Mail rules.",
@@ -245,7 +219,6 @@ function AgentAccessSettings({
     (setupDomainOptions.some((option) => option.domain === requestedWorkspace)
       ? (requestedWorkspace as SetupDomain)
       : "mail");
-  const reviewRuleId = searchParams.get("reviewRule");
 
   function updateSearchParam(name: string, value: string | null) {
     setSearchParams((current) => {
@@ -274,12 +247,12 @@ function AgentAccessSettings({
     refetchInterval: 10_000,
   });
   const mailSetup = useQuery({
-    enabled: view === "workspaces" && selectedDomain === "mail" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "mail",
     queryFn: api.getMailSetupContext,
     queryKey: ["mail-setup-context"],
   });
   const rules = useQuery({
-    enabled: view === "workspaces" && selectedDomain === "mail" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "mail",
     queryFn: api.listMailRules,
     queryKey: ["mail-rules"],
   });
@@ -316,17 +289,17 @@ function AgentAccessSettings({
       token.revokedAt === null &&
       (token.expiresAt === null || new Date(token.expiresAt).getTime() > currentTime),
   );
-  const usedActiveTokens = activeTokens.filter((token) => token.lastUsedAt !== null);
-  const connectedAgentCount = usedActiveTokens.length + (oauthClients.data?.length ?? 0);
+  const connectedAgentCount = countConnectedAgents(
+    tokens.data ?? [],
+    oauthClients.data ?? [],
+    currentTime,
+  );
   const connectionCountUnavailable = tokens.isError || oauthClients.isError;
   const connectionCountLoading = tokens.isPending || oauthClients.isPending;
   const mailSources = mailSetup.data?.accounts ?? [];
   const setupResource = queryLoadable(setup);
   const selectedProfile = mapLoadable(setupResource, (value) =>
     value.domains.find((item) => item.domain === selectedDomain),
-  );
-  const mailProfile = mapLoadable(setupResource, (value) =>
-    value.domains.find((item) => item.domain === "mail"),
   );
   const hostAuthorities = connectedHostAuthorities(tokens, oauthClients, currentTime);
   const selectedLabel = setupDomainLabels[selectedDomain];
@@ -485,21 +458,46 @@ function AgentAccessSettings({
       ) : null}
 
       {view === "workspaces" ? (
-        <>
+        <div className="settings-stack">
+          {selectedDomain === "mail" ? (
+            <>
+              <QueryFeedback query={mailSetup} title="Couldn’t load Mail accounts." />
+              <QueryFeedback query={rules} title="Couldn’t load Mail rules." />
+              {mailSetup.isPending || rules.isPending ? <p>Loading Mail settings…</p> : null}
+              {mailSetup.data || rules.data ? (
+                <MailConfiguration
+                  {...(mailSetup.data ? { accounts: mailSources } : {})}
+                  {...(rules.data ? { rules: rules.data } : {})}
+                />
+              ) : null}
+            </>
+          ) : null}
+          {selectedDomain === "mail" || selectedDomain === "tasks" ? (
+            <WorkspaceGuidance domain={selectedDomain} />
+          ) : null}
+          <RelatedSettings
+            title="Permissions & approvals"
+            items={[
+              {
+                label: `${selectedLabel} access`,
+                description: "Inspect effective permissions and approval requirements.",
+                section: "workspace-access",
+                workspace: selectedDomain,
+              },
+            ]}
+          />
           <Card className="settings-section agent-access__workspaces">
             <CardHeader>
               <CardTitle>
-                <h2>{selectedLabel} settings</h2>
+                <h2>
+                  {guidedSetupComplete
+                    ? "Setup & diagnostics"
+                    : `Finish setting up ${selectedLabel}`}
+                </h2>
               </CardTitle>
               <CardDescription>
-                Configure {selectedLabel}, understand its setup state, and see whether you need to
-                act.
+                Review setup progress or inspect configuration checks.
               </CardDescription>
-              <CardAction>
-                <Button asChild size="sm" variant="outline">
-                  <Link to="/settings?section=workspace-access">Workspace access</Link>
-                </Button>
-              </CardAction>
             </CardHeader>
             <CardContent className="settings-section__body agent-access__body">
               {blockingError ? (
@@ -523,71 +521,58 @@ function AgentAccessSettings({
                 step={currentSetupStep}
               />
 
-              <DomainReadinessPanel
-                domain={selectedDomain}
-                enabled={selectedDomainEnabled}
-                error={readinessError}
-                key={selectedDomain}
-                label={selectedLabel}
-                loading={readinessPending}
-                readiness={readiness}
-                suppressFocus={workspaceSetupNeedsPersonAction(setupPlan.data)}
-              />
-
-              {setupPlan.data && !guidedSetupComplete ? (
-                <SetupProtocolDetails
-                  guide={guide.data}
-                  guideLoading={guide.isPending}
-                  plan={setupPlan.data}
-                />
-              ) : null}
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    Setup details <ChevronDownIcon />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <DomainReadinessPanel
+                    domain={selectedDomain}
+                    enabled={selectedDomainEnabled}
+                    error={readinessError}
+                    key={selectedDomain}
+                    label={selectedLabel}
+                    loading={readinessPending}
+                    readiness={readiness}
+                    suppressFocus={workspaceSetupNeedsPersonAction(setupPlan.data)}
+                  />
+                  {setupPlan.data && !guidedSetupComplete ? (
+                    <SetupProtocolDetails
+                      guide={guide.data}
+                      guideLoading={guide.isPending}
+                      plan={setupPlan.data}
+                    />
+                  ) : null}
+                </CollapsibleContent>
+              </Collapsible>
             </CardContent>
           </Card>
-
-          {selectedDomain === "mail" && selectedDomainEnabled ? (
-            <MailRuleReviewDialog
-              accounts={mailSources}
-              onClose={() => updateSearchParam("reviewRule", null)}
-              profileActive={
-                mailProfile.state === "ready" && mailProfile.data?.profileStatus === "active"
-              }
-              profileLoading={mailProfile.state === "loading"}
-              profileUnavailable={mailProfile.state === "unavailable"}
-              reviewRuleId={reviewRuleId}
-              rules={rules.data ?? []}
-              unavailable={rules.isError}
-            />
-          ) : null}
-        </>
+        </div>
       ) : null}
 
       {view === "connections" ? (
         <>
-          <header className="agent-access__page-heading">
-            <div>
-              <h2>Connected agents</h2>
-              <p>
-                See every host and local credential that can act in nohmi, then revoke access in one
-                place.
-              </p>
-            </div>
-            <Badge
-              variant={
-                !connectionCountLoading && !connectionCountUnavailable && connectedAgentCount > 0
-                  ? "default"
-                  : "secondary"
-              }
-            >
-              {connectionCountLoading
-                ? "Checking connections"
-                : connectionCountUnavailable
-                  ? "Connections unavailable"
-                  : `${connectedAgentCount} connected`}
-            </Badge>
-          </header>
-
           <Card className="settings-section" size="sm">
             <CardHeader>
+              <CardAction>
+                <Badge
+                  variant={
+                    !connectionCountLoading &&
+                    !connectionCountUnavailable &&
+                    connectedAgentCount > 0
+                      ? "default"
+                      : "secondary"
+                  }
+                >
+                  {connectionCountLoading
+                    ? "Checking connections"
+                    : connectionCountUnavailable
+                      ? "Connections unavailable"
+                      : `${connectedAgentCount} connected`}
+                </Badge>
+              </CardAction>
               <CardTitle>
                 <h3>Connect an agent host</h3>
               </CardTitle>
@@ -605,15 +590,10 @@ function AgentAccessSettings({
           </Card>
 
           <section
-            aria-labelledby="access-management-heading"
+            aria-label="Access management"
             className="agent-access__access"
             id="access-management"
           >
-            <div className="agent-access__section-heading">
-              <h2 id="access-management-heading">Access management</h2>
-              <p>Review connected hosts and least-privilege local credentials.</p>
-            </div>
-
             {(oauthClients.data?.length ?? 0) > 0 ? (
               <Card className="settings-section" size="sm">
                 <CardHeader>
@@ -627,7 +607,7 @@ function AgentAccessSettings({
                 <CardContent>
                   <ItemGroup>
                     {oauthClients.data?.map((client) => (
-                      <Item key={client.id} variant="outline">
+                      <Item key={client.id} variant="secondary">
                         <ItemMedia variant="icon">
                           {/* OAuth client names are self-asserted, not verified provider identities. */}
                           <PlugIcon />
@@ -684,203 +664,6 @@ function AgentAccessSettings({
       ) : null}
     </div>
   );
-}
-
-function MailRuleReviewDialog({
-  accounts,
-  onClose,
-  profileActive,
-  profileLoading,
-  profileUnavailable,
-  reviewRuleId,
-  rules,
-  unavailable,
-}: {
-  accounts: MailSetupAccount[];
-  onClose: () => void;
-  profileActive: boolean;
-  profileLoading: boolean;
-  profileUnavailable: boolean;
-  reviewRuleId: string | null;
-  rules: Awaited<ReturnType<typeof api.listMailRules>>;
-  unavailable: boolean;
-}) {
-  const queryClient = useQueryClient();
-  const preview = useQuery({
-    enabled: reviewRuleId !== null,
-    queryFn: () => api.previewSavedMailRule(reviewRuleId as string),
-    queryKey: ["mail-rule-preview", reviewRuleId],
-  });
-  const activate = useFeedbackMutation({
-    feedback: { action: "activate this mail rule", safeToRetry: false, form: false },
-    mutationFn: ({ id, preview }: { id: string; preview: MailRulePreview }) =>
-      api.activateMailRule(id, {
-        expectedCandidateIds: preview.candidates.map((candidate) => candidate.id),
-        expectedPreviewFingerprint: preview.fingerprint,
-        expectedPreviewedAt: preview.previewedAt,
-        expectedVersion: preview.ruleVersion as number,
-      }),
-    onSuccess: async () => {
-      toast.success("Mail rule activated.");
-      onClose();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["mail-rules"] }),
-        queryClient.invalidateQueries({ queryKey: ["mail-setup-context"] }),
-        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
-        queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
-      ]);
-    },
-  });
-  const accountNames = new Map(
-    accounts.map((account) => [account.accountId, account.email ?? account.label]),
-  );
-  const reviewedRule = reviewRuleId ? rules.find((rule) => rule.id === reviewRuleId) : null;
-  const reviewed = preview.data;
-
-  return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-      open={reviewRuleId !== null}
-    >
-      <DialogContent className="agent-access__rule-dialog">
-        <MutationFeedback feedback={activate.feedback} />
-        <DialogHeader>
-          <DialogTitle>
-            {reviewedRule ? `Review ${reviewedRule.name}` : "Review Mail rule"}
-          </DialogTitle>
-          <DialogDescription>
-            Review the current bounded sample before activating this agent-drafted rule.
-          </DialogDescription>
-        </DialogHeader>
-
-        {unavailable ? (
-          <Alert variant="destructive">
-            <XIcon />
-            <AlertTitle>Mail rules are unavailable</AlertTitle>
-            <AlertDescription>
-              Reload Mail rules before making an activation decision.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {preview.isPending ? (
-          <Alert role="status" variant="info">
-            <ShieldCheckIcon />
-            <AlertTitle>Checking current matches</AlertTitle>
-            <AlertDescription>
-              nohmi is rebuilding the bounded preview for this rule.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        <QueryFeedback query={preview} title="Couldn’t load the rule preview." />
-
-        {reviewed ? (
-          <div className="agent-access__rule-preview">
-            <Alert role="status" variant={reviewed.window.truncated ? "warning" : "info"}>
-              <ShieldCheckIcon />
-              <AlertTitle>
-                {reviewed.matchedCount} current match
-                {reviewed.matchedCount === 1 ? "" : "es"}
-              </AlertTitle>
-              <AlertDescription>
-                Reviewed {formatPreviewWindow(reviewed)}. This is a bounded recent sample; the rule
-                condition will also govern future matching Mail. Activation rechecks this sample,
-                due states, rule version, and fingerprint.
-                {reviewedRule
-                  ? ` Rule scope: ${formatRuleSources(reviewedRule.sourceIds, accountNames)}.`
-                  : ""}
-              </AlertDescription>
-            </Alert>
-            {reviewed.candidates.length > 0 ? (
-              <ItemGroup aria-label="Exact Mail rule matches">
-                {reviewed.candidates.map((candidate) => (
-                  <Item key={candidate.id} size="xs" variant="muted">
-                    <ItemContent>
-                      <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
-                      <ItemDescription>
-                        {candidate.from.address} ·{" "}
-                        {accountNames.get(candidate.accountId) ?? "Unknown account"} ·{" "}
-                        {formatCandidateActions(candidate.actions)}
-                      </ItemDescription>
-                    </ItemContent>
-                  </Item>
-                ))}
-              </ItemGroup>
-            ) : null}
-            {!profileActive ? (
-              <Alert variant="warning">
-                <ShieldCheckIcon />
-                <AlertTitle>
-                  {profileLoading
-                    ? "Mail profile status is loading"
-                    : profileUnavailable
-                      ? "Mail profile status is unavailable"
-                      : "Activate your Mail profile first"}
-                </AlertTitle>
-                <AlertDescription>
-                  {profileLoading
-                    ? "Wait for setup status before deciding whether this rule can be activated."
-                    : profileUnavailable
-                      ? "Reload setup status before deciding whether this rule can be activated."
-                      : "Review and accept the profile summary in your agent conversation before activating a rule."}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-          </div>
-        ) : null}
-
-        <DialogFooter showCloseButton>
-          <Button
-            disabled={
-              !reviewRuleId ||
-              !reviewed ||
-              activate.isPending ||
-              unavailable ||
-              !profileActive ||
-              reviewed.ruleVersion === null
-            }
-            onClick={() => {
-              if (reviewRuleId && reviewed)
-                activate.mutate({ id: reviewRuleId, preview: reviewed });
-            }}
-            type="button"
-          >
-            Activate reviewed rule
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function formatPreviewWindow(preview: MailRulePreview): string {
-  if (!preview.window.newestReceivedAt || !preview.window.oldestReceivedAt) {
-    return `0 of ${preview.window.limit} recent conversations`;
-  }
-  const oldest = new Date(preview.window.oldestReceivedAt).toLocaleDateString();
-  const newest = new Date(preview.window.newestReceivedAt).toLocaleDateString();
-  return `${preview.scannedCount} conversations from ${oldest} to ${newest}${
-    preview.window.truncated ? ` (more than ${preview.window.limit} exist)` : ""
-  }`;
-}
-
-function formatRuleSources(sourceIds: string[], accountNames: Map<string, string>): string {
-  if (sourceIds.length === 0) return "no explicit account selected";
-  return sourceIds.map((sourceId) => accountNames.get(sourceId) ?? "Unknown account").join(", ");
-}
-
-function formatCandidateActions(actions: MailRulePreview["candidates"][number]["actions"]): string {
-  return actions
-    .map((action) => {
-      const label =
-        action.type === "trash" ? "recoverable Trash" : action.type.replaceAll("_", " ");
-      const delay = action.afterDays > 0 ? ` after ${action.afterDays}d` : "";
-      return `${label}${delay} — ${action.due ? "due now" : "retained until due"}`;
-    })
-    .join("; ");
 }
 
 function CapabilityList({
@@ -1089,7 +872,7 @@ function SetupProtocolDetails({
           value={guide?.skill.setupPrompt ?? ""}
         />
         {guide ? (
-          <Item size="xs" variant="muted">
+          <Item size="xs" variant="secondary">
             <ItemMedia variant="icon">
               <ShieldCheckIcon />
             </ItemMedia>
@@ -1285,27 +1068,24 @@ function TokenAccess({
                 </Field>
                 <FieldSet>
                   <FieldLegend variant="label">Permission preset</FieldLegend>
-                  <ToggleGroup
+                  <SegmentedControl
                     aria-label="Permission preset"
-                    className="agent-access__presets"
                     onValueChange={(presetName) => {
                       const preset = tokenPresets.find((item) => item.name === presetName);
                       if (preset) setScopes(preset.scopes);
                     }}
-                    type="single"
                     value={selectedPreset}
-                    variant="outline"
                   >
                     {tokenPresets.map((preset) => (
-                      <ToggleGroupItem
+                      <SegmentedControlItem
                         aria-label={`${preset.name}: ${preset.description}`}
                         key={preset.name}
                         value={preset.name}
                       >
                         {preset.name}
-                      </ToggleGroupItem>
+                      </SegmentedControlItem>
                     ))}
-                  </ToggleGroup>
+                  </SegmentedControl>
                 </FieldSet>
                 <Collapsible onOpenChange={setPermissionsOpen} open={permissionsOpen}>
                   <CollapsibleTrigger asChild>
@@ -1358,7 +1138,7 @@ function TokenAccess({
                 <KeyIcon />
                 <AlertTitle>Copy this token now</AlertTitle>
                 <AlertDescription>
-                  It will not be shown again. <code>{secret}</code>
+                  It will not be shown again. <code className="break-all">{secret}</code>
                 </AlertDescription>
                 <Button
                   aria-label="Dismiss token"
@@ -1377,7 +1157,7 @@ function TokenAccess({
         {!loading && activeTokens.length > 0 ? (
           <ItemGroup className="agent-access__credentials">
             {activeTokens.map((token) => (
-              <Item key={token.id} variant="outline">
+              <Item key={token.id} variant="secondary">
                 <ItemMedia variant="icon">
                   <KeyIcon />
                 </ItemMedia>
@@ -1417,7 +1197,7 @@ function TokenAccess({
             <CollapsibleContent>
               <ItemGroup>
                 {inactiveTokens.map((token) => (
-                  <Item key={token.id} size="xs" variant="muted">
+                  <Item key={token.id} size="xs" variant="secondary">
                     <ItemContent>
                       <ItemTitle>{token.name}</ItemTitle>
                       <ItemDescription>

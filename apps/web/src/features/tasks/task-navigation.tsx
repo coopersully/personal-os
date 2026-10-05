@@ -275,7 +275,9 @@ export function TaskNavigation({
   onNavigate: () => void;
 }) {
   const [params] = useSearchParams();
-  const reminders = useLocation().pathname === "/reminders";
+  const pathname = useLocation().pathname;
+  const decisions = pathname === "/tasks/decisions";
+  const reminders = pathname === "/reminders";
   const rawView = params.get("view");
   const selectedView = reminders
     ? rawView === "completed"
@@ -294,7 +296,7 @@ export function TaskNavigation({
       ? projects.find((project) => project.id === params.get("project"))
       : undefined;
   const selectedListId =
-    reminders || selectedView || archive
+    decisions || reminders || selectedView || archive
       ? null
       : (selectedProject?.listId ??
         params.get("list") ??

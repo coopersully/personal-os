@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-10-01 — Settings information architecture (branch implementation)
+
+- Regrouped Settings into Account, Personal, Workspaces, and App. Security & access owns password
+  actions and links to devices, workspace access, and permission-gated invitations. Connections
+  links to connected agents. Secondary pages retain direct URLs, parent context, and field search.
+- Moved unified Reviews to Today at `/reviews`; legacy settings links preserve query filters.
+  Today and its mobile page list expose the queue. Domain-owned review actions remain unchanged.
+- Mail leads with account health and rule configuration; Mail and Tasks expose existing versioned
+  guidance. Rule activation still uses its signed-in preview flow, and pause checks rule versions.
+  Calendar/Finance editors precede support sections; setup diagnostics are disclosed on demand.
+- This records source changes on the UX branch, not a production deployment. No new provider
+  capabilities, permissions, or storage model were added.
+
 ## 2026-09-29 — Morning and evening rituals
 
 - Added account-owned ritual definitions, immutable daily snapshots, checkbox, short-entry, time, date, number, and multiple-choice
@@ -663,3 +676,13 @@ See [release operations](../releasing.md) and the
 [specification](../superpowers/specs/2026-09-30-desktop-updates-design.md).
 This source implementation is not evidence of a published installer: signing
 credentials and an installed old-to-new upgrade smoke remain required.
+
+## Contextual review flow — source implementation (2026-10-02)
+
+Workspace alerts and workspace Settings headers now open one shared responsive
+dialog/drawer. Decisions retain domain-specific actions and version checks; progress
+advances only after the open-work source confirms resolution. Later leaves work
+outstanding. Duplicate navigation entries are removed and legacy review links
+redirect into the flow. The earlier review grid remains in source but is not routed.
+Source repairs that require their original editor keep an explicit source link.
+See [review interaction standards](../design/pages/reviews.md).

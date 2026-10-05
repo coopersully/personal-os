@@ -8,6 +8,7 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeReviewCases,
+  financeTransactions,
   mailRules,
   mailStewardshipQuestions,
   workspaceMaintenanceRuns,
@@ -40,7 +41,13 @@ type SourceReaders = {
     input: SourceInput,
   ) => Promise<Array<typeof financeAgentActionReviews.$inferSelect>>;
   financeContextual: (input: SourceInput) => Promise<AgentAccessWorkItem[]>;
-  financeReviews: (input: SourceInput) => Promise<Array<typeof financeReviewCases.$inferSelect>>;
+  financeReviews: (input: SourceInput) => Promise<
+    Array<
+      typeof financeReviewCases.$inferSelect & {
+        transaction?: typeof financeTransactions.$inferSelect | null;
+      }
+    >
+  >;
   mailQuestions: (
     input: SourceInput,
   ) => Promise<Array<typeof mailStewardshipQuestions.$inferSelect>>;
@@ -176,17 +183,26 @@ export function createAgentAccessWorkItemService({
           ),
         ),
     financeContextual: (input) => readFinanceContextualWork(db, input),
-    financeReviews: async ({ snapshotAt, userId }) =>
-      db
-        .select()
+    financeReviews: async ({ snapshotAt, userId }) => {
+      const rows = await db
+        .select({ review: financeReviewCases, transaction: financeTransactions })
         .from(financeReviewCases)
+        .leftJoin(
+          financeTransactions,
+          and(
+            eq(financeTransactions.id, financeReviewCases.transactionId),
+            eq(financeTransactions.userId, userId),
+          ),
+        )
         .where(
           and(
             eq(financeReviewCases.userId, userId),
             or(eq(financeReviewCases.status, "open"), eq(financeReviewCases.status, "deferred")),
             lte(financeReviewCases.updatedAt, snapshotAt),
           ),
-        ),
+        );
+      return rows.map(({ review, transaction }) => ({ ...review, transaction }));
+    },
     mailRules: async ({ snapshotAt, userId }) =>
       db
         .select()
@@ -320,6 +336,7 @@ export function createAgentAccessWorkItemService({
       const items = projectItems({
         accessibleDomains,
         results,
+        includePreview: principal.actorType === "user",
       }).toSorted(compareItems);
       const unavailableDomains = [
         ...new Set([...failedSources].flatMap((source) => sourceImpact[source].domains)),
@@ -404,7 +421,9 @@ export function createAgentAccessWorkItemService({
 function projectItems({
   accessibleDomains,
   results,
+  includePreview,
 }: {
+  includePreview: boolean;
   accessibleDomains: Set<AgentAccessDomain>;
   results: Partial<SourceResult>;
 }): AgentAccessWorkItem[] {
@@ -449,6 +468,17 @@ function projectItems({
         summary: blocked
           ? "A Mail maintenance turn is blocked and needs signed-in review."
           : "A Mail maintenance turn settled with questions that need signed-in judgment.",
+        ...(includePreview
+          ? {
+              preview: workPreview([
+                ["What stopped", blocked ? representedRun.lastSafeError?.message : null],
+                [
+                  "Needs your input",
+                  representedOpenQuestions.map((question) => question.reason).join("; "),
+                ],
+              ]),
+            }
+          : {}),
         title: blocked ? "Mail maintenance is blocked" : "Mail needs your input",
         updatedAt: representedRun.updatedAt.toISOString(),
       });
@@ -464,6 +494,14 @@ function projectItems({
           priority: "person_review",
           source: null,
           summary: `${question.reason} Question type: ${question.kind}. Account ${question.accountId}; thread ${question.threadId}. Open since ${question.createdAt.toISOString()}.`,
+          ...(includePreview
+            ? {
+                preview: workPreview([
+                  ["Question", question.reason],
+                  ["Choices", question.options.map((option) => option.label).join(" · ")],
+                ]),
+              }
+            : {}),
           title: "Answer a Mail stewardship question",
           updatedAt: question.updatedAt.toISOString(),
         });
@@ -481,6 +519,27 @@ function projectItems({
         kind: "review",
         priority: "person_review",
         source: null,
+        ...(includePreview
+          ? {
+              preview: workPreview([
+                [
+                  "When",
+                  rule.condition
+                    ? `${rule.condition.field === "any" ? "Message" : humanize(rule.condition.field)} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}”`
+                    : null,
+                ],
+                [
+                  "Proposed action",
+                  rule.actions
+                    ?.map(
+                      (action) =>
+                        `${humanize(action.type)}${action.afterDays ? ` after ${action.afterDays} days` : " immediately"}`,
+                    )
+                    .join("; "),
+                ],
+              ]),
+            }
+          : {}),
         summary: rule.description || "Review the current bounded sample before activation.",
         title: `Review ${rule.name}`,
         updatedAt: rule.updatedAt.toISOString(),
@@ -509,6 +568,26 @@ function projectItems({
           review.resolution?.type === "clarify" || typeof review.evidence.clarification === "string"
             ? "A note is saved for maintenance. This Finance decision remains open."
             : "A Finance decision needs signed-in judgment; nohmi will not guess.",
+        ...(includePreview
+          ? {
+              preview: workPreview([
+                [
+                  "Transaction",
+                  review.transaction
+                    ? `${review.transaction.merchant} · ${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(review.transaction.amount / 100)} ${review.transaction.currencyCode ?? "(currency not recorded)"} · ${review.transaction.transactionDate}`
+                    : null,
+                ],
+                ["Decision", humanize(review.economicEventId ? review.reasonCode : review.reason)],
+                ["Why it needs review", review.rationale],
+                [
+                  "Your note",
+                  review.resolution?.type === "clarify"
+                    ? review.resolution.clarification
+                    : review.evidence.clarification,
+                ],
+              ]),
+            }
+          : {}),
         title: "Review a Finance decision",
         updatedAt: review.updatedAt.toISOString(),
       });
@@ -529,6 +608,25 @@ function projectItems({
         summary: question
           ? "A Finance question needs your judgment. Open its current evidence before answering."
           : "A proposed Finance change needs signed-in approval of its current evidence.",
+        ...(includePreview
+          ? {
+              preview: workPreview([
+                [
+                  question ? "Question" : "Proposed change",
+                  question
+                    ? isRecord(review.privatePayload.question)
+                      ? review.privatePayload.question.prompt
+                      : null
+                    : review.safeChanges
+                        .map((change) => (typeof change.summary === "string" ? change.summary : ""))
+                        .filter(Boolean)
+                        .join("; "),
+                ],
+                ["Reason", review.privatePayload.rationale],
+                ["Change type", humanize(review.actionKind)],
+              ]),
+            }
+          : {}),
         title: question ? "Answer a Finance question" : "Approve a Finance change",
         updatedAt: review.updatedAt.toISOString(),
       });
@@ -547,6 +645,14 @@ function projectItems({
         source: null,
         summary:
           "This Finance source needs renewed authorization before synchronization can continue.",
+        ...(includePreview
+          ? {
+              preview: workPreview([
+                ["Account", account.name],
+                ["Institution", account.institution],
+              ]),
+            }
+          : {}),
         title: "Reconnect a Finance account",
         updatedAt: account.updatedAt.toISOString(),
       });
@@ -700,4 +806,31 @@ function isAgentAccessDomain(value: string): value is AgentAccessDomain {
 
 function workspaceLabel(domain: AgentAccessDomain): string {
   return domain === "finances" ? "Finances" : `${domain[0]?.toUpperCase()}${domain.slice(1)}`;
+}
+
+function humanize(value: string) {
+  const text = value.replaceAll("_", " ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Explicit display fields only: never serialize arbitrary evidence or private payloads. */
+function workPreview(
+  fields: Array<[string, unknown]>,
+): NonNullable<AgentAccessWorkItem["preview"]> {
+  return fields
+    .flatMap(([label, value]) =>
+      typeof value === "string" && value.trim()
+        ? [
+            {
+              label,
+              value: value.trim().length > 600 ? `${value.trim().slice(0, 599)}…` : value.trim(),
+            },
+          ]
+        : [],
+    )
+    .slice(0, 4);
 }

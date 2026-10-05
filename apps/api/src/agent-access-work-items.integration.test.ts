@@ -210,6 +210,39 @@ describe.sequential("Agent Access work-item projection", () => {
     await container.stop();
   });
 
+  it("previews owned review evidence for people without exposing it to agents", async () => {
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => snapshot,
+      cursorSigningKey: "preview-test",
+    });
+    const person = await service.list(
+      { ...principal, actorType: "user" },
+      { kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(person.items.find((item) => item.id.startsWith("mail-rule:"))?.preview).toEqual([
+      { label: "When", value: "Sender equals “statements@example.test”" },
+      { label: "Proposed action", value: "Mark read immediately" },
+    ]);
+    expect(person.items.find((item) => item.id.startsWith("finance-review:"))?.preview).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Transaction",
+          value: expect.stringContaining("Private merchant"),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(person.items)).not.toContain("Other user attention");
+    const agent = await service.list(
+      { ...principal, actorType: "agent" },
+      { kind: "review", limit: 10 },
+      publishedDomains,
+    );
+    expect(agent.items.every((item) => item.preview === undefined)).toBe(true);
+    expect(JSON.stringify(agent.items)).not.toContain("Private merchant");
+  });
+
   it("orders, summarizes, filters, and cursor-paginates owned work", async () => {
     const service = createAgentAccessWorkItemService({
       cursorSigningKey: "agent-access-test-signing-key",
@@ -850,7 +883,11 @@ describe.sequential("Agent Access work-item projection", () => {
         }),
       ]),
     );
-    expect(JSON.stringify(first.items)).not.toContain("Private");
+    expect(JSON.stringify(first.items)).toContain("Private question");
+    expect(JSON.stringify(first.items)).toContain("Private proposed category");
+    expect(JSON.stringify(first.items)).not.toContain("Private payload");
+    const redacted = await service.list({ ...actor, actorType: "agent" }, query, publishedDomains);
+    expect(JSON.stringify(redacted.items)).not.toContain("Private");
     expect((await service.list(actor, query, publishedDomains)).items).toEqual(first.items);
     expect(
       (

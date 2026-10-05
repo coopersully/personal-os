@@ -154,3 +154,7 @@ initiate delivery.
 - The exact-thread stewardship panel exposes disposition, obligation state, question answers,
   explicit feedback, Calendar evidence handoff, and a private non-transmittable response brief.
 - No MCP or autonomous Mail surface renders a send action or obtains provider delivery authority.
+
+Floating action sizing, colors, and labels use the shared
+[floating workspace actions contract](../system.md#floating-workspace-actions).
+Workspace placement and opened-workflow behavior remain owned by this page.

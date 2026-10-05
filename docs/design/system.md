@@ -702,3 +702,39 @@ account-owned `tasks_workspace_settings` table. Returning to Tasks restores thes
 explicit URL options take precedence without silently overwriting saved preferences. Save only
 user changes, serialize rapid preference writes, preserve unrelated fields, and expose save
 failures through shared mutation feedback. An empty row-details selection is a persisted choice.
+
+Tasks Settings exposes the same sort, group, row-details, and collection-sort preferences
+as its workspace menus. Mail Settings exposes conversation density and desktop list width.
+Both settings catalogs index these controls. Mail stores these layout values in
+`mail_workspace_settings`, not device storage; resize events persist the desktop split
+without applying it to the mobile single-pane layout. Conversation lists use the page
+background and selected rows use the lighter `card` surface token.
+
+Mail conversation readers open at the newest message, with chronological history above.
+Use proximity scroll snapping at message starts; allow uninterrupted scrolling inside long
+messages and respect the reader's position during background refreshes. Identify outgoing
+mail by the user's connected account addresses and label it “You · Sent”; do not infer
+ownership from a display name. Incoming/outgoing surfaces use semantic tokens and textual
+labels, not color alone. Shared message attachment tiles remain inside their owning message
+and show filename, file type, and size without implying unavailable download actions.
+
+Mail message cards use the `card` surface for both incoming and outgoing mail; direction
+remains explicit through sender labels. Message bodies use the full card content width.
+The sticky title occupies the same top position for single-message and multi-message threads. A sticky upper-right older-message
+control counts messages above the current position and moves to the nearest earlier message.
+Hide the control at the beginning of the conversation and respect reduced-motion preferences.
+
+Mail defaults to a resizable split view on desktop and a full-width list/reader flow on
+mobile. The saved conversation-layout preference can select the full-width flow on desktop
+as well, with Back to conversations returning to the same mailbox and filters. Expose it
+in the Mail layout menu and searchable Mail settings. Message cards retain the shared card
+radius; small theme-rounded tails align with the sender header on the incoming/start or
+outgoing/end edge.
+
+Mail inbox rows adapt to their pane width: wide panes place sender, subject with preview,
+message metadata, and date on one scan line; narrow panes stack these for legibility.
+Keep compact/comfortable/expanded density preferences and suppress empty metadata rows.
+
+Collapsed sidebar review entries follow the shared icon-only menu-button geometry: hide
+both text and inline count, center the review icon, preserve its attention surface, and
+expose the complete review count/status through the shared tooltip and accessible label.

@@ -79,6 +79,7 @@ import {
   boolean,
   check,
   date,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -4928,8 +4929,24 @@ export const tasksWorkspaceSettings = pgTable(
 );
 export const mailWorkspaceSettings = pgTable(
   "mail_workspace_settings",
-  workspacePreferenceColumns(),
-  (table) => [check("mail_workspace_settings_revision_check", sql`${table.revision} > 0`)],
+  {
+    ...workspacePreferenceColumns(),
+    mailConversationLayout: text("mail_conversation_layout").notNull().default("split"),
+    mailListDensity: text("mail_list_density").notNull().default("comfortable"),
+    mailListWidth: doublePrecision("mail_list_width").notNull().default(34),
+  },
+  (table) => [
+    check(
+      "mail_workspace_settings_layout_check",
+      sql`${table.mailConversationLayout} IN ('split', 'single')`,
+    ),
+    check("mail_workspace_settings_revision_check", sql`${table.revision} > 0`),
+    check(
+      "mail_workspace_settings_density_check",
+      sql`${table.mailListDensity} IN ('compact', 'comfortable', 'expanded')`,
+    ),
+    check("mail_workspace_settings_width_check", sql`${table.mailListWidth} BETWEEN 5 AND 95`),
+  ],
 );
 export const financesWorkspaceSettings = pgTable(
   "finances_workspace_settings",

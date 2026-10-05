@@ -334,6 +334,50 @@ describe.sequential("workspace discovery and account preferences", () => {
       }).success,
     ).toBe(false);
   });
+  it("stores Mail layout in account preferences with partial updates and validation", async () => {
+    const context = { principal, requestId: "mail-layout" };
+    const before = await settings.get(userId, "mail");
+    const saved = await settings.update(
+      "mail",
+      {
+        expectedRevision: before.revision,
+        preferences: {
+          mailListDensity: "compact",
+          mailListWidth: 42,
+          mailConversationLayout: "single",
+        },
+      },
+      context,
+    );
+    await settings.update(
+      "mail",
+      { expectedRevision: saved.revision, preferences: { mailListDensity: "expanded" } },
+      context,
+    );
+    expect((await settings.get(userId, "mail")).preferences).toMatchObject({
+      mailListDensity: "expanded",
+      mailListWidth: 42,
+      mailConversationLayout: "single",
+    });
+    expect((await settings.get(otherId, "mail")).preferences.mailListWidth).toBeUndefined();
+    await expect(
+      settings.update(
+        "tasks",
+        { expectedRevision: 0, preferences: { mailListDensity: "compact" } },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    for (const preferences of [
+      { mailListWidth: 0 },
+      { mailListWidth: 101 },
+      { mailListDensity: "unknown" },
+      { mailConversationLayout: "unknown" },
+    ]) {
+      expect(
+        updateWorkspaceSettingsSchema.safeParse({ expectedRevision: 0, preferences }).success,
+      ).toBe(false);
+    }
+  });
   it("preserves unrelated calendar preferences on a partial update", async () => {
     await settings.update(
       "calendar",

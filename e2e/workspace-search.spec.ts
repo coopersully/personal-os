@@ -344,3 +344,275 @@ test("Tasks restores saved display preferences on a fresh workspace entry", asyn
   await page.getByRole("menuitemcheckbox", { name: "Estimates", exact: true }).click();
   await resetDetails;
 });
+
+test("workspace settings edit Tasks display and Mail layout preferences", async ({
+  page,
+  isMobile,
+}) => {
+  test.setTimeout(90_000);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  const saved = (workspace: string) =>
+    page.waitForResponse(
+      (r) =>
+        r.url().includes(`/workspaces/${workspace}/settings`) &&
+        r.request().method() === "PATCH" &&
+        r.ok(),
+    );
+  await page.goto("/settings?section=tasks");
+  await expect(page.getByLabel("Sort by", { exact: true })).toBeEnabled();
+  let writing = saved("tasks");
+  await page.getByLabel("Sort by", { exact: true }).selectOption("title");
+  await writing;
+  await expect(page.getByLabel("Group by", { exact: true })).toBeEnabled();
+  writing = saved("tasks");
+  await page.getByLabel("Group by", { exact: true }).selectOption("project");
+  await writing;
+  await expect(page.getByLabel("List and project sorting", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Notes", { exact: true })).toBeVisible();
+  await page.goto("/tasks");
+  await expect(page.getByRole("button", { name: "Sort: Title A–Z", exact: true })).toBeVisible();
+  await page.goto("/settings?section=tasks");
+  writing = saved("tasks");
+  await page.getByLabel("Sort by", { exact: true }).selectOption("default");
+  await writing;
+  await expect(page.getByLabel("Group by", { exact: true })).toBeEnabled();
+  writing = saved("tasks");
+  await page.getByLabel("Group by", { exact: true }).selectOption("none");
+  await writing;
+
+  await page.goto("/settings?section=mail");
+  await expect(page.getByLabel("Conversation density", { exact: true })).toBeEnabled();
+  writing = saved("mail");
+  await page.getByLabel("Conversation density", { exact: true }).selectOption("compact");
+  await writing;
+  await expect(page.getByLabel("Conversation list width (%)", { exact: true })).toBeEnabled();
+  writing = saved("mail");
+  await page.getByLabel("Conversation list width (%)", { exact: true }).fill("42");
+  await page.getByLabel("Conversation list width (%)", { exact: true }).press("Tab");
+  await writing;
+  await page.goto("/mail");
+  const row = page.locator(".mail-thread-row").first();
+  await expect(row).toHaveAttribute("data-density", "compact");
+  expect(
+    await page.locator(".mail-thread-list").evaluate((el) => {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = "var(--background)";
+      el.append(probe);
+      const matches =
+        getComputedStyle(el).backgroundColor === getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return matches;
+    }),
+  ).toBeTruthy();
+  if (!isMobile) {
+    await row.click();
+    await expect(page.locator(".mail-thread-row.is-active")).toBeVisible();
+    expect(
+      await page.locator(".mail-thread-row.is-active").evaluate((el) => {
+        const probe = document.createElement("div");
+        probe.style.backgroundColor = "var(--card)";
+        el.append(probe);
+        const matches =
+          getComputedStyle(el).backgroundColor === getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return matches;
+      }),
+    ).toBeTruthy();
+  }
+  await page.getByRole("button", { name: "Message list layout", exact: true }).click();
+  writing = saved("mail");
+  await page.getByRole("menuitemradio", { name: "Expanded", exact: true }).click();
+  await writing;
+  await page.goto("/settings?section=mail");
+  await expect(page.getByLabel("Conversation density", { exact: true })).toHaveValue("expanded");
+  await expect(page.getByLabel("Conversation list width (%)", { exact: true })).toHaveValue("42");
+  writing = saved("mail");
+  await page.getByLabel("Conversation density", { exact: true }).selectOption("comfortable");
+  await writing;
+  await expect(page.getByLabel("Conversation list width (%)", { exact: true })).toBeEnabled();
+  writing = saved("mail");
+  await page.getByLabel("Conversation list width (%)", { exact: true }).fill("34");
+  await page.getByLabel("Conversation list width (%)", { exact: true }).press("Tab");
+  await writing;
+});
+
+test("Mail opens at its latest message and retains scrollable conversation history", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/mail");
+  await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
+  const messages = page.locator(".mail-reader__message");
+  await expect(messages).toHaveCount(2);
+  const reader = page.getByRole("region", { name: "Message reader", exact: true });
+  await expect
+    .poll(() =>
+      reader.evaluate((el) => {
+        const latest = el.querySelector(".mail-reader__message:last-of-type");
+        return latest
+          ? Math.abs(latest.getBoundingClientRect().top - el.getBoundingClientRect().top - 64)
+          : 1000;
+      }),
+    )
+    .toBeLessThan(4);
+  expect(await reader.evaluate((el) => getComputedStyle(el).scrollSnapType)).toMatch(
+    /^y(?: proximity)?$/,
+  );
+  expect(await reader.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  const previousMessage = reader.getByRole("button", {
+    name: "1 more message above. Go to previous message",
+  });
+  await expect(previousMessage).toBeVisible();
+  await previousMessage.click();
+  await expect(previousMessage).toHaveCount(0);
+  await expect(messages.first()).toBeInViewport();
+  await expect
+    .poll(() =>
+      messages.first().evaluate((el) => {
+        const viewport = el.closest(".mail-reader");
+        if (!viewport) return 1000;
+        return Math.abs(el.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 64);
+      }),
+    )
+    .toBeLessThan(4);
+});
+
+test("Mail single-message reader keeps the title at the top and uses the full card width", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/mail");
+  await page
+    .locator(".mail-thread-row")
+    .filter({ hasText: "Your July statement is ready" })
+    .click();
+  const reader = page.getByRole("region", { name: "Message reader", exact: true });
+  await expect(reader.locator(".mail-reader__message")).toHaveCount(1);
+  await expect
+    .poll(() =>
+      reader.evaluate((el) => {
+        const nav = el.querySelector(".mail-reader__history-nav");
+        return nav
+          ? Math.abs(nav.getBoundingClientRect().top - el.getBoundingClientRect().top)
+          : 1000;
+      }),
+    )
+    .toBeLessThan(2);
+  await expect(reader.getByRole("heading", { name: "Your July statement is ready" })).toBeVisible();
+  const dimensions = await reader.locator(".mail-reader__message").evaluate((el) => {
+    const body = el.querySelector("pre");
+    const style = getComputedStyle(el);
+    const available =
+      el.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+    return { available, body: body?.getBoundingClientRect().width ?? 0 };
+  });
+  expect(Math.abs(dimensions.available - dimensions.body)).toBeLessThan(2);
+});
+
+test("Mail saves full-width conversation layout and supports returning to the list", async ({
+  page,
+  isMobile,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/mail");
+  await page.getByRole("button", { name: "Message list layout", exact: true }).click();
+  const saved = page.waitForResponse(
+    (r) => r.url().includes("/settings") && r.request().method() === "PATCH" && r.ok(),
+  );
+  await page.getByRole("menuitemradio", { name: "Full-width view", exact: true }).click();
+  await saved;
+  await page.reload();
+  const list = page.getByRole("region", { name: "Conversations", exact: true });
+  const reader = page.getByRole("region", { name: "Message reader", exact: true });
+  await expect(list).toBeVisible();
+  await expect(reader).toBeHidden();
+  const expectFullWidth = async (region: typeof list) => {
+    await expect
+      .poll(() =>
+        region.evaluate((el) => {
+          const workspace = el.closest(".mail-workspace");
+          return workspace
+            ? Math.abs(el.getBoundingClientRect().width - workspace.getBoundingClientRect().width)
+            : 1000;
+        }),
+      )
+      .toBeLessThan(2);
+  };
+  await expectFullWidth(list);
+  if (!isMobile) {
+    const row = page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" });
+    const subject = await row.locator("strong").boundingBox();
+    const preview = await row.locator(".mail-thread-row__snippet").boundingBox();
+    expect(subject).not.toBeNull();
+    expect(preview).not.toBeNull();
+    if (subject && preview) {
+      expect(Math.abs(subject.y - preview.y)).toBeLessThan(3);
+      expect(preview.x).toBeGreaterThan(subject.x);
+    }
+    expect(await row.evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(65);
+  }
+  await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
+  await expect(reader).toBeVisible();
+  await expectFullWidth(reader);
+  await expect(list).toBeHidden();
+  await page.getByRole("button", { name: "Back to conversations", exact: true }).click();
+  await expect(list).toBeVisible();
+  await expect(reader).toBeHidden();
+  await page.getByRole("button", { name: "Message list layout", exact: true }).click();
+  const restored = page.waitForResponse(
+    (r) => r.url().includes("/settings") && r.request().method() === "PATCH" && r.ok(),
+  );
+  await page.getByRole("menuitemradio", { name: "Split view", exact: true }).click();
+  await restored;
+  await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
+  await expect(reader).toBeVisible();
+  if (isMobile) await expect(list).toBeHidden();
+  else await expect(list).toBeVisible();
+});
+
+test("Collapsed workspace sidebar keeps reviews centered and exposes the count in a tooltip", async ({
+  page,
+  isMobile,
+}) => {
+  test.skip(isMobile, "Mobile uses the header review control.");
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/mail");
+  const review = page.locator('[data-sidebar="menu-button"].review-navigation');
+  await expect(review).toBeVisible();
+  await page.keyboard.press("Control+b");
+  await expect(review.locator(".review-navigation__label")).toBeHidden();
+  await expect(review.locator(".review-navigation__count")).toBeHidden();
+  await expect
+    .poll(() =>
+      review.evaluate((el) => {
+        const icon = el.querySelector("svg");
+        if (!icon) return 1000;
+        const button = el.getBoundingClientRect();
+        const glyph = icon.getBoundingClientRect();
+        return Math.abs(button.x + button.width / 2 - glyph.x - glyph.width / 2);
+      }),
+    )
+    .toBeLessThan(2);
+  await review.hover();
+  await expect(page.getByRole("tooltip")).toContainText("need review");
+});

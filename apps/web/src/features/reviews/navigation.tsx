@@ -51,12 +51,13 @@ export function ReviewNavigation({
     </>
   );
   return footer ? (
-    <SidebarFooter>
+    <SidebarFooter className="review-navigation__footer">
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
             aria-label={label}
             className="review-navigation"
+            tooltip={label}
             data-attention={needsAttention || undefined}
             onClick={open}
             isActive={active}

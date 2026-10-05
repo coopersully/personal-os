@@ -26,6 +26,27 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...fields("tasks", [
+    [
+      "Sort by",
+      "taskSort",
+      "recommended relevant date reserved priority newest oldest title estimate",
+    ],
+    ["Group by", "taskGroup", "date list project grouping"],
+    ["List and project sorting", "taskContainerSort", "recent updated name target date"],
+    ["Estimates", "task-details-estimate", "row details"],
+    ["Tags", "task-details-tags", "row details"],
+    ["Notes", "task-details-notes", "row details"],
+  ]),
+  ...fields("mail", [
+    ["Conversation layout", "mail-conversation-layout", "split full width reading pane mobile"],
+    [
+      "Conversation density",
+      "mail-list-density",
+      "message list layout compact comfortable expanded",
+    ],
+    ["Conversation list width", "mail-list-width", "reader split layout percent"],
+  ]),
   ...["calendar", "tasks", "mail", "finances"].flatMap((workspace) =>
     fields(workspace, [
       [

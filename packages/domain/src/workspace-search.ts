@@ -42,7 +42,12 @@ export const taskGroupPreferenceSchema = z.enum(["none", "date", "list", "projec
 export const taskRowDetailsPreferenceSchema = z.array(z.enum(["estimate", "tags", "notes"])).max(3);
 export const taskContainerSortPreferenceSchema = z.enum(["updated", "name", "newest", "target"]);
 
+export const mailListDensityPreferenceSchema = z.enum(["compact", "comfortable", "expanded"]);
+export const mailListWidthPreferenceSchema = z.number().finite().min(5).max(95);
 export const workspacePreferencesSchema = z.object({
+  mailConversationLayout: z.enum(["split", "single"]).optional(),
+  mailListDensity: mailListDensityPreferenceSchema.optional(),
+  mailListWidth: mailListWidthPreferenceSchema.optional(),
   taskSort: taskSortPreferenceSchema.optional(),
   taskGroup: taskGroupPreferenceSchema.optional(),
   taskRowDetails: taskRowDetailsPreferenceSchema.optional(),
@@ -68,6 +73,9 @@ export const updateWorkspaceSettingsSchema = z
     // PATCH fields must not carry read-time defaults: omitted preferences stay unchanged.
     preferences: z
       .object({
+        mailConversationLayout: z.enum(["split", "single"]).optional(),
+        mailListDensity: mailListDensityPreferenceSchema.optional(),
+        mailListWidth: mailListWidthPreferenceSchema.optional(),
         taskSort: taskSortPreferenceSchema.optional(),
         taskGroup: taskGroupPreferenceSchema.optional(),
         taskRowDetails: taskRowDetailsPreferenceSchema.optional(),

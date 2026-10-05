@@ -15,6 +15,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
@@ -126,6 +127,67 @@ export function WorkspacePreferencesSection({ workspace }: { workspace: Searchab
                 checked={values.showWeekends}
                 disabled={disabled}
                 onCheckedChange={(showWeekends) => save.mutate({ showWeekends })}
+              />
+            </Field>
+          </>
+        ) : null}
+        {workspace === "mail" ? (
+          <>
+            <Field>
+              <FieldLabel htmlFor="mail-conversation-layout">Conversation layout</FieldLabel>
+              <NativeSelect
+                id="mail-conversation-layout"
+                value={values.mailConversationLayout ?? "split"}
+                disabled={disabled}
+                onChange={(event) =>
+                  save.mutate({ mailConversationLayout: event.target.value as "split" | "single" })
+                }
+              >
+                <option value="split">Split view (full-width on mobile)</option>
+                <option value="single">Full-width view</option>
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-list-density">Conversation density</FieldLabel>
+              <NativeSelect
+                id="mail-list-density"
+                value={values.mailListDensity ?? "comfortable"}
+                disabled={disabled}
+                onChange={(event) =>
+                  save.mutate({
+                    mailListDensity: event.target.value as WorkspacePreferences["mailListDensity"],
+                  })
+                }
+              >
+                <NativeSelectOption value="compact">Compact</NativeSelectOption>
+                <NativeSelectOption value="comfortable">Comfortable</NativeSelectOption>
+                <NativeSelectOption value="expanded">Expanded</NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mail-list-width">Conversation list width (%)</FieldLabel>
+              <FieldDescription>
+                Preferred share of the desktop split view. Smaller screens keep their responsive
+                layout.
+              </FieldDescription>
+              <Input
+                key={values.mailListWidth ?? 34}
+                id="mail-list-width"
+                type="number"
+                min={5}
+                max={95}
+                step="any"
+                defaultValue={values.mailListWidth ?? 34}
+                disabled={disabled}
+                onBlur={(event) => {
+                  const width = event.target.valueAsNumber;
+                  if (
+                    event.target.validity.valid &&
+                    Number.isFinite(width) &&
+                    width !== (values.mailListWidth ?? 34)
+                  )
+                    save.mutate({ mailListWidth: width });
+                }}
               />
             </Field>
           </>

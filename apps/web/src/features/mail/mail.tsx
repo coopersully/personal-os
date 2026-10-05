@@ -1,15 +1,19 @@
+import { MessageAttachments } from "@/components/message-attachments";
+
+export { formatAttachmentSize } from "@/components/message-attachments";
+
 import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
+  ArrowUpIcon,
   ClockIcon,
   EditIcon,
   EyeIcon,
   EyeOffIcon,
-  FileTextIcon,
   ForwardIcon,
   InboxIcon,
   ListChecksIcon,
@@ -68,6 +72,7 @@ import { formatRelativeTime } from "../../lib/time-format.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
+import { useMailLayoutPreferences } from "./layout-preferences";
 
 export const mailListScopes = ["all", "unread", "starred", "snoozed", "sent", "drafts"] as const;
 export type MailListScope = (typeof mailListScopes)[number];
@@ -123,55 +128,8 @@ function inboxUnreadCount(items: Array<{ role: string; unreadCount: number }>) {
     .reduce((sum, mailbox) => sum + mailbox.unreadCount, 0);
 }
 export const relative = formatRelativeTime;
-const mailReaderLayoutStorageKey = "ilo.mail.reader-layout.v1";
-const mailListDensityStorageKey = "ilo.mail.list-density.v1";
 export const mailListDensities = ["compact", "comfortable", "expanded"] as const;
 export type MailListDensity = (typeof mailListDensities)[number];
-
-export function storedMailListDensity(): MailListDensity {
-  try {
-    if (typeof window === "undefined") return "comfortable";
-    const value = window.localStorage.getItem(mailListDensityStorageKey);
-    return mailListDensities.find((density) => density === value) ?? "comfortable";
-  } catch {
-    return "comfortable";
-  }
-}
-
-export function persistMailListDensity(density: MailListDensity) {
-  try {
-    window.localStorage.setItem(mailListDensityStorageKey, density);
-  } catch {
-    // A browser storage restriction must not prevent changing list density.
-  }
-}
-
-export function storedMailReaderLayout() {
-  try {
-    if (typeof window === "undefined") return undefined;
-    const value = JSON.parse(
-      window.localStorage.getItem(mailReaderLayoutStorageKey) ?? "null",
-    ) as unknown;
-    if (
-      value &&
-      typeof value === "object" &&
-      typeof (value as Record<string, unknown>)["mail-list"] === "number" &&
-      typeof (value as Record<string, unknown>)["mail-reader"] === "number"
-    )
-      return value as Record<string, number>;
-  } catch {
-    // A damaged preference should never prevent Mail from opening.
-  }
-  return undefined;
-}
-
-export function persistMailReaderLayout(layout: Record<string, number>) {
-  try {
-    window.localStorage.setItem(mailReaderLayoutStorageKey, JSON.stringify(layout));
-  } catch {
-    // A browser storage restriction must not prevent panel resizing.
-  }
-}
 
 function initials(name: string) {
   return name
@@ -325,7 +283,8 @@ export function MailPage({ user }: { user: User }) {
   const search = params.get("q")?.trim() ?? "";
   const listScope = mailListScopeFromSearch(params);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
-  const [density, setDensity] = useState<MailListDensity>(storedMailListDensity);
+  const { settings: layoutSettings, save: saveLayout } = useMailLayoutPreferences();
+  const density = layoutSettings.data?.preferences.mailListDensity ?? "comfortable";
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -378,7 +337,12 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-thread", selectedId],
   });
   const selected = listed ?? loaded.data;
-  const readerLayout = useMemo(storedMailReaderLayout, []);
+  const conversationLayout = layoutSettings.data?.preferences.mailConversationLayout ?? "split";
+  const listWidth = layoutSettings.data?.preferences.mailListWidth ?? 34;
+  const readerLayout = useMemo(
+    () => ({ "mail-list": listWidth, "mail-reader": 100 - listWidth }),
+    [listWidth],
+  );
   const messages = useQuery({
     enabled: Boolean(selected),
     queryFn: () => api.listMailMessages(selected?.id as string),
@@ -451,6 +415,10 @@ export function MailPage({ user }: { user: User }) {
             ? `${(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent").length} drafts`
             : `${threads.data?.length ?? 0} conversations`
         }
+        conversationLayout={conversationLayout}
+        setConversationLayout={(mailConversationLayout) =>
+          saveLayout.mutate({ mailConversationLayout })
+        }
         density={density}
         forward={() => {
           if (!selected) return;
@@ -483,8 +451,7 @@ export function MailPage({ user }: { user: User }) {
         }}
         selected={selected}
         setDensity={(nextDensity) => {
-          setDensity(nextDensity);
-          persistMailListDensity(nextDensity);
+          saveLayout.mutate({ mailListDensity: nextDensity });
         }}
         snooze={() => {
           if (selected) snoozeThread.mutate(selected.id);
@@ -507,6 +474,8 @@ export function MailPage({ user }: { user: User }) {
         {confirmation}
         <MutationFeedback feedback={deleteDraft.feedback} />
         <MutationFeedback feedback={reconcileDraft.feedback} />
+        <MutationFeedback feedback={saveLayout.feedback} />
+        <QueryFeedback query={layoutSettings} title="Couldn’t load Mail layout preferences." />
         <MutationFeedback feedback={updateThread.feedback} />
         <MutationFeedback feedback={snoozeThread.feedback} />
         <QueryFeedback query={accounts} title="Couldn’t refresh mail accounts." staleOnly />
@@ -515,11 +484,20 @@ export function MailPage({ user }: { user: User }) {
         <QueryFeedback query={threads} title="Couldn’t refresh conversations." staleOnly />
         <QueryFeedback query={setup} title="Couldn’t load sending accounts." />
         <ResizablePanelGroup
-          className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}
+          className={`mail-workspace mail-workspace--${conversationLayout} mail-workspace--${selectedId ? "reader" : "list"}`}
+          key={layoutSettings.isPending ? "loading-preferences" : "ready"}
           defaultLayout={readerLayout}
           id="mail-reader-layout"
           onLayoutChanged={(layout, metadata) => {
-            if (metadata.isUserInteraction) persistMailReaderLayout(layout);
+            const width = layout["mail-list"];
+            if (
+              conversationLayout === "split" &&
+              metadata.isUserInteraction &&
+              width !== undefined &&
+              width >= 5 &&
+              width <= 95
+            )
+              saveLayout.mutate({ mailListWidth: Math.round(width * 100) / 100 });
           }}
           orientation="horizontal"
         >
@@ -578,7 +556,15 @@ export function MailPage({ user }: { user: User }) {
               <QueryFeedback query={messages} title="Couldn’t load conversation messages." />
               {selected ? (
                 <Reader
+                  key={selected.id}
                   messages={messages.data ?? []}
+                  loadingMessages={messages.isPending}
+                  ownAddresses={[
+                    user.email,
+                    ...(accounts.data ?? []).flatMap((account) =>
+                      account.email ? [account.email] : [],
+                    ),
+                  ]}
                   thread={selected}
                   timeZone={user.planningTimezone}
                 />
@@ -642,8 +628,10 @@ function MailDraftList({
           {draft.to.map((recipient) => recipient.address).join(", ") || "No recipients"}
         </span>
         <time>{draft.sendStatus === "reconcile" ? "Needs review" : "Draft"}</time>
-        <strong>{draft.subject || "(No subject)"}</strong>
-        <span className="mail-thread-row__snippet">{draft.body || "Empty message"}</span>
+        <span className="mail-thread-row__summary">
+          <strong>{draft.subject || "(No subject)"}</strong>
+          <span className="mail-thread-row__snippet">{draft.body || "Empty message"}</span>
+        </span>
       </button>
       <div className="mail-draft-row__actions">
         {draft.sendStatus === "reconcile" ? (
@@ -669,6 +657,8 @@ function MailSecondaryNavigation({
   archive,
   back,
   countLabel,
+  conversationLayout,
+  setConversationLayout,
   density,
   pending,
   forward,
@@ -684,6 +674,8 @@ function MailSecondaryNavigation({
   archive: () => void;
   back: () => void;
   countLabel: string;
+  conversationLayout: "split" | "single";
+  setConversationLayout: (layout: "split" | "single") => void;
   density: MailListDensity;
   pending: boolean;
   forward: () => void;
@@ -709,7 +701,7 @@ function MailSecondaryNavigation({
           data-visible={selected ? "true" : "false"}
         >
           <Button
-            aria-label="Back to inbox"
+            aria-label="Back to conversations"
             disabled={!selected}
             onClick={back}
             tabIndex={selected ? undefined : -1}
@@ -837,7 +829,16 @@ function MailSecondaryNavigation({
             <TooltipContent>Message list layout</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="mail-density-menu">
-            <DropdownMenuLabel>Message list layout</DropdownMenuLabel>
+            <DropdownMenuLabel>Conversation layout</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={conversationLayout}
+              onValueChange={(value) => setConversationLayout(value as "split" | "single")}
+            >
+              <DropdownMenuRadioItem value="split">Split view</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="single">Full-width view</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Conversation density</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               onValueChange={(value) => setDensity(value as MailListDensity)}
               value={density}
@@ -944,8 +945,10 @@ function ThreadRow({
         <span>{thread.from.name || thread.from.address || "Unknown sender"}</span>
       </span>
       <time>{relative(thread.receivedAt)}</time>
-      <strong>{thread.subject}</strong>
-      <span className="mail-thread-row__snippet">{thread.snippet || "No preview available"}</span>
+      <span className="mail-thread-row__summary">
+        <strong>{thread.subject}</strong>
+        <span className="mail-thread-row__snippet">{thread.snippet || "No preview available"}</span>
+      </span>
       <span className="mail-thread-row__meta">
         {thread.starred ? (
           <StarIcon aria-label="Starred" className="size-[13px]" weight="Filled" />
@@ -956,11 +959,15 @@ function ThreadRow({
   );
 }
 export function Reader({
+  ownAddresses = [],
+  loadingMessages = false,
   messages,
   thread,
   timeZone,
 }: {
   messages: MailMessage[];
+  ownAddresses?: string[];
+  loadingMessages?: boolean;
   thread: MailThread;
   timeZone: string;
 }) {
@@ -984,6 +991,54 @@ export function Reader({
       : [fallbackMessage, ...messages]
     : [fallbackMessage];
 
+  const chronologicalMessages = [...displayedMessages].sort(
+    (a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt),
+  );
+  const latestMessageId = chronologicalMessages.at(-1)?.id;
+  const articleRef = useRef<HTMLElement>(null);
+  const initializedThread = useRef<string | null>(null);
+  const [messagesAbove, setMessagesAbove] = useState(0);
+  const previousMessageRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const article = articleRef.current;
+    const viewport = article?.closest<HTMLElement>(".mail-reader");
+    if (!article || !viewport || !latestMessageId) return;
+    const latest = article.querySelector<HTMLElement>(".mail-reader__message:last-of-type");
+    const scrollOffset = () => Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 16;
+    const updateMessagesAbove = () => {
+      const top = viewport.getBoundingClientRect().top + scrollOffset();
+      const above = [...article.querySelectorAll<HTMLElement>(".mail-reader__message")].filter(
+        (message) => message.getBoundingClientRect().top < top - 4,
+      );
+      previousMessageRef.current = above.at(-1) ?? null;
+      setMessagesAbove(above.length);
+    };
+    const resize = () => {
+      article.style.setProperty("--reader-height", `${viewport.clientHeight}px`);
+      article.style.setProperty("--last-message-height", `${latest?.offsetHeight ?? 0}px`);
+      updateMessagesAbove();
+    };
+    resize();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    observer?.observe(viewport);
+    if (latest) observer?.observe(latest);
+    if (!loadingMessages && initializedThread.current !== thread.id) {
+      const latest = article.querySelector<HTMLElement>(".mail-reader__message:last-child");
+      if (latest)
+        viewport.scrollTop +=
+          latest.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top -
+          scrollOffset();
+      initializedThread.current = thread.id;
+    }
+    updateMessagesAbove();
+    viewport.addEventListener("scroll", updateMessagesAbove, { passive: true });
+    return () => {
+      observer?.disconnect();
+      viewport.removeEventListener("scroll", updateMessagesAbove);
+    };
+  }, [thread.id, loadingMessages, latestMessageId]);
+
   function toggleMessage(messageId: string) {
     setCollapsedMessageIds((current) => {
       const next = new Set(current);
@@ -994,15 +1049,52 @@ export function Reader({
   }
 
   return (
-    <article className="mail-reader__article">
-      <header className="mail-reader__subject">
-        <h2>{thread.subject}</h2>
+    <article ref={articleRef} className="mail-reader__article">
+      <header className="mail-reader__history-nav">
+        <h2 className="min-w-0 flex-1 truncate" title={thread.subject}>
+          {thread.subject}
+        </h2>
+        {messagesAbove > 0 ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label={`${messagesAbove} more ${messagesAbove === 1 ? "message" : "messages"} above. Go to previous message`}
+            onClick={() => {
+              const viewport = articleRef.current?.closest<HTMLElement>(".mail-reader");
+              const previous = previousMessageRef.current;
+              if (!viewport || !previous) return;
+              const offset = Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 16;
+              viewport.scrollTo({
+                top:
+                  viewport.scrollTop +
+                  previous.getBoundingClientRect().top -
+                  viewport.getBoundingClientRect().top -
+                  offset,
+                behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                  ? "instant"
+                  : "smooth",
+              });
+            }}
+          >
+            <ArrowUpIcon aria-hidden="true" />
+            {messagesAbove} more
+          </Button>
+        ) : null}
       </header>
-      {displayedMessages.map((message) => {
+      {chronologicalMessages.map((message) => {
+        const outgoing = ownAddresses.some(
+          (address) => address.toLowerCase() === message.from.address.toLowerCase(),
+        );
         const collapsed = collapsedMessageIds.has(message.id);
         const senderName = message.from.name || message.from.address || "Unknown sender";
         return (
-          <section className="mail-reader__message" data-collapsed={collapsed} key={message.id}>
+          <section
+            className="mail-reader__message"
+            data-direction={outgoing ? "outgoing" : "incoming"}
+            aria-label={`${outgoing ? "Sent by you" : `Received from ${senderName}`}`}
+            data-collapsed={collapsed}
+            key={message.id}
+          >
             <header className="mail-reader__message-header">
               <button
                 aria-expanded={!collapsed}
@@ -1019,7 +1111,16 @@ export function Reader({
               <div className="mail-reader__message-meta">
                 <div className="mail-reader__sender-line">
                   <strong>
-                    <MailContactHoverCard address={message.from} />
+                    {outgoing ? (
+                      <span>
+                        You <span className="font-normal text-muted-foreground">· Sent</span>
+                      </span>
+                    ) : (
+                      <>
+                        <MailContactHoverCard address={message.from} />
+                        <span className="ml-2 font-normal text-muted-foreground">· Received</span>
+                      </>
+                    )}
                   </strong>
                   <time dateTime={message.receivedAt}>
                     {mailDate(message.receivedAt, timeZone)}
@@ -1050,22 +1151,7 @@ export function Reader({
             {!collapsed ? (
               <div className="mail-reader__message-content">
                 <pre>{message.bodyText || "This message has no plain-text body."}</pre>
-                {message.attachments.length ? (
-                  <ul aria-label="Attachments" className="mail-reader__attachments">
-                    {message.attachments.map((attachment) => (
-                      <li key={attachment.id}>
-                        <FileTextIcon aria-hidden="true" />
-                        <span>
-                          <strong>{attachment.filename || "Attachment"}</strong>
-                          <small>
-                            {attachment.contentType}
-                            {attachment.size ? ` · ${formatAttachmentSize(attachment.size)}` : ""}
-                          </small>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                <MessageAttachments attachments={message.attachments} />
               </div>
             ) : null}
           </section>
@@ -1101,10 +1187,4 @@ function MailContactHoverCard({ address }: { address: MailAddress }) {
       </HoverCardContent>
     </HoverCard>
   );
-}
-
-export function formatAttachmentSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

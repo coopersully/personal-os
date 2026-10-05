@@ -67,6 +67,13 @@ export function createWorkspaceSettingsService(db: Database) {
           input.preferences.pinnedProjectIds !== undefined)
       )
         throw new AppError("invalid_request", "Task preferences belong to Tasks.");
+      if (
+        workspace !== "mail" &&
+        (input.preferences.mailConversationLayout !== undefined ||
+          input.preferences.mailListDensity !== undefined ||
+          input.preferences.mailListWidth !== undefined)
+      )
+        throw new AppError("invalid_request", "Mail layout preferences belong to Mail.");
       return db.transaction(async (tx) => {
         const userId = context.principal.userId;
         await tx.execute(
@@ -127,6 +134,17 @@ export function createWorkspaceSettingsService(db: Database) {
             .insert(tasksWorkspaceSettings)
             .values({ userId, ...values })
             .onConflictDoUpdate({ target: tasksWorkspaceSettings.userId, set: values });
+        } else if (workspace === "mail") {
+          const values = {
+            ...common,
+            mailConversationLayout: preferences.mailConversationLayout ?? "split",
+            mailListDensity: preferences.mailListDensity ?? "comfortable",
+            mailListWidth: preferences.mailListWidth ?? 34,
+          };
+          await tx
+            .insert(mailWorkspaceSettings)
+            .values({ userId, ...values })
+            .onConflictDoUpdate({ target: mailWorkspaceSettings.userId, set: values });
         } else {
           await tx
             .insert(table)

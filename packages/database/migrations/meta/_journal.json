@@ -736,6 +736,20 @@
       "when": 1791222000000,
       "tag": "0097_task_display_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1791223000000,
+      "tag": "0098_mail_layout_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1791224000000,
+      "tag": "0099_mail_conversation_layout",
+      "breakpoints": true
     }
   ]
 }

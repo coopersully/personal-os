@@ -21,14 +21,17 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../../api.js", () => ({ api: mocks, errorMessage: () => "Failed" }));
 beforeEach(() => vi.resetAllMocks());
-function setup(id: string) {
+function setup(id: string, action: AgentAccessWorkItem["action"] = null) {
   const changed = vi.fn(async () => {});
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <MemoryRouter>
-        <ReviewActions item={{ id, domain: "mail" } as AgentAccessWorkItem} onChanged={changed} />
+        <ReviewActions
+          item={{ id, domain: "mail", action } as AgentAccessWorkItem}
+          onChanged={changed}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -158,4 +161,95 @@ it("trims a freeform Mail answer and keeps the reviewed version", async () => {
   });
   await waitFor(() => expect(changed).toHaveBeenCalledOnce());
   expect(answer).toHaveValue("");
+});
+it("shows bounded rule evidence and activates only the reviewed candidate snapshot", async () => {
+  mocks.previewSavedMailRule.mockResolvedValue({
+    candidates: [
+      {
+        id: "conversation",
+        subject: "",
+        from: { address: "news@example.com" },
+        accountId: "missing",
+        actions: [
+          { type: "mark_read", due: true },
+          { type: "trash", afterDays: 7, due: false },
+        ],
+      },
+    ],
+    matchedCount: 1,
+    scannedCount: 100,
+    ruleVersion: 3,
+    fingerprint: "bounded-fingerprint",
+    previewedAt: "2026-07-13T12:00:00.000Z",
+    window: { limit: 100, truncated: true },
+  });
+  mocks.getAssistantSetupStatus.mockResolvedValue({
+    domains: [{ domain: "mail", profileStatus: "active" }],
+  });
+  mocks.listMailRules.mockResolvedValue([
+    {
+      id: "bounded",
+      name: "Bounded newsletter cleanup",
+      sourceIds: ["missing"],
+      condition: { field: "sender", operator: "contains", value: "news@example.com" },
+      actions: [{ type: "mark_read" }, { type: "trash", afterDays: 7 }],
+    },
+  ]);
+  mocks.getMailSetupContext.mockResolvedValue({
+    accounts: [{ accountId: "known", email: null, label: "Archive account" }],
+  });
+  mocks.activateMailRule.mockResolvedValue({});
+  const changed = setup("mail-rule:bounded");
+  expect(await screen.findByText(/\(No subject\)/)).toBeVisible();
+  expect(screen.getByText(/Rule scope: Unknown account/)).toBeVisible();
+  expect(screen.getByText(/more than 100 exist/)).toBeVisible();
+  expect(screen.getByText(/mark read immediately; recoverable Trash after 7 days/)).toBeVisible();
+  expect(
+    screen.getByText(/mark read — due now, recoverable Trash after 7d — retained until due/),
+  ).toBeVisible();
+  const activate = screen.getByRole("button", { name: "Activate reviewed rule" });
+  await waitFor(() => expect(activate).toBeEnabled());
+  await userEvent.click(activate);
+  expect(mocks.activateMailRule).toHaveBeenCalledWith("bounded", {
+    expectedCandidateIds: ["conversation"],
+    expectedPreviewFingerprint: "bounded-fingerprint",
+    expectedPreviewedAt: "2026-07-13T12:00:00.000Z",
+    expectedVersion: 3,
+  });
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+});
+
+it("keeps an unfamiliar work item’s explicit destination without inventing mutations", () => {
+  setup("proposal:one", { label: "Open proposal", to: "/tasks?task=one" });
+  expect(screen.getByRole("link", { name: "Open proposal" })).toHaveAttribute(
+    "href",
+    "/tasks?task=one",
+  );
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  expect(mocks.updateAttentionItem).not.toHaveBeenCalled();
+});
+it("does not invent an action for an unfamiliar item with no destination", () => {
+  setup("proposal:unavailable");
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+it("does not answer an exact Mail question that has already been closed", async () => {
+  mocks.getMailQuestion.mockResolvedValue({
+    id: "closed",
+    status: "answered",
+    version: 5,
+    reason: "Already decided",
+    options: [{ label: "Keep", value: "keep" }],
+  });
+  setup("mail-question:closed");
+  expect(await screen.findByText(/No open question is available/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Keep" })).not.toBeInTheDocument();
+  expect(mocks.answerMailQuestion).not.toHaveBeenCalled();
+});
+it("exposes a failed exact-question lookup without offering an answer", async () => {
+  mocks.getMailQuestion.mockRejectedValue(new Error("Question unavailable"));
+  setup("mail-question:failed");
+  expect(await screen.findByText("Couldn’t load the Mail question.")).toBeVisible();
+  expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
+  expect(mocks.answerMailQuestion).not.toHaveBeenCalled();
 });

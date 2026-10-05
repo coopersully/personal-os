@@ -5941,6 +5941,39 @@ describe("ilo web app", () => {
     );
   });
 
+  it("preserves an invalid email draft until a valid address is finished", async () => {
+    const browser = userEvent.setup();
+    setup("/settings?section=profile");
+    const email = await screen.findByLabelText("Email");
+    await browser.clear(email);
+    await browser.type(email, "unfinished");
+    await browser.click(screen.getByLabelText("First name"));
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+    expect(email).toHaveValue("unfinished");
+    await browser.clear(email);
+    await browser.type(email, "valid@example.com");
+    await browser.click(screen.getByLabelText("First name"));
+    await waitFor(() =>
+      expect(mocks.updateUser).toHaveBeenCalledWith(
+        expect.objectContaining({ email: "valid@example.com" }),
+      ),
+    );
+  });
+  it("does not autosave a reversed workday and recovers when the end is corrected", async () => {
+    setup("/settings?section=profile");
+    const end = await screen.findByLabelText("Day end");
+    fireEvent.change(end, { target: { value: "08:00" } });
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+    expect(end).toHaveValue("08:00");
+    fireEvent.change(end, { target: { value: "18:00" } });
+    await waitFor(() =>
+      expect(mocks.updateUser).toHaveBeenCalledWith(
+        expect.objectContaining({ workdayEndMinute: 18 * 60 }),
+      ),
+    );
+  });
   it("autosaves profile edits, exposes failures, and serializes newer drafts", async () => {
     const browser = userEvent.setup();
     setup("/settings?section=profile");
@@ -9198,11 +9231,11 @@ describe("ilo web app", () => {
       await screen.findByText(/Couldn’t confirm whether we could create this motive/),
     ).toBeInTheDocument();
     motives.unmount();
-    mocks.listGoals.mockRejectedValueOnce(new Error("Goals unavailable"));
+    mocks.listGoals.mockRejectedValue(new Error("Goals unavailable"));
     const brokenGoals = setup("/goals");
     expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
     brokenGoals.unmount();
-    mocks.listMotives.mockRejectedValueOnce(new Error("Motives unavailable"));
+    mocks.listMotives.mockRejectedValue(new Error("Motives unavailable"));
     setup("/motives");
     expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
   });

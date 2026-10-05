@@ -716,7 +716,8 @@ messages and respect the reader's position during background refreshes. Identify
 mail by the user's connected account addresses and label it “You · Sent”; do not infer
 ownership from a display name. Incoming/outgoing surfaces use semantic tokens and textual
 labels, not color alone. Shared message attachment tiles remain inside their owning message
-and show filename, file type, and size without implying unavailable download actions.
+and show filename, file type, size, and authenticated download actions. Supported safe file
+types can be previewed through the shared responsive dialog; see the Mail page specification.
 
 Mail message cards use the `card` surface for both incoming and outgoing mail; direction
 remains explicit through sender labels. Message bodies use the full card content width.

@@ -208,6 +208,12 @@ export type ConnectedEventGateway = {
 };
 
 export type ConnectedMailGateway = {
+  downloadAttachment?: (
+    userId: string,
+    accountId: string,
+    messageId: string,
+    attachment: import("@personal-os/domain").MailAttachment,
+  ) => Promise<Uint8Array>;
   sendCapability?: (
     userId: string,
     accountId: string,
@@ -639,6 +645,43 @@ export function createConnectorService({
   };
 
   const mailGateway: ConnectedMailGateway = {
+    async downloadAttachment(userId, accountId, messageId, attachment) {
+      const account = await getAccount(userId, accountId);
+      if (!account.mailEnabled)
+        throw new AppError(
+          "forbidden",
+          "Mail is disabled for this account. Enable Mail in Connections.",
+        );
+      const operation = { signal: AbortSignal.timeout(20_000), deadlineMs: Date.now() + 20_000 };
+      try {
+        if (account.provider === "google" && google.downloadMailAttachment) {
+          const result = await google.downloadMailAttachment(
+            credentials<GoogleCredentials>(account),
+            messageId,
+            attachment,
+            operation,
+          );
+          await saveGoogleCredentials(account.id, result.credentials, true);
+          return result.value;
+        }
+        if (account.provider === "icloud" && icloud.downloadMailAttachment)
+          return await icloud.downloadMailAttachment(
+            credentials<ICloudCredentials>(account),
+            messageId,
+            attachment,
+            operation,
+          );
+      } catch {
+        throw new AppError(
+          "service_unavailable",
+          "Couldn’t retrieve this attachment. Try again, or check the account in Connections. The original message may have moved or been removed.",
+        );
+      }
+      throw new AppError(
+        "service_unavailable",
+        "Attachment downloads are unavailable for this connection.",
+      );
+    },
     async sendCapability(userId, accountId) {
       try {
         const account = await getAccount(userId, accountId);

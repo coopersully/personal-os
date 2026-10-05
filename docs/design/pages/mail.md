@@ -158,3 +158,31 @@ initiate delivery.
 Floating action sizing, colors, and labels use the shared
 [floating workspace actions contract](../system.md#floating-workspace-actions).
 Workspace placement and opened-workflow behavior remain owned by this page.
+
+
+## Received attachments
+
+Message attachment tiles expose filename, MIME type, size, and a labelled Download action.
+Raster images (PNG, JPEG, GIF, WebP) and plain text, CSV, and calendar files also expose
+Preview using the shared responsive dialog/drawer. Text is rendered literally; HTML, SVG,
+PDFs, documents, archives, and other file types are download-only. Show loading per file,
+disable duplicate requests, and keep an inline error with Retry when retrieval fails.
+Release preview object URLs when closed and never persist attachment bodies in browser storage.
+Downloads are user-initiated; never auto-fetch every attachment while reading a thread.
+
+The Mail API verifies message ownership and attachment membership before asking the connected
+account's provider for bytes. Gmail uses the attachment endpoint or inline MIME-part data;
+iCloud verifies mailbox UIDVALIDITY, retrieves a bounded source message by UID, and selects the
+stored attachment index. This read uses existing Gmail/IMAP authority and network paths, with
+no background handoff or provider mutation. The interactive gateway deadline is 20 seconds;
+iCloud closes its socket after 15 seconds. Downloads cap decoded files at 10 MiB; Gmail JSON is
+bounded to 15 MiB and iCloud raw source to 10 MiB before MIME parsing. Responses are private
+`no-store` JSON; file bytes are not logged. Provider failures expose retry/connection recovery,
+not credentials or raw provider errors. No download success is claimed before retrieval succeeds.
+
+Local adapter, authorization, and UI tests do not prove live-provider access. Revoked scopes,
+moved/deleted messages, expired credentials, provider throttling, and disconnected accounts can
+still prevent retrieval. Demo fixtures contain attachment metadata, not live provider bytes;
+exercise downloads with a connected account or explicit mocked file bytes in browser tests.
+
+Provider reference: [Gmail attachment retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages.attachments/get).

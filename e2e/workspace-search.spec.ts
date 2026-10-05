@@ -616,3 +616,58 @@ test("Collapsed workspace sidebar keeps reviews centered and exposes the count i
   await review.hover();
   await expect(page.getByRole("tooltip")).toContainText("need review");
 });
+
+test("Mail attachments download, retry failures, and preview safely", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.route("**/v1/mail/threads/*/messages", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    for (const message of payload.messages) {
+      for (const file of message.attachments) {
+        file.filename = "notes.txt";
+        file.contentType = "text/plain";
+      }
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  let fail = true;
+  await page.route("**/v1/mail/messages/*/attachments/*", async (route) => {
+    if (fail) {
+      fail = false;
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: { code: "service_unavailable", message: "Attachment unavailable. Try again." },
+        },
+      });
+    } else {
+      await route.fulfill({
+        json: {
+          attachment: {
+            filename: "notes.txt",
+            contentType: "text/plain",
+            size: 5,
+            data: "aGVsbG8=",
+          },
+        },
+      });
+    }
+  });
+  await page.goto("/mail");
+  await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
+  await page.getByRole("button", { name: "Download notes.txt", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  const downloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe("notes.txt");
+  expect(await download.failure()).toBeNull();
+  await page.getByRole("button", { name: "Preview notes.txt", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("hello");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});

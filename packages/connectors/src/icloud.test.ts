@@ -1296,3 +1296,74 @@ describe("iCloud connector", () => {
     });
   });
 });
+
+describe("iCloud attachment retrieval", () => {
+  const file = {
+    id: "INBOX:10:7:0",
+    providerPartId: "INBOX:10:7:0",
+    filename: "notes.txt",
+    contentType: "text/plain",
+    size: 5,
+  };
+  const source = Buffer.from(
+    'From: sender@example.com\r\nTo: me@example.com\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="part"\r\n\r\n--part\r\nContent-Type: text/plain\r\n\r\nMessage\r\n--part\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename="notes.txt"\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8=\r\n--part--\r\n',
+  );
+  function imap() {
+    return {
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(),
+      mailbox: { path: "INBOX", uidValidity: 10n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      fetch: vi.fn(async function* () {
+        yield { source, size: source.length };
+      }),
+    };
+  }
+  it("retrieves the matching UID attachment and closes the socket", async () => {
+    const client = imap();
+    const result = await connector(davClient(), client).value.downloadMailAttachment?.(
+      credentials,
+      "INBOX:10:7",
+      file,
+    );
+    expect(Buffer.from(result ?? []).toString()).toBe("hello");
+    expect(client.fetch).toHaveBeenCalledWith(
+      "7",
+      { source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 }, size: true },
+      { uid: true },
+    );
+    expect(client.close).toHaveBeenCalled();
+  });
+  it("rejects reused mailbox UIDs before reading bytes", async () => {
+    const client = imap();
+    client.mailbox.uidValidity = 11n;
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toThrow("mailbox changed");
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(client.close).toHaveBeenCalled();
+  });
+  it("rejects missing files and oversized source messages", async () => {
+    const client = imap();
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(credentials, "INBOX:10:7", {
+        ...file,
+        providerPartId: "INBOX:10:7:1",
+      }),
+    ).rejects.toThrow("no longer available");
+    client.fetch.mockImplementation(async function* () {
+      yield { source, size: MAX_MAIL_SOURCE_BYTES + 1 };
+    });
+    await expect(
+      connector(davClient(), client).value.downloadMailAttachment?.(
+        credentials,
+        "INBOX:10:7",
+        file,
+      ),
+    ).rejects.toThrow("download limit");
+  });
+});

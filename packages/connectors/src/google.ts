@@ -535,6 +535,60 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
   }
 
   return {
+    async downloadMailAttachment(credentials, messageId, attachment, operation) {
+      const attachmentId =
+        attachment.providerAttachmentId === undefined && !attachment.id.startsWith("part:")
+          ? attachment.id
+          : attachment.providerAttachmentId;
+      const partId =
+        attachment.providerPartId ??
+        (attachment.id.startsWith("part:") ? attachment.id.slice(5) : null);
+      const root = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`;
+      const result = await authenticatedRequest(
+        credentials,
+        attachmentId
+          ? `${root}/attachments/${encodeURIComponent(attachmentId)}`
+          : `${root}?format=full`,
+        {},
+        operation,
+      );
+      if (!result.response.ok) throw await connectorHttpError(result.response, "google");
+      const reader = result.response.body?.getReader();
+      if (!reader) throw new Error("Attachment response is empty.");
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          size += chunk.value.length;
+          if (size > 15 * 1024 * 1024) throw new Error("Attachment exceeds the download limit.");
+          chunks.push(chunk.value);
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      let body = payload;
+      if (!attachmentId) {
+        const pending = [payload.payload];
+        body = undefined;
+        for (let count = 0; pending.length && count < 256; count++) {
+          const part = pending.pop();
+          if (!part) continue;
+          if (partId !== null && part.partId === partId) {
+            body = part.body;
+            break;
+          }
+          if (Array.isArray(part.parts)) pending.push(...part.parts.slice(0, 256));
+        }
+      }
+      const data = z.object({ data: z.string().regex(/^[A-Za-z0-9_-]*={0,2}$/) }).parse(body).data;
+      const bytes = Buffer.from(data, "base64url");
+      if (bytes.length > 10 * 1024 * 1024)
+        throw new Error("Attachment exceeds the download limit.");
+      return { credentials: result.credentials, value: bytes };
+    },
     authorizationUrl(
       state: string,
       codeChallenge: string,

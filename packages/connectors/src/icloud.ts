@@ -143,6 +143,58 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
   }
 
   return {
+    async downloadMailAttachment(credentials, messageId, attachment, operation) {
+      const match = /^(.*):([0-9]+):([0-9]+)$/.exec(messageId);
+      const part = attachment.providerPartId ?? attachment.id;
+      const index = part.startsWith(`${messageId}:`)
+        ? Number(part.slice(messageId.length + 1))
+        : -1;
+      if (!match || !Number.isSafeInteger(index) || index < 0)
+        throw new Error("Attachment locator is unavailable.");
+      const client = imapFactory(credentials);
+      const close = () => {
+        try {
+          client.close();
+        } catch {
+          /* Socket already closed. */
+        }
+      };
+      const timeout = setTimeout(close, 15_000);
+      operation?.signal?.addEventListener("abort", close, { once: true });
+      try {
+        throwIfProviderOperationCancelled(operation);
+        await client.connect();
+        const lock = await client.getMailboxLock(match[1] ?? "");
+        try {
+          if (!client.mailbox || String(client.mailbox.uidValidity) !== match[2])
+            throw new Error("The mailbox changed. Sync Mail and try again.");
+          let message: { source?: Buffer; size?: number } | undefined;
+          for await (const fetched of client.fetch(
+            match[3] ?? "",
+            { source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 }, size: true },
+            { uid: true },
+          )) {
+            message = fetched;
+          }
+          if (!message || !message.source) throw new Error("The message is no longer available.");
+          if (
+            (message.size ?? message.source.length) > MAX_MAIL_SOURCE_BYTES ||
+            message.source.length > MAX_MAIL_SOURCE_BYTES
+          )
+            throw new Error("The message exceeds the download limit.");
+          const parsed = await simpleParser(message.source);
+          const file = parsed.attachments[index];
+          if (!file) throw new Error("The attachment is no longer available.");
+          return file.content;
+        } finally {
+          lock.release();
+        }
+      } finally {
+        clearTimeout(timeout);
+        operation?.signal?.removeEventListener("abort", close);
+        close();
+      }
+    },
     async listenForMailChanges(credentials, onChange, operation) {
       throwIfProviderOperationCancelled(operation);
       const client = imapFactory(credentials);

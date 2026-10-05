@@ -1151,7 +1151,10 @@ export function Reader({
             {!collapsed ? (
               <div className="mail-reader__message-content">
                 <pre>{message.bodyText || "This message has no plain-text body."}</pre>
-                <MessageAttachments attachments={message.attachments} />
+                <MessageAttachments
+                  attachments={message.attachments}
+                  load={(attachmentId) => api.downloadMailAttachment(message.id, attachmentId)}
+                />
               </div>
             ) : null}
           </section>

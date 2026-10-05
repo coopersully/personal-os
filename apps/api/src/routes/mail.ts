@@ -154,6 +154,20 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
       ),
     }),
   );
+  app.get(
+    "/v1/mail/messages/:id/attachments/:attachmentId",
+    requireScope("mail:read"),
+    async (context) => {
+      context.header("Cache-Control", "no-store");
+      return context.json({
+        attachment: await mail.downloadAttachment(
+          context.get("principal").userId,
+          context.req.param("id"),
+          context.req.param("attachmentId"),
+        ),
+      });
+    },
+  );
   app.get("/v1/mail/threads/:id/messages", async (context) =>
     context.json({
       messages: await mail.listMessages(context.get("principal").userId, context.req.param("id")),

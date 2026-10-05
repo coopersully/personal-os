@@ -1743,6 +1743,46 @@ export function createMailService({
       return serializeMailThread(record, await mailboxMap(userId));
     },
 
+    async downloadAttachment(userId: string, messageId: string, attachmentId: string) {
+      const [record] = await db
+        .select({ message: mailMessages, accountId: mailThreads.accountId })
+        .from(mailMessages)
+        .innerJoin(mailThreads, eq(mailMessages.threadId, mailThreads.id))
+        .where(
+          and(
+            eq(mailMessages.id, messageId),
+            eq(mailThreads.userId, userId),
+            isNull(mailThreads.deletedAt),
+          ),
+        )
+        .limit(1);
+      const attachment = record?.message.attachments.find((file) => file.id === attachmentId);
+      if (!record || !attachment) throw new AppError("not_found", "The attachment was not found.");
+      if (attachment.projectionIssue || (attachment.size ?? 0) > 10 * 1024 * 1024)
+        throw new AppError(
+          "invalid_request",
+          "This attachment is too large to download here. Open it in your mail provider.",
+        );
+      if (!gateway.downloadAttachment)
+        throw new AppError(
+          "service_unavailable",
+          "Attachment downloads are unavailable for this connection.",
+        );
+      const bytes = await gateway.downloadAttachment(
+        userId,
+        record.accountId,
+        record.message.remoteMessageId,
+        attachment,
+      );
+      if (bytes.length > 10 * 1024 * 1024)
+        throw new AppError("invalid_request", "This attachment exceeds the 10 MB download limit.");
+      return {
+        filename: (attachment.filename || "attachment").replace(/[/\\\p{Cc}]/gu, "_"),
+        contentType: attachment.contentType,
+        data: Buffer.from(bytes).toString("base64"),
+        size: bytes.length,
+      };
+    },
     async listMessages(userId: string, threadId: string): Promise<MailMessage[]> {
       const records = await db
         .select({ message: mailMessages })

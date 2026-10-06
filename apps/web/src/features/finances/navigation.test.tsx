@@ -113,3 +113,34 @@ it("shows connected accounts and separate attention for accounts, profile, and a
   ).toBeInTheDocument();
   expect(screen.getByRole("status", { name: "Budget: Action required" })).toBeInTheDocument();
 });
+
+it.each([
+  null,
+  { status: "draft" },
+  { status: "retired" },
+  { status: "active" },
+])("shows Budget attention until an approved plan is active: %s", async (budget) => {
+  const { api } = await import("../../api.js");
+  vi.mocked(api.getFinanceConfiguration).mockResolvedValueOnce({
+    capabilities: { budget: { state: "ready" } },
+    budget: { state: "loaded", value: budget },
+  } as never);
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <TooltipProvider>
+          <SidebarProvider>
+            <FinanceSidebarNavigation onNavigate={vi.fn()} reviewCount={0} section="plan" />
+          </SidebarProvider>
+        </TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await vi.waitFor(() => expect(api.getFinanceConfiguration).toHaveBeenCalled());
+  if (budget?.status !== "active")
+    expect(await screen.findByRole("status", { name: "Budget: Action required" })).toBeVisible();
+  else
+    expect(
+      screen.queryByRole("status", { name: "Budget: Action required" }),
+    ).not.toBeInTheDocument();
+});

@@ -20,6 +20,7 @@ import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
+import { CurrencyInput } from "@/components/currency-input";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -105,6 +106,7 @@ import {
   TableHeader as ShadcnTableHeader,
   TableRow as ShadcnTableRow,
 } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { TooltipContent, TooltipTrigger, Tooltip as UiTooltip } from "@/components/ui/tooltip";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
@@ -115,7 +117,9 @@ import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { AddTransactionContext } from "./contextual-question.js";
+import { FinanceEntitySelector } from "./entity-selector";
 import { FinanceTransactionChecks } from "./transaction-checks";
+import { FinanceTransactionItem } from "./transaction-item";
 import { FinanceCreateButton } from "./workspace-header";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
@@ -221,6 +225,11 @@ export function FinancesPage() {
     enabled: section === "overview",
     queryFn: () => api.getFinanceBudgetPace(budgetPacePeriod),
     queryKey: ["finance-budget-pace", budgetPacePeriod],
+  });
+  const merchants = useQuery({
+    queryKey: ["finance-merchants"],
+    queryFn: () => api.listFinanceMerchants(200),
+    enabled: section === "transactions",
   });
   const categories = useQuery({
     queryFn: api.getFinanceCategories,
@@ -754,7 +763,7 @@ export function FinancesPage() {
               </ShadcnCardTitle>
               <ShadcnCardDescription>
                 {section === "transactions"
-                  ? "One row per transaction, with normalized names and category evidence."
+                  ? "Your posted and pending transactions."
                   : "Review only the categories the system cannot safely infer."}
               </ShadcnCardDescription>
               <ShadcnCardAction>
@@ -1210,12 +1219,17 @@ export function FinancesPage() {
                         ))}
                       </ShadcnNativeSelect>
                     </ShadcnField>
-                    <FinanceTextField
-                      id="finance-merchant"
-                      label="Merchant"
-                      onChange={setMerchant}
-                      value={merchant}
-                    />
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="finance-merchant">Merchant</ShadcnFieldLabel>
+                      <FinanceEntitySelector
+                        id="finance-merchant"
+                        label="Merchant"
+                        value={merchant}
+                        onValueChange={setMerchant}
+                        options={(merchants.data ?? []).map((item) => item.displayName)}
+                        required
+                      />
+                    </ShadcnField>
                     <FinanceTextField
                       id="finance-amount"
                       inputMode="decimal"
@@ -1223,12 +1237,18 @@ export function FinancesPage() {
                       onChange={setAmount}
                       value={amount}
                     />
-                    <FinanceTextField
-                      id="finance-category"
-                      label="Category (optional)"
-                      onChange={setCategory}
-                      value={category}
-                    />
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="finance-category">
+                        Category (optional)
+                      </ShadcnFieldLabel>
+                      <FinanceEntitySelector
+                        id="finance-category"
+                        label="Category (optional)"
+                        value={category}
+                        onValueChange={setCategory}
+                        options={(categories.data ?? []).map((item) => item.name)}
+                      />
+                    </ShadcnField>
                     <ShadcnButton disabled={addTransaction.isPending} type="submit">
                       Add transaction
                     </ShadcnButton>
@@ -2606,6 +2626,7 @@ function FinanceTransactionsTable({
   };
   transactions: FinanceTransaction[];
 }) {
+  const [view, setView] = useState<"table" | "cards">("table");
   const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
   const columns = useMemo<Array<ColumnDef<FinanceTransaction>>>(
     () => [
@@ -2651,7 +2672,7 @@ function FinanceTransactionsTable({
                   />
                 </span>
               )}
-              <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate font-medium" title={item.merchant}>
                   {item.merchant}
                 </p>
@@ -2744,62 +2765,118 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <ShadcnTable aria-label="Transactions" className="min-w-[33rem] table-fixed">
-        <ShadcnTableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <ShadcnTableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <ShadcnTableHead
-                  className={transactionTableColumnClass(header.column.id)}
-                  key={header.id}
+      <ToggleGroup
+        type="single"
+        value={view}
+        onValueChange={(value) => {
+          if (value) setView(value as "table" | "cards");
+        }}
+        aria-label="Transaction view"
+      >
+        <ToggleGroupItem value="table" aria-label="Table view">
+          Table
+        </ToggleGroupItem>
+        <ToggleGroupItem value="cards" aria-label="Card view">
+          Cards
+        </ToggleGroupItem>
+      </ToggleGroup>
+      {view === "cards" ? (
+        <ShadcnItemGroup className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {transactions.map((transaction) => (
+            <FinanceTransactionItem
+              key={transaction.id}
+              title={transaction.merchant}
+              amount={transaction.amount}
+              direction={transaction.direction}
+              description={`${formatTransactionDate(transaction.date)} · ${transactionCategoryLabel(transaction.category)}`}
+              status={transaction.pending ? "pending" : undefined}
+              actions={
+                <ShadcnButton
+                  size="sm"
+                  variant="ghost"
+                  aria-expanded={expandedTransactionId === transaction.id}
+                  onClick={() =>
+                    setExpandedTransactionId(
+                      expandedTransactionId === transaction.id ? null : transaction.id,
+                    )
+                  }
                 >
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(header.column.columnDef.header, header.getContext())}
-                </ShadcnTableHead>
-              ))}
-            </ShadcnTableRow>
+                  Details
+                </ShadcnButton>
+              }
+            >
+              {expandedTransactionId === transaction.id ? (
+                <TransactionDetails
+                  canAddContext={manualAccountIds.includes(transaction.accountId)}
+                  isCategorizing={isCategorizing}
+                  onBreakdown={onBreakdown}
+                  onCategorize={onCategorize}
+                  transaction={transaction}
+                />
+              ) : null}
+            </FinanceTransactionItem>
           ))}
-        </ShadcnTableHeader>
-        <ShadcnTableBody>
-          {table.getRowModel().rows.map((row) => {
-            const isExpanded = expandedTransactionId === row.original.id;
-            return (
-              <Fragment key={row.id}>
-                <ShadcnTableRow
-                  className={row.original.pending ? "bg-muted/50 text-muted-foreground" : undefined}
-                  data-state={isExpanded ? "selected" : undefined}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <ShadcnTableCell
-                      className={transactionTableColumnClass(cell.column.id)}
-                      key={cell.id}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </ShadcnTableCell>
-                  ))}
-                </ShadcnTableRow>
-                {isExpanded ? (
-                  <ShadcnTableRow id={`transaction-details-${row.original.id}`}>
-                    <ShadcnTableCell
-                      className="whitespace-normal"
-                      colSpan={row.getVisibleCells().length}
-                    >
-                      <TransactionDetails
-                        canAddContext={manualAccountIds.includes(row.original.accountId)}
-                        isCategorizing={isCategorizing}
-                        onBreakdown={onBreakdown}
-                        onCategorize={onCategorize}
-                        transaction={row.original}
-                      />
-                    </ShadcnTableCell>
+        </ShadcnItemGroup>
+      ) : (
+        <ShadcnTable aria-label="Transactions" className="min-w-[33rem] table-fixed">
+          <ShadcnTableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <ShadcnTableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <ShadcnTableHead
+                    className={transactionTableColumnClass(header.column.id)}
+                    key={header.id}
+                  >
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </ShadcnTableHead>
+                ))}
+              </ShadcnTableRow>
+            ))}
+          </ShadcnTableHeader>
+          <ShadcnTableBody>
+            {table.getRowModel().rows.map((row) => {
+              const isExpanded = expandedTransactionId === row.original.id;
+              return (
+                <Fragment key={row.id}>
+                  <ShadcnTableRow
+                    className={
+                      row.original.pending ? "bg-muted/50 text-muted-foreground" : undefined
+                    }
+                    data-state={isExpanded ? "selected" : undefined}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <ShadcnTableCell
+                        className={transactionTableColumnClass(cell.column.id)}
+                        key={cell.id}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </ShadcnTableCell>
+                    ))}
                   </ShadcnTableRow>
-                ) : null}
-              </Fragment>
-            );
-          })}
-        </ShadcnTableBody>
-      </ShadcnTable>
+                  {isExpanded ? (
+                    <ShadcnTableRow id={`transaction-details-${row.original.id}`}>
+                      <ShadcnTableCell
+                        className="whitespace-normal"
+                        colSpan={row.getVisibleCells().length}
+                      >
+                        <TransactionDetails
+                          canAddContext={manualAccountIds.includes(row.original.accountId)}
+                          isCategorizing={isCategorizing}
+                          onBreakdown={onBreakdown}
+                          onCategorize={onCategorize}
+                          transaction={row.original}
+                        />
+                      </ShadcnTableCell>
+                    </ShadcnTableRow>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </ShadcnTableBody>
+        </ShadcnTable>
+      )}
       <div className="flex items-center justify-between gap-3 border-t pt-3">
         <p className="font-mono text-xs text-muted-foreground">
           {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
@@ -3025,38 +3102,48 @@ function FinanceTextField({
   onChange: (value: string) => void;
   value: string;
 }) {
+  const name =
+    (
+      {
+        "finance-institution": "institution",
+        "finance-account": "name",
+        "finance-balance": "balance",
+        "finance-merchant": "merchant",
+        "finance-amount": "amount",
+        "finance-category": "category",
+        "finance-budget-category": "category",
+        "finance-budget-limit": "limit",
+      } as Record<string, string>
+    )[id] ?? id;
+  const required = [
+    "finance-institution",
+    "finance-account",
+    "finance-merchant",
+    "finance-amount",
+    "finance-budget-category",
+    "finance-budget-limit",
+  ].includes(id);
   return (
     <ShadcnField>
       <ShadcnFieldLabel htmlFor={id}>{label}</ShadcnFieldLabel>
-      <ShadcnInput
-        id={id}
-        name={
-          {
-            "finance-institution": "institution",
-            "finance-account": "name",
-            "finance-balance": "balance",
-            "finance-merchant": "merchant",
-            "finance-amount": "amount",
-            "finance-category": "category",
-            "finance-budget-category": "category",
-            "finance-budget-limit": "limit",
-          }[id] ?? id
-        }
-        required={[
-          "finance-institution",
-          "finance-account",
-          "finance-merchant",
-          "finance-amount",
-          "finance-budget-category",
-          "finance-budget-limit",
-        ].includes(id)}
-        type={inputMode === "decimal" ? "number" : "text"}
-        step={inputMode === "decimal" ? "any" : undefined}
-        min={["finance-amount", "finance-budget-limit"].includes(id) ? "0.01" : undefined}
-        inputMode={inputMode}
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      />
+      {inputMode === "decimal" ? (
+        <CurrencyInput
+          id={id}
+          name={name}
+          required={required}
+          value={value}
+          min={id === "finance-balance" ? Number.NEGATIVE_INFINITY : 0.01}
+          onValueChange={onChange}
+        />
+      ) : (
+        <ShadcnInput
+          id={id}
+          name={name}
+          required={required}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
     </ShadcnField>
   );
 }

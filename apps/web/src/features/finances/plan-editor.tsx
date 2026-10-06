@@ -9,6 +9,7 @@ import {
   type FinanceGoal,
 } from "@personal-os/domain";
 import { useRef, useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -293,7 +294,7 @@ export function FinancePlanEditor({
                       <FieldLabel htmlFor={`resource-amount-${row.rowId}`}>
                         Resource {index + 1} amount
                       </FieldLabel>
-                      <Input
+                      <CurrencyInput
                         id={`resource-amount-${row.rowId}`}
                         inputMode="decimal"
                         required
@@ -306,12 +307,10 @@ export function FinancePlanEditor({
                           setValidatedAmounts((current) => new Set([...current, row.rowId]))
                         }
                         value={row.amount}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setResources((rows) =>
                             rows.map((item) =>
-                              item.rowId === row.rowId
-                                ? { ...item, amount: event.target.value }
-                                : item,
+                              item.rowId === row.rowId ? { ...item, amount: value } : item,
                             ),
                           )
                         }
@@ -426,7 +425,7 @@ export function FinancePlanEditor({
                       <FieldLabel htmlFor={`allocation-amount-${row.rowId}`}>
                         Allocation {index + 1} amount
                       </FieldLabel>
-                      <Input
+                      <CurrencyInput
                         id={`allocation-amount-${row.rowId}`}
                         inputMode="decimal"
                         required
@@ -439,12 +438,10 @@ export function FinancePlanEditor({
                           setValidatedAmounts((current) => new Set([...current, row.rowId]))
                         }
                         value={row.amount}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setAllocations((rows) =>
                             rows.map((item) =>
-                              item.rowId === row.rowId
-                                ? { ...item, amount: event.target.value }
-                                : item,
+                              item.rowId === row.rowId ? { ...item, amount: value } : item,
                             ),
                           )
                         }

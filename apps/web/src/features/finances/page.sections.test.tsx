@@ -42,6 +42,7 @@ const api = vi.hoisted(() => ({
   listFinanceRecurringObligations: vi.fn(),
   listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
+  listFinanceMerchants: vi.fn(),
   resolveFinanceReview: vi.fn(),
   resolveFinanceAlert: vi.fn(),
   refreshFinanceInsights: vi.fn(),
@@ -81,6 +82,7 @@ beforeEach(() => {
     spendingThisMonth: 0,
     transactions: [],
   };
+  api.listFinanceMerchants.mockResolvedValue([]);
   api.getFinanceOverview.mockResolvedValue(overview);
   api.getFinanceOverviewForMonth.mockResolvedValue(overview);
   api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
@@ -977,6 +979,13 @@ describe("Finance section states", () => {
 
     renderPage("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" });
+    await browser.click(screen.getByRole("radio", { name: "Card view" }));
+    expect(screen.queryByRole("table", { name: "Transactions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("listitem")).toHaveTextContent("Cafe");
+    await browser.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText("SQ CAFE")).toBeVisible();
+    await browser.click(screen.getByRole("button", { name: "Details" }));
+    await browser.click(screen.getByRole("radio", { name: "Table view" }));
     for (const label of ["date", "merchant", "amount", "date"]) {
       fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
       await screen.findByRole("table", { name: "Transactions" });
@@ -1261,10 +1270,12 @@ describe("Finance section states", () => {
       throw new Error("Expected the transaction account select.");
     fireEvent.change(transactionAccount, { target: { value: "checking" } });
     fireEvent.change(screen.getByLabelText("Merchant"), { target: { value: "Cafe" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Add “Cafe”" }));
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "8.5" } });
     fireEvent.change(screen.getByLabelText("Category (optional)"), {
       target: { value: "Dining" },
     });
+    fireEvent.click(await screen.findByRole("option", { name: /Dining/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add transaction" }));
     await waitFor(() =>
       expect(api.createFinanceTransaction).toHaveBeenCalledWith(

@@ -354,7 +354,7 @@ export function FinancePlanPage() {
       <WorkspaceHeaderControls label="Plan controls">
         {plan && loaded ? (
           <Button
-            size="icon"
+            size="icon-sm"
             variant="outline"
             disabled={approve.isPending}
             onClick={openEditor}
@@ -374,8 +374,8 @@ export function FinancePlanPage() {
               <Dialog>
                 <DialogTrigger asChild>
                   <Button
-                    size="icon"
-                    variant="default"
+                    size="icon-sm"
+                    variant="ghost"
                     aria-label="Budget buckets"
                     title="Budget buckets"
                   >

@@ -318,3 +318,20 @@ cards. Currency fields use CurrencyInput; absent account currency stays unspecif
 source caveat available in a tooltip. Pending posting state has an explicit badge and subdued row;
 it is independent of review status. URL `reviewState` filters transactions, while `review` opens a
 review flow. Historical review-state links remain readable without opening a review dialog.
+
+### Shared Finance presentation
+
+Overview and Wealth compose the shared `KeyMetrics` container and `KeyMetric` cards. Metrics fit
+side by side when space permits and wrap on narrow screens; current data does not imply historical
+balances. The Overview does not duplicate the outstanding Reviews inbox.
+
+Transactions offer compact table and card views with the same details, categorization, split, and
+pagination behavior. Cash flow reuses the Finance transaction Item with an explicit Expected state;
+forecast entries are not posted transactions. Recurring-item actions sit at the top right.
+
+Bento collection add actions use the Settings-standard ghost icon button and accessible tooltip.
+All dollar-entry fields compose `CurrencyInput`, including allocations, split amounts, scenarios,
+and setup answers. Scenario and split fields must wrap within the available container, retaining
+persistent labels. Merchant and category entry search existing names and permit new names; new
+records are created by the transaction save. Budget navigation needs attention when prerequisites
+are incomplete or no active approved plan exists.

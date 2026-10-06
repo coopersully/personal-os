@@ -768,3 +768,10 @@ header filter and sort buttons. Sort choices are radio menu items; clearing filt
 unrelated URL state. Workspace-wide search remains the shared workspace finder.
 
 Top-navigation filter triggers show the number of active filters in a bottom-end badge. The shared ActionButton owns badge geometry; each domain counts applied filters, excluding sort/display preferences. Zero active filters render no badge. Keep the full accessible filter label and tooltip.
+
+### Key metrics and monetary entry
+
+Use the shared `KeyMetrics` layout with `KeyMetric` cards for a set of scalar summaries. Prefer
+fitting or wrapping cards so all values remain visible over forcing a carousel. Compose the shared
+shadcn Card anatomy and retain honest unavailable states. Dollar amount entry uses `CurrencyInput`
+with a canonical decimal value; percentages, counts, and durations remain ordinary numeric inputs.

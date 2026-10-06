@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { BankIcon, ReceiptIcon, WalletIcon } from "@/components/icons";
+import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -14,7 +16,6 @@ import {
 } from "@/components/ui/item";
 import { api } from "../../api.js";
 import { FinanceBentoSection } from "./bento-section.js";
-import { FinanceInboxList } from "./inbox-list.js";
 import {
   FinancePositionMaterial,
   FinanceSourceState,
@@ -62,9 +63,30 @@ export function FinanceOverviewPage() {
   return (
     <div className="flex flex-col gap-6">
       <FinanceSourceState label="Financial position" query={snapshot} />
-      {snapshot.data ? <FinancePositionMaterial result={snapshot.data} /> : null}
-      <FinanceSourceState label="Review inbox" query={inbox} />
-      {inbox.data ? <FinanceInboxList result={inbox.data} /> : null}
+      {snapshot.data ? (
+        <>
+          <KeyMetrics label="Finance key metrics">
+            <KeyMetric
+              label="Cash"
+              value={financeAmount(snapshot.data.data.cash)}
+              icon={BankIcon}
+              description="Current balance"
+            />
+            <KeyMetric
+              label="Posted spending this month"
+              value={financeAmount(snapshot.data.data.budget.spent)}
+              icon={ReceiptIcon}
+            />
+            <KeyMetric
+              label="Net worth"
+              value={financeAmount(snapshot.data.data.netWorth)}
+              icon={WalletIcon}
+              description="Current balance"
+            />
+          </KeyMetrics>
+          <FinancePositionMaterial result={snapshot.data} hideMetrics />
+        </>
+      ) : null}
       <div className="finance-bento">
         {inbox.isSuccess && reviewCount === 0 ? (
           <FinanceBentoSection title="Next step">

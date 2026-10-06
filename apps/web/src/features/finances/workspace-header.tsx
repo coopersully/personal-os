@@ -36,7 +36,8 @@ export function FinanceCreateButton({
               ? "Add transaction"
               : "Add in Finances"
         }
-        size="icon"
+        size="icon-sm"
+        variant="ghost"
         onClick={() => {
           if (kind === "transaction") {
             navigate({

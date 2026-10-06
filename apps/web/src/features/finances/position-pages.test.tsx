@@ -295,7 +295,7 @@ describe("Finance position pages", () => {
       "href",
       "/finances/cashflow?view=reimbursements",
     );
-    const position = await screen.findByRole("region", { name: "Financial position" });
+    const position = await screen.findByRole("region", { name: "Finance key metrics" });
     expect(within(position).getAllByText("Unavailable")).toHaveLength(3);
     expect(await screen.findByText("Proposed · Version 3")).toBeInTheDocument();
     expect(screen.getByText("Keep a reserve while income settles.")).toBeInTheDocument();
@@ -316,7 +316,8 @@ describe("Finance position pages", () => {
   it("waits for a successful empty Inbox before showing next-step guidance", async () => {
     api.getFinanceInbox.mockRejectedValue(new Error("Inbox unavailable"));
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Review inbox unavailable")).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Financial position" })).toBeVisible();
+    expect(screen.queryByText("Review inbox unavailable")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
   });
 
@@ -399,9 +400,8 @@ describe("Finance position pages", () => {
       nextCursor: null,
     });
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Outstanding (2)")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Review item" })).toHaveLength(2);
-    expect(screen.getByText("Active · Version 4")).toBeVisible();
+    expect(await screen.findByText("Active · Version 4")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Review item" })).not.toBeInTheDocument();
     expect(screen.getByText("Automate savings")).toBeVisible();
     expect(screen.getByRole("link", { name: "Open review" })).toHaveAttribute(
       "href",

@@ -5149,24 +5149,24 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("prioritizes canonical Finance position, proposals, and selectable outstanding work", async () => {
+  it("prioritizes Finance metrics and proposals without duplicating Reviews", async () => {
     configureFinanceWorkspace();
     const view = setup("/finances");
     const position = await screen.findByRole(
       "region",
-      { name: "Financial position" },
+      { name: "Finance key metrics" },
       { timeout: 10_000 },
     );
     expect(within(position).getByText("$250.00")).toBeInTheDocument();
     expect(within(position).getByText("$42.50")).toBeInTheDocument();
     expect(within(position).getByText("$300.00")).toBeInTheDocument();
     expect(await screen.findByText("Proposed · Version 4")).toBeInTheDocument();
-    const outstanding = screen.getByRole("region", { name: "Outstanding finance items" });
-    expect(within(outstanding).getByText("Outstanding (1)")).toBeInTheDocument();
-    expect(within(outstanding).getByRole("button", { name: "Review item" })).toBeEnabled();
+    expect(
+      screen.queryByRole("region", { name: "Outstanding finance items" }),
+    ).not.toBeInTheDocument();
     const sidebar = screen.getByRole("complementary", { name: "Finances Sidebar" });
     expect(within(sidebar).queryByRole("link", { name: "Review 1" })).not.toBeInTheDocument();
-    for (const label of ["Overview", "Transactions", "Plan", "Cash flow", "Wealth", "Accounts"])
+    for (const label of ["Overview", "Transactions", "Budget", "Cash flow", "Wealth", "Accounts"])
       expect(within(sidebar).getByRole("link", { name: label })).toBeInTheDocument();
     expect(mocks.getFinanceBudgetPace).not.toHaveBeenCalled();
     view.unmount();
@@ -5174,7 +5174,7 @@ describe("ilo web app", () => {
 
   it("keeps missing Finance values unavailable and links an absent complete plan to creation", async () => {
     const view = setup("/finances");
-    const position = await screen.findByRole("region", { name: "Financial position" });
+    const position = await screen.findByRole("region", { name: "Finance key metrics" });
     expect(within(position).getAllByText("Unavailable")).toHaveLength(3);
     expect(await screen.findByText("No complete plan yet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create plan" })).toHaveAttribute(
@@ -5258,8 +5258,7 @@ describe("ilo web app", () => {
     expect(
       await screen.findByRole("list", { name: "Financial accounts" }, { timeout: 5_000 }),
     ).toHaveTextContent("Checking");
-    await browser.click(screen.getByRole("button", { name: "Add in Finances" }));
-    await browser.click(screen.getByRole("button", { name: "Account" }));
+    await browser.click(screen.getByRole("button", { name: "Add account" }));
     await browser.click(screen.getByRole("button", { name: "Connect bank" }));
     await waitFor(() => expect(mocks.plaidLink.open).toHaveBeenCalled());
     act(() => mocks.plaidLink.onSuccess?.("public-token"));
@@ -5296,15 +5295,16 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" }, { timeout: 5_000 });
-    await browser.click(screen.getByRole("button", { name: "Add in Finances" }));
-    await browser.click(screen.getByRole("button", { name: "Transaction" }));
+    await browser.click(screen.getByRole("button", { name: "Add transaction" }));
     await browser.selectOptions(
       screen.getByLabelText("Account", { selector: "#finance-account-select" }),
       id,
     );
     await browser.type(screen.getByLabelText("Merchant"), "Bookstore");
+    await browser.click(await screen.findByRole("option", { name: "Add “Bookstore”" }));
     await browser.type(screen.getByLabelText("Amount"), "19.25");
     await browser.type(screen.getByLabelText("Category (optional)"), "Books");
+    await browser.click(await screen.findByRole("option", { name: /Books/ }));
     await browser.click(
       within(screen.getByRole("dialog", { name: "Add a transaction" })).getByRole("button", {
         name: "Add transaction",
@@ -5340,6 +5340,7 @@ describe("ilo web app", () => {
     await waitFor(() => expect(view.location.value).toBe("/finances/plan"));
     expect(await screen.findByText("Monthly pay")).toBeInTheDocument();
     expect(screen.getByText("Emergency reserve")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: /assumptions · Show details/ }));
     expect(screen.getByText("Income needs reconfirmation next month.")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Approve version 4" }));
     await waitFor(() =>
@@ -5354,35 +5355,11 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("resumes Finance setup from the shell without mutating on navigation", async () => {
-    const response = {
-      ...financeEnvelope({
-        sessionId: id,
-        version: 9,
-        stage: "collecting_profile",
-        budgetVersionId: null,
-        maintenanceRunId: null,
-        question: { id: "profile:location", answerType: "location", prompt: "Where do you live?" },
-      }),
-      outcome: "user_input_required",
-    };
-    mocks.setupFinances.mockResolvedValue(response);
-    const browser = userEvent.setup();
+  it("opens the editable Financial profile without starting a guided setup mutation", async () => {
     const view = setup("/finances/setup");
-    await screen.findByRole("button", { name: "Start or resume setup" });
+    expect(await screen.findByRole("heading", { name: "Financial profile" })).toBeInTheDocument();
     expect(mocks.setupFinances).not.toHaveBeenCalled();
-    await browser.click(screen.getByRole("button", { name: "Start or resume setup" }));
-    await browser.type(await screen.findByLabelText("Where do you live?"), "New York");
-    await browser.click(screen.getByRole("button", { name: "Save answer" }));
-    expect(mocks.setupFinances).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        operation: "answer",
-        questionId: "profile:location",
-        sessionId: id,
-        expectedVersion: 9,
-        answer: "New York",
-      }),
-    );
+    expect(screen.queryByRole("button", { name: "Start or resume setup" })).not.toBeInTheDocument();
     view.unmount();
   });
 
@@ -5392,24 +5369,24 @@ describe("ilo web app", () => {
       ["/finances/cashflow", "Cash flow"],
       ["/finances/wealth", "Wealth"],
       ["/finances/accounts", "Accounts"],
-      ["/finances/health", "Accounts"],
+      ["/finances/health", "Transactions"],
       ["/finances/subscriptions", "Cash flow"],
     ] as const) {
       const view = setup(path);
       const sidebar = await screen.findByRole("complementary", { name: "Finances Sidebar" });
       expect(within(sidebar).getByText("Finances")).toBeInTheDocument();
-      expect(within(sidebar).getByRole("link", { name: title })).toHaveAttribute(
-        "aria-current",
-        "page",
+      await waitFor(() =>
+        expect(within(sidebar).getByRole("link", { name: title })).toHaveAttribute(
+          "aria-current",
+          "page",
+        ),
       );
       if (path === "/finances/wealth")
         expect(
           await screen.findByRole("region", { name: "Ownership-qualified wealth" }),
         ).toBeInTheDocument();
       if (path === "/finances/subscriptions")
-        expect(
-          await screen.findByRole("tab", { name: "Bills & subscriptions", selected: true }),
-        ).toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Cash flow view" })).toBeInTheDocument();
       view.unmount();
     }
   });
@@ -5823,9 +5800,10 @@ describe("ilo web app", () => {
     const financeHeader = screen.getByRole("navigation", { name: "Top navigation" });
     expect(financeHeader).toContainElement(financeControls);
     expect(within(financeControls).getByRole("button", { name: "Import" })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Add in Finances" })).toHaveLength(1);
-    await userEvent.click(within(financeHeader).getByRole("button", { name: "Add in Finances" }));
-    await userEvent.click(screen.getByRole("button", { name: "Transaction" }));
+    expect(
+      within(financeHeader).queryByRole("button", { name: "Add in Finances" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add transaction" }));
     expect(await screen.findByRole("dialog", { name: "Add a transaction" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();

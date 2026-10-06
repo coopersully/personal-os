@@ -175,7 +175,7 @@ function Collection({
       action={
         <Button
           variant="ghost"
-          size="icon"
+          size="icon-sm"
           aria-label={`Add ${title.toLowerCase()}`}
           onClick={() =>
             field.setValue([
@@ -306,7 +306,7 @@ function Collection({
               <Button
                 className="self-end"
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 aria-label={`Remove ${row.name || "item"}`}
                 onClick={() => {
                   const next = rows.filter((item) => item.id !== row.id);

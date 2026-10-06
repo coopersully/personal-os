@@ -6,10 +6,10 @@ import type {
 import { formatDateOnly } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { ChevronDownIcon, DollarIcon } from "@/components/icons";
+import { ActionButton as Button } from "@/components/action-button";
+import { ChevronDownIcon, DollarIcon, PauseIcon, PlayIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -19,14 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "@/components/ui/item";
+import { ItemGroup } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
@@ -37,6 +30,7 @@ import { formatMoney } from "./format";
 import { FinanceSourceState, requireFinanceResult } from "./position-material.js";
 import { FinanceReimbursementList } from "./reimbursement-list";
 import { FinanceScenarioComparison } from "./scenario-comparison.js";
+import { FinanceTransactionItem } from "./transaction-item";
 
 const cashflowViews = [
   { value: "outlook", label: "Outlook" },
@@ -144,39 +138,33 @@ export function FinanceCashflowPage() {
   ) => (
     <ItemGroup>
       {items.map((item) => (
-        <Item key={item.id}>
-          <ItemContent>
-            <ItemTitle>{item.displayName}</ItemTitle>
-            <ItemDescription>
-              {formatMoney(item.expectedAmount)} · {cadence[item.cadence] ?? item.cadence}
-              {item.nextExpectedDate
-                ? ` · Next ${date(item.nextExpectedDate)}`
-                : " · Date not established"}
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions className="flex-wrap">
-            <Badge variant="secondary">
-              {item.status === "needs_review"
-                ? "Needs confirmation"
-                : item.status === "active"
-                  ? "Included in forecast"
-                  : "Inactive"}
-            </Badge>
+        <FinanceTransactionItem
+          key={item.id}
+          title={item.displayName}
+          amount={item.expectedAmount}
+          direction={itemType === "income" ? "income" : "expense"}
+          status={item.status === "active" ? "expected" : undefined}
+          description={`${cadence[item.cadence] ?? item.cadence}${item.nextExpectedDate ? ` · Next ${date(item.nextExpectedDate)}` : " · Date not established"}`}
+          actions={
             <Button
-              size="sm"
-              variant="outline"
+              size="icon-sm"
+              variant="ghost"
               disabled={update.isPending}
               aria-label={`${item.status === "active" ? "Pause" : item.status === "needs_review" ? "Confirm" : "Resume"} ${item.displayName}`}
               onClick={() => change(item, itemType)}
             >
-              {item.status === "active"
-                ? "Pause"
-                : item.status === "needs_review"
-                  ? "Confirm"
-                  : "Resume"}
+              {item.status === "active" ? <PauseIcon /> : <PlayIcon />}
             </Button>
-          </ItemActions>
-        </Item>
+          }
+        >
+          <Badge variant="secondary">
+            {item.status === "needs_review"
+              ? "Needs confirmation"
+              : item.status === "active"
+                ? "Included in forecast"
+                : "Inactive"}
+          </Badge>
+        </FinanceTransactionItem>
       ))}
     </ItemGroup>
   );
@@ -349,21 +337,14 @@ export function FinanceCashflowPage() {
                   ) : nextEvents.length ? (
                     <ItemGroup>
                       {nextEvents.map((item) => (
-                        <Item key={`${item.type}-${item.id}`}>
-                          <ItemContent>
-                            <ItemTitle>{item.displayName}</ItemTitle>
-                            <ItemDescription>
-                              {date(item.nextExpectedDate as string)} ·{" "}
-                              {item.type === "income" ? "Expected income" : "Expected payment"}
-                            </ItemDescription>
-                          </ItemContent>
-                          <ItemActions>
-                            <span className="tabular-nums">
-                              {item.type === "income" ? "+" : "−"}
-                              {formatMoney(item.expectedAmount)}
-                            </span>
-                          </ItemActions>
-                        </Item>
+                        <FinanceTransactionItem
+                          key={`${item.type}-${item.id}`}
+                          title={item.displayName}
+                          amount={item.expectedAmount}
+                          direction={item.type === "income" ? "income" : "expense"}
+                          status="expected"
+                          description={`${date(item.nextExpectedDate as string)} · ${item.type === "income" ? "Expected income" : "Expected payment"}`}
+                        />
                       ))}
                     </ItemGroup>
                   ) : recurring.isSuccess ? (

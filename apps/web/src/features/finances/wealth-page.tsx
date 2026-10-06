@@ -4,23 +4,10 @@ import { useRef, useState } from "react";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
+import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "@/components/ui/carousel";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -100,45 +87,22 @@ export function FinanceWealthPage() {
       <FinanceSourceState label="Wealth snapshot" query={snapshot} />
       {snapshot.data ? (
         <>
-          <Carousel
-            opts={{ align: "start", loop: true }}
-            aria-label="Wealth key metrics"
-            className="min-w-0"
-          >
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-base font-medium">Key metrics</h2>
-              <div className="flex gap-2">
-                <CarouselPrevious
-                  className="static translate-x-0 translate-y-0"
-                  title="Previous metrics"
-                />
-                <CarouselNext className="static translate-x-0 translate-y-0" title="Next metrics" />
-              </div>
-            </div>
-            <CarouselContent>
-              {[
-                { label: "Net worth", value: snapshot.data.data.netWorth, icon: WalletIcon },
-                { label: "Cash", value: snapshot.data.data.cash, icon: BankIcon },
-                { label: "Investments", value: snapshot.data.data.investments, icon: TargetIcon },
-                { label: "Debt", value: snapshot.data.data.debt, icon: DollarIcon },
-              ].map(({ label, value, icon: Icon }) => (
-                <CarouselItem key={label} className="basis-4/5 sm:basis-1/2 xl:basis-1/3">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Icon aria-hidden="true" />
-                        {label}
-                      </CardTitle>
-                      <CardDescription>Current balance</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-3xl font-semibold tabular-nums">{financeAmount(value)}</p>
-                    </CardContent>
-                  </Card>
-                </CarouselItem>
-              ))}
-            </CarouselContent>
-          </Carousel>
+          <KeyMetrics label="Wealth key metrics">
+            {[
+              { label: "Net worth", value: snapshot.data.data.netWorth, icon: WalletIcon },
+              { label: "Cash", value: snapshot.data.data.cash, icon: BankIcon },
+              { label: "Investments", value: snapshot.data.data.investments, icon: TargetIcon },
+              { label: "Debt", value: snapshot.data.data.debt, icon: DollarIcon },
+            ].map(({ label, value, icon }) => (
+              <KeyMetric
+                key={label}
+                label={label}
+                value={financeAmount(value)}
+                icon={icon}
+                description="Current balance"
+              />
+            ))}
+          </KeyMetrics>
           <FinancePositionMaterial result={snapshot.data} wealth hideMetrics />
         </>
       ) : null}
@@ -146,7 +110,12 @@ export function FinanceWealthPage() {
         <CardHeader>
           <CardTitle>Financial goals</CardTitle>
           <CardAction>
-            <Button size="icon" aria-label="Create goal" onClick={() => setEditor("new")}>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Create goal"
+              onClick={() => setEditor("new")}
+            >
               <PlusIcon />
             </Button>
           </CardAction>

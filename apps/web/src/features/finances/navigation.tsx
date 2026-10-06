@@ -129,7 +129,8 @@ export function FinanceSidebarNavigation({
                     : id === "setup"
                       ? profile?.state === "loaded" && financeProfileNeedsAttention(profile.value)
                       : id === "plan"
-                        ? budget?.state === "loaded" && budget.value?.status === "proposed"
+                        ? budgetNeedsInput ||
+                          (budget?.state === "loaded" && budget.value?.status !== "active")
                         : false;
                 const count = id === "accounts" ? accounts?.length : undefined;
                 return (

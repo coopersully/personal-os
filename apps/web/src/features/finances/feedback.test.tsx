@@ -185,7 +185,7 @@ const queryCases = [
   },
   {
     method: "getFinanceLedgerHealth",
-    route: "health",
+    route: "overview",
     title: "Couldn’t load account health.",
     key: ["finance-ledger-health"],
   },

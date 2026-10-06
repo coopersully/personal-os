@@ -13,6 +13,7 @@ import { formatMoney } from "./format";
 
 export function FinanceTransactionItem({
   title,
+  presentation = false,
   amount,
   direction,
   description,
@@ -23,6 +24,7 @@ export function FinanceTransactionItem({
   children,
 }: {
   title: string;
+  presentation?: boolean;
   amount: number;
   direction: "income" | "expense" | "transfer";
   description: ReactNode;
@@ -35,7 +37,7 @@ export function FinanceTransactionItem({
   return (
     <Item
       variant={status === "expected" ? "muted" : "outline"}
-      role="listitem"
+      role={presentation ? "presentation" : "listitem"}
       className="min-w-0 items-start"
     >
       <ItemMedia variant="icon">

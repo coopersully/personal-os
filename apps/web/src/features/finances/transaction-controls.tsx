@@ -300,34 +300,36 @@ export function FinanceTransactionControls({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" aria-label="Display transactions">
-              <EyeIcon />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Group by</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={params.get("group") ?? "none"}
-              onValueChange={(value) =>
-                setParams((current) => {
-                  const next = new URLSearchParams(current);
-                  if (value === "none") next.delete("group");
-                  else next.set("group", value);
-                  return next;
-                })
-              }
-            >
-              {transactionGroupingOptions.map(([value, label]) => (
-                <DropdownMenuRadioItem key={value} value={value}>
-                  <LayersIcon />
-                  {label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {view === "cards" ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" aria-label="Display transactions">
+                <EyeIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Group by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={params.get("group") ?? "none"}
+                onValueChange={(value) =>
+                  setParams((current) => {
+                    const next = new URLSearchParams(current);
+                    if (value === "none") next.delete("group");
+                    else next.set("group", value);
+                    return next;
+                  })
+                }
+              >
+                {transactionGroupingOptions.map(([value, label]) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    <LayersIcon />
+                    {label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {exportAction}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

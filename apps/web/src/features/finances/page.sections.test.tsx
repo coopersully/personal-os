@@ -651,11 +651,11 @@ describe("Finance section states", () => {
     renderPage("/finances/transactions");
     expect(await screen.findByText("Corner Bistro")).toBeVisible();
     expect(screen.getByLabelText("Merchant entity needs review")).toBeVisible();
-    const [detailsButton] = screen.getAllByRole("button", { name: "Details" });
+    const [detailsButton] = screen.getAllByRole("row", { name: /Open .* transaction/ });
     if (!detailsButton) throw new Error("Transaction details button was not rendered.");
     fireEvent.click(detailsButton);
     expect(await screen.findByText("Team dinner")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recategorize" }));
     const categorySelect = screen.getAllByLabelText("Category").at(-1);
     if (!categorySelect) throw new Error("Category selector was not rendered.");
     fireEvent.change(categorySelect, {
@@ -667,7 +667,6 @@ describe("Finance section states", () => {
         category: "Dining",
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
     fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
@@ -986,21 +985,26 @@ describe("Finance section states", () => {
     await browser.click(screen.getByRole("button", { name: "Display transactions" }));
     await browser.click(screen.getByRole("menuitemradio", { name: "Merchant" }));
     expect(screen.getByRole("heading", { name: "Cafe (1)" })).toBeVisible();
-    await browser.click(screen.getByRole("button", { name: "Details" }));
+    await browser.click(screen.getByRole("button", { name: "Open Cafe transaction" }));
     expect(screen.getByText("SQ CAFE")).toBeVisible();
-    await browser.click(screen.getByRole("button", { name: "Details" }));
+    await browser.click(screen.getByRole("button", { name: "Close" }));
     await browser.click(screen.getByRole("button", { name: "Transaction view: Cards" }));
     await browser.click(screen.getByRole("menuitemradio", { name: "Table" }));
-    expect(screen.getByRole("rowheader", { name: "Cafe (1)" })).toBeVisible();
+    expect(screen.queryByRole("rowheader", { name: "Cafe (1)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Display transactions" })).not.toBeInTheDocument();
     for (const label of ["date", "merchant", "amount", "date"]) {
       fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
       await screen.findByRole("table", { name: "Transactions" });
     }
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Posted" })).toBeVisible();
+    fireEvent.keyDown(screen.getByRole("row", { name: "Open Cafe transaction" }), { key: "Enter" });
     expect(screen.getByText("SQ CAFE")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
     expect(await screen.findByRole("dialog", { name: /Categorize Cafe/ })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Split purchase" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.contextMenu(screen.getByRole("row", { name: "Open Cafe transaction" }));
+    await browser.click(screen.getByRole("menuitem", { name: "Split purchase" }));
     expect(await screen.findByRole("dialog", { name: /Split Cafe/ })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -1377,7 +1381,7 @@ it.each([
   save.mockRejectedValueOnce(new Error("private database details")).mockResolvedValue({});
   renderPage(`/finances/${section}`);
   if (section === "transactions")
-    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    fireEvent.click(await screen.findByRole("row", { name: "Open Cafe transaction" }));
   fireEvent.click(
     await screen.findByRole("button", {
       name: section === "transactions" ? "Categorize" : "Change",

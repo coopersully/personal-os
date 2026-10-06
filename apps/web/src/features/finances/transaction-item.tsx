@@ -38,16 +38,38 @@ export function FinanceTransactionItem({
     <Item
       variant={status === "expected" ? "muted" : "outline"}
       role={presentation ? "presentation" : "listitem"}
-      className="min-w-0 items-start"
+      className="min-w-0 flex-nowrap items-center"
     >
-      <ItemMedia variant="icon">
-        {status === "expected" ? <ClockIcon /> : <MerchantIcon />}
+      <ItemMedia
+        variant="icon"
+        className="group-has-data-[slot=item-description]/item:translate-y-0 group-has-data-[slot=item-description]/item:self-center"
+      >
+        {status === "expected" ? (
+          <ClockIcon className="size-10" />
+        ) : (
+          <MerchantIcon className="size-10" />
+        )}
       </ItemMedia>
       <ItemContent className="min-w-0">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
           <div className="flex min-w-0 flex-col gap-1">
             <ItemTitle className="min-w-0 max-w-full break-words">{title}</ItemTitle>
             <ItemDescription className="text-xs">{description}</ItemDescription>
+            {status || category ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {status ? (
+                  <Badge variant="secondary">
+                    <ClockIcon aria-hidden="true" />
+                    {status === "expected" ? "Expected" : "Pending"}
+                  </Badge>
+                ) : null}
+                {category ? (
+                  <Badge variant="secondary" className="h-auto max-w-full whitespace-normal">
+                    {category}
+                  </Badge>
+                ) : null}
+              </div>
+            ) : null}
             {actions && actionsPlacement === "start" ? (
               <ItemActions className="mt-1 self-start">{actions}</ItemActions>
             ) : null}
@@ -60,17 +82,6 @@ export function FinanceTransactionItem({
               {direction === "income" ? "+" : direction === "expense" ? "−" : "↔ "}
               {formatMoney(amount)}
             </p>
-            {status ? (
-              <Badge variant="secondary">
-                <ClockIcon aria-hidden="true" />
-                {status === "expected" ? "Expected" : "Pending"}
-              </Badge>
-            ) : null}
-            {category ? (
-              <Badge variant="secondary" className="h-auto max-w-full whitespace-normal text-right">
-                {category}
-              </Badge>
-            ) : null}
           </div>
         </div>
         {children}

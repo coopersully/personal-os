@@ -174,11 +174,13 @@ export function DesktopSettingsPanel({
       }
     >
       {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
-      {!connectionOnly && section !== "notifications" && query.data ? (
+      {!connectionOnly && section !== "notifications" && query.data?.native.loginStatus ? (
         <BackgroundSetup
           status={query.data}
           stale={query.isError}
           saving={save.isPending}
+          dirty={JSON.stringify(draft) !== JSON.stringify(query.data.settings)}
+          section={section}
           onStartupEnabled={() =>
             setDraft((current) => current && { ...current, launchAtLogin: true })
           }

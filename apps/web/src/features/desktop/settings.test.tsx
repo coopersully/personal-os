@@ -481,11 +481,20 @@ describe("background setup", () => {
       if (command === "ritual_local") return { enabled: true };
       return { ok: true };
     });
-    mount();
+    const { cache } = mount();
     expect(await screen.findByText("4 of 4 complete")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
     await userEvent.click(screen.getByRole("button", { name: "Show 4 completed checks" }));
     expect(screen.getByText(/Scheduled for 08:00/)).toBeInTheDocument();
+    mocks.rituals.mockRejectedValue(new Error("Offline"));
+    mocks.invoke.mockRejectedValue(new Error("Offline"));
+    await act(async () => {
+      await cache.invalidateQueries();
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /completed checks/ })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Could not check morning routine readiness/)).toBeInTheDocument();
   });
 
   it("explains disabled OS alerts even when notification permission is authorized", async () => {
@@ -608,5 +617,73 @@ describe("background setup", () => {
     );
     await userEvent.keyboard("{Escape}");
     expect(screen.getByRole("switch", { name: "Open at login" })).not.toBeChecked();
+  });
+
+  it("does not poll macOS setup on an unsupported desktop", async () => {
+    delete status.native.loginStatus;
+    mount();
+    await screen.findByRole("button", { name: "Save preferences" });
+    expect(screen.queryByText("Keep nohmi active")).not.toBeInTheDocument();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("ritual_local", expect.anything());
+  });
+
+  it("reports registration errors returned in a successful bridge response", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_save_settings")
+        return {
+          ...status,
+          settings: { ...settings, launchAtLogin: true },
+          native: { ...status.native, error: "Cannot register" },
+        };
+      if (command === "desktop_settings") return status;
+      return { enabled: false };
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/Couldn’t enable launch at login/),
+        expect.anything(),
+      ),
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("switch", { name: "Open at login" })).toBeChecked();
+  });
+
+  it("keeps dirty pet preferences safe from setup navigation", async () => {
+    mount({ section: "pet" });
+    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
+    expect(screen.queryByRole("link", { name: "Pet settings" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Routine settings — save preferences first" }),
+    ).toBeDisabled();
+    expect(screen.queryByRole("link", { name: "Routine settings" })).not.toBeInTheDocument();
+  });
+  it("does not confuse notification errors with successful startup registration", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_save_settings")
+        return {
+          ...status,
+          settings: { ...settings, launchAtLogin: true },
+          native: {
+            ...status.native,
+            loginStatus: "enabled",
+            launchAtLogin: true,
+            error: "Notification delivery failed",
+          },
+        };
+      if (command === "desktop_settings") return status;
+      return { enabled: false };
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Open at login" })).toBeChecked(),
+    );
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

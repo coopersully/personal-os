@@ -18,11 +18,15 @@ export function BackgroundSetup({
   status,
   stale,
   saving,
+  dirty,
+  section,
   onStartupEnabled,
 }: {
   status: DesktopStatus;
   stale: boolean;
   saving: boolean;
+  dirty: boolean;
+  section: string;
   onStartupEnabled: () => void;
 }) {
   const cache = useQueryClient();
@@ -43,11 +47,18 @@ export function BackgroundSetup({
     feedback: { action: "enable launch at login", safeToRetry: true, form: false },
     mutationFn: async () => {
       const current = await getDesktopSettings();
-      return saveDesktopSettings({ ...current.settings, launchAtLogin: true });
+      const value = await saveDesktopSettings({ ...current.settings, launchAtLogin: true });
+      cache.setQueryData(["desktop-settings"], value);
+      onStartupEnabled();
+      if (
+        value.native.error &&
+        !["enabled", "requiresApproval"].includes(value.native.loginStatus ?? "")
+      )
+        throw new Error("macOS could not register launch at login.");
+      return value;
     },
     onSuccess: (value) => {
       cache.setQueryData(["desktop-settings"], value);
-      onStartupEnabled();
     },
   });
   const action = useFeedbackMutation({
@@ -55,11 +66,16 @@ export function BackgroundSetup({
     mutationFn: nativeAction,
     onSuccess: () => cache.invalidateQueries({ queryKey: ["desktop-settings"] }),
   });
-  const link = (section: string, label: string) => (
-    <Button asChild size="sm" variant="outline">
-      <a href={`/settings?section=${section}`}>{label}</a>
-    </Button>
-  );
+  const link = (target: string, label: string) =>
+    target === section ? undefined : dirty || saving ? (
+      <Button type="button" disabled size="sm" variant="outline">
+        {label} — save preferences first
+      </Button>
+    ) : (
+      <Button asChild size="sm" variant="outline">
+        <a href={`/settings?section=${target}`}>{label}</a>
+      </Button>
+    );
   const login = status.native.loginStatus;
   const loginEnabled = login === "enabled" && status.native.launchAtLogin === true;
   const startupDescription = loginEnabled
@@ -77,7 +93,7 @@ export function BackgroundSetup({
     {
       id: "startup",
       title: "Launch at login",
-      complete: loginEnabled,
+      complete: !stale && loginEnabled,
       description: startupDescription,
       action:
         login === "requiresApproval" ? (
@@ -106,6 +122,7 @@ export function BackgroundSetup({
       id: "notifications",
       title: "Desktop notifications",
       complete:
+        !stale &&
         status.settings.notifications.enabled &&
         permission === "authorized" &&
         status.native.notificationAlertsAvailable === true,
@@ -123,7 +140,7 @@ export function BackgroundSetup({
     {
       id: "pet",
       title: "Desktop pet",
-      complete: status.settings.petEnabled,
+      complete: !stale && status.settings.petEnabled,
       description: status.settings.petEnabled
         ? "The pet is enabled and stays available when you close the main window."
         : "Turn on the pet to keep quick access on your desktop.",
@@ -133,7 +150,9 @@ export function BackgroundSetup({
       id: "morning",
       title: "Morning routine",
       complete: Boolean(
-        morning?.enabled &&
+        !local.isError &&
+          !rituals.isError &&
+          morning?.enabled &&
           local.data?.enabled &&
           !local.data.recovery &&
           !local.data.storageWarning &&

@@ -361,3 +361,28 @@ it("inherits the existing shared zone when creating the second ritual", async ()
     ),
   );
 });
+
+it("blocks background setup navigation until ritual edits are saved", async () => {
+  mocks.desktop = true;
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.save.mockReset().mockRejectedValue(new Error("Offline"));
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings timeZone="UTC" />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("link", { name: "Set up launch at login and background activity" });
+  fireEvent.change(screen.getAllByLabelText("Available from")[0]!, { target: { value: "07:15" } });
+  expect(
+    screen.getByRole("button", { name: "Save routine changes before opening background setup" }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("link", { name: "Set up launch at login and background activity" }),
+  ).not.toBeInTheDocument();
+  await screen.findByRole("alert");
+  expect(
+    screen.getByRole("button", { name: "Save routine changes before opening background setup" }),
+  ).toBeDisabled();
+});

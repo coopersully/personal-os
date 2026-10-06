@@ -357,11 +357,17 @@ function RitualForm({
             {isDesktop() ? (
               <>
                 <RitualLocal />
-                <Button asChild variant="ghost">
-                  <a href="/settings?section=desktop">
-                    Set up launch at login and background activity
-                  </a>
-                </Button>
+                {dirty || busy ? (
+                  <Button disabled variant="ghost">
+                    Save routine changes before opening background setup
+                  </Button>
+                ) : (
+                  <Button asChild variant="ghost">
+                    <a href="/settings?section=desktop">
+                      Set up launch at login and background activity
+                    </a>
+                  </Button>
+                )}
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => void automatic(true)}>
                     Enable

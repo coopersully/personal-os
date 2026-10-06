@@ -4,6 +4,10 @@ The job is to keep enabled desktop features available without the main window op
 Desktop and Pet settings show a shared **Keep nohmi active** readiness overview. Its
 **Review checks** dialog separates login startup, notification alerts, pet enablement,
 and the morning routine. Routine settings link back to this setup.
+The overview requires native login-status support and is not shown by the Windows fallback.
+Setup navigation is disabled while preferences or routine edits remain unsaved; the current
+section has no redundant setup link. Returned native registration errors remain failed actions
+even when the bridge request itself succeeds.
 
 Use actual macOS login status, not the requested preference, as evidence of startup
 approval. Pending approval offers **Open Login Items** with the next instruction;

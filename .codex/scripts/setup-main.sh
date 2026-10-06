@@ -21,13 +21,13 @@ fi
 # OpenSSH keeps the first repeated option. Refuse caller-supplied overrides
 # rather than appending an ineffective safety setting behind one.
 shopt -s nocasematch
-if [[ "$ssh_command" =~ BatchMode|ConnectTimeout ]]; then
-  die 'Remove BatchMode/ConnectTimeout from the configured SSH command; setup supplies these options.'
+if [[ "$ssh_command" =~ BatchMode|ConnectTimeout|ServerAliveInterval|ServerAliveCountMax ]]; then
+  die 'Remove BatchMode/ConnectTimeout/ServerAliveInterval/ServerAliveCountMax from the configured SSH command; setup supplies these options.'
 fi
 shopt -u nocasematch
 # An explicit refspec also works in clones configured to fetch a single feature branch.
 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=false SSH_ASKPASS=false \
-  GIT_SSH_COMMAND="$ssh_command -o BatchMode=yes -o ConnectTimeout=15" \
+  GIT_SSH_COMMAND="$ssh_command -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" \
   git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=60 \
   fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main' ||
   die 'Could not fetch origin/main. Check network access and Git credentials, then rerun setup.'

@@ -85,10 +85,12 @@ if bash "$SETUP_SCRIPT"; then exit 1; fi
 grep -Fxq 'configured-key' "$SSH_ARGUMENT_LOG"
 grep -Fxq 'BatchMode=yes' "$SSH_ARGUMENT_LOG"
 grep -Fxq 'ConnectTimeout=15' "$SSH_ARGUMENT_LOG"
+grep -Fxq 'ServerAliveInterval=15' "$SSH_ARGUMENT_LOG"
+grep -Fxq 'ServerAliveCountMax=3' "$SSH_ARGUMENT_LOG"
 [[ "$(git rev-parse HEAD)" == "$EXPECTED" ]]
 printf 'noninteractive SSH setup behavior passed\n'
 
-for override in '-o BatchMode=no' '-o bAtChMoDe=yes' '-o ConnectTimeout=0'; do
+for override in '-o BatchMode=no' '-o bAtChMoDe=yes' '-o ConnectTimeout=0' '-o ServerAliveInterval=0' '-o sErVeRaLiVeCoUnTmAx=99'; do
   rm -f "$SSH_ARGUMENT_LOG"
   if GIT_SSH_COMMAND="$SANDBOX/ssh-probe $override" bash "$SETUP_SCRIPT"; then exit 1; fi
   [[ ! -e "$SSH_ARGUMENT_LOG" ]]

@@ -53,10 +53,12 @@ Start and Restart continue to run the current source without fetching or switchi
 
 Fetching requires the configured `origin` and existing Git credentials, using that remote's
 HTTPS or OpenSSH transport. Git/askpass prompting is disabled; SSH batch mode and a 15-second
-connection timeout are appended to the configured SSH command. Setup rejects commands containing
-BatchMode or ConnectTimeout overrides, because OpenSSH uses the first repeated option. Configured
+connection timeout are appended to the configured SSH command, along with 15-second keepalives
+and a limit of three unanswered probes. Setup rejects commands containing BatchMode, ConnectTimeout,
+ServerAliveInterval, or ServerAliveCountMax overrides, because OpenSSH uses the first repeated option. Configured
 wrappers must accept OpenSSH options and must not override batch mode. HTTP fetches abort after 60 seconds below one
-byte per second. Network/authentication failure stops setup before dependency installation; repair
+byte per second. SSH keepalives detect an unresponsive peer; they do not impose an overall deadline
+on a responsive server doing slow work. Network/authentication failure stops setup before dependency installation; repair
 access and rerun setup. The logged revision
 is the commit observed by the successful fetch; remote changes after that fetch require another
 setup. Local-remote integration tests prove revision and work-preservation behavior, not hosted

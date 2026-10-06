@@ -32,8 +32,9 @@ for file in "${required_files[@]}"; do
   fi
 done
 
-bash -n ./.codex/scripts/check-pr-body.sh
-bash -n ./.codex/scripts/environment.sh ./.codex/scripts/environment.test.sh
+for file in ./.codex/scripts/*.sh; do
+  bash -n "$file"
+done
 
 for file in ./.codex/scripts/*.mjs; do
   node --check "$file"

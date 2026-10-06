@@ -63,12 +63,38 @@ async function getContext(rootArgument) {
     "--path-format=absolute",
     "--git-common-dir",
   ]);
-  return {
+  const context = {
     ...deriveRuntimeIdentity({ commonDir: commonResult.stdout.trim(), root }),
     composeFile: path.join(root, ".codex/runtime/compose.yaml"),
     envFile: path.join(root, ".env"),
     overlayFile: path.join(root, ".env.codex.local"),
   };
+  await assertNoLegacyRuntime(context);
+  return context;
+}
+
+// Refuse an implicit database cutover, including when only the old volume survives.
+export async function assertNoLegacyRuntime(context, exec = command) {
+  const legacyProject = `ilo-${context.runtimeId}`;
+  const containers = await exec("docker", [
+    "ps",
+    "-a",
+    "-q",
+    "--filter",
+    `label=com.docker.compose.project=${legacyProject}`,
+  ]);
+  const volumes = await exec("docker", [
+    "volume",
+    "ls",
+    "-q",
+    "--filter",
+    `label=com.docker.compose.project=${legacyProject}`,
+  ]);
+  if (containers.stdout.trim() || volumes.stdout.trim()) {
+    throw new Error(
+      `Legacy runtime ${legacyProject} still exists. Follow the runtime-name cutover in docs/local-development.md before using personal-os actions; existing data has not been changed.`,
+    );
+  }
 }
 
 async function getStoredPort(overlayFile) {
@@ -99,7 +125,7 @@ async function listProjects(context) {
     "ps",
     "-a",
     "--filter",
-    `label=app.ilo.runtime.repository=${context.repositoryId}`,
+    `label=app.personal-os.runtime.repository=${context.repositoryId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -129,7 +155,7 @@ async function removeLabeledResources(type, project, repositoryId) {
     "--filter",
     `label=com.docker.compose.project=${project}`,
     "--filter",
-    `label=app.ilo.runtime.repository=${repositoryId}`,
+    `label=app.personal-os.runtime.repository=${repositoryId}`,
   ]);
   const ids = result.stdout.trim().split(/\s+/).filter(Boolean);
   if (ids.length === 0) return;
@@ -313,7 +339,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     process.exitCode = await runManager(process.argv.slice(2));
   } catch (error) {
     process.stderr.write(
-      `[ilo] error: ${error instanceof Error ? error.message : String(error)}\n`,
+      `[personal-os] error: ${error instanceof Error ? error.message : String(error)}\n`,
     );
     process.exitCode = 1;
   }

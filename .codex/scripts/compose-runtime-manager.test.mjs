@@ -9,7 +9,7 @@ const context = {
   overlayFile: "/repo/.env.codex.local",
   root: "/repo",
   ...{
-    composeProject: "ilo-123456789abc",
+    composeProject: "personal-os-123456789abc",
     repositoryId: "0123456789abcdef",
     runtimeId: "123456789abc",
   },
@@ -147,4 +147,17 @@ test("fixtures run inside the isolated application container", async () => {
   assert.ok(
     commands.some(({ args }) => args.includes("api") && args.includes("scripts/qa-fixtures.ts")),
   );
+});
+
+test("runtime cutover refuses legacy containers or a retained database volume", async () => {
+  const { assertNoLegacyRuntime } = await import("./compose-runtime-manager.mjs");
+  for (const resource of ["ps", "volume"]) {
+    await assert.rejects(
+      assertNoLegacyRuntime(context, async (_file, args) => ({
+        stdout: args[0] === resource ? "legacy-resource\n" : "",
+      })),
+      /existing data has not been changed/,
+    );
+  }
+  await assertNoLegacyRuntime(context, async () => ({ stdout: "" }));
 });

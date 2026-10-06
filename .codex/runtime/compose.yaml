@@ -1,5 +1,5 @@
 x-app-common: &app-common
-  image: ilo-${ILO_RUNTIME_ID:?}-dev
+  image: personal-os-${PERSONAL_OS_RUNTIME_ID:?}-dev
   build:
     context: ../..
     dockerfile: .codex/runtime/Dockerfile.dev
@@ -8,9 +8,9 @@ x-app-common: &app-common
     - ../../.env
     - ../../.env.codex.local
   labels: &runtime-labels
-    app.ilo.runtime.id: ${ILO_RUNTIME_ID:?}
-    app.ilo.runtime.repository: ${ILO_REPOSITORY_ID:?}
-    app.ilo.runtime.root: ${ILO_RUNTIME_ROOT:?}
+    app.personal-os.runtime.id: ${PERSONAL_OS_RUNTIME_ID:?}
+    app.personal-os.runtime.repository: ${PERSONAL_OS_REPOSITORY_ID:?}
+    app.personal-os.runtime.root: ${PERSONAL_OS_RUNTIME_ROOT:?}
   develop: &app-develop
     watch:
       # Native build trees are outside every sync root, including directory events.

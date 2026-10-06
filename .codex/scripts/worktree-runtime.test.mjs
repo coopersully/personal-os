@@ -31,21 +31,21 @@ test("a worktree gets a stable Compose identity without a shared registry", () =
 
   assert.deepEqual(first, again);
   assert.match(first.runtimeId, /^[a-f0-9]{12}$/);
-  assert.equal(first.composeProject, `ilo-${first.runtimeId}`);
+  assert.equal(first.composeProject, `personal-os-${first.runtimeId}`);
   assert.notEqual(first.composeProject, other.composeProject);
   assert.equal(first.repositoryId, other.repositoryId);
 });
 
 test("the generated environment uses one public loopback origin", () => {
   const overlay = buildRuntimeOverlay({
-    composeProject: "ilo-123456789abc",
+    composeProject: "personal-os-123456789abc",
     port: 49152,
     repositoryId: "0123456789abcdef",
     root: "/repo/.worktrees/calendar",
     runtimeId: "123456789abc",
   });
 
-  assert.match(overlay, /^COMPOSE_PROJECT_NAME=ilo-123456789abc$/m);
+  assert.match(overlay, /^COMPOSE_PROJECT_NAME=personal-os-123456789abc$/m);
   assert.match(overlay, /^LOCAL_WEB_PORT=49152$/m);
   assert.match(overlay, /^APP_BASE_URL=http:\/\/127\.0\.0\.1:49152$/m);
   assert.match(overlay, /^API_BASE_URL=http:\/\/127\.0\.0\.1:49152$/m);
@@ -58,10 +58,10 @@ test("the generated environment uses one public loopback origin", () => {
 });
 
 test("runtime configuration is atomically written with private permissions", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "ilo-compose-runtime-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "personal-os-compose-runtime-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const runtime = {
-    composeProject: "ilo-123456789abc",
+    composeProject: "personal-os-123456789abc",
     port: 49152,
     repositoryId: "0123456789abcdef",
     root,
@@ -77,8 +77,8 @@ test("runtime configuration is atomically written with private permissions", asy
 
 test("orphan detection trusts Git worktrees and repository ownership labels", () => {
   const projects = [
-    { project: "ilo-live", repositoryId: "repo-a", root: "/repo/live" },
-    { project: "ilo-orphan", repositoryId: "repo-a", root: "/repo/deleted" },
+    { project: "personal-os-live", repositoryId: "repo-a", root: "/repo/live" },
+    { project: "personal-os-orphan", repositoryId: "repo-a", root: "/repo/deleted" },
     { project: "someone-else", repositoryId: "repo-b", root: "/other/deleted" },
   ];
 
@@ -117,25 +117,25 @@ test("Docker labels are the runtime registry", () => {
     {
       Config: {
         Labels: {
-          "app.ilo.runtime.repository": "repo-a",
-          "app.ilo.runtime.root": "/repo/a",
-          "com.docker.compose.project": "ilo-a",
+          "app.personal-os.runtime.repository": "repo-a",
+          "app.personal-os.runtime.root": "/repo/a",
+          "com.docker.compose.project": "personal-os-a",
         },
       },
     },
     {
       Config: {
         Labels: {
-          "app.ilo.runtime.repository": "repo-a",
-          "app.ilo.runtime.root": "/repo/a",
-          "com.docker.compose.project": "ilo-a",
+          "app.personal-os.runtime.repository": "repo-a",
+          "app.personal-os.runtime.root": "/repo/a",
+          "com.docker.compose.project": "personal-os-a",
         },
       },
     },
   ];
 
   assert.deepEqual(projectsFromDockerInspect(inspect), [
-    { project: "ilo-a", repositoryId: "repo-a", root: "/repo/a" },
+    { project: "personal-os-a", repositoryId: "repo-a", root: "/repo/a" },
   ]);
 });
 
@@ -157,7 +157,7 @@ test("the development Compose project isolates the full stack without Docker soc
   assert.match(compose, /VITE_PROXY_API_TARGET: http:\/\/api:8787/);
   assert.match(compose, /VITE_PROXY_MCP_TARGET: http:\/\/mcp:8788/);
   assert.match(compose, /develop:[^\n]*\n\s+watch:/);
-  assert.match(compose, /app\.ilo\.runtime\.root: \$\{ILO_RUNTIME_ROOT:\?\}/);
+  assert.match(compose, /app\.personal-os\.runtime\.root: \$\{PERSONAL_OS_RUNTIME_ROOT:\?\}/);
   assert.doesNotMatch(compose, /docker\.sock|LOCAL_POSTGRES_PORT|LOCAL_API_PORT|LOCAL_MCP_PORT/);
   assert.match(dockerfile, /FROM dependencies AS development/);
   assert.doesNotMatch(dockerfile, /pnpm.*--parallel/);
@@ -168,7 +168,7 @@ test("the development Compose project isolates the full stack without Docker soc
 
 test("orphan pruning rechecks ownership and removes only confirmed repository projects", async () => {
   const removed = [];
-  const project = { project: "ilo-orphan", repositoryId: "repo-a", root: "/repo/gone" };
+  const project = { project: "personal-os-orphan", repositoryId: "repo-a", root: "/repo/gone" };
   const orphans = await reconcileOrphans({
     listProjects: async () => [
       project,

@@ -11,12 +11,12 @@ PRIMARY_ENV_FILE="$PRIMARY_ROOT/.env"
 ENV_FILE="$ROOT/.env"
 OVERLAY_FILE="$ROOT/.env.codex.local"
 COMPOSE_MANAGER="$ROOT/.codex/scripts/compose-runtime-manager.mjs"
-PRODUCTION_RUNTIME_HELPER="${ILO_PRODUCTION_RUNTIME_HELPER:-$ROOT/.codex/scripts/production-runtime.mjs}"
-AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/ilo-setup-release.json"
+PRODUCTION_RUNTIME_HELPER="${PERSONAL_OS_PRODUCTION_RUNTIME_HELPER:-$ROOT/.codex/scripts/production-runtime.mjs}"
+AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/personal-os-setup-release.json"
 mkdir -p "$LOG_DIR"
 
-log() { printf '[ilo] %s\n' "$*"; }
-die() { printf '[ilo] error: %s\n' "$*" >&2; exit 1; }
+log() { printf '[personal-os] %s\n' "$*"; }
+die() { printf '[personal-os] error: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command '$1' is not installed."; }
 
 check_toolchain() {
@@ -74,6 +74,12 @@ allocate_loopback_ports() {
 }
 
 command_setup() {
+  bash "$ROOT/.codex/scripts/setup-main.sh"
+  # Reload the lifecycle code from the fetched revision before installing dependencies.
+  exec bash "$ROOT/.codex/scripts/environment.sh" setup-dependencies
+}
+
+command_setup_dependencies() {
   check_toolchain; ensure_primary_env
   log "Installing the locked workspace dependencies..."
   pnpm install --frozen-lockfile
@@ -113,11 +119,12 @@ command_fixtures() {
   node "$COMPOSE_MANAGER" fixtures --root "$ROOT"
 }
 
-usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|start|stop|restart|status|logs|config|gc|purge|production-start|production-stop|production-status|fixtures|test|e2e|verify|build>'; }
+usage() { printf '%s\n' 'Usage: bash ./.codex/scripts/environment.sh <setup|setup-dependencies|start|stop|restart|status|logs|config|gc|purge|production-start|production-stop|production-status|fixtures|test|e2e|verify|build>'; }
 
 cd "$ROOT"
 case "${1:-}" in
   setup) command_setup ;;
+  setup-dependencies) command_setup_dependencies ;;
   start) command_start ;;
   stop) command_stop ;;
   restart) command_stop; command_start ;;

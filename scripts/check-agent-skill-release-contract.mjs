@@ -5,7 +5,7 @@ import { migrateLegacyAgentSkillEnvironment } from "./migrate-agent-skill-enviro
 
 const root = resolve(import.meta.dirname, "..");
 const manifest = JSON.parse(
-  readFileSync(resolve(root, "packages/domain/src/ilo-setup-release.json"), "utf8"),
+  readFileSync(resolve(root, "packages/domain/src/personal-os-setup-release.json"), "utf8"),
 );
 const exampleEnvironment = readFileSync(resolve(root, ".env.example"), "utf8");
 const compose = readFileSync(resolve(root, "compose.yaml"), "utf8");
@@ -17,7 +17,7 @@ const expectedEnvironment = [
 ];
 for (const line of expectedEnvironment) {
   if (!exampleEnvironment.split(/\r?\n/).includes(line)) {
-    throw new Error(`.env.example diverges from the Ilo setup release manifest: ${line}`);
+    throw new Error(`.env.example diverges from the personal-os setup release manifest: ${line}`);
   }
 }
 
@@ -28,7 +28,7 @@ const expectedCompose = [
 ];
 for (const line of expectedCompose) {
   if (!compose.includes(line)) {
-    throw new Error(`compose.yaml diverges from the Ilo setup release manifest: ${line}`);
+    throw new Error(`compose.yaml diverges from the personal-os setup release manifest: ${line}`);
   }
 }
 
@@ -130,4 +130,4 @@ assert.equal(
   "Conflicting metadata must be preserved for API validation.",
 );
 
-console.log("Ilo setup release manifest contract passed.");
+console.log("personal-os setup release manifest contract passed.");

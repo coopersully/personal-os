@@ -1,5 +1,19 @@
 # nohmi — Implementation Log
 
+## 2026-10-05 — Desktop background setup (source)
+
+- Desktop and Pet settings now guide login startup, OS notification alerts, pet enablement,
+  and morning routine readiness through the shared readiness dialog. Routine settings link
+  back to setup. Pending login approval opens macOS Login Items directly.
+- Settings refresh OS evidence while visible and on return from System Settings, preserving
+  unsaved edits. Setup saves launch-at-login independently of those drafts.
+- The existing resident runtime remains responsible for close-window operation and wake
+  recovery. Explicit Quit still exits; there is no new persistent helper. Already scheduled
+  OS notifications may outlive Quit.
+- Signed-installation approval, login relaunch, and actual OS delivery still require native
+  smoke verification; source checks do not establish those runtime capabilities. See
+  [desktop background setup](../design/pages/desktop-background.md).
+
 ## 2026-10-01 — Settings information architecture (branch implementation)
 
 - Regrouped Settings into Account, Personal, Workspaces, and App. Security & access owns password

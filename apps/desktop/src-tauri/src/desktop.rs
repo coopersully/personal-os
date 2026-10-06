@@ -395,6 +395,7 @@ pub async fn desktop_native_action(
         "reset_pet_position",
         "quick_access",
         "open_notification_settings",
+        "open_login_settings",
     ]
     .contains(&action.as_str())
     {

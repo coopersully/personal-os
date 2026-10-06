@@ -457,6 +457,15 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
+Closing the main desktop window keeps enabled pet, routine presentation, and notification
+refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next
+launch; it does not create a separate companion that survives Quit. Already scheduled operating
+system notifications may still arrive. Setup guides the person through launch at login and
+notification permission, reports actual OS approval separately from saved preferences, and
+links to recovery when permission or routine delivery is unavailable. Login startup restores
+background operation after the person signs in. Sleeping or powered-off computers do not run
+interactive routines; wake recovery respects the existing catch-up window.
+
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
 - The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.

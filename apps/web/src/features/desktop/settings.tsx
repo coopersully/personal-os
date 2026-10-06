@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../api.js";
@@ -35,6 +35,7 @@ import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { SettingsSection } from "../settings/settings-layout.js";
 import { RitualLocal } from "../tracking/ritual-local.js";
+import { BackgroundSetup } from "./background-setup.js";
 import {
   type DesktopSettings,
   getDesktopSettings,
@@ -73,12 +74,20 @@ export function DesktopSettingsPanel({
   connectionOnly?: boolean;
 }) {
   const cache = useQueryClient();
+  const startupPending = useIsMutating({ mutationKey: ["desktop-startup"] }) > 0;
   const query = useQuery({
     queryKey: ["desktop-settings"],
     queryFn: getDesktopSettings,
     refetchOnMount: "always",
+    refetchInterval: 3000,
     enabled: isDesktop(),
   });
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const refresh = () => void cache.invalidateQueries({ queryKey: ["desktop-settings"] });
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [cache]);
   const [draft, setDraft] = useState<DesktopSettings | null>(null);
   const [tested, setTested] = useState<string | null>(null);
   const [advancedServerOpen, setAdvancedServerOpen] = useState(false);
@@ -165,6 +174,16 @@ export function DesktopSettingsPanel({
       }
     >
       {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
+      {!connectionOnly && section !== "notifications" && query.data ? (
+        <BackgroundSetup
+          status={query.data}
+          stale={query.isError}
+          saving={save.isPending}
+          onStartupEnabled={() =>
+            setDraft((current) => current && { ...current, launchAtLogin: true })
+          }
+        />
+      ) : null}
       {connectionOnly ? <RitualLocal recoveryOnly /> : null}
       {query.data?.native.error ? (
         <Alert variant="destructive">
@@ -182,7 +201,7 @@ export function DesktopSettingsPanel({
         className="flex flex-col gap-5"
         onSubmit={(event) => {
           event.preventDefault();
-          save.mutate(draft);
+          if (!startupPending) save.mutate(draft);
         }}
       >
         {section === "desktop" ? (
@@ -273,12 +292,6 @@ export function DesktopSettingsPanel({
                   <p role="alert">
                     Wallpaper could not refresh. nohmi will retry while it is running.
                   </p>
-                ) : null}
-                <FieldDescription>
-                  Closing the window keeps nohmi in the menu bar. Use Quit nohmi to exit.
-                </FieldDescription>
-                {query.data?.native.loginStatus ? (
-                  <p role="status">Login item: {query.data.native.loginStatus}</p>
                 ) : null}
                 <FieldSet>
                   <FieldLegend>Widget workspaces</FieldLegend>
@@ -371,6 +384,13 @@ export function DesktopSettingsPanel({
             <p role="status">
               macOS permission: {query.data?.native.notificationPermission ?? "unavailable"}
             </p>
+            <FieldDescription>
+              {query.data?.native.notificationPermission === "denied"
+                ? "Notifications are blocked. Open macOS notification settings and allow nohmi, then return here."
+                : query.data?.native.notificationAlertsAvailable === false
+                  ? "macOS alerts are off. Enable banners or alerts in notification settings."
+                  : "Allow macOS notifications, then send a test. Focus and quiet hours may silence alerts."}
+            </FieldDescription>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -528,7 +548,7 @@ export function DesktopSettingsPanel({
             </FieldDescription>
           </FieldGroup>
         ) : null}
-        <Button type="submit" disabled={save.isPending}>
+        <Button type="submit" disabled={save.isPending || startupPending}>
           {save.isPending ? "Saving…" : "Save preferences"}
         </Button>
       </FeedbackForm>

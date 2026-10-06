@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   mailboxes: vi.fn(),
   calendars: vi.fn(),
   accounts: vi.fn(),
+  rituals: vi.fn(),
   success: vi.fn(),
   assign: vi.fn(),
 }));
@@ -20,6 +21,7 @@ vi.mock("../../api.js", () => ({
     listMailboxes: mocks.mailboxes,
     listCalendars: mocks.calendars,
     listConnectors: mocks.accounts,
+    listRituals: mocks.rituals,
   },
   errorMessage: (error: unknown) =>
     error instanceof Error ? error.message : "Something went wrong.",
@@ -93,11 +95,13 @@ beforeEach(() => {
   };
   mocks.invoke.mockImplementation(
     async (command: string, args?: { settings?: DesktopSettings }) => {
+      if (command === "ritual_local") return { enabled: false };
       if (command === "desktop_settings") return status;
       if (command === "desktop_save_settings") return { ...status, settings: args?.settings };
       return { ok: true };
     },
   );
+  mocks.rituals.mockResolvedValue({ rituals: [] });
   mocks.accounts.mockResolvedValue([{ id: "account-1", email: "cooper@example.com" }]);
   mocks.mailboxes.mockResolvedValue([
     { accountId: "account-1" },
@@ -219,7 +223,7 @@ describe("desktop preferences", () => {
   it("saves login and widget choices independently from pet and notification settings", async () => {
     mount();
     await screen.findByText("Recommended");
-    expect(screen.getByText("Login item: notRegistered")).toBeInTheDocument();
+    expect(screen.getByText("Keep nohmi active")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("switch", { name: "Open at login" }));
     const finance = document.getElementById("widget-finances");
     const tasks = document.getElementById("widget-tasks");
@@ -457,4 +461,152 @@ it("exposes pending ritual recovery in signed-out connection settings", async ()
   expect(await screen.findByRole("button", { name: "Export pending changes" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Discard pending changes" })).toBeInTheDocument();
   expect(screen.queryByText(/Private answer/)).not.toBeInTheDocument();
+});
+
+describe("background setup", () => {
+  it("reports readiness only after OS approval and both morning settings are enabled", async () => {
+    settings.petEnabled = true;
+    settings.notifications.enabled = true;
+    status.native = {
+      loginStatus: "enabled",
+      launchAtLogin: true,
+      notificationPermission: "authorized",
+      notificationAlertsAvailable: true,
+    };
+    mocks.rituals.mockResolvedValue({
+      rituals: [{ kind: "morning", enabled: true, time: "08:00", timeZone: "America/New_York" }],
+    });
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_settings") return status;
+      if (command === "ritual_local") return { enabled: true };
+      return { ok: true };
+    });
+    mount();
+    expect(await screen.findByText("4 of 4 complete")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show 4 completed checks" }));
+    expect(screen.getByText(/Scheduled for 08:00/)).toBeInTheDocument();
+  });
+
+  it("explains disabled OS alerts even when notification permission is authorized", async () => {
+    settings.notifications.enabled = true;
+    status.native.notificationPermission = "authorized";
+    status.native.notificationAlertsAvailable = false;
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    expect(
+      screen.getByText(/Notifications are allowed, but macOS alerts are off/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Set up notifications" })).toHaveAttribute(
+      "href",
+      "/settings?section=notifications",
+    );
+  });
+
+  it("blocks preference saves while the setup startup write is pending", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    const write = deferred<DesktopStatus>();
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_settings") return status;
+      if (command === "desktop_save_settings") return write.promise;
+      return { enabled: false };
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
+    expect(screen.getByRole("button", { name: "Enable launch at login" })).toBeDisabled();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Save preferences" })).toBeDisabled();
+    await act(async () =>
+      write.resolve({ ...status, settings: { ...settings, launchAtLogin: true } }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save preferences" })).toBeEnabled(),
+    );
+  });
+
+  it("guides pending macOS approval without claiming startup is enabled", async () => {
+    status.native.loginStatus = "requiresApproval";
+    settings.launchAtLogin = true;
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    expect(screen.getByText(/Approve nohmi in System Settings/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open Login Items" }));
+    expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
+      action: "open_login_settings",
+    });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
+  });
+
+  it("enables startup without committing or discarding unsaved pet preferences", async () => {
+    mount({ section: "pet" });
+    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
+    await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("desktop_save_settings", {
+        settings: { ...settings, launchAtLogin: true },
+      }),
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
+    await userEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("desktop_save_settings", {
+        settings: { ...settings, launchAtLogin: true, petColor: "#123456" },
+      }),
+    );
+  });
+
+  it("refreshes OS status on return without resetting an edited preference", async () => {
+    mount({ section: "pet" });
+    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    status = {
+      ...status,
+      native: { ...status.native, loginStatus: "enabled", launchAtLogin: true },
+    };
+    fireEvent.focus(window);
+    await waitFor(() => expect(screen.getByText("1 of 4 complete")).toBeInTheDocument());
+    expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
+  });
+
+  it("does not report a morning routine ready when automatic delivery is paused", async () => {
+    mocks.rituals.mockResolvedValue({
+      rituals: [{ kind: "morning", enabled: true, time: "08:00", timeZone: "America/New_York" }],
+    });
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    expect(await screen.findByText(/Enable automatic rituals on this Mac/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
+      "href",
+      "/settings?section=rituals",
+    );
+  });
+
+  it("does not show a completion percentage when routine checks fail", async () => {
+    mocks.rituals.mockRejectedValue(new Error("Offline"));
+    mount();
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
+    expect(screen.getByText(/Could not check morning routine readiness/)).toBeInTheDocument();
+  });
+
+  it("shows registration failures without changing the saved startup preference", async () => {
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_settings") return status;
+      if (command === "desktop_save_settings") throw new Error("Cannot register");
+      return { enabled: false };
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/Couldn’t enable launch at login/),
+        expect.anything(),
+      ),
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("switch", { name: "Open at login" })).not.toBeChecked();
+  });
 });

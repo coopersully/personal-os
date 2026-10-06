@@ -32,6 +32,8 @@ export type DesktopStatus = {
   native: {
     error?: string;
     notificationPermission?: string;
+    notificationAlertsAvailable?: boolean;
+    notificationSoundsAvailable?: boolean;
     launchAtLogin?: boolean;
     loginStatus?: string;
     widgetsAvailable?: boolean;

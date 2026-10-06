@@ -188,6 +188,9 @@ final class NativeCompanion {
     case "quick_access":
       pet.quickAccess()
       return ["ok": true]
+    case "open_login_settings":
+      SMAppService.openSystemSettingsLoginItems()
+      return ["ok": true]
     case "open_notification_settings":
       guard
         let url = URL(
